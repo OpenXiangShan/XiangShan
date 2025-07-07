@@ -465,7 +465,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   refill.id := req.id
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
       //(effect param) -> (next)
       Cat(rd, toB, false.B)  -> Branch,
       Cat(rd, toB, true.B)   -> Branch,
@@ -574,6 +574,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   
   // 128KBL1: FIXME: provide vaddr for l2
 
+  val pDcacheMSHRs = WireInit(0.U(log2Up(cfg.nMissEntries + 1).W))
+  ExcitingUtils.addSink(pDcacheMSHRs, "DSE_DCACHEMSHRS")
+
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge)))
 
   val req_data_gen = io.req.bits.toMissReqStoreData()
@@ -625,7 +628,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         !merge && 
         !reject && 
         !former_primary_ready &&
-        e.io.primary_ready
+        e.io.primary_ready &&
+        i.U < pDcacheMSHRs
       e.io.req.bits := io.req.bits.toMissReqWoStoreData()
       e.io.req_data := req_data_buffer
 
@@ -669,7 +673,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.probe_block := Cat(probe_block_vec).orR
 
-  io.full := ~Cat(entries.map(_.io.primary_ready)).andR
+  val idle_vec = VecInit(Seq.fill(cfg.nMissEntries)(false.B))
+  entries.zipWithIndex.foreach{
+    case (e, i) => idle_vec(i) := e.io.primary_ready && (i.U < pDcacheMSHRs)
+  }
+  io.full := ~Cat(idle_vec).andR
 
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)

@@ -25,6 +25,7 @@ import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
+import chisel3.util.random.LFSR
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
 import huancun.utils.FastArbiter
@@ -502,12 +503,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
 
+  val pDcacheWays = WireInit(0.U(log2Up(nWays + 1).W))
+  ExcitingUtils.addSink(pDcacheWays, "DSE_DCACHEWAYS")
+
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
   io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
+
+  ldu.foreach(_.io.pNWays := pDcacheWays)
+  mainPipe.io.pNWays := pDcacheWays
 
   //----------------------------------------
   // meta array
@@ -768,6 +775,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // replacement algorithm
+
+  def randomWay(key: UInt): UInt = {
+    val random = LFSR(16)
+    val mask = (1.U << Log2(pDcacheWays)) - 1.U
+    random & mask
+  }
+
+  val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
+  replWayReqs.foreach{
+    case req =>
+      req.way := DontCare
+      when (req.set.valid) { req.way := randomWay(req.set.bits) }
+  }
+  /*
   val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
 
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
@@ -788,6 +809,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
   val touchSets = replAccessReqs.map(_.bits.set)
   replacer.access(touchSets, touchWays)
+  */
 
   //----------------------------------------
   // assertions

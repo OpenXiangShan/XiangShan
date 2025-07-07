@@ -59,6 +59,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+
+    val pNWays = Input(UInt(log2Up(nWays + 1).W))
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -127,7 +129,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
 
   // dcache side tag match
-  val s1_tag_eq_way_dup_dc = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
+  val s1_tag_eq_way_dup_dc = VecInit((0 until nWays).map(w =>
+      (w.U < io.pNWays) && (tag_resp(w) === get_tag(s1_paddr_dup_dcache)))).asUInt
+  // val s1_tag_eq_way_dup_dc = wayMap((w: Int) => tag_resp(w) === (get_tag(s1_paddr_dup_dcache))).asUInt
   val s1_tag_match_way_dup_dc = wayMap((w: Int) => s1_tag_eq_way_dup_dc(w) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")

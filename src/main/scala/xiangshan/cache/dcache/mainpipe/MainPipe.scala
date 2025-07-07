@@ -162,6 +162,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
     // ecc error
     val error = Output(new L1CacheErrorInfo())
+
+    val pNWays = Input(UInt(log2Up(nWays + 1).W))
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -274,7 +276,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   enc_tag_resp := Mux(RegNext(s0_fire), io.tag_resp, RegNext(enc_tag_resp))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
+  val s1_tag_eq_way = VecInit((0 until nWays).map(w =>
+    (w.U < io.pNWays) && (tag_resp(w) === get_tag(s1_req.addr)))).asUInt
+  // val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
 
@@ -507,7 +511,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
       //(effect param) -> (next)
       Cat(rd, toB, false.B)  -> Branch,
       Cat(rd, toB, true.B)   -> Branch,

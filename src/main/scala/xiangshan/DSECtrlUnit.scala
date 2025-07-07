@@ -115,6 +115,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val rasSize1 = RegInit(RasSize.U(64.W))
     val rasSize = Wire(UInt(64.W))
 
+    val dcacheWays0 = RegInit(p(XSCoreParamsKey).dcacheParametersOpt.map(_.nWays).getOrElse(0).U(64.W))
+    val dcacheWays1 = RegInit(p(XSCoreParamsKey).dcacheParametersOpt.map(_.nWays).getOrElse(0).U(64.W))
+    val dcacheWays = Wire(UInt(64.W))
+
+    val dcacheMSHRs0 = RegInit(p(XSCoreParamsKey).dcacheParametersOpt.map(_.nMissEntries).getOrElse(0).U(64.W))
+    val dcacheMSHRs1 = RegInit(p(XSCoreParamsKey).dcacheParametersOpt.map(_.nMissEntries).getOrElse(0).U(64.W))
+    val dcacheMSHRs = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -156,7 +164,11 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x1D0 -> Seq(RegField(64, fpPhyRegs0)),
       0x1D8 -> Seq(RegField(64, fpPhyRegs1)),
       0x1E0 -> Seq(RegField(64, rasSize0)),
-      0x1E8 -> Seq(RegField(64, rasSize1))
+      0x1E8 -> Seq(RegField(64, rasSize1)),
+      0x1F0 -> Seq(RegField(64, dcacheWays0)),
+      0x1F8 -> Seq(RegField(64, dcacheWays1)),
+      0x200 -> Seq(RegField(64, dcacheMSHRs0)),
+      0x208 -> Seq(RegField(64, dcacheMSHRs1))
     )
 
     // Mux logic
@@ -175,6 +187,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     intPhyRegs := Mux(ctrlSel.orR, intPhyRegs1, intPhyRegs0)
     fpPhyRegs := Mux(ctrlSel.orR, fpPhyRegs1, fpPhyRegs0)
     rasSize := Mux(ctrlSel.orR, rasSize1, rasSize0)
+    dcacheWays := Mux(ctrlSel.orR, dcacheWays1, dcacheWays0)
+    dcacheMSHRs := Mux(ctrlSel.orR, dcacheMSHRs1, dcacheMSHRs0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -192,6 +206,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(intPhyRegs, "DSE_INTFLSIZE")
     ExcitingUtils.addSource(fpPhyRegs, "DSE_FPFLSIZE")
     ExcitingUtils.addSource(rasSize, "DSE_RASSIZE")
+    ExcitingUtils.addSource(dcacheWays, "DSE_DCACHEWAYS")
+    ExcitingUtils.addSource(dcacheMSHRs, "DSE_DCACHEMSHRS")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -212,6 +228,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(intPhyRegs <= NRPhyRegs.U, "DSE parameter must not exceed NRPhyRegs")
     assert(fpPhyRegs <= (NRPhyRegs - 32).U, "DSE parameter must not exceed fpPhyRegs")
     assert(rasSize <= RasSize.U, "DSE parameter must not exceed RasSize")
+    assert(dcacheWays <= p(XSCoreParamsKey).dcacheParametersOpt.map(_.nWays).getOrElse(0).U, "DSE parameter must not exceed dcacheWays")
+    assert(dcacheMSHRs <= p(XSCoreParamsKey).dcacheParametersOpt.map(_.nMissEntries).getOrElse(0).U, "DSE parameter must not exceed dcacheMSHRs")
 
 
     // core reset generation
@@ -228,15 +246,20 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       ctrlSelChangedStall := true.B
     }
 
+    val reset_avoid = RegInit(false.B)
+    val (reset_avoid_counter, reset_avoid_end) = Counter(coreResetReg, 10)
+    when (reset_avoid_end) {
+      reset_avoid := false.B
+    }
 
     // workload -> driver reset
-    val reach_instr_limit = (io.instrCnt >= max_instr_cnt)
-
+    val reach_instr_limit = (io.instrCnt >= max_instr_cnt) && (resetVectorReg === 0x80000000L.U) && !reset_avoid
 
     when (ctrlSelReset) {
       coreResetReg := true.B
       resetVectorReg := 0x80000000L.U
       ctrlSelChangedStall := false.B
+      reset_avoid := true.B
     }
 
     when (reach_instr_limit) {
