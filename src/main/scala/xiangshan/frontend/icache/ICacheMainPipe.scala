@@ -113,7 +113,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_valid        = fromFtq.valid
   private val s0_readValidAll = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i))
   private val s0_vAddrAll =
-    (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
+    (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startVAddr, fromFtqReq(i).nextCachelineVAddr)))
   private val s0_vSetIdxAll = (0 until partWayNum + 1).map(i => VecInit(s0_vAddrAll(i).map(get_idx)))
   private val s0_offsetAll  = (0 until partWayNum + 1).map(i => s0_vAddrAll(i)(0)(log2Ceil(blockBytes) - 1, 0))
   private val s0_doublelineAll =

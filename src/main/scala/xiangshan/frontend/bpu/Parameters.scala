@@ -38,5 +38,4 @@ trait HasBpuParameters extends HasFrontendParameters {
   // general
   def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
-  def CfiPositionWidth:     Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 }

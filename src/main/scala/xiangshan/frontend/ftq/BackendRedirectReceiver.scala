@@ -18,11 +18,10 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import utility.XSError
-import xiangshan.HasXSParameter
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
 
-trait BackendRedirectReceiver extends HasXSParameter {
+trait BackendRedirectReceiver extends HasFtqParameters {
   def receiveBackendRedirect(
       fromBackend: CtrlToFtqIO
   ): (Valid[FtqPtr], Valid[BranchPredictionRedirect]) = {
