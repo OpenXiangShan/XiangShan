@@ -29,21 +29,20 @@ import utility.ParallelPriorityMux
 import utility.XSError
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
-import xiangshan.ValidUndirectioned
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.HasBPUConst
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
     with HasCircularQueuePtrHelper
+    with IfuRedirectReceiver
     with BackendRedirectReceiver
     with HasBPUConst {
 
@@ -70,8 +69,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val SCMissBubble:         Bool = Output(Bool())
     val ITTAGEMissBubble:     Bool = Output(Bool())
     val RASMissBubble:        Bool = Output(Bool())
-
-    val reset_vector: PrunedAddr = Input(new PrunedAddr(VAddrBits))
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -85,42 +82,41 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val ifuWbPtr  = RegInit(FtqPtrVec())
   private val commitPtr = RegInit(FtqPtrVec(2))
 
-  // TODO: remove them for now to run dummy FTQ
-//  XSError(bpuPtr < ifuPtr && !isFull(bpuPtr(0), ifuPtr(0)), "ifuPtr runs ahead of bpuPtr")
+  XSError(bpuPtr < ifuPtr && !isFull(bpuPtr(0), ifuPtr(0)), "ifuPtr runs ahead of bpuPtr")
+  // TODO: Reconsider this
 //  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
 //  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
 
   private val validEntries = distanceBetween(bpuPtr(0), commitPtr(0))
 
   // entryQueue stores predictions made by BPU.
-  private val entryQueue = Module(new EntryQueue)
+  private val entryQueue = Reg(Vec(FtqSize, PrunedAddr(VAddrBits)))
 
-  // ftbEntryQueue stores FTB entries of BPU, which are used to train BPU after committed.
-  private val ftbEntryQueue = Module(new FtbEntryQueue)
+  // cfiQueue stores positions of control flow instructions in each request entry.
+  // FIXME: Do we need cfiQueue when backend sends instruction information with commit?
+  private val cfiQueue = Reg(Vec(FtqSize, Valid(UInt(CfiPositionWidth.W))))
 
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Module(new MetaQueue)
-
-  // pdQueue stores pre-decode information from IFU.
-  private val pdQueue = Module(new PdQueue)
-
-  private val redirectQueue = Module(new RedirectQueue)
 
   private val readyToCommit = Wire(Bool())
   private val canCommit     = Wire(Bool())
   private val shouldCommit  = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
-  private val ifuRedirect = WireInit(0.U.asTypeOf(Valid(new BranchPredictionRedirect)))
+  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.pdWb)
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+
+  private val redirect     = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
+  private val redirectNext = RegNext(redirect)
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
   // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
   // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
   // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
   // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
-  private val backendException  = RegInit(ExceptionType.None)
-  private val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
+  private val backendException    = RegInit(ExceptionType.None)
+  private val backendExceptionPtr = RegInit(FtqPtr(false.B, 0.U))
   when(backendRedirect.valid) {
     backendException := ExceptionType(
       hasPf = backendRedirect.bits.cfiUpdate.backendIPF,
@@ -128,9 +124,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
       hasAf = backendRedirect.bits.cfiUpdate.backendIAF
     )
     when(backendException.hasException) {
-      backendPcFaultPtr := ifuWbPtr(0)
+      backendExceptionPtr := ifuWbPtr(0)
     }
-  }.elsewhen(ifuWbPtr(0) =/= backendPcFaultPtr) {
+  }.elsewhen(ifuWbPtr(0) =/= backendExceptionPtr) {
     backendException := ExceptionType.None
   }
 
@@ -138,53 +134,37 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with BPU
   // --------------------------------------------------------------------------------
   // TODO: resp is a bad name
-  io.fromBpu.resp.ready := validEntries < FtqSize.U || readyToCommit
-  io.fromBpu.meta.ready := validEntries < FtqSize.U || readyToCommit
+  io.fromBpu.resp.ready := validEntries < FtqSize.U
+  io.fromBpu.meta.ready := validEntries < FtqSize.U
 
-  private val bpuResp = io.fromBpu.resp.bits
+  private val fromBpu = io.fromBpu.resp
 
-  private val bpuS2Redirect = bpuResp.s2Override.valid && io.fromBpu.resp.valid
-  private val bpuS3Redirect = bpuResp.s3Override.valid && io.fromBpu.resp.valid
+  private val bpuS2Redirect = fromBpu.bits.s2Override.valid && fromBpu.valid
+  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && fromBpu.valid
 
-  io.toBpu.enq_ptr := bpuPtr(0)
-  // TODO: Why use bpuResp.s2&3.valid for s2 and s3, but io.fromBpu.resp.fire for s1?
-  private val bpuEnqueue = io.fromBpu.resp.fire && !ifuRedirect.valid && !backendRedirect.valid
+  io.toBpu.bpuPtr := bpuPtr(0)
+  private val bpuEnqueue = io.fromBpu.resp.fire && !redirect.valid
 
-  private val bpuIn = (io.fromBpu.resp.fire || bpuS2Redirect || bpuS3Redirect) &&
-    !ifuRedirect.valid && !backendRedirect.valid
-
-  private val bpuInResp = bpuResp
-//  private val bpuInStage   = bpuResp.selectedRespIdxForFtq
-  private val bpuInRespPtr = MuxCase(
+  private val fromBpuPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      bpuResp.s3Override.valid -> bpuResp.s3Override.bits.ftqPtr,
-      bpuResp.s2Override.valid -> bpuResp.s2Override.bits.ftqPtr
+      fromBpu.bits.s3Override.valid -> fromBpu.bits.s3Override.bits.ftqPtr,
+      fromBpu.bits.s2Override.valid -> fromBpu.bits.s2Override.bits.ftqPtr
     )
   )
 
-  private val bpuInNext        = RegNext(bpuIn)
-  private val bpuInRespNext    = RegEnable(bpuInResp, bpuIn)
-  private val bpuInRespPtrNext = RegEnable(bpuInRespPtr, bpuIn)
-//  private val bpuInStageNext   = RegEnable(bpuInStage, bpuIn)
+  when(fromBpu.bits.s3Override.valid) {
+    bpuPtr := fromBpu.bits.s3Override.bits.ftqPtr + 1.U
+  }.elsewhen(fromBpu.bits.s2Override.valid) {
+    bpuPtr := fromBpu.bits.s2Override.bits.ftqPtr + 1.U
+  }.elsewhen(bpuEnqueue) {
+    bpuPtr := bpuPtr + 1.U
+  }
 
-  bpuPtr := bpuPtr + bpuEnqueue
-//  for (stage <- 2 to 3) {
-//    when(bpuResp.stage(stage).valid && bpuResp.stage(stage).hasRedirect) {
-//      bpuPtr := bpuResp.stage(stage).ftq_idx + 1.U
-//    }
-//  }
-
-  entryQueue.io.wen   := bpuIn
-  entryQueue.io.waddr := bpuInRespPtr.value
-  entryQueue.io.wdata := bpuInResp
-
-//  redirectQueue.io.wen   := bpuResp.lastStage.valid
-//  redirectQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
-//  redirectQueue.io.wdata := bpuResp.s3_specInfo
-  redirectQueue.io.wen   := false.B
-  redirectQueue.io.waddr := DontCare
-  redirectQueue.io.wdata := DontCare
+  when((fromBpu.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
+    entryQueue(fromBpuPtr.value) := fromBpu.bits.startVAddr
+    cfiQueue(fromBpuPtr.value)   := fromBpu.bits.cfiPosition
+  }
 
   metaQueue.io.wen             := io.fromBpu.meta.valid
   metaQueue.io.waddr           := io.fromBpu.resp.bits.s3Override.bits.ftqPtr.value
@@ -195,69 +175,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
     metaQueue.io.wdata.paddingBit.get := 0.U
   }
 
-//  ftbEntryQueue.io.wen   := bpuResp.lastStage.valid
-//  ftbEntryQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
-//  ftbEntryQueue.io.wdata := bpuResp.s3_ftbEntry
-  ftbEntryQueue.io.wen   := false.B
-  ftbEntryQueue.io.waddr := DontCare
-  ftbEntryQueue.io.wdata := DontCare
-
-  private val latestTarget           = Reg(PrunedAddr(VAddrBits))
-  private val latestTargetModified   = RegInit(false.B)
-  private val latestEntryPtr         = Reg(new FtqPtr)
-  private val latestEntryPtrModified = RegInit(false.B)
-  private val cfiIndexVec            = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  private val mispredictVec          = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
-  private val predStage              = Reg(Vec(FtqSize, UInt(2.W)))
-
-  private val entrySentToIfu = RegInit(VecInit(Seq.fill(FtqSize)(true.B)))
-
-  // Modify registers one cycle later to cut critical path
-  latestTargetModified   := false.B
-  latestEntryPtrModified := false.B
-  when(bpuInNext) {
-    val ftqIdx = bpuInRespPtrNext.value
-
-    entrySentToIfu(ftqIdx) := false.B
-    cfiIndexVec(ftqIdx)    := bpuInRespNext.cfiPosition
-//    predStage(ftqIdx)      := bpuInStageNext
-
-    latestTargetModified   := true.B
-    latestTarget           := bpuInRespNext.target
-    latestEntryPtrModified := true.B
-    latestEntryPtr         := bpuInRespPtrNext
-
-    mispredictVec(ftqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
-
-    shouldCommit(ftqIdx) := true.B
-  }
-
-  // TODO: Rewrite this in FSM style
-  private def entryNotHit    = 0.U(2.W)
-  private def entryFalseHit  = 1.U(2.W)
-  private def entryHit       = 2.U(2.W)
-  private val entryHitStatus = RegInit(VecInit(Seq.fill(FtqSize)(entryNotHit)))
-
-  // Only use FTB result to modify hit status
-  // TODO: Why?
-//  when(bpuResp.s2.valid) {
-//    entryHitStatus(bpuResp.s2.ftq_idx.value) := Mux(bpuResp.s2.full_pred.hit, entryHit, entryNotHit)
-//  }
-
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
   // --------------------------------------------------------------------------------
 
-  when(io.toICache.prefetchReq.fire && !ifuRedirect.valid && !backendRedirect.valid) {
+  when(io.toICache.prefetchReq.fire) {
     pfPtr := pfPtr + 1.U
   }
-  when(io.toIfu.req.fire && !ifuRedirect.valid && !backendRedirect.valid) {
+  when(io.toIfu.req.fire) {
     ifuPtr := ifuPtr + 1.U
   }
 
   for (stage <- 2 to 3) {
-    val redirect = if (stage == 2) bpuResp.s2Override.valid else bpuResp.s3Override.valid
-    val ftqIdx   = if (stage == 2) bpuResp.s2Override.bits.ftqPtr else bpuResp.s3Override.bits.ftqPtr
+    val redirect = fromBpu.bits.overrideStage(stage).valid
+    val ftqIdx   = fromBpu.bits.overrideStage(stage).bits.ftqPtr
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
@@ -274,239 +205,87 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
-  io.toIfu.req.bits.ftqIdx := ifuPtr(0)
-
-  entryQueue.io.pfPtr.zipWithIndex.foreach { case (ptr, offset) => ptr.ptr := pfPtr(offset) }
-  entryQueue.io.ifuPtr.zipWithIndex.foreach { case (ptr, offset) => ptr.ptr := ifuPtr(offset) }
-
-  private val toPreFetchEntry     = Wire(new FtqEntry)
-  private val bpuInPrefetchBypass = bpuInNext && bpuInRespPtrNext === pfPtr(0)
-
-  when(bpuInPrefetchBypass) {
-    toPreFetchEntry := bpuInRespNext
-  }.otherwise {
-    toPreFetchEntry := Mux(
-      RegNext(io.toICache.prefetchReq.fire),
-      entryQueue.io.pfPtr(1).rdata,
-      entryQueue.io.pfPtr(0).rdata
-    )
-  }
-
-  // TODO: why valid also uses entrySentToIfu?
-  io.toICache.prefetchReq.valid := (bpuInPrefetchBypass || !entrySentToIfu(pfPtr(0).value)) && pfPtr(0) =/= bpuPtr(0)
-  io.toICache.prefetchReq.bits.req.fromFtqPcBundle(toPreFetchEntry)
+  // FIXME: backend redirect delay should be more than ITLB csr delay
+  io.toICache.prefetchReq.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
+  io.toICache.prefetchReq.bits.req.startVAddr := Mux(
+    redirectNext.valid,
+    PrunedAddrInit(redirectNext.bits.cfiUpdate.target),
+    entryQueue(pfPtr(0).value)
+  )
+  io.toICache.prefetchReq.bits.req.nextCachelineVAddr :=
+    io.toICache.prefetchReq.bits.req.startVAddr + (CacheLineSize / 8).U
   io.toICache.prefetchReq.bits.req.ftqIdx := pfPtr(0)
-  // TODO: why this is different from ICache?
   io.toICache.prefetchReq.bits.backendException := Mux(
-    backendPcFaultPtr === pfPtr(0),
+    backendExceptionPtr === pfPtr(0),
     backendException,
     ExceptionType.None
   )
 
-  private val toIfuEntry          = Wire(new FtqEntry)
-  private val toIfuEntryNextAddr  = Wire(PrunedAddr(VAddrBits))
-  private val toIfuEntryFtqOffset = WireInit(cfiIndexVec(ifuPtr(0).value))
-  private val bpuInIfuBypass      = bpuInNext && bpuInRespPtrNext === ifuPtr(0)
-
-  when(bpuInIfuBypass) {
-    toIfuEntry          := bpuInRespNext
-    toIfuEntryNextAddr  := bpuInRespNext.target
-    toIfuEntryFtqOffset := bpuInRespNext.cfiPosition
-  }.otherwise {
-    toIfuEntry := Mux(RegNext(io.toIfu.req.fire), entryQueue.io.ifuPtr(1).rdata, entryQueue.io.ifuPtr(0).rdata)
-    // TODO: potential problems here
-    toIfuEntryNextAddr := Mux(
-      bpuInNext && bpuInRespPtrNext === ifuPtr(1),
-      bpuInRespNext.startVAddr,
-      Mux(ifuPtr(0) === latestEntryPtr, latestTarget, RegNext(entryQueue.io.ifuPtr(1).rdata.startAddr))
-    )
-  }
-
   // TODO: we should not need both fetchReq.valid and fetchReq.bits.readValid
-  io.toICache.fetchReq.valid := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
+  // TODO: consider BPU bypass
+  io.toICache.fetchReq.valid := bpuPtr(0) > ifuPtr(0) && !redirect.valid
   io.toICache.fetchReq.bits.readValid.foreach(valid =>
-    valid := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
+    valid := io.toICache.fetchReq.valid
   )
   io.toICache.fetchReq.bits.req.foreach { req =>
-    req.fromFtqPcBundle(toIfuEntry)
-    req.ftqIdx := ifuPtr(0)
+    req.startVAddr         := entryQueue(ifuPtr(0).value)
+    req.nextCachelineVAddr := req.startVAddr + (CacheLineSize / 8).U
+    req.ftqIdx             := ifuPtr(0)
   }
-  io.toICache.fetchReq.bits.isBackendException := backendException.hasException &&
-    backendPcFaultPtr === ifuPtr(0)
+  io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
-  io.toIfu.req.valid              := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
-  io.toIfu.req.bits.nextStartAddr := toIfuEntryNextAddr
-  io.toIfu.req.bits.ftqOffset     := toIfuEntryFtqOffset
-  io.toIfu.req.bits               := toIfuEntry
-
-  // False hit if fall through is smaller than start address
-  when(toIfuEntry.fallThruError && entryHitStatus(ifuPtr(0).value) === entryHit) {
-    when(io.toIfu.req.fire &&
-      !(bpuS2Redirect && bpuResp.s2Override.bits.ftqPtr === ifuPtr(0)) &&
-      !(bpuS3Redirect && bpuResp.s3Override.bits.ftqPtr === ifuPtr(0))) {
-      entryHitStatus(ifuPtr(0).value) := entryFalseHit
-    }
-  }
-
-  private val shouldFlushIfuReq = io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
-    io.toIfu.flushFromBpu.shouldFlushByStage3(io.toIfu.req.bits.ftqIdx)
-
-  when(io.toIfu.req.fire && !shouldFlushIfuReq) {
-    entrySentToIfu(ifuPtr(0).value) := true.B
-  }
-
-  // --------------------------------------------------------------------------------
-  // Write back from IFU
-  // --------------------------------------------------------------------------------
-  private val pdWb = io.fromIfu.pdWb
-  pdQueue.io.wen   := pdWb.valid
-  pdQueue.io.waddr := pdWb.bits.ftqIdx.value
-  pdQueue.io.wdata.fromPdWb(pdWb.bits)
-
-  private val hitPdValid          = entryHitStatus(pdWb.bits.ftqIdx.value) === entryHit && pdWb.valid
-  private val hitPdMispredictNext = RegNext(hitPdValid && pdWb.bits.misOffset.valid)
-  private val pdNext              = RegEnable(pdWb.bits.pd, pdWb.valid)
-
-  when(pdWb.valid) {
-    ifuWbPtr := ifuWbPtr(0) + 1.U
-  }
-
-  ftbEntryQueue.io.ifuWb.ren   := pdWb.valid
-  ftbEntryQueue.io.ifuWb.raddr := pdWb.bits.ftqIdx.value
-
-  private val hasFalseHit = WireInit(false.B)
-  when(RegNext(hitPdValid)) {
-    val ftbEntry = ftbEntryQueue.io.ifuWb.rdata
-    val brSlots  = ftbEntry.brSlots
-    val tailSlot = ftbEntry.tailSlot
-
-    val brFalseHit = brSlots.map(s => s.valid && !(pdNext(s.offset).valid && pdNext(s.offset).isBr)).reduce(_ || _) ||
-      tailSlot.valid && ftbEntry.tailSlot.sharing && !(pdNext(tailSlot.offset).valid && pdNext(tailSlot.offset).isBr)
-
-    val jmpPd = pdNext(tailSlot.offset)
-    val jalFalseHit = ftbEntry.jmpValid &&
-      (ftbEntry.isJal && !(jmpPd.valid && jmpPd.isJal) ||
-        ftbEntry.isJalr && !(jmpPd.valid && jmpPd.isJalr) ||
-        ftbEntry.isCall && !(jmpPd.valid && jmpPd.isCall) ||
-        ftbEntry.isRet && !(jmpPd.valid && jmpPd.isRet))
-
-    hasFalseHit := brFalseHit || jalFalseHit || hitPdMispredictNext
-  }
-
-  when(hasFalseHit) {
-    entryHitStatus(RegNext(pdWb.bits.ftqIdx.value)) := entryFalseHit
-  }
+  io.toIfu.req.valid           := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toIfu.req.bits.startVAddr := entryQueue(ifuPtr(0).value)
+  io.toIfu.req.bits.nextStartVAddr := MuxCase(
+    entryQueue(ifuPtr(1).value),
+    Seq(
+      (bpuPtr(0) === ifuPtr(0)) -> fromBpu.bits.target,
+      (bpuPtr(0) === ifuPtr(1)) -> fromBpu.bits.startVAddr
+    )
+  )
+  io.toIfu.req.bits.nextCachelineVAddr := io.toIfu.req.bits.startVAddr + (CacheLineSize / 8).U
+  io.toIfu.req.bits.ftqIdx             := ifuPtr(0)
+  io.toIfu.req.bits.ftqOffset          := cfiQueue(ifuPtr(0).value)
 
   // --------------------------------------------------------------------------------
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.pc_mem_wen   := RegNext(bpuInNext)
-  io.toBackend.pc_mem_waddr := RegNext(bpuInRespPtr.value)
-  io.toBackend.pc_mem_wdata := RegNext(bpuInRespNext)
+  io.toBackend.pc_mem_wen   := (fromBpu.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
+  io.toBackend.pc_mem_waddr := fromBpuPtr.value
+  io.toBackend.pc_mem_wdata := fromBpu.bits.startVAddr
 
-  io.toBackend.newest_entry_en     := RegNext(RegNext(bpuIn || backendRedirect.valid || ifuRedirect.valid))
-  io.toBackend.newest_entry_ptr    := RegNext(latestEntryPtr)
-  io.toBackend.newest_entry_target := RegNext(latestTarget.toUInt)
+  // TODO: remove or reconsider this
+  io.toBackend.newest_entry_en     := false.B
+  io.toBackend.newest_entry_ptr    := DontCare
+  io.toBackend.newest_entry_target := DontCare
 
   // --------------------------------------------------------------------------------
   // Redirect from backend and IFU
   // --------------------------------------------------------------------------------
-  redirectQueue.io.backendRedirect.ren   := backendRedirectFtqIdx.valid
-  redirectQueue.io.backendRedirect.raddr := backendRedirectFtqIdx.bits.value
-  ftbEntryQueue.io.backendRedirect.ren   := backendRedirectFtqIdx.valid
-  ftbEntryQueue.io.backendRedirect.raddr := backendRedirectFtqIdx.bits.value
-  pdQueue.io.backendRedirect.ren         := backendRedirectFtqIdx.valid
-  pdQueue.io.backendRedirect.raddr       := backendRedirectFtqIdx.bits.value
-
-  // TODO: bad naming
-  private val redirectQueueRdata = redirectQueue.io.backendRedirect.rdata
-  private val redirectPdRdata    = pdQueue.io.backendRedirect.rdata
-  private val redirectFtbEntry   = ftbEntryQueue.io.backendRedirect.rdata
-  private val redirectFtqOffset  = backendRedirect.bits.ftqOffset
-
-  // TODO: why the fuck manipulate something passed by backend??? And I can not even manipulate them now!
-//  private val backendRedirectCfi = backendRedirect.bits.cfiUpdate
-//  backendRedirectCfi.fromFtqRedirectSram(redirectQueueRdata)
-//  backendRedirectCfi.pd     := redirectPdRdata.toPd(redirectFtqOffset)
-//  backendRedirectCfi.br_hit := redirectFtbEntry.brIsSaved(redirectFtqOffset)
-//  backendRedirectCfi.jr_hit := redirectFtbEntry.isJalr && redirectFtbEntry.tailSlot.offset === redirectFtqOffset
-
-//  when(entryHitStatus(backendRedirect.bits.ftqIdx.value) === entryHit) {
-//    backendRedirectCfi.shift := PopCount(redirectFtbEntry.getBrMaskByOffset(redirectFtqOffset)) +&
-//      (backendRedirectCfi.pd.isBr &&
-//        !redirectFtbEntry.brIsSaved(redirectFtqOffset) &&
-//        !redirectFtbEntry.newBrCanNotInsert(redirectFtqOffset))
-//
-//    backendRedirectCfi.addIntoHist := backendRedirectCfi.pd.isBr &&
-//      (redirectFtbEntry.brIsSaved(redirectFtqOffset) || !redirectFtbEntry.newBrCanNotInsert(redirectFtqOffset))
-//  }.otherwise {
-//    backendRedirectCfi.shift       := (backendRedirectCfi.pd.isBr && backendRedirectCfi.taken).asUInt
-//    backendRedirectCfi.addIntoHist := backendRedirectCfi.pd.isBr.asUInt
-//  }
-
-  ifuRedirect.valid                    := pdWb.valid && pdWb.bits.misOffset.valid && !backendRedirect.valid
-  ifuRedirect.bits.ftqIdx              := pdWb.bits.ftqIdx
-  ifuRedirect.bits.ftqOffset           := pdWb.bits.misOffset.bits
-  ifuRedirect.bits.level               := RedirectLevel.flushAfter
-  ifuRedirect.bits.cfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits).toUInt
-  ifuRedirect.bits.cfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
-  ifuRedirect.bits.cfiUpdate.predTaken := cfiIndexVec(pdWb.bits.ftqIdx.value).valid
-  ifuRedirect.bits.cfiUpdate.target    := pdWb.bits.target.toUInt
-  ifuRedirect.bits.cfiUpdate.taken     := pdWb.bits.cfiOffset.valid
-  ifuRedirect.bits.cfiUpdate.isMisPred := pdWb.bits.misOffset.valid
-  ifuRedirect.bits.cfiUpdate.fromFtqRedirectSram(redirectQueue.io.ifuRedirect.rdata)
-  when(ifuRedirect.bits.cfiUpdate.pd.isRet && ifuRedirect.bits.cfiUpdate.pd.valid) {
-    ifuRedirect.bits.cfiUpdate.target := ifuRedirect.bits.cfiUpdate.topAddr
-  }
-
-  redirectQueue.io.ifuRedirect.ren   := ifuRedirect.valid
-  redirectQueue.io.ifuRedirect.raddr := ifuRedirect.bits.ftqIdx.value
 
   private def updateCfi(redirect: Valid[Redirect]): Unit = {
     val valid     = redirect.valid
     val ftqPtr    = redirect.bits.ftqIdx
     val ftqOffset = redirect.bits.ftqOffset
     val taken     = redirect.bits.cfiUpdate.taken
-
-    val cfiIndexValidWen = valid && ftqOffset === cfiIndexVec(ftqPtr.value).bits
-    val cfiIndexBitsWen  = valid && taken && ftqOffset < cfiIndexVec(ftqPtr.value).bits
-
-    when(cfiIndexValidWen || cfiIndexBitsWen) {
-      cfiIndexVec(ftqPtr.value).valid := cfiIndexValidWen && taken || cfiIndexBitsWen
-    }.elsewhen(valid && !taken && ftqOffset =/= cfiIndexVec(ftqPtr.value).bits) {
-      cfiIndexVec(ftqPtr.value).valid := false.B
-    }
-
-    when(cfiIndexBitsWen) {
-      cfiIndexVec(ftqPtr.value).bits := ftqOffset
-    }
-
-    latestTargetModified   := true.B
-    latestTarget           := redirect.bits.cfiUpdate.target
-    latestEntryPtrModified := true.B
-    latestEntryPtr         := ftqPtr
   }
 
   when(backendRedirect.valid) {
     updateCfi(backendRedirect)
     val redirect = backendRedirect.bits
-    mispredictVec(redirect.ftqIdx.value)(redirect.ftqOffset) :=
-      redirect.cfiUpdate.isMisPred && redirect.level === RedirectLevel.flushAfter
   }.elsewhen(ifuRedirect.valid) {
     updateCfi(ifuRedirect)
   }
 
-  private val redirectVec   = Seq(backendRedirect, ifuRedirect)
-  private val redirectValid = redirectVec.map(_.valid).reduce(_ || _)
-  io.toICache.redirectFlush := redirectValid
-  when(redirectValid) {
-    val redirect    = PriorityMux(redirectVec.map(redirect => redirect.valid -> redirect.bits))
-    val newEntryPtr = redirect.ftqIdx + 1.U
+  io.toICache.redirectFlush := redirect.valid
+  when(redirect.valid) {
+    // TODO: When can redirect information be written to original entry instead of a new entry?
+    val newEntryPtr = redirect.bits.ftqIdx + 1.U
     Seq(bpuPtr, ifuPtr, pfPtr).foreach(_ := newEntryPtr)
-    when(RedirectLevel.flushItself(redirect.level)) {
-      shouldCommit(redirect.ftqIdx.value) := false.B
-      shouldCommit(newEntryPtr.value)     := false.B
+    when(RedirectLevel.flushItself(redirect.bits.level)) {
+      shouldCommit(redirect.bits.ftqIdx.value) := false.B
+      shouldCommit(newEntryPtr.value)          := false.B
     }
   }
 
@@ -514,23 +293,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
 
-  io.toBpu.redirctFromIFU := ifuRedirect.valid
-  io.toBpu.redirect       := Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
-
-  // --------------------------------------------------------------------------------
-  // MMIO fetch
-  // --------------------------------------------------------------------------------
-  private val mmioPtr           = io.fromIfu.mmioCommitRead.mmioFtqPtr
-  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit
-  io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted)
+  io.toBpu.redirect.valid := redirect.valid
+  // FIXME: Modify BPU
+  io.toBpu.redirect.bits   := redirect.bits
+  io.toBpu.redirectFromIFU := ifuRedirect.valid
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
-  // TODO: problems here, rewrite commit after BTB is merged
   // TODO: frontend does not need this many rob commit channels
-  // Backend may send commit for on entry multiple times, but when the entry is committed for the first time,
-  // it is actually committed, the rest of the commmits can be ignored.
+  // Backend may send commit for on entry multiple times, but the entry is actually committed when it is committed for
+  // the first time. The rest of the commits can be ignored.
   // TODO: Backend now still does not guarantee to send commit for every entry. For example, entry 0 has a flush-itself
   // redirect in the middle, and entry 1 has a flush-itself redirect on the same instruction in the beginning, entry 2
   // begins with the same instruction. Backend may not commit entry 0. This may not be totally backend's problem. Maybe
@@ -551,78 +324,19 @@ class Ftq(implicit p: Parameters) extends FtqModule
     commitPtr := commitPtr + 1.U
   }
 
-  // frontend commit is one cycle later than backend commit because reading srams needs one cycle
-  private val s2_readyToCommit = RegNext(readyToCommit, init = false.B)
-
-  entryQueue.io.commitPtr(0).ptr := commitPtr(0)
-  entryQueue.io.commitPtr(1).ptr := commitPtr(1)
-  private val s2_commitEntry = RegNext(entryQueue.io.commitPtr(0).rdata)
-  private val s2_commitTarget = Mux(
-    RegNext(commitPtr === latestEntryPtr),
-    RegEnable(latestTarget, latestTargetModified),
-    RegNext(entryQueue.io.commitPtr(1).rdata.startAddr)
-  )
-
-  pdQueue.io.commit.ren   := readyToCommit
-  pdQueue.io.commit.raddr := commitPtr(0).value
-  private val s2_commitPd = pdQueue.io.commit.rdata
-
-  redirectQueue.io.commit.ren   := readyToCommit
-  redirectQueue.io.commit.raddr := commitPtr(0).value
-  private val s2_commitSpeculativeInfo = redirectQueue.io.commit.rdata
-
+  // TODO: Wrap metaQueue as other queues
   metaQueue.io.ren   := readyToCommit
   metaQueue.io.raddr := commitPtr(0).value
-  private val s2_commitMeta    = metaQueue.io.rdata.meta
-  private val s2_commitNewMeta = metaQueue.io.rdata.newMeta
-  private val s2_commitFtb     = metaQueue.io.rdata.ftb_entry // TODO: why not FTB entry queue?
 
-  private val s1_commitCfi = cfiIndexVec(commitPtr(0).value)
-  private val s2_commitCfi = RegEnable(s1_commitCfi, readyToCommit)
+  io.toBpu.update    := DontCare
+  io.toBpu.newUpdate := DontCare
 
-  private val s1_commitHit   = entryHitStatus(commitPtr(0).value)
-  private val s2_commitHit   = RegEnable(s1_commitHit, readyToCommit)
-  private val s2_commitValid = s2_commitHit === entryHit || s2_commitCfi.valid
-
-  private val s2_commitStage = RegEnable(predStage(commitPtr(0).value), readyToCommit)
-
-  private val s2_commitMispredict = RegEnable(mispredictVec(commitPtr(0).value), readyToCommit)
-
-  private val ftbGenerator = Module(new FtbEntryGen)
-  ftbGenerator.io.start_addr     := s2_commitEntry.startAddr
-  ftbGenerator.io.old_entry      := s2_commitFtb
-  ftbGenerator.io.pd             := s2_commitPd
-  ftbGenerator.io.cfiIndex       := s2_commitCfi
-  ftbGenerator.io.target         := s2_commitTarget
-  ftbGenerator.io.hit            := s2_commitHit === entryHit
-  ftbGenerator.io.mispredict_vec := s2_commitMispredict
-
-  io.toBpu.update                  := DontCare // TODO: ?
-  io.toBpu.update.valid            := s2_commitValid && s2_readyToCommit
-  io.toBpu.update.bits.false_hit   := s2_commitHit === entryFalseHit
-  io.toBpu.update.bits.pc          := s2_commitEntry.startAddr
-  io.toBpu.update.bits.meta        := s2_commitMeta
-  io.toBpu.update.bits.cfi_idx     := s2_commitCfi
-  io.toBpu.update.bits.full_target := s2_commitTarget
-  io.toBpu.update.bits.from_stage  := s2_commitStage
-  io.toBpu.update.bits.spec_info   := s2_commitSpeculativeInfo
-
-  io.toBpu.update.bits.ftb_entry         := ftbGenerator.io.new_entry
-  io.toBpu.update.bits.new_br_insert_pos := ftbGenerator.io.new_br_insert_pos
-  io.toBpu.update.bits.mispred_mask      := ftbGenerator.io.mispred_mask
-  io.toBpu.update.bits.old_entry         := ftbGenerator.io.is_old_entry
-  io.toBpu.update.bits.pred_hit          := s2_commitHit === entryHit || s2_commitHit === entryFalseHit
-  io.toBpu.update.bits.br_taken_mask     := ftbGenerator.io.taken_mask
-  io.toBpu.update.bits.jmp_taken         := ftbGenerator.io.jmp_taken
-
-  io.toBpu.newUpdate.valid              := s2_commitValid && s2_readyToCommit
-  io.toBpu.newUpdate.bits.startVAddr    := s2_commitEntry.startAddr
-  io.toBpu.newUpdate.bits.target        := s2_commitTarget
-  io.toBpu.newUpdate.bits.hasMispredict := s2_commitMispredict.reduce(_ || _)
-  io.toBpu.newUpdate.bits.taken         := s2_commitCfi.valid
-  io.toBpu.newUpdate.bits.cfiPosition   := s2_commitCfi.bits
-  io.toBpu.newUpdate.bits.cfiAttribute  := BranchAttribute.None // FIXME
-  io.toBpu.newUpdate.bits.aBtbMeta      := s2_commitNewMeta.aBtbMeta
+  // --------------------------------------------------------------------------------
+  // MMIO fetch
+  // --------------------------------------------------------------------------------
+  private val mmioPtr           = io.fromIfu.mmioCommitRead.mmioFtqPtr
+  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit
+  io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted)
 
   // --------------------------------------------------------------------------------
   // Performance monitoring
@@ -638,83 +352,4 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
-
-  // Dummy FTQ below
-  io.toBpu.redirect.valid := false.B
-
-  private val dummy_startAddr = Reg(new PrunedAddr(VAddrBits))
-  private val dummy_ftqIdx    = RegInit(FtqPtr(false.B, 0.U))
-
-  when(reset.asBool) {
-    dummy_startAddr := io.reset_vector
-  }.elsewhen(backendRedirect.valid) {
-    dummy_startAddr := backendRedirect.bits.cfiUpdate.target
-    dummy_ftqIdx    := backendRedirect.bits.ftqIdx + 1.U
-  }.elsewhen(ifuRedirect.valid) {
-    dummy_startAddr := pdWb.bits.target.toUInt
-    dummy_ftqIdx    := ifuRedirect.bits.ftqIdx + 1.U
-  }.elsewhen(io.toIfu.req.fire) {
-    dummy_startAddr := dummy_startAddr + 32.U(VAddrBits.W)
-    dummy_ftqIdx    := dummy_ftqIdx + 1.U
-  }
-
-  for (stage <- 2 to 3) {
-    io.toICache.flushFromBpu.stage(stage).valid := false.B
-    io.toICache.flushFromBpu.stage(stage).bits  := DontCare
-    io.toIfu.flushFromBpu.stage(stage).valid    := false.B
-    io.toIfu.flushFromBpu.stage(stage).bits     := DontCare
-  }
-
-  io.toIfu.req.valid := !reset.asBool && !backendRedirect.valid && !ifuRedirect.valid &&
-    !isFull(dummy_ftqIdx, robCommitPtrReg) &&
-    !RegNext(backendRedirect.valid) && !RegNext(RegNext(backendRedirect.valid))
-  io.toIfu.req.bits.startAddr       := dummy_startAddr
-  io.toIfu.req.bits.nextStartAddr   := dummy_startAddr + 32.U(VAddrBits.W)
-  io.toIfu.req.bits.nextlineStart   := dummy_startAddr + (FetchWidth * 4 * 2).U
-  io.toIfu.req.bits.ftqIdx          := dummy_ftqIdx
-  io.toIfu.req.bits.ftqOffset.valid := false.B
-
-  private val dummy_canPrefetch = RegInit(true.B)
-
-  when(backendRedirect.valid || ifuRedirect.valid || io.toIfu.req.fire) {
-    dummy_canPrefetch := true.B
-  }.elsewhen(io.toICache.prefetchReq.fire) {
-    dummy_canPrefetch := false.B
-  }
-
-  io.fromIfu.mmioCommitRead.mmioLastCommit := true.B
-
-  io.toICache.redirectFlush := backendRedirect.valid || ifuRedirect.valid
-
-  // backend redirect delay should be more than ITLB csr delay
-  io.toICache.prefetchReq.valid := dummy_canPrefetch && !backendRedirect.valid && !ifuRedirect.valid &&
-    !RegNext(backendRedirect.valid) && !RegNext(RegNext(backendRedirect.valid))
-  io.toICache.prefetchReq.bits.req.startAddr     := dummy_startAddr
-  io.toICache.prefetchReq.bits.req.nextlineStart := dummy_startAddr + (FetchWidth * 4 * 2).U
-  io.toICache.prefetchReq.bits.req.ftqIdx        := dummy_ftqIdx
-  io.toICache.prefetchReq.bits.backendException  := ExceptionType.None
-
-  io.toICache.fetchReq.valid := !reset.asBool && !backendRedirect.valid && !ifuRedirect.valid &&
-    !isFull(dummy_ftqIdx, robCommitPtrReg)
-  io.toICache.fetchReq.bits.readValid.foreach(valid =>
-    valid := !reset.asBool && !backendRedirect.valid && !ifuRedirect.valid && !isFull(dummy_ftqIdx, robCommitPtrReg)
-  )
-  io.toICache.fetchReq.bits.req.foreach { req =>
-    req.startAddr     := dummy_startAddr
-    req.nextlineStart := dummy_startAddr + (FetchWidth * 4 * 2).U
-    req.ftqIdx        := dummy_ftqIdx
-  }
-  io.toICache.fetchReq.bits.isBackendException := false.B
-
-  io.toBackend.pc_mem_wen   := io.toIfu.req.fire
-  io.toBackend.pc_mem_waddr := dummy_ftqIdx.value
-  // only startAddr is needed by backend
-  io.toBackend.pc_mem_wdata.startAddr     := dummy_startAddr
-  io.toBackend.pc_mem_wdata.nextLineAddr  := dummy_startAddr + 32.U(VAddrBits.W)
-  io.toBackend.pc_mem_wdata.fallThruError := false.B
-
-  io.toBackend.newest_entry_en     := false.B
-  io.toBackend.newest_entry_ptr    := dummy_ftqIdx
-  io.toBackend.newest_entry_target := dummy_startAddr.toUInt
-
 }

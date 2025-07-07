@@ -33,7 +33,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import ftq.Ftq
-import ftq.FtqEntry
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility._
@@ -114,7 +113,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
-  ftq.io.reset_vector := io.reset_vector
 
   val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
@@ -214,7 +212,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
+  val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
@@ -227,53 +225,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     checkTarget(i) := Mux(
       ftq.io.toBackend.newest_entry_ptr.value === checkTargetPtr(i).value,
       PrunedAddrInit(ftq.io.toBackend.newest_entry_target),
-      checkPcMem((checkTargetPtr(i) + 1.U).value).startAddr
+      checkPcMem((checkTargetPtr(i) + 1.U).value)
     )
   }
 
-  // commented out for this br could be the last instruction in the fetch block
-  def checkNotTakenConsecutive = {
-    val prevNotTakenValid  = RegInit(0.B)
-    val prevNotTakenFtqPtr = Reg(new FtqPtr)
-    for (i <- 0 until DecodeWidth - 1) {
-      // for instrs that is not the last, if a not-taken br, the next instr should have the same ftqPtr
-      // for instrs that is the last, record and check next request
-      when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr) {
-        when(ibuffer.io.out(i + 1).fire) {
-          // not last br, check now
-        }.otherwise {
-          // last br, record its info
-          prevNotTakenValid  := true.B
-          prevNotTakenFtqPtr := checkTargetPtr(i)
-        }
-      }
-      XSError(
-        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr &&
-          ibuffer.io.out(i + 1).fire &&
-          checkTargetPtr(i).value =/= checkTargetPtr(i + 1).value,
-        "not-taken br should have same ftqPtr\n"
-      )
-    }
-    when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr) {
-      // last instr is a br, record its info
-      prevNotTakenValid  := true.B
-      prevNotTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
-    }
-    when(prevNotTakenValid && ibuffer.io.out(0).fire) {
-      prevNotTakenValid := false.B
-    }
-    XSError(
-      prevNotTakenValid && ibuffer.io.out(0).fire &&
-        prevNotTakenFtqPtr.value =/= checkTargetPtr(0).value,
-      "not-taken br should have same ftqPtr\n"
-    )
-
-    when(needFlush) {
-      prevNotTakenValid := false.B
-    }
-  }
-
-  def checkTakenNotConsecutive = {
+  // FIXME: reconsider this check when newest_target_entry is deleted
+  private def checkTakenNotConsecutive(): Unit = {
     val prevTakenValid  = RegInit(0.B)
     val prevTakenFtqPtr = Reg(new FtqPtr)
     for (i <- 0 until DecodeWidth - 1) {
@@ -315,7 +272,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  def checkNotTakenPC = {
+  // FIXME: reconsider this check when newest_target_entry is deleted
+  private def checkNotTakenPC(): Unit = {
     val prevNotTakenPC    = Reg(PrunedAddr(VAddrBits))
     val prevIsRVC         = Reg(Bool())
     val prevNotTakenValid = RegInit(0.B)
@@ -357,11 +315,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  def checkTakenPC = {
+  // FIXME: reconsider this check when newest_target_entry is deleted
+  private def checkTakenPC(): Unit = {
     val prevTakenFtqPtr = Reg(new FtqPtr)
     val prevTakenValid  = RegInit(0.B)
     val prevTakenTarget = Wire(PrunedAddr(VAddrBits))
-    prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value).startAddr
+    prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value)
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {
@@ -396,10 +355,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  // checkNotTakenConsecutive
-  checkTakenNotConsecutive
-  checkTakenPC
-  checkNotTakenPC
+  // FIXME: reconsider these checks when newest_target_entry is deleted
+//  checkTakenNotConsecutive()
+//  checkTakenPC()
+//  checkNotTakenPC()
 
   ifu.io.robCommits <> io.backend.toFtq.rob_commits
 
