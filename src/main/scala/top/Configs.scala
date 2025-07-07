@@ -479,8 +479,79 @@ class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
+class MiniMemBlockConfig extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(
+    p => p.copy(
+      ldtlbParameters = TLBParameters(
+        name = "ldtlb",
+        NWays = 4,
+        partialStaticPMP = true,
+        outsideRecvFlush = true,
+        outReplace = false,
+        lgMaxSize = 4
+      ),
+      sttlbParameters = TLBParameters(
+        name = "sttlb",
+        NWays = 4,
+        partialStaticPMP = true,
+        outsideRecvFlush = true,
+        outReplace = false,
+        lgMaxSize = 4
+      ),
+      hytlbParameters = TLBParameters(
+        name = "hytlb",
+        NWays = 4,
+        partialStaticPMP = true,
+        outsideRecvFlush = true,
+        outReplace = false,
+        lgMaxSize = 4
+      ),
+      pftlbParameters = TLBParameters(
+        name = "pftlb",
+        NWays = 4,
+        partialStaticPMP = true,
+        outsideRecvFlush = true,
+        outReplace = false,
+        lgMaxSize = 4
+      ),
+      l2tlbParameters = L2TLBParameters(
+        l3Size = 4,
+        l2Size = 4,
+        l1nSets = 4,
+        l1nWays = 4,
+        l1ReservedBits = 1,
+        l0nSets = 4,
+        l0nWays = 8,
+        l0ReservedBits = 0,
+        spSize = 4,
+      ),
+      VirtualLoadQueueSize = 24,
+      LoadQueueRARSize = 24,
+      LoadQueueRAWSize = 16,
+      LoadQueueReplaySize = 24,
+      StoreQueueSize = 16,
+      dcacheParametersOpt = Some(DCacheParameters(
+        // 8KB
+        nSets = 32,
+        nWays = 4,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        replacer = Some("setplru"),
+        nMissEntries = 4,
+        nProbeEntries = 2,
+        nReleaseEntries = 5,
+        nMaxPrefetchEntry = 2,
+        enableTagEcc = true,
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+      )),
+    )
+  )
+})
+
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  L2CacheConfig("32KB", inclusive = true, banks = 2, tp = false)
+    ++ new MiniMemBlockConfig
     ++ new DefaultConfig(n)
     ++ new WithCHI
 )
