@@ -221,8 +221,10 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 }
 
 class storeMisaignIO(implicit p: Parameters) extends Bundle{
-  val storePipeEmpty           = Input(Bool())
-  val storeMisalignBufferEmpty = Input(Bool())
+  val storePipeEmpty            = Input(Bool())
+  val storeMisalignBufferEmpty  = Input(Bool())
+  val storeMisalignBufferRobIdx = Input(new RobPtr)
+  val storeMisalignBufferUopIdx = Input(UopIdx())
 }
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{

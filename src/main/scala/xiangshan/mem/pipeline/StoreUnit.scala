@@ -71,7 +71,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
-    val s0_s1_valid = Output(Bool())
+    val s0_s1_s2_valid = Output(Bool())
   })
 
   PerfCCT.updateInstPos(io.stin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
@@ -343,9 +343,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
   val s1_trigger_breakpoint = TriggerAction.isExp(s1_trigger_action)
 
-  // for misalign in vsMergeBuffer
-  io.s0_s1_valid := s0_valid || s1_valid
-
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   val s1_feedback = Wire(Valid(new RSFeedback))
@@ -555,6 +552,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.misalignNeedWakeUp := false.B
   io.prefetch_train.bits.updateAddrValid := false.B
   io.prefetch_train.bits.hasException := false.B
+
+  // for misalign in vsMergeBuffer
+  io.s0_s1_s2_valid := s0_valid || s1_valid || s2_valid
 
   // Pipeline
   // --------------------------------------------------------------------------------
