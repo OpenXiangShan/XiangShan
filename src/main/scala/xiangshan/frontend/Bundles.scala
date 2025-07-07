@@ -19,7 +19,6 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
-import ftq.FtqEntry
 import ftq.FtqPtr
 import ftq.FtqRedirectSramEntry
 import org.chipsalliance.cde.config.Parameters
@@ -53,7 +52,7 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   // TODO: topdown, etc.
 }
 
-class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
 
   // fast path: Timing critical
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
@@ -61,7 +60,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx    = new FtqPtr
-  val ftqOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset = Valid(UInt(CfiPositionWidth.W))
 
   val topdownInfo = new FrontendTopDownBundle
 
@@ -812,23 +811,6 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
 }
 
 class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with HasBPUConst {
-  // override def toPrintable: Printable = {
-  //   p"-----------BranchPredictionRedirect----------- " +
-  //     p"-----------cfiUpdate----------- " +
-  //     p"[pc] ${Hexadecimal(cfiUpdate.pc)} " +
-  //     p"[predTaken] ${cfiUpdate.predTaken}, [taken] ${cfiUpdate.taken}, [isMisPred] ${cfiUpdate.isMisPred} " +
-  //     p"[target] ${Hexadecimal(cfiUpdate.target)} " +
-  //     p"------------------------------- " +
-  //     p"[robPtr] f=${robIdx.flag} v=${robIdx.value} " +
-  //     p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} " +
-  //     p"[ftqOffset] ${ftqOffset} " +
-  //     p"[level] ${level}, [interrupt] ${interrupt} " +
-  //     p"[stFtqIdx] f=${stFtqIdx.flag} v=${stFtqIdx.value} " +
-  //     p"[stFtqOffset] ${stFtqOffset} " +
-  //     p"\n"
-
-  // }
-
   // TODO: backend should pass topdown signals here
   // must not change its parent since BPU has used asTypeOf(this type) from its parent class
   require(isInstanceOf[Redirect])

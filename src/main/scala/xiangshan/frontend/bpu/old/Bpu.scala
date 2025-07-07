@@ -186,7 +186,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   ftb.io.in.fromFauFtb        := uftb.io.out.toFtb
   ftb.io.in.fromTage          := tage.io.out.toFtb
-  ftb.io.in.isRedirectFromIfu := RegNext(io.fromFtq.redirctFromIFU, init = false.B)
+  ftb.io.in.isRedirectFromIfu := RegNext(io.fromFtq.redirectFromIFU, init = false.B)
   ittage.io.in.fromFtb        := ftb.io.out.toIttage
   ras.io.in.fromFtb           := ftb.io.out.toRas
 
@@ -331,7 +331,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     .elsewhen(s2_fire)(s3_valid := !s2_flush)
     .elsewhen(s3_fire)(s3_valid := false.B)
 
-  val s2_ftq_idx = RegEnable(io.fromFtq.enq_ptr, s1_fire)
+  val s2_ftq_idx = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   val s3_ftq_idx = RegEnable(s2_ftq_idx, s2_fire)
 
   val bpuResp = Wire(new BranchPredictionResp)
