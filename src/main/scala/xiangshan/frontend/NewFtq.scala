@@ -30,7 +30,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
 import utility.mbist.MbistPipeline
-import utility.sram.SRAMTemplate
+import utility.sram.SplittedSRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
@@ -77,7 +77,16 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SRAMTemplate(gen, FtqSize, withClockGate = true, hasMbist = hasMbist))
+    val sram = Module(new SplittedSRAMTemplate(
+      gen,
+      set = FtqSize,
+      way = 1,
+      dataSplit = 4,
+      singlePort = false,
+      withClockGate = true,
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
+    ))
     sram.io.r.req.valid       := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i)               := sram.io.r.resp.data(0)

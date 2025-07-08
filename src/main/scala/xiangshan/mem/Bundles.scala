@@ -37,6 +37,18 @@ import math._
 
 object Bundles {
 
+  object StLdNukeMatchType {
+    def Normal      = "b00".U
+    def QuadWord    = "b01".U
+    def CacheLine   = "b10".U
+
+    def isNormal(matchType: UInt)    = matchType === Normal
+    def isQuadWord(matchType: UInt)  = matchType === QuadWord
+    def isCacheLine(matchType: UInt) = matchType === CacheLine
+
+    def apply() = UInt(2.W)
+  }
+
   class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     with HasDCacheParameters
     with HasVLSUParameters {
@@ -56,7 +68,6 @@ object Bundles {
     val nc = Bool()
     val mmio = Bool()
     val memBackTypeMM = Bool() // 1: main memory, 0: IO
-    val atomic = Bool()
     val hasException = Bool()
     val isHyper = Bool()
     val isForVSnonLeafPTE = Bool()
@@ -161,7 +172,8 @@ object Bundles {
       }
       connectSamePort(this, inputReg)
       this.rep_info := DontCare
-      this.data_wen_dup   := DontCare
+      this.nc_with_data := DontCare
+      this.data_wen_dup := DontCare
     }
   }
 
@@ -257,8 +269,8 @@ object Bundles {
     //  mask: requestor's (a store instruction) data width mask for match logic.
     val mask = UInt((VLEN/8).W)
 
-    // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
-    val matchLine = Bool()
+    // matchType: store load nuke match type. See this class for details.
+    val matchType = StLdNukeMatchType()
   }
 
   class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
@@ -358,4 +370,28 @@ object Bundles {
     val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
   }
 
+  class MisalignBufferEnqIO(implicit p: Parameters) extends XSBundle {
+    val req = DecoupledIO(new LqWriteBundle)
+    val revoke = Output(Bool())
+  }
+
+}
+
+// for vector difftest store event
+class ToSbufferDifftestInfoBundle(implicit p: Parameters) extends XSBundle{
+  val uop        = new DynInst
+  val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
+  val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
+}
+
+
+class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
+  val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
+  val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
+}
+
+class DiffStoreIO(implicit p: Parameters) extends XSBundle{
+  val diffInfo = Vec(EnsbufferWidth, Flipped(new ToSbufferDifftestInfoBundle()))
+  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DCacheWordReqWithVaddrAndPfFlag())))
+  val ncStore = Flipped(Valid(new UncacheWordReq()))
 }

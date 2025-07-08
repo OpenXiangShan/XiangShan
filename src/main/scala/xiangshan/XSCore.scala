@@ -26,6 +26,8 @@ import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
 import utility._
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
@@ -34,8 +36,6 @@ import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
 import scala.collection.mutable.ListBuffer
-import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramHelper}
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -112,8 +112,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2Miss = Bool()
       val l3Miss = Bool()
     })
-    val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
   })
 
   dontTouch(io.l2_flush_done)
@@ -264,7 +264,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
   io.msiAck := memBlock.io.outer_msi_ack
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
-  io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
+  io.beu_errors.dcache <> memBlock.io.dcacheError.bits.toL1BusErrorUnitInfo(memBlock.io.dcacheError.valid)
+  io.beu_errors.uncache <> memBlock.io.uncacheError
   io.beu_errors.l2 <> DontCare
   io.l2PfCtrl := backend.io.mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl()
 
@@ -272,6 +273,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
   memBlock.io.traceCoreInterfaceBypass.fromBackend <> backend.io.traceCoreInterface
   io.traceCoreInterface <> memBlock.io.traceCoreInterfaceBypass.toL2Top
+  memBlock.io.wfi <> backend.io.mem.wfi
   memBlock.io.topDownInfo.fromL2Top.l2Miss := io.topDownInfo.l2Miss
   memBlock.io.topDownInfo.fromL2Top.l3Miss := io.topDownInfo.l3Miss
   memBlock.io.topDownInfo.toBackend.noUopsIssued := backend.io.topDownInfo.noUopsIssued
@@ -287,12 +289,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     frontend.reset := backend.io.frontendReset
   }
 
-  if (hasMbist) {
-    memBlock.io.dft_reset.get := io.dft_reset.get
-    memBlock.io.dft.get := io.dft.get
-    frontend.io.dft.get := memBlock.io.dft_frnt.get
-    frontend.io.dft_reset.get := memBlock.io.dft_reset_frnt.get
-    backend.io.dft_cgen.get := memBlock.io.dft_bcknd.get.cgen
-    backend.io.dft_reset.get := memBlock.io.dft_reset_bcknd.get
-  }
+  memBlock.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+  memBlock.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  frontend.io.dft.zip(memBlock.io.dft_frnt).foreach({ case (a, b) => a := b })
+  frontend.io.dft_reset.zip(memBlock.io.dft_reset_frnt).foreach({ case (a, b) => a := b })
+  backend.io.dft.zip(memBlock.io.dft_bcknd).foreach({ case (a, b) => a := b })
+  backend.io.dft_reset.zip(memBlock.io.dft_reset_bcknd).foreach({ case (a, b) => a := b })
 }

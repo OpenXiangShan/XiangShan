@@ -116,7 +116,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(Decoupled(new LqWriteBundle)))
+    val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
     val rob             = Flipped(new RobLsqIO)
     val splitLoadReq    = Decoupled(new LsPipelineBundle)
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
@@ -143,18 +143,17 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.loadMisalignFull := req_valid
 
-  (0 until io.req.length).map{i =>
+  (0 until io.enq.length).map{i =>
     if (i == 0) {
-      io.req(0).ready := !req_valid && io.req(0).valid
+      io.enq(0).req.ready := !req_valid && io.enq(0).req.valid
     }
     else {
-      io.req(i).ready := !io.req.take(i).map(_.ready).reduce(_ || _) && !req_valid && io.req(i).valid
+      io.enq(i).req.ready := !io.enq.take(i).map(_.req.ready).reduce(_ || _) && !req_valid && io.enq(i).req.valid
     }
   }
 
-
-  val select_req_bit   = ParallelPriorityMux(io.req.map(_.valid), io.req.map(_.bits))
-  val select_req_valid = io.req.map(_.valid).reduce(_ || _)
+  val select_req_bit   = ParallelPriorityMux(io.enq.map(_.req.valid), io.enq.map(_.req.bits))
+  val select_req_valid = io.enq.map(_.req.valid).reduce(_ || _)
   val canEnqValid = !req_valid && !select_req_bit.uop.robIdx.needFlush(io.redirect) && select_req_valid
   when(canEnqValid) {
     req := select_req_bit
@@ -179,13 +178,18 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val needWakeUpWB       = RegInit(false.B)
   val data_select        = RegEnable(genRdataOH(select_req_bit.uop), 0.U(genRdataOH(select_req_bit.uop).getWidth.W), canEnqValid)
 
-  // if there is exception or mmio in split load
+  // if there is exception or uncache in split load
   val globalException = RegInit(false.B)
+  val globalUncache = RegInit(false.B)
+
+  // debug info
   val globalMMIO = RegInit(false.B)
+  val globalNC   = RegInit(false.B)
+  val globalMemBackTypeMM = RegInit(false.B)
 
   val hasException = io.splitLoadResp.bits.vecActive &&
     ExceptionNO.selectByFu(io.splitLoadResp.bits.uop.exceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(io.splitLoadResp.bits.uop.trigger)
-  val isMMIO = io.splitLoadResp.bits.mmio
+  val isUncache = io.splitLoadResp.bits.mmio || io.splitLoadResp.bits.nc
   needWakeUpReqsWire := false.B
   switch(bufferState) {
     is (s_idle) {
@@ -207,12 +211,15 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     is (s_resp) {
       when (io.splitLoadResp.valid) {
         val clearOh = UIntToOH(curPtr)
-        when (hasException || isMMIO) {
+        when (hasException || isUncache) {
           // commit directly when exception ocurs
-          // if any split load reaches mmio space, delegate to software loadAddrMisaligned exception
+          // if any split load reaches uncache space, delegate to software loadAddrMisaligned exception
           bufferState := s_wb
           globalException := hasException
-          globalMMIO := isMMIO
+          globalUncache := isUncache
+          globalMMIO := io.splitLoadResp.bits.mmio
+          globalNC   := io.splitLoadResp.bits.nc
+          globalMemBackTypeMM := io.splitLoadResp.bits.memBackTypeMM
         } .elsewhen(io.splitLoadResp.bits.rep_info.need_rep || (unSentLoads & ~clearOh).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
@@ -246,8 +253,12 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
           curPtr := 0.U
           unSentLoads := 0.U
           globalException := false.B
-          globalMMIO := false.B
+          globalUncache := false.B
           needWakeUpWB := false.B
+
+          globalMMIO := false.B
+          globalNC   := false.B
+          globalMemBackTypeMM := false.B
         }
 
       } .otherwise {
@@ -257,8 +268,12 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
           curPtr := 0.U
           unSentLoads := 0.U
           globalException := false.B
-          globalMMIO := false.B
+          globalUncache := false.B
           needWakeUpWB := false.B
+
+          globalMMIO := false.B
+          globalNC   := false.B
+          globalMemBackTypeMM := false.B
         }
       }
 
@@ -495,10 +510,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
   io.splitLoadReq.bits.alignedType  := Mux(req.isvec, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
 
-  when (io.splitLoadResp.valid) {
+  when (io.splitLoadResp.valid && bufferState === s_resp && req.uop.robIdx === io.splitLoadResp.bits.uop.robIdx) {
     val resp = io.splitLoadResp.bits
     splitLoadResp(curPtr) := io.splitLoadResp.bits
-    when (isMMIO) {
+    when (isUncache) {
       unSentLoads := 0.U
       exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), LduCfg)
       // delegate to software
@@ -534,19 +549,20 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalMMIO || globalException) && !io.loadOutValid && !req.isvec
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) && !io.loadOutValid && !req.isvec
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
-  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
-  io.writeBack.bits.uop.rfWen := !globalException && !globalMMIO && req.uop.rfWen
+  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
+  io.writeBack.bits.uop.rfWen := !globalException && !globalUncache && req.uop.rfWen
   io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.flushPipe := false.B
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := newRdataHelper(data_select, combinedData)
   io.writeBack.bits.isFromLoadUnit := needWakeUpWB
+  // Misaligned accesses to uncache space trigger exceptions, so theoretically these signals won't do anything practical.
+  // But let's get them assigned correctly.
   io.writeBack.bits.debug.isMMIO := globalMMIO
-  // FIXME lyq: temporarily set to false
-  io.writeBack.bits.debug.isNC := false.B
+  io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
@@ -575,10 +591,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.vecWriteBack.bits.vaNeedExt            := req.vaNeedExt
   io.vecWriteBack.bits.gpaddr               := req.gpaddr
   io.vecWriteBack.bits.isForVSnonLeafPTE    := req.isForVSnonLeafPTE
-  io.vecWriteBack.bits.mmio                 := DontCare
+  io.vecWriteBack.bits.mmio                 := globalMMIO
   io.vecWriteBack.bits.vstart               := req.uop.vpu.vstart
   io.vecWriteBack.bits.vecTriggerMask       := req.vecTriggerMask
-  io.vecWriteBack.bits.nc                   := false.B
+  io.vecWriteBack.bits.nc                   := globalNC
 
 
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
@@ -589,7 +605,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     curPtr := 0.U
     unSentLoads := 0.U
     globalException := false.B
+    globalUncache := false.B
+
     globalMMIO := false.B
+    globalNC   := false.B
+    globalMemBackTypeMM := false.B
   }
 
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
@@ -614,8 +634,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.overwriteExpBuf.gpaddr := overwriteGpaddr
   io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
-  // when no exception or mmio, flush loadExceptionBuffer at s_wb
-  val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))
+  // when no exception or uncache, flush loadExceptionBuffer at s_wb
+  val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalUncache || globalException))
   io.flushLdExpBuff := flushLdExpBuff
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)

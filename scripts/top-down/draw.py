@@ -67,12 +67,12 @@ def draw():
             else:
                 rename_with_map(df, cf.xs_coarse_rename_map)
 
-                icount = 20 * 10 ** 6
-                if 'BadSpecInst' in df.columns:
-                    df['BadSpecInst'] += df['Base'] - icount
-                else:
-                    df['BadSpecInst'] = df['Base'] - icount
-                df['Base'] = icount
+            icount = 20 * 10 ** 6
+            if 'BadSpecInst' in df.columns:
+                df['BadSpecInst'] += df['Base'] - icount
+            else:
+                df['BadSpecInst'] = df['Base'] - icount
+            df['Base'] = icount
 
         df = df.astype(float)
         renamed_dfs.append(df)
@@ -128,7 +128,7 @@ def draw():
     ax.set_xlabel('SPECCPU 2006 Benchmarks')
 
     handles, labels = plt.gca().get_legend_handles_labels()
-    ax.legend(reversed(handles), reversed(labels), fancybox=True,
+    ax.legend(list(reversed(handles)), list(reversed(labels)), fancybox=True,
               framealpha=0.3,
               loc='best',
               ncol=3,

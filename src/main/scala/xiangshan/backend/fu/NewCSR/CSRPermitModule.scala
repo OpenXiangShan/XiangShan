@@ -6,8 +6,10 @@ import chisel3.util.experimental.decode.TruthTable
 import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
+import org.chipsalliance.cde.config.Parameters
+import system.HasSoCParameter
 
-class CSRPermitModule extends Module {
+class CSRPermitModule(implicit p: Parameters) extends Module {
   val io = IO(new CSRPermitIO)
 
   val xRetPermitMod = Module(new XRetPermitModule)
@@ -50,6 +52,7 @@ class CSRPermitModule extends Module {
   indirectCSRPermitMod.io.in.csrAccess := io.in.csrAccess
   indirectCSRPermitMod.io.in.privState := io.in.privState
   indirectCSRPermitMod.io.in.aia       := io.in.aia
+  indirectCSRPermitMod.io.in.xstateen  := io.in.xstateen
 
   private val (ren, wen) = (
     io.in.csrAccess.ren,
@@ -183,6 +186,9 @@ class MLevelPermitModule extends Module {
   private val mcounteren = io.in.xcounteren.mcounteren
 
   private val mstateen0 = io.in.xstateen.mstateen0
+  private val mstateen1 = io.in.xstateen.mstateen1
+  private val mstateen2 = io.in.xstateen.mstateen2
+  private val mstateen3 = io.in.xstateen.mstateen3
 
   private val mcounterenTM = mcounteren(1)
 
@@ -225,13 +231,17 @@ class MLevelPermitModule extends Module {
   private val rwStopei_EX_II = privState.isModeHS && mvienSEIE && (addr === CSRs.stopei.U)
 
   /**
-   * Sm/Ssstateen0 begin
+   * Sm/Ssstateen begin
    */
-  // SE0 bit 63
-  private val csrIsHstateen0 = addr === CSRs.hstateen0.U
-  private val csrIsSstateen0 = addr === CSRs.sstateen0.U
-  private val csrIsStateen0 = csrIsHstateen0 || csrIsSstateen0
-  private val accessStateen0_EX_II = csrIsStateen0 && !privState.isModeM && !mstateen0.SE0.asBool
+  // SE bit 63
+  private val accessStateen_EX_II = (
+    mstateen0.SE0.asBool +: Seq(mstateen1, mstateen2, mstateen3).map(_.SE.asBool)
+    ).zipWithIndex.map{ case(se, i) => {
+    val csrIsHstateen = addr === (CSRs.hstateen0 + i).U
+    val csrIsSstateen = addr === (CSRs.sstateen0 + i).U
+    val csrIsStateen = csrIsHstateen || csrIsSstateen
+    csrIsStateen && !privState.isModeM && !se
+  }}.reduce(_ || _)
 
   // ENVCFG bit 62
   private val csrIsHenvcfg = addr === CSRs.henvcfg.U
@@ -241,8 +251,8 @@ class MLevelPermitModule extends Module {
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]     VS: [0x250, 0x257]
-  private val csrIsSi = addr.head(9) === CSRs.siselect.U.head(9)
-  private val csrIsVSi = addr.head(9) === CSRs.vsiselect.U.head(9)
+  private val csrIsSi = Ireg.isInSCsrInd(addr)
+  private val csrIsVSi = Ireg.isInVSCsrInd(addr)
   private val csrIsIND = csrIsSi || csrIsVSi
   private val accessIND_EX_II = csrIsIND && !privState.isModeM && !mstateen0.CSRIND.asBool
 
@@ -259,7 +269,7 @@ class MLevelPermitModule extends Module {
   private val csrIsTpoie = csrIsStopei || csrIsVStopei
   private val accessTopie_EX_II = csrIsTpoie && !privState.isModeM && !mstateen0.IMSIC.asBool
 
-  // CONTEXT bit 57 context reg (Sdtrig extensions), this is not implemented
+  // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsHcontext = addr === CSRs.hcontext.U
   private val csrIsScontext = addr === CSRs.scontext.U
   private val csrIsContext = csrIsHcontext || csrIsScontext
@@ -277,7 +287,7 @@ class MLevelPermitModule extends Module {
   private val allCustom      = csrIsHVSCustom || csrIsSCustom || csrIsUCustom
   private val accessCustom_EX_II = allCustom && !privState.isModeM && !mstateen0.C.asBool
 
-  val xstateControlAccess_EX_II = accessStateen0_EX_II || accessEnvcfg_EX_II || accessIND_EX_II || accessAIA_EX_II ||
+  private val xstateControlAccess_EX_II = accessStateen_EX_II || accessEnvcfg_EX_II || accessIND_EX_II || accessAIA_EX_II ||
     accessTopie_EX_II || accessContext_EX_II || accessCustom_EX_II
   /**
    * Sm/Ssstateen end
@@ -369,7 +379,7 @@ class PrivilegePermitModule extends Module {
   io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
-class VirtualLevelPermitModule extends Module {
+class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with HasSoCParameter {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO
@@ -408,8 +418,11 @@ class VirtualLevelPermitModule extends Module {
 
   private val henvcfgSTCE = henvcfg(63)
 
-  private val (hstateen0, sstateen0) = (
+  private val (hstateen0, hstateen1, hstateen2, hstateen3, sstateen0) = (
     io.in.xstateen.hstateen0,
+    io.in.xstateen.hstateen1,
+    io.in.xstateen.hstateen2,
+    io.in.xstateen.hstateen3,
     io.in.xstateen.sstateen0,
   )
 
@@ -420,8 +433,8 @@ class VirtualLevelPermitModule extends Module {
 
   private val rwSatp_EX_VI = privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
-  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
-  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
+  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
+  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
 
   private val rwSip_Sie_EX_VI = privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
 
@@ -434,11 +447,16 @@ class VirtualLevelPermitModule extends Module {
     )
 
   /**
-   * Sm/Ssstateen0 begin
+   * Sm/Ssstateen begin
    */
-  // SE0 bit 63
-  private val csrIsSstateen0 = addr === CSRs.sstateen0.U
-  private val accessStateen0_EX_VI = csrIsSstateen0 && privState.isVirtual && !hstateen0.SE0.asBool
+
+  //  SE0 bit 63
+  private val accessStateen_EX_VI = (
+    hstateen0.SE0.asBool +: Seq(hstateen1, hstateen2, hstateen3).map(_.SE.asBool)
+    ).zipWithIndex.map{case(se, i) => {
+    val csrIsSstateen = addr === (CSRs.sstateen0 + i).U
+    csrIsSstateen && privState.isVirtual && !se
+  }}.reduce(_ || _)
 
   // ENVCFG bit 62
   private val csrIsSenvcfg = addr === CSRs.senvcfg.U
@@ -446,7 +464,7 @@ class VirtualLevelPermitModule extends Module {
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]
-  private val csrIsSi = addr.head(9) === CSRs.siselect.U.head(9)
+  private val csrIsSi = Ireg.isInSCsrInd(addr)
   private val accessIND_EX_VI = csrIsSi && privState.isVirtual && !hstateen0.CSRIND.asBool
 
   // AIA bit 59
@@ -457,7 +475,7 @@ class VirtualLevelPermitModule extends Module {
   private val csrIsStopei = addr === CSRs.stopei.U
   private val accessTopie_EX_VI = csrIsStopei && privState.isVirtual && !hstateen0.IMSIC.asBool
 
-  // CONTEXT bit 57 context reg (Sdtrig extensions), this is not implemented
+  // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsScontext = addr === CSRs.scontext.U
   private val accessContext_EX_VI = csrIsScontext && privState.isVirtual && !hstateen0.CONTEXT.asBool
 
@@ -471,7 +489,7 @@ class VirtualLevelPermitModule extends Module {
   private val accessCustom_EX_VI = (csrIsSCustom || csrIsUCustom) && privState.isVirtual && !hstateen0.C.asBool ||
     csrIsUCustom && privState.isModeVU && hstateen0.C.asBool && !sstateen0.C.asBool
 
-  private val xstateControlAccess_EX_VI = accessStateen0_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
+  private val xstateControlAccess_EX_VI = accessStateen_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
   io.out.virtualLevelPermit_EX_II := rwVStopei_EX_II
@@ -484,6 +502,7 @@ class IndirectCSRPermitModule extends Module {
       val csrAccess = new csrAccessIO
       val privState = new PrivState
       val aia = new aiaIO
+      val xstateen = new xstateenIO
     })
     val out = Output(new Bundle {
       val indirectCSR_EX_II = Bool()
@@ -496,33 +515,58 @@ class IndirectCSRPermitModule extends Module {
     io.in.privState,
   )
 
-  private val (miselectIsIllegal, siselectIsIllegal, vsiselectIsIllegal) = (
-    io.in.aia.miselectIsIllegal,
-    io.in.aia.siselectIsIllegal,
-    io.in.aia.vsiselectIsIllegal,
-  )
-
-  private val (siselect, vsiselect) = (
+  private val (miselect, siselect, vsiselect) = (
+    io.in.aia.miselect,
     io.in.aia.siselect,
     io.in.aia.vsiselect,
   )
 
+  private val (mstateen0, hstateen0) = (
+    io.in.xstateen.mstateen0,
+    io.in.xstateen.hstateen0,
+  )
+
   private val mvienSEIE = io.in.aia.mvienSEIE
 
-  private val rwMireg_EX_II = miselectIsIllegal && addr === CSRs.mireg.U
+  private val rwMireg_EX_II = (
+      Iselect.isInAIA(miselect) && Iselect.isOdd(miselect) ||
+      Iselect.isInOthers(miselect)
+    ) && addr === CSRs.mireg.U
+
+  private val rwMireg2_6_EX_II = Ireg.isInMireg2_6(addr)
 
   private val rwSireg_EX_II = (
-      (privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
-      ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-      (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))
+      !privState.isVirtual && (
+        Iselect.isInAIA(siselect) && Iselect.isOdd(siselect) ||
+        Iselect.isInOthers(siselect)
+      ) ||
+      privState.isModeHS && (
+        mvienSEIE && Iselect.isInImsic(siselect) ||
+        !mstateen0.AIA.asBool && Iselect.isInAIA(siselect) ||
+        !mstateen0.IMSIC.asBool && Iselect.isInImsic(siselect)
+      ) ||
+      privState.isVirtual && (
+        Iselect.isInOthers(vsiselect) ||
+        !mstateen0.AIA.asBool && Iselect.isInAIA(vsiselect) ||
+        !mstateen0.IMSIC.asBool && Iselect.isInImsic(vsiselect)
+      )
     ) && addr === CSRs.sireg.U
 
-  private val rwSireg_EX_VI = privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect) && !hstateen0.IMSIC.asBool) && addr === CSRs.sireg.U
 
-  private val rwVSireg_EX_II = vsiselectIsIllegal && addr === CSRs.vsireg.U
+  private val rwSireg2_6_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect)) && Ireg.isInSireg2_6(addr)
 
-  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
-  io.out.indirectCSR_EX_VI := rwSireg_EX_VI
+  private val rwSireg2_6_EX_II = Ireg.isInSireg2_6(addr) && !rwSireg2_6_EX_VI
+
+  private val rwVSireg_EX_II = (
+      !Iselect.isInImsic(vsiselect) ||
+      !privState.isModeM && !mstateen0.IMSIC.asBool
+    ) && addr === CSRs.vsireg.U
+
+  private val rwVSireg2_6_EX_II = Ireg.isInVSireg2_6(addr)
+
+  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwMireg2_6_EX_II || rwSireg_EX_II || rwSireg2_6_EX_II || rwVSireg_EX_II || rwVSireg2_6_EX_II
+  io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
 class csrAccessIO extends Bundle {
@@ -577,15 +621,19 @@ class xenvcfgIO extends Bundle {
 
 class xstateenIO extends Bundle {
   // Sm/Ssstateen: to control state access
-  val mstateen0 = new MstateenBundle0
-  val hstateen0 = new HstateenBundle0
-  val sstateen0 = new SstateenBundle0
+  val mstateen0 = new Mstateen0Bundle
+  val mstateen1 = new MstateenNonZeroBundle
+  val mstateen2 = new MstateenNonZeroBundle
+  val mstateen3 = new MstateenNonZeroBundle
+  val hstateen0 = new Hstateen0Bundle
+  val hstateen1 = new HstateenNonZeroBundle
+  val hstateen2 = new HstateenNonZeroBundle
+  val hstateen3 = new HstateenNonZeroBundle
+  val sstateen0 = new Sstateen0Bundle
 }
 
 class aiaIO extends Bundle {
-  val miselectIsIllegal = Bool()
-  val siselectIsIllegal = Bool()
-  val vsiselectIsIllegal = Bool()
+  val miselect = UInt(64.W)
   val siselect = UInt(64.W)
   val vsiselect = UInt(64.W)
   val mvienSEIE = Bool()

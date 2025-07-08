@@ -334,23 +334,26 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
 
-  val robidxStepNext  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxStepHold  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  robidxStepReg := robidxCanCommitStepping
 
   when(!io.singleStep) {
     singleStepState := s_updateRobidx
   }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
     singleStepState := s_holdRobidx
-    robidxStepNext := fromRename(0).bits.robIdx
+    robidxStepHold := fromRename(0).bits.robIdx
   }
 
   when(singleStepState === s_updateRobidx) {
-    robidxStepReg := robidxStepNext
-    robidxCanCommitStepping := robidxStepNext
+    robidxCanCommitStepping := robidxStepHold
   }.elsewhen(singleStepState === s_holdRobidx) {
-    robidxStepReg := robidxStepReg
-    robidxCanCommitStepping := robidxStepReg
+    when(io.redirect.valid){
+      robidxCanCommitStepping.flag := !robidxStepReg.flag
+    }.otherwise {
+      robidxCanCommitStepping := robidxStepReg
+    }
   }
 
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
@@ -451,7 +454,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   }
   for (i <- 0 until RenameWidth){
     // check is drop amocas sta
-    fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 1.U
+    fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 0.U
     // update singleStep
     fromRenameUpdate(i).bits.singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
   }
@@ -871,6 +874,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
   TopDownCounters.LoadL1Stall.id.U))))))))
 
+  val fusedVec = (0 until RenameWidth).map{ case i =>
+    if (i == 0) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid &&
+         CommitType.isFused(io.fromRename(i-1).bits.commitType))
+  }
+
   val decodeReason = RegNextN(io.stallReason.reason, 2)
   val renameReason = RegNext(io.stallReason.reason)
 
@@ -878,7 +887,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val firedVec = fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.map { case (((update, in), fire), idx) =>
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
     val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
     val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
@@ -891,7 +900,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     import TopDownCounters._
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
-      (fire                                              ) -> NoStall.id.U          ,
+      (fire || fused                                     ) -> NoStall.id.U          ,
       // dispatch not stall / core stall from decode or rename
       (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                    ,
       // rob stall
@@ -906,7 +915,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     ))
   }
 
-  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)), XSPerfLevel.CRITICAL))
 
   val robTrueCommit = io.debugTopDown.fromRob.robTrueCommit
   TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),

@@ -38,6 +38,7 @@ import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistPipeline
+import utility.sram.SplittedSRAMTemplate
 import utility.sram.SRAMReadBus
 import utility.sram.SRAMTemplate
 import utility.sram.SRAMWriteBus
@@ -268,15 +269,18 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
   )
 
   private val tagArrays = (0 until PortNumber) map { bank =>
-    val tagArray = Module(new SRAMTemplate(
+    val tagArray = Module(new SplittedSRAMTemplate(
       new ICacheMetaEntry(),
       set = nSets / PortNumber,
       way = nWays,
+      waySplit = 2,
+      dataSplit = 1,
       shouldReset = true,
       holdRead = true,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
 
     // meta connection
@@ -438,7 +442,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
         holdRead = true,
         singlePort = true,
         withClockGate = false, // enable signal timing is bad, no gating here
-        hasMbist = hasMbist
+        hasMbist = hasMbist,
+        hasSramCtl = hasSramCtl
       ))
 
       // read
@@ -556,6 +561,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   // flush
   val fencei: Bool = Input(Bool())
   val flush:  Bool = Input(Bool())
+  // wfi
+  val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
 
   // perf
   val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
@@ -683,6 +690,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
   missUnit.io.flush  := io.flush
+  missUnit.io.wfi <> io.wfi
   missUnit.io.fetch_req <> mainPipe.io.mshr.req
   missUnit.io.prefetch_req <> prefetcher.io.MSHRReq
   missUnit.io.mem_grant.valid := false.B
@@ -834,7 +842,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
     singlePort:    Boolean = false,
     bypassWrite:   Boolean = false,
     withClockGate: Boolean = false,
-    hasMbist:      Boolean = false
+    hasMbist:      Boolean = false,
+    hasSramCtl:    Boolean = false
 ) extends Module {
 
   private val dataBits  = gen.getWidth
@@ -860,7 +869,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
       singlePort = singlePort,
       bypassWrite = bypassWrite,
       withClockGate = withClockGate,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
     // read req
     sramBank.io.r.req.valid       := io.r.req.valid

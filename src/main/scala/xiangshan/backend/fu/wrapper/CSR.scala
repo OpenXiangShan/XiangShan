@@ -184,6 +184,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapInstMod.io.fromRob.flush.valid := io.flush.valid
   trapInstMod.io.fromRob.flush.bits.ftqPtr := io.flush.bits.ftqIdx
   trapInstMod.io.fromRob.flush.bits.ftqOffset := io.flush.bits.ftqOffset
+  trapInstMod.io.fromRob.isInterrupt.valid := csrIn.exception.valid
+  trapInstMod.io.fromRob.isInterrupt.bits := csrIn.exception.bits.isInterrupt
   trapInstMod.io.faultCsrUop.valid         := csrMod.io.out.valid && (csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI)
   trapInstMod.io.faultCsrUop.bits.fuOpType := DataHoldBypass(io.in.bits.ctrl.fuOpType, io.in.fire)
   trapInstMod.io.faultCsrUop.bits.imm      := DataHoldBypass(io.in.bits.data.imm, io.in.fire)
@@ -268,6 +270,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.vsum := csrMod.io.tlb.vsum
   tlb.priv.spvp := csrMod.io.tlb.spvp
   tlb.priv.virt := csrMod.io.tlb.dvirt
+  tlb.priv.virt_changed := DataChanged(tlb.priv.virt)
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
 

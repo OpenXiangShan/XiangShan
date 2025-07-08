@@ -27,6 +27,7 @@ import xiangshan._
 import xiangshan.mem._
 import xiangshan.mem.Bundles._
 import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
+import difftest._
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
 
@@ -60,7 +61,6 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
   val data = UInt(XLEN.W)
   val mask = UInt(DataBytes.W)
   val nc = Bool()
-  val atomic = Bool()
   val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
@@ -77,7 +77,6 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     mask := x.mask
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
-    atomic := x.atomic
     resp_nderr := false.B
     // fwd_data := 0.U
     // fwd_mask := 0.U
@@ -175,6 +174,8 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  val wfi = Flipped(new WfiReqBundle)
+  val busError = Output(new L1BusErrorUnitInfo())
 }
 
 // convert DCacheIO to TileLink
@@ -234,6 +235,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
   val s_idle :: s_inflight :: s_wait_return :: Nil = Enum(3)
   val uState = RegInit(s_idle)
+  val noPending = RegInit(VecInit(Seq.fill(UncacheBufferSize)(true.B)))
 
   // drain buffer
   val empty = Wire(Bool())
@@ -281,7 +283,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) &&
       x.cmd === e.cmd && x.nc && e.nc &&
-      x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
+      x.memBackTypeMM === e.memBackTypeMM &&
       continueAndAlign(x.mask | e.mask) &&
     // not receiving uncache response, not waitReturn -> no wake-up signal in these cases
       !(mem_grant.fire && mem_grant.bits.source === eid || states(eid).isWaitReturn())
@@ -346,14 +348,14 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   assert(PopCount(e0_mergeVec) <= 1.U, "Uncache buffer should not merge multiple entries")
 
   val e0_invalidVec = sizeMap(i => !states(i).isValid())
-  val e0_reject = do_uarch_drain || !e0_invalidVec.asUInt.orR || e0_rejectVec.reduce(_ || _)
   val (e0_mergeIdx, e0_canMerge) = PriorityEncoderWithFlag(e0_mergeVec)
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_allocWaitSame = e0_allocWaitSameVec.reduce(_ || _)
   val e0_sid = Mux(e0_canMerge, e0_mergeIdx, e0_allocIdx)
+  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_fire){
+  when(e0_canMerge && e0_req_valid){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
@@ -418,12 +420,13 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
 
-  mem_acquire.valid := q0_canSent
+  mem_acquire.valid := q0_canSent && !io.wfi.wfiReq
   mem_acquire.bits := Mux(q0_isStore, q0_store, q0_load)
   mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q0_entry.memBackTypeMM)
   mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q0_entry.nc)
   when(mem_acquire.fire){
     states(q0_canSentIdx).setInflight(true.B)
+    noPending(q0_canSentIdx) := false.B
 
     // q0 should judge whether wait same block
     (0 until UncacheBufferSize).map(j =>
@@ -433,6 +436,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     )
   }
 
+  // uncache store but memBackTypeMM should update the golden memory
+  if (env.EnableDifftest) {
+    val difftest = DifftestModule(new DiffUncacheMMStoreEvent, delay = 1)
+    difftest.coreid := io.hartId
+    difftest.index  := 0.U
+    difftest.valid  := mem_acquire.fire && isStore(entries(q0_canSentIdx)) && entries(q0_canSentIdx).memBackTypeMM
+    difftest.addr   := entries(q0_canSentIdx).addr
+    difftest.data   := entries(q0_canSentIdx).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
+    difftest.mask   := entries(q0_canSentIdx).mask
+  }
 
   /******************************************************************
    * Uncache Resp
@@ -445,6 +458,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val id = mem_grant.bits.source
     entries(id).update(mem_grant.bits)
     states(id).updateUncacheResp()
+    noPending(id) := true.B
     assert(refill_done, "Uncache response should be one beat only!")
 
     // remove state of wait same block
@@ -454,8 +468,11 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       }
     )
   }
+  io.busError.ecc_error.valid := mem_grant.fire && isStore(entries(mem_grant.bits.source)) &&
+    (mem_grant.bits.denied || mem_grant.bits.corrupt)
+  io.busError.ecc_error.bits := entries(mem_grant.bits.source).addr >> blockOffBits << blockOffBits
 
-
+  io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
   /******************************************************************
    * Return to LSQ
    ******************************************************************/
@@ -472,7 +489,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   /******************************************************************
    * Buffer Flush
    * 1. when io.flush.valid is true: drain store queue and ubuffer
-   * 2. when io.lsq.req.bits.atomic is true: not support temporarily
    ******************************************************************/
   empty := !VecInit(states.map(_.isValid())).asUInt.orR
   io.flush.empty := empty

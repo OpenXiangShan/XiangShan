@@ -175,13 +175,20 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_req_valid = RegInit(VecInit.fill(2)(false.B))
   val pending_write_req_bits  = RegEnable(in.aw.bits, in.aw.fire)
   val pending_write_req_data  = RegEnable(in.w.bits, in.w.fire)
-  XSError(in.aw.fire && in.aw.bits.len === 0.U, "data must have more than one beat now")
   val pending_write_req_ready = Wire(Bool())
   val pending_write_need_req = pending_write_req_valid.last && !pending_write_req_ready
-  val write_req_valid = pending_write_req_valid.head && (pending_write_need_req || in.w.valid && in.w.bits.last)
-  pending_write_req_ready := writeRequest(write_req_valid, pending_write_req_bits.addr, pending_write_req_bits.id)
+  val aw_and_w_last_arrive_at_same_time = in.aw.fire && in.w.fire && in.w.bits.last
+  val w_last_arrive_before_aw = in.aw.fire && pending_write_need_req
+  val aw_arrive_before_w_last = pending_write_req_valid.head && in.w.fire && in.w.bits.last
+  val aw_arrive_before_w = pending_write_req_valid.head && pending_write_need_req
+  val write_req_enq_pending = aw_arrive_before_w || aw_arrive_before_w_last
+  val write_req_enq_no_pending = aw_and_w_last_arrive_at_same_time || w_last_arrive_before_aw
+  val write_req_valid = write_req_enq_pending || RegNext(write_req_enq_no_pending, false.B)
+  val write_req_enq_addr = Mux(write_req_enq_pending, pending_write_req_bits.addr, in.aw.bits.addr)
+  val write_req_enq_id = Mux(write_req_enq_pending, pending_write_req_bits.id, in.aw.bits.id)
+  pending_write_req_ready := writeRequest(write_req_valid, write_req_enq_addr, write_req_enq_id)
 
-  when (in.aw.fire) {
+  when (in.aw.fire && !write_req_enq_no_pending) {
     pending_write_req_valid.head := true.B
   }.elsewhen (pending_write_req_ready) {
     pending_write_req_valid.head := false.B

@@ -210,14 +210,11 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && !cfg.w
+    resp.ld := TlbCmd.isRead(cmd) && !cfg.r
+    resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     //TODO We require that a `PMA` can generate an mmio response only if the address has the appropriate `PMA` permissions.
-    resp.mmio := !cfg.c &&
-                 (TlbCmd.isRead(cmd) && cfg.r ||
-                 (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && cfg.w ||
-                 TlbCmd.isExec(cmd) && cfg.x)
+    resp.mmio := !cfg.c && !(resp.ld || resp.st || resp.instr)
     resp.atomic := cfg.atomic
     resp
   }

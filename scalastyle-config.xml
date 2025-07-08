@@ -71,43 +71,43 @@
  <!-- always add a space after `//` or `/*` before comments -->
  <check enabled="true" class="org.scalastyle.scalariform.SpaceAfterCommentStartChecker" level="warning"/>
  <!-- check space around operators, ref: https://github.com/scala-ide/scalariform/blob/master/scalariform/src/main/scala/scalariform/lexer/Tokens.scala -->
- <check enabled="true" class="org.scalastyle.scalariform.DisallowSpaceAfterTokenChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.scalariform.DisallowSpaceAfterTokenChecker" level="warning">
   <parameters>
    <!-- (, ~, ! -->
    <parameter name="tokens">LPAREN, TILDE, EXCLAMATION</parameter>
   </parameters>
  </check>
- <check enabled="true" class="org.scalastyle.scalariform.DisallowSpaceBeforeTokenChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.scalariform.DisallowSpaceBeforeTokenChecker" level="warning">
   <parameters>
    <!-- :, ,, ) -->
    <parameter name="tokens">COLON, COMMA, RPAREN</parameter>
   </parameters>
  </check>
- <check enabled="true" class="org.scalastyle.scalariform.EnsureSingleSpaceAfterTokenChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.scalariform.EnsureSingleSpaceAfterTokenChecker" level="warning">
   <parameters>
    <!-- if, match, case, for, while, =>, <-, {, <:, <%:, >:, +, -, *, |, = -->
    <parameter name="tokens">IF, MATCH, CASE, FOR, WHILE, ARROW, LARROW, LBRACE, SUBTYPE, VIEWBOUND, SUPERTYPE, PLUS, MINUS, STAR, PIPE, EQUAL</parameter>
   </parameters>
  </check>
- <check enabled="true" class="org.scalastyle.scalariform.EnsureSingleSpaceBeforeTokenChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.scalariform.EnsureSingleSpaceBeforeTokenChecker" level="warning">
   <parameters>
    <!-- =>, <-, }, <:, <%, >:, +, -, *, |, = -->
    <parameter name="tokens">ARROW, LARROW, RBRACE, SUBTYPE, VIEWBOUND, SUPERTYPE, PLUS, MINUS, STAR, PIPE, EQUAL</parameter>
   </parameters>
  </check>
- <check enabled="true" class="org.scalastyle.file.RegexChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.file.RegexChecker" level="warning">
   <parameters>
    <!-- :=, :<=, :>=, :<>=, :#=, <>, ===, =/=, <<, >>, <=, >= -->
    <parameter name="regex"><![CDATA[[^ ](:<?#?>?=|<>|=[=/]=|<<|>>|[<>]=)]]></parameter>
   </parameters>
   <customMessage>No space before operators</customMessage>
  </check>
- <check enabled="true" class="org.scalastyle.file.RegexChecker" level="warning">
+ <check enabled="false" class="org.scalastyle.file.RegexChecker" level="warning">
   <parameters>
    <!-- :=, :<=, :>=, :<>=, :#=, <>, ===, =/=, <<, >>, <=, >= -->
-   <parameter name="regex"><![CDATA[(:<?#?>?=|<>|=[=/]=|<<|>>|[<>]=)[^ ]]]></parameter>
+   <parameter name="regex"><![CDATA[(:<?#?>?=|<>|=[=/]=|<<|>>|[<>]=)[^ \n]]]></parameter>
   </parameters>
-  <customMessage>No space after operators</customMessage>
+  <customMessage>No space or newline after operators</customMessage>
  </check>
 
  <!-- ===== imports ===== -->
@@ -138,7 +138,7 @@
  <check enabled="true" class="org.scalastyle.scalariform.FieldNamesChecker" level="warning">
   <parameters>
    <!-- we allow sx_lowerCamelCase for pipeline signals -->
-   <parameter name="regex">^(s[0-9]_)?[a-z][A-Za-z0-9]*$</parameter>
+   <parameter name="regex">^(([a-z][0-9]|perf|debug)_)?[a-z][A-Za-z0-9]*$</parameter>
    <parameter name="objectFieldRegex">^[A-Z][A-Za-z0-9]*$</parameter>
   </parameters>
  </check>

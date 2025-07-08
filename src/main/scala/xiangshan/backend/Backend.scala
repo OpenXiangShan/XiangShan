@@ -30,6 +30,7 @@ import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility._
+import utility.sram.SramBroadcastBundle
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
@@ -262,6 +263,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
   ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
+
+  io.mem.wfi <> ctrlBlock.io.toMem.wfi
 
   io.mem.lsqEnqIO <> ctrlBlock.io.toMem.lsqEnqIO
   ctrlBlock.io.fromMemToDispatch.scommit := io.mem.sqDeq
@@ -680,6 +683,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
     sink.bits.debug := source.bits.debug
     sink.bits.debugInfo := source.bits.uop.debugInfo
+    sink.bits.debug_seqNum := source.bits.uop.debug_seqNum
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
     sink.bits.predecodeInfo.foreach(_ := source.bits.uop.preDecodeInfo)
@@ -811,6 +815,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.ftqPtr         := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
     sink.bits.uop.ftqOffset      := source.bits.ftqOffset.getOrElse(0.U)
     sink.bits.uop.debugInfo      := source.bits.perfDebugInfo
+    sink.bits.uop.debug_seqNum   := source.bits.debug_seqNum
     sink.bits.uop.vpu            := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
     sink.bits.uop.preDecodeInfo  := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
     sink.bits.uop.numLsElem      := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
@@ -866,7 +871,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
   if(hasMbist) {
-    cg.cgen := io.dft_cgen.get
+    cg.cgen := io.dft.get.cgen
   } else {
     cg.cgen := false.B
   }
@@ -1020,6 +1025,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val isStoreException = Output(Bool())
   val isVlsException = Output(Bool())
 
+  val wfi = new WfiReqBundle
   // ATTENTION: The issue ports' sequence order should be the same as IQs' deq config
   private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
     issueSta ++
@@ -1087,6 +1093,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   }
   val debugRolling = new RobDebugRollingIO
   val topDownInfo = new TopDownInfo
-  val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals)) else None
-  val dft_cgen = if(hasMbist) Some(Input(Bool())) else None
+  val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+  val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
 }

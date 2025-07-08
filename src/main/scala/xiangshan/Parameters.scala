@@ -233,8 +233,6 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
-  VFOFBufferSize: Int = 8,
-  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -355,7 +353,7 @@ case class XSCoreParameters
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
-  hasMbist:Boolean = false
+  wfiResume: Boolean = true,
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -567,6 +565,14 @@ case class DebugOptions
   EnableRollingDB: Boolean = false
 )
 
+case object DFTOptionsKey extends Field[DFTOptions]
+
+case class DFTOptions
+(
+  EnableMbist: Boolean = true, // enable mbist default
+  EnableSramCtl: Boolean = false,
+)
+
 trait HasXSParameter {
 
   implicit val p: Parameters
@@ -771,6 +777,8 @@ trait HasXSParameter {
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
   def RollbackGroupSize = coreParams.RollbackGroupSize
+  val RAWlgSelectGroupSize = log2Ceil(RollbackGroupSize)
+  val RAWTotalDelayCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / RAWlgSelectGroupSize).toInt + 1 - 2
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
@@ -809,7 +817,6 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
-  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def UncacheBufferIndexWidth = log2Up(UncacheBufferSize)
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
@@ -902,9 +909,12 @@ trait HasXSParameter {
   def PrivWidth              = coreParams.traceParams.PrivWidth
   def IaddrWidth             = coreParams.traceParams.IaddrWidth
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
-  def IretireWidthInPipe     = log2Up(RenameWidth * 2)
-  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IretireWidthInPipe     = log2Up(RenameWidth * 2 + 1)
+  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2 + 1)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
-  def hasMbist               = coreParams.hasMbist
+  def wfiResume              = coreParams.wfiResume
+  def hasMbist               = p(DFTOptionsKey).EnableMbist
+  def hasSramCtl             = p(DFTOptionsKey).EnableSramCtl
+  def hasDFT                 = hasMbist || hasSramCtl
 }

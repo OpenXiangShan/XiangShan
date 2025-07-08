@@ -265,9 +265,10 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
+  val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
-  val vecDifftestInfo     = Decoupled(new DynInst) // to sbuffer
+  val vecDifftestInfo     = Decoupled(new ToSbufferDifftestInfoBundle) // to sbuffer
   val dtlb                = new TlbRequestIO(2)
   val pmpResp             = Flipped(new PMPRespBundle())
   val flush_sbuffer       = new SbufferFlushBundle
@@ -281,7 +282,7 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
 class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
-  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExuOutput(isVector=true))))
+  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new FeedbackToLsqIO)))
 
   val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
 }

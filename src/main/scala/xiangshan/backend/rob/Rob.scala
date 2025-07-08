@@ -88,6 +88,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val robFull = Output(Bool())
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
+    val wfi = new Bundle {
+      val wfiReq = Output(Bool())
+      val safeFromMem = Input(Bool())
+      val safeFromFrontend = Input(Bool())
+    }
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
@@ -123,6 +128,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadLqIdx = Valid(new LqPtr)
     }
     val debugRolling = new RobDebugRollingIO
+    val debugInstrAddrTransType = Input(new AddrTransType) 
 
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
@@ -141,6 +147,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
+
+  PerfCCT.tick(clock, reset)
+
+  io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
+    PerfCCT.updateInstPos(wb.bits.debug_seqNum, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+  }
 
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
@@ -173,7 +185,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
-  val doingSvinval = RegInit(false.B)
   val enqPtr = enqPtrVec(0)
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
@@ -201,8 +212,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   robBanksRaddrThisLine := robBanksRaddrNextLine
   val bankNumWidth = log2Up(bankNum)
   val deqPtrWidth = deqPtr.value.getWidth
-  val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(deqPtr.value(deqPtrWidth - 1, bankNumWidth), i.U(bankNumWidth.W))))
-  val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(deqPtr.value(deqPtrWidth - 1, bankNumWidth) + 1.U, i.U(bankNumWidth.W))))
+  val highDeqPtrThisLine = deqPtr.value(deqPtrWidth - 1, bankNumWidth)
+  val highDeqPtrMax = (RobSize - 1).U(deqPtrWidth - 1, bankNumWidth)
+  val highDeqPtrNextLine = Mux(highDeqPtrThisLine === highDeqPtrMax, 0.U, highDeqPtrThisLine + 1.U)
+  val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrThisLine, i.U(bankNumWidth.W))))
+  val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrNextLine, i.U(bankNumWidth.W))))
   // robBanks read
   val robBanksRdataThisLine = VecInit(robBanks.map{ case bank =>
     Mux1H(robBanksRaddrThisLine, bank)
@@ -373,7 +387,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   vtypeBuffer.io.fromRob.walkSize := PopCount(walkIsVTypeVec)
   vtypeBuffer.io.snpt := io.snpt
   vtypeBuffer.io.snpt.snptEnq := snptEnq
-  io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
   io.toDecode.walkToArchVType := vtypeBuffer.io.toDecode.walkToArchVType
   io.toDecode.commitVType := vtypeBuffer.io.toDecode.commitVType
   io.toDecode.walkVType := vtypeBuffer.io.toDecode.walkVType
@@ -392,13 +405,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
   // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
   val hasWFI = RegInit(false.B)
-  io.cpu_halt := hasWFI
+  val wfiSafe = io.wfi.safeFromMem && io.wfi.safeFromFrontend
+  io.wfi.wfiReq := hasWFI
+  io.cpu_halt := hasWFI && wfiSafe
   // WFI Timeout: 2^20 = 1M cycles
   val wfi_cycles = RegInit(0.U(20.W))
-  when(hasWFI) {
-    wfi_cycles := wfi_cycles + 1.U
-  }.elsewhen(!hasWFI && RegNext(hasWFI)) {
-    wfi_cycles := 0.U
+  if (wfiResume) {
+    when(hasWFI) {
+      wfi_cycles := wfi_cycles + 1.U
+    }.elsewhen(!hasWFI && RegNext(hasWFI)) {
+      wfi_cycles := 0.U
+    }
   }
   val wfi_timeout = wfi_cycles.andR
   when(RegNext(RegNext(io.csr.wfiEvent)) || io.flushOut.valid || wfi_timeout) {
@@ -428,16 +445,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
       val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
-      // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!enqTriggerActionIsDebugMode && !enqHasException && enqUop.isSvinvalBegin(enqUop.flushPipe)) {
-        doingSvinval := true.B
-      }
-      // the end instruction of Svinval enqs so clear doingSvinval
-      when(!enqTriggerActionIsDebugMode && !enqHasException && enqUop.isSvinvalEnd(enqUop.flushPipe)) {
-        doingSvinval := false.B
-      }
-      // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
-      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe) || enqUop.isNotSvinval))
       when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
         hasWFI := true.B
       }
@@ -598,10 +605,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val isFlushPipe = deqPtrEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
 
-  val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushPipe && exceptionDataRead.bits.isVset
+  // vsetvl instruction need another one cycle to write to vtype gen
+  val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushed && exceptionDataRead.bits.isVset
+  val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
   //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
   io.isVsetFlushPipe := isVsetFlushPipe
+  io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType || isVsetFlushPipeReg
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
@@ -772,6 +782,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
     io.commits.info(i) := commitInfo(i)
     io.commits.robIdx(i) := deqPtrVec(i)
+    val deqDebugInst = debug_microOp(deqPtrVec(i).value)
+    PerfCCT.commitInstMeta(i.U, deqDebugInst.debug_seqNum, deqDebugInst.instrSize, io.commits.isCommit && io.commits.commitValid(i), clock, reset)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
     XSError(
@@ -1240,14 +1252,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val traceBlocks = io.trace.traceCommitInfo.blocks
   val traceBlockInPipe = io.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
 
-  // The reg 'isTraceXret' only for trace xret instructions. xret only occur in block(0).
-  val isTraceXret = RegInit(false.B)
-  when(io.csr.isXRet){
-    isTraceXret := true.B
-  }.elsewhen(isTraceXret && io.commits.isCommit && io.commits.commitValid(0)){
-    isTraceXret := false.B
-  }
-
   for (i <- 0 until CommitWidth) {
     traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
     traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
@@ -1255,11 +1259,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     traceBlockInPipe(i).iretire := rawInfo(i).traceBlockInPipe.iretire
     traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
     traceValids(i) := io.commits.isCommit && io.commits.commitValid(i)
-    // exception/xret only occur in block(0).
+    // exception only occur in block(0).
     if(i == 0) {
-      when(isTraceXret && io.commits.isCommit && io.commits.commitValid(0)){ // trace xret
-        traceBlocks(i).bits.tracePipe.itype := Itype.ExpIntReturn
-      }.elsewhen(io.exception.valid){ // trace exception
+      when(io.exception.valid){ // trace exception
         traceBlocks(i).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
           Itype.Interrupt,
           Itype.Exception
@@ -1269,7 +1271,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
   }
-  
+
   /**
    * debug info
    */
@@ -1297,10 +1299,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
 
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
-  XSPerfAccumulate("clock_cycle", 1.U)
+  XSPerfAccumulate("clock_cycle", 1.U, XSPerfLevel.CRITICAL)
   QueuePerf(RobSize, numValidEntries, numValidEntries === RobSize.U)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
-  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
+  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt), XSPerfLevel.CRITICAL)
   XSPerfRolling("ipc", ifCommitReg(trueCommitCnt), 1000, clock, reset)
   XSPerfRolling("cpi", perfCnt = 1.U /*Cycle*/ , eventTrigger = ifCommitReg(trueCommitCnt), granularity = 1000, clock, reset)
   XSPerfAccumulate("commitInstrFused", ifCommitReg(fuseCommitCnt))
@@ -1411,6 +1413,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // rolling
   io.debugRolling.robTrueCommit := ifCommitReg(trueCommitCnt)
 
+  // debug trigger for simulation
+  if (backendParams.debugEn) {
+    val debug_sim_trig = dontTouch(Wire(Bool()))
+    debug_sim_trig := io.commits.isCommit && (io.commits.commitValid zip commitDebugUop map {
+      case (valid, uop) => valid && uop.debug_sim_trig.get
+    }).reduce(_ || _)
+  }
+
   /**
    * DataBase info:
    * log trigger is at writeback valid
@@ -1480,11 +1490,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // These are the structures used by difftest only and should be optimized after synthesis.
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
+    val dt_pcTransType = Option.when(env.EnableDifftest)(Mem(RobSize, new AddrTransType))
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
+        dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }
     }
     for (wb <- exuWBs) {
@@ -1523,8 +1535,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
       }
       if (env.EnableDifftest) {
-        val uop = commitDebugUop(i)
-        difftest.pc := SignExt(uop.pc, XLEN)
+        val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)
+        difftest.pc := Mux(pcTransType.shouldBeSext, SignExt(uop.pc, XLEN), uop.pc)
         difftest.instr := uop.instr
         difftest.robIdx := ZeroExt(ptr, 10)
         difftest.lqIdx := ZeroExt(uop.lqIdx.value, 7)
@@ -1621,7 +1633,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     commitStuckCycle := 0.U
   }
   // check if stuck > 2^maxCommitStuckCycle
-  val commitStuck_overflow = commitStuckCycle.andR
+  val commitStuck_overflow = commitStuckCycle.andR && (if (wfiResume) true.B else (!hasWFI))
   val criticalErrors = Seq(
     ("rob_commit_stuck  ", commitStuck_overflow),
   )

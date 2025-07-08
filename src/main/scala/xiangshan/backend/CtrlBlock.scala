@@ -558,10 +558,11 @@ class CtrlBlockImp(
   rat.io.snpt.snptSelect := snptSelect
   rat.io.snpt.flushVec := flushVec
 
-  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
+  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
+  fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
-    fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !(decodeHasException(i) || disableFusion)
+    fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !decodeHasException(i)
     fusionDecoder.io.in(i).bits := decode.io.out(i).bits.instr
     if (i > 0) {
       fusionDecoder.io.inReady(i - 1) := decode.io.out(i).ready
@@ -763,6 +764,12 @@ class CtrlBlockImp(
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
 
+  // wfi
+  io.frontend.wfi.wfiReq := rob.io.wfi.wfiReq
+  rob.io.wfi.safeFromFrontend := io.frontend.wfi.wfiSafe
+  io.toMem.wfi.wfiReq := rob.io.wfi.wfiReq
+  rob.io.wfi.safeFromMem := io.toMem.wfi.wfiSafe
+
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
@@ -777,6 +784,7 @@ class CtrlBlockImp(
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
+  rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
@@ -872,6 +880,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   //toMem
   val toMem = new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
+    val wfi = new WfiReqBundle
   }
   val toDispatch = new Bundle {
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
@@ -931,7 +940,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val vtype = Output(ValidIO(VType()))
       val hasVsetvl = Output(Bool())
     }
-
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
       val robidx = Input(new RobPtr)

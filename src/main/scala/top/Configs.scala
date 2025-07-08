@@ -37,13 +37,13 @@ import huancun._
 import coupledL2._
 import coupledL2.prefetch._
 
-class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, up) => {
+class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
   case CVMParamskey => CVMParameters()
   case PMParameKey => PMParameters()
-  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i, hasMbist = hasMbist) }
+  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(DebugModuleParams(
     nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
@@ -57,6 +57,7 @@ class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, 
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
+  case DFTOptionsKey => DFTOptions()
 })
 
 // Synthesizable minimal XiangShan
@@ -283,7 +284,8 @@ case class L2CacheConfig
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
-  tp: Boolean = true
+  tp: Boolean = true,
+  enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -317,10 +319,13 @@ case class L2CacheConfig
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
-        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
+        hasMbist = site(DFTOptionsKey).EnableMbist,
+        hasSramCtl = site(DFTOptionsKey).EnableSramCtl,
       )),
       L2NBanks = banks
     ))
@@ -450,14 +455,14 @@ class MediumConfig(n: Int = 1) extends Config(
 
 class FuzzConfig(dummy: Int = 0) extends Config(
   new WithFuzzer
-    ++ new DefaultConfig(1)
+    ++ new KunminghuV2Config(1)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n, true)
+    ++ new BaseConfig(n)
 )
 
 class CVMConfig(n: Int = 1) extends Config(

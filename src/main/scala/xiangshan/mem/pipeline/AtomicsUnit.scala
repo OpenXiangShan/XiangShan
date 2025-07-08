@@ -60,6 +60,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
+  PerfCCT.updateInstPos(io.in.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
+
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
@@ -464,7 +466,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
   // send req to sbuffer to flush it if it is not empty
-  io.flush_sbuffer.valid := !sbuffer_empty && state === s_tlb_and_flush_sbuffer_req
+  io.flush_sbuffer.valid := !sbuffer_empty && (
+    state === s_tlb_and_flush_sbuffer_req ||
+    state === s_pm ||
+    state === s_wait_flush_sbuffer_resp
+  )
 
   // When is sta issue port ready:
   // (1) AtomicsUnit is idle, or
@@ -530,6 +536,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   pipe_req.amo_data := genWdataAMO(rs2, uop.fuOpType)
   pipe_req.amo_mask := genWmaskAMO(paddr, uop.fuOpType)
   pipe_req.amo_cmp  := genWdataAMO(rd, uop.fuOpType)
+  pipe_req.miss_fail_cause_evict_btot := false.B
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)

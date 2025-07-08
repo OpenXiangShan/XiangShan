@@ -65,6 +65,17 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val req_coh = new ClientMetadata
   val id = UInt(reqIdWidth.W)
 
+  /**
+    * isBtoT is used to mark whether the current request requires BtoT permission.
+    * If so, other requests for BtoT in the same set are blocked. Otherwise,
+    * they are not blocked.
+    */
+  val isBtoT = Bool()
+  /**
+    * The way isBtoT requests to occupy
+    */
+  val occupy_way = UInt(nWays.W)
+
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
   // * cancel is slow to generate, it will not be used until the last moment
@@ -128,6 +139,15 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   val merged = Bool()
 }
 
+class MissQueueBlockReqBundle(implicit p: Parameters) extends XSBundle {
+  val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+}
+
+class MissQueueBlockIO(implicit p: Parameters) extends XSBundle {
+  val req = ValidIO(new MissQueueBlockReqBundle)
+  val block = Input(Bool())
+}
 
 /**
   * miss queue enq logic: enq is now splited into 2 cycles
@@ -268,8 +288,12 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire
   }
 
-  def block_match(release_addr: UInt): Bool = {
-    reg_valid() && get_block(req.addr) === get_block(release_addr)
+  def block_and_alias_match(releaseReq: MissQueueBlockReqBundle): Bool = {
+    reg_valid() && get_block(req.addr) === get_block(releaseReq.addr) && is_alias_match(req.vaddr, releaseReq.vaddr)
+  }
+
+  def evict_set_match(evict_set: UInt): Bool = {
+    reg_valid() && req.isBtoT && addr_to_dcache_set(req.vaddr) === evict_set
   }
 }
 
@@ -279,6 +303,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val req_chanA = DecoupledIO(new TLBundleA(edge.bundle))
     val resp_chanD = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val resp_to_lsq = DecoupledIO(new CMOResp)
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
@@ -286,6 +311,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val state_next = WireInit(state)
   val req = RegEnable(io.req.bits, io.req.fire)
   val nderr = RegInit(false.B)
+  val no_pending = RegInit(true.B)
 
   state := state_next
 
@@ -299,12 +325,14 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     is(s_sreq) {
       when (io.req_chanA.fire) {
         state_next := s_wresp
+        no_pending := false.B
       }
     }
     is(s_wresp) {
       when (io.resp_chanD.fire) {
         state_next := s_lsq_resp
         nderr := io.resp_chanD.bits.denied || io.resp_chanD.bits.corrupt
+        no_pending := true.B
       }
     }
     is(s_lsq_resp) {
@@ -316,7 +344,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.req.ready := state === s_idle
 
-  io.req_chanA.valid := state === s_sreq
+  io.req_chanA.valid := state === s_sreq && !io.wfi.wfiReq
   io.req_chanA.bits := edge.CacheBlockOperation(
     fromSource = (cfg.nMissEntries + 1).U,
     toAddress = req.address,
@@ -325,6 +353,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   )._2
 
   io.resp_chanD.ready := state === s_wresp
+  io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   io.resp_to_lsq.valid := state === s_lsq_resp
   io.resp_to_lsq.bits.address := req.address
@@ -374,13 +403,23 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val main_pipe_resp = Input(Bool())
     val main_pipe_refill_resp = Input(Bool())
     val main_pipe_replay = Input(Bool())
+    val main_pipe_evict_BtoT_way = Input(Bool())
+    val main_pipe_next_evict_way = Input(UInt(nWays.W))
 
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
-    val block_addr = ValidIO(UInt(PAddrBits.W))
+    val occupy_way = Output(UInt(nWays.W))
+
+    // block probe
+    val probe = Flipped(new MissQueueBlockIO)
+
+    // block replace when release an addr valid in mshr
+    val replace = Flipped(new MissQueueBlockIO)
 
     val req_addr = ValidIO(UInt(PAddrBits.W))
+    val req_vaddr = ValidIO(UInt(VAddrBits.W))
+    val req_isBtoT = Output(Bool())
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -419,6 +458,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
     val l1Miss = Output(Bool())
+
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -428,6 +469,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
+  val evict_BtoT_way = RegInit(false.B)
   // initial keyword
   val isKeyword = RegInit(false.B)
 
@@ -444,6 +486,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val w_mainpipe_resp = RegInit(true.B)
   val w_refill_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
+
+  val no_pending = RegInit(true.B)
 
   val mainpipe_req_fired = RegInit(true.B)
 
@@ -501,8 +545,11 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req_valid := true.B
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
-    req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+    req.occupy_way := miss_req_pipe_reg_bits.occupy_way
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
+    req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    evict_BtoT_way := false.B
     //only  load miss need keyword
     isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B)
 
@@ -514,6 +561,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     w_grantlast := false.B
     w_l2hint := false.B
     mainpipe_req_fired := false.B
+
+    no_pending := !io.acquire_fired_by_pipe_reg
 
     when(miss_req_pipe_reg_bits.isFromStore) {
       req_store_mask := miss_req_pipe_reg_bits.store_mask
@@ -553,6 +602,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
+      req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+      req.occupy_way := miss_req_pipe_reg_bits.occupy_way
+      evict_BtoT_way := false.B
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
@@ -572,6 +624,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   when (io.mem_acquire.fire) {
     s_acquire := true.B
+    no_pending := false.B
   }
 
   // merge data refilled by l2 and store data, update miss queue entry, gen refill_req
@@ -591,6 +644,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val hasData = RegInit(true.B)
   val isDirty = RegInit(false.B)
+  io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
   when (io.mem_grant.fire) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
@@ -611,6 +665,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         }
       }
       w_grantlast := w_grantlast || refill_done
+      no_pending := no_pending || refill_done
       hasData := true.B
     }.otherwise {
       // Grant
@@ -619,6 +674,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         refill_and_store_data(i) := new_data(i)
       }
       w_grantlast := true.B
+      no_pending := true.B
       hasData := false.B
     }
 
@@ -637,9 +693,16 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
-  when (io.main_pipe_replay) {
+  when (io.main_pipe_replay || io.main_pipe_evict_BtoT_way) {
     s_mainpipe_req := false.B
   }
+  when (io.main_pipe_replay) {
+    evict_BtoT_way := false.B
+  } .elsewhen (io.main_pipe_evict_BtoT_way) {
+    evict_BtoT_way := true.B
+    req.occupy_way := io.main_pipe_next_evict_way
+  }
+  XSError(req_valid && req.isBtoT && io.main_pipe_evict_BtoT_way, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
@@ -753,7 +816,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // if the entry has a pending merge req, wait for it
   // Note: now, only wait for store, because store may acquire T
-  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore)
+  io.mem_acquire.valid := !s_acquire &&
+    !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) &&
+    !io.wfi.wfiReq
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
     fromSource = io.id,
@@ -818,12 +883,24 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.occupy_way := req.occupy_way
+  io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
-  io.block_addr.valid := req_valid && w_grantlast
-  io.block_addr.bits := req.addr
+  io.probe.block := req_valid && w_grantlast &&
+    get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
+    is_alias_match(req.vaddr, io.probe.req.bits.vaddr)
+
+  io.replace.block := req_valid &&
+    get_block_addr(req.addr) === get_block_addr(io.replace.req.bits.addr) &&
+    is_alias_match(req.vaddr, io.replace.req.bits.vaddr)
 
   io.req_addr.valid := req_valid
-  io.req_addr.bits := req.addr
+  io.req_addr.bits:= req.addr
+  io.req_vaddr.valid := req_valid
+  io.req_vaddr.bits := req.vaddr
+  io.req_isBtoT := req.isBtoT
+
+  io.occupy_way := req.occupy_way
 
   io.refill_info.valid := req_valid && w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
@@ -835,6 +912,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
+  XSPerfAccumulate("miss_refill_evict_BtoT_way", io.main_pipe_evict_BtoT_way)
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
@@ -921,12 +999,18 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
-    val probe_addr = Input(UInt(PAddrBits.W))
-    val probe_block = Output(Bool())
+    val probe = Flipped(new MissQueueBlockIO)
 
     // block replace when release an addr valid in mshr
-    val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
-    val replace_block = Output(Bool())
+    val replace = Flipped(new MissQueueBlockIO)
+
+    // block all way for set to BtoT
+    val evict_set = Input(UInt())
+    val btot_ways_for_set = Output(UInt(nWays.W))
+
+    // occupy set check
+    val occupy_set = Input(Vec(LoadPipelineWidth, UInt()))
+    val occupy_fail = Output(Vec(LoadPipelineWidth, Bool()))
 
     // req blocked by wbq
     val wbq_block_miss_req = Input(Bool())
@@ -952,6 +1036,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       }
     }
 
+    val wfi = Flipped(new WfiReqBundle)
+
     val debugTopDown = new DCacheTopDownIO
     val l1Miss = Output(Bool())
   })
@@ -967,7 +1053,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val secondary_ready_vec = entries.map(_.io.secondary_ready)
   val secondary_reject_vec = entries.map(_.io.secondary_reject)
-  val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
+  val probe_block_vec = entries.map {
+    case e =>
+      e.io.probe.req <> io.probe.req
+      e.io.probe.block
+  }
 
   val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
@@ -1098,6 +1188,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_evict_BtoT_way := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_evict_BtoT_way && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_next_evict_way := io.mainpipe_info.s2_next_evict_way
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
@@ -1116,8 +1208,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         e.io.l2_hint.valid := false.B
         e.io.l2_hint.bits := DontCare
       }
+
+      e.io.wfi.wfiReq := io.wfi.wfiReq
   }
 
+  cmo_unit.io.wfi.wfiReq := io.wfi.wfiReq
   cmo_unit.io.req <> io.cmo_req
   io.cmo_resp <> cmo_unit.io.resp_to_lsq
   when (io.mem_grant.valid && io.mem_grant.bits.opcode === TLMessages.CBOAck) {
@@ -1126,6 +1221,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     cmo_unit.io.resp_chanD.valid := false.B
     cmo_unit.io.resp_chanD.bits := DontCare
   }
+  io.wfi.wfiSafe := (Seq(cmo_unit.io.wfi.wfiSafe) ++ entries.map(_.io.wfi.wfiSafe)).reduce(_&&_)
 
   io.req.ready := accept
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
@@ -1134,7 +1230,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_info.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_info.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info.bits })
 
-  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
+  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits) && !io.wfi.wfiReq
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
 
   XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
@@ -1147,9 +1243,30 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // amo's main pipe req out
   fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
-  io.probe_block := Cat(probe_block_vec).orR
+  io.probe.block := Cat(probe_block_vec).orR
+  io.replace.block := Cat(entries.map {
+    case e =>
+      e.io.replace.req <> io.replace.req
+      e.io.replace.block
+  } :+ miss_req_pipe_reg.block_and_alias_match(io.replace.req.bits)).orR
 
-  io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
+  val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
+    Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
+  val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ Seq(miss_req_pipe_reg.req.occupy_way)
+  io.btot_ways_for_set := btot_evict_set_hit.zip(btot_occupy_ways).map {
+    case (hit, way) => Fill(nWays, hit) & way
+  }.reduce(_|_)
+
+  // LoadPipe occupy check
+  for (i <- 0 until LoadPipelineWidth) {
+    val occupy_set_hits = entries.map(
+      e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.occupy_set(i)
+    ) ++ Seq(miss_req_pipe_reg.evict_set_match(io.occupy_set(i)))
+    val occupy_ways = occupy_set_hits.zip(btot_occupy_ways).map {
+      case (hit, way) => Fill(nWays, hit) & way
+    }.reduce(_|_)
+    io.occupy_fail(i) := PopCount(occupy_ways) > (nWays-2).U
+  }
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
@@ -1191,7 +1308,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
-  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
+  XSPerfAccumulate("probe_blocked_by_miss", io.probe.block)
   XSPerfAccumulate("prefetch_primary_fire", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("prefetch_secondary_fire", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)

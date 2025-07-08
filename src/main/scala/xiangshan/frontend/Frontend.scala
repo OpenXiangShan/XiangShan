@@ -96,8 +96,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
-    val dft       = if (hasMbist) Some(Input(new SramBroadcastBundle)) else None
-    val dft_reset = if (hasMbist) Some(Input(new DFTResetSignals)) else None
+    val dft       = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
   })
 
   // decouped-frontend modules
@@ -167,6 +167,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   icache.io.ftqPrefetch <> ftq.io.toPrefetch
   icache.io.softPrefetch <> io.softPrefetch
+
+  // wfi (backend-icache, backend-instrUncache)
+  // DelayN for better timing, FIXME: maybe 1 cycle is not enough, to be evaluated
+  private val wfiReq = DelayN(io.backend.wfi.wfiReq, 1)
+  icache.io.wfi.wfiReq       := wfiReq
+  instrUncache.io.wfi.wfiReq := wfiReq
+  // return safe only when both icache & instrUncache are safe, also only when has wfiReq (like, safe := wfiReq.fire)
+  io.backend.wfi.wfiSafe := DelayN(wfiReq && icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe, 1)
 
   // IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
@@ -462,13 +470,30 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   } else {
     None
   }
-  private val sigFromSrams = if (hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val sigFromSrams = if (hasDFT) Some(SramHelper.genBroadCastBundleTop()) else None
   private val cg           = ClockGate.genTeSrc
   dontTouch(cg)
+
   if (hasMbist) {
-    sigFromSrams.get := io.dft.get
-    cg.cgen          := io.dft.get.cgen
+    cg.cgen := io.dft.get.cgen
   } else {
     cg.cgen := false.B
+  }
+
+  sigFromSrams.foreach { case sig => sig := DontCare }
+  sigFromSrams.zip(io.dft).foreach {
+    case (sig, dft) =>
+      if (hasMbist) {
+        sig.ram_hold     := dft.ram_hold
+        sig.ram_bypass   := dft.ram_bypass
+        sig.ram_bp_clken := dft.ram_bp_clken
+        sig.ram_aux_clk  := dft.ram_aux_clk
+        sig.ram_aux_ckbp := dft.ram_aux_ckbp
+        sig.ram_mcp_hold := dft.ram_mcp_hold
+        sig.cgen         := dft.cgen
+      }
+      if (hasSramCtl) {
+        sig.ram_ctl := dft.ram_ctl
+      }
   }
 }

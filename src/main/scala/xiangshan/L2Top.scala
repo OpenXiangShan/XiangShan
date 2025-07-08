@@ -27,15 +27,15 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, M
 import freechips.rocketchip.tilelink._
 import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2}
+import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
+import utility.sram.SramBroadcastBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-import utility.sram.SramBroadcastBundle
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -44,12 +44,14 @@ class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCP
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
   val icache = new L1BusErrorUnitInfo
   val dcache = new L1BusErrorUnitInfo
+  val uncache = new L1BusErrorUnitInfo
   val l2 = new L1BusErrorUnitInfo
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
     List(
       Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
       Some(dcache.ecc_error, "D_ECC", "Dcache ecc error"),
+      Some(uncache.ecc_error, "U_ECC", "Uncache ecc error"),
       Some(l2.ecc_error, "L2_ECC", "L2Cache ecc error")
     )
 }
@@ -85,7 +87,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
   val icachectrl_port_opt = Option.when(icacheParameters.cacheCtrlAddressOpt.nonEmpty)(TLTempNode())
-  val sep_dm_port_opt = Option.when(SeperateDMBus)(TLTempNode())
+  val sep_tl_port_opt = Option.when(SeperateTLBus)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform && !enableCHI, stat_latency = true)
@@ -114,6 +116,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
+      case CHIAddrWidthKey => p(CHIAddrWidthKey)
+      case NonSecureKey => p(NonSecureKey)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
       case MaxHartIdBits => p(MaxHartIdBits)
       case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
@@ -146,14 +150,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
     icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }
-  if (SeperateDMBus) {
-    sep_dm_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
+  if (SeperateTLBus) {
+    sep_tl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }
 
   // filter out in-core addresses before sent to mmio_port
   // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
   private def cacheAddressSet: Seq[AddressSet] = (icacheParameters.cacheCtrlAddressOpt ++ dcacheParameters.cacheCtrlAddressOpt).toSeq
-  private def mmioFilters = if(SeperateDMBus) (p(DebugModuleKey).get.address +: cacheAddressSet) else cacheAddressSet
+  private def mmioFilters = if(SeperateTLBus) (SeperateTLBusRanges ++ cacheAddressSet) else cacheAddressSet
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
@@ -179,10 +183,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val toTile = Output(Bool())
       }
       val cpu_halt = new Bundle() {
-        val fromCore = Input(Bool())
-        val toTile = Output(Bool())
-      }
-      val cpu_poff = new Bundle() {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
@@ -219,16 +219,16 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
-      val l2_flush_en = Input(Bool())
-      val l2_flush_done = Output(Bool())
-      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-      val dft_out = if(hasMbist) Some(Output(new SramBroadcastBundle)) else None
-      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
-      val dft_reset_out = if(hasMbist) Some(Output(new DFTResetSignals())) else None
+      val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
+      val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
+      val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val dft_out = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+      val dft_reset_out = Option.when(hasMbist)(Output(new DFTResetSignals()))
       // val reset_core = IO(Output(Reset()))
     })
-    io.dft_out.zip(io.dft).foreach({case(a, b) => a := b})
-    io.dft_reset_out.zip(io.dft_reset).foreach({case(a, b) => a := b})
+    io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
+    io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -237,15 +237,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     beu.module.io.errors.icache := io.beu_errors.icache
     beu.module.io.errors.dcache := io.beu_errors.dcache
+    beu.module.io.errors.uncache := io.beu_errors.uncache
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
     io.msiInfo.toCore := io.msiInfo.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
-    io.cpu_poff.toTile := io.cpu_poff.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     io.msiAck.toTile := io.msiAck.fromCore
-    io.l2_flush_done := true.B //TODO connect CoupleedL2
     io.l3Miss.toCore := io.l3Miss.fromTile
     io.clintTime.toCore := io.clintTime.fromTile
     // trace interface
@@ -280,15 +279,15 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val hartIsInReset = RegInit(true.B)
-    hartIsInReset := io.hartIsInReset.resetInFrontend || reset.asBool
+    hartIsInReset := io.hartIsInReset.resetInFrontend
     io.hartIsInReset.toTile := hartIsInReset
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
-      l2.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
-      l2.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
+      l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
+      l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
@@ -296,6 +295,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
       io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
       io.l2Miss := l2.io.l2Miss
+      io.l2_flush_done.foreach { _ := l2.io.l2FlushDone.getOrElse(false.B) }
+      l2.io.l2Flush.foreach { _ := io.l2_flush_en.getOrElse(false.B) }
 
       /* l2 tlb */
       io.l2_tlb_req.req.bits := DontCare
@@ -334,6 +335,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           val l2 = l2cache.module
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
+          l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
         case l2cache: TL2TLCoupledL2 =>
       }
 

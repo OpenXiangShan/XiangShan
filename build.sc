@@ -43,6 +43,9 @@ def defaultVersions = Map(
   "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.6.0",
   "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
 )
+/* resolve firtool dependency */
+import $ivy.`org.chipsalliance::chisel:6.6.0`
+import $ivy.`org.chipsalliance::firtool-resolver:1.3.0`
 
 trait HasChisel extends SbtModule {
   def chiselModule: Option[ScalaModule] = None
@@ -61,6 +64,13 @@ trait HasChisel extends SbtModule {
   override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
+
+  def resolveFirtoolDeps = T {
+    firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
+      case Right(bin) => bin.path.getAbsolutePath
+      case Left(err) => err
+    }
+  }
 }
 
 object rocketchip
@@ -121,6 +131,9 @@ object utility extends HasChisel {
     ivy"com.lihaoyi::sourcecode:0.4.2",
   )
 
+  object test extends SbtTests with TestModule.ScalaTest {
+    override def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.7")
+  }
 }
 
 object yunsuan extends HasChisel {

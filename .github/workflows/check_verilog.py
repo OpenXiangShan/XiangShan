@@ -31,7 +31,8 @@ if __name__ == "__main__":
             line_number = 1
             for line in f:
                 if "$fatal" in line or "$fwrite" in line:
-                    err(file, line, line_number, "'fatal' or 'fwrite' statement was found!")
+                    if "Commit SHA" not in line:
+                        err(file, line, line_number, "'fatal' or 'fwrite' statement was found!")
                 if "module Decode" in line:
                     in_decode = True
                 elif "module Dispatch" in line:

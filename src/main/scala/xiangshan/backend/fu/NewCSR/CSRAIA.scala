@@ -204,11 +204,11 @@ class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnu
 }
 
 object VSISelectField extends ISelectField(
-  0x1FF,
+  0xFFF,
   reserved = Seq(
     Range.inclusive(0x000, 0x02F),
     Range.inclusive(0x040, 0x06F),
-    Range.inclusive(0x100, 0x1FF),
+    Range.inclusive(0x100, 0xFFF),
   ),
 )
 
@@ -221,15 +221,16 @@ object MISelectField extends ISelectField(
 )
 
 object SISelectField extends ISelectField(
-  maxValue = 0xFF,
+  maxValue = 0xFFF,
   reserved = Seq(
-    Range.inclusive(0x00, 0x2F),
-    Range.inclusive(0x40, 0x6F),
+    Range.inclusive(0x000, 0x02F),
+    Range.inclusive(0x040, 0x06F),
+    Range.inclusive(0x100, 0xFFF),
   ),
 )
 
 class VSISelectBundle extends CSRBundle {
-  val ALL = VSISelectField(log2Up(0x1FF), 0, null).withReset(0.U)
+  val ALL = VSISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
 }
 
 class MISelectBundle extends CSRBundle {
@@ -237,7 +238,7 @@ class MISelectBundle extends CSRBundle {
 }
 
 class SISelectBundle extends CSRBundle {
-  val ALL = SISelectField(log2Up(0xFF), 0, null).withReset(0.U)
+  val ALL = SISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
 }
 
 class TopIBundle extends CSRBundle {

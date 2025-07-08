@@ -1,0 +1,8 @@
+L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: false, enableFlush: true }
+
+EnablePowerDown: true
+
+WFIResume: false
+
+IMSICParams:
+  geilen: 7

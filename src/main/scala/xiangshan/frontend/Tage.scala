@@ -36,6 +36,7 @@ import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
+import utility.sram.SRAMConflictBehavior
 import xiangshan._
 
 trait TageParams extends HasBPUConst with HasXSParameter {
@@ -167,10 +168,10 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true,
+      conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
       withClockGate = true,
-      avoidSameAddr = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     )
   )
 
@@ -330,7 +331,8 @@ class TageTable(
     holdRead = true,
     singlePort = true,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -344,7 +346,8 @@ class TageTable(
       holdRead = true,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
   )
 

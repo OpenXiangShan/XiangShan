@@ -558,10 +558,11 @@ object ZfaDecode extends DecodeConstants {
 }
 
 /**
- * XiangShan Trap Decode constants
+ * XiangShan Debug Decode constants
  */
-object XSTrapDecode extends DecodeConstants {
+object XSDebugDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
+  def SIM_TRIG = BitPat("b11011111101010010010000000010011") // HINT, slti x0, x18, -518
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     TRAP    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, SelImm.IMM_I, xWen = T, xsTrap = T, noSpec = T, blockBack = T)
   )
@@ -807,7 +808,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 //    FDivSqrtDecode.table ++
     BitmanipDecode.table ++
     ScalarCryptoDecode.table ++
-    XSTrapDecode.table ++
+    XSDebugDecode.table ++
     CBODecode.table ++
     SvinvalDecode.table ++
     HypervisorDecode.table ++
@@ -899,9 +900,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.illegalInst.wrs_nto    && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWrsNto(decodedInst.fuOpType) ||
     (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
     (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm ||
-    io.fromCSR.illegalInst.cboZ       && isCboZero ||
-    io.fromCSR.illegalInst.cboCF      && (isCboClean || isCboFlush) ||
-    io.fromCSR.illegalInst.cboI       && isCboInval ||
+    (io.fromCSR.illegalInst.cboZ  || !HasCMO.B) && isCboZero ||
+    (io.fromCSR.illegalInst.cboCF || !HasCMO.B) && (isCboClean || isCboFlush) ||
+    (io.fromCSR.illegalInst.cboI  || !HasCMO.B) && isCboInval ||
     isAes64ks1iIllegal ||
     isAmocasQIllegal
 

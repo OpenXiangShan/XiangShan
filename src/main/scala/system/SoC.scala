@@ -96,6 +96,10 @@ case class SoCParameters
   UseXSNoCTop: Boolean = false,
   UseXSNoCDiffTop: Boolean = false,
   UseXSTileDiffTop: Boolean = false,
+  IMSICUseTL: Boolean = false,
+  SeperateTLBus: Boolean = false,
+  SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
+  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
@@ -107,10 +111,11 @@ case class SoCParameters
     EnableImsicAsyncBridge = true,
     HasTEEIMSIC = false
   ),
-  SeperateDMBus: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  EnableDMAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  WFIClockGate: Boolean = false,
+  EnablePowerDown: Boolean = false
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
@@ -144,7 +149,7 @@ trait HasSoCParameter {
   val TracePrivWidth              = tiles.head.traceParams.PrivWidth
   val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
   val TraceItypeWidth             = tiles.head.traceParams.ItypeWidth
-  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2)
+  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2 + 1)
   val TraceIlastsizeWidth         = tiles.head.traceParams.IlastsizeWidth
 
   // L3 configurations
@@ -161,13 +166,21 @@ trait HasSoCParameter {
 
   val NumIRSrc = soc.NumIRSrc
 
-  val SeperateDMBus = soc.SeperateDMBus
+  val SeperateDM = soc.SeperateDM
+  val SeperateTLBus = soc.SeperateTLBus
+  val SeperateTLBusRanges = soc.SeperateTLBusRanges
 
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val EnableDMAsyncBridge = if (SeperateDMBus && soc.EnableDMAsyncBridge.isDefined)
-    soc.EnableDMAsyncBridge else None
+  val SeperateTLAsyncBridge = if (SeperateTLBus && soc.SeperateTLAsyncBridge.isDefined)
+    soc.SeperateTLAsyncBridge else None
+
+  // seperate TL bus
+  val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
+
+  val WFIClockGate = soc.WFIClockGate
+  val EnablePowerDown = soc.EnablePowerDown
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)),
@@ -483,9 +496,9 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { pll_node := peripheralXbar.get }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
-  val debugModuleXbarOpt = Option.when(SeperateDMBus)(TLXbar())
+  val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
   if (enableCHI) {
-    if (SeperateDMBus) {
+    if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := device_xbar.get
@@ -494,7 +507,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       error_xbar.get := sb2tl.node
     }
   } else {
-    if (SeperateDMBus) {
+    if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := peripheralXbar.get

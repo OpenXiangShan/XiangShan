@@ -23,7 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
@@ -94,6 +94,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val out = new StallReasonIO(RenameWidth)
     }
   })
+
+  io.in.zipWithIndex.map { case (o, i) =>
+    PerfCCT.updateInstPos(o.bits.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+  }
 
   // io alias
   private val dispatchCanAcc = io.out.head.ready
@@ -202,8 +206,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
   private val isCsr        = Wire(Vec(RenameWidth, Bool()))
   private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
-  private val isWaitForwardCsrr = Wire(Vec(RenameWidth, Bool()))
-  private val isBlockBackwardCsrr = Wire(Vec(RenameWidth, Bool()))
+  private val isNotWaitForwardCsrr = Wire(Vec(RenameWidth, Bool()))
+  private val isNotBlockBackwardCsrr = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -275,6 +279,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
+  io.out.zipWithIndex.foreach{ case (o, i) =>
+    o.bits.debug_seqNum := io.in(i).bits.debug_seqNum
+  }
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
@@ -283,9 +291,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
     isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
     isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
-    isWaitForwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
+    isNotWaitForwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
       inst(i).CSRIDX, true.B, CSROoORead.waitForwardInOrderCsrReadList.map(_.U -> false.B))
-    isBlockBackwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
+    isNotBlockBackwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
       inst(i).CSRIDX, true.B, CSROoORead.blockBackwardInOrderCsrReadList.map(_.U -> false.B))
 
     /*
@@ -295,8 +303,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
      *
      * Signal "isCsrr" contains not only "CSRR", but also other CSR instructions that do not require writing to CSR.
      */
-    uops(i).waitForward := io.in(i).bits.waitForward && !isWaitForwardCsrr(i)
-    uops(i).blockBackward := io.in(i).bits.blockBackward && !isBlockBackwardCsrr(i)
+    uops(i).waitForward := io.in(i).bits.waitForward && !isNotWaitForwardCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isNotBlockBackwardCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
@@ -372,6 +380,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
       ).reverse)
     ).orR
+    uops(i).debug_sim_trig.foreach(_ := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR)
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
@@ -486,8 +495,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
     )
 
-    // itype
-    uops(i).traceBlockInPipe.itype := Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+    // CSR systemop instruction excluding ebreak & ecall
+    val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
+    val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
+    uops(i).traceBlockInPipe.itype := Mux(
+      isXret,
+      Itype.ExpIntReturn,
+      Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+    )
   }
   /**
    * trace end

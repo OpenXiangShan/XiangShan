@@ -21,6 +21,7 @@ import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.{VecMissalignedDebugBundle}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
 import utility._
@@ -53,6 +54,7 @@ object Bundles {
     val ftqPtr           = new FtqPtr
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
+    val debug_seqNum     = InstSeqNum()
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
@@ -67,6 +69,7 @@ object Bundles {
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
       this.isLastInFtqEntry := source.isLastInFtqEntry
+      this.debug_seqNum     := source.debug_seqNum
     }
   }
 
@@ -119,6 +122,7 @@ object Bundles {
     val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_seqNum    = InstSeqNum()
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -151,9 +155,13 @@ object Bundles {
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
 
-    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool ={
+    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
       val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
       sameFlush || isAfter(this.ftqPtr, ftqPtr)
+    }
+
+    def sameInst(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
+      this.ftqPtr === ftqPtr && this.ftqOffset === ftqOffset
     }
 
     def fromDecodedInst(decodedInst: DecodedInst): this.type = {
@@ -228,6 +236,7 @@ object Bundles {
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
     val debugInfo       = new PerfDebugInfo
+    val debug_seqNum    = InstSeqNum()
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
     // Load wait is needed
@@ -245,7 +254,8 @@ object Bundles {
     // schedule
     val replayInst      = Bool()
 
-    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fuType    = Option.when(backendParams.debugEn)(FuType())
+    val debug_sim_trig  = Option.when(backendParams.debugEn)(Bool())
 
     val numLsElem       = NumLsElem()
 
@@ -645,6 +655,7 @@ object Bundles {
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
+    val debug_seqNum = InstSeqNum()
 
     def exuIdx = this.params.exuIdx
 
@@ -658,6 +669,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
+      this.debug_seqNum  := source.common.debug_seqNum
       this.exuSources    .foreach(_ := source.common.exuSources.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
@@ -728,6 +740,7 @@ object Bundles {
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val debug_seqNum = InstSeqNum()
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
@@ -748,6 +761,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val debug_seqNum = InstSeqNum()
 
     this.wakeupSource = s"WB(${params.toString})"
 
@@ -769,6 +783,7 @@ object Bundles {
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
       this.debugInfo := source.debugInfo
+      this.debug_seqNum := source.debug_seqNum
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
@@ -954,6 +969,7 @@ object Bundles {
     val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
     val isFromLoadUnit = Bool()
     val debug = new DebugBundle
+    val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     def isVls = FuType.isVls(uop.fuType)
   }

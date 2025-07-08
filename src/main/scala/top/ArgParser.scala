@@ -19,7 +19,7 @@ package top
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.{DebugOptionsKey, DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -91,7 +91,7 @@ object ArgParser {
           }), tail)
         case "--hartidbits" :: hartidbits :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case MaxHartIdBits => hartidbits
+            case MaxHartIdBits => hartidbits.toInt
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -149,6 +149,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(IMSICBusType = device.IMSICBusType.withName(value))
           }), tail)
+        case "--enable-ns" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.NonSecureKey => true
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
@@ -192,11 +196,27 @@ object ArgParser {
           }), tail)
         case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableMbist = value.toBoolean)
           }), tail)
-        case "--seperate-dm-bus" :: tail =>
+        case "--sram-with-ctl" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDMBus = true)
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = true)
+          }), tail)
+        case "--seperate-tl-bus" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+          }), tail)
+        case "--seperate-dm" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
+          }), tail)
+        case "--chi-addr-width" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIAddrWidthKey => value.toInt
+          }), tail)
+        case "--wfi-resume" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)

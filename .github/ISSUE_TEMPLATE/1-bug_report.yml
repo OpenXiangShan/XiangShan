@@ -11,6 +11,9 @@ body:
         This template is only used for reporting a bug (incorrect behaviors) of XiangShan Processor Cores. If this doesn't look right, please back and choose another template.
         这个 issue 模板仅用于提报香山不正确的行为。如果您遇到的不是此类问题，请回退并选择其他模板。
 
+        Please make sure that the incorrect behaviors can still be reproduced on the latest commit of the master branch.
+        请确保不正确的行为在 master 分支最新的 commit 仍能复现。
+
         Please fill in the following information so we can better understand and address your issue. Thank you!
         请填写以下内容，以便我们更好地理解和处理您的问题。谢谢！
   - type: checkboxes
@@ -28,6 +31,8 @@ body:
         - label: I have searched the previous issues and did not find anything relevant. 我已经搜索过之前的 issue，并没有找到相关的。
           required: true
         - label: I have reviewed the commit messages from the relevant commit history. 我已经浏览过相关的提交历史和提交信息。
+          required: true
+        - label: I have reproduced the incorrect behaviors using the latest commit on the master branch. 我已经使用 master 分支最新的 commit 复现了不正确的行为。
           required: true
   - type: textarea
     id: describe
@@ -62,11 +67,16 @@ body:
     attributes:
       label: Environment
       description: |
-        Please provide your environment information. 请提供您的环境信息。
+        Please provide your environment information.
+        请提供您的环境信息。
+        
+        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`. 
+        XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `DefaultConfig`。
       placeholder: 
       value: |
        - XiangShan branch: 
        - XiangShan commit id: 
+       - XiangShan config: 
        - NEMU commit id: 
        - SPIKE commit id:
     validations:

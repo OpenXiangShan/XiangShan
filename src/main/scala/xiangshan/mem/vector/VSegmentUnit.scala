@@ -311,21 +311,28 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-
         stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
     }
   }.elsewhen(state === s_misalign_merge_data) {
-    stateNext := Mux(!curPtr, s_tlb_req, s_latch_and_merge_data)
+    when(exception_pa) {
+      stateNext := s_finish
+    } .otherwise {
+      stateNext := Mux(!curPtr, s_tlb_req, s_latch_and_merge_data)
+    }
   }.elsewhen(state === s_latch_and_merge_data) {
-    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
-      ((segmentIdx === maxSegIdx) && !segmentActive)) {
+    when(exception_pa) {
+      stateNext := s_finish
+    } .otherwise {
+      when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
+        ((segmentIdx === maxSegIdx) && !segmentActive)) {
 
-      stateNext := s_finish // segment instruction finish
-    }.otherwise {
-      stateNext := s_tlb_req // need continue
+        stateNext := s_finish // segment instruction finish
+      }.otherwise {
+        stateNext := s_tlb_req // need continue
+      }
     }
     /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
@@ -479,8 +486,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
-      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
-      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st || Pbmt.isUncache(io.dtlb.resp.bits.pbmt.head)
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld || Pbmt.isUncache(io.dtlb.resp.bits.pbmt.head)
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
         instMicroOp.exceptionVaddr    := io.dtlb.resp.bits.fullva
@@ -515,8 +522,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     notCross16ByteWire   := highAddress(4) === vaddr(4)
     isMisalignWire       := !addr_aligned && !isMisalignReg
     canHandleMisalign    := !pmp.mmio && !triggerBreakpoint && !triggerDebugMode
-    exceptionVec(loadAddrMisaligned)  := isMisalignWire && isVSegLoad  && canTriggerException && pmp.mmio
-    exceptionVec(storeAddrMisaligned) := isMisalignWire && isVSegStore && canTriggerException && pmp.mmio
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
@@ -559,7 +564,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * flush sbuffer IO Assign
    */
-  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req)
+  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req || state === s_wait_flush_sbuffer_resp)
 
   /**
   * update curPtr
@@ -585,6 +590,23 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
 
+  // HardwareError response will be one beat late
+  when(
+    (state === s_latch_and_merge_data || state === s_misalign_merge_data) &&
+    io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
+    segmentActive
+  ) {
+    exception_pa := true.B
+    instMicroOp.exception_pa := true.B
+
+    when(canTriggerException) {
+      exceptionVec(hardwareError) := true.B
+      instMicroOp.exceptionVstart := segmentIdx // for exception
+    }.otherwise {
+      instMicroOp.exceptionVl.valid := true.B
+      instMicroOp.exceptionVl.bits := segmentIdx
+    }
+  }
 
   /**
    * merge data for load
@@ -750,7 +772,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   )
 
   io.vecDifftestInfo.valid         := io.sbuffer.valid
-  io.vecDifftestInfo.bits          := uopq(deqPtr.value).uop
+  io.vecDifftestInfo.bits.uop      := uopq(deqPtr.value).uop
+  io.vecDifftestInfo.bits.start    := 0.U // only use in no-segment unit-stride
+  io.vecDifftestInfo.bits.offset   := 0.U
 
   /**
    * update ptr
@@ -896,8 +920,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
     writebackOut.uop.vpu.vmask          := maskUsed
     writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
-    // when exception updates vl, should use vtu strategy.
-    writebackOut.uop.vpu.vta            := Mux(instMicroOp.exceptionVl.valid, VType.tu, instMicroOp.uop.vpu.vta)
     writebackOut.debug                  := DontCare
     writebackOut.vdIdxInField.get       := vdIdxInField
     writebackOut.uop.robIdx             := instMicroOp.uop.robIdx

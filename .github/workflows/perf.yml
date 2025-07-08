@@ -1,10 +1,10 @@
 name: Performance Regression
 on:
   schedule:
-    #run at 15:30 UTC (23:30 UTC+8) on Friday
-    - cron: '30 15 * * 5'
-    #run at 15:30 UTC (23:30 UTC+8) Every two weeks
-    # - cron: '30 15 13,27 * *'
+    #run at 4:00 UTC (12:00 UTC+8) on Friday
+    - cron: '0 4 * * 5'
+    #run at 4:00 UTC (12:00 UTC+8) Every two weeks
+    # - cron: '0 4 13,27 * *'
   #run it manually when the workflow is in the default branch
   workflow_dispatch:
     inputs:
@@ -21,8 +21,8 @@ jobs:
   run:
     runs-on: perf
     continue-on-error: true
-    #At most 2.5/Kun days to finish
-    timeout-minutes: 3600
+    #At most 3 days to finish
+    timeout-minutes: 4320
     name: Checkpoints
     steps:
       - name: Set test commit
@@ -85,7 +85,7 @@ jobs:
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
               --with-dramsim3 --threads 16                                  \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata
+              --llvm-profdata llvm-profdata --trace-fst
             mkdir -p $SPEC_DIR
             cp $NOOP_HOME/build/emu $SPEC_DIR/emu
           fi
@@ -98,6 +98,7 @@ jobs:
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
             -L "$NODE_SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
+          find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
 
       - name: Report SPEC CPU2006 score
         if: steps.determine_run.outputs.run_biweekly == 'true'
@@ -109,13 +110,39 @@ jobs:
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
-          mkdir $GITHUB_WORKSPACE/result
-          cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
-          cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
+          # mkdir $GITHUB_WORKSPACE/result
+          # cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
+          # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
-      - name: Upload result
+      - name: Summary result
         if: steps.determine_run.outputs.run_biweekly == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: result
-          path: result
+        run: |
+          echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$SPEC_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
+          tail -n 39 $SPEC_DIR/score.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
+          echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
+          TOTAL_SCORE=$(grep "SPEC2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
+          INT_SCORE=$(grep "SPECint2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
+          FP_SCORE=$(grep "SPECfp2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
+          echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
+          echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
+          echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+
+          if ! grep -q '^{\s*}$' $SPEC_DIR/err_ckps.json; then
+            echo "### :sos: Failed Tests" >> $GITHUB_STEP_SUMMARY  
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat $SPEC_DIR/err_ckps.json >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # - name: Upload result
+      #   if: steps.determine_run.outputs.run_biweekly == 'true'
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: result
+      #     path: result

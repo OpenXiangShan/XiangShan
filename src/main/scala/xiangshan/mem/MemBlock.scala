@@ -26,7 +26,9 @@ import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
 import utils._
 import utility._
-import system.SoCParamsKey
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
+import system.{HasSoCParameter, SoCParamsKey}
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.frontend.HasInstrMMIOConst
@@ -51,7 +53,7 @@ import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.HasSoCParameter
+
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -310,7 +312,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
 
     // misc
-    val error = ValidIO(new L1CacheErrorInfo)
+    val dcacheError = ValidIO(new L1CacheErrorInfo)
+    val uncacheError = Output(new L1BusErrorUnitInfo())
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
       val lqFull = Output(Bool())
@@ -359,17 +362,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val toL2Top     = new TraceCoreInterface
     }
 
+    val wfi = Flipped(new WfiReqBundle)
+
     val topDownInfo = new Bundle {
       val fromL2Top = Input(new TopDownFromL2Top)
       val toBackend = Flipped(new TopDownInfo)
     }
-    val dft = if (hasMbist) Some(Input(new SramBroadcastBundle)) else None
-    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
-    val dft_frnt = if (hasMbist) Some(Output(new SramBroadcastBundle)) else None
-    val dft_reset_frnt = if(hasMbist) Some(Output(new DFTResetSignals())) else None
-    val dft_bcknd = if (hasMbist) Some(Output(new SramBroadcastBundle)) else None
-    val dft_reset_bcknd = if(hasMbist) Some(Output(new DFTResetSignals())) else None
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+    val dft_frnt = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+    val dft_reset_frnt = Option.when(hasMbist)(Output(new DFTResetSignals()))
+    val dft_bcknd = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+    val dft_reset_bcknd = Option.when(hasMbist)(Output(new DFTResetSignals()))
   })
+
+  io.mem_to_ooo.writeBack.zipWithIndex.foreach{ case (wb, i) =>
+    PerfCCT.updateInstPos(wb.bits.uop.debug_seqNum, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset)
+  }
 
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
@@ -392,10 +401,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
-  io.error <> DelayNWithValid(dcache.io.error, 2)
+  io.dcacheError <> DelayNWithValid(dcache.io.error, 2)
+  io.uncacheError.ecc_error <> DelayNWithValid(uncache.io.busError.ecc_error, 2)
   when(!csrCtrl.cache_error_enable){
-    io.error.bits.report_to_beu := false.B
-    io.error.valid := false.B
+    io.dcacheError.bits.report_to_beu := false.B
+    io.dcacheError.valid := false.B
+    io.uncacheError.ecc_error.valid := false.B
   }
 
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
@@ -419,9 +430,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
+  val l1D_pf_enable = GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
+      val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
+      // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+      sms.io.enable := enableSMS && l1D_pf_enable &&
+        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_recv_enable, 2, Some(false.B))
       sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt, 2, Some(false.B))
       sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold, 2, Some(12.U))
@@ -436,7 +452,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
-      l1Prefetcher.io.enable := Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
+      val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
+      // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+      l1Prefetcher.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
+        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_stride, 2, Some(false.B))
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -598,6 +617,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   dcache.io.lqEmpty := lsq.io.lqEmpty
+  dcache.io.wfi.wfiReq := io.wfi.wfiReq
+  lsq.io.wfi.wfiReq := io.wfi.wfiReq
 
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
@@ -609,8 +630,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
       outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
       outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 2, Some(true.B))
-
-      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
@@ -646,6 +665,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  ptw.io.wfi.wfiReq := io.wfi.wfiReq
+
+  io.wfi.wfiSafe := dcache.io.wfi.wfiSafe && uncache.io.wfi.wfiSafe && lsq.io.wfi.wfiSafe && ptw.io.wfi.wfiSafe
 
   val perfEventsPTW = if (!coreParams.softPTW) {
     ptw.getPerfEvents
@@ -705,7 +727,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   val ptw_resp_next = RegEnable(ptwio.resp.bits, ptwio.resp.valid)
-  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed && tlbcsr.vsatp.changed && tlbcsr.hgatp.changed), init = false.B)
+  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid || tlbcsr.satp.changed || tlbcsr.vsatp.changed || tlbcsr.hgatp.changed || tlbcsr.priv.virt_changed), init = false.B)
   ptwio.resp.ready := true.B
 
   val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
@@ -716,7 +738,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
-      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid, allType = true, ignoreAsid = true)
+      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
+        allType = true, ignoreAsid = true) // Maybe need not ignoreAsid here, however not a functional bug
   }
 
   dtlb.flatMap(a => a.ptw.req)
@@ -728,7 +751,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       else if (i < TlbEndVec(dtlb_ld_idx)) Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_ld_idx), TlbEndVec(dtlb_ld_idx))).orR
       else if (i < TlbEndVec(dtlb_st_idx)) Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_st_idx), TlbEndVec(dtlb_st_idx))).orR
       else                                 Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_pf_idx), TlbEndVec(dtlb_pf_idx))).orR
-    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit && ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid, allType = true, ignoreAsid = true))
+    ptwio.req(i).valid := tlb.valid &&
+      !(ptw_resp_v && vector_hit &&
+        ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
+          allType = true, ignoreAsid = true)) // // Maybe need not ignoreAsid here, however not a functional bug
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -983,7 +1009,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
     // connect misalignBuffer
-    loadMisalignBuffer.io.req(i) <> loadUnits(i).io.misalign_buf
+    loadMisalignBuffer.io.enq(i) <> loadUnits(i).io.misalign_enq
 
     if (i == MisalignWBPort) {
       loadUnits(i).io.misalign_ldin  <> loadMisalignBuffer.io.splitLoadReq
@@ -1242,7 +1268,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // connect misalignBuffer
-    storeMisalignBuffer.io.req(i) <> stu.io.misalign_buf
+    storeMisalignBuffer.io.enq(i) <> stu.io.misalign_enq
 
     if (i == 0) {
       stu.io.misalign_stin  <> storeMisalignBuffer.io.splitStoreReq
@@ -1265,6 +1291,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vecDebug.map(_ := DontCare)
         stData(i).ready := true.B
       }
     } else {
@@ -1274,6 +1301,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vecDebug.map(_ := DontCare)
         stData(i).ready := true.B
     }
     lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
@@ -1359,6 +1387,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
+  uncache.io.wfi.wfiReq := io.wfi.wfiReq
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
@@ -1486,21 +1515,30 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
-  sbuffer.io.vecDifftestInfo      := DontCare
-  lsq.io.sbufferVecDifftestInfo   := DontCare
+  sbuffer.io.diffStore := DontCare
+  lsq.io.diffStore := DontCare
   vSegmentUnit.io.vecDifftestInfo := DontCare
+  io.mem_to_ooo.storeDebugInfo := DontCare
+  // store event difftest information
   if (env.EnableDifftest) {
-    sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
-      if (index == 0) {
-        val vSegmentDifftestValid = vSegmentUnit.io.vecDifftestInfo.valid
-        sbufferPort.valid := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
-        sbufferPort.bits  := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
-
-        vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
-        lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready
-      } else {
-         sbufferPort <> lsq.io.sbufferVecDifftestInfo(index)
+    // diffStoreEvent for vSegment, pmaStore and ncStore
+    (0 until EnsbufferWidth).foreach{i =>
+      if(i == 0) {
+        when(vSegmentUnit.io.sbuffer.valid) {
+          sbuffer.io.diffStore.diffInfo(0) := vSegmentUnit.io.vecDifftestInfo.bits
+          sbuffer.io.diffStore.pmaStore(0).valid := vSegmentUnit.io.sbuffer.fire
+          sbuffer.io.diffStore.pmaStore(0).bits := vSegmentUnit.io.sbuffer.bits
+        }.otherwise{
+          sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.diffInfo(0)
+          sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.pmaStore(0)
+        }
+      }else{
+        sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.diffInfo(i)
+        sbuffer.io.diffStore.pmaStore(i) := lsq.io.diffStore.pmaStore(i)
       }
+      sbuffer.io.diffStore.ncStore := lsq.io.diffStore.ncStore
+      io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
+      sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
   }
 
@@ -1674,8 +1712,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
     }
 
-    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.uopWriteback(i).valid
-    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.uopWriteback(i).bits
+    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.toLsq(i).valid
+    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.toLsq(i).bits
   }
 
 
@@ -1866,9 +1904,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // For isVirt, mode check is unnecessary, as virt won't be 1 in M-mode.
     // Also, isVirt includes Hyper Insts, which don't care mode either.
 
-    val useBareAddr = 
+    val useBareAddr =
       (isVirt && vsatpNone && hgatpNone) ||
-      (!isVirt && (mode === CSRConst.ModeM)) || 
+      (!isVirt && (mode === CSRConst.ModeM)) ||
       (!isVirt && (mode =/= CSRConst.ModeM) && satpNone)
     val useSv39Addr =
       (isVirt && vsatpSv39) ||
@@ -1970,6 +2008,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // vector segmentUnit
   vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
+  vSegmentUnit.io.csrCtrl <> csrCtrl
   vSegmentUnit.io.in.valid := isSegment && io.ooo_to_mem.issueVldu.head.valid// is segment instruction
   vSegmentUnit.io.dtlb.resp.bits <> dtlb_reqs.take(LduCnt).head.resp.bits
   vSegmentUnit.io.dtlb.resp.valid <> dtlb_reqs.take(LduCnt).head.resp.valid
@@ -2046,16 +2085,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     ) << instOffsetBits)
   }
 
-
-  io.mem_to_ooo.storeDebugInfo := DontCare
-  // store event difftest information
-  if (env.EnableDifftest) {
-    (0 until EnsbufferWidth).foreach{i =>
-        io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.robIdx
-        sbuffer.io.vecDifftestInfo(i).bits.pc := io.mem_to_ooo.storeDebugInfo(i).pc
-    }
-  }
-
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
   dtlbRepeater.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
@@ -2125,19 +2154,37 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   } else {
     None
   }
-  private val sigFromSrams = if (hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val sigFromSrams = if (hasDFT) Some(SramHelper.genBroadCastBundleTop()) else None
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
+
   if (hasMbist) {
-    sigFromSrams.get := io.dft.get
     cg.cgen := io.dft.get.cgen
-    io.dft_frnt.get := io.dft.get
-    io.dft_reset_frnt.get := io.dft_reset.get
-    io.dft_bcknd.get := io.dft.get
-    io.dft_reset_bcknd.get := io.dft_reset.get
   } else {
     cg.cgen := false.B
   }
+
+  // sram debug
+  sigFromSrams.foreach({ case sig => sig := DontCare })
+  sigFromSrams.zip(io.dft).foreach {
+    case (sig, dft) =>
+      if (hasMbist) {
+        sig.ram_hold := dft.ram_hold
+        sig.ram_bypass := dft.ram_bypass
+        sig.ram_bp_clken := dft.ram_bp_clken
+        sig.ram_aux_clk := dft.ram_aux_clk
+        sig.ram_aux_ckbp := dft.ram_aux_ckbp
+        sig.ram_mcp_hold := dft.ram_mcp_hold
+        sig.cgen := dft.cgen
+      }
+      if (hasSramCtl) {
+        sig.ram_ctl := dft.ram_ctl
+      }
+  }
+  io.dft_frnt.zip(sigFromSrams).foreach({ case (a, b) => a := b })
+  io.dft_reset_frnt.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  io.dft_bcknd.zip(sigFromSrams).foreach({ case (a, b) => a := b })
+  io.dft_reset_bcknd.zip(io.dft_reset).foreach({ case (a, b) => a := b })
 }
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
@@ -2156,6 +2203,9 @@ class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
   io_perf <> wrapper.inner.module.io_perf
 
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
+    ResetGen(
+      ResetGenNode(Seq(ModuleNode(wrapper.inner.module))),
+      reset, sim = false, io.dft_reset
+    )
   }
 }

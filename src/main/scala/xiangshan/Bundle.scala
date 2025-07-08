@@ -164,6 +164,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isLastInFtqEntry = Bool()
+  val debug_seqNum = InstSeqNum()
 }
 
 
@@ -344,12 +345,12 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
 
 class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
-  val isNC = Bool()
+  val isNCIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
 
-  def isSkipDiff: Bool = isMMIO || isNC || isPerfCnt
+  def isSkipDiff: Bool = isMMIO || isNCIO || isPerfCnt
   /* add L/S inst info in EXU */
   // val L1toL2TlbLatency = UInt(XLEN.W)
   // val levelTlbHit = UInt(2.W)
@@ -463,6 +464,11 @@ class LoadCancelIO(implicit p: Parameters) extends XSBundle {
   val ld2Cancel = Bool()
 }
 
+class WfiReqBundle extends Bundle {
+  val wfiReq = Output(Bool())
+  val wfiSafe = Input(Bool())
+}
+
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
@@ -472,6 +478,8 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
   val canAccept = Input(Bool())
+
+  val wfi = Flipped(new WfiReqBundle)
 }
 
 class SatpStruct(implicit p: Parameters) extends XSBundle {
@@ -544,6 +552,7 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val vmxr = Bool()
     val vsum = Bool()
     val virt = Bool()
+    val virt_changed = Bool()
     val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
@@ -669,6 +678,9 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
     sv48 && target(XLEN - 1, 48) =/= VecInit.fill(XLEN - 48)(target(47)).asUInt
   def checkGuestPageFault(target: UInt): Bool =
     sv39x4 && target(XLEN - 1, 41).orR || sv48x4 && target(XLEN - 1, 50).orR
+
+  def shouldBeSext: Bool = sv39 || sv48
+  def shouldBeZext: Bool = bare || sv39x4 || sv48x4
 }
 
 object AddrTransType {
@@ -808,4 +820,15 @@ class TopDownInfo(implicit p: Parameters) extends XSBundle {
 class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
   val l2Miss = Bool()
   val l3Miss = Bool()
+}
+
+class LowPowerIO(implicit p: Parameters) extends Bundle {
+  /* i_*: SoC -> CPU   o_*: CPU -> SoC */
+  val o_cpu_no_op = Output(Bool()) 
+  //physical power down 
+  val i_cpu_pwrdown_req_n = Input(Bool())
+  val o_cpu_pwrdown_ack_n = Output(Bool())
+  // power on/off sequence control for Core iso/rst
+  val i_cpu_iso_en= Input(Bool())
+  val i_cpu_sw_rst_n = Input(Bool())
 }
