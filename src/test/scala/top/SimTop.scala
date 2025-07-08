@@ -78,7 +78,7 @@ class SimTop(implicit p: Parameters) extends Module {
   when (rtcCounter === 0.U) {
     rtcClock := ~rtcClock
   }
-  soc.io.rtc_clock := rtcClock
+  soc.io.rtc_clock := rtcClock.asClock
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay = 3)(p))
