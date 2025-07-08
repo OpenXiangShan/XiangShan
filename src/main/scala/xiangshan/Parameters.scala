@@ -104,12 +104,14 @@ case class XSCoreParameters
   RasSpecSize: Int = 32,
   RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
-  TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
-  //       Sets  Hist   Tag
-    Seq(( 4096,    8,    8),
-        ( 4096,   13,    8),
-        ( 4096,   32,    8),
-        ( 4096,  119,    8)),
+  TageTableInfos: Seq[Tuple5[Int,Int,Int,Int,Int]] =
+  //       Sets  Hist  phrbLen  phrtLen  Tag
+    Seq(( 4096,    8,     6,     6,    16),
+        ( 4096,   13,    11,    11,    16),
+        ( 4096,   13,    18,    18,    16),
+        ( 4096,   13,    28,    32,    16),
+        ( 4096,   13,    28,    57,    16),
+        ( 4096,  119,    28,   100,    16)),
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 256,    4,    9),
@@ -388,6 +390,18 @@ case class XSCoreParameters
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
+  val Bpu2TakenEnable = false
+
+  val PhrDiffEnable = true
+
+  val PhrbHighBitsLen = 24
+  val PhrbLowBitsLen = 4
+  val PhrbLen = PhrbHighBitsLen + PhrbLowBitsLen
+
+  val PhrtHighBitsLen = 70
+  val PhrtLowBitsLen = 30
+  val PhrtLen = PhrtHighBitsLen + PhrtLowBitsLen
+
   val RegCacheSize = IntRegCacheSize + MemRegCacheSize
   val RegCacheIdxWidth = log2Up(RegCacheSize)
 
@@ -654,6 +668,14 @@ trait HasXSParameter {
   def EnableSC = coreParams.EnableSC
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def HistoryLength = coreParams.HistoryLength
+  def Bpu2TakenEnable = coreParams.Bpu2TakenEnable
+  def PhrDiffEnable = coreParams.PhrDiffEnable
+  def PhrbHighBitsLen = coreParams.PhrbHighBitsLen
+  def PhrbLowBitsLen = coreParams.PhrbLowBitsLen
+  def PhrbLen = coreParams.PhrbLen
+  def PhrtHighBitsLen = coreParams.PhrtHighBitsLen
+  def PhrtLowBitsLen = coreParams.PhrtLowBitsLen
+  def PhrtLen = coreParams.PhrtLen
   def EnableGHistDiff = coreParams.EnableGHistDiff
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate

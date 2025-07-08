@@ -1479,6 +1479,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.full_target := commit_target
   update.from_stage  := commit_stage
   update.spec_info   := commit_spec_meta
+  update.ftqPtr      := do_commit_ptr
   XSError(commit_valid && do_commit && debug_cfi, "\ncommit cfi can be non c_commited\n")
 
   val commit_real_hit  = commit_hit === h_hit

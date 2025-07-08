@@ -555,6 +555,14 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
 
   val predCycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 
+  def realTakenMask = VecInit(br_taken_mask.zip(slot_valids).map { case (m, v) => m && v && hit })
+
+  def phrNeedUpdate = realTakenMask.reduce(_ || _)
+
+  def phrUpdatePcOffset = PriorityMux(realTakenMask, offsets)
+
+  def phrUpdateTarget = PriorityMux(realTakenMask, targets)
+
   def br_slot_valids  = slot_valids.init
   def tail_slot_valid = slot_valids.last
 
@@ -696,6 +704,8 @@ class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) exten
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
+  def phrUpdatePc = pc(0) + full_pred(0).phrUpdatePcOffset
+
   def getTarget     = targets(pc)
   def getAllTargets = allTargets(pc)
 
@@ -758,6 +768,11 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val full_target       = UInt(VAddrBits.W)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)
+
+  val ftqPtr = new FtqPtr
+  
+  val phrb = UInt(PhrbLen.W)
+  val phrt = UInt(PhrtLen.W)
 
   def is_jal  = ftb_entry.tailSlot.valid && ftb_entry.isJal
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr

@@ -45,15 +45,19 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageCtrBits = 3
   val TickWidth   = 7
 
+  // TODO: move to Parameters.scala?
+  def TagHighBitsLen = 12
+  def TagLowBitsLen = 4
+
   val USE_ALT_ON_NA_WIDTH = 4
   val NUM_USE_ALT_ON_NA   = 128
   def use_alt_idx(pc: UInt) = (pc >> instOffsetBits)(log2Ceil(NUM_USE_ALT_ON_NA) - 1, 0)
 
-  val TotalBits = TageTableInfos.map {
-    case (s, h, t) => {
-      s * (1 + t + TageCtrBits + 1)
-    }
-  }.reduce(_ + _)
+//  val TotalBits = TageTableInfos.map {
+//    case (s, h, t) => {
+//      s * (1 + t + TageCtrBits + 1)
+//    }
+//  }.reduce(_ + _)
 
   def posUnconf(ctr: UInt) = ctr === (1 << (ctr.getWidth - 1)).U
   def negUnconf(ctr: UInt) = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
@@ -87,8 +91,10 @@ abstract class TageModule(implicit p: Parameters)
 
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc          = UInt(VAddrBits.W)
-  val ghist       = UInt(HistoryLength.W)
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghist       = UInt(HistoryLength.W) // TODO: remove it
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos) // TODO: remove it
+  val phrb        = UInt(PhrbLen.W)
+  val phrt        = UInt(PhrtLen.W)
 }
 
 class TageResp_meta(implicit p: Parameters) extends TageBundle with TageParams {
@@ -103,6 +109,8 @@ class TageResp(implicit p: Parameters) extends TageResp_meta {
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc    = UInt(VAddrBits.W)
   val ghist = UInt(HistoryLength.W)
+  val phrb = UInt(PhrbLen.W)
+  val phrt = UInt(PhrtLen.W)
   // update tag and ctr
   val mask    = Vec(numBr, Bool())
   val takens  = Vec(numBr, Bool())
@@ -246,6 +254,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
 class TageTable(
     val nRows:    Int,
     val histLen:  Int,
+    val phrbLen:  Int,
+    val phrtLen:  Int,
     val tagLen:   Int,
     val tableIdx: Int
 )(implicit p: Parameters)
@@ -261,6 +271,8 @@ class TageTable(
     val tag   = UInt(tagLen.W)
     val ctr   = UInt(TageCtrBits.W)
   }
+
+  def phrLen = phrbLen + phrtLen
 
   // Physical SRAM size
   val bankSRAMSize = 512
@@ -278,6 +290,46 @@ class TageTable(
   val bankIdxWidth = log2Ceil(nBanks)
   def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth - 1, 0) === _.U))
   def get_bank_idx(idx:  UInt) = idx >> bankIdxWidth
+
+  def getCutPhr(phrb: UInt, phrbLen: Int, phrt: UInt, phrtLen: Int) = {
+    val cutPhrb = phrb(phrbLen - 1, 0)
+    val cutPhrt = phrt(phrtLen - 1, 0)
+    Cat(cutPhrt, cutPhrb)
+  }
+
+  def getTag(pc: UInt, phr: UInt, phrLen: Int): UInt = {
+
+    val tagLowBits = pc(TagLowBitsLen, 1) // pc[4:1]
+
+    val tagHighBits = Wire(Vec(TagHighBitsLen, Bool()))
+
+    for (i <- 0 until TagHighBitsLen) {
+      val phrXorBits = (i until phrLen by TagHighBitsLen).map(j => phr(j))
+      val phrXorResult = if (phrXorBits.nonEmpty) phrXorBits.reduce(_ ^ _) else false.B
+
+      tagHighBits(i) := pc(i + TagLowBitsLen + 1) ^ phrXorResult
+    }
+
+    Cat(tagHighBits.asUInt, tagLowBits)
+  }
+
+  // TODO: need pc?
+  def getIndex(pc: UInt, phr: UInt, phrLen: Int, indexLen: Int): UInt = {
+
+    val index = Wire(Vec(indexLen, Bool()))
+
+    val step1 = Math.ceil(phrLen / indexLen / 3).toInt
+    val step2 = step1 * indexLen
+
+    for (i <- 0 until indexLen) {
+      val phrXorBits = ((i * step1) until phrLen by step2).map(j => phr(j))
+      val phrXorResult = if (phrXorBits.nonEmpty) phrXorBits.reduce(_ ^ _) else false.B
+
+      index(i) := pc(i + TagLowBitsLen + 1) ^ phrXorResult
+    }
+
+    index.asUInt
+  }
 
   // bypass entries for tage update
   val perBankWrbypassEntries = 8
@@ -344,7 +396,16 @@ class TageTable(
     ))
   )
 
-  val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
+  val pc = io.req.bits.pc
+  val phrb = io.req.bits.phrb
+  val phrt = io.req.bits.phrt
+
+  val phr = getCutPhr(phrb, phrbLen, phrt, phrtLen)
+
+  val s0_tag = getTag(pc, phr, phrbLen + phrtLen)
+  val s0_idx = getIndex(pc, phr, phrbLen + phrtLen, 12) // TODO
+
+//  val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
   val s0_bank_req_1h   = get_bank_mask(s0_idx)
 
   for (b <- 0 until nBanks) {
@@ -404,7 +465,14 @@ class TageTable(
   val per_bank_update_wdata = Wire(Vec(nBanks, Vec(numBr, new TageEntry))) // corresponds to physical branches
 
   val update_unhashed_idx      = getUnhashedIdx(io.update.pc)
-  val (update_idx, update_tag) = compute_tag_and_hash(update_unhashed_idx, update_folded_hist)
+
+  val updatePhr = getCutPhr(io.update.phrb, phrbLen, io.update.phrt, phrtLen)
+  val updateInex = getIndex(io.update.pc, updatePhr, phrLen, 12)
+  val updateTag = getTag(io.update.pc, updatePhr, phrLen)
+
+  val (update_idx, update_tag) = (updateInex, updateTag)
+
+  // val (update_idx, update_tag) = compute_tag_and_hash(update_unhashed_idx, update_folded_hist)
   val update_req_bank_1h       = get_bank_mask(update_idx)
   val update_idx_in_bank       = get_bank_idx(update_idx)
 
@@ -612,8 +680,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val resp_meta          = Wire(new TageMeta)
   override val meta_size = resp_meta.getWidth
   val tables = TageTableInfos.zipWithIndex.map {
-    case ((nRows, histLen, tagLen), i) => {
-      val t = Module(new TageTable(nRows, histLen, tagLen, i))
+    case ((nRows, histLen, phrbLen, phrtLen, tagLen), i) => {
+      val t = Module(new TageTable(nRows, histLen, tagLen, phrbLen, phrtLen, i))
       t.io.req.valid            := io.s0_fire(1)
       t.io.req.bits.pc          := s0_pc_dup(1)
       t.io.req.bits.folded_hist := io.in.bits.folded_hist(1)

@@ -128,6 +128,9 @@ class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUCon
   val s1_folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
   val ghist          = UInt(HistoryLength.W)
 
+  val phrb = UInt(PhrbLen.W)
+  val phrt = UInt(PhrtLen.W)
+
   val resp_in = Vec(nInputs, new BranchPredictionResp)
 
   // val final_preds = Vec(numBpStages, new)
@@ -234,6 +237,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val ctrl       = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
+
+  val phrbModule = Module(new Phr(PhrbHighBitsLen, PhrbLowBitsLen)) // phr of branch address
+  val phrtModule = Module(new Phr(PhrtHighBitsLen, PhrtLowBitsLen)) // phr of target address
+  val phrModules = Seq(phrtModule, phrbModule)
 
   def numOfStage = 3
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
@@ -345,6 +352,43 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s0_ghist := getHist(s0_ghist_ptr_dup(0))
 
   val resp = predictors.io.out
+
+  if (Bpu2TakenEnable) {
+    // TODO
+    phrbModule.io.in.vaddr.get := DontCare
+    phrbModule.io.in.updateEnable.get := DontCare
+    phrbModule.io.in.updateFtqPtr.get := DontCare
+
+    phrtModule.io.in.vaddr.get := DontCare
+    phrtModule.io.in.updateEnable.get := DontCare
+    phrtModule.io.in.updateFtqPtr.get := DontCare
+  } else {
+    phrbModule.io.in.vaddr.get := resp.s1.phrUpdatePc
+    phrbModule.io.in.updateEnable.get := resp.s1.full_pred(0).phrNeedUpdate
+    phrbModule.io.in.updateFtqPtr.get := io.ftq_to_bpu.enq_ptr
+
+    phrtModule.io.in.vaddr.get := resp.s1.full_pred(0).phrUpdateTarget
+    phrtModule.io.in.updateEnable.get := resp.s1.full_pred(0).phrNeedUpdate
+    phrtModule.io.in.updateFtqPtr.get := io.ftq_to_bpu.enq_ptr
+  }
+
+  for (p <- phrModules) {
+    p.io.in.s2Fire := s2_fire_dup(0)
+    p.io.in.s3Fire := s3_fire_dup(0)
+    p.io.in.s2OverrideValid := resp.s2.hasRedirect(0)
+    p.io.in.s3OverrideValid := resp.s3.hasRedirect(0)
+    // TODO: redirect ftqIdx ahead one cycle
+    p.io.in.recoveryEnable := io.ftq_to_bpu.redirect.valid
+    p.io.in.recoveryFtqPtr := io.ftq_to_bpu.redirect.bits.ftqIdx
+    p.io.in.readEnable := io.ftq_to_bpu.update.valid
+    p.io.in.readFtqPtr := io.ftq_to_bpu.update.bits.ftqPtr
+  }
+
+  predictors.io.in.bits.phrb := phrbModule.io.out.phr
+  predictors.io.in.bits.phrt := phrtModule.io.out.phr
+
+  predictors.io.update.bits.phrb := phrbModule.io.out.phrReadResp
+  predictors.io.update.bits.phrt := phrtModule.io.out.phrReadResp
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
