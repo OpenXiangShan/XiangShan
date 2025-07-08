@@ -19,7 +19,7 @@ object SYSCNTConsts {
 
   def timeOffset   = 0xbff8//0xbff8 base addr is 0x8000
   def incOffset    = 0xC000//0xC000:0x8000+0x4000
-  def size         = 0x8000
+  def size         = 0x10000
   def timeWidth    = 64
 }
 

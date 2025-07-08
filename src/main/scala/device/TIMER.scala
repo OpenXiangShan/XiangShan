@@ -16,10 +16,10 @@ import freechips.rocketchip.util._
 object TIMERConsts
 {
   def timecmpOffset = 0x4000
-//  def timeOffset = 0x7ff8//not use by simtop
+  def timeOffset = 0xbff8//not use by simtop
   def msipBytes = 4
   def timecmpBytes = 8
-  def size = 0x8000
+  def size = 0xc000
   def timeWidth = 64
   def ipiWidth = 32
   def ints = 2
@@ -109,23 +109,8 @@ val ipi_hartoffset =io.hartId * msipBytes.U
         RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
       },
     )
-
-    val msipAddr = params.baseAddress.U + io.hartId * msipBytes.U
-    val timecmpAddr = params.baseAddress.U + timecmpOffset.U + io.hartId * timecmpBytes.U
-
-    val bundleIn = node.in.head._1
-    val a = bundleIn.a
-    val d = bundleIn.d
-
-    val isMsipAccess = a.bits.address === msipAddr
-    val isTimecmpAccess = a.bits.address === timecmpAddr
-
-    val isCorrectAccess = isMsipAccess || isTimecmpAccess
-
-    // filter out accesses not belonging to this hart
-//    when(!isCorrectAccess) {
-//      d.bits.denied := true.B
-//    }
+    node.regmapClint(0.asUInt,
+      timeOffset -> Seq(RegField.r(32, io.time.bits, RegFieldDesc("mtime", "Timer Register", volatile=true))))
 
   }
 }
