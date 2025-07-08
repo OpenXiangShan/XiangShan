@@ -980,15 +980,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cboMmioAddr = get_block_addr(cboMmioPAddr)
   val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))
 
-  // RegNext(io.sbuffer(i).fire) is used to alignment timing
   val isCboZeroToSbVec = (0 until EnsbufferWidth).map{ i =>
-    RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline) && allocated(deqPtrExt(i).value)
+    io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline && allocated(dataBuffer.io.deq(i).bits.sqPtr.value)
   }
   val cboZeroToSb        = isCboZeroToSbVec.reduce(_ || _)
   val cboZeroFlushSb     = GatedRegNext(cboZeroToSb)
 
-  val cboZeroUop         = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt.map(x=>uop(x.value))), cboZeroToSb)
-  val cboZeroSqIdx       = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt), cboZeroToSb)
+  val cboZeroUop         = RegEnable(PriorityMux(isCboZeroToSbVec, dataBuffer.io.deq.map(x=>uop(x.bits.sqPtr.value))), cboZeroToSb)
+  val cboZeroSqIdx       = RegEnable(PriorityMux(isCboZeroToSbVec, dataBuffer.io.deq.map(_.bits.sqPtr)), cboZeroToSb)
   val cboZeroValid       = RegInit(false.B)
   val cboZeroWaitFlushSb = RegInit(false.B)
 
@@ -1081,6 +1080,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     cboZeroWaitFlushSb    := false.B
   }
   when (io.cboZeroStout.fire) {
+    completed(cboZeroSqIdx.value) := true.B
     cboZeroValid := false.B
   }
 
@@ -1325,8 +1325,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // Only sqNeedDeq can move the ptr.
     // ---
     // however, `completed` is register, when it turn true, the data has already been written to sbuffer
+    // Besides, we should not have cbozero completed. (wline is currently only for cbozero)
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq) {
+    when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq && !io.sbuffer(i).bits.wline) {
 
       completed(ptr) := true.B
     }
