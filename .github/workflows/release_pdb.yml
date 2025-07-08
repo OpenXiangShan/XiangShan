@@ -1,9 +1,9 @@
 name: Release XSPdb Jobs
 on:
   push:
-    branches: [feat_xspdb]
+    branches: [pdb]
   pull_request:
-    branches: [feat_xspdb]
+    branches: [pdb]
 jobs:
   build-xsdev-image:
     runs-on: ghcr.io/openxiangshan/xspdb:build-latest 
