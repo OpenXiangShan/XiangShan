@@ -1,0 +1,67 @@
+name: Release XSPdb Jobs
+on:
+  push:
+    branches: [pdb]
+  pull_request:
+    branches: [pdb]
+jobs:
+  build-xsdev-image:
+    runs-on: bosc 
+    container: ghcr.io/openxiangshan/xspdb:build-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Env 
+        run: |
+          echo "RTL_HOME=$GITHUB_WORKSPACE/build/rtl" >> $GITHUB_ENV 
+          echo "PDB_HOME=$GITHUB_WORKSPACE/build/xspdb" >> $GITHUB_ENV 
+          echo "PYTHON_VERSION=$(python3 --version | awk '{print $2}' | cut -d'.' -f1-2)" >> $GITHUB_ENV 
+          echo "PICKER_INCLUDE=$(picker --show_xcom_lib_location_cpp|grep include|awk '{print $2}')" >> $GITHUB_ENV
+          echo "pythonversion=$PYTHON_VERSION" >> $GITHUB_ENV 
+      - name: Init Xiangshan
+        run: make init
+      - name: Setup mill
+        uses: jodersky/setup-mill@v0.3.0
+        with:
+          mill-version: 0.12.3
+      
+      - name: Prepare XiangShan
+        run: | 
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV 
+          NOOP_HOME=$GITHUB_WORKSPACE make sim-verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 JVM_XMX=16g
+      - name: Prepare Difftest
+        run: | 
+          cd $GITHUB_WORKSPACE/
+          NOOP_HOME=$GITHUB_WORKSPACE make -C difftest/ difftest_python WITH_CONSTANTIN=0 WITH_CHISELDB=0
+          cp $GITHUB_WORKSPACE/difftest/src/test/vsrc/common/* $RTL_HOME/
+          cp $PDB_HOME/python/_difftest.so $RTL_HOME/libdifftest.so 
+          cd $RTL_HOME/ 
+          ls | grep -E "\.sv$|\.v$|\.cpp$|\.so$" | grep -v "SimTop\.sv" > $RTL_HOME/picker.f || true 
+      
+      - name: Build XSPython
+        run: |
+          SIM_LDFLAGS=$(cat $PDB_HOME/python/sim_ld_flags.txt)
+          cd $PDB_HOME 
+          picker export $RTL_HOME/SimTop.sv --rw 1 -w xs.fst --lang python --tdir XSIT --fs $RTL_HOME/picker.f -V "--no-timing;--threads;8;+define+DIFFTEST" -C "-fPIC -lz -I$PICKER_INCLUDE/xspcomm -L$RTL_HOME -ldifftest -lpython${PYTHON_VERSION} ${SIM_LDFLAGS}"
+      - name: Update Difftest Lib
+        run: |
+          cd $PDB_HOME/XSIT 
+          rm -rf _difftest.so libdifftest.so difftest.py 
+          cp $PDB_HOME/python/_difftest.so .
+          ln -s _difftest.so libdifftest.so 
+          cp $PDB_HOME/python/difftest.py .
+      - name: Build XSPdb
+        run: |
+          cd $PDB_HOME 
+          git clone https://github.com/OpenXiangShan/XSPdb.git 
+          cd XSPdb 
+          wget https://github.com/OpenXiangShan/XSPdb/releases/download/v0.1.0-test/ready-to-run.tar.gz 
+          tar zxvf ready-to-run.tar.gz 
+          mv ../XSIT XSPython 
+          cd $PDB_HOME 
+          tar czvf xspdb.tar.gz XSPdb
+      
+      - name: Upload XSPdb
+        uses: actions/upload-artifact@v4 
+        with:
+          name: xspdb-${{ github.sha }} 
+          path: $PDB_HOME/xspdb.tar.gz 
