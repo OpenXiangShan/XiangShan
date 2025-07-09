@@ -113,7 +113,7 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
     )
     //mtime report r reg.
     node.regmapClint(0.asUInt,
-      timeOffset -> Seq(RegField.r(32, io.time.bits, RegFieldDesc("mtime", "Timer Register", volatile=true))))
+      timeOffset -> Seq(RegField.r(64, io.time.bits, RegFieldDesc("mtime", "Timer Register", volatile=true))))
 
   }
 }
