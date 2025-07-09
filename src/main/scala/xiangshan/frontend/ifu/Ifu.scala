@@ -252,7 +252,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstFetchSize = Mux(
     s1_ftqReq.ftqOffset.valid,
     s1_ftqReq.ftqOffset.bits + 1.U(log2Ceil(PredictWidth + 1).W),
-    (s1_ftqReq.nextStartAddr - s1_ftqReq.startAddr)(log2Ceil(PredictWidth + 1) + 1, 1)
+    (s1_ftqReq.nextStartVAddr - s1_ftqReq.startVAddr)(log2Ceil(PredictWidth + 1) + 1, 1)
   )
   private val s1_totalFetchSize = s1_firstFetchSize
   private val s1_firstEndPos    = s1_firstFetchSize - 1.U
@@ -266,8 +266,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   )
   private val s1_firstFtrRange =
     Fill(PredictWidth, s1_ftqReq.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(
-      s1_ftqReq.nextStartAddr,
-      s1_ftqReq.startAddr
+      s1_ftqReq.nextStartVAddr,
+      s1_ftqReq.startVAddr
     )
   /* *****************************************************************************
    * IFU Stage 2
@@ -305,8 +305,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // TODO: addr compare may be timing critical
   private val s2_iCacheAllRespWire =
     fromICache.valid &&
-      fromICache.bits.vAddr(0) === s2_ftqReq.startAddr &&
-      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s2_ftqReq.nextlineStart || !s2_doubleline)
+      fromICache.bits.vAddr(0) === s2_ftqReq.startVAddr &&
+      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s2_ftqReq.nextCachelineVAddr || !s2_doubleline)
   private val s2_iCacheAllRespReg = ValidHold(s2_valid && s2_iCacheAllRespWire && !s3_ready, s2_fire, s2_flush)
 
   icacheRespAllValid := s2_iCacheAllRespReg || s2_iCacheAllRespWire
@@ -344,7 +344,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_perfInfo = io.fromICache.perf
   preDecodeBounder.io.req.valid            := fromICache.valid
   preDecodeBounder.io.req.bits.instrRange  := s2_totalInstrRange.asTypeOf(Vec(PredictWidth, Bool()))
-  preDecodeBounder.io.req.bits.cacheData   := Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqReq.startAddr(5, 0), 0.U(3.W))
+  preDecodeBounder.io.req.bits.cacheData   := Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqReq.startVAddr(5, 0), 0.U(3.W))
   preDecodeBounder.io.req.bits.endPosition := s2_totalEndPos
   preDecodeBounder.io.req.bits.prevLastIsHalfRvi := s2_prevLastIsHalfRvi
 
@@ -375,7 +375,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
 
   private val s2_firstFetchBlockPcLowerResult = VecInit((0 until PredictWidth).map(i =>
-    Cat(0.U(1.W), s2_ftqReq.startAddr(PcCutPoint - 1, 0)) + (i * 2).U
+    Cat(0.U(1.W), s2_ftqReq.startVAddr(PcCutPoint - 1, 0)) + (i * 2).U
   )) // cat with overflow bit
 
   private val firstFetchBlockIndex =
@@ -469,9 +469,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_firstBlock.invalidTaken := !bubbleInstrValid(firstFtqOffset.bits) && firstFtqOffset.valid
 
   s2_firstBlock.instrRange := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
-  s2_firstBlock.pcHigh           := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
-  s2_firstBlock.pcHighPlus1      := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint) + 1.U
-  s2_firstBlock.target           := s2_ftqReq.nextStartAddr
+  s2_firstBlock.pcHigh           := s2_ftqReq.startVAddr(VAddrBits - 1, PcCutPoint)
+  s2_firstBlock.pcHighPlus1      := s2_ftqReq.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
+  s2_firstBlock.target           := s2_ftqReq.nextStartVAddr
   s2_firstBlock.fetchSize        := s2_firstFetchSize
   s2_firstBlock.bubbleInstrValid := bubbleInstrValid.asUInt & s2_firstInstrRange
 
@@ -513,7 +513,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_pmpMmio            = RegEnable(s2_pmpMmio, s2_fire)
   private val s3_itlbPbmt           = RegEnable(s2_itlbPbmt, s2_fire)
   private val s3_instrOffset        = RegEnable(s2_instrOffset, s2_fire)
-  private val s3_resendVAddr        = RegEnable(s2_ftqReq.startAddr + 2.U, s2_fire)
+  private val s3_resendVAddr        = RegEnable(s2_ftqReq.startVAddr + 2.U, s2_fire)
 
   private val s3_instrPcLowerResult  = RegEnable(s2_instrPcLowerResult, s2_fire)
   private val s3_bubblePcLowerResult = RegEnable(s2_bubblePcLowerResult, s2_fire)
@@ -530,8 +530,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     MuxCase(
       ExceptionType.None,
       Seq(
-        !isNextLine(s3_pc(i), s3_ftqReq.startAddr)                   -> s3_exception(0),
-        (isNextLine(s3_pc(i), s3_ftqReq.startAddr) && s3_doubleline) -> s3_exception(1)
+        !isNextLine(s3_pc(i), s3_ftqReq.startVAddr)                   -> s3_exception(0),
+        (isNextLine(s3_pc(i), s3_ftqReq.startVAddr) && s3_doubleline) -> s3_exception(1)
       )
     )
   ))
@@ -694,8 +694,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_instrOffset       = RegEnable(s3_instrOffset, s3_fire)
 
   // Expand 1 bit to prevent overflow when assert
-  private val s4_ftqReqStartAddr     = PrunedAddrInit(Cat(0.U(1.W), s4_ftqReq.startAddr.toUInt))
-  private val s4_ftqReqNextStartAddr = PrunedAddrInit(Cat(0.U(1.W), s4_ftqReq.nextStartAddr.toUInt))
+  private val s4_ftqReqStartAddr     = PrunedAddrInit(Cat(0.U(1.W), s4_ftqReq.startVAddr.toUInt))
+  private val s4_ftqReqNextStartAddr = PrunedAddrInit(Cat(0.U(1.W), s4_ftqReq.nextStartVAddr.toUInt))
 
   when(s4_valid && !s4_ftqReq.ftqOffset.valid) {
     assert(
@@ -1049,7 +1049,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   mmioFlushWb.bits.ftqOffset  := s4_ftqReq.ftqOffset.bits
   mmioFlushWb.bits.misOffset  := s4_mmioMissOffset
   mmioFlushWb.bits.cfiOffset  := DontCare
-  mmioFlushWb.bits.target     := Mux(mmioIsRvc, s4_ftqReq.startAddr + 2.U, s4_ftqReq.startAddr + 4.U)
+  mmioFlushWb.bits.target     := Mux(mmioIsRvc, s4_ftqReq.startVAddr + 2.U, s4_ftqReq.startVAddr + 4.U)
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := s4_mmioRange
 
@@ -1178,8 +1178,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   XSDebug(
     checkRetFault,
     "startAddr:%x  nextStartAddr:%x  taken:%d    takenIdx:%d\n",
-    wbFtqReq.startAddr.toUInt,
-    wbFtqReq.nextStartAddr.toUInt,
+    wbFtqReq.startVAddr.toUInt,
+    wbFtqReq.nextStartVAddr.toUInt,
     wbFtqReq.ftqOffset.valid,
     wbFtqReq.ftqOffset.bits
   )
@@ -1236,13 +1236,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val ifuWbToFtqTable            = ChiselDB.createTable(s"IfuWbToFtq$hartId", new IfuWbToFtqDB)
 
   private val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
-  fetchIBufferDumpData.startAddr  := s4_ftqReq.startAddr.toUInt
+  fetchIBufferDumpData.startAddr  := s4_ftqReq.startVAddr.toUInt
   fetchIBufferDumpData.instrCount := PopCount(io.toIBuffer.bits.enqEnable)
   fetchIBufferDumpData.exception  := io.toIBuffer.fire && s4_perfInfo.except
   fetchIBufferDumpData.isCacheHit := io.toIBuffer.fire && s4_perfInfo.hit
 
   private val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
-  ifuWbToFtqDumpData.startAddr         := wbFtqReq.startAddr.toUInt
+  ifuWbToFtqDumpData.startAddr         := wbFtqReq.startVAddr.toUInt
   ifuWbToFtqDumpData.isMissPred        := checkFlushWb.bits.misOffset.valid
   ifuWbToFtqDumpData.missPredOffset    := checkFlushWb.bits.misOffset.bits
   ifuWbToFtqDumpData.checkJalFault     := checkJalFault

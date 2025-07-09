@@ -46,7 +46,7 @@ class FtqPtrVec(val num: Int = 1)(implicit p: Parameters) extends FtqBundle {
 
 object FtqPtrVec {
   def apply(num: Int = 1)(implicit p: Parameters): FtqPtrVec = {
-    require(num < p(XSCoreParamsKey).FtqSize)
+    require(num < p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize)
     val ptrVec = Wire(new FtqPtrVec(num))
     // We don't use ptrVec := FtqPtr(false, 0.U) because FtqPtr + involves a Mux,
     // which makes Chisel unable to infer that the initial value is a constant, which will fail with async reset.

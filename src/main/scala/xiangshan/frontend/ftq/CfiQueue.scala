@@ -19,43 +19,42 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SyncDataModuleTemplate
-import xiangshan.frontend.bpu.FTBEntry_FtqMem
 
-class FtbEntryQueue(implicit p: Parameters) extends FtqModule {
+class CfiQueue(implicit p: Parameters) extends FtqModule {
 
-  class FtbEntryQueueIO extends FtqBundle {
+  class CfiQueueIO extends FtqBundle {
     class ReadChannel extends FtqBundle {
-      val ren:   Bool            = Input(Bool())
-      val raddr: UInt            = Input(UInt(log2Ceil(FtqSize).W))
-      val rdata: FTBEntry_FtqMem = Output(new FTBEntry_FtqMem)
+      val ptr:   FtqPtr      = Input(new FtqPtr())
+      val rdata: Valid[UInt] = Output(Valid(UInt(CfiPositionWidth.W)))
     }
 
-    val ifuWb           = new ReadChannel
-    val backendRedirect = new ReadChannel
+    val ifuPtr:    Vec[ReadChannel] = Vec(1, new ReadChannel)
+    val commitPtr: Vec[ReadChannel] = Vec(1, new ReadChannel)
 
-    val wen:   Bool            = Input(Bool())
-    val waddr: UInt            = Input(UInt(log2Ceil(FtqSize).W))
-    val wdata: FTBEntry_FtqMem = Input(new FTBEntry_FtqMem)
+    val wen:   Bool        = Input(Bool())
+    val waddr: UInt        = Input(UInt(log2Ceil(FtqSize).W))
+    val wdata: Valid[UInt] = Input(Valid(UInt(CfiPositionWidth.W)))
   }
 
-  val io: FtbEntryQueueIO = IO(new FtbEntryQueueIO)
+  val io: CfiQueueIO = IO(new CfiQueueIO)
 
-  private val readChannels = Seq(
-    io.ifuWb,
-    io.backendRedirect
+  private val readChannels = Seq.concat(
+    io.ifuPtr.map(ptr => ptr),
+    io.commitPtr.map(ptr => ptr)
   )
+  private val readChannelNum = readChannels.size
 
   private val mem = Module(new SyncDataModuleTemplate(
-    gen = new FTBEntry_FtqMem,
+    gen = Valid(UInt(CfiPositionWidth.W)),
     numEntries = FtqSize,
-    numRead = 2,
-    numWrite = 1,
-    hasRen = true
+    numRead = readChannelNum,
+    numWrite = 1
   ))
 
-  mem.io.ren.get := readChannels.map(_.ren)
-  mem.io.raddr   := readChannels.map(_.raddr)
-  readChannels.zipWithIndex.foreach { case (readChannel, i) => readChannel.rdata := mem.io.rdata(i) }
+  mem.io.raddr := readChannels.map(_.ptr.value)
+  readChannels.zipWithIndex.foreach { case (readChannel, i) =>
+    readChannel.rdata := mem.io.rdata.dropRight(readChannelNum - i - 1).last
+  }
 
   mem.io.wen(0)   := io.wen
   mem.io.waddr(0) := io.waddr

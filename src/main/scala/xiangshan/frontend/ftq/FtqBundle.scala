@@ -16,6 +16,6 @@
 package xiangshan.frontend.ftq
 
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
+import xiangshan.frontend.FrontendBundle
 
-abstract class FtqBundle(implicit p: Parameters) extends XSBundle
+abstract class FtqBundle(implicit p: Parameters) extends FrontendBundle with HasFtqParameters

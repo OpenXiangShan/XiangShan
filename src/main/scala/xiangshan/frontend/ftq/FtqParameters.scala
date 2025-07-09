@@ -16,19 +16,16 @@
 package xiangshan.frontend.ftq
 
 import chisel3._
-import org.chipsalliance.cde.config.Parameters
-import utility.CircularQueuePtr
-import xiangshan.XSCoreParamsKey
+import chisel3.util._
+import xiangshan.frontend.HasFrontendParameters
 
-class FtqPtr(entries: Int) extends CircularQueuePtr[FtqPtr](entries) {
-  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize)
+case class FtqParameters(
+    FtqSize: Int = 64
+) {
+  // sanity check
+  require(isPow2(FtqSize))
 }
 
-object FtqPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
-    val ptr = Wire(new FtqPtr)
-    ptr.flag  := f
-    ptr.value := v
-    ptr
-  }
+trait HasFtqParameters extends HasFrontendParameters {
+  def ftqParameters: FtqParameters = frontendParameters.ftqParameters
 }

@@ -33,7 +33,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import ftq.Ftq
-import ftq.FtqEntry
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility._
@@ -114,7 +113,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
-  ftq.io.reset_vector := io.reset_vector
 
   val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
@@ -214,7 +212,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
+  val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
@@ -227,7 +225,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     checkTarget(i) := Mux(
       ftq.io.toBackend.newest_entry_ptr.value === checkTargetPtr(i).value,
       PrunedAddrInit(ftq.io.toBackend.newest_entry_target),
-      checkPcMem((checkTargetPtr(i) + 1.U).value).startAddr
+      checkPcMem((checkTargetPtr(i) + 1.U).value)
     )
   }
 
@@ -361,7 +359,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val prevTakenFtqPtr = Reg(new FtqPtr)
     val prevTakenValid  = RegInit(0.B)
     val prevTakenTarget = Wire(PrunedAddr(VAddrBits))
-    prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value).startAddr
+    prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value)
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {

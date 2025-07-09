@@ -129,6 +129,14 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
     this.target            := prediction.target
   }
 
+  def overrideStage(idx: Int): Valid[OverrideBranchPrediction] = {
+    require(idx >= 2 && idx <= 3)
+    idx match {
+      case 2 => s2Override
+      case 3 => s3Override
+    }
+  }
+
   // TODO: what else do we need?
 }
 

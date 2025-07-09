@@ -16,6 +16,6 @@
 package xiangshan.frontend.ftq
 
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSModule
+import xiangshan.frontend.FrontendModule
 
-abstract class FtqModule(implicit p: Parameters) extends XSModule
+abstract class FtqModule(implicit p: Parameters) extends FrontendModule with HasFtqParameters

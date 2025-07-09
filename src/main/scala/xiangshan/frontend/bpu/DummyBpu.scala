@@ -133,7 +133,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     assert(abtb.io.debug_startVaddr === s1_pc)
   }
 
-  private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
+  private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
   s3_flush := redirect.valid

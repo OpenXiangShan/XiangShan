@@ -44,6 +44,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
+import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams, TLBPlace}
 
 import scala.math.{max, min, pow}
@@ -123,7 +124,6 @@ case class XSCoreParameters
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
   // old bpu deprecate end
-  bpuParameters: BpuParameters = BpuParameters(),
   ICacheForceMetaECCError: Boolean = false,
   ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
@@ -137,7 +137,8 @@ case class XSCoreParameters
   MaxUopSize: Int = 65,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
-  FtqSize: Int = 64,
+  // TODO: New frontend parameters system below. Replace the old parameters above during development.
+  frontendParameters: FrontendParameters = FrontendParameters(),
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
   FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
@@ -366,7 +367,8 @@ case class XSCoreParameters
   val maxElemPerVreg: Int = VLEN / minVecElen
 
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
-  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
+  val HistoryLength = allHistLens.max + numBr * 64 + 9 // FIXME: original code below
+//  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
   val RegCacheSize = IntRegCacheSize + MemRegCacheSize
   val RegCacheIdxWidth = log2Up(RegCacheSize)
@@ -701,6 +703,7 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def ExtHistoryLength = HistoryLength + 64
+  def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
   def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
   def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
@@ -715,7 +718,6 @@ trait HasXSParameter {
   def MaxUopSize = coreParams.MaxUopSize
   def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   def RenameSnapshotNum = coreParams.RenameSnapshotNum
-  def FtqSize = coreParams.FtqSize
   def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   def IntLogicRegs = coreParams.IntLogicRegs
   def FpLogicRegs = coreParams.FpLogicRegs

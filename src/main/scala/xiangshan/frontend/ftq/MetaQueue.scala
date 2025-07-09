@@ -25,17 +25,17 @@ class MetaQueue(implicit p: Parameters) extends FtqModule {
   class MetaQueueIO extends FtqBundle {
     val ren:   Bool             = Input(Bool())
     val raddr: UInt             = Input(UInt(log2Up(FtqSize).W))
-    val rdata: Ftq_1R_SRAMEntry = Output(new Ftq_1R_SRAMEntry)
+    val rdata: MetaEntry = Output(new MetaEntry)
 
     val wen:   Bool             = Input(Bool())
     val waddr: UInt             = Input(UInt(log2Up(FtqSize).W))
-    val wdata: Ftq_1R_SRAMEntry = Input(new Ftq_1R_SRAMEntry)
+    val wdata: MetaEntry = Input(new MetaEntry)
   }
 
   val io: MetaQueueIO = IO(new MetaQueueIO)
 
   private val sram = Module(new SplittedSRAMTemplate(
-    gen = new Ftq_1R_SRAMEntry,
+    gen = new MetaEntry,
     set = FtqSize,
     way = 1,
     dataSplit = 2,

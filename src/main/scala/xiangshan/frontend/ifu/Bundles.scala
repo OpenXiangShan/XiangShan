@@ -28,7 +28,7 @@ import xiangshan.frontend.ftq.FtqPtr
  * Naming:
  * - I/O:
  *   - Ifu inner use only: xxxBundle
- *   - Other modules use: IfuXxxBundle, consider move to FrontendBundle.scala
+ *   - Other modules use: IfuXxxBundle, consider move to Bundles.scala
  * - Sram/register: xxxEntry
  *
  * Try avoiding directed Bundle, unless it's req-resp pair

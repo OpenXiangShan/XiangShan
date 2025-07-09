@@ -19,22 +19,23 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SyncDataModuleTemplate
+import xiangshan.frontend.PrunedAddr
 
 class EntryQueue(implicit p: Parameters) extends FtqModule {
 
   class FtqEntryQueueIO extends FtqBundle {
     class ReadChannel extends FtqBundle {
-      val ptr:   FtqPtr   = Input(new FtqPtr())
-      val rdata: FtqEntry = Output(new FtqEntry())
+      val ptr:   FtqPtr     = Input(new FtqPtr())
+      val rdata: PrunedAddr = Output(new PrunedAddr(VAddrBits))
     }
 
     val pfPtr:     Vec[ReadChannel] = Vec(2, new ReadChannel)
     val ifuPtr:    Vec[ReadChannel] = Vec(3, new ReadChannel)
     val commitPtr: Vec[ReadChannel] = Vec(2, new ReadChannel)
 
-    val wen:   Bool     = Input(Bool())
-    val waddr: UInt     = Input(UInt(log2Ceil(FtqSize).W))
-    val wdata: FtqEntry = Input(new FtqEntry)
+    val wen:   Bool       = Input(Bool())
+    val waddr: UInt       = Input(UInt(log2Ceil(FtqSize).W))
+    val wdata: PrunedAddr = Input(new PrunedAddr(VAddrBits))
   }
 
   val io: FtqEntryQueueIO = IO(new FtqEntryQueueIO)
@@ -47,7 +48,7 @@ class EntryQueue(implicit p: Parameters) extends FtqModule {
   private val readChannelNum = readChannels.size
 
   private val mem = Module(new SyncDataModuleTemplate(
-    gen = new FtqEntry,
+    gen = PrunedAddr(VAddrBits),
     numEntries = FtqSize,
     numRead = readChannelNum,
     numWrite = 1
