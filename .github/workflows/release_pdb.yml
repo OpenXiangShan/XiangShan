@@ -1,0 +1,31 @@
+name: Release XSPdb Jobs
+on:
+  push:
+    branches: [master, pdb]
+  pull_request:
+    branches: [master, pdb]
+jobs:
+  build-xsdev-image:
+    runs-on: bosc 
+    container: ghcr.io/openxiangshan/xspdb:build-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Env 
+        run: |
+          echo "RTL_HOME=$GITHUB_WORKSPACE/build/rtl" >> $GITHUB_ENV 
+          echo "PDB_HOME=$GITHUB_WORKSPACE/scripts/xspdb" >> $GITHUB_ENV 
+      - name: Init Xiangshan
+        run: make init
+      - name: Setup mill
+        uses: jodersky/setup-mill@v0.3.0
+        with:
+          mill-version: 0.12.3 
+      - name: Build XSPdb 
+        run: |
+          cd $PDB_HOME 
+          make NOOP_HOME="$GITHUB_WORKSPACE" RTL_HOME="$RTL_HOME" PDB_HOME="$PDB_HOME"
+      - name: Upload XSPdb
+        uses: actions/upload-artifact@v4 
+        with:
+          name: xspdb-${{ github.sha }} 
+          path: $PDB_HOME/xspdb.tar.gz 
