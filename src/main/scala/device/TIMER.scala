@@ -15,11 +15,12 @@ import freechips.rocketchip.util._
 
 object TIMERConsts
 {
+  def msipOffset(hart: Int) = hart * msipBytes
   def timecmpOffset = 0x4000
-  def timeOffset = 0xbff8//not use by simtop
+  def timeOffset = 0xbff8
   def msipBytes = 4
   def timecmpBytes = 8
-  def size = 0xc000
+  def size = 0x10000
   def timeWidth = 64
   def ipiWidth = 32
   def ints = 2
@@ -69,6 +70,7 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
 
     val time = RegInit(0.U(timeWidth.W))
     when (io.time.valid) { time := io.time.bits }
+
     val nTiles = intnode.out.size
     val timecmp = Seq.fill(nTiles) { RegInit((BigInt(2).pow(timeWidth)-1).asUInt(timeWidth.W))}
     val ipi = Seq.fill(nTiles) { RegInit(0.U(1.W)) }
@@ -91,7 +93,7 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
      * bff8 mtime lo
      * bffc mtime hi
      */
-val ipi_hartoffset =io.hartId * msipBytes.U
+    val ipi_hartoffset =io.hartId * msipBytes.U
     node.regmapClint(ipi_hartoffset,
       0 -> RegFieldGroup("msip", Some("MSIP Bits"), ipi.zipWithIndex.flatMap { case (r, i) =>
         RegField(1, r, RegFieldDesc(s"msip_$i", s"MSIP bit for Hart $i", reset = Some(0))) :: RegField(ipiWidth - 1) :: Nil
@@ -102,13 +104,14 @@ val ipi_hartoffset =io.hartId * msipBytes.U
 //      timeOffset -> RegFieldGroup("mtime", Some("Timer Register"),
 //        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true))))
     )
-
+    //timecmp rw reg.
     val timecmp_hartoffset =io.hartId * timecmpBytes.U
     node.regmapClint(timecmp_hartoffset,
       timecmpOffset -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
         RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
       },
     )
+    //mtime report r reg.
     node.regmapClint(0.asUInt,
       timeOffset -> Seq(RegField.r(32, io.time.bits, RegFieldDesc("mtime", "Timer Register", volatile=true))))
 
