@@ -1373,15 +1373,22 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     robidxNE && (vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1) || !vecCommitHasExceptionValid(1)) ||
     onlyCommit0 && vecCommitHasExceptionLastFlow(0)
 
-
-  val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
+  val vecLastFlowCommit = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+  (0 until EnsbufferWidth).map{ i =>
     val ptr = rdataPtrExt(i).value
-    val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
-                            dataBuffer.io.enq(i).fire && !firstSplit
-    vecLastFlowCommit
-  }.reduce(_ || _)
 
-  // When a LastFlow with an exception instruction is commited, clear the flag.
+    if(i == 0) {
+      vecLastFlowCommit(i) := vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
+        dataBuffer.io.enq(i).fire
+    }
+    else {
+      vecLastFlowCommit(i) := vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
+        dataBuffer.io.enq(i).fire && !firstSplit
+    }
+  }
+  val vecExceptionFlagCancel  = vecLastFlowCommit.reduce(_ || _)
+
+    // When a LastFlow with an exception instruction is commited, clear the flag.
   when(!vecExceptionFlag.valid && vecCommitHasExceptionValidOR && !vecCommitLastFlow) {
     vecExceptionFlag.valid  := true.B
     vecExceptionFlag.bits   := vecCommitHasExceptionSelectUop
