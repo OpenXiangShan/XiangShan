@@ -1375,10 +1375,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.vecmmioStout.ready := false.B
 
   // miss align buffer will overwrite stOut(0)
-  val storeMisalignCanWriteBack = !otherStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid
+  val storeMisalignCanWriteBack = !otherStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid && !storeUnits(1).io.vecstout.valid
   storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
   storeMisalignBuffer.io.storeOutValid := storeUnits(0).io.stout.valid
-  storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid
+  storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid || storeUnits(1).io.vecstout.valid
   when (storeMisalignBuffer.io.writeBack.valid && storeMisalignCanWriteBack) {
     stOut(0).valid := true.B
     stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
