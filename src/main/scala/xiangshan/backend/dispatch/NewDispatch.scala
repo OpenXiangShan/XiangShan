@@ -476,6 +476,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
   }
+  val dispatchBlock = fromRename.map(_.valid).reduce(_ || _) && !io.toRenameAllFire
+  XSPerfAccumulate(s"block_cycle", dispatchBlock)
+  XSPerfAccumulate(s"block_iq", dispatchBlock && uopBlockByIQ.asUInt.orR)
+  XSPerfAccumulate(s"block_allowDispatch", dispatchBlock && allowDispatch.asUInt.orR)
+  XSPerfAccumulate(s"block_lsqFull", dispatchBlock && lsqCanAccept)
   for (i <- 0 until RenameWidth){
     // check is drop amocas sta
     fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 0.U

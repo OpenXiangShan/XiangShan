@@ -815,6 +815,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
   XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
   XSPerfAccumulate("wait_cycle", !io.in.head.valid && dispatchCanAcc)
+  for (i <- 1 to RenameWidth){
+    XSPerfAccumulate(s"load_num_$i", PopCount(io.in.map(x => x.fire && FuType.isLoad(x.bits.fuType))) === i.U)
+    XSPerfAccumulate(s"store_num_$i", PopCount(io.in.map(x => x.fire && FuType.isStore(x.bits.fuType))) === i.U)
+    XSPerfAccumulate(s"bju_num_$i", PopCount(io.in.map(x => x.fire && FuType.isBrh(x.bits.fuType))) === i.U)
+  }
 
   // These stall reasons could overlap each other, but we configure the priority as fellows.
   // walk stall > dispatch stall > int freelist stall > fp freelist stall

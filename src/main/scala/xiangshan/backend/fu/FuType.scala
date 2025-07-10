@@ -161,6 +161,8 @@ object FuType extends OHEnumeration {
 
   def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 
+  def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp))
+
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
   def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
