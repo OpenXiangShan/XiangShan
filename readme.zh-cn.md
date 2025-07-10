@@ -8,9 +8,11 @@ English Readme is [here](README.md).
 
 香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
 
-[docs.xiangshan.cc](https://docs.xiangshan.cc) 上的微架构文档尚未根据最新架构（昆明湖）更新，我们正在撰写新的设计文档。
+香山设计文档（适用于昆明湖 V2R2）已经发布，您可在此处查看：[docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/)
 
-香山用户文档已单独发布，您可在此处查看：[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
+香山用户文档已单独发布，您可在此处查看：[docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/)、[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
+
+我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
 
 ## 论文发表情况
 
