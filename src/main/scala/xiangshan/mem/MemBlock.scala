@@ -1618,8 +1618,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vfofBuffer.io.in(i).bits  := io.ooo_to_mem.issueVldu(i).bits
   }
   (0 until LduCnt).foreach{i=>
-    loadUnits(i).io.vecldout.ready         := vlMergeBuffer.io.fromPipeline(i).ready
-    loadMisalignBuffer.io.vecWriteBack.ready := true.B
+    loadUnits(i).io.vecldout.ready           := vlMergeBuffer.io.fromPipeline(i).ready
+    loadMisalignBuffer.io.vecWriteBack.ready := vlMergeBuffer.io.fromPipeline(MisalignWBPort).ready &&
+      !loadUnits(MisalignWBPort).io.vecldout.valid
 
     if (i == MisalignWBPort) {
       when(loadUnits(i).io.vecldout.valid) {
@@ -1637,8 +1638,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   (0 until StaCnt).foreach{i=>
     if(i < VstuCnt){
-      storeUnits(i).io.vecstout.ready := true.B
-      storeMisalignBuffer.io.vecWriteBack(i).ready := vsMergeBuffer(i).io.fromPipeline.head.ready
+      storeUnits(i).io.vecstout.ready := vsMergeBuffer(i).io.fromPipeline.head.ready
+      storeMisalignBuffer.io.vecWriteBack(i).ready := vsMergeBuffer(i).io.fromPipeline.head.ready &&
+        !storeUnits(i).io.vecstout.valid
 
       when(storeUnits(i).io.vecstout.valid) {
         vsMergeBuffer(i).io.fromPipeline.head.valid := storeUnits(i).io.vecstout.valid
