@@ -285,7 +285,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
-  io.out.valid := DelayN(csrModOutValid, 3) && !isXRetReg || csrModOutValid && isXRetReg
+  io.out.valid := Mux(isXRetReg, csrModOutValid, DelayN(csrModOutValid, 3))
   io.out.bits.ctrl.exceptionVec.get := Mux(isXRetReg, exceptionVec, DelayNWithValid(exceptionVec, csrModOutValid, 3)._2)
   io.out.bits.ctrl.flushPipe.get := Mux(isXRetReg, flushPipe, DelayNWithValid(flushPipe, csrModOutValid, 3)._2)
   io.out.bits.res.data := DelayNWithValid(csrMod.io.out.bits.rData, csrModOutValid, 3)._2
@@ -315,7 +315,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.outPdestAhead3Cycle.get := pdestReg
   io.out.bits.ctrl.robIdx := Mux(isXRetReg, robIdxReg, DelayNWithValid(robIdxReg, csrModOutValid, 3)._2)
   io.out.bits.ctrl.pdest := DelayNWithValid(RegEnable(io.in.bits.ctrl.pdest, io.in.fire), csrModOutValid, 3)._2
-  io.out.bits.ctrl.rfWen.foreach(_ := DelayNWithValid(RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire), csrModOutValid, 3)._2)
+  io.out.bits.ctrl.rfWen.foreach(_ := Mux(isXRetReg, rfWenReg, DelayNWithValid(rfWenReg, csrModOutValid, 3)._2))
   val preDecodeReg = RegEnable(io.in.bits.ctrl.preDecode.get, io.in.fire)
   io.out.bits.ctrl.preDecode.foreach(_ := Mux(isXRetReg, preDecodeReg, DelayNWithValid(preDecodeReg, csrModOutValid, 3)._2))
   val perfDebugInfoReg = RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
