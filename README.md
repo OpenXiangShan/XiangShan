@@ -8,9 +8,11 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
 
-The microarchitecture documentation on [docs.xiangshan.cc](https://docs.xiangshan.cc) is currently outdated for the latest version (Kunminghu). An updated version is in progress.
+XiangShan Design Docuemtn for Kunminghu V2R2 has been published separately. You can find it at [docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/) or [XiangShan-Design-Doc/releases](https://github.com/OpenXiangShan/XiangShan-Design-Doc/releases). The microarchitecture documentation on [docs.xiangshan.cc](https://docs.xiangshan.cc) is outdated.
 
-XiangShan User Guide has been published separately. You can find it at [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
+XiangShan User Guide has been published separately. You can find it at [docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/) or [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
+
+We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
 
 ## Publications
 
