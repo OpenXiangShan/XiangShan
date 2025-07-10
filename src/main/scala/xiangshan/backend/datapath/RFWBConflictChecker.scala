@@ -65,6 +65,7 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
 
   val cancelCounter      = RegInit(VecInit(Seq.fill(n)(0.U(CounterWidth.W))))
   val isFull             = RegInit(VecInit(Seq.fill(n)(false.B)))
+  val isFullReg          = RegNext(isFull)
   val cancelCounterNext  = Wire(Vec(n, UInt(CounterWidth.W)))
   val isFullNext         = Wire(Vec(n, Bool()))
   val hasFull            = RegInit(false.B)
@@ -78,15 +79,14 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
 
   cancelCounterNext.zip(isFullNext).zip(cancelCounter).zip(isFull).zipWithIndex.foreach{ case ((((cntNext, fullNext), cnt), full), i) =>
     when (io.in(i).valid && !io.in(i).ready) {
-      cntNext   := Mux(cnt === CounterThreshold.U, CounterThreshold.U, cnt + 1.U)
-      fullNext  := cnt(CounterWidth - 1, 1).andR  // counterNext === CounterThreshold.U
+      cntNext   := Mux((cnt === CounterThreshold.U) || cnt === (CounterThreshold - 1).U, CounterThreshold.U, cnt + 2.U)
     }.elsewhen (io.in(i).valid && io.in(i).ready) {
-      cntNext   := 0.U
-      fullNext  := false.B
+      cntNext   := Mux(cnt === 0.U, 0.U, cnt - 1.U)
     }.otherwise {
       cntNext   := cnt
-      fullNext  := full
     }
+    // To resolve deadlock
+    fullNext := (cancelCounter(i) === CounterThreshold.U) || (cancelCounter(i) === (CounterThreshold - 1).U)
   }
 
   finalValid := io.in.zipWithIndex.map{ case (in, i) => in.valid && (!hasFull || !hasFullReq || isFull(i)) }

@@ -189,9 +189,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   dontTouch(crossFtqNumVec)
   dontTouch(oddFtqVec)
-  compressUnit.io.in.zip(io.in).zip(io.validVec).foreach{ case((sink, source), valid) =>
+  val isFusionPair = ((isFusionVec.asUInt << 1).asUInt | isFusionVec.asUInt)(RenameWidth-1, 0).asBools
+  compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
     sink.valid := valid && !io.singleStep
     sink.bits := source.bits
+    sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion)
   }
   compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
@@ -813,6 +815,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
   XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
   XSPerfAccumulate("wait_cycle", !io.in.head.valid && dispatchCanAcc)
+  for (i <- 1 to RenameWidth){
+    XSPerfAccumulate(s"load_num_$i", PopCount(io.in.map(x => x.fire && FuType.isLoad(x.bits.fuType))) === i.U)
+    XSPerfAccumulate(s"store_num_$i", PopCount(io.in.map(x => x.fire && FuType.isStore(x.bits.fuType))) === i.U)
+    XSPerfAccumulate(s"bju_num_$i", PopCount(io.in.map(x => x.fire && FuType.isBrh(x.bits.fuType))) === i.U)
+  }
 
   // These stall reasons could overlap each other, but we configure the priority as fellows.
   // walk stall > dispatch stall > int freelist stall > fp freelist stall
