@@ -397,6 +397,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }
     uops(i).eliminatedMove := isMove(i)
+    uops(i).isMove := isMove(i)
 
     // update pdest
     uops(i).pdest := MuxCase(0.U, Seq(
