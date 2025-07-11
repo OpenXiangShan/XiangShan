@@ -65,14 +65,13 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
 
   // fast path: Timing critical
+  val valid:              Bool       = Bool()
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx    = new FtqPtr
   val ftqOffset = Valid(UInt(CfiPositionWidth.W))
-
-  val topdownInfo = new FrontendTopDownBundle
 
   def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
 
@@ -130,20 +129,24 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  val req:              DecoupledIO[FetchRequestBundle] = Decoupled(new FetchRequestBundle)
+  class FtqToIfuReq(implicit p: Parameters) extends XSBundle {
+    val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
+    val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
+  }
+  val req:              DecoupledIO[FtqToIfuReq]        = Decoupled(new FtqToIfuReq)
   val redirect:         Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val topdown_redirect: Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val flushFromBpu:     BpuFlushInfo                    = new BpuFlushInfo
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val pdWb:           Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
-  val mmioCommitRead: MmioCommitRead                  = new MmioCommitRead
+  val mmioCommitRead: MmioCommitRead                        = new MmioCommitRead
+  val pdWb:           Vec[Valid[PredecodeWritebackBundle]]  = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
-  val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
+  val pc         = PrunedAddr(VAddrBits)
   val ftqIdx     = new FtqPtr
   val ftqOffset  = UInt(log2Ceil(PredictWidth).W)
   val misOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))

@@ -93,4 +93,29 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
     result
   }
 
+  def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, prevIsHalf: Bool, default: T): Vec[T] = {
+    require(shiftNum.getWidth == 2)
+    val dataVec = VecInit((0 until IBufEnqWidth).map(i =>
+      if (i < indataVec.length) indataVec(i) else 0.U.asTypeOf(default)
+    ))
+    val out = WireDefault(VecInit.fill(IBufEnqWidth)(0.U.asTypeOf(default)))
+    for (i <- 0 until IBufEnqWidth) {
+      out(i) := MuxLookup(shiftNum, 0.U.asTypeOf(default))(Seq(
+        0.U -> Mux(prevIsHalf, if (i == IBufEnqWidth - 1) 0.U.asTypeOf(default) else dataVec(i + 1), dataVec(i)),
+        1.U -> Mux(prevIsHalf, dataVec(i), if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)),
+        2.U -> Mux(
+          prevIsHalf,
+          if (i < 1) 0.U.asTypeOf(default) else dataVec(i - 1),
+          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2)
+        ),
+        3.U -> Mux(
+          prevIsHalf,
+          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2),
+          if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3)
+        )
+      ))
+    }
+    out
+  }
+
 }
