@@ -78,6 +78,7 @@ case class XSCoreParameters
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
+  FetchPorts: Int = 2,
   AsidLength: Int = 16,
   VmidLength: Int = 14,
   EnableBPU: Boolean = true,
@@ -128,6 +129,8 @@ case class XSCoreParameters
   ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
   IBufEnqWidth: Int = 16,
+  IBufWriteBank: Int = 4, 
+  IBufReadBank: Int = 6,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -641,6 +644,7 @@ trait HasXSParameter {
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   def FetchWidth = coreParams.FetchWidth
   def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
+  def FetchPorts = coreParams.FetchPorts
   def EnableBPU = coreParams.EnableBPU
   def EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
   def EnableRAS = coreParams.EnableRAS
@@ -705,6 +709,7 @@ trait HasXSParameter {
   def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
   def IBufEnqWidth = coreParams.IBufEnqWidth
+  def IBufWriteBank = coreParams.IBufWriteBank
   def IBufNBank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams
   def DecodeWidth = coreParams.DecodeWidth

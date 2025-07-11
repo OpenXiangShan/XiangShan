@@ -34,6 +34,7 @@ import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
@@ -274,7 +275,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
-  io.toIfu.req.bits.ftqIdx := ifuPtr(0)
+  io.toIfu.req.bits.fetch(0).ftqIdx := ifuPtr(0)
 
   entryQueue.io.pfPtr.zipWithIndex.foreach { case (ptr, offset) => ptr.ptr := pfPtr(offset) }
   entryQueue.io.ifuPtr.zipWithIndex.foreach { case (ptr, offset) => ptr.ptr := ifuPtr(offset) }
@@ -334,10 +335,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException &&
     backendPcFaultPtr === ifuPtr(0)
 
-  io.toIfu.req.valid              := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
-  io.toIfu.req.bits.nextStartAddr := toIfuEntryNextAddr
-  io.toIfu.req.bits.ftqOffset     := toIfuEntryFtqOffset
-  io.toIfu.req.bits               := toIfuEntry
+  io.toIfu.req.valid               := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
+  io.toIfu.req.bits.fetch(0).valid := (bpuInIfuBypass || !entrySentToIfu(ifuPtr(0).value)) && ifuPtr(0) =/= bpuPtr(0)
+  io.toIfu.req.bits.fetch(0).nextStartAddr := toIfuEntryNextAddr
+  io.toIfu.req.bits.fetch(0).ftqOffset     := toIfuEntryFtqOffset
+  io.toIfu.req.bits.fetch(0)               := toIfuEntry // The order is reversed.?
 
   // False hit if fall through is smaller than start address
   when(toIfuEntry.fallThruError && entryHitStatus(ifuPtr(0).value) === entryHit) {
@@ -348,8 +350,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
-  private val shouldFlushIfuReq = io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
-    io.toIfu.flushFromBpu.shouldFlushByStage3(io.toIfu.req.bits.ftqIdx)
+  private val shouldFlushIfuReq = io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.fetch(0).ftqIdx) ||
+    io.toIfu.flushFromBpu.shouldFlushByStage3(io.toIfu.req.bits.fetch(0).ftqIdx)
 
   when(io.toIfu.req.fire && !shouldFlushIfuReq) {
     entrySentToIfu(ifuPtr(0).value) := true.B
@@ -358,7 +360,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Write back from IFU
   // --------------------------------------------------------------------------------
-  private val pdWb = io.fromIfu.pdWb
+  private val pdWb = io.fromIfu.pdWb(0)
   pdQueue.io.wen   := pdWb.valid
   pdQueue.io.waddr := pdWb.bits.ftqIdx.value
   pdQueue.io.wdata.fromPdWb(pdWb.bits)
@@ -449,7 +451,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   ifuRedirect.bits.ftqIdx              := pdWb.bits.ftqIdx
   ifuRedirect.bits.ftqOffset           := pdWb.bits.misOffset.bits
   ifuRedirect.bits.level               := RedirectLevel.flushAfter
-  ifuRedirect.bits.cfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits).toUInt
+  ifuRedirect.bits.cfiUpdate.pc        := pdWb.bits.pc.toUInt
   ifuRedirect.bits.cfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
   ifuRedirect.bits.cfiUpdate.predTaken := cfiIndexVec(pdWb.bits.ftqIdx.value).valid
   ifuRedirect.bits.cfiUpdate.target    := pdWb.bits.target.toUInt
@@ -520,8 +522,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // MMIO fetch
   // --------------------------------------------------------------------------------
+  private val mmioReadValid     = io.fromIfu.mmioCommitRead.valid
   private val mmioPtr           = io.fromIfu.mmioCommitRead.mmioFtqPtr
-  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit
+  private val lastMmioCommitted = mmioReadValid && (commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit)
   io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted)
 
   // --------------------------------------------------------------------------------
@@ -668,11 +671,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.req.valid := !reset.asBool && !backendRedirect.valid && !ifuRedirect.valid &&
     !isFull(dummy_ftqIdx, robCommitPtrReg) &&
     !RegNext(backendRedirect.valid) && !RegNext(RegNext(backendRedirect.valid))
-  io.toIfu.req.bits.startAddr       := dummy_startAddr
-  io.toIfu.req.bits.nextStartAddr   := dummy_startAddr + 32.U(VAddrBits.W)
-  io.toIfu.req.bits.nextlineStart   := dummy_startAddr + (FetchWidth * 4 * 2).U
-  io.toIfu.req.bits.ftqIdx          := dummy_ftqIdx
-  io.toIfu.req.bits.ftqOffset.valid := false.B
+  io.toIfu.req.bits.fetch(0).startAddr       := dummy_startAddr
+  io.toIfu.req.bits.fetch(0).nextStartAddr   := dummy_startAddr + 32.U(VAddrBits.W)
+  io.toIfu.req.bits.fetch(0).nextlineStart   := dummy_startAddr + (FetchWidth * 4 * 2).U
+  io.toIfu.req.bits.fetch(0).ftqIdx          := dummy_ftqIdx
+  io.toIfu.req.bits.fetch(0).ftqOffset.valid := false.B
+
+  io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
 
   private val dummy_canPrefetch = RegInit(true.B)
 
