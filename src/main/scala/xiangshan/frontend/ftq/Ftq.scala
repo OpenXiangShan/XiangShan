@@ -32,6 +32,7 @@ import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
@@ -104,7 +105,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val canCommit     = Wire(Bool())
   private val shouldCommit  = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
-  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.pdWb)
+  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.pdWb(0))
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
@@ -234,18 +235,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid           := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toIfu.req.bits.startVAddr := entryQueue(ifuPtr(0).value)
-  io.toIfu.req.bits.nextStartVAddr := MuxCase(
+  io.toIfu.req.bits.fetch(0).valid          := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toIfu.req.bits.fetch(0).startVAddr     := entryQueue(ifuPtr(0).value)
+  io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
     entryQueue(ifuPtr(1).value),
     Seq(
       (bpuPtr(0) === ifuPtr(0)) -> fromBpu.bits.target,
       (bpuPtr(0) === ifuPtr(1)) -> fromBpu.bits.startVAddr
     )
   )
-  io.toIfu.req.bits.nextCachelineVAddr := io.toIfu.req.bits.startVAddr + (CacheLineSize / 8).U
-  io.toIfu.req.bits.ftqIdx             := ifuPtr(0)
-  io.toIfu.req.bits.ftqOffset          := cfiQueue(ifuPtr(0).value)
+  io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
+  io.toIfu.req.bits.fetch(0).ftqIdx             := ifuPtr(0)
+  io.toIfu.req.bits.fetch(0).ftqOffset          := cfiQueue(ifuPtr(0).value)
 
+  io.toIfu.req.bits.fetch(1)  := 0.U.asTypeOf(new FetchRequestBundle)
   // --------------------------------------------------------------------------------
   // Interaction with backend
   // --------------------------------------------------------------------------------
