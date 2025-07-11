@@ -67,7 +67,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val tlAsyncSourceOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
   tlAsyncSourceOpt.foreach(_.node := tile.sep_tl_opt.get)
   // synchronous source node
-  val tlSyncSourceOpt = Option.when(SeperateTLsync)(TLTempNode())
+  val tlSyncSourceOpt = Option.when(EnableIOSeperateTLBus && SeperateTLsync)(TLTempNode())
   tlSyncSourceOpt.foreach(_ := tlXbar.get)
 
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
