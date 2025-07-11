@@ -460,15 +460,30 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
-  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) &&
-   (mmio(ptr.value) || datavalid(ptr.value) || vecMbCommit(ptr.value))
-    && ptr =/= enqPtrExt(0))
+  val dataReadyLookup = dataReadyLookupVec.map(ptr =>
+    allocated(ptr.value) &&
+    (addrvalid(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value)) || vecMbCommit(ptr.value)) &&
+    !unaligned(ptr.value) &&
+    ptr =/= enqPtrExt(0)
+  )
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
+  // move unalign ptr
+  val deqGroupHasUnalign = deqPtrExt.map { case ptr => unaligned(ptr.value) }.reduce(_|_)
+  val dataPtrInDeqGroupRangeVec = VecInit(deqPtrExt.zipWithIndex.map { case (ptr, i) =>
+    dataReadyPtrExt === ptr && sqDeqCnt > i.U
+  })
+  val unalignedCanMove = deqGroupHasUnalign && dataPtrInDeqGroupRangeVec.asUInt.orR
+  when (unalignedCanMove) {
+    val step = sqDeqCnt - PriorityEncoder(dataPtrInDeqGroupRangeVec)
+    dataReadyPtrExt := dataReadyPtrExt + step
+  }
+
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    stDataReadyVecReg(i) := allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i)))
+    stDataReadyVecReg(i) := allocated(i) &&
+      (addrvalid(i) && (mmio(i) || datavalid(i)) || (isVec(i) && vecMbCommit(i))) && !unaligned(i)
   })
   io.stDataReadyVec := GatedValidRegNext(stDataReadyVecReg)
 
@@ -903,7 +918,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     is(nc_idle) {
       when(
         nc(rptr0) && allocated(rptr0) && !completed(rptr0) && committed(rptr0) &&
-        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0) 
+        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0)
       ) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
@@ -965,15 +980,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cboMmioAddr = get_block_addr(cboMmioPAddr)
   val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))
 
-  // RegNext(io.sbuffer(i).fire) is used to alignment timing
   val isCboZeroToSbVec = (0 until EnsbufferWidth).map{ i =>
-    RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline) && allocated(deqPtrExt(i).value)
+    io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline && allocated(dataBuffer.io.deq(i).bits.sqPtr.value)
   }
   val cboZeroToSb        = isCboZeroToSbVec.reduce(_ || _)
   val cboZeroFlushSb     = GatedRegNext(cboZeroToSb)
 
-  val cboZeroUop         = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt.map(x=>uop(x.value))), cboZeroToSb)
-  val cboZeroSqIdx       = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt), cboZeroToSb)
+  val cboZeroUop         = RegEnable(PriorityMux(isCboZeroToSbVec, dataBuffer.io.deq.map(x=>uop(x.bits.sqPtr.value))), cboZeroToSb)
+  val cboZeroSqIdx       = RegEnable(PriorityMux(isCboZeroToSbVec, dataBuffer.io.deq.map(_.bits.sqPtr)), cboZeroToSb)
   val cboZeroValid       = RegInit(false.B)
   val cboZeroWaitFlushSb = RegInit(false.B)
 
@@ -1066,6 +1080,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     cboZeroWaitFlushSb    := false.B
   }
   when (io.cboZeroStout.fire) {
+    completed(cboZeroSqIdx.value) := true.B
     cboZeroValid := false.B
   }
 
@@ -1310,8 +1325,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // Only sqNeedDeq can move the ptr.
     // ---
     // however, `completed` is register, when it turn true, the data has already been written to sbuffer
+    // Besides, we should not have cbozero completed. (wline is currently only for cbozero)
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq) {
+    when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq && !io.sbuffer(i).bits.wline) {
 
       completed(ptr) := true.B
     }
@@ -1325,7 +1341,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val ncStall = if(i == 0) nc(rdataPtrExt(0).value) else (nc(rdataPtrExt(i).value) || nc(rdataPtrExt(i-1).value))
-    val exceptionVliad      = isVec(ptr) && hasException(ptr) && dataBuffer.io.enq(i).fire
+    val exceptionVliad      = isVec(ptr) && hasException(ptr) && dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq
     (exceptionVliad, uop(ptr), vecLastFlow(ptr))
   }
 

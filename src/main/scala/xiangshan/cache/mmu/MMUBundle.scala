@@ -778,7 +778,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   }
 
   def isNapot(level: UInt): Bool = {
-    isLeaf() && (n === true.B)
+    isLeaf() && n === true.B && ppn(3, 0) === 8.U && level === 0.U
   }
 
   def getPerm() = {
@@ -1132,7 +1132,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.tag := vpn
     this.entry.perm.map(_ := resp_pte.getPerm())
     this.entry.ppn := resp_pte.ppn
-    this.entry.n.map(_ := resp_pte.n)
+    this.entry.n.map(_ := resp_pte.n === true.B && resp_pte.ppn(3, 0) === 8.U && level === 0.U)
     this.entry.pbmt := resp_pte.pbmt
     this.entry.prefetch := DontCare
     this.entry.asid := DontCare
@@ -1246,7 +1246,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true, hasNapot = true))
     ptw_resp.ppn := resp_pte.getPPN()(ptePPNLen - 1, sectortlbwidth)
     ptw_resp.ppn_low := resp_pte.getPPN()(sectortlbwidth - 1, 0)
-    ptw_resp.n.map(_ := resp_pte.n)
+    ptw_resp.n.map(_ := resp_pte.n === true.B && ptw_resp.ppn(3, 0) === 8.U && level === 0.U)
     ptw_resp.pbmt := resp_pte.pbmt
     ptw_resp.level.map(_ := level)
     ptw_resp.perm.map(_ := resp_pte.getPerm())
