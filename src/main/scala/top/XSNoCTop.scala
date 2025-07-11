@@ -299,11 +299,11 @@ trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
   )
   tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
   // synchronous sink node
-  val tlSyncSinkOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
+  val tlSyncSinkOpt = Option.when(EnableIOSeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
   tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
 
   // The Manager Node is only used to make IO
-  val tl = Option.when(SeperateTLBus)(TLManagerNode(Seq(
+  val tl = Option.when(EnableIOSeperateTLBus)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
       managers = SeperateTLBusRanges map { address =>
         TLSlaveParameters.v1(
@@ -320,7 +320,7 @@ trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
       beatBytes = 8
     )
   )))
-  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
+  val tlXbar = Option.when((SeperateTLBus && EnableSeperateTLAsync) || EnableIOSeperateTLBus)(TLXbar())
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
   tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
   asyncClint.foreach(_.node := tlXbar.get)//TLXbar node out connnect with timer mmio

@@ -116,7 +116,8 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  EnableClintAsync:       Boolean = true,
+  EnableIOSeperateTLBus: Boolean = false,
+  EnableClintAsync: Boolean = true,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -182,6 +183,7 @@ trait HasSoCParameter {
   // seperate TL bus
   val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
 
+  val EnableIOSeperateTLBus = soc.EnableIOSeperateTLBus && SeperateTLBus
   val EnableClintAsync = soc.EnableClintAsync
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
