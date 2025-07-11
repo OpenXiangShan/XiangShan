@@ -19,7 +19,7 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{DebugModule, TLPMA, TLPMAIO, AXI4MemEncrypt}
+import device.{AXI4MemEncrypt, DebugModule, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO, TimeAsync, TimeVldGen}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -35,6 +35,7 @@ import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
+import device.SYSCNTConsts.timeWidth
 import openLLC.OpenLLCParam
 
 case object SoCParamsKey extends Field[SoCParameters]
@@ -70,7 +71,8 @@ case class SoCParameters
     PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0)
   ),
-  CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
+  TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
+  SYSCNTRange: AddressSet = AddressSet(0x3a010000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
@@ -114,6 +116,8 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  EnableIOSeperateTLBus: Boolean = false,
+  EnableClintAsync: Boolean = true,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -179,6 +183,8 @@ trait HasSoCParameter {
   // seperate TL bus
   val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
 
+  val EnableIOSeperateTLBus = soc.EnableIOSeperateTLBus && SeperateTLBus
+  val EnableClintAsync = soc.EnableClintAsync
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
 
@@ -198,7 +204,8 @@ trait HasPeripheralRanges {
   private def mmpma = pmParams.mmpma
 
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
-    "CLINT" -> soc.CLINTRange,
+    "TIMER" -> soc.TIMERRange,
+    "SYSCNT" -> soc.SYSCNTRange,
     "BEU"   -> soc.BEURange,
     "PLIC"  -> soc.PLICRange,
     "PLL"   -> soc.PLLRange,
@@ -466,9 +473,15 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
-  if (enableCHI) { clint.node := device_xbar.get }
-  else { clint.node := peripheralXbar.get }
+  //instant syscnt
+  val syscnt = (LazyModule(new SYSCNT(SYSCNTParams(soc.SYSCNTRange.base), 8)))
+  //  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
+
+  if (enableCHI) { syscnt.node := device_xbar.get }
+  else { syscnt.node := peripheralXbar.get }
+
+//  if (enableCHI) { clint.node := device_xbar.get }
+//  else { clint.node := peripheralXbar.get }
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
     val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
@@ -495,13 +508,17 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   if (enableCHI) { pll_node := device_xbar.get }
   else { pll_node := peripheralXbar.get }
 
+  //instance timer
+  val timer = (LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
   if (enableCHI) {
     if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
+      timer.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := device_xbar.get
+      timer.node := device_xbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
@@ -509,8 +526,10 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   } else {
     if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
+      timer.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := peripheralXbar.get
+      timer.node := peripheralXbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
       l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
@@ -534,12 +553,18 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(new debugModule.DebugModuleIO)
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    val rtc_clock = IO(Input(Bool()))
+    val rtc_clock = IO(Input(Clock()))
+    val rtc_reset = IO(Input(Reset()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
     val clintTime = IO(Output(ValidIO(UInt(64.W))))
-
+    val scntIO = IO(new Bundle {
+      val update_en = Input(Bool())
+      val update_value = Input(UInt(timeWidth.W))
+      val stop_en = Input(Bool())
+      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+    })
     debugModule.module.io <> debug_module_io
 
     // sync external interrupts
@@ -558,14 +583,34 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       axi4memencrpty.get.module.io.random_data := cnt(0).asBool
     }
     // positive edge sampling of the lower-speed rtc_clock
-    val rtcTick = RegInit(0.U(3.W))
-    rtcTick := Cat(rtcTick(1, 0), rtc_clock)
-    clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
+//    val rtcTick = RegInit(0.U(3.W))
+//    rtcTick := Cat(rtcTick(1, 0), rtc_clock)
+//    clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
 
-    clintTime := clint.module.io.time
+    //instance time async proc ip
+    //timevldgen instant to generate timestamp valid
+    val ClintVldGen = Module(new TimeVldGen())
+    ClintVldGen.io.i_time := syscnt.module.io.time
+    ClintVldGen.clock := rtc_clock
+    ClintVldGen.reset := rtc_reset
+    // timer instance
+    val time_async = Module(new TimeAsync())
+    time_async.io.i_time <> ClintVldGen.io.o_time
+    clintTime := time_async.io.o_time //syscnt->timevldgen ->timeasync
+
+    timer.module.io.time <> ClintVldGen.io.o_time
+    timer.module.io.hartId := 0.U
+
+    // instance syscnt
+    syscnt.module.clock := rtc_clock
+    syscnt.module.reset := rtc_reset
+    syscnt.module.io.update_en := scntIO.update_en
+    syscnt.module.io.update_value := scntIO.update_value
+    syscnt.module.io.stop_en := scntIO.stop_en
+    scntIO.time_freq := syscnt.module.io.time_freq
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 
