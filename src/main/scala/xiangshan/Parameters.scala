@@ -718,7 +718,8 @@ trait HasXSParameter {
   def IBufSize = coreParams.IBufSize
   def IBufEnqWidth = coreParams.IBufEnqWidth
   def IBufWriteBank = coreParams.IBufWriteBank
-  def IBufNBank = coreParams.IBufNBank
+  def IBufReadBank = coreParams.IBufReadBank
+  def IBufNRank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams
   def DecodeWidth = coreParams.DecodeWidth
   def RenameWidth = coreParams.RenameWidth
