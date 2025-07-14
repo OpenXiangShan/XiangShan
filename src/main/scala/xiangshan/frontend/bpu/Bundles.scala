@@ -26,6 +26,8 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
+import xiangshan.frontend.bpu.ras.RasInternalMeta
+import xiangshan.frontend.bpu.ras.RasMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -131,9 +133,28 @@ class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters
   def startVAddr: PrunedAddr = PrunedAddrInit(cfiUpdate.pc)
   def target:     PrunedAddr = PrunedAddrInit(cfiUpdate.target)
   def taken:      Bool       = cfiUpdate.taken
+  def attribute: BranchAttribute = {
+    val m = MuxCase(
+      BranchAttribute.Conditional,
+      Seq(
+        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJal)  -> BranchAttribute.DirectCall,
+        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJalr) -> BranchAttribute.IndirectCall,
+        (cfiUpdate.pd.isRet)                         -> BranchAttribute.Return,
+        (cfiUpdate.pd.isJal)                         -> BranchAttribute.OtherDirect,
+        (cfiUpdate.pd.isJalr)                        -> BranchAttribute.OtherIndirect
+      )
+    )
+    m
+  }
   def speculativeMeta: BpuSpeculativeMeta = {
     val m = Wire(new BpuSpeculativeMeta)
-    m.phrHistPtr := cfiUpdate.phrHistPtr
+    m.phrHistPtr   := cfiUpdate.phrHistPtr
+    m.rasMeta.ssp  := cfiUpdate.ssp
+    m.rasMeta.tosw := cfiUpdate.TOSW
+    m.rasMeta.tosr := cfiUpdate.TOSR
+    m.rasMeta.nos  := cfiUpdate.NOS
+    m.rasMeta.sctr := cfiUpdate.sctr
+    m.topRetAddr   := cfiUpdate.topAddr
     m
   }
 
@@ -183,7 +204,9 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
-  val phrHistPtr: PhrPtr = new PhrPtr
+  val phrHistPtr: PhrPtr          = new PhrPtr
+  val rasMeta:    RasInternalMeta = new RasInternalMeta
+  val topRetAddr: PrunedAddr      = PrunedAddr(VAddrBits)
   // TODO: rasPtr for recovery
   // TODO: and maybe more
 }
@@ -192,7 +215,7 @@ class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val abtb: AheadBtbMeta = new AheadBtbMeta
   val mbtb: MainBtbMeta  = new MainBtbMeta
-  // TODO: maybe more
+  val ras:  RasMeta      = new RasMeta
 }
 
 /* *** internal const & type *** */
