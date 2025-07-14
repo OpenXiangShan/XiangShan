@@ -217,6 +217,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
     rTrackersDataID(read_resp_id) := rTrackersDataID(read_resp_id) + 1.U
   }
 
+  rPipe.io.deq.ready := rQueue.io.enq.ready
   rQueue.io.enq.valid := rPipe.io.deq.valid
   rQueue.io.enq.bits.id := rPipe.io.deq.bits.id
   rQueue.io.enq.bits.data := ramHelper.readAndHold(read_resp_addr, rPipe.io.enq.fire).asUInt
@@ -275,6 +276,10 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   }
 
   // generate write response
+  bQueue.io.deq.ready := in.b.ready
+  in.b.valid := bQueue.io.deq.valid
+  in.b.bits := bQueue.io.deq.bits
+
   bQueue.io.enq.valid := wQueue.io.deq.fire && wQueue.io.deq.bits.last
   bQueue.io.enq.bits.id := wTrackers.io.deq.bits.id
   bQueue.io.enq.bits.resp := AXI4Parameters.RESP_OKAY
