@@ -155,6 +155,8 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   //       consistent with the legacy AXI4Memory SoC. Which was natural for write transactions, and
   //       patched by 'read_flap*' for read transactions.
 
+  // !! This implementation should be only used for simulation purposes. !! 
+
   val numOutstanding = 1 << in.ar.bits.id.getWidth
   // Note: we are using in.ar.bits.addr.getWidth insead of ramOffsetBits here.
   // Why: the CPU may access out-of-range addresses. Let the RAM helper deal with it.
@@ -178,12 +180,12 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   arQueue.io.enq.valid := in.ar.valid
   arQueue.io.enq.bits := in.ar.bits
 
-  arQueue.io.deq.ready := readRequest(arQueue.io.deq.valid, arQueue.io.deq.bits.addr, arQueue.io.deq.bits.id)
-
-  when (arQueue.io.deq.fire) {
+  when (arQueue.io.enq.fire) {
     rTrackers.write(in.ar.bits.id, in.ar.bits)
     rTrackersDataID(in.ar.bits.id) := 0.U
   }
+
+  arQueue.io.deq.ready := readRequest(arQueue.io.deq.valid, arQueue.io.deq.bits.addr, arQueue.io.deq.bits.id)
 
   // read data response: resp from DRAMsim3; read data and response to in.r
   val rPipe = Module(new Queue(chiselTypeOf(in.r.bits), 1, pipe = true, flow = false))
