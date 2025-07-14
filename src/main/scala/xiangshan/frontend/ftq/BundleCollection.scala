@@ -32,10 +32,10 @@ import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuSpeculativeMeta
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
-import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.HasBPUConst
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {

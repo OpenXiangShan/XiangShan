@@ -46,6 +46,8 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.ras.Ras
+import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.ftq.OldFtqToBpuIO
 import xiangshan.frontend.selectByTaken
 
@@ -169,13 +171,13 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val ftb    = Module(new Ftb)
   val tage   = Module(new Tage)
   val ittage = Module(new Ittage)
-  val ras    = Module(new Ras)
+//  val ras    = Module(new Ras)
 
   ftb.io.in.fromFauFtb        := uftb.io.out.toFtb
   ftb.io.in.fromTage          := tage.io.out.toFtb
   ftb.io.in.isRedirectFromIfu := RegNext(io.fromFtq.redirctFromIFU, init = false.B)
   ittage.io.in.fromFtb        := ftb.io.out.toIttage
-  ras.io.in.fromFtb           := ftb.io.out.toRas
+//  ras.io.in.fromFtb           := ftb.io.out.toRas
 
   val s0_stall = Wire(Bool()) // For some reason s0 stalled, usually FTQ Full
 
@@ -209,7 +211,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val s2_pc = RegEnable(s1_pc, s1_fire)
   val s3_pc = RegEnable(s2_pc, s2_fire)
 
-  val predictorsIn = Seq(uftb.io.in, tage.io.in, ftb.io.in, ittage.io.in, ras.io.in)
+  val predictorsIn = Seq(uftb.io.in, tage.io.in, ftb.io.in, ittage.io.in)
   predictorsIn.foreach { in =>
     in.ctrl := DelayN(io.ctrl, 2)
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -288,7 +290,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val redirect_req = io.fromFtq.redirect
   val do_redirect  = RegNextWithEnable(redirect_req) // TODO: reduce one cycle delay
 
-  ras.io.in.redirect := do_redirect
+  // ras.io.in.redirect := do_redirect
 
   s3_flush := redirect_req.valid // flush when redirect comes
   s2_flush := s3_flush || s3_override
@@ -345,7 +347,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3.full_pred.targets.last := MuxCase(
     ftb.io.out.s3_fullPred.targets.last, // default
     Seq(
-      ras.io.out.predictionValid    -> ras.io.out.s3_returnAddress,
+      // ras.io.out.predictionValid    -> ras.io.out.s3_returnAddress,
       ittage.io.out.predictionValid -> ittage.io.out.s3_jalrTarget
     )
   )
@@ -358,7 +360,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3_ftbEntry := ftb.io.out.s3_ftbEntry
 
   bpuResp.s3_specInfo.histPtr     := s3_ghist_ptr
-  bpuResp.s3_specInfo.rasSpecInfo := ras.io.out.s3_rasSpecInfo
+  bpuResp.s3_specInfo.rasSpecInfo := DontCare // ras.io.out.s3_rasSpecInfo
 //  if (bpuResp.s3_specInfo.sc_disagree.isDefined && tage.io.out.sc_disagree.isDefined) {
 //    bpuResp.s3_specInfo.sc_disagree.get := tage.io.out.sc_disagree.get
 //  }
@@ -367,7 +369,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3_meta.tageMeta   := tage.io.out.s3_meta
   bpuResp.s3_meta.ftbMeta    := ftb.io.out.s3_meta
   bpuResp.s3_meta.ittageMeta := ittage.io.out.s3_meta
-  bpuResp.s3_meta.rasMeta    := ras.io.out.s3_meta
+  bpuResp.s3_meta.rasMeta    := DontCare // ras.io.out.s3_meta
 
   val totalMetaSize = (new OldPredictorMeta).getWidth
   println(s"total meta size: $totalMetaSize\n")

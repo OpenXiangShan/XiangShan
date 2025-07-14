@@ -34,8 +34,9 @@ import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, 
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
-import xiangshan.frontend.bpu.{HasBPUParameter, BpuCtrl, RasPtr}
+import xiangshan.frontend.bpu.{HasBPUParameter, BpuCtrl}
 import xiangshan.frontend.bpu.phr.PhrPtr
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
@@ -134,12 +135,12 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   def fromFtqRedirectSram(entry: FtqRedirectSramEntry) = {
     // this.hist := entry.ghist
     this.histPtr := entry.histPtr
-    this.ssp := entry.rasSpecInfo.ssp
-    this.sctr := entry.rasSpecInfo.sctr
-    this.TOSW := entry.rasSpecInfo.TOSW
-    this.TOSR := entry.rasSpecInfo.TOSR
-    this.NOS := entry.rasSpecInfo.NOS
-    this.topAddr := entry.rasSpecInfo.topAddr.toUInt
+    this.ssp     := entry.speculativeMeta.rasMeta.ssp
+    this.sctr    := entry.speculativeMeta.rasMeta.sctr
+    this.TOSW    := entry.speculativeMeta.rasMeta.TOSW
+    this.TOSR    := entry.speculativeMeta.rasMeta.TOSR
+    this.NOS     := entry.speculativeMeta.rasMeta.NOS
+    this.topAddr := entry.speculativeMeta.topRetAddr.toUInt
     this.phrHistPtr := entry.speculativeMeta.phrHistPtr // TODO: this bundle should be re-organized
     this
   }

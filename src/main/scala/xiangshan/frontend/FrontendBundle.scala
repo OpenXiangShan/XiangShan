@@ -37,8 +37,8 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.bpu.OldPredictorMeta
-import xiangshan.frontend.bpu.RasPtr
+import xiangshan.frontend.bpu.OldPredictorMeta // TODO: remove this
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
