@@ -114,5 +114,4 @@ trait Helpers extends HasAheadBtbParameters {
     }
     multiHit
   }
-
 }

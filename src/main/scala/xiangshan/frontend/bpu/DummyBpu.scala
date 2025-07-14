@@ -26,6 +26,7 @@ import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
@@ -43,11 +44,13 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
   private val abtb        = Module(new AheadBtb)
+  private val mbtb        = Module(new MainBtb)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
-    abtb
+    abtb,
+    mbtb
   )
 
   /* *** aliases *** */
@@ -59,6 +62,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtb_enable
   abtb.io.enable        := true.B // FIXME
+  mbtb.io.enable        := true.B
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -145,6 +149,14 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ubtb.io.train.bits.cfiPosition := t0_cfiPosition
   ubtb.io.train.bits.target      := t0_target
   ubtb.io.train.bits.attribute   := t0_attribute
+  // mbtb
+  mbtb.io.train.valid            := t0_valid
+  mbtb.io.train.bits.startVAddr  := t0_startVAddr
+  mbtb.io.train.bits.taken       := t0_taken
+  mbtb.io.train.bits.cfiPosition := t0_cfiPosition
+  mbtb.io.train.bits.target      := t0_target
+  mbtb.io.train.bits.attribute   := t0_attribute
+  mbtb.io.train.bits.meta        := train.bits.newMeta.mbtbMeta
 
   // abtb
   abtb.io.train.valid          := t0_valid
@@ -242,8 +254,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
+  // mbtb meta
+  val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+
   private val predictorMeta = Wire(new NewPredictorMeta)
   predictorMeta.abtbMeta := s3_abtbMeta
+  predictorMeta.mbtbMeta := s3_mbtbMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid

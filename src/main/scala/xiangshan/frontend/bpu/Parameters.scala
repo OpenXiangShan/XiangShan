@@ -20,6 +20,7 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
+import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 
 // For users: these are default Bpu parameters set by dev, do not change them here,
 // use top-level Parameters.scala instead.
@@ -29,7 +30,8 @@ case class BpuParameters(
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
-    aBtbParameters: AheadBtbParameters = AheadBtbParameters()
+    aBtbParameters: AheadBtbParameters = AheadBtbParameters(),
+    mbtbParameters: MainBtbParameters = MainBtbParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))
@@ -41,6 +43,7 @@ trait HasBpuParameters extends HasXSParameter {
 
   // general
   def FetchBlockSize:       Int = bpuParameters.FetchBlockSize
+  def FetchBlockSizeWidth:  Int = log2Ceil(FetchBlockSize)
   def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
   def FetchBlockInstNum:    Int = FetchBlockSize / instBytes

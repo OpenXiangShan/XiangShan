@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
+import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.ftq.FtqPtr
 
 class BranchAttribute extends Bundle {
@@ -43,6 +44,20 @@ class BranchAttribute extends Bundle {
   // hasPop = isPop || isPushAndPop, hasPush = isPush || isPushAndPop
   def hasPop:  Bool = rasAction(BranchAttribute.RasAction.popBit)
   def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
+}
+
+// TargetCarry is an attribute of partial target
+// While lower part of target is recorded in predictor structure,
+// Some more bits are need when a branch target is crossing the boundary of what lower partial target bits can record.
+object TargetCarry extends EnumUInt(3) {
+  // Branch target and current PC is in the same region
+  def Fit: UInt = 0.U(width.W)
+  // Branch target is in the next region of current PC
+  // Final target should be Cat(PC high bits + RegionSize, lower partial target bits)
+  def Overflow: UInt = 1.U(width.W)
+  // Branch target is in the previous region of current PC
+  // Final target should be Cat(PC high bits - RegionSize, lower partial target bits)
+  def Underflow: UInt = 2.U(width.W)
 }
 
 object BranchAttribute {
@@ -132,6 +147,7 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
 
 class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
   val abtbMeta: AheadBtbMeta = new AheadBtbMeta
+  val mbtbMeta: MainBtbMeta = new MainBtbMeta
   // TODO: other meta
 }
 
