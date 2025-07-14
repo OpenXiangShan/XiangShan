@@ -37,7 +37,7 @@ import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.OldPredictorMeta // TODO: remove this
-import xiangshan.frontend.bpu.RasPtr
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
@@ -711,15 +711,6 @@ class OldFullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) exte
 
   def display(cond: Bool): Unit =
     XSDebug(cond, p"[taken_mask] ${Binary(br_taken_mask.asUInt)} [hit] $hit\n")
-}
-
-class RasSpeculativeInfo(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils {
-  val ssp     = UInt(log2Up(RasSize).W)
-  val sctr    = UInt(RasCtrSize.W)
-  val TOSW    = new RasPtr
-  val TOSR    = new RasPtr
-  val NOS     = new RasPtr
-  val topAddr = PrunedAddr(VAddrBits)
 }
 
 class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle

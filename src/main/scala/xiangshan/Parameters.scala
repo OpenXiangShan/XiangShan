@@ -83,7 +83,6 @@ case class XSCoreParameters
   VmidLength: Int = 14,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
-  EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
   EnableSC: Boolean = true,
@@ -101,9 +100,6 @@ case class XSCoreParameters
   FtbSize: Int = 2048,
   FtbWays: Int = 4,
   FtbTagLength: Int = 20,
-  RasSize: Int = 16,
-  RasSpecSize: Int = 32,
-  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
@@ -643,7 +639,6 @@ trait HasXSParameter {
   def FetchPorts = coreParams.FetchPorts
   def EnableBPU = coreParams.EnableBPU
   def EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
-  def EnableRAS = coreParams.EnableRAS
   def EnableLB = coreParams.EnableLB
   def EnableLoop = coreParams.EnableLoop
   def EnableSC = coreParams.EnableSC
@@ -658,9 +653,6 @@ trait HasXSParameter {
   def FtbSize = coreParams.FtbSize
   def FtbWays = coreParams.FtbWays
   def FtbTagLength = coreParams.FtbTagLength
-  def RasSize = coreParams.RasSize
-  def RasSpecSize = coreParams.RasSpecSize
-  def RasCtrSize = coreParams.RasCtrSize
   def numBr = coreParams.numBr
   def TageTableInfos = coreParams.TageTableInfos
   def TageBanks = coreParams.numBr
