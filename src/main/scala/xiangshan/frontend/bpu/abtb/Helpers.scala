@@ -16,71 +16,40 @@
 package xiangshan.frontend.bpu.abtb
 
 import chisel3._
-import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasAheadBtbParameters {
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxLen + BankIdxLen + instOffsetBits - 1, BankIdxLen + instOffsetBits)
+    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxLen + instOffsetBits - 1, instOffsetBits)
+    pc(BankIdxWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(TagLen, instOffsetBits)
+    pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
   def getPcUpperBits(pc: PrunedAddr): UInt =
-    pc(VAddrBits - 1, TargetLowerBitsLen + instOffsetBits)
+    pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
-    target(TargetLowerBitsLen + instOffsetBits - 1, instOffsetBits)
-
-  def getAlignedPc(pc: PrunedAddr): PrunedAddr = {
-    val shiftAmount = log2Ceil(FetchBlockAlignSize)
-    val alignedPc   = (pc.toUInt >> shiftAmount) << shiftAmount
-    PrunedAddrInit(alignedPc.asUInt)
-  }
-
-  def getHitMask(entries: Vec[AheadBtbEntry], tag: UInt): Vec[Bool] =
-    VecInit(entries.map(entry => entry.valid && entry.tag === tag))
-
-  def getTakenMask(entries: Vec[AheadBtbEntry], hitMask: Vec[Bool], counterResult: Vec[Bool]): Vec[Bool] =
-    VecInit(entries.zip(hitMask).zip(counterResult).map { case ((entry, hit), taken) =>
-      hit && (taken || entry.isStaticTarget)
-    })
-
-  def getFirstTakenEntry(entries: Vec[AheadBtbEntry], takenMask: Vec[Bool]): (AheadBtbEntry, UInt) = {
-    val indexedEntries = VecInit(entries.zipWithIndex.zip(takenMask).map {
-      case ((e, i), t) =>
-        val bundle = new Bundle {
-          val key   = UInt((1 + e.position.getWidth).W)
-          val idx   = UInt(log2Ceil(entries.size).W)
-          val entry = e.cloneType
-        }
-        val wire = Wire(bundle)
-        wire.key   := Cat(!t, e.position)
-        wire.idx   := i.U
-        wire.entry := e
-        wire
-    })
-    val firstTakenEntry = indexedEntries.reduceTree((a, b) => Mux(a.key < b.key, a, b))
-    (firstTakenEntry.entry, firstTakenEntry.idx)
-  }
+    target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
     val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits = MuxCase(
-      startPcUpperBits,
-      Seq(
-        entry.targetState.isCarry  -> (startPcUpperBits + 1.U),
-        entry.targetState.isBorrow -> (startPcUpperBits - 1.U)
+    val targetUpperBits = if (EnableTargetFix)
+      MuxCase(
+        startPcUpperBits,
+        Seq(
+          entry.targetState.get.isCarry  -> (startPcUpperBits + 1.U),
+          entry.targetState.get.isBorrow -> (startPcUpperBits - 1.U)
+        )
       )
-    )
+    else
+      startPcUpperBits
     val targetLowerBits = entry.targetLowerBits
-    val target          = PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
-    target
+    PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
   }
 
   def getTargetState(startPc: PrunedAddr, target: PrunedAddr): TargetState = {
@@ -93,5 +62,24 @@ trait Helpers extends HasAheadBtbParameters {
         (targetUpperBits < startPcUpperBits) -> TargetState.Borrow
       )
     )
+  }
+
+  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, UInt) = {
+    require(hitMask.length == position.length)
+    require(hitMask.length >= 2)
+    val isMultiHit     = WireDefault(false.B)
+    val multiHitWayIdx = WireDefault(0.U(WayIdxWidth.W))
+    for {
+      i <- 0 until NumWays
+      j <- i + 1 until NumWays
+    } {
+      val bothHit      = hitMask(i) && hitMask(j)
+      val samePosition = position(i) === position(j)
+      when(bothHit && samePosition) {
+        isMultiHit     := true.B
+        multiHitWayIdx := i.U
+      }
+    }
+    (isMultiHit, multiHitWayIdx)
   }
 }

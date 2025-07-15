@@ -21,22 +21,20 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TargetState
-import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
-  val redirectValid: Bool                  = Input(Bool())
-  val overrideValid: Bool                  = Input(Bool())
-  val update:        Valid[AheadBtbUpdate] = Flipped(Valid(new AheadBtbUpdate))
+  val redirectValid: Bool                 = Input(Bool())
+  val overrideValid: Bool                 = Input(Bool())
+  val train:         Valid[AheadBtbTrain] = Flipped(Valid(new AheadBtbTrain))
 
   val meta:             AheadBtbMeta = Output(new AheadBtbMeta)
   val debug_startVaddr: PrunedAddr   = Output(PrunedAddr(VAddrBits))
 }
 
 class BankReadReq(implicit p: Parameters) extends AheadBtbBundle {
-  val setIdx: UInt = UInt(SetIdxLen.W)
+  val setIdx: UInt = UInt(SetIdxWidth.W)
 }
 
 class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
@@ -44,17 +42,18 @@ class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
 }
 
 class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasAheadBtbParameters {
-  val setIdx:     UInt          = UInt(SetIdxLen.W)
-  val isNewEntry: Bool          = Bool()
-  val wayIdx:     UInt          = UInt(WayIdxLen.W)
-  val entry:      AheadBtbEntry = new AheadBtbEntry
-  // This is not needed since we use setIdx directly in the write buffer
-  def tag: UInt = entry.tag // use entry's tag directly
+  val needResetCtr: Bool          = Bool()
+  val setIdx:       UInt          = UInt(SetIdxWidth.W)
+  val wayIdx:       UInt          = UInt(WayIdxWidth.W)
+  val entry:        AheadBtbEntry = new AheadBtbEntry
+
+  def tag: UInt = entry.tag
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {
-  val setIdx: UInt = UInt(SetIdxLen.W)
-  val wayIdx: UInt = UInt(log2Ceil(NumWays).W)
+  val needResetCtr: Bool = Bool()
+  val setIdx:       UInt = UInt(SetIdxWidth.W)
+  val wayIdx:       UInt = UInt(WayIdxWidth.W)
 }
 
 class BankIO(implicit p: Parameters) extends AheadBtbBundle {
@@ -67,43 +66,45 @@ class BankIO(implicit p: Parameters) extends AheadBtbBundle {
 
 class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val readValid:   Bool      = Input(Bool())
-  val readSetIdx:  UInt      = Input(UInt(SetIdxLen.W))
-  val readHitMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
+  val readSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))
+  val readWayMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
 
   val writeValid:  Bool = Input(Bool())
-  val writeSetIdx: UInt = Input(UInt(SetIdxLen.W))
-  val writeWayIdx: UInt = Input(UInt(WayIdxLen.W))
+  val writeSetIdx: UInt = Input(UInt(SetIdxWidth.W))
+  val writeWayIdx: UInt = Input(UInt(WayIdxWidth.W))
 
-  val usefulCounter:     Vec[SaturateCounter] = Input(Vec(NumWays, new SaturateCounter(UsefulCounterWidth)))
-  val needReplaceSetIdx: UInt                 = Input(UInt(SetIdxLen.W))
-  val victimWayIdx:      UInt                 = Output(UInt(WayIdxLen.W))
+  val replaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))
+  val victimWayIdx:  UInt = Output(UInt(WayIdxWidth.W))
 }
 
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
-  val valid:         Bool      = Bool()
-  val taken:         Bool      = Bool()
-  val takenPosition: UInt      = UInt(log2Ceil(PredictWidth).W)
-  val takenWayIdx:   UInt      = UInt(WayIdxLen.W)
-  val hitMask:       Vec[Bool] = Vec(NumWays, Bool())
-  val positions:     Vec[UInt] = Vec(NumWays, UInt(log2Ceil(PredictWidth).W))
+  val valid: Bool = Bool()
+//  val previousPc:    PrunedAddr           = PrunedAddr(VAddrBits) // TODO: update after execution will need it
+  val hitMask:         Vec[Bool]            = Vec(NumWays, Bool())
+  val taken:           Bool                 = Bool()
+  val takenWayIdx:     UInt                 = UInt(WayIdxWidth.W)
+  val attributes:      Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute) // TODO: do not need store RasAction
+  val positions:       Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
+  val targetLowerBits: UInt                 = UInt(TargetLowerBitsWidth.W)
+  // The following signals are used for simulation only.
+  val target: Option[PrunedAddr] = if (!env.FPGAPlatform) Some(PrunedAddr(VAddrBits)) else None
 }
 
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val valid:           Bool            = Bool()
-  val tag:             UInt            = UInt(TagLen.W)
-  val position:        UInt            = UInt(log2Ceil(PredictWidth).W)
+  val tag:             UInt            = UInt(TagWidth.W)
+  val position:        UInt            = UInt(CfiPositionWidth.W)
   val attribute:       BranchAttribute = new BranchAttribute
-  val targetState:     TargetState     = new TargetState
-  val targetLowerBits: UInt            = UInt(TargetLowerBitsLen.W)
-  val isStaticTarget:  Bool            = Bool()
+  val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
+  // target fix, see comment in Parameters.scala
+  val targetState: Option[TargetState] = if (EnableTargetFix) Option(new TargetState) else None
 }
 
-class AheadBtbUpdate(implicit p: Parameters) extends AheadBtbBundle {
-  val startVAddr:    PrunedAddr      = PrunedAddr(VAddrBits)
-  val target:        PrunedAddr      = PrunedAddr(VAddrBits)
-  val hasMispredict: Bool            = Bool()
-  val taken:         Bool            = Bool()
-  val cfiPosition:   UInt            = UInt(log2Ceil(PredictWidth).W)
-  val cfiAttribute:  BranchAttribute = new BranchAttribute
-  val aBtbMeta:      AheadBtbMeta    = new AheadBtbMeta
+class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {
+  val startPc:   PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val taken:     Bool            = Bool()
+  val position:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute: BranchAttribute = new BranchAttribute
+  val meta:      AheadBtbMeta    = new AheadBtbMeta
 }

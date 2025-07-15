@@ -94,3 +94,22 @@ trait CrossPageHelper extends HasBpuParameters {
       0.U(PageOffsetWidth.W)
     ))
 }
+
+trait BtbHelper extends HasBpuParameters {
+  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
+    require(positions.length == takenMask.length)
+    val n = positions.length
+    val compareMatrix = (0 until n).map(i =>
+      (0 until i).map(j =>
+        positions(j) > positions(i)
+      )
+    )
+    (0 until n).map { i =>
+      (0 until n).map { j =>
+        if (j < i) !takenMask(j) || compareMatrix(i)(j)
+        else if (j == i) takenMask(i)
+        else !takenMask(j) || !compareMatrix(j)(i)
+      }.reduce(_ && _)
+    }
+  }
+}

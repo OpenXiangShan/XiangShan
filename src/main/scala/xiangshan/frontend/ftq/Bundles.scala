@@ -28,7 +28,6 @@ import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.abtb.AheadBtbUpdate
 
 class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle {
   val histPtr     = new CGHPtr
@@ -58,7 +57,6 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
 class FtqToBpuIO(implicit p: Parameters) extends FtqBundle {
   val redirect:        Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val update:          Valid[BranchPredictionUpdate]   = Valid(new BranchPredictionUpdate)
-  val newUpdate:       Valid[AheadBtbUpdate]           = Valid(new AheadBtbUpdate) // FIXME
   val bpuPtr:          FtqPtr                          = Output(new FtqPtr)
   val redirectFromIFU: Bool                            = Output(Bool())
 }
