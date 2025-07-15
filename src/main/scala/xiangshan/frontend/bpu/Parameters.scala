@@ -19,8 +19,9 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
-import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.tage.TageParameters
+import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
 // For users: these are default Bpu parameters set by dev, do not change them here,
 // use top-level Parameters.scala instead.
@@ -31,7 +32,8 @@ case class BpuParameters(
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     aBtbParameters: AheadBtbParameters = AheadBtbParameters(),
-    mbtbParameters: MainBtbParameters = MainBtbParameters()
+    mbtbParameters: MainBtbParameters = MainBtbParameters(),
+    tageParameters: TageParameters = TageParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))
