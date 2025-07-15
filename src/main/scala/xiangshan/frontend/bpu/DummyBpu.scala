@@ -27,6 +27,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
@@ -45,12 +46,14 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val ubtb        = Module(new MicroBtb)
   private val abtb        = Module(new AheadBtb)
   private val mbtb        = Module(new MainBtb)
+  private val tage        = Module(new Tage)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
     abtb,
-    mbtb
+    mbtb,
+    tage
   )
 
   /* *** aliases *** */
@@ -63,6 +66,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ubtb.io.enable        := ctrl.ubtb_enable
   abtb.io.enable        := true.B // FIXME
   mbtb.io.enable        := true.B
+  tage.io.enable        := true.B
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
