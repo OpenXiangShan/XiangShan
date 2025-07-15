@@ -22,8 +22,6 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.TargetState
-import xiangshan.frontend.bpu.WriteBuffer
-import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
   val redirectValid: Bool                 = Input(Bool())
@@ -35,7 +33,7 @@ class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
 }
 
 class BankReadReq(implicit p: Parameters) extends AheadBtbBundle {
-  val setIdx: UInt = UInt(SetIdxLen.W)
+  val setIdx: UInt = UInt(SetIdxWidth.W)
 }
 
 class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
@@ -44,14 +42,14 @@ class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
 
 class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
   val needResetCtr: Bool          = Bool()
-  val setIdx:       UInt          = UInt(SetIdxLen.W)
-  val wayIdx:       UInt          = UInt(WayIdxLen.W)
+  val setIdx:       UInt          = UInt(SetIdxWidth.W)
+  val wayIdx:       UInt          = UInt(WayIdxWidth.W)
   val entry:        AheadBtbEntry = new AheadBtbEntry
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {
   val needResetCtr: Bool      = Bool()
-  val setIdx:       UInt      = UInt(SetIdxLen.W)
+  val setIdx:       UInt      = UInt(SetIdxWidth.W)
   val wayMask:      Vec[Bool] = Vec(NumWays, Bool())
 }
 
@@ -65,16 +63,16 @@ class BankIO(implicit p: Parameters) extends AheadBtbBundle {
 
 class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val readValid:   Bool      = Input(Bool())
-  val readSetIdx:  UInt      = Input(UInt(SetIdxLen.W))
+  val readSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))
   val readWayMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
 
   val writeValid:   Bool      = Input(Bool())
-  val writeSetIdx:  UInt      = Input(UInt(SetIdxLen.W))
+  val writeSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))
   val writeWayMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
 
 //  val usefulCounter:     Vec[SaturateCounter] = Input(Vec(NumWays, new SaturateCounter(UsefulCounterWidth)))
-  val needReplaceSetIdx: UInt = Input(UInt(SetIdxLen.W))
-  val victimWayIdx:      UInt = Output(UInt(WayIdxLen.W))
+  val needReplaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))
+  val victimWayIdx:      UInt = Output(UInt(WayIdxWidth.W))
 }
 
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
@@ -82,7 +80,7 @@ class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
 //  val previousPc:    PrunedAddr           = PrunedAddr(VAddrBits) // TODO: update after execution will need it
   val hitMask:     Vec[Bool]            = Vec(NumWays, Bool())
   val taken:       Bool                 = Bool()
-  val takenWayIdx: UInt                 = UInt(WayIdxLen.W)
+  val takenWayIdx: UInt                 = UInt(WayIdxWidth.W)
   val attributes:  Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute)
   val positions:   Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
   // TODO: remove it, we need backend send one bit to indicate whether the target is right or wrong
@@ -91,11 +89,11 @@ class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
 
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val valid:           Bool            = Bool()
-  val tag:             UInt            = UInt(TagLen.W)
+  val tag:             UInt            = UInt(TagWidth.W)
   val position:        UInt            = UInt(CfiPositionWidth.W)
   val attribute:       BranchAttribute = new BranchAttribute
   val targetState:     TargetState     = new TargetState
-  val targetLowerBits: UInt            = UInt(TargetLowerBitsLen.W)
+  val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
 //  val isStaticTarget:  Bool            = Bool() // TODO: abtb really need it?
 }
 

@@ -28,8 +28,8 @@ class Replacer(implicit p: Parameters) extends AheadBtbModule {
 
   private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
 
-  private val touchSets = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(UInt(SetIdxLen.W))))
-  private val touchWays = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(Valid(UInt(WayIdxLen.W)))))
+  private val touchSets = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(UInt(SetIdxWidth.W))))
+  private val touchWays = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(Valid(UInt(WayIdxWidth.W)))))
 
   when(io.writeValid) {
     touchSets.foreach(_ := io.writeSetIdx)

@@ -23,35 +23,19 @@ import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasAheadBtbParameters {
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxLen + BankIdxLen + instOffsetBits - 1, BankIdxLen + instOffsetBits)
+    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxLen + instOffsetBits - 1, instOffsetBits)
+    pc(BankIdxWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(TagLen + instOffsetBits - 1, instOffsetBits)
+    pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
   def getPcUpperBits(pc: PrunedAddr): UInt =
-    pc(VAddrBits - 1, TargetLowerBitsLen + instOffsetBits)
+    pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
-    target(TargetLowerBitsLen + instOffsetBits - 1, instOffsetBits)
-
-  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
-    val n = positions.length
-    val compareMatrix = (0 until n).map(i =>
-      (0 until i).map(j =>
-        positions(i) < positions(j)
-      )
-    )
-    (0 until n).map { i =>
-      (0 until n).map { j =>
-        if (j < i) !takenMask(j) || compareMatrix(i)(j) // positions(i) < positions(j)
-        else if (j == i) takenMask(i)
-        else !takenMask(j) || !compareMatrix(j)(i) // positions(i) <= positions(j)
-      }.reduce(_ && _)
-    }
-  }
+    target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
     val startPcUpperBits = getPcUpperBits(startPc)
@@ -63,8 +47,7 @@ trait Helpers extends HasAheadBtbParameters {
       )
     )
     val targetLowerBits = entry.targetLowerBits
-    val target          = PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
-    target
+    PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
   }
 
   def getTargetState(startPc: PrunedAddr, target: PrunedAddr): TargetState = {

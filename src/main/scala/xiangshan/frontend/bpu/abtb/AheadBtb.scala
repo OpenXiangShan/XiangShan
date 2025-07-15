@@ -21,12 +21,13 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BranchPrediction
+import xiangshan.frontend.bpu.BtbHelper
 import xiangshan.frontend.bpu.SaturateCounter
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParameters with Helpers {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParameters with Helpers with BtbHelper {
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
   private val banks     = Seq.fill(NumBanks)(Module(new Bank))
