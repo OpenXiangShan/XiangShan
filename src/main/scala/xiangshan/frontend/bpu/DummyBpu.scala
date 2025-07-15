@@ -147,7 +147,13 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ubtb.io.train.bits.attribute   := t0_attribute
 
   // abtb
-  abtb.io.update := io.fromFtq.newUpdate
+  abtb.io.train.valid          := t0_valid
+  abtb.io.train.bits.startPc   := t0_startVAddr
+  abtb.io.train.bits.target    := t0_target
+  abtb.io.train.bits.taken     := t0_taken
+  abtb.io.train.bits.position  := t0_cfiPosition
+  abtb.io.train.bits.attribute := t0_attribute
+  abtb.io.train.bits.meta      := train.bits.newMeta.abtbMeta
 
   dontTouch(abtb.io.hit)
   dontTouch(abtb.io.prediction)
@@ -193,18 +199,20 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // if ubtb hits, use meta (i.e. cfiPosition, attribute) from ubtb
   // otherwise, use fallThrough
   private val s1_prediction = Wire(new BranchPrediction)
-  s1_prediction := Mux(
-    ubtb.io.hit,
-    ubtb.io.prediction,
-    fallThrough.io.prediction
+  s1_prediction := MuxCase(
+    fallThrough.io.prediction,
+    Seq(
+      (ubtb.io.hit && ubtb.io.prediction.taken) -> ubtb.io.prediction,
+      abtb.io.prediction.taken                  -> abtb.io.prediction
+    )
   )
   // and, if ubtb predicts a taken branch, use target from ubtb
   // otherwise, use fallThrough
-  s1_prediction.target := Mux(
-    ubtb.io.hit && ubtb.io.prediction.taken,
-    ubtb.io.prediction.target,
-    fallThrough.io.prediction.target
-  )
+//  s1_prediction.target := Mux(
+//    ubtb.io.hit && ubtb.io.prediction.taken,
+//    ubtb.io.prediction.target,
+//    fallThrough.io.prediction.target
+//  )
 
   // s2 prediction: TODO
   private val s2_prediction = Wire(new BranchPrediction)
@@ -231,11 +239,11 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.toFtq.resp.bits.s3Override.bits.ftqPtr := s3_ftqPtr
 
   // abtb meta delay to s3
-  val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
-  val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
+  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
+  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
   private val predictorMeta = Wire(new NewPredictorMeta)
-  predictorMeta.aBtbMeta := s3_abtbMeta
+  predictorMeta.abtbMeta := s3_abtbMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid
@@ -277,6 +285,15 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     io.toFtq.resp.fire,
     0,
     FetchBlockInstNum
+  )
+  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.hit && ubtb.io.prediction.taken)
+  XSPerfAccumulate(
+    "s1_use_abtb",
+    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && abtb.io.prediction.taken
+  )
+  XSPerfAccumulate(
+    "s1_use_fallThrough",
+    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && !abtb.io.prediction.taken
   )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)

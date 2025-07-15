@@ -328,8 +328,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   metaQueue.io.ren   := readyToCommit
   metaQueue.io.raddr := commitPtr(0).value
 
-  io.toBpu.update    := DontCare
-  io.toBpu.newUpdate := DontCare
+  io.toBpu.update := DontCare
 
   // --------------------------------------------------------------------------------
   // MMIO fetch
