@@ -306,6 +306,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req.bits.cmd := l2.io.l2_tlb_req.req.bits.cmd
       io.l2_tlb_req.req.bits.size := l2.io.l2_tlb_req.req.bits.size
       io.l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
+      io.l2_tlb_req.req.bits.isPrefetch := l2.io.l2_tlb_req.req.bits.isPrefetch
       io.l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
       io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
       io.perfEvents := l2.io_perf
