@@ -157,7 +157,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
 
   // !! This implementation should be only used for simulation purposes. !! 
 
-  val numOutstanding = 1 << in.ar.bits.id.getWidth
+  val numOutstanding = 64
   // Note: we are using in.ar.bits.addr.getWidth insead of ramOffsetBits here.
   // Why: the CPU may access out-of-range addresses. Let the RAM helper deal with it.
   val awQueue = Module(new Queue(chiselTypeOf(in.aw.bits), numOutstanding, flow = false))
