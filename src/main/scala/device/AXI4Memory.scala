@@ -73,8 +73,18 @@ class MemoryRequestHelper(requestType: Int)
     "  output            io_response",
     ");",
     "",
-    " assign io_response = (reset ? 1'b0 :",
-    "               (io_req_valid ? memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE) : 1'b0));",
+    "always @(negedge clock or posedge reset) begin",
+    "  if (reset) begin",
+    "    io_response <= 1'b0;",
+    "  end",
+    "  else if (io_req_valid) begin",
+    "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
+    "  end" +
+    "  else begin",
+    "    io_response <= 1'b0;",
+    "  end",
+    "end",
+    "",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -119,8 +129,18 @@ class MemoryResponseHelper(requestType: Int)
     "  output [63:0]     response",
     ");",
     "",
-    "assign response = reset ? 64'b0 :",
-    "((!reset && enable) ? memory_response(REQUEST_TYPE) : 64'b0);",
+    "always @(negedge clock or posedge reset) begin",
+    "  if (reset) begin",
+    "    response <= 64'b0;",
+    "  end",
+    "  else if (!reset && enable) begin",
+    "    response <= memory_response(REQUEST_TYPE);",
+    "  end",
+    " else begin",
+    "    response <= 64'b0;",
+    "  end",
+    "end",
+    "",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
