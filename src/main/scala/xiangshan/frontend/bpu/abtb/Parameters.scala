@@ -19,29 +19,32 @@ import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
-    NumEntries:         Int = 1024,
-    NumWays:            Int = 4,
-    TagLen:             Int = 24,
-    TargetLowerBitsLen: Int = 22,
-    NumBanks:           Int = 4,
-    WriteBufferSize:    Int = 4,
-    TakenCounterWidth:  Int = 2,
-    UsefulCounterWidth: Int = 3
+    NumEntries:           Int = 1024,
+    NumBanks:             Int = 4,
+    NumWays:              Int = 4,
+    TagWidth:             Int = 24,
+    TargetLowerBitsWidth: Int = 22,
+    WriteBufferSize:      Int = 4,
+    TakenCounterWidth:    Int = 2,
+    // enable carry and borrow fix for target, so jumps around 2^(TargetWidth+1) boundary will not cause misprediction
+    // mainBtb should handle this case, so performance affect should be slight, and, bad for timing
+    EnableTargetFix: Boolean = false
 ) {}
 
 trait HasAheadBtbParameters extends HasBpuParameters {
-  def aBtbParameters: AheadBtbParameters = bpuParameters.aBtbParameters
+  def abtbParameters: AheadBtbParameters = bpuParameters.abtbParameters
 
-  def NumEntries:         Int = aBtbParameters.NumEntries
-  def NumWays:            Int = aBtbParameters.NumWays
-  def NumSets:            Int = NumEntries / NumWays
-  def TagLen:             Int = aBtbParameters.TagLen
-  def TargetLowerBitsLen: Int = aBtbParameters.TargetLowerBitsLen
-  def NumBanks:           Int = aBtbParameters.NumBanks
-  def SetIdxLen:          Int = log2Ceil(NumSets)
-  def WayIdxLen:          Int = log2Ceil(NumWays)
-  def BankIdxLen:         Int = log2Ceil(NumBanks)
-  def WriteBufferSize:    Int = aBtbParameters.WriteBufferSize
-  def TakenCounterWidth:  Int = aBtbParameters.TakenCounterWidth
-  def UsefulCounterWidth: Int = aBtbParameters.UsefulCounterWidth
+  def NumEntries:           Int = abtbParameters.NumEntries
+  def NumBanks:             Int = abtbParameters.NumBanks
+  def NumWays:              Int = abtbParameters.NumWays
+  def NumSets:              Int = NumEntries / NumWays / NumBanks
+  def TagWidth:             Int = abtbParameters.TagWidth
+  def TargetLowerBitsWidth: Int = abtbParameters.TargetLowerBitsWidth
+  def SetIdxWidth:          Int = log2Ceil(NumSets)
+  def WayIdxWidth:          Int = log2Ceil(NumWays)
+  def BankIdxWidth:         Int = log2Ceil(NumBanks)
+  def WriteBufferSize:      Int = abtbParameters.WriteBufferSize
+  def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
+
+  def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
 }

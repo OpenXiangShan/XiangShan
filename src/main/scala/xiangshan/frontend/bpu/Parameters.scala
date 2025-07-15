@@ -28,7 +28,7 @@ case class BpuParameters(
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
-    aBtbParameters: AheadBtbParameters = AheadBtbParameters()
+    abtbParameters: AheadBtbParameters = AheadBtbParameters()
 ) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
