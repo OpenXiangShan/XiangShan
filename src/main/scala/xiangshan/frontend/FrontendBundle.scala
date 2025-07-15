@@ -792,6 +792,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry         = Bool()
   val meta              = new PredictorMeta
+  val newMeta           = new NewPredictorMeta
   val full_target       = PrunedAddr(VAddrBits)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)

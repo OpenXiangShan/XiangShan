@@ -29,7 +29,7 @@ trait Helpers extends HasAheadBtbParameters {
     pc(BankIdxLen + instOffsetBits - 1, instOffsetBits)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(TagLen, instOffsetBits)
+    pc(TagLen + instOffsetBits - 1, instOffsetBits)
 
   def getPcUpperBits(pc: PrunedAddr): UInt =
     pc(VAddrBits - 1, TargetLowerBitsLen + instOffsetBits)
@@ -43,15 +43,23 @@ trait Helpers extends HasAheadBtbParameters {
     PrunedAddrInit(alignedPc.asUInt)
   }
 
-  def getHitMask(entries: Vec[AheadBtbEntry], tag: UInt): Vec[Bool] =
-    VecInit(entries.map(entry => entry.valid && entry.tag === tag))
+  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
+    val n = positions.length
+    val compareMatrix = (0 until n).map(i =>
+      (0 until i).map(j =>
+        positions(i) < positions(j)
+      )
+    )
+    (0 until n).map { i =>
+      (0 until n).map { j =>
+        if (j < i) !takenMask(j) || compareMatrix(i)(j) // positions(i) < positions(j)
+        else if (j == i) takenMask(i)
+        else !takenMask(j) || !compareMatrix(j)(i) // positions(i) <= positions(j)
+      }.reduce(_ && _)
+    }
+  }
 
-  def getTakenMask(entries: Vec[AheadBtbEntry], hitMask: Vec[Bool], counterResult: Vec[Bool]): Vec[Bool] =
-    VecInit(entries.zip(hitMask).zip(counterResult).map { case ((entry, hit), taken) =>
-      hit && (taken || entry.isStaticTarget)
-    })
-
-  def getFirstTakenEntry(entries: Vec[AheadBtbEntry], takenMask: Vec[Bool]): (AheadBtbEntry, UInt) = {
+  def getFirstTakenEntry(entries: Vec[AheadBtbEntry], takenMask: IndexedSeq[Bool]): (AheadBtbEntry, UInt) = {
     val indexedEntries = VecInit(entries.zipWithIndex.zip(takenMask).map {
       case ((e, i), t) =>
         val bundle = new Bundle {
@@ -94,4 +102,17 @@ trait Helpers extends HasAheadBtbParameters {
       )
     )
   }
+
+  def detectMultiHit(entries: Vec[AheadBtbEntry], tag: UInt): Bool = {
+    val multiHit = WireDefault(false.B)
+    for (i <- 0 until entries.length) {
+      for (j <- i + 1 until entries.length) {
+        val sameTag      = entries(i).tag === entries(j).tag === tag
+        val samePosition = entries(i).position === entries(j).position
+        multiHit := sameTag && samePosition && entries(i).valid && entries(j).valid
+      }
+    }
+    multiHit
+  }
+
 }

@@ -956,19 +956,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   update.false_hit   := s2_commitHit === h_false_hit
   update.pc          := s2_commitPcBundle.startAddr
   update.meta        := s2_commitMeta
+  update.newMeta     := s2_commitNewMeta
   update.ftqOffset   := s2_commitCfi
   update.full_target := s2_commitTarget
   update.from_stage  := s2_commitStage
   update.spec_info   := s2_commitSpecMeta
-
-  io.toBpu.newUpdate.valid              := s2_commitValid && s2_readyToCommit
-  io.toBpu.newUpdate.bits.startVAddr    := s2_commitPcBundle.startAddr
-  io.toBpu.newUpdate.bits.target        := s2_commitTarget
-  io.toBpu.newUpdate.bits.hasMispredict := s2_commitMispredict.reduce(_ || _)
-  io.toBpu.newUpdate.bits.taken         := s2_commitCfi.valid
-  io.toBpu.newUpdate.bits.cfiPosition   := s2_commitCfi.bits
-  io.toBpu.newUpdate.bits.cfiAttribute  := BranchAttribute.None // FIXME
-  io.toBpu.newUpdate.bits.aBtbMeta      := s2_commitNewMeta.aBtbMeta
 
   val s2_commitRealHit = s2_commitHit === h_hit
   val update_ftb_entry = update.ftb_entry

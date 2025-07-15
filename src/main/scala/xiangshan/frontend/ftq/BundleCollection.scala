@@ -37,7 +37,7 @@ import xiangshan.frontend.bpu.FullBranchPrediction
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.abtb.AheadBtbUpdate
+import xiangshan.frontend.bpu.abtb.AheadBtbTrain
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -166,7 +166,6 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
 class FtqToBpuIO(implicit p: Parameters) extends FtqBundle {
   val redirect       = Valid(new BranchPredictionRedirect)
   val update         = Valid(new BranchPredictionUpdate)
-  val newUpdate      = Valid(new AheadBtbUpdate) // FIXME
   val enq_ptr        = Output(new FtqPtr)
   val redirctFromIFU = Output(Bool())
 }

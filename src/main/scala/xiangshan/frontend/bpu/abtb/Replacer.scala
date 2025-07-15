@@ -20,24 +20,32 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
 
+/**
+  * This module implement the replacement policy for the ahead BTB.
+  */
 class Replacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
   private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
 
-  // select first not-useful entry
-  private val notUsefulVec = VecInit(io.usefulCounter.map(_.isSaturateNegative))
-  private val notUseful    = notUsefulVec.reduce(_ || _)
-  private val notUsefulIdx = PriorityEncoder(notUsefulVec)
-
-  // if all entries are useful, select by replacement policy
-  io.victimWayIdx := Mux(notUseful, notUsefulIdx, replacer.way(io.needReplaceSetIdx))
+  private val touchSets = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(UInt(SetIdxLen.W))))
+  private val touchWays = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(Valid(UInt(WayIdxLen.W)))))
 
   when(io.writeValid) {
-    replacer.access(io.writeSetIdx, io.writeWayIdx)
+    touchSets.foreach(_ := io.writeSetIdx)
+    touchWays.zip(io.writeWayMask).zipWithIndex.foreach { case ((t, w), i) =>
+      t.valid := w
+      t.bits  := i.U
+    }
   }.elsewhen(io.readValid) {
-    io.readHitMask.zipWithIndex.foreach { case (hit, i) =>
-      when(hit)(replacer.access(io.readSetIdx, i.U))
+    touchSets.foreach(_ := io.readSetIdx)
+    touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
+      t.valid := r
+      t.bits  := i.U
     }
   }
+
+  replacer.access(touchSets, touchWays)
+
+  io.victimWayIdx := replacer.way(io.needReplaceSetIdx)
 }

@@ -20,13 +20,13 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
     NumEntries:         Int = 1024,
-    NumWays:            Int = 4,
+    NumWays:            Int = 8, // TODO: 4 or 8?
     TagLen:             Int = 24,
     TargetLowerBitsLen: Int = 22,
     NumBanks:           Int = 4,
     WriteBufferSize:    Int = 4,
     TakenCounterWidth:  Int = 2,
-    UsefulCounterWidth: Int = 3
+    UsefulCounterWidth: Int = 2
 ) {}
 
 trait HasAheadBtbParameters extends HasBpuParameters {
@@ -34,7 +34,7 @@ trait HasAheadBtbParameters extends HasBpuParameters {
 
   def NumEntries:         Int = aBtbParameters.NumEntries
   def NumWays:            Int = aBtbParameters.NumWays
-  def NumSets:            Int = NumEntries / NumWays
+  def NumSets:            Int = NumEntries / NumWays / NumBanks
   def TagLen:             Int = aBtbParameters.TagLen
   def TargetLowerBitsLen: Int = aBtbParameters.TargetLowerBitsLen
   def NumBanks:           Int = aBtbParameters.NumBanks
