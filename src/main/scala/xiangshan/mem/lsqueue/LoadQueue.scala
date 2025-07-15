@@ -232,11 +232,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
+  loadQueueRAR.io.alloc <> io.enq.req
+  loadQueueRAR.io.doAlloc := io.enq.canAccept
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
   loadQueueRAR.io.check <> io.ldu.ldld_check
   for (w <- 0 until LoadPipelineWidth) {
-    loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
-    loadQueueRAR.io.query(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
+    loadQueueRAR.io.complete(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
+    loadQueueRAR.io.complete(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
   }
 
   /**

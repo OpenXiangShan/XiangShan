@@ -676,7 +676,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TSO stuff
   val matchReleaseOffset = log2Up(blockBytes)
   def matchReleaseAddr(paddr: UInt): Bool = {
-    paddr(PAddrBits - 1, matchReleaseOffset) === io.lsq.ldld_check.bits.released
+    paddr(PAddrBits - 1, matchReleaseOffset) === io.lsq.ldld_check.bits.released(PAddrBits - 1, matchReleaseOffset)
   }
 
   // set default
@@ -1018,12 +1018,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                        s1_nuke_paddr_match(w) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
-  val s1_nuke_ldld = (
+  val s1_nuke_ldld_cur = (
     io.lsq.ldld_check.valid
     && isAfter(s1_in.uop.robIdx, io.lsq.ldld_check.bits.older)
     && matchReleaseAddr(s1_paddr_dup_lsu)
     && !s1_tlb_miss
   )
+  val s1_nuke_ldld = Wire(Bool())
+  s1_nuke_ldld := s1_nuke_ldld_cur || RegNext(s1_nuke_ldld && !s1_can_go)
   val s1_nuke = s1_nuke_stld || s1_nuke_ldld
 
   s1_out                   := s1_in
@@ -1329,12 +1331,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                           (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                         })).asUInt.orR && !s2_tlb_miss
   // FIXME(meow): check s2 really probed
-  val s2_nuke_ldld = (
+  val s2_nuke_ldld_cur = (
     io.lsq.ldld_check.valid
     && isAfter(s2_in.uop.robIdx, io.lsq.ldld_check.bits.older)
     && matchReleaseAddr(s2_in.paddr)
     && !s2_tlb_miss
   )
+  val s2_nuke_ldld = Wire(Bool())
+  s2_nuke_ldld := s2_nuke_ldld_cur || RegNext(s2_nuke_ldld && !s2_can_go)
   val s2_nuke = s2_nuke_stld || s2_nuke_ldld || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.dcache.resp.bits.handled
