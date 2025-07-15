@@ -127,15 +127,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
   private val s2_taken       = s2_takenMask.reduce(_ || _)
 
+  private val perf_s2_multiHit = PopCount(s2_hitMask) > 1.U
+
   private val s2_positions               = s2_realEntries.map(_.position)
   private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
   private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
-//  private val (s2_firstTakenEntry, s2_firstTakenEntryWayIdx) = getFirstTakenEntry(s2_entries, s2_takenMask)
 
   private val s2_takenPosition = s2_firstTakenEntry.position
   private val s2_target        = getTarget(s2_firstTakenEntry, s2_startPc)
-
-  private val perf_s2_multiHit = detectMultiHit(s2_realEntries, s2_tag)
 
   private val s2_prediction = Wire(new BranchPrediction)
   s2_prediction.taken       := s2_valid && s2_taken
@@ -196,8 +195,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val t1_valid = t1_previousPcValid && t1_trainValid && t1_meta.valid
 
   // TODO: if we want update after execution, we need FTQ send a previousPc with one update request
-  // if we want update after commit, we just ues previous update request to get bankIdx and setIdx
-  // because the order of prediction and commit is the same
+  //  if we want update after commit, we just ues previous update request to get bankIdx and setIdx
+  //  because the order of prediction and commit is the same
 
   /* --------------------------------------------------------------------------------------------------------------
      update taken counter
@@ -302,7 +301,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   XSPerfAccumulate("total_predict", s2_valid)
   XSPerfAccumulate("hit", s2_valid && s2_hit)
   XSPerfAccumulate("miss", s2_valid && !s2_hit)
-//  XSPerfAccumulate("hit_entry_num", PopCount(s2_hitMask), cntEn = s2_valid)
+  XSPerfAccumulate("hit_entry_num", Mux(s2_valid, PopCount(s2_hitMask), 0.U))
   XSPerfAccumulate("taken", s2_valid && s2_taken)
   XSPerfAccumulate("notTaken", s2_valid && s2_hit && !s2_taken)
   XSPerfAccumulate("multi_hit", s2_valid && perf_s2_multiHit)

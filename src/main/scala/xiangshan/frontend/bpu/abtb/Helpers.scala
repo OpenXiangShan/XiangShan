@@ -37,12 +37,6 @@ trait Helpers extends HasAheadBtbParameters {
   def getTargetLowerBits(target: PrunedAddr): UInt =
     target(TargetLowerBitsLen + instOffsetBits - 1, instOffsetBits)
 
-  def getAlignedPc(pc: PrunedAddr): PrunedAddr = {
-    val shiftAmount = log2Ceil(FetchBlockAlignSize)
-    val alignedPc   = (pc.toUInt >> shiftAmount) << shiftAmount
-    PrunedAddrInit(alignedPc.asUInt)
-  }
-
   def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
     val n = positions.length
     val compareMatrix = (0 until n).map(i =>
@@ -57,24 +51,6 @@ trait Helpers extends HasAheadBtbParameters {
         else !takenMask(j) || !compareMatrix(j)(i) // positions(i) <= positions(j)
       }.reduce(_ && _)
     }
-  }
-
-  def getFirstTakenEntry(entries: Vec[AheadBtbEntry], takenMask: IndexedSeq[Bool]): (AheadBtbEntry, UInt) = {
-    val indexedEntries = VecInit(entries.zipWithIndex.zip(takenMask).map {
-      case ((e, i), t) =>
-        val bundle = new Bundle {
-          val key   = UInt((1 + e.position.getWidth).W)
-          val idx   = UInt(log2Ceil(entries.size).W)
-          val entry = e.cloneType
-        }
-        val wire = Wire(bundle)
-        wire.key   := Cat(!t, e.position)
-        wire.idx   := i.U
-        wire.entry := e
-        wire
-    })
-    val firstTakenEntry = indexedEntries.reduceTree((a, b) => Mux(a.key < b.key, a, b))
-    (firstTakenEntry.entry, firstTakenEntry.idx)
   }
 
   def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
@@ -101,17 +77,5 @@ trait Helpers extends HasAheadBtbParameters {
         (targetUpperBits < startPcUpperBits) -> TargetState.Borrow
       )
     )
-  }
-
-  def detectMultiHit(entries: Vec[AheadBtbEntry], tag: UInt): Bool = {
-    val multiHit = WireDefault(false.B)
-    for (i <- 0 until entries.length) {
-      for (j <- i + 1 until entries.length) {
-        val sameTag      = entries(i).tag === entries(j).tag === tag
-        val samePosition = entries(i).position === entries(j).position
-        multiHit := sameTag && samePosition && entries(i).valid && entries(j).valid
-      }
-    }
-    multiHit
   }
 }

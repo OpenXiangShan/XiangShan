@@ -147,7 +147,7 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
 
 class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
   val abtbMeta: AheadBtbMeta = new AheadBtbMeta
-  val mbtbMeta: MainBtbMeta = new MainBtbMeta
+  val mbtbMeta: MainBtbMeta  = new MainBtbMeta
   // TODO: other meta
 }
 
