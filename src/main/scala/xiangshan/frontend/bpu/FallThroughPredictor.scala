@@ -23,7 +23,9 @@ import utility.XSPerfAccumulate
 class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
     with HalfAlignHelper
     with CrossPageHelper {
-  class FallThroughPredictorIO extends BasePredictorIO {}
+  class FallThroughPredictorIO extends BasePredictorIO {
+    val prediction: BranchPrediction = Output(new BranchPrediction)
+  }
 
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
 
@@ -48,7 +50,6 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
 
-  io.hit                    := true.B
   io.prediction.taken       := false.B
   io.prediction.cfiPosition := (FetchBlockInstNum - 1).U
   io.prediction.target      := s1_fallThroughAddr
