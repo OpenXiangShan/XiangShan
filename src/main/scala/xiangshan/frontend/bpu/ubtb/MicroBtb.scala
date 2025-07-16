@@ -21,13 +21,14 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchPrediction
 
 // TODO: 2-taken
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    // predict request
-    // ... all inherited from BasePredictorIO
-    // train request
+    // predict
+    val prediction: BranchPrediction = Output(new BranchPrediction)
+    // train
     val train: Valid[MicroBtbTrain] = Flipped(Valid(new MicroBtbTrain))
   }
 
@@ -63,11 +64,10 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_hitIdx   = OHToUInt(s1_hitOH)
   private val s1_hitEntry = entries(s1_hitIdx)
 
-  io.hit := s1_hit
   // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
   // and for those jumps, takenCnt will remain unchanged during training,
   // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
-  io.prediction.taken       := s1_hitEntry.slot1.takenCnt.isPositive
+  io.prediction.taken       := s1_hit && s1_hitEntry.slot1.takenCnt.isPositive
   io.prediction.cfiPosition := s1_hitEntry.slot1.position
   io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetState)
   io.prediction.attribute   := s1_hitEntry.slot1.attribute
