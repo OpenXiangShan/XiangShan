@@ -176,21 +176,25 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
      - update taken counter
-     - write new entry if needed
+     - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
   // delay one cycle for better timing
   private val t1_trainValid = RegNext(t0_train.valid)
   private val t1_train      = RegEnable(t0_train.bits, t0_train.valid)
 
-  private val t1_previousPcValid = RegNext(t1_trainValid, init = false.B)
-  private val t1_previousPc      = RegEnable(t1_train.startPc, t1_trainValid)
+  private val t1_previousPcValid = RegInit(false.B)
+  private val t1_bankIdx         = Reg(UInt(BankIdxWidth.W))
+  private val t1_setIdx          = Reg(UInt(SetIdxWidth.W))
 
-  private val t1_bankIdx  = getBankIndex(t1_previousPc)
+  when(t1_trainValid) {
+    t1_previousPcValid := true.B
+    t1_bankIdx         := getBankIndex(t1_train.startPc)
+    t1_setIdx          := getSetIndex(t1_train.startPc)
+  }
+
   private val t1_bankMask = UIntToOH(t1_bankIdx)
-
-  private val t1_setIdx  = getSetIndex(t1_previousPc)
-  private val t1_setMask = UIntToOH(t1_setIdx)
+  private val t1_setMask  = UIntToOH(t1_setIdx)
 
   private val t1_meta = t1_train.abtbMeta
 
@@ -252,7 +256,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   }
 
   /* --------------------------------------------------------------------------------------------------------------
-     generate a new entry or modify an existing entry if needed
+     write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
   // if the taken branch is not hit, we need write a new entry
@@ -300,24 +304,26 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  XSPerfAccumulate("total_predict", s2_valid)
-  XSPerfAccumulate("hit", s2_valid && s2_hit)
-  XSPerfAccumulate("miss", s2_valid && !s2_hit)
-  XSPerfAccumulate("hit_entry_num", Mux(s2_valid, PopCount(s2_hitMask), 0.U))
-  XSPerfAccumulate("taken", s2_valid && s2_taken)
-  XSPerfAccumulate("notTaken", s2_valid && s2_hit && !s2_taken)
-  XSPerfAccumulate("multi_hit", s2_valid && perf_s2_multiHit)
+  XSPerfAccumulate("predict_req_num", predictReqValid)
+  XSPerfAccumulate("predict_num", s2_valid)
+  XSPerfAccumulate("predict_hit", s2_valid && s2_hit)
+  XSPerfAccumulate("predict_miss", s2_valid && !s2_hit)
+  XSPerfAccumulate("predict_hit_entry_num", Mux(s2_valid, PopCount(s2_hitMask), 0.U))
+  XSPerfAccumulate("predict_taken", s2_valid && s2_taken)
+  XSPerfAccumulate("predict_not_taken", s2_valid && s2_hit && !s2_taken)
+  XSPerfAccumulate("predict_multi_hit", s2_valid && perf_s2_multiHit)
 
-  XSPerfAccumulate("total_update_from_ftq", io.train.valid)
-  XSPerfAccumulate("total_update_in_abtb", t1_valid)
-  XSPerfAccumulate("update_hit", t1_valid && t1_hitTakenBranch)
-  XSPerfAccumulate("update_predictTaken", t1_valid && t1_meta.taken)
-  XSPerfAccumulate("update_predictNotTaken", t1_valid && t1_meta.hitMask.reduce(_ || _) && !t1_meta.taken)
-  XSPerfAccumulate("update_actualTaken", t1_valid && t1_train.taken)
-  XSPerfAccumulate("update_actualNotTaken", t1_valid && !t1_train.taken)
-  XSPerfAccumulate("update_total_write", t1_writeBankValid)
-  XSPerfAccumulate("update_writeNewEntry", t1_valid && t1_needWriteNewEntry)
-  XSPerfAccumulate("update_correctTarget", t1_valid && t1_needCorrectTarget)
+  XSPerfAccumulate("train_req_num", io.train.valid)
+  XSPerfAccumulate("train_t1_meta_valid", t1_trainValid && t1_meta.valid)
+  XSPerfAccumulate("train_num", t1_valid)
+  XSPerfAccumulate("train_hit", t1_valid && t1_hitTakenBranch)
+  XSPerfAccumulate("train_predict_taken", t1_valid && t1_meta.taken)
+  XSPerfAccumulate("train_predict_not_taken", t1_valid && t1_meta.hitMask.reduce(_ || _) && !t1_meta.taken)
+  XSPerfAccumulate("train_actual_taken", t1_valid && t1_train.taken)
+  XSPerfAccumulate("train_actual_not_taken", t1_valid && !t1_train.taken)
+  XSPerfAccumulate("train_total_write", t1_writeBankValid)
+  XSPerfAccumulate("train_write_new_entry", t1_valid && t1_needWriteNewEntry)
+  XSPerfAccumulate("train_correct_target", t1_valid && t1_needCorrectTarget)
 //  XSPerfAccumulate("update_needReplaceEntry", needReplaceEntry)
 
   XSPerfAccumulate("update_reset_ctr", VecInit(t1_needResetCtr.flatten.flatten).reduce(_ || _))
