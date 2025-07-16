@@ -73,8 +73,8 @@ class Bank(implicit p: Parameters) extends AheadBtbModule {
   // when entry is written to sram, we need to notify takenCounter and replacer
   io.writeResp.valid             := writeBuffer.io.deq.fire
   io.writeResp.bits.needResetCtr := writeBuffer.io.deq.bits.needResetCtr
-  io.writeResp.bits.setIdx       := writeSetIdx
-  io.writeResp.bits.wayMask      := VecInit(writeWayMask.asBools)
+  io.writeResp.bits.setIdx       := writeBuffer.io.deq.bits.setIdx
+  io.writeResp.bits.wayIdx       := writeBuffer.io.deq.bits.wayIdx
 
   XSPerfAccumulate("read", sram.io.r.req.fire)
   XSPerfAccumulate("write", sram.io.w.req.fire)

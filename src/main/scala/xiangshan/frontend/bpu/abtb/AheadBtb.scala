@@ -161,7 +161,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   io.meta := meta
 
   replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_hit && s2_bankMask(i)
+    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
     r.io.readSetIdx  := s2_setIdx
     r.io.readWayMask := s2_hitMask
   }
@@ -218,7 +218,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val t1_needResetCtr = takenCounter.zip(banks).map { case (bankCtrs, bank) =>
     val needReset = bank.io.writeResp.valid && bank.io.writeResp.bits.needResetCtr
     val setMask   = UIntToOH(bank.io.writeResp.bits.setIdx)
-    val wayMask   = bank.io.writeResp.bits.wayMask
+    val wayMask   = UIntToOH(bank.io.writeResp.bits.wayIdx)
     bankCtrs.zipWithIndex.map { case (setCtrs, setIdx) =>
       setCtrs.zipWithIndex.map { case (_, wayIdx) =>
         needReset && setMask(setIdx) && wayMask(wayIdx)
@@ -297,7 +297,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   replacers.zip(banks).foreach { case (r, b) =>
     r.io.writeValid   := b.io.writeResp.valid
     r.io.writeSetIdx  := b.io.writeResp.bits.setIdx
-    r.io.writeWayMask := b.io.writeResp.bits.wayMask
+    r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
   }
 
   /* --------------------------------------------------------------------------------------------------------------

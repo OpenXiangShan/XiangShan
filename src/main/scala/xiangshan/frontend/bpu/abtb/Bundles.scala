@@ -48,9 +48,9 @@ class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {
-  val needResetCtr: Bool      = Bool()
-  val setIdx:       UInt      = UInt(SetIdxWidth.W)
-  val wayMask:      Vec[Bool] = Vec(NumWays, Bool())
+  val needResetCtr: Bool = Bool()
+  val setIdx:       UInt = UInt(SetIdxWidth.W)
+  val wayIdx:       UInt = UInt(WayIdxWidth.W)
 }
 
 class BankIO(implicit p: Parameters) extends AheadBtbBundle {
@@ -66,9 +66,9 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val readSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))
   val readWayMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
 
-  val writeValid:   Bool      = Input(Bool())
-  val writeSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))
-  val writeWayMask: Vec[Bool] = Input(Vec(NumWays, Bool()))
+  val writeValid:  Bool = Input(Bool())
+  val writeSetIdx: UInt = Input(UInt(SetIdxWidth.W))
+  val writeWayIdx: UInt = Input(UInt(WayIdxWidth.W))
 
 //  val usefulCounter:     Vec[SaturateCounter] = Input(Vec(NumWays, new SaturateCounter(UsefulCounterWidth)))
   val needReplaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))

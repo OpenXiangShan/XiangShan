@@ -28,24 +28,17 @@ class Replacer(implicit p: Parameters) extends AheadBtbModule {
 
   private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
 
-  private val touchSets = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(UInt(SetIdxWidth.W))))
-  private val touchWays = Seq.fill(NumWays)(WireDefault(0.U.asTypeOf(Valid(UInt(WayIdxWidth.W)))))
-
   when(io.writeValid) {
-    touchSets.foreach(_ := io.writeSetIdx)
-    touchWays.zip(io.writeWayMask).zipWithIndex.foreach { case ((t, w), i) =>
-      t.valid := w
-      t.bits  := i.U
-    }
+    replacer.access(io.writeSetIdx, io.writeWayIdx)
   }.elsewhen(io.readValid) {
-    touchSets.foreach(_ := io.readSetIdx)
+    val touchSets = Seq.fill(NumWays)(io.readSetIdx)
+    val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
     touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
       t.valid := r
       t.bits  := i.U
     }
+    replacer.access(touchSets, touchWays)
   }
-
-  replacer.access(touchSets, touchWays)
 
   io.victimWayIdx := replacer.way(io.needReplaceSetIdx)
 }
