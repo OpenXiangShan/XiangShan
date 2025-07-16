@@ -139,8 +139,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val fromBpu = io.fromBpu.resp
 
-  private val bpuS2Redirect = fromBpu.bits.s2Override.valid && fromBpu.valid
-  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && fromBpu.valid
+  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && io.fromBpu.resp.valid
 
   io.toBpu.bpuPtr := bpuPtr(0)
   private val bpuEnqueue = io.fromBpu.resp.fire && !redirect.valid
@@ -148,20 +147,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val fromBpuPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      fromBpu.bits.s3Override.valid -> fromBpu.bits.s3Override.bits.ftqPtr,
-      fromBpu.bits.s2Override.valid -> fromBpu.bits.s2Override.bits.ftqPtr
+      fromBpu.bits.s3Override.valid -> fromBpu.bits.s3Override.bits.ftqPtr
     )
   )
 
   when(fromBpu.bits.s3Override.valid) {
     bpuPtr := fromBpu.bits.s3Override.bits.ftqPtr + 1.U
-  }.elsewhen(fromBpu.bits.s2Override.valid) {
-    bpuPtr := fromBpu.bits.s2Override.bits.ftqPtr + 1.U
   }.elsewhen(bpuEnqueue) {
     bpuPtr := bpuPtr + 1.U
   }
 
-  when((fromBpu.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
+  when((fromBpu.fire || bpuS3Redirect) && !redirect.valid) {
     entryQueue(fromBpuPtr.value) := fromBpu.bits.startVAddr
     cfiQueue(fromBpuPtr.value)   := fromBpu.bits.ftqOffset
   }
@@ -186,9 +182,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ifuPtr := ifuPtr + 1.U
   }
 
+  // TODO: wait for Ifu/ICache to remove bpu s2 flush
   for (stage <- 2 to 3) {
-    val redirect = fromBpu.bits.overrideStage(stage).valid
-    val ftqIdx   = fromBpu.bits.overrideStage(stage).bits.ftqPtr
+    val redirect = if (stage == 3) fromBpu.bits.s3Override.valid else false.B
+    val ftqIdx   = if (stage == 3) fromBpu.bits.s3Override.bits.ftqPtr else 0.U.asTypeOf(new FtqPtr)
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
@@ -251,7 +248,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.pc_mem_wen   := (fromBpu.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
+  io.toBackend.pc_mem_wen   := (fromBpu.fire || bpuS3Redirect) && !redirect.valid
   io.toBackend.pc_mem_waddr := fromBpuPtr.value
   io.toBackend.pc_mem_wdata := fromBpu.bits.startVAddr
 
