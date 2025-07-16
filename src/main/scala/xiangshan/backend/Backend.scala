@@ -663,14 +663,18 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
     for (j <- 0 until vfExuBlock.io.in(i).size) {
-      val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.vf(i)(j).bits.loadDependency, io.mem.ldCancel)
+      val leftIn = Wire(chiselTypeOf(bypassNetwork.io.toExus.vf(i)(j)))
+      leftIn.valid := bypassNetwork.io.toExus.vf(i)(j).valid
+      leftIn.bits := bypassNetwork.io.toExus.vf(i)(j).bits
+      leftIn.ready := true.B
+      bypassNetwork.io.toExus.vf(i)(j).ready := vfExuBlock.io.in(i)(j).ready && !(vfExuBlock.io.in(i)(j).fire && FuType.isUncertain(vfExuBlock.io.in(i)(j).bits.fuType))
       NewPipelineConnect(
-        bypassNetwork.io.toExus.vf(i)(j), vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
+        leftIn, vfExuBlock.io.in(i)(j), vfExuBlock.io.in(i)(j).fire,
         Mux(
           bypassNetwork.io.toExus.vf(i)(j).fire,
-          bypassNetwork.io.toExus.vf(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
+          bypassNetwork.io.toExus.vf(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush),
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
-        ),
+        ) || !bypassNetwork.io.toExus.vf(i)(j).ready,
         Option("bypassNetwork2vfExuBlock")
       )
 
