@@ -202,24 +202,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
-  // s1 prediction:
-  // if ubtb hits, use meta (i.e. cfiPosition, attribute) from ubtb
-  // otherwise, use fallThrough
+  // s1 prediction selection:
+  // if ubtb or abtb find a taken branch, use the corresponding prediction
+  // otherwise, use fall-through prediction
   private val s1_prediction = Wire(new BranchPrediction)
   s1_prediction := MuxCase(
     fallThrough.io.prediction,
     Seq(
-      (ubtb.io.hit && ubtb.io.prediction.taken) -> ubtb.io.prediction,
-      abtb.io.prediction.taken                  -> abtb.io.prediction
+      ubtb.io.prediction.taken -> ubtb.io.prediction,
+      abtb.io.prediction.taken -> abtb.io.prediction
     )
   )
-  // and, if ubtb predicts a taken branch, use target from ubtb
-  // otherwise, use fallThrough
-//  s1_prediction.target := Mux(
-//    ubtb.io.hit && ubtb.io.prediction.taken,
-//    ubtb.io.prediction.target,
-//    fallThrough.io.prediction.target
-//  )
 
   // s3 prediction: TODO
   private val s3_prediction = Wire(new BranchPrediction)
