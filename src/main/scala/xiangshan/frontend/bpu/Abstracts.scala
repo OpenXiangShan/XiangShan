@@ -33,14 +33,13 @@ abstract class BasePredictor(implicit p: Parameters) extends BpuModule {
 abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // control
   val enable: Bool = Input(Bool())
-  // predict request
-  val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
-  // predict response
-  val hit:        Bool             = Output(Bool())
-  val prediction: BranchPrediction = Output(new BranchPrediction)
-  // maybe meta, differs from predictor to predictor
   // predict stage control
   val stageCtrl: StageCtrl = Input(new StageCtrl)
+  // predict request
+  val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
+
+  // other predictor specific io
+  // maybe meta, differs from predictor to predictor
   // train: differs from predictor to predictor
   // ...
 }

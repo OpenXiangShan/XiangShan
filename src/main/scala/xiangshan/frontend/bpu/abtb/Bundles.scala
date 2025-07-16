@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BranchPrediction
 import xiangshan.frontend.bpu.TargetState
 import xiangshan.frontend.bpu.WriteReqBundle
 
@@ -29,8 +30,9 @@ class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
   val overrideValid: Bool                 = Input(Bool())
   val train:         Valid[AheadBtbTrain] = Flipped(Valid(new AheadBtbTrain))
 
-  val meta:             AheadBtbMeta = Output(new AheadBtbMeta)
-  val debug_startVaddr: PrunedAddr   = Output(PrunedAddr(VAddrBits))
+  val prediction:       BranchPrediction = Output(new BranchPrediction)
+  val meta:             AheadBtbMeta     = Output(new AheadBtbMeta)
+  val debug_startVaddr: PrunedAddr       = Output(PrunedAddr(VAddrBits))
 }
 
 class BankReadReq(implicit p: Parameters) extends AheadBtbBundle {

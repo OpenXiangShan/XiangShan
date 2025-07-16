@@ -186,24 +186,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
-  // s1 prediction:
-  // if ubtb hits, use meta (i.e. cfiPosition, attribute) from ubtb
-  // otherwise, use fallThrough
+  // s1 prediction selection:
+  // if ubtb or abtb find a taken branch, use the corresponding prediction
+  // otherwise, use fall-through prediction
   private val s1_prediction = Wire(new BranchPrediction)
   s1_prediction := MuxCase(
     fallThrough.io.prediction,
     Seq(
-      (ubtb.io.hit && ubtb.io.prediction.taken) -> ubtb.io.prediction,
-      abtb.io.prediction.taken                  -> abtb.io.prediction
+      ubtb.io.prediction.taken -> ubtb.io.prediction,
+      abtb.io.prediction.taken -> abtb.io.prediction
     )
   )
-  // and, if ubtb predicts a taken branch, use target from ubtb
-  // otherwise, use fallThrough
-//  s1_prediction.target := Mux(
-//    ubtb.io.hit && ubtb.io.prediction.taken,
-//    ubtb.io.prediction.target,
-//    fallThrough.io.prediction.target
-//  )
 
   // s3 prediction: TODO
   private val s3_prediction = Wire(new BranchPrediction)
@@ -260,7 +253,6 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** perf pred *** */
   XSPerfAccumulate("toFtqFire", io.toFtq.resp.fire)
   XSPerfAccumulate("s3Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s3Override.valid)
-  XSPerfAccumulate("ubtbHit", io.toFtq.resp.fire && ubtb.io.hit)
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
@@ -272,15 +264,9 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     0,
     FetchBlockInstNum
   )
-  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.hit && ubtb.io.prediction.taken)
-  XSPerfAccumulate(
-    "s1_use_abtb",
-    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && abtb.io.prediction.taken
-  )
-  XSPerfAccumulate(
-    "s1_use_fallThrough",
-    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && !abtb.io.prediction.taken
-  )
+  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_abtb", io.toFtq.resp.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_fallThrough", io.toFtq.resp.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken)
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
