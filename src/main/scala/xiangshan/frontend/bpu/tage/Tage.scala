@@ -25,4 +25,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   class TageIO(implicit p: Parameters) extends BasePredictorIO {}
 
   val io: TageIO = IO(new TageIO)
+
+  // FIXME: temporary connection for compile
+  io.hit                    := DontCare
+  io.prediction.taken       := DontCare
+  io.prediction.cfiPosition := DontCare
+  io.prediction.target      := DontCare
+  io.prediction.attribute   := DontCare
 }
