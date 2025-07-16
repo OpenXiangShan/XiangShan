@@ -185,7 +185,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
 //  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
 //  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = io.fromBpu.resp.bits.s2Override.valid
+  val bpu_s2_redirect = false.B
   val bpu_s3_redirect = io.fromBpu.resp.bits.s3Override.valid
 
   io.toBpu.enq_ptr := bpuPtr

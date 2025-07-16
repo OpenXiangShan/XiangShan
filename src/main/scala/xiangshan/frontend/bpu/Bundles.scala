@@ -132,7 +132,6 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
   val ftqOffset:  Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val target:     PrunedAddr  = PrunedAddr(VAddrBits)
   // override valid
-  val s2Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
   val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
 
   def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
