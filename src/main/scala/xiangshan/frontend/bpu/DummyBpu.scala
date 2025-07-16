@@ -160,7 +160,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_flush := s3_flush || s3_override
   s1_flush := s2_flush
 
-  s1_ready := s1_fire || !s1_valid
+  s1_ready := s1_fire || !s1_valid || s1_flush
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
