@@ -29,6 +29,9 @@ import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
+import xiangshan.frontend.bpu.ras.Ras
+import xiangshan.frontend.bpu.ras.CfiOffset
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
@@ -47,17 +50,20 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtb        = Module(new AheadBtb)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
+  private val ras         = Module(new Ras)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
     abtb,
     mbtb,
-    tage
+    tage,
+    ras
   )
 
   /* *** aliases *** */
-  private val train    = io.fromFtq.update
+  private val train         = io.fromFtq.update
+  private val commitUpdate  = io.fromFtq.update
   private val redirect = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
@@ -67,6 +73,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := true.B // FIXME
   mbtb.io.enable        := true.B
   tage.io.enable        := true.B
+  ras.io.enable         := false.B // ctrl.ras_enable
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -119,6 +126,27 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // abtb
   abtb.io.redirectValid := redirect.valid
   abtb.io.overrideValid := s3_override
+  private val redirectAttribute = MuxCase(
+    BranchAttribute.Conditional,
+    Seq(
+      (redirect.bits.cfiUpdate.pd.isCall && redirect.bits.cfiUpdate.pd.isJal)   -> BranchAttribute.DirectCall,
+      (redirect.bits.cfiUpdate.pd.isCall && redirect.bits.cfiUpdate.pd.isJalr)  -> BranchAttribute.IndirectCall,
+      (redirect.bits.cfiUpdate.pd.isRet)                                        -> BranchAttribute.Return,
+      (redirect.bits.cfiUpdate.pd.isJal)                                        -> BranchAttribute.OtherDirect,
+      (redirect.bits.cfiUpdate.pd.isJalr)                                       -> BranchAttribute.OtherIndirect
+    )
+  )
+  ras.io.redirect.valid           := redirect.valid
+  ras.io.redirect.bits.attribute  := redirectAttribute
+  ras.io.redirect.bits.brPc       := redirect.bits.cfiUpdate.pc
+  ras.io.redirect.bits.isRvc      := redirect.bits.isRVC
+  ras.io.redirect.bits.meta.ssp   := redirect.bits.cfiUpdate.ssp
+  ras.io.redirect.bits.meta.TOSW  := redirect.bits.cfiUpdate.TOSW
+  ras.io.redirect.bits.meta.TOSR  := redirect.bits.cfiUpdate.TOSR
+  ras.io.redirect.bits.meta.NOS   := redirect.bits.cfiUpdate.NOS
+  ras.io.redirect.bits.meta.sctr  := redirect.bits.cfiUpdate.sctr
+  ras.io.redirect.bits.level      := 0.U(1.W)
+
 
   /* *** train *** */
   private val t0_valid      = train.valid
@@ -169,6 +197,14 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.train.bits.attribute := t0_attribute
   abtb.io.train.bits.abtbMeta  := train.bits.newMeta.abtbMeta
 
+  // ras
+  ras.io.commit.valid           := commitUpdate.valid
+  ras.io.commit.bits.attribute  := t0_attribute
+  ras.io.commit.bits.startPc    := commitUpdate.bits.pc.toUInt
+  ras.io.commit.bits.isRvc      := false.B // commitUpdate.bits.isRvc
+  ras.io.commit.bits.meta       := commitUpdate.bits.meta.rasMeta
+  ras.io.commit.bits.cfiOffset  := 0.U.asTypeOf(new CfiOffset)
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
@@ -214,9 +250,22 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   )
 
+  private val s2_prediction     = RegEnable(s1_prediction, s1_fire)
   // s3 prediction: TODO
-  private val s3_prediction = Wire(new BranchPrediction)
-  s3_prediction := DontCare
+  private val s3_inPrediction   = RegEnable(s2_prediction, s2_fire)
+  ras.io.specIn.valid           := s3_fire
+  ras.io.specIn.bits.startPc    := s3_pc.toUInt
+  ras.io.specIn.bits.isRvc      := false.B
+  ras.io.specIn.bits.attribute  := s3_inPrediction.attribute
+  ras.io.specIn.bits.cfiOffset  := 0.U.asTypeOf(new CfiOffset)
+  ras.io.specIn.bits.target     := s3_inPrediction.target
+
+  ras.io.pass.taken       := s3_inPrediction.taken
+  ras.io.pass.cfiPosition := s3_inPrediction.cfiPosition
+  ras.io.pass.attribute   := s3_inPrediction.attribute
+
+  private val s3_prediction   = ras.io.prediction
+  s3_override := ras.io.rasOverride
 
   io.toFtq.resp.valid := s1_valid && s2_ready || s3_fire && s3_override
 
@@ -236,10 +285,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // mbtb meta
   val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+  private val s3_rasMeta  = ras.io.specMeta
 
   private val predictorMeta = Wire(new NewPredictorMeta)
   predictorMeta.abtbMeta := s3_abtbMeta
   predictorMeta.mbtbMeta := s3_mbtbMeta
+  predictorMeta.rasMeta  := s3_rasMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid

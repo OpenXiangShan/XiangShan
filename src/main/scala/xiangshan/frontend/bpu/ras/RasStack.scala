@@ -23,7 +23,7 @@
 // (https://crad.ict.ac.cn/en/article/doi/10.7544/issn1000-1239.202111274)" Journal of Computer Research and Development
 // (CRAD) 60.6: 1337-1345. 2023.
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.bpu.ras
 
 import chisel3._
 import chisel3.util._
@@ -43,9 +43,10 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.RasSpeculativeInfo
 
-class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircularQueuePtrHelper {
+class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends RasModule with HasCircularQueuePtrHelper with Helpers{
   class RasIO extends Bundle {
     class RasSpecIO extends Bundle {
+      val fire:      Bool       = Input(Bool())
       val pushValid: Bool       = Input(Bool())
       val popValid:  Bool       = Input(Bool())
       val pushAddr:  PrunedAddr = Input(PrunedAddr(VAddrBits))
@@ -70,11 +71,10 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
       val meta:     RasInternalMeta = Input(new RasInternalMeta)
     }
 
-    val spec     = new RasSpecIO
-    val s3_fire  = Input(Bool())
-    val commit   = new RasCommitIO
-    val redirect = new RasRedirectIO
-    val meta     = Output(new RasInternalMeta)
+    val spec        = new RasSpecIO
+    val commit      = new RasCommitIO
+    val redirect    = new RasRedirectIO
+    val meta        = Output(new RasInternalMeta)
 
     val specNearOverflow = Output(Bool())
     val debug            = new RasDebug
@@ -101,66 +101,86 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
   val writeBypassValid     = RegInit(0.B)
   val writeBypassValidWire = Wire(Bool())
 
-  def TOSRinRange(currentTOSR: RasPtr, currentTOSW: RasPtr) = {
+  def TOSRinRange(currTOSR: RasPtr, currTOSW: RasPtr):Bool = {
     val inflightValid = WireInit(false.B)
     // if in range, TOSR should be no younger than BOS and strictly younger than TOSW
-    when(!isBefore(currentTOSR, BOS) && isBefore(currentTOSR, currentTOSW)) {
+    when(!isBefore(currTOSR, BOS) && isBefore(currTOSR, currTOSW)) {
       inflightValid := true.B
     }
     inflightValid
   }
 
-  def getCommitTop(currentSsp: UInt): RasEntry = commitStack(currentSsp)
+  def getCommitTop(currSsp: UInt): RasEntry = commitStack(currSsp)
 
-  def getTopNos(currentTOSR: RasPtr, allowBypass: Boolean): RasPtr = {
+  def getTopNos(currTOSR: RasPtr, allowBypass: Boolean): RasPtr = {
     val ret = Wire(new RasPtr)
     if (allowBypass) {
       when(writeBypassValid) {
         ret := writeBypassNos
       }.otherwise {
-        ret := specNOS(TOSR.value)
+        ret := specNOS(currTOSR.value)
       }
     } else {
-      ret := specNOS(TOSR.value) // invalid when TOSR is not in range
+      ret := specNOS(currTOSR.value) // invalid when TOSR is not in range
     }
     ret
   }
 
-  def getTop(
-      currentSsp:  UInt,
-      currentSctr: UInt,
-      currentTOSR: RasPtr,
-      currentTOSW: RasPtr,
-      allowBypass: Boolean
-  ): RasEntry = {
+  def getTop(currSsp: UInt, currSctr: UInt, currTOSR: RasPtr, currTOSW: RasPtr, allowBypass: Boolean): RasEntry = {
     val ret = Wire(new RasEntry)
     if (allowBypass) {
       when(writeBypassValid) {
         ret := writeBypassEntry
-      }.elsewhen(TOSRinRange(currentTOSR, currentTOSW)) {
-        ret := specQueue(currentTOSR.value)
+      }.elsewhen(TOSRinRange(currTOSR, currTOSW)) {
+        ret := specQueue(currTOSR.value)
       }.otherwise {
-        ret := getCommitTop(currentSsp)
+        ret := getCommitTop(currSsp)
       }
     } else {
-      when(TOSRinRange(currentTOSR, currentTOSW)) {
-        ret := specQueue(currentTOSR.value)
+      when(TOSRinRange(currTOSR, currTOSW)) {
+        ret := specQueue(currTOSR.value)
       }.otherwise {
-        ret := getCommitTop(currentSsp)
+        ret := getCommitTop(currSsp)
       }
     }
-
     ret
+  }
+
+  def specPush(retAddr: PrunedAddr, currSsp: UInt, currSctr: UInt, currTOSR: RasPtr, currTOSW: RasPtr,
+   topEntry: RasEntry):Unit = {
+    TOSR := currTOSW
+    TOSW := specPtrInc(currTOSW)
+    // spec sp and ctr should always be maintained
+    when(topEntry.retAddr === retAddr && currSctr < ctrMax) {
+      sctr := currSctr + 1.U
+    }.otherwise {
+      ssp  := ptrInc(currSsp)
+      sctr := 0.U
+    }
+  }
+
+  def specPop(currSsp: UInt, currSctr: UInt, currTOSR: RasPtr, currTOSW: RasPtr, currTopNos: RasPtr):Unit = {
+    // TOSR is only maintained when spec queue is not empty
+    when(TOSRinRange(currTOSR, currTOSW)) {
+      TOSR := currTopNos
+    }
+    // spec sp and ctr should always be maintained
+    when(currSctr > 0.U) {
+      sctr := currSctr - 1.U
+    }.elsewhen(TOSRinRange(currTopNos, currTOSW)) {
+      // in range, use inflight data
+      ssp  := ptrDec(currSsp)
+      sctr := specQueue(currTopNos.value).ctr
+    }.otherwise {
+      // NOS not in range, use commit data
+      ssp  := ptrDec(currSsp)
+      sctr := getCommitTop(ptrDec(currSsp)).ctr
+      // in overflow state, we cannot determine the next sctr, sctr here is not accurate
+    }
   }
 
   // it would be unsafe for specPtr manipulation if specSize is not power of 2
   assert(log2Up(RasSpecSize) == log2Floor(RasSpecSize))
-  def ctrMax: UInt = ((1L << RasCtrSize) - 1).U
-  def ptrInc(ptr: UInt): UInt = ptr + 1.U
-  def ptrDec(ptr: UInt): UInt = ptr - 1.U
-
-  def specPtrInc(ptr: RasPtr): RasPtr = ptr + 1.U
-  def specPtrDec(ptr: RasPtr): RasPtr = ptr - 1.U
 
   when(io.redirect.valid && io.redirect.isCall) {
     writeBypassValidWire := true.B
@@ -169,7 +189,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
     // clear current top writeBypass if doing redirect
     writeBypassValidWire := false.B
     writeBypassValid     := false.B
-  }.elsewhen(io.s3_fire) {
+  }.elsewhen(io.spec.fire) {
     writeBypassValidWire := io.spec.pushValid
     writeBypassValid     := io.spec.pushValid
   }.otherwise {
@@ -278,16 +298,16 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
   XSPerfAccumulate("ras_top_mismatch", diffTop =/= timingTop.retAddr)
   // could diff when more pop than push and a commit stack is updated with inflight info
 
-  realWriteEntry := RegEnable(writeEntry, io.s3_fire || io.redirect.isCall)
+  realWriteEntry := RegEnable(writeEntry, io.spec.fire || io.redirect.isCall)
 
   val realWriteAddr = RegEnable(
     Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.TOSW, TOSW),
-    io.s3_fire || (io.redirect.valid && io.redirect.isCall)
+    io.spec.fire || (io.redirect.valid && io.redirect.isCall)
   )
 
   val realNos = RegEnable(
     Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.TOSR, TOSR),
-    io.s3_fire || (io.redirect.valid && io.redirect.isCall)
+    io.spec.fire || (io.redirect.valid && io.redirect.isCall)
   )
 
   realPush := RegNext(io.spec.pushValid, init = false.B) || RegNext(
@@ -300,58 +320,13 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
     specNOS(realWriteAddr.value)   := realNos
   }
 
-  def specPush(
-      retAddr:     PrunedAddr,
-      currentSsp:  UInt,
-      currentSctr: UInt,
-      currentTOSR: RasPtr,
-      currentTOSW: RasPtr,
-      topEntry:    RasEntry
-  ) = {
-    TOSR := currentTOSW
-    TOSW := specPtrInc(currentTOSW)
-    // spec sp and ctr should always be maintained
-    when(topEntry.retAddr === retAddr && currentSctr < ctrMax) {
-      sctr := currentSctr + 1.U
-    }.otherwise {
-      ssp  := ptrInc(currentSsp)
-      sctr := 0.U
-    }
-  }
-
   when(io.spec.pushValid) {
     specPush(io.spec.pushAddr, ssp, sctr, TOSR, TOSW, topEntry)
   }
-  def specPop(
-      currentSsp:    UInt,
-      currentSctr:   UInt,
-      currentTOSR:   RasPtr,
-      currentTOSW:   RasPtr,
-      currentTopNos: RasPtr
-  ) = {
-    // TOSR is only maintained when spec queue is not empty
-    when(TOSRinRange(currentTOSR, currentTOSW)) {
-      TOSR := currentTopNos
-    }
-    // spec sp and ctr should always be maintained
-    when(currentSctr > 0.U) {
-      sctr := currentSctr - 1.U
-    }.elsewhen(TOSRinRange(currentTopNos, currentTOSW)) {
-      // in range, use inflight data
-      ssp  := ptrDec(currentSsp)
-      sctr := specQueue(currentTopNos.value).ctr
-    }.otherwise {
-      // NOS not in range, use commit data
-      ssp  := ptrDec(currentSsp)
-      sctr := getCommitTop(ptrDec(currentSsp)).ctr
-      // in overflow state, we cannot determine the next sctr, sctr here is not accurate
-    }
-  }
+
   when(io.spec.popValid) {
     specPop(ssp, sctr, TOSR, TOSW, topNos)
   }
-
-  // io.spec_pop_addr := Mux(writeBypassValid, writeBypassEntry.retAddr, topEntry.retAddr)
 
   io.spec.popAddr := timingTop.retAddr
 
@@ -360,7 +335,6 @@ class RasStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircular
   io.meta.NOS  := topNos
   io.meta.ssp  := ssp
   io.meta.sctr := sctr
-  // io.meta.nsp            := nsp
 
   val commitTop = commitStack(nsp)
 

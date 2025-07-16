@@ -22,6 +22,8 @@ import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.ras.RasMeta
+import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.ftq.FtqPtr
 
 class BranchAttribute extends Bundle {
@@ -147,6 +149,7 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
 class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
   val abtbMeta: AheadBtbMeta = new AheadBtbMeta
   val mbtbMeta: MainBtbMeta  = new MainBtbMeta
+  val rasMeta:  RasMeta      = new RasMeta
   // TODO: other meta
 }
 

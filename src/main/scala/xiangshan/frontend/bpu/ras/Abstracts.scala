@@ -14,19 +14,12 @@
 // See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.bpu.ras
+
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
-import xiangshan.XSCoreParamsKey
-import xiangshan.XSModule
-import chisel3.util._
-import chisel3._
+import xiangshan.frontend.bpu.BpuBundle
+import xiangshan.frontend.bpu.BpuModule
 import xiangshan.frontend.bpu.HasBpuParameters
 
-trait Helpers extends HasBpuParameters {
-  def ctrMax: UInt = ((1L << RasCtrSize) - 1).U
-  def ptrInc(ptr: UInt): UInt = ptr + 1.U
-  def ptrDec(ptr: UInt): UInt = ptr - 1.U
+abstract class RasBundle(implicit p: Parameters) extends BpuBundle with HasBpuParameters
 
-  def specPtrInc(ptr: RasPtr): RasPtr = ptr + 1.U
-  def specPtrDec(ptr: RasPtr): RasPtr = ptr - 1.U
-}
+abstract class RasModule(implicit p: Parameters) extends BpuModule with HasBpuParameters

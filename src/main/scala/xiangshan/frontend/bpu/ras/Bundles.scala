@@ -13,11 +13,31 @@
 //
 // See the Mulan PSL v2 for more details.
 package xiangshan.frontend.bpu.ras
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import utility.CircularQueuePtr
+import utility.HasCircularQueuePtrHelper
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.RedirectLevel
+import xiangshan.XSBundle
+import xiangshan.XSCoreParamsKey
+import xiangshan.XSModule
 
-class RasEntry()(implicit p: Parameters) extends XSBundle {
+class RasEntry()(implicit p: Parameters) extends RasBundle {
   val retAddr = PrunedAddr(VAddrBits)
   val ctr     = UInt(RasCtrSize.W) // layer of nested call functions
-  def =/=(that: RasEntry): Bool = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
+}
+
+object RasEntry {
+  def apply(retAddr: PrunedAddr, ctr: UInt)(implicit p: Parameters): RasEntry = {
+    val e = Wire(new RasEntry)
+    e.retAddr := retAddr
+    e.ctr     := ctr
+    e
+  }
 }
 
 class RasPtr(implicit p: Parameters) extends CircularQueuePtr[RasPtr](p => p(XSCoreParamsKey).RasSpecSize) {}
@@ -33,7 +53,7 @@ object RasPtr {
   def inverse(ptr: RasPtr)(implicit p: Parameters): RasPtr = apply(!ptr.flag, ptr.value)
 }
 
-class RasInternalMeta(implicit p: Parameters) extends XSBundle {
+class RasInternalMeta(implicit p: Parameters) extends RasBundle {
   val ssp  = UInt(log2Up(RasSize).W)
   val sctr = UInt(RasCtrSize.W)
   val TOSW = new RasPtr
@@ -45,6 +65,7 @@ object RasInternalMeta {
   def apply(ssp: UInt, sctr: UInt, TOSW: RasPtr, TOSR: RasPtr, NOS: RasPtr)(implicit p: Parameters): RasInternalMeta = {
     val e = Wire(new RasInternalMeta)
     e.ssp  := ssp
+    e.sctr := sctr
     e.TOSW := TOSW
     e.TOSR := TOSR
     e.NOS  := NOS
@@ -52,13 +73,13 @@ object RasInternalMeta {
   }
 }
 
-class RasMeta(implicit p: Parameters) extends XSBundle {
+class RasMeta(implicit p: Parameters) extends RasBundle {
   val ssp  = UInt(log2Up(RasSize).W)
   val TOSW = new RasPtr
 }
 
 object RasMeta {
-  def apply(ssp: UInt, sctr: UInt, TOSW: RasPtr, TOSR: RasPtr, NOS: RasPtr)(implicit p: Parameters): RasMeta = {
+  def apply(ssp: UInt, TOSW: RasPtr)(implicit p: Parameters): RasMeta = {
     val e = Wire(new RasMeta)
     e.ssp  := ssp
     e.TOSW := TOSW
@@ -66,21 +87,55 @@ object RasMeta {
   }
 }
 
-class RasDebug(implicit p: Parameters) extends XSBundle {
+class CfiOffset(implicit p: Parameters) extends RasBundle {
+  val carry:    Bool            = Bool()
+  val offset:   UInt            = UInt(log2Ceil(PredictWidth).W)
+}
+
+class RasDebug(implicit p: Parameters) extends RasBundle {
   val specQueue   = Output(Vec(RasSpecSize, new RasEntry))
   val specNOS     = Output(Vec(RasSpecSize, new RasPtr))
   val commitStack = Output(Vec(RasSize, new RasEntry))
   val BOS         = Output(new RasPtr)
 }
 
-class RasTopInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonSignals {
-  val redirect = Valid(new BranchPredictionRedirect)
-  val fromFtb  = new FtbToRasBundle
+class RasBypass(implicit p: Parameters) extends RasBundle {
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
 }
 
-class RasTopOutput(implicit p: Parameters) extends XSBundle {
-  val predictionValid  = Bool()
-  val s3_returnAddress = PrunedAddr(VAddrBits)
-  val s3_rasSpecInfo   = new RasSpeculativeInfo
-  val s3_meta          = new RasMeta
+class RasSpecInfo(implicit p: Parameters) extends RasBundle {
+  val attribute:  BranchAttribute = new BranchAttribute
+  val cfiOffset:  CfiOffset       = new CfiOffset
+  val startPc:    UInt            = UInt(VAddrBits.W)
+  val isRvc:      Bool            = Bool()
+  val target:     PrunedAddr      = PrunedAddr(VAddrBits)
+}
+
+class RasCommitInfo(implicit p: Parameters) extends RasBundle {
+  val attribute:  BranchAttribute = new BranchAttribute
+  val cfiOffset:  CfiOffset       = new CfiOffset
+  val startPc:    UInt            = UInt(VAddrBits.W)
+  val isRvc:      Bool            = Bool()
+  val meta:       RasMeta         = new RasMeta
+}
+
+class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
+  val attribute:  BranchAttribute = new BranchAttribute
+  val brPc:       PrunedAddr      = PrunedAddr(VAddrBits)
+  val isRvc:      Bool            = Bool()
+  val meta:       RasInternalMeta = new RasInternalMeta
+  val level = RedirectLevel()
+}
+
+class RasIO(implicit p: Parameters) extends BasePredictorIO {
+  val specIn:   Valid[RasSpecInfo]      = Flipped(Valid(new RasSpecInfo))
+  val commit:   Valid[RasCommitInfo]    = Flipped(Valid(new RasCommitInfo))
+  val redirect: Valid[RasRedirectInfo]  = Flipped(Valid(new RasRedirectInfo))
+  val pass:     RasBypass               = Input(new RasBypass)
+
+  val rasOverride:  Bool            = Output(Bool())
+  val topRetAddr:   PrunedAddr      = Output(PrunedAddr(VAddrBits))
+  val specMeta:     RasInternalMeta = Output(new RasInternalMeta)
 }

@@ -36,7 +36,7 @@ import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.RasPtr
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp

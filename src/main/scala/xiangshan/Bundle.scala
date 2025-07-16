@@ -34,7 +34,8 @@ import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, 
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
-import xiangshan.frontend.bpu.{HasBPUParameter, BPUCtrl, RasPtr}
+import xiangshan.frontend.bpu.{HasBPUParameter, BPUCtrl}
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
