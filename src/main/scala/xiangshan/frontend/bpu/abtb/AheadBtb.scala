@@ -145,6 +145,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   io.prediction := s2_prediction
   io.hit        := s2_valid && s2_hit
 
+  // used for check abtb output
   io.debug_startVaddr := s2_startPc
 
   private val meta = Wire(new AheadBtbMeta)
