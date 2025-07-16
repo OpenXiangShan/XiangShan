@@ -58,10 +58,10 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     ): Unit = {
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
-          sink.valid := source.valid
+          sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.intWen.getOrElse(false.B)
           sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
           sink.bits.pdest := source.bits.pdest
-          sink.bits.data := source.bits.data(0)
+          sink.bits.data := source.bits.data(source.bits.params.getForwardIndex)
         }
       }
     }
@@ -98,7 +98,17 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   )
 
   private val bypassDataVec = VecInit(
-    fromExus.map(x => ZeroExt(RegEnable(x.bits.data, x.valid), RegDataMaxWidth))
+    // remove fp exu which need i2f data's clock gate
+    // remove int exu which need f2i data's clock gate
+    fromExus.map(x => {
+      if (x.bits.params.needDataFromI2F || x.bits.params.needDataFromF2I) {
+        // because RegNext unset width, canot ZeroExt
+        val tempWire = Wire(UInt(RegDataMaxWidth.W))
+        tempWire := RegNext(x.bits.data)
+        ZeroExt(tempWire, RegDataMaxWidth)
+      }
+      else ZeroExt(RegEnable(x.bits.data, x.valid), RegDataMaxWidth)
+    })
   )
 
   private val intExuNum = params.intSchdParams.get.numExu
@@ -156,7 +166,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readV0 = if (srcIdx < 3 && isReadVfRf) dataSource.readV0 else false.B
       val readRegOH = exuInput.bits.dataSources(srcIdx).readRegOH
       val readRegCache = if (exuParm.needReadRegCache) exuInput.bits.dataSources(srcIdx).readRegCache else false.B
-      val readImm = if (exuParm.immType.nonEmpty || exuParm.hasLoadExu) exuInput.bits.dataSources(srcIdx).readImm else false.B
+      val readImm = if (exuParm.immType.nonEmpty && srcIdx == 1 || exuParm.hasLoadExu && srcIdx == 0) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
       println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
       val readBypass2 = if (bypass2ExuIdx >= 0) dataSource.readBypass2 else false.B
@@ -174,7 +184,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       )
     }
     if (exuInput.bits.params.hasBrhFu) {
-      val immWidth = exuInput.bits.params.immType.map(x => SelImm.getImmUnion(x).len).max
       val nextPcOffset = exuInput.bits.ftqOffset.get +& Mux(exuInput.bits.preDecode.get.isRVC, 1.U, 2.U)
       val imm = ImmExtractor(
         immInfo(exuIdx).imm,
@@ -184,8 +193,12 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       )
       val isJALR = FuType.isJump(exuInput.bits.fuType) && JumpOpType.jumpOpisJalr(exuInput.bits.fuOpType)
       val immBJU = imm + Mux(isJALR, 0.U, (exuInput.bits.ftqOffset.getOrElse(0.U) << instOffsetBits).asUInt)
-      exuInput.bits.imm := immBJU
+      val immCsrFence = immInfo(exuIdx).imm
+      exuInput.bits.imm := Mux((FuType.isCsr(exuInput.bits.fuType) || FuType.isFence(exuInput.bits.fuType))&& exuInput.bits.params.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.get := nextPcOffset
+      dontTouch(isJALR)
+      dontTouch(immBJU)
+      dontTouch(immCsrFence)
     }
     exuInput.bits.copySrc.get.map( copysrc =>
       copysrc.zip(exuInput.bits.src).foreach{ case(copy, src) => copy := src}

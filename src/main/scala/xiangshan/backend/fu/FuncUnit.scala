@@ -92,6 +92,10 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
+  val outValidAhead3Cycle = OptionWrapper(FuConfig.needUncertainWakeupFuConfigs.contains(cfg), Output(Bool()))
+  val outRFWenAhead3Cycle = OptionWrapper(cfg.isCsr, Output(Bool()))
+  val outPdestAhead3Cycle = OptionWrapper(cfg.isCsr, Output(UInt(PhyRegIdxWidth.W)))
+  val wakeupSuccess = OptionWrapper(FuConfig.needUncertainWakeupFuConfigs.contains(cfg), Input(Bool()))
   val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
@@ -127,7 +131,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.debug_seqNum := RegEnable(io.in.bits.debug_seqNum, io.in.fire)
   }
 
-  def connectNonPipedCtrlSingalForCSR: Unit = {
+  def connectNonPipedCtrlDataHoldBypass: Unit = {
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
     io.out.bits.ctrl.rfWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
@@ -157,6 +161,10 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
     io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
     io.out.bits.debug_seqNum := io.in.bits.debug_seqNum
+  }
+  io.outValidAhead3Cycle.foreach{x =>
+    println(s"${cfg.name}: has outValidAhead3Cycle")
+    x := false.B
   }
 }
 
