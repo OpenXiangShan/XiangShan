@@ -27,6 +27,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.phr.Phr
+import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
@@ -47,6 +50,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtb        = Module(new AheadBtb)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
+  private val phr         = Module(new Phr)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -253,6 +257,46 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s1_valid       -> s1_prediction.target
     )
   )
+
+  private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrBitsWidth, Bool())))
+  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  // phr train
+  phr.io.train.s0_stall          := s0_stall
+  phr.io.train.stageCtrl.s0_fire := s0_fire
+  phr.io.train.stageCtrl.s1_fire := s1_fire
+  phr.io.train.stageCtrl.s2_fire := s2_fire
+  phr.io.train.stageCtrl.s3_fire := s3_fire
+  phr.io.train.redirectValid     := redirect.valid
+  phr.io.train.redirectPc        := redirect.bits.cfiUpdate.pc
+  phr.io.train.redirectTaken     := redirect.bits.cfiUpdate.taken
+  phr.io.train.redirectPhrPtr    := redirect.bits.cfiUpdate.phrHistPtr
+  phr.io.train.s2_override       := s2_override
+  phr.io.train.s2_pc             := s2_pc
+  phr.io.train.s2_taken          := s2_prediction.taken
+  phr.io.train.s3_override       := s3_override
+  phr.io.train.s3_pc             := s3_pc
+  phr.io.train.s3_taken          := s3_prediction.taken
+  phr.io.train.s1_valid          := s1_valid
+  phr.io.train.s1_pc             := s1_pc
+  phr.io.train.s1_taken          := s1_prediction.taken
+
+  s0_foldedPhr := phr.io.s0_foldedPhr
+  s1_foldedPhr := phr.io.s1_foldedPhr
+  s2_foldedPhr := phr.io.s2_foldedPhr
+  s3_foldedPhr := phr.io.s3_foldedPhr
+  phrsWire     := phr.io.phrs
+
+  dontTouch(s0_foldedPhr)
+  dontTouch(s1_foldedPhr)
+  dontTouch(s2_foldedPhr)
+  dontTouch(s3_foldedPhr)
+  dontTouch(phrsWire)
+
+  io.toFtq.resp.bits.s3SpecInfo            := DontCare
+  io.toFtq.resp.bits.s3SpecInfo.phrHistPtr := phr.io.phrPtr
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)

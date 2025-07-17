@@ -366,6 +366,8 @@ case class XSCoreParameters
 
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
+  val newAllHistLens   = bpuParameters.tageParameters.TableInfos.map(_._2)
+  val PhrHistoryLength = newAllHistLens.max + bpuParameters.phrParameters.Shamt * FtqSize
 
   val RegCacheSize = IntRegCacheSize + MemRegCacheSize
   val RegCacheIdxWidth = log2Up(RegCacheSize)
@@ -648,6 +650,7 @@ trait HasXSParameter {
   def EnableSC = coreParams.EnableSC
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def HistoryLength = coreParams.HistoryLength
+  def PhrHistoryLength = coreParams.PhrHistoryLength
   def EnableGHistDiff = coreParams.EnableGHistDiff
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate

@@ -22,7 +22,9 @@ import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.FtqRedirectSramEntry
 
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
@@ -133,6 +135,8 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
   val target:     PrunedAddr  = PrunedAddr(VAddrBits)
   // override valid
   val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+
+  val s3SpecInfo = new FtqRedirectSramEntry
 
   def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
     this.startVAddr      := pc
