@@ -121,6 +121,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
 
   private val s2_tag = getTag(s2_startPc)
+  dontTouch(s2_tag)
 //  private val s2_realEntries = Mux(RegNext(io.overrideValid), s2_entriesDelay1, s2_entries)
   private val s2_realEntries = s2_entries // TODO
   private val s2_hitMask     = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
@@ -128,11 +129,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
   private val s2_taken       = s2_takenMask.reduce(_ || _)
 
-  private val perf_s2_multiHit = PopCount(s2_hitMask) > 1.U
-
   private val s2_positions               = s2_realEntries.map(_.position)
   private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
   private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
+
+  private val perf_s2_multiHit = detectMultiHit(s2_hitMask, s2_positions)
 
   private val s2_takenPosition = s2_firstTakenEntry.position
   private val s2_target        = getTarget(s2_firstTakenEntry, s2_startPc)
@@ -144,7 +145,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   s2_prediction.attribute   := s2_firstTakenEntry.attribute
 
   io.prediction := s2_prediction
-  io.hit        := s2_valid && s2_hit
 
   // used for check abtb output
   io.debug_startVaddr := s2_startPc
@@ -196,7 +196,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val t1_bankMask = UIntToOH(t1_bankIdx)
   private val t1_setMask  = UIntToOH(t1_setIdx)
 
-  private val t1_meta = t1_train.abtbMeta
+  private val t1_meta = t1_train.meta
 
   private val t1_valid = t1_previousPcValid && t1_trainValid && t1_meta.valid
 
@@ -295,8 +295,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   }
 
   replacers.zip(banks).foreach { case (r, b) =>
-    r.io.writeValid   := b.io.writeResp.valid
-    r.io.writeSetIdx  := b.io.writeResp.bits.setIdx
+    r.io.writeValid  := b.io.writeResp.valid
+    r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
   }
 

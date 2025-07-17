@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchPrediction
 
 // TODO: 2-taken
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
@@ -28,7 +29,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     // predict request
     // ... all inherited from BasePredictorIO
     // train request
-    val train: Valid[MicroBtbTrain] = Flipped(Valid(new MicroBtbTrain))
+    val train:      Valid[MicroBtbTrain] = Flipped(Valid(new MicroBtbTrain))
+    val hit:        Bool                 = Output(Bool())
+    val prediction: BranchPrediction     = Output(new BranchPrediction)
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)

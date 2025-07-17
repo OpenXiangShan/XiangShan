@@ -23,13 +23,15 @@ import utility.XSPerfHistogram
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchPrediction
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // training specific bundle
-    val train: Valid[MainBtbTrain] = Flipped(Valid(new MainBtbTrain))
-    val meta:  MainBtbMeta         = Output(new MainBtbMeta)
+    val train:      Valid[MainBtbTrain] = Flipped(Valid(new MainBtbTrain))
+    val prediction: BranchPrediction    = Output(new BranchPrediction)
+    val meta:       MainBtbMeta         = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -156,7 +158,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val (s2_brValids, s2_btbEntries, s2_targets, s2_multihits) =
     (s2_perBankSignals.map(_._1), s2_perBankSignals.map(_._2), s2_perBankSignals.map(_._3), s2_perBankSignals.map(_._4))
 
-  io.hit                     := false.B
   io.prediction              := DontCare // FIXME: temp
   io.meta.valid              := s2_fire
   io.meta.hitMask            := s2_hitMask

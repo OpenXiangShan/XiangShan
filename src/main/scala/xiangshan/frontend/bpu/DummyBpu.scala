@@ -167,7 +167,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.train.bits.taken     := t0_taken
   abtb.io.train.bits.position  := t0_cfiPosition
   abtb.io.train.bits.attribute := t0_attribute
-  abtb.io.train.bits.abtbMeta  := train.bits.newMeta.abtbMeta
+  abtb.io.train.bits.meta      := train.bits.newMeta.abtbMeta
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -285,15 +285,9 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     0,
     FetchBlockInstNum
   )
-  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.hit && ubtb.io.prediction.taken)
-  XSPerfAccumulate(
-    "s1_use_abtb",
-    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && abtb.io.prediction.taken
-  )
-  XSPerfAccumulate(
-    "s1_use_fallThrough",
-    io.toFtq.resp.fire && !(ubtb.io.hit && ubtb.io.prediction.taken) && !abtb.io.prediction.taken
-  )
+  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_abtb", io.toFtq.resp.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_fallThrough", io.toFtq.resp.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken)
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 

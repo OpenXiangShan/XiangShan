@@ -61,4 +61,19 @@ trait Helpers extends HasAheadBtbParameters {
       )
     )
   }
+
+  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): Bool = {
+    require(hitMask.length == position.length)
+    require(hitMask.length >= 2)
+    val n = hitMask.length
+    val multiHitConditions = for {
+      i <- 0 until n
+      j <- i + 1 until n
+    } yield {
+      val bothHit      = hitMask(i) && hitMask(j)
+      val samePosition = position(i) === position(j)
+      bothHit && samePosition
+    }
+    multiHitConditions.reduce(_ || _)
+  }
 }
