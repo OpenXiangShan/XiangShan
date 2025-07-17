@@ -654,9 +654,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // last instuction finish
   val is_first_instr = RegInit(true.B)
 
-  /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
-  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
-
   val m_idle :: m_waitLastCmt :: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil =
     Enum(11)
   val mmio_state = RegInit(m_idle)
@@ -675,6 +672,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_to_commit      = f3_req_is_mmio && mmio_state === m_waitCommit
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go         = f3_mmio_to_commit && !f3_mmio_to_commit_next
+
+  /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
+  io.mmioCommitRead.valid      := RegNext(f3_req_is_mmio && f3_valid, false.B)
+  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
 
   val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
   fromFtqRedirectReg.bits := RegEnable(
