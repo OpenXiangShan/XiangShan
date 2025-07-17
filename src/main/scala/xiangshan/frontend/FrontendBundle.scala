@@ -103,6 +103,7 @@ class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {
+  val valid          = Output(Bool())
   val mmioFtqPtr     = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
 }
