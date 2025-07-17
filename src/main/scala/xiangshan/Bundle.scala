@@ -35,6 +35,7 @@ import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
 import xiangshan.frontend.bpu.{HasBPUParameter, BPUCtrl, RasPtr}
+import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
@@ -113,6 +114,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val lastBrNumOH = UInt((numBr+1).W)
   val ghr = UInt(UbtbGHRLength.W)
   val histPtr = new CGHPtr
+  val phrHistPtr = new PhrPtr
   val specCnt = Vec(numBr, UInt(10.W))
   // need pipeline update
   val br_hit = Bool() // if in ftb entry
