@@ -64,8 +64,6 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
 
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s1_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val s2_override     = WireInit(false.B)
-  private val s2_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s3_override     = WireInit(false.B)
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val updateData      = WireInit(0.U.asTypeOf(new PhrUpdateData))
@@ -75,13 +73,6 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   redirectData.taken  := io.train.redirectTaken
   redirectData.pc     := io.train.redirectPc
   redirectData.phrPtr := io.train.redirectPhrPtr
-
-  s2_override               := io.train.s2_override
-  s2_overrideData.valid     := s2_override
-  s2_overrideData.taken     := io.train.s2_taken
-  s2_overrideData.pc        := io.train.s2_pc
-  s2_overrideData.phrPtr    := s2_phrPtr
-  s2_overrideData.foldedPhr := s2_foldedPhrReg
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
@@ -100,8 +91,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     0.U.asTypeOf(new PhrUpdateData),
     Seq(
       redirectData.valid -> redirectData,
-      s3_override        -> s2_overrideData,
-      s2_override        -> s2_overrideData,
+      s3_override        -> s3_overrideData,
       s1_valid           -> s1_overrideData
     )
   )

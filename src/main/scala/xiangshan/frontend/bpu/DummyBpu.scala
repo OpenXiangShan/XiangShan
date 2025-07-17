@@ -258,12 +258,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   )
 
+  // phr train
   private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrBitsWidth, Bool())))
   private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  // phr train
   phr.io.train.s0_stall          := s0_stall
   phr.io.train.stageCtrl.s0_fire := s0_fire
   phr.io.train.stageCtrl.s1_fire := s1_fire
@@ -273,9 +273,6 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.redirectPc        := redirect.bits.cfiUpdate.pc
   phr.io.train.redirectTaken     := redirect.bits.cfiUpdate.taken
   phr.io.train.redirectPhrPtr    := redirect.bits.cfiUpdate.phrHistPtr
-  phr.io.train.s2_override       := s2_override
-  phr.io.train.s2_pc             := s2_pc
-  phr.io.train.s2_taken          := s2_prediction.taken
   phr.io.train.s3_override       := s3_override
   phr.io.train.s3_pc             := s3_pc
   phr.io.train.s3_taken          := s3_prediction.taken

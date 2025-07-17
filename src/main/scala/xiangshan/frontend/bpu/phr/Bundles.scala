@@ -69,10 +69,6 @@ class PhrTrain(implicit p: Parameters) extends PhrBundle {
   val s1_pc:    PrunedAddr = PrunedAddr(VAddrBits)
   val s1_taken: Bool       = Bool()
 
-  val s2_override: Bool       = Bool()
-  val s2_pc:       PrunedAddr = PrunedAddr(VAddrBits)
-  val s2_taken:    Bool       = Bool()
-
   val s3_override: Bool       = Bool()
   val s3_pc:       PrunedAddr = PrunedAddr(VAddrBits)
   val s3_taken:    Bool       = Bool()
