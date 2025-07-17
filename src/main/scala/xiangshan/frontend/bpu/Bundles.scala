@@ -22,7 +22,9 @@ import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.FtqRedirectSramEntry
 
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
@@ -130,8 +132,10 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
 }
 
 class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
-  val abtbMeta: AheadBtbMeta = new AheadBtbMeta
-  val mbtbMeta: MainBtbMeta  = new MainBtbMeta
+  val abtbMeta:   AheadBtbMeta = new AheadBtbMeta
+  val mbtbMeta:   MainBtbMeta  = new MainBtbMeta
+  val phrHistPtr: PhrPtr       = new PhrPtr
+
   // TODO: other meta
 }
 

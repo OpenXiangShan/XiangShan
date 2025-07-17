@@ -17,9 +17,11 @@ package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
+import scala.math.min
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.phr.PhrParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
@@ -29,6 +31,7 @@ import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 case class BpuParameters(
     // general
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
+    phrParameters:       PhrParameters = PhrParameters(),
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     abtbParameters: AheadBtbParameters = AheadBtbParameters(),
@@ -45,6 +48,22 @@ trait HasBpuParameters extends HasFrontendParameters {
   def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
 
+  // phr history
+  def Shamt:            Int      = bpuParameters.phrParameters.Shamt
+  def AllHistLens:      Seq[Int] = bpuParameters.tageParameters.TableInfos.map(_._2)
+  def PhrHistoryLength: Int      = AllHistLens.max + Shamt * FtqSize
+  def TageFoldedGHistInfos: List[Tuple2[Int, Int]] =
+    (bpuParameters.tageParameters.TableInfos.map { case (nRows, h, _) =>
+      if (h > 0)
+        Set(
+          (h, min(log2Ceil(nRows), h)),
+          (h, min(h, bpuParameters.tageParameters.TagWidth)),
+          (h, min(h, bpuParameters.tageParameters.TagWidth - 1))
+        )
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_ ++ _).toSet ++
+      Set[FoldedHistoryInfo]()).toList
   // sanity check
   // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there
   require(isPow2(FetchBlockAlignSize))
