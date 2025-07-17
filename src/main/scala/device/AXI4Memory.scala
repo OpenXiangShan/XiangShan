@@ -37,6 +37,23 @@ class MemoryRequestHelper(requestType: Int)
     }))
     val response = Output(Bool())
   })
+  val cppExtModule =
+    """
+      |void MemoryRequestHelper (
+      |  int       REQUEST_TYPE,
+      |  uint8_t   reset,
+      |  uint8_t   io_req_valid,
+      |  uint64_t  io_req_bits_addr,
+      |  uint32_t  io_req_bits_id,
+      |  uint8_t&  io_response
+      |) {
+      |  if (reset) io_response = 0;
+      |  else if (io_req_valid) io_response = memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);
+      |  else io_response = 0;
+      |}
+      |""".stripMargin
+  difftest.DifftestModule.createCppExtModule("MemoryRequestHelper", cppExtModule, Some("\"ram.h\""))
+
 
   val verilogLines = Seq(
     "import \"DPI-C\" function bit memory_request (",
@@ -53,21 +70,11 @@ class MemoryRequestHelper(requestType: Int)
     "  input             io_req_valid,",
     "  input      [63:0] io_req_bits_addr,",
     "  input      [31:0] io_req_bits_id,",
-    "  output reg        io_response",
+    "  output            io_response",
     ");",
     "",
-    "always @(posedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "  else if (io_req_valid) begin",
-    "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
-    "  end" +
-    "  else begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "end",
-    "",
+    " assign io_response = (reset ? 1'b0 :",
+    "               (io_req_valid ? memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE) : 1'b0));",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -82,6 +89,22 @@ class MemoryResponseHelper(requestType: Int)
   val enable   = IO(Input(Bool()))
   val response = IO(Output(UInt(64.W)))
 
+  val cppExtModule =
+    """
+      |void MemoryResponseHelper (
+      |  int       REQUEST_TYPE,
+      |  uint8_t   reset,
+      |  uint8_t   enable,
+      |  uint64_t& response
+      |) {
+      |  if (reset) response = 0;
+      |  else if (!reset && enable) response = memory_response(REQUEST_TYPE);
+      |  else response = 0;
+      |}
+      |""".stripMargin
+  difftest.DifftestModule.createCppExtModule("MemoryResponseHelper", cppExtModule, Some("\"ram.h\""))
+
+
   val verilogLines = Seq(
     "import \"DPI-C\" function longint memory_response (",
     "  input bit isWrite",
@@ -93,21 +116,11 @@ class MemoryResponseHelper(requestType: Int)
     "  input             clock,",
     "  input             reset,",
     "  input             enable,",
-    "  output reg [63:0] response",
+    "  output [63:0]     response",
     ");",
     "",
-    "always @(posedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    response <= 64'b0;",
-    "  end",
-    "  else if (!reset && enable) begin",
-    "    response <= memory_response(REQUEST_TYPE);",
-    "  end",
-    " else begin",
-    "    response <= 64'b0;",
-    "  end",
-    "end",
-    "",
+    "assign response = reset ? 64'b0 :",
+    "((!reset && enable) ? memory_response(REQUEST_TYPE) : 64'b0);",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -122,7 +135,8 @@ trait MemoryHelper { this: Module =>
     helper.io.req.valid := valid
     helper.io.req.bits.addr := addr
     helper.io.req.bits.id := id
-    helper.io.response
+    val responseReg = RegNext(helper.io.response)
+    responseReg
   }
   protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
     request(valid, addr, id, false)
@@ -133,7 +147,9 @@ trait MemoryHelper { this: Module =>
     helper.clock := clock
     helper.reset := reset
     helper.enable := enable
-    (helper.response(32), helper.response(31, 0))
+    val response32 = RegNext(helper.response(32))
+    val response31_0 = RegNext(helper.response(31, 0))
+    (response32, response31_0)
   }
   protected def readResponse(enable: Bool): (Bool, UInt) =
     response(enable, false)
