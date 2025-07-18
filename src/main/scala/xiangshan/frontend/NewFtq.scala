@@ -1401,9 +1401,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     * MMIO instruction fetch is allowed only if MMIO is the oldest instruction.
     *************************************************************************************
     */
-  val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = isAfter(commPtr, mmioReadPtr) ||
-    commPtr === mmioReadPtr && validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed
+  val mmioReadPtr   = io.mmioCommitRead.mmioFtqPtr
+  val mmioReadValid = io.mmioCommitRead.valid
+  val mmioLastCommit = mmioReadValid && (isAfter(commPtr, mmioReadPtr) ||
+    commPtr === mmioReadPtr && validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed)
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
