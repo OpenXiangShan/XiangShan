@@ -14,6 +14,8 @@ XiangShan User Guide has been published separately. You can find it at [docs.xia
 
 We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
 
+All XiangShan documents are licensed under the CC-BY-4.0.
+
 ## Publications
 
 ### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
