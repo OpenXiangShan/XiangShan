@@ -68,6 +68,8 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val updateData      = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val updatePc        = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val updateOverride  = WireInit(false.B)
+  private val redirctPhr      = WireInit(0.U(PhrBitsWidth.W))
 
   redirectData.valid  := io.train.redirectValid
   redirectData.taken  := io.train.redirectTaken
@@ -87,6 +89,9 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   s1_overrideData.phrPtr    := s1_phrPtr
   s1_overrideData.foldedPhr := s1_foldedPhrReg
 
+  updatePc       := updateData.pc
+  updateOverride := redirectData.valid || s3_override
+
   updateData := MuxCase(
     0.U.asTypeOf(new PhrUpdateData),
     Seq(
@@ -95,7 +100,6 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
       s1_valid           -> s1_overrideData
     )
   )
-  updatePc := updateData.pc
   private val shiftBits =
     (((updatePc >> 1) ^ (updatePc >> 3)) ^ ((updatePc >> 5) ^ (updatePc >> 7)))(Shamt - 1, 0)
 
@@ -107,11 +111,12 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
       phr(updateData.phrPtr.value - 1.U) := shiftBits(1)
       phr(updateData.phrPtr.value - 2.U) := shiftBits(0)
       phrPtr                             := updateData.phrPtr - 2.U
-    }.otherwise {
+    }.elsewhen(updateOverride) {
       phrPtr := updateData.phrPtr
     }
   }
 
+  s0_phrPtr       := phrPtr
   io.phrPtr       := phrPtr
   io.phrs         := getPhr(phrPtr).asTypeOf(Vec(PhrBitsWidth, Bool()))
   io.s0_foldedPhr := s0_foldedPhr
@@ -124,13 +129,26 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
       histLen
     )
   }
-  private val redirctPhr = getPhr(redirectData.phrPtr)
-  redirectData.foldedPhr.update(VecInit(redirctPhr.asBools), redirectData.phrPtr, Shamt, shiftBits)
-  // TageFoldedGHistInfos.foreach { case (histLen, compLen) =>
-  //   redirectData.foldedPhr.getHistWithInfo((histLen, compLen)).foldedHist := computeFoldedHist(redirctPhr, compLen)(
-  //     histLen
-  //   )
-  // }
+
+  when(redirectData.valid) {
+    redirctPhr := getPhr(redirectData.phrPtr)
+    TageFoldedGHistInfos.foreach { case (histLen, compLen) =>
+      redirectData.foldedPhr.getHistWithInfo((histLen, compLen)).foldedHist := computeFoldedHist(redirctPhr, compLen)(
+        histLen
+      )
+    }
+    s0_foldedPhr := redirectData.foldedPhr
+    when(redirectData.taken) {
+      s0_foldedPhr := redirectData.foldedPhr.update(VecInit(redirctPhr.asBools), redirectData.phrPtr, Shamt, shiftBits)
+    }
+  }.elsewhen(s3_override) {
+    s0_foldedPhr := s3_foldedPhrReg
+    when(s3_overrideData.taken) {
+      s0_foldedPhr := s3_foldedPhrReg.update(VecInit(getPhr(s3_phrPtr).asBools), s3_phrPtr, Shamt, shiftBits)
+    }
+  }.otherwise {
+    s0_foldedPhr := s1_foldedPhrReg
+  }
 
   s0_foldedPhr := Mux(
     updateData.valid,
@@ -138,6 +156,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     s0_foldedPhrReg
   )
 
+  // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
   dontTouch(s2_foldedPhrReg)

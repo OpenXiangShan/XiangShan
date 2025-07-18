@@ -56,7 +56,7 @@ class ReadReq(implicit p: Parameters) extends XSBundle {
 }
 
 class PhrTrain(implicit p: Parameters) extends PhrBundle {
-  // TODO: do we need ready / valid of each stage?
+  // NOTE: if the StageCtrl structure changes, it may require refactoring
   val s0_stall:  Bool      = Bool()
   val stageCtrl: StageCtrl = new StageCtrl
 
@@ -216,6 +216,7 @@ class PhrAllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Paramete
     }
     res
   }
+  // TODO: Enable ahead logic
   // def update(afhob: AllAheadFoldedHistoryOldestBits, lastBrNumOH: UInt, shift: Int, taken: Bool): AllFoldedHistories = {
   //   val res = WireInit(this)
   //   for (i <- 0 until this.hist.length) {

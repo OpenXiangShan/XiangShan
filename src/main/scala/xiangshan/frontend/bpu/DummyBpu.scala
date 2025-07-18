@@ -270,7 +270,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.stageCtrl.s2_fire := s2_fire
   phr.io.train.stageCtrl.s3_fire := s3_fire
   phr.io.train.redirectValid     := redirect.valid
-  phr.io.train.redirectPc        := redirect.bits.cfiUpdate.pc
+  phr.io.train.redirectPc        := PrunedAddrInit(redirect.bits.cfiUpdate.pc)
   phr.io.train.redirectTaken     := redirect.bits.cfiUpdate.taken
   phr.io.train.redirectPhrPtr    := redirect.bits.cfiUpdate.phrHistPtr
   phr.io.train.s3_override       := s3_override
