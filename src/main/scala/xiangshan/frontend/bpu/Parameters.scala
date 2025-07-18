@@ -20,6 +20,7 @@ import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
@@ -32,7 +33,8 @@ case class BpuParameters(
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     abtbParameters: AheadBtbParameters = AheadBtbParameters(),
     mbtbParameters: MainBtbParameters = MainBtbParameters(),
-    tageParameters: TageParameters = TageParameters()
+    tageParameters: TageParameters = TageParameters(),
+    scParameters:   ScParameters = ScParameters()
 ) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
