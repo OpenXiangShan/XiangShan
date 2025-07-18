@@ -19,47 +19,23 @@ import chisel3._
 import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasAheadBtbParameters {
-  def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
-
   def getBankIndex(pc: PrunedAddr): UInt =
     pc(BankIdxWidth + instOffsetBits - 1, instOffsetBits)
+
+  def getSetIndex(pc: PrunedAddr): UInt =
+    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
 
   def getTag(pc: PrunedAddr): UInt =
     pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
-  def getPcUpperBits(pc: PrunedAddr): UInt =
-    pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
-
   def getTargetLowerBits(target: PrunedAddr): UInt =
     target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
 
-  def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
-    val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits = MuxCase(
-      startPcUpperBits,
-      Seq(
-        entry.targetState.isCarry  -> (startPcUpperBits + 1.U),
-        entry.targetState.isBorrow -> (startPcUpperBits - 1.U)
-      )
-    )
-    val targetLowerBits = entry.targetLowerBits
-    PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
-  }
-
-  def getTargetState(startPc: PrunedAddr, target: PrunedAddr): TargetState = {
-    val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits  = getPcUpperBits(target)
-    MuxCase(
-      TargetState.NoCarryAndBorrow,
-      Seq(
-        (targetUpperBits > startPcUpperBits) -> TargetState.Carry,
-        (targetUpperBits < startPcUpperBits) -> TargetState.Borrow
-      )
-    )
+  def getTarget(startPc: PrunedAddr, targetLowerBits: UInt): PrunedAddr = {
+    val startPcUpperBits = startPc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
+    PrunedAddrInit(Cat(startPcUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
   }
 
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): Bool = {
