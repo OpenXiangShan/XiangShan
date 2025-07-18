@@ -133,8 +133,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
   private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
 
-  private val perf_s2_multiHit = detectMultiHit(s2_hitMask, s2_positions)
-
   private val s2_takenPosition = s2_firstTakenEntry.position
   private val s2_target        = getTarget(s2_firstTakenEntry, s2_startPc)
 
@@ -165,6 +163,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
     r.io.readSetIdx  := s2_setIdx
     r.io.readWayMask := s2_hitMask
   }
+
+  private val perf_s2_multiHit = detectMultiHit(s2_hitMask, s2_positions)
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -203,6 +203,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   // TODO: if we want update after execution, we need FTQ send a previousPc with one update request
   //  if we want update after commit, we just ues previous update request to get bankIdx and setIdx
   //  because the order of prediction and commit is the same
+
+  private val perf_t1_hit = t1_meta.hitMask.reduce(_ || _)
 
   /* --------------------------------------------------------------------------------------------------------------
      update taken counter
@@ -274,7 +276,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
 
   // TODO: if the attribute of the taken branch is wrong, we need replace it or invalidate it
 
-  private val t1_writeBankValid = t1_valid && (t1_needWriteNewEntry || t1_needCorrectTarget)
+  private val t1_writeBankValid = t1_needWriteNewEntry || t1_needCorrectTarget
 
   private val t1_writeEntry = Wire(new AheadBtbEntry)
   t1_writeEntry.valid           := true.B
@@ -285,7 +287,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
 
   banks.zip(replacers).zipWithIndex.foreach { case ((b, r), i) =>
-    b.io.writeReq.valid             := t1_writeBankValid && t1_bankMask(i)
+    b.io.writeReq.valid             := t1_valid && t1_writeBankValid && t1_bankMask(i)
     b.io.writeReq.bits.needResetCtr := t1_needWriteNewEntry
     b.io.writeReq.bits.setIdx       := t1_setIdx
     b.io.writeReq.bits.wayIdx       := Mux(t1_needWriteNewEntry, r.io.victimWayIdx, t1_meta.takenWayIdx)
@@ -304,6 +306,35 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
+  private val perf_directionWrong = t1_valid &&
+    ((!t1_meta.taken && t1_train.taken) || (t1_meta.taken && !t1_train.taken))
+
+  private val perf_takenPositionWrong = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.positions(t1_meta.takenWayIdx) =/= t1_train.position
+
+  private val perf_targetWrong = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.attributes(t1_meta.takenWayIdx) === t1_train.attribute &&
+    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position &&
+    t1_meta.target =/= t1_train.target
+
+  private val perf_predictTakenRight = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.attributes(t1_meta.takenWayIdx) === t1_train.attribute &&
+    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position &&
+    t1_meta.target === t1_train.target
+
+  private val perf_condRight = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.attributes(t1_meta.takenWayIdx).isConditional && t1_train.attribute.isConditional &&
+    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position
+
+  private val perf_directRight = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.attributes(t1_meta.takenWayIdx).isDirect && t1_train.attribute.isDirect &&
+    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position
+
+  private val perf_indirectRight = t1_valid && t1_meta.taken && t1_train.taken &&
+    t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
+    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position &&
+    t1_meta.target === t1_train.target
+
   XSPerfAccumulate("predict_req_num", predictReqValid)
   XSPerfAccumulate("predict_num", s2_valid)
   XSPerfAccumulate("predict_hit", s2_valid && s2_hit)
@@ -314,19 +345,26 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   XSPerfAccumulate("predict_multi_hit", s2_valid && perf_s2_multiHit)
 
   XSPerfAccumulate("train_req_num", io.train.valid)
-  XSPerfAccumulate("train_t1_meta_valid", t1_trainValid && t1_meta.valid)
   XSPerfAccumulate("train_num", t1_valid)
-  XSPerfAccumulate("train_hit", t1_valid && t1_hitTakenBranch)
+  XSPerfAccumulate("train_hit_path", t1_valid && perf_t1_hit)
+  XSPerfAccumulate("train_hit_taken_branch", t1_valid && t1_hitTakenBranch)
   XSPerfAccumulate("train_predict_taken", t1_valid && t1_meta.taken)
-  XSPerfAccumulate("train_predict_not_taken", t1_valid && t1_meta.hitMask.reduce(_ || _) && !t1_meta.taken)
+  XSPerfAccumulate("train_predict_not_taken", t1_valid && perf_t1_hit && !t1_meta.taken)
   XSPerfAccumulate("train_actual_taken", t1_valid && t1_train.taken)
   XSPerfAccumulate("train_actual_not_taken", t1_valid && !t1_train.taken)
-  XSPerfAccumulate("train_total_write", t1_writeBankValid)
+  XSPerfAccumulate("train_total_write", t1_valid && t1_writeBankValid)
   XSPerfAccumulate("train_write_new_entry", t1_valid && t1_needWriteNewEntry)
   XSPerfAccumulate("train_correct_target", t1_valid && t1_needCorrectTarget)
-//  XSPerfAccumulate("update_needReplaceEntry", needReplaceEntry)
 
-  XSPerfAccumulate("update_reset_ctr", VecInit(t1_needResetCtr.flatten.flatten).reduce(_ || _))
-  XSPerfAccumulate("update_decrease_ctr", VecInit(t1_needDecreaseCtr.flatten.flatten).reduce(_ || _))
-  XSPerfAccumulate("update_increase_ctr", VecInit(t1_needIncreaseCtr.flatten.flatten).reduce(_ || _))
+  XSPerfAccumulate("train_reset_ctr", VecInit(t1_needResetCtr.flatten.flatten).reduce(_ || _))
+  XSPerfAccumulate("train_decrease_ctr", VecInit(t1_needDecreaseCtr.flatten.flatten).reduce(_ || _))
+  XSPerfAccumulate("train_increase_ctr", VecInit(t1_needIncreaseCtr.flatten.flatten).reduce(_ || _))
+
+  XSPerfAccumulate("train_direction_wrong", perf_directionWrong)
+  XSPerfAccumulate("train_taken_position_wrong", perf_takenPositionWrong)
+  XSPerfAccumulate("train_target_wrong", perf_targetWrong)
+  XSPerfAccumulate("train_predict_taken_right", perf_predictTakenRight)
+  XSPerfAccumulate("train_cond_right", perf_condRight)
+  XSPerfAccumulate("train_direct_right", perf_directRight)
+  XSPerfAccumulate("train_indirect_right", perf_indirectRight)
 }
