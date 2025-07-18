@@ -22,6 +22,7 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.phr.PhrParameters
+import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
@@ -36,7 +37,8 @@ case class BpuParameters(
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     abtbParameters: AheadBtbParameters = AheadBtbParameters(),
     mbtbParameters: MainBtbParameters = MainBtbParameters(),
-    tageParameters: TageParameters = TageParameters()
+    tageParameters: TageParameters = TageParameters(),
+    scParameters:   ScParameters = ScParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))
