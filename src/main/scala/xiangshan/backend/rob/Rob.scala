@@ -33,6 +33,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.{BackendParams, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
@@ -649,6 +650,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.isFetchMalAddr := RegEnable(exceptionDataRead.bits.isFetchMalAddr && deqHasException, exceptionHappen)
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
+  io.exception.bits.isFromFetchHWE := RegEnable(exceptionDataRead.bits.isFromFetchHWE, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
   io.exception.bits.isHls := RegEnable(deqPtrEntry.isHls, exceptionHappen)
   io.exception.bits.vls := RegEnable(deqPtrEntry.vls, exceptionHappen)
@@ -1185,6 +1187,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.vsew := 0.U
     exceptionGen.io.enq(i).bits.veew := 0.U
     exceptionGen.io.enq(i).bits.vlmul := 0.U
+    exceptionGen.io.enq(i).bits.isFromFetchHWE := io.enq.req(i).bits.exceptionVec(hardwareError)
   }
 
   println(s"ExceptionGen:")
@@ -1221,6 +1224,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.vsew := wb.bits.vls.map(_.vpu.vsew).getOrElse(0.U)
     exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
     exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
+    exc_wb.bits.isFromFetchHWE := false.B // HWE instructions should not be executed and writeback.
   }
 
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
