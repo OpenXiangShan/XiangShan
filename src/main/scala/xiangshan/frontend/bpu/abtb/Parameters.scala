@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.HasBpuParameters
 case class AheadBtbParameters(
     NumEntries:           Int = 1024,
     NumBanks:             Int = 4,
-    NumWays:              Int = 8, // TODO: 4 or 8?
+    NumWays:              Int = 4,
     TagWidth:             Int = 24,
     TargetLowerBitsWidth: Int = 22,
     WriteBufferSize:      Int = 4,
