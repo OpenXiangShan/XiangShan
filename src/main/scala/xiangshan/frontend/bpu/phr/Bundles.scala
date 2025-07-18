@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.XSDebug
-import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.StageCtrl
@@ -40,19 +39,13 @@ object PhrPtr {
     apply(!ptr.flag, ptr.value)
 }
 
-class PhrUpdateData(implicit p: Parameters) extends XSBundle with HasPhrParameters {
+class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val valid:     Bool                  = Bool()
   val taken:     Bool                  = Bool()
   val pc:        PrunedAddr            = PrunedAddr(VAddrBits)
   val phrPtr:    PhrPtr                = new PhrPtr
   val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(TageFoldedGHistInfos)
   // val target: PrunedAddr = PrunedAddr(VAddrBits)
-}
-class RecoverReq(implicit p: Parameters) extends XSBundle {
-  val phrPtr: PhrPtr = new PhrPtr
-}
-class ReadReq(implicit p: Parameters) extends XSBundle {
-  val phrPtr: PhrPtr = new PhrPtr
 }
 
 class PhrTrain(implicit p: Parameters) extends PhrBundle {
@@ -83,6 +76,9 @@ class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val phrs:         Vec[Bool]             = Output(Vec(PhrBitsWidth, Bool()))
   val phrPtr:       PhrPtr                = Output(new PhrPtr)
 }
+
+//NOTE: Folded history maintainance logic reuse kmh-v2 ghr folded history management logic,
+// with only minor modifications made for phr characteristics.
 class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(implicit p: Parameters)
     extends PhrBundle with Helpers {
   require(compLen >= 1)

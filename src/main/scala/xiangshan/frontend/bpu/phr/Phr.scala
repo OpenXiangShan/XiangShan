@@ -17,14 +17,9 @@ package xiangshan.frontend.bpu.phr
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.BufferParams.pipe
-import freechips.rocketchip.regmapper.RRTest0Map.re
 import org.chipsalliance.cde.config.Parameters
-import utility.XSPerfAccumulate
-import xiangshan.XSModule
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.phr.PhrPtr
-import xiangshan.frontend.ftq.FtqPtr
 
 class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
 
