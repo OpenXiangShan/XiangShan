@@ -14,6 +14,8 @@ English Readme is [here](README.md).
 
 我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
 
+所有香山文档均采用 CC-BY-4.0 协议授权。
+
 ## 论文发表情况
 
 ### MICRO 2022: Towards Developing High Performance RISC-V Processors Using Agile Methodology
