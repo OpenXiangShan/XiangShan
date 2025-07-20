@@ -23,12 +23,13 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort}
+import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort, UopIdx}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{Pbmt, TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DCacheStoreIO, DcacheStoreRequestIO, HasDCacheParameters, MemoryOpConstants, StorePrefetchReq}
@@ -70,6 +71,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val misalign_enq = new MisalignBufferEnqIO
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
+    val sqDeqPtr       = Input(new SqPtr)
+    val sqDeqUopIdx    = Input(UopIdx())
+    val sqDeqRobIdx    = Input(new RobPtr())
 
     val s0_s1_s2_valid = Output(Bool())
   })
@@ -176,6 +180,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   )) + s0_addr_low
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
+  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqDeqPtr || s0_uop.robIdx === io.sqDeqRobIdx && s0_uop.uopIdx === io.sqDeqUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -300,6 +305,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_pbmt      = Mux(s1_tlb_hit, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
+  val s1_misalignNeedReplay = RegEnable(s0_misalignNeedReplay, false.B, s0_fire)
   //We don't want `StoreUnit` to have an additional effect on the Store of vector from a `misalignBuffer,`
   //But there are places where a marker bit is needed to enable additional processing of vector instructions.
   //For example: `StoreQueue` is exceptionBuffer
@@ -420,7 +426,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
     !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
     GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
-  io.misalign_enq.req.valid := s1_toMisalignBufferValid
+  io.misalign_enq.req.valid := s1_toMisalignBufferValid && !s1_misalignNeedReplay
   io.misalign_enq.req.bits.fromLsPipelineBundle(s1_in)
 
   // Pipeline
@@ -491,7 +497,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
   val s2_misalignBufferNack = !io.misalign_enq.revoke &&
-    RegEnable(s1_toMisalignBufferValid && !io.misalign_enq.req.ready, false.B, s1_fire)
+    RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
