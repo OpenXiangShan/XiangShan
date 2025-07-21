@@ -22,7 +22,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchPrediction
-import xiangshan.frontend.bpu.TargetState
+import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
@@ -99,7 +99,7 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val attribute:       BranchAttribute = new BranchAttribute
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
   // target fix, see comment in Parameters.scala
-  val targetState: Option[TargetState] = if (EnableTargetFix) Option(new TargetState) else None
+  val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
 }
 
 class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {

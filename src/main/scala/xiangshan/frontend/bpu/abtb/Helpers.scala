@@ -17,10 +17,9 @@ package xiangshan.frontend.bpu.abtb
 
 import chisel3._
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.TargetState
+import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasAheadBtbParameters {
+trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
 
@@ -30,39 +29,11 @@ trait Helpers extends HasAheadBtbParameters {
   def getTag(pc: PrunedAddr): UInt =
     pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
-  def getPcUpperBits(pc: PrunedAddr): UInt =
+  def getTargetUpper(pc: PrunedAddr): UInt =
     pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
     target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
-
-  def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
-    val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits = if (EnableTargetFix)
-      MuxCase(
-        startPcUpperBits,
-        Seq(
-          entry.targetState.get.isCarry  -> (startPcUpperBits + 1.U),
-          entry.targetState.get.isBorrow -> (startPcUpperBits - 1.U)
-        )
-      )
-    else
-      startPcUpperBits
-    val targetLowerBits = entry.targetLowerBits
-    PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
-  }
-
-  def getTargetState(startPc: PrunedAddr, target: PrunedAddr): TargetState = {
-    val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits  = getPcUpperBits(target)
-    MuxCase(
-      TargetState.NoCarryAndBorrow,
-      Seq(
-        (targetUpperBits > startPcUpperBits) -> TargetState.Carry,
-        (targetUpperBits < startPcUpperBits) -> TargetState.Borrow
-      )
-    )
-  }
 
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, UInt) = {
     require(hitMask.length == position.length)
