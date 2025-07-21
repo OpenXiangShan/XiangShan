@@ -181,7 +181,12 @@ endif
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
+ifneq ($(FPGA_DIFF),1)
 override PLDM_ARGS += --enable-difftest
+else
+override PLDM_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
+endif
+
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
