@@ -18,7 +18,6 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.TargetCarry
@@ -41,8 +40,8 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
 
   //  Branch target info
-  val targetCarry: EnumUInt = TargetCarry
-  val target:      UInt     = UInt(TargetWidth.W)
+//  val targetCarry: TargetCarry = new TargetCarry // FIXME: seems not used
+  val target: UInt = UInt(TargetWidth.W)
 
   val replaceCnt: UInt = UInt(2.W) // FIXME: not used for now
 }
