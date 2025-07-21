@@ -134,7 +134,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
 
   private val s2_takenPosition = s2_firstTakenEntry.position
-  private val s2_target        = getTarget(s2_firstTakenEntry, s2_startPc)
+  private val s2_target = getFullTarget(s2_startPc, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
 
   private val s2_prediction = Wire(new BranchPrediction)
   s2_prediction.taken       := s2_valid && s2_taken
@@ -292,7 +292,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   t1_writeEntry.position        := t1_train.position
   t1_writeEntry.attribute       := t1_train.attribute
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
-  t1_writeEntry.targetState.foreach(_ := getTargetState(t1_train.startPc, t1_train.target)) // if (EnableTargetFix)
+  t1_writeEntry.targetCarry.foreach(_ := getTargetCarry(t1_train.startPc, t1_train.target)) // if (EnableTargetFix)
 
   banks.zip(replacers).zipWithIndex.foreach { case ((b, r), i) =>
     b.io.writeReq.valid             := t1_valid && t1_writeBankValid && t1_bankMask(i)

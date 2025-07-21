@@ -95,6 +95,60 @@ trait CrossPageHelper extends HasBpuParameters {
     ))
 }
 
+trait TargetFixHelper extends HasBpuParameters {
+  // abstract getTargetUpper function, to be implemented by sub-predictors.
+  // basically, it should be `vAddr(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)`,
+  // where TargetLowerBitsWidth differs for different predictors.
+  def getTargetUpper(vAddr: PrunedAddr): UInt
+
+  def getTargetCarry(startVAddr: PrunedAddr, fullTarget: PrunedAddr): TargetCarry = {
+    val startVAddrUpper = getTargetUpper(startVAddr)
+    val targetUpper     = getTargetUpper(fullTarget)
+    MuxCase(
+      TargetCarry.NoCarryAndBorrow,
+      Seq(
+        (targetUpper > startVAddrUpper) -> TargetCarry.Overflow,
+        (targetUpper < startVAddrUpper) -> TargetCarry.Underflow
+      )
+    )
+  }
+
+  def fixTargetUpper(
+      startVAddrUpper: UInt,
+      targetCarry:     TargetCarry,
+      // pre-computed startVAddrUpper+-1 for timing, default is not needed
+      startVAddrUpperPlusOne:  Option[UInt] = None,
+      startVAddrUpperMinusOne: Option[UInt] = None
+  ): UInt =
+    MuxCase(
+      startVAddrUpper,
+      Seq(
+        targetCarry.isOverflow  -> startVAddrUpperPlusOne.getOrElse(startVAddrUpper + 1.U),
+        targetCarry.isUnderflow -> startVAddrUpperMinusOne.getOrElse(startVAddrUpper - 1.U)
+      )
+    )
+
+  // ubtb and abtb can select whether to use the targetCarry or not, so Option[TargetCarry]
+  def getFullTarget(
+      startVAddr:  PrunedAddr,
+      target:      UInt,
+      targetCarry: Option[TargetCarry],
+      // pre-computed startVAddrUpper+-1 for timing, default is not needed
+      startVAddrUpperPlusOne:  Option[UInt] = None,
+      startVAddrUpperMinusOne: Option[UInt] = None
+  ): PrunedAddr = {
+    val startVAddrUpper = getTargetUpper(startVAddr)
+    PrunedAddrInit(Cat(
+      if (targetCarry.isDefined) // `if (EnableTargetFix)` in ubtb and abtb
+        fixTargetUpper(startVAddrUpper, targetCarry.get, startVAddrUpperPlusOne, startVAddrUpperMinusOne)
+      else
+        startVAddrUpper,    // (VAddrBits - 1, TargetWidth + instOffsetBits)
+      target,               // (TargetWidth + instOffsetBits - 1, instOffsetBits)
+      0.U(instOffsetBits.W) // (instOffsetBits - 1, 0)
+    ))
+  }
+}
+
 trait BtbHelper extends HasBpuParameters {
   def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
     require(positions.length == takenMask.length)

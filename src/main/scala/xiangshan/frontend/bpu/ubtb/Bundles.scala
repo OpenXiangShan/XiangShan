@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.TargetState
+import xiangshan.frontend.bpu.TargetCarry
 
 class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   class SlotBase extends Bundle {
@@ -32,8 +32,8 @@ class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
     // partial target: full target = Cat(fetchBlockVAddr(VAddrBits-1, TargetWidth), target)
     val target: UInt = UInt(TargetWidth.W)
 
-    // target fix, see comment in Parameters.scala
-    val targetState: Option[TargetState] = if (EnableTargetFix) Option(new TargetState) else None
+    // used for target fix, see comment in Parameters.scala
+    val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
   }
 
   class Slot1 extends SlotBase {
