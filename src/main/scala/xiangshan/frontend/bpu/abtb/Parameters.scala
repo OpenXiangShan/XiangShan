@@ -23,7 +23,7 @@ case class AheadBtbParameters(
     NumBanks:             Int = 4,
     NumWays:              Int = 4,
     TagWidth:             Int = 24,
-    TargetLowerBitsWidth: Int = 24,
+    TargetLowerBitsWidth: Int = 22,
     WriteBufferSize:      Int = 4,
     TakenCounterWidth:    Int = 2,
     UsefulCounterWidth:   Int = 2

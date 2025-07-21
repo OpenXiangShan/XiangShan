@@ -22,6 +22,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchPrediction
+import xiangshan.frontend.bpu.TargetState
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
@@ -96,7 +97,9 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val tag:             UInt            = UInt(TagWidth.W)
   val position:        UInt            = UInt(CfiPositionWidth.W)
   val attribute:       BranchAttribute = new BranchAttribute
+  val targetState:     TargetState     = new TargetState
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
+//  val isStaticTarget:  Bool            = Bool() // TODO: abtb really need it?
 }
 
 class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {
