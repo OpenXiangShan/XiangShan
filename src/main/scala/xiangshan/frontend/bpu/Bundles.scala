@@ -46,20 +46,6 @@ class BranchAttribute extends Bundle {
   def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
 }
 
-// TargetCarry is an attribute of partial target
-// While lower part of target is recorded in predictor structure,
-// Some more bits are need when a branch target is crossing the boundary of what lower partial target bits can record.
-object TargetCarry extends EnumUInt(3) {
-  // Branch target and current PC is in the same region
-  def Fit: UInt = 0.U(width.W)
-  // Branch target is in the next region of current PC
-  // Final target should be Cat(PC high bits + RegionSize, lower partial target bits)
-  def Overflow: UInt = 1.U(width.W)
-  // Branch target is in the previous region of current PC
-  // Final target should be Cat(PC high bits - RegionSize, lower partial target bits)
-  def Underflow: UInt = 2.U(width.W)
-}
-
 object BranchAttribute {
   private object BranchType extends EnumUInt(4) {
     // no branch
@@ -149,29 +135,32 @@ class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
   // TODO: other meta
 }
 
-class TargetState extends Bundle {
-  val value: UInt = TargetState.Value()
+// TargetCarry is an attribute of partial target
+// While lower part of target is recorded in predictor structure,
+// Some more bits are need when a branch target is crossing the boundary of what lower partial target bits can record.
+class TargetCarry extends Bundle {
+  val value: UInt = TargetCarry.Value()
 
-  def noCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
-  def isCarry:          Bool = value === TargetState.Value.Carry
-  def isBorrow:         Bool = value === TargetState.Value.Borrow
+  def isFit:       Bool = value === TargetCarry.Value.Fit
+  def isOverflow:  Bool = value === TargetCarry.Value.Overflow
+  def isUnderflow: Bool = value === TargetCarry.Value.Underflow
 }
 
-object TargetState {
+object TargetCarry {
   private object Value extends EnumUInt(3) {
-    def NoCarryAndBorrow: UInt = 0.U(width.W)
-    def Carry:            UInt = 1.U(width.W)
-    def Borrow:           UInt = 2.U(width.W)
+    def Fit:       UInt = 0.U(width.W)
+    def Overflow:  UInt = 1.U(width.W)
+    def Underflow: UInt = 2.U(width.W)
   }
 
-  def apply(value: UInt): TargetState = {
+  def apply(value: UInt): TargetCarry = {
     Value.assertLegal(value)
-    val e = Wire(new TargetState)
+    val e = Wire(new TargetCarry)
     e.value := value
     e
   }
 
-  def NoCarryAndBorrow: TargetState = apply(Value.NoCarryAndBorrow)
-  def Carry:            TargetState = apply(Value.Carry)
-  def Borrow:           TargetState = apply(Value.Borrow)
+  def Fit: TargetCarry = apply(Value.Fit)
+  def Overflow:         TargetCarry = apply(Value.Overflow)
+  def Underflow:        TargetCarry = apply(Value.Underflow)
 }
