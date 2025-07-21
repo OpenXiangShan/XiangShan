@@ -409,27 +409,27 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     })
   }
 
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    vfWbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffVecWriteback(VfPhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire
-      difftest.address := out.bits.pdest
-      difftest.data(0) := out.bits.data(63, 0)
-      difftest.data(1) := out.bits.data(127, 64)
-    })
-  }
+  // if (env.EnableDifftest || env.AlwaysBasicDiff) {
+  //   vfWbArbiterOut.foreach(out => {
+  //     val difftest = DifftestModule(new DiffVecWriteback(VfPhyRegs))
+  //     difftest.coreid := io.fromTop.hartId
+  //     difftest.valid := out.fire
+  //     difftest.address := out.bits.pdest
+  //     difftest.data(0) := out.bits.data(63, 0)
+  //     difftest.data(1) := out.bits.data(127, 64)
+  //   })
+  // }
 
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    v0WbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffVecV0Writeback(V0PhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire
-      difftest.address := out.bits.pdest
-      difftest.data(0) := out.bits.data(63, 0)
-      difftest.data(1) := out.bits.data(127, 64)
-    })
-  }
+  // if (env.EnableDifftest || env.AlwaysBasicDiff) {
+  //   v0WbArbiterOut.foreach(out => {
+  //     val difftest = DifftestModule(new DiffVecV0Writeback(V0PhyRegs))
+  //     difftest.coreid := io.fromTop.hartId
+  //     difftest.valid := out.fire
+  //     difftest.address := out.bits.pdest
+  //     difftest.data(0) := out.bits.data(63, 0)
+  //     difftest.data(1) := out.bits.data(127, 64)
+  //   })
+  // }
 }
 
 
