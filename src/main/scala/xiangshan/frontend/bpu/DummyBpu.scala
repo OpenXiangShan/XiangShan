@@ -314,7 +314,6 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** perf pred *** */
   XSPerfAccumulate("toFtqFire", io.toFtq.resp.fire)
   XSPerfAccumulate("s3Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s3Override.valid)
-  XSPerfAccumulate("ubtbHit", io.toFtq.resp.fire && ubtb.io.hit)
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
