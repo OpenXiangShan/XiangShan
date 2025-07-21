@@ -97,9 +97,9 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val tag:             UInt            = UInt(TagWidth.W)
   val position:        UInt            = UInt(CfiPositionWidth.W)
   val attribute:       BranchAttribute = new BranchAttribute
-  val targetState:     TargetState     = new TargetState
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
-//  val isStaticTarget:  Bool            = Bool() // TODO: abtb really need it?
+  // target fix, see comment in Parameters.scala
+  val targetState: Option[TargetState] = if (EnableTargetFix) Option(new TargetState) else None
 }
 
 class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {

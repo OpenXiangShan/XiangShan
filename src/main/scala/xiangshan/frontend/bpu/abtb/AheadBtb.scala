@@ -291,8 +291,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   t1_writeEntry.tag             := getTag(t1_train.startPc)
   t1_writeEntry.position        := t1_train.position
   t1_writeEntry.attribute       := t1_train.attribute
-  t1_writeEntry.targetState     := getTargetState(t1_train.startPc, t1_train.target)
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
+  t1_writeEntry.targetState.foreach(_ := getTargetState(t1_train.startPc, t1_train.target)) // if (EnableTargetFix)
 
   banks.zip(replacers).zipWithIndex.foreach { case ((b, r), i) =>
     b.io.writeReq.valid             := t1_valid && t1_writeBankValid && t1_bankMask(i)

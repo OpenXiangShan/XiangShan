@@ -39,13 +39,16 @@ trait Helpers extends HasAheadBtbParameters {
 
   def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
     val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits = MuxCase(
-      startPcUpperBits,
-      Seq(
-        entry.targetState.isCarry  -> (startPcUpperBits + 1.U),
-        entry.targetState.isBorrow -> (startPcUpperBits - 1.U)
+    val targetUpperBits = if (EnableTargetFix)
+      MuxCase(
+        startPcUpperBits,
+        Seq(
+          entry.targetState.get.isCarry  -> (startPcUpperBits + 1.U),
+          entry.targetState.get.isBorrow -> (startPcUpperBits - 1.U)
+        )
       )
-    )
+    else
+      startPcUpperBits
     val targetLowerBits = entry.targetLowerBits
     PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
   }

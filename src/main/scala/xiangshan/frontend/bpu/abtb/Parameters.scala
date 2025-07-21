@@ -26,7 +26,10 @@ case class AheadBtbParameters(
     TargetLowerBitsWidth: Int = 22,
     WriteBufferSize:      Int = 4,
     TakenCounterWidth:    Int = 2,
-    UsefulCounterWidth:   Int = 2
+    UsefulCounterWidth:   Int = 2,
+    // enable carry and borrow fix for target, so jumps around 2^(TargetWidth+1) boundary will not cause misprediction
+    // mainBtb should handle this case, so performance affect should be slight, and, bad for timing
+    EnableTargetFix: Boolean = false
 ) {}
 
 trait HasAheadBtbParameters extends HasBpuParameters {
@@ -44,4 +47,6 @@ trait HasAheadBtbParameters extends HasBpuParameters {
   def WriteBufferSize:      Int = abtbParameters.WriteBufferSize
   def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
   def UsefulCounterWidth:   Int = abtbParameters.UsefulCounterWidth
+
+  def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
 }
