@@ -22,6 +22,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchPrediction
+import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
   val redirectValid: Bool                 = Input(Bool())
@@ -41,11 +42,13 @@ class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
   val entries: Vec[AheadBtbEntry] = Vec(NumWays, new AheadBtbEntry)
 }
 
-class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
+class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasAheadBtbParameters {
   val needResetCtr: Bool          = Bool()
   val setIdx:       UInt          = UInt(SetIdxWidth.W)
   val wayIdx:       UInt          = UInt(WayIdxWidth.W)
   val entry:        AheadBtbEntry = new AheadBtbEntry
+
+  def tag: UInt = entry.tag
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {
@@ -82,10 +85,10 @@ class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
   val hitMask:     Vec[Bool]            = Vec(NumWays, Bool())
   val taken:       Bool                 = Bool()
   val takenWayIdx: UInt                 = UInt(WayIdxWidth.W)
-  val attributes:  Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute)
+  val attributes:  Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute) // TODO: do not need store RasAction
   val positions:   Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
-  // TODO: remove it, we need backend send one bit to indicate whether the target is right or wrong
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  // The following signals are used for simulation only.
+  val target: Option[PrunedAddr] = if (!env.FPGAPlatform) Some(PrunedAddr(VAddrBits)) else None
 }
 
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
@@ -103,4 +106,6 @@ class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
   val meta:      AheadBtbMeta    = new AheadBtbMeta
+  // TODO: we need backend send one bit to indicate whether the targetLowerBits is right or wrong
+//  val targetLowerBitsWrong: Bool = Bool()
 }
