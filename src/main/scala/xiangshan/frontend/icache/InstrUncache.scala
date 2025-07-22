@@ -19,6 +19,8 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import coupledL2.MemBackTypeMM
+import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
@@ -35,7 +37,9 @@ import xiangshan.WfiReqBundle
 import xiangshan.frontend._
 
 class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
-  val addr: UInt = UInt(PAddrBits.W)
+  val addr:          UInt = UInt(PAddrBits.W)
+  val memBackTypeMM: Bool = Bool() // !pmp.mmio, pbmt.nc/io on a main memory region
+  val memPageTypeNC: Bool = Bool() // pbmt.nc
   // FIXME: this IO is re-organized in kunminghu-v3, this is a temp solution for v2
   val flush: Bool = Bool()
 }
@@ -106,6 +110,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
       toAddress = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
       lgSize = log2Ceil(mmioBusBytes).U
     )._2
+    io.mmio_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := req.memBackTypeMM)
+    io.mmio_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := req.memPageTypeNC)
 
     when(io.mmio_acquire.fire) {
       state := s_refill_resp
