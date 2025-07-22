@@ -21,14 +21,14 @@ import xiangshan.frontend.bpu.PhrHelper
 
 trait Helpers extends HasPhrParameters with PhrHelper {
   // folded History
-  def circularShiftLeft(src: UInt, shamt: Int) = {
+  def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
     val srcDoubled = Cat(src, src)
     val shifted    = srcDoubled(srcLen * 2 - 1 - shamt, srcLen - shamt)
     shifted
   }
   // do xors for several bitsets at specified bits
-  def bitsetsXor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]], hisLen: Int, compLen: Int) = {
+  def bitsetsXor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]], hisLen: Int, compLen: Int): UInt = {
     val res = Wire(Vec(len, Bool()))
     // println(f"num bitsets: ${bitsets.length}")
     // println(f"bitsets $bitsets")
