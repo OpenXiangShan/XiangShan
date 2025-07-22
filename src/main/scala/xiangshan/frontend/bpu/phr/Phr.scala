@@ -44,7 +44,9 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   private val s3_phrPtr    = RegEnable(s2_phrPtr, 0.U.asTypeOf(new PhrPtr), s2_fire)
 
   // phr folded history
-  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val ghistFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos))) //for diff
+
+  private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s0_foldedPhrReg =
     RegEnable(s0_foldedPhr, 0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)), !s0_stall)
   private val s1_foldedPhrReg =
@@ -99,13 +101,13 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     (((updatePc >> 1) ^ (updatePc >> 3)) ^ ((updatePc >> 5) ^ (updatePc >> 7)))(Shamt - 1, 0)
 
   private def getPhr(ptr: PhrPtr): UInt =
-    (Cat(phr.asUInt, phr.asUInt) >> ptr.value + 1.U)(PhrBitsWidth - 1, 0)
+    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrBitsWidth - 1, 0)
 
   when(updateData.valid) {
     when(updateData.taken) {
-      phr(updateData.phrPtr.value - 1.U) := shiftBits(1)
-      phr(updateData.phrPtr.value - 2.U) := shiftBits(0)
-      phrPtr                             := updateData.phrPtr - 2.U
+      phr(updateData.phrPtr.value)         := shiftBits(1)
+      phr((updateData.phrPtr - 1.U).value) := shiftBits(0)
+      phrPtr                               := updateData.phrPtr - 2.U
     }.elsewhen(updateOverride) {
       phrPtr := updateData.phrPtr
     }
@@ -141,19 +143,27 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     when(s3_overrideData.taken) {
       s0_foldedPhr := s3_foldedPhrReg.update(VecInit(getPhr(s3_phrPtr).asBools), s3_phrPtr, Shamt, shiftBits)
     }
-  }.otherwise {
+  }.elsewhen(s1_valid) {
     s0_foldedPhr := s1_foldedPhrReg
+    when(s1_overrideData.taken) {
+      s0_foldedPhr := s1_foldedPhrReg.update(VecInit(getPhr(s1_phrPtr).asBools), s1_phrPtr, Shamt, shiftBits)
+    }
+  }.otherwise {
+    s0_foldedPhr := s0_foldedPhrReg
   }
 
-  s0_foldedPhr := Mux(
-    updateData.valid,
-    updateData.foldedPhr.update(VecInit(getPhr(updateData.phrPtr).asBools), updateData.phrPtr, Shamt, shiftBits),
-    s0_foldedPhrReg
-  )
+  private val phrValue = getPhr(phrPtr)
 
+  TageFoldedGHistInfos.foreach { case (histLen, compLen) =>
+    ghistFoldedPhr.getHistWithInfo((histLen, compLen)).foldedHist := computeFoldedHist(phrValue, compLen)(
+      histLen
+    )
+  }
   // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
   dontTouch(s2_foldedPhrReg)
-
+  dontTouch(phrValue)
+  dontTouch(ghistFoldedPhr)
+  dontTouch(redirctPhr)
 }

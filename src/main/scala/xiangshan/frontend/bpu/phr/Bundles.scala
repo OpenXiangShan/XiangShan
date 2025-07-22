@@ -96,7 +96,7 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
 
   def getOldestBitFromGhr(phr: Vec[Bool], histPtr: PhrPtr) =
     // TODO: wrap inc for histPtr value
-    oldestBitToGetFromPhr.map(i => phr((histPtr + (i + 1).U).value))
+    oldestBitToGetFromPhr.map(i => phr(i))
 
   // slow path, read bits from phr
   def update(phr: Vec[Bool], histPtr: PhrPtr, num: Int, shiftBits: UInt): PhrFoldedHistory = {
@@ -119,22 +119,20 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
         (oldestBitPosInFolded(i), oldestBitsMasked(i))
       )
 
-      // println(f"old bits pos ${oldest_bits_set.map(_._1)}")
+      // println(f"old bits pos ${oldestBitsSet.map(_._1)}")
 
       // only the last bit could be 1, as we have at most one taken branch at a time
       val newestBitsMasked = shiftBits
       // val newestBitsMasked = VecInit((0 until maxUpdateNum).map(i => taken && ((i + 1) == num).B)).asUInt
       // if a bit does not wrap around, newest bits should not be xored onto it either
-      val newestBitsSet = (0 until maxUpdateNum).map(i => (compLen - 1 - i, newestBitsMasked(i)))
+      val newestBitsSet = (0 until maxUpdateNum).map(i => (compLen - 1 - i, newestBitsMasked(num - i - 1)))
 
-      // println(f"new bits set ${newest_bits_set.map(_._1)}")
+      // println(f"new bits set ${newestBitsSet.map(_._1)}")
       //
       val originalBitsMasked = VecInit(foldedHist.asBools.zipWithIndex.map {
         case (fb, i) => fb && !(num >= (len - i)).B
       })
       val originalBitsSet = (0 until compLen).map(i => (i, originalBitsMasked(i)))
-      dontTouch(originalBitsMasked)
-      dontTouch(newestBitsMasked)
 
       // do xor then shift
       val xored = bitsetsXor(compLen, Seq(originalBitsSet, oldestBitsSet, newestBitsSet), this.len, compLen)

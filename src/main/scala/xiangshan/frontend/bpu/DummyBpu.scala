@@ -286,11 +286,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_foldedPhr := phr.io.s3_foldedPhr
   phrsWire     := phr.io.phrs
 
+  private val phrsWireValue = phrsWire.asUInt
+  private val redirectPhrValue =
+    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.cfiUpdate.phrHistPtr.value + 1.U))(
+      PhrBitsWidth - 1,
+      0
+    )
+
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhr)
   dontTouch(s2_foldedPhr)
   dontTouch(s3_foldedPhr)
-  dontTouch(phrsWire)
+  dontTouch(phrsWireValue)
+  dontTouch(redirectPhrValue)
 
   io.toFtq.resp.bits.s3SpecInfo            := DontCare
   io.toFtq.resp.bits.s3SpecInfo.phrHistPtr := phr.io.phrPtr
