@@ -104,16 +104,18 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   when(updateData.valid) {
+    phrPtr    := updateData.phrPtr
+    s0_phrPtr := updateData.phrPtr
     when(updateData.taken) {
       phr(updateData.phrPtr.value)         := shiftBits(1)
       phr((updateData.phrPtr - 1.U).value) := shiftBits(0)
       phrPtr                               := updateData.phrPtr - 2.U
-    }.elsewhen(updateOverride) {
-      phrPtr := updateData.phrPtr
+      s0_phrPtr                            := updateData.phrPtr - 2.U
     }
+  }.otherwise {
+    s0_phrPtr := phrPtr
   }
 
-  s0_phrPtr       := phrPtr
   io.phrPtr       := phrPtr
   io.phrs         := getPhr(phrPtr).asTypeOf(Vec(PhrHistoryLength, Bool()))
   io.s0_foldedPhr := s0_foldedPhr
