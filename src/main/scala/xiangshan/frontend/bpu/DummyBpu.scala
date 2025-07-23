@@ -29,7 +29,6 @@ import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
-import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
@@ -147,6 +146,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       train.bits.is_jalr                         -> BranchAttribute.OtherIndirect
     )
   )
+  private val t0_meta = train.bits.meta
 
   // FIXME: should use s3_prediction to train ubtb
   // ubtb
@@ -163,7 +163,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   mbtb.io.train.bits.cfiPosition := t0_cfiPosition
   mbtb.io.train.bits.target      := t0_target
   mbtb.io.train.bits.attribute   := t0_attribute
-  mbtb.io.train.bits.meta        := train.bits.newMeta.mbtbMeta
+  mbtb.io.train.bits.meta        := t0_meta.mbtb
   // abtb
   abtb.io.train.valid          := t0_valid
   abtb.io.train.bits.startPc   := t0_startVAddr
@@ -171,7 +171,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.train.bits.taken     := t0_taken
   abtb.io.train.bits.position  := t0_cfiPosition
   abtb.io.train.bits.attribute := t0_attribute
-  abtb.io.train.bits.meta      := train.bits.newMeta.abtbMeta
+  abtb.io.train.bits.meta      := t0_meta.abtb
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -187,7 +187,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val predictorsReady = true.B // FIXME
 
   s0_fire := s1_ready && predictorsReady && resetDone
-  s1_fire := s1_valid && s2_ready && io.toFtq.resp.ready
+  s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
   s2_fire := s2_valid && s3_ready
   s3_fire := s3_valid
 
@@ -222,17 +222,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_prediction = Wire(new BranchPrediction)
   s3_prediction := DontCare
 
-  io.toFtq.resp.valid := s1_valid && s2_ready || s3_fire && s3_override
+  io.toFtq.prediction.valid := s1_valid && s2_ready || s3_fire && s3_override
 
   when(s3_override) {
-    io.toFtq.resp.bits.fromStage(s3_pc, s3_prediction)
+    io.toFtq.prediction.bits.fromStage(s3_pc, s3_prediction)
   }.otherwise {
-    io.toFtq.resp.bits.fromStage(s1_pc, s1_prediction)
+    io.toFtq.prediction.bits.fromStage(s1_pc, s1_prediction)
   }
 
   // override
-  io.toFtq.resp.bits.s3Override.valid       := s3_override
-  io.toFtq.resp.bits.s3Override.bits.ftqPtr := s3_ftqPtr
+  io.toFtq.prediction.bits.s3Override.valid       := s3_override
+  io.toFtq.prediction.bits.s3Override.bits.ftqPtr := s3_ftqPtr
 
   // abtb meta delay to s3
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
@@ -241,14 +241,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // mbtb meta
   val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
-  private val predictorMeta = Wire(new NewPredictorMeta)
-  predictorMeta.abtbMeta   := s3_abtbMeta
-  predictorMeta.mbtbMeta   := s3_mbtbMeta
-  predictorMeta.phrHistPtr := phr.io.phrPtr
+  private val s3_speculativeMeta = Wire(new PredictorSpeculativeMeta)
+  s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
+
+  private val s3_meta = Wire(new PredictorMeta)
+  s3_meta.abtb := s3_abtbMeta
+  s3_meta.mbtb := s3_mbtbMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid
-  io.toFtq.meta.bits  := predictorMeta
+  io.toFtq.meta.bits  := s3_meta
+
+  io.toFtq.speculativeMeta.valid := s3_valid
+  io.toFtq.speculativeMeta.bits  := s3_speculativeMeta
 
   s0_pc := MuxCase(
     s0_pcReg,
@@ -318,22 +323,25 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   }
 
   /* *** perf pred *** */
-  XSPerfAccumulate("toFtqFire", io.toFtq.resp.fire)
-  XSPerfAccumulate("s3Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s3Override.valid)
+  XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
+  XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override.valid)
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.resp.bits.ftqOffset.valid,
-      io.toFtq.resp.bits.ftqOffset.bits,
+      io.toFtq.prediction.bits.ftqOffset.valid,
+      io.toFtq.prediction.bits.ftqOffset.bits,
       FetchBlockInstNum.U
     ),
-    io.toFtq.resp.fire,
+    io.toFtq.prediction.fire,
     0,
     FetchBlockInstNum
   )
-  XSPerfAccumulate("s1_use_ubtb", io.toFtq.resp.fire && ubtb.io.prediction.taken)
-  XSPerfAccumulate("s1_use_abtb", io.toFtq.resp.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
-  XSPerfAccumulate("s1_use_fallThrough", io.toFtq.resp.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate(
+    "s1_use_fallThrough",
+    io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
+  )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 

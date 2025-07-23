@@ -35,9 +35,8 @@ import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.FullBranchPrediction
 import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.abtb.AheadBtbTrain
+import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -135,14 +134,14 @@ class PrefetchPtrDb(implicit p: Parameters) extends Bundle {
 class FtqRedirectSramEntry(implicit p: Parameters) extends XSBundle {
   val histPtr = new CGHPtr
 //  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
-  val rasSpecInfo = new RasSpeculativeInfo
+  val rasSpecInfo     = new RasSpeculativeInfo
+  val speculativeMeta = new PredictorSpeculativeMeta
 }
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends FtqBundle with HasBPUConst {
   val meta       = new PredictorMeta
-  val newMeta    = new NewPredictorMeta
   val ftb_entry  = new FTBEntry
-  val paddingBit = if ((meta.getWidth + newMeta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
+  val paddingBit = if ((meta.getWidth + meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
 }
 
 class Ftq_Pred_Info(implicit p: Parameters) extends FtqBundle {

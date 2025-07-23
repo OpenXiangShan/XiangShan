@@ -180,19 +180,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // **************************** enq from bpu ****************************
   // **********************************************************************
   val new_entry_ready = validEntries < FtqSize.U || readyToCommit
-  io.fromBpu.resp.ready := new_entry_ready
-  io.fromBpu.meta.ready := new_entry_ready
+  io.fromBpu.prediction.ready      := new_entry_ready
+  io.fromBpu.meta.ready            := new_entry_ready
+  io.fromBpu.speculativeMeta.ready := new_entry_ready
 
 //  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
 //  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
   val bpu_s2_redirect = false.B
-  val bpu_s3_redirect = io.fromBpu.resp.bits.s3Override.valid
+  val bpu_s3_redirect = io.fromBpu.prediction.bits.s3Override.valid
 
   io.toBpu.enq_ptr := bpuPtr
-  val enq_fire    = io.fromBpu.resp.fire && allowBpuIn // from bpu s1
-  val bpu_in_fire = (io.fromBpu.resp.fire || bpu_s2_redirect || bpu_s3_redirect) && allowBpuIn
+  val enq_fire    = io.fromBpu.prediction.fire && allowBpuIn // from bpu s1
+  val bpu_in_fire = (io.fromBpu.prediction.fire || bpu_s2_redirect || bpu_s3_redirect) && allowBpuIn
 
-  val bpu_in_resp     = io.fromBpu.resp.bits
+  val bpu_in_resp     = io.fromBpu.prediction.bits
   val bpuRespFtqIdx   = bpuPtr       // FIXME
   val bpu_in_stage    = BP_S1        // FIXME
   val bpu_in_resp_ptr = bpuPtr       // FIXME
@@ -215,17 +216,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   ))
   // these info is intended to enq at the last stage of bpu
   // TODO: Change to real last stage data
-  ftq_redirect_mem.io.wen(0)   := false.B
-  ftq_redirect_mem.io.waddr(0) := 0.U
-  ftq_redirect_mem.io.wdata(0) := 0.U.asTypeOf(new FtqRedirectSramEntry)
+  ftq_redirect_mem.io.wen(0)                   := io.fromBpu.speculativeMeta.valid
+  ftq_redirect_mem.io.waddr(0)                 := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  ftq_redirect_mem.io.wdata(0)                 := DontCare
+  ftq_redirect_mem.io.wdata(0).speculativeMeta := io.fromBpu.speculativeMeta.bits
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen             := io.fromBpu.meta.valid
-  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.s3Override.bits.ftqPtr.value
-  ftq_meta_1r_sram.io.wdata.meta      := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).meta)
-  ftq_meta_1r_sram.io.wdata.newMeta   := io.fromBpu.meta.bits
+  ftq_meta_1r_sram.io.waddr           := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.meta.bits
   ftq_meta_1r_sram.io.wdata.ftb_entry := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).ftb_entry)
   if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
     ftq_meta_1r_sram.io.wdata.paddingBit.get := 0.U
@@ -916,7 +917,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   ftq_meta_1r_sram.io.ren(0)   := readyToCommit
   ftq_meta_1r_sram.io.raddr(0) := commitPtr.value
   val s2_commitMeta     = ftq_meta_1r_sram.io.rdata(0).meta
-  val s2_commitNewMeta  = ftq_meta_1r_sram.io.rdata(0).newMeta
   val s2_commitFtbEntry = ftq_meta_1r_sram.io.rdata(0).ftb_entry
 
   val s1_commitCfi = WireInit(cfiIndex_vec(commitPtr.value))
@@ -957,7 +957,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   update.false_hit   := s2_commitHit === h_false_hit
   update.pc          := s2_commitPcBundle.startAddr
   update.meta        := s2_commitMeta
-  update.newMeta     := s2_commitNewMeta
   update.ftqOffset   := s2_commitCfi
   update.full_target := s2_commitTarget
   update.from_stage  := s2_commitStage
@@ -1017,7 +1016,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val misPred = s2_commitMispredict(i)
     // val ghist = commit_spec_meta.ghist.predHist
     val histPtr   = s2_commitSpecMeta.histPtr
-    val predCycle = s2_commitMeta.tageMeta.pred_cycle
+    val predCycle = 0.U // FIXME
     val target    = s2_commitTarget
 
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map { case (v, offset) =>
@@ -1056,7 +1055,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   }
 
-  val enq           = io.fromBpu.resp
+  val enq           = io.fromBpu.prediction
   val perf_redirect = backendRedirect
 
   XSPerfAccumulate("entry", validEntries)
@@ -1079,7 +1078,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("fromBackendRedirect_ValidNum", io.fromBackend.redirect.valid)
   XSPerfAccumulate("toBpuRedirect_ValidNum", io.toBpu.redirect.valid)
 
-  val from_bpu = io.fromBpu.resp.bits
+  val from_bpu = io.fromBpu.prediction.bits
   val to_ifu   = io.toIfu.req.bits
 
   val commit_jal_mask  = UIntToOH(s2_commitPd.jmpOffset) & Fill(PredictWidth, s2_commitPd.hasJal.asTypeOf(UInt(1.W)))
@@ -1184,7 +1183,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [ifuWbPtr] $ifuWbPtr [commPtr] $commitPtr\n")
   XSDebug(
     true.B,
-    p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
+    p"[in] v:${io.fromBpu.prediction.valid} r:${io.fromBpu.prediction.ready} " +
       p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n"
   )
   XSDebug(

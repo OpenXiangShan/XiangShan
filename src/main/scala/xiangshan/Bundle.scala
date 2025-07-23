@@ -140,6 +140,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.TOSR := entry.rasSpecInfo.TOSR
     this.NOS := entry.rasSpecInfo.NOS
     this.topAddr := entry.rasSpecInfo.topAddr.toUInt
+    this.phrHistPtr := entry.speculativeMeta.phrHistPtr // TODO: this bundle should be re-organized
     this
   }
 

@@ -620,7 +620,7 @@ class Ras(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))',
   // but the fault-tolerance mechanism of the return stack needs to be updated in time. Using an unexpected old value on reset will cause errors.
   // Only 9 registers have clock gate efficiency affected, so we relaxed the control signals.
-  val updateMeta = RegEnable(io.in.update.bits.meta.rasMeta, io.in.update.valid)
+  val updateMeta = 0.U.asTypeOf(new RasInternalMeta)
 
   stack.commit.valid     := updateValid
   stack.commit.pushValid := updateValid && update.is_call_taken

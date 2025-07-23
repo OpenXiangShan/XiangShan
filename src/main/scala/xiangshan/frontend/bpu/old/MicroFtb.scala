@@ -26,7 +26,7 @@ import utility.XSPerfAccumulate
 import xiangshan.HasXSParameter
 import xiangshan.XSBundle
 import xiangshan.XSModule
-import xiangshan.frontend.FullBranchPrediction
+import xiangshan.frontend.OldFullBranchPrediction
 import xiangshan.frontend.PrunedAddr
 
 trait FauFTBParams extends HasXSParameter with HasBPUConst {
@@ -93,7 +93,7 @@ class MicroFtbInput(implicit p: Parameters) extends XSBundle with HasPredictorCo
 
 class MicroFtbOutput(implicit p: Parameters) extends XSBundle {
   val toFtb       = new MicroFtbToFtbBundle
-  val s1_fullPred = new FullBranchPrediction(isNotS3 = true)
+  val s1_fullPred = new OldFullBranchPrediction(isNotS3 = true)
   val s3_meta     = new MicroFtbMeta
 }
 
@@ -123,7 +123,7 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
   private val s1_hitOH               = VecInit(ways.map(_.io.resp_hit)).asUInt
   private val s1_hit                 = s1_hitOH.orR
   private val s1_hitWay              = OHToUInt(s1_hitOH)
-  private val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction(isNotS3 = true)))
+  private val s1_possible_full_preds = Wire(Vec(numWays, new OldFullBranchPrediction(isNotS3 = true)))
 
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
