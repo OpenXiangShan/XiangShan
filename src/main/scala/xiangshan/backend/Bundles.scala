@@ -55,6 +55,8 @@ object Bundles {
     val ftqPtr           = new FtqPtr
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
+    val vtype            = new VType()
+    val specvtype        = new VType()
     val debug_seqNum     = InstSeqNum()
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
@@ -70,6 +72,8 @@ object Bundles {
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
       this.isLastInFtqEntry := source.isLastInFtqEntry
+      this.vtype            := source.vtype
+      this.specvtype        := source.specvtype
       this.debug_seqNum     := source.debug_seqNum
     }
   }
@@ -77,7 +81,7 @@ object Bundles {
   // StaticInst --[Decode]--> DecodedInst
   class DecodedInst(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
-    // passed from StaticInst
+    // passed from StaticInst, except for vtype and specvtype
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
