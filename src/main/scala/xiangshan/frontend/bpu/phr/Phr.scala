@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.phr
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.phr.PhrPtr
 
@@ -161,6 +162,9 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
       histLen
     )
   }
+
+  private val diffFoldedPhr = ghistFoldedPhr.asUInt =/= s0_foldedPhrReg.asUInt
+  XSPerfAccumulate("ghistFoldedPhr_diff_s0_foldedPhrReg", diffFoldedPhr)
   // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
@@ -168,4 +172,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   dontTouch(phrValue)
   dontTouch(ghistFoldedPhr)
   dontTouch(redirctPhr)
+  dontTouch(diffFoldedPhr)
+  dontTouch(s0_phrPtr)
+  dontTouch(s1_phrPtr)
 }
