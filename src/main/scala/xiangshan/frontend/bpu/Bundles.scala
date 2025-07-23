@@ -147,15 +147,15 @@ class TargetCarry extends Bundle {
   val value: UInt = TargetCarry.Value()
 
   def isFit:       Bool = value === TargetCarry.Value.Fit
-  def isOverflow:  Bool = value === TargetCarry.Value.Carry
-  def isUnderflow: Bool = value === TargetCarry.Value.Borrow
+  def isOverflow:  Bool = value === TargetCarry.Value.Overflow
+  def isUnderflow: Bool = value === TargetCarry.Value.Underflow
 }
 
 object TargetCarry {
   private object Value extends EnumUInt(3) {
-    def Fit:    UInt = 0.U(width.W)
-    def Carry:  UInt = 1.U(width.W)
-    def Borrow: UInt = 2.U(width.W)
+    def Fit:       UInt = 0.U(width.W)
+    def Overflow:  UInt = 1.U(width.W)
+    def Underflow: UInt = 2.U(width.W)
   }
 
   def apply(value: UInt): TargetCarry = {
@@ -166,6 +166,6 @@ object TargetCarry {
   }
 
   def NoCarryAndBorrow: TargetCarry = apply(Value.Fit)
-  def Overflow:         TargetCarry = apply(Value.Carry)
-  def Underflow:        TargetCarry = apply(Value.Borrow)
+  def Overflow:         TargetCarry = apply(Value.Overflow)
+  def Underflow:        TargetCarry = apply(Value.Underflow)
 }
