@@ -25,6 +25,7 @@ import xiangshan.CtrlFlow
 import xiangshan.ExceptionNO
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.PreDecodeInfo
@@ -91,6 +92,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.isBackendException := exception.isBackendException
     result.triggered          := triggered
     result.isLastInFtqEntry   := isLastInFtqEntry
+    result.vtype              := DontCare // assign outside
+    result.specvtype          := DontCare // assign outside
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
     result
@@ -127,7 +130,10 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:          UInt          = TriggerAction()
   val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
-  val debug_seqNum:       InstSeqNum    = InstSeqNum()
+  val vtype:              VType         = VType()
+  val specvtype:          VType         = VType()
+
+  val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
@@ -154,6 +160,8 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.ftqPtr                                        := ftqPtr
     cf.ftqOffset                                     := instrEndOffset
     cf.isLastInFtqEntry                              := isLastInFtqEntry
+    cf.vtype                                         := vtype
+    cf.specvtype                                     := specvtype
     cf.debug_seqNum                                  := debug_seqNum
     cf
   }
