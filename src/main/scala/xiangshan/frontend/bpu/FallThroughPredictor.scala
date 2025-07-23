@@ -30,31 +30,31 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
 
   /* *** predict stage 0 *** */
-  private val s0_fire = io.stageCtrl.s0_fire
-
+  private val s0_fire       = io.stageCtrl.s0_fire
   private val s0_startVAddr = io.startVAddr
 
+  /* *** predict stage 1 *** */
+  private val s1_fire       = io.stageCtrl.s1_fire
+  private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
+
   // fall-through address = startVAddr + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
-  private val s0_nextBlockAlignedAddr = getAlignedAddr(s0_startVAddr + FetchBlockSize.U)
+  private val s1_nextBlockAlignedAddr = getAlignedAddr(s1_startVAddr + FetchBlockSize.U)
 
   // if cross page, we need to align fallThroughAddr to the next page
-  private val s0_crossPage           = isCrossPage(s0_startVAddr, s0_nextBlockAlignedAddr) // compare LSB of Vpn
-  private val s0_nextPageAlignedAddr = getPageAlignedAddr(s0_nextBlockAlignedAddr)         // clear page offset
+  private val s1_crossPage           = isCrossPage(s1_startVAddr, s1_nextBlockAlignedAddr) // compare LSB of Vpn
+  private val s1_nextPageAlignedAddr = getPageAlignedAddr(s1_nextBlockAlignedAddr)         // clear page offset
 
-  private val s0_fallThroughAddr = Mux(
-    s0_crossPage,
-    s0_nextPageAlignedAddr,
-    s0_nextBlockAlignedAddr
+  private val s1_fallThroughAddr = Mux(
+    s1_crossPage,
+    s1_nextPageAlignedAddr,
+    s1_nextBlockAlignedAddr
   )
-
-  /* *** predict stage 1 *** */
-  private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
 
   io.prediction.taken       := false.B
   io.prediction.cfiPosition := (FetchBlockInstNum - 1).U
   io.prediction.target      := s1_fallThroughAddr
   io.prediction.attribute   := BranchAttribute.None
 
-  XSPerfAccumulate("crossPage", s0_fire && s0_crossPage)
-  XSPerfAccumulate("crossPageFixed", s0_fire && s0_crossPage && s0_nextBlockAlignedAddr =/= s0_nextPageAlignedAddr)
+  XSPerfAccumulate("crossPage", s1_fire && s1_crossPage)
+  XSPerfAccumulate("crossPageFixed", s1_fire && s1_crossPage && s1_nextBlockAlignedAddr =/= s1_nextPageAlignedAddr)
 }
