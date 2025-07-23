@@ -29,9 +29,9 @@ import xiangshan.frontend.bpu.WriteBuffer
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     val prediction: BranchPrediction = Output(new BranchPrediction)
+    val meta:       MainBtbMeta      = Output(new MainBtbMeta)
     // training specific bundle
     val train: Valid[MainBtbTrain] = Flipped(Valid(new MainBtbTrain))
-    val meta:  MainBtbMeta         = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)

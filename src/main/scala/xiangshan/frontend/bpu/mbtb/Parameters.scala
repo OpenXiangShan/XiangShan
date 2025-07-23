@@ -17,8 +17,6 @@ package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
 import chisel3.util._
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class MainBtbParameters(

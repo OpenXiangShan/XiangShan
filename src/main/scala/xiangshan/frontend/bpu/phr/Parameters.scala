@@ -19,7 +19,6 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class PhrParameters(
     Shamt: Int = 2 // shift amount for PHR
-
 ) {}
 
 trait HasPhrParameters extends HasBpuParameters {
