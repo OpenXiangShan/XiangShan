@@ -825,7 +825,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   // Exception or flush by older branch prediction
   // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend rediect
-  when(f3_ftq_flush_self || f3_ftq_flush_by_older) {
+  when(f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush) {
     mmio_state                    := m_idle
     mmio_exception                := ExceptionType.none
     mmio_is_RVC                   := false.B
@@ -836,9 +836,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_mmio_data.map(_ := 0.U)
   }
 
-  toUncache.valid     := ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
-  toUncache.bits.addr := Mux(mmio_state === m_resendReq, mmio_resend_addr, f3_paddrs(0))
-  fromUncache.ready   := true.B
+  toUncache.valid      := ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
+  toUncache.bits.addr  := Mux(mmio_state === m_resendReq, mmio_resend_addr, f3_paddrs(0))
+  toUncache.bits.flush := f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush
+  fromUncache.ready    := true.B
 
   // send itlb request in m_sendTLB state
   io.iTLBInter.req.valid                   := (mmio_state === m_sendTLB) && f3_req_is_mmio
