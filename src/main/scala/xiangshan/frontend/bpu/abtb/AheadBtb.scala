@@ -34,11 +34,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
   private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
-  // TODO: do we need useful counter?
-//  private val usefulCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(UsefulCounterWidth)))))
 
   // TODO: write ctr bypass to read
-  // TODO: invliadate multi-hit entry
   // TODO: train after execution
 
   private val s0_fire = Wire(Bool())
@@ -151,12 +148,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   io.debug_startVaddr := s2_startPc
 
   private val meta = Wire(new AheadBtbMeta)
-  meta.valid       := s2_valid
-  meta.hitMask     := s2_hitMask
-  meta.taken       := s2_taken
-  meta.takenWayIdx := OHToUInt(s2_firstTakenEntryWayIdxOH)
-  meta.attributes  := s2_realEntries.map(_.attribute)
-  meta.positions   := s2_positions
+  meta.valid           := s2_valid
+  meta.hitMask         := s2_hitMask
+  meta.taken           := s2_taken
+  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryWayIdxOH)
+  meta.attributes      := s2_realEntries.map(_.attribute)
+  meta.positions       := s2_positions
+  meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
   if (meta.target.isDefined) {
     meta.target.get := s2_target
   }
@@ -271,19 +269,12 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   }.reduce(_ || _)
   private val t1_needWriteNewEntry = !t1_hitTakenBranch
 
-  // TODO: it should from backend by one bit signal
-  private val t1_targetLowerBitsWrong = if (t1_meta.target.isDefined) {
-    getTargetLowerBits(t1_meta.target.get) =/= getTargetLowerBits(t1_train.target)
-  } else {
-    false.B
-  }
-
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
   private val t1_needCorrectTarget = t1_meta.taken && t1_train.taken &&
     t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
     t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position &&
-    t1_targetLowerBitsWrong
+    t1_meta.targetLowerBits =/= getTargetLowerBits(t1_train.target)
 
   // TODO: if the attribute of the taken branch is wrong, we need replace it or invalidate it
 
@@ -340,16 +331,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
     false.B
   }
 
-  private val perf_targetLowerBitsSame = if (t1_meta.target.isDefined) {
-    getTargetLowerBits(t1_meta.target.get) === getTargetLowerBits(t1_train.target)
-  } else {
-    false.B
-  }
-
   private val perf_targetOverflow = t1_valid && t1_meta.taken && t1_train.taken &&
     t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
     t1_meta.positions(t1_meta.takenWayIdx) === t1_train.position &&
-    !perf_targetSame && perf_targetLowerBitsSame
+    t1_meta.targetLowerBits =/= getTargetLowerBits(t1_train.target) &&
+    !perf_targetSame
 
   private val perf_directionWrong = t1_valid &&
     ((!t1_meta.taken && t1_train.taken) || (t1_meta.taken && !t1_train.taken))

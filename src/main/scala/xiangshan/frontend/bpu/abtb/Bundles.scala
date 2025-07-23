@@ -82,11 +82,12 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
   val valid: Bool = Bool()
 //  val previousPc:    PrunedAddr           = PrunedAddr(VAddrBits) // TODO: update after execution will need it
-  val hitMask:     Vec[Bool]            = Vec(NumWays, Bool())
-  val taken:       Bool                 = Bool()
-  val takenWayIdx: UInt                 = UInt(WayIdxWidth.W)
-  val attributes:  Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute) // TODO: do not need store RasAction
-  val positions:   Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
+  val hitMask:         Vec[Bool]            = Vec(NumWays, Bool())
+  val taken:           Bool                 = Bool()
+  val takenWayIdx:     UInt                 = UInt(WayIdxWidth.W)
+  val attributes:      Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute) // TODO: do not need store RasAction
+  val positions:       Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
+  val targetLowerBits: UInt                 = UInt(TargetLowerBitsWidth.W)
   // The following signals are used for simulation only.
   val target: Option[PrunedAddr] = if (!env.FPGAPlatform) Some(PrunedAddr(VAddrBits)) else None
 }
@@ -108,6 +109,4 @@ class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
   val meta:      AheadBtbMeta    = new AheadBtbMeta
-  // TODO: we need backend send one bit to indicate whether the targetLowerBits is right or wrong
-//  val targetLowerBitsWrong: Bool = Bool()
 }
