@@ -145,7 +145,7 @@ trait BPUUtils extends HasXSParameter {
   }
 }
 
-class PredictorMeta(implicit p: Parameters) extends XSBundle {
+class OldPredictorMeta(implicit p: Parameters) extends XSBundle {
   val uftbMeta   = new MicroFtbMeta
   val ftbMeta    = new FtbMeta
   val tageMeta   = new TageMeta
@@ -314,7 +314,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val s1_predictorsReady = ftb.io.out.s1_ready && tage.io.out.s1_ready && ittage.io.out.s1_ready
 
   s0_fire := s1_predictorsReady && s1_ready
-  s1_fire := s1_valid && s2_ready && io.toFtq.resp.ready
+  s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
   s2_fire := s2_valid && s3_ready
   s3_fire := s3_valid
 
@@ -382,11 +382,11 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3_meta.ittageMeta := ittage.io.out.s3_meta
   bpuResp.s3_meta.rasMeta    := ras.io.out.s3_meta
 
-  val totalMetaSize = (new PredictorMeta).getWidth
+  val totalMetaSize = (new OldPredictorMeta).getWidth
   println(s"total meta size: $totalMetaSize\n")
 
-  io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
-  io.toFtq.resp.bits  := bpuResp
+  io.toFtq.prediction.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
+  io.toFtq.prediction.bits  := bpuResp
 
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s2_override || s3_override || do_redirect.valid)
@@ -885,7 +885,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   ftqUpdateBubble(0)   := !s1_predictorsReady
   ftqUpdateBubble(1)   := false.B
   ftqUpdateBubble(2)   := false.B
-  ftqFullStall         := !io.toFtq.resp.ready
+  ftqFullStall         := !io.toFtq.prediction.ready
   bpuResp.topdown_info := topdown_stages(numOfStage - 1)
 
   // topdown handling logic here
@@ -998,7 +998,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     s3_flush,
     s3_pc.toUInt
   )
-  XSDebug("[FTQ] ready=%d\n", io.toFtq.resp.ready)
+  XSDebug("[FTQ] ready=%d\n", io.toFtq.prediction.ready)
   XSDebug("resp.s1.target=%x\n", bpuResp.s1.getTarget.toUInt)
   XSDebug("resp.s2.target=%x\n", bpuResp.s2.getTarget.toUInt)
   // XSDebug("s0_ghist: %b\n", s0_ghist.predHist)

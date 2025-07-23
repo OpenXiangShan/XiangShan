@@ -35,7 +35,7 @@ import xiangshan.HasXSParameter
 import xiangshan.XSBundle
 import xiangshan.XSModule
 import xiangshan.frontend.BranchPredictionUpdate
-import xiangshan.frontend.FullBranchPrediction
+import xiangshan.frontend.OldFullBranchPrediction
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.TableAddr
@@ -490,8 +490,8 @@ class FtbInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonS
 
 class FtbOutput(implicit p: Parameters) extends XSBundle {
   val s1_ready    = Bool()
-  val s2_fullPred = new FullBranchPrediction(isNotS3 = true)
-  val s3_fullPred = new FullBranchPrediction(isNotS3 = false)
+  val s2_fullPred = new OldFullBranchPrediction(isNotS3 = true)
+  val s3_fullPred = new OldFullBranchPrediction(isNotS3 = false)
   val toIttage    = new FtbToIttageBundle
   val toRas       = new FtbToRasBundle
   val s3_ftbEntry = new FTBEntry
@@ -783,7 +783,7 @@ class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEv
   val update_pc = io.in.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  update.meta.ftbMeta := RegEnable(io.in.update.bits.meta.ftbMeta, io.in.update.valid && !io.in.update.bits.old_entry)
+//  update.meta.ftbMeta := RegEnable(io.in.update.bits.meta.ftbMeta, io.in.update.valid && !io.in.update.bits.old_entry)
 
   // Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
@@ -811,13 +811,13 @@ class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEv
   XSPerfAccumulate("this_cycle_is_close", s2_close_ftb_req && s2_fire)
   XSPerfAccumulate("this_cycle_is_open", !s2_close_ftb_req && s2_fire)
 
-  val s2_fullPred = Wire(new FullBranchPrediction(isNotS3 = true))
+  val s2_fullPred = Wire(new OldFullBranchPrediction(isNotS3 = true))
   io.out.s2_fullPred   := s2_fullPred
   s2_fullPred.hit      := s2_hit
   s2_fullPred.multiHit := false.B
   s2_fullPred.fromFtbEntry(s2_ftb_entry, s2_pc, Some(s1_pc, s1_fire), Some(s1_read_resp, s1_fire))
 
-  val s3_fullPred = Wire(new FullBranchPrediction(isNotS3 = false))
+  val s3_fullPred = Wire(new OldFullBranchPrediction(isNotS3 = false))
   io.out.s3_fullPred   := s3_fullPred
   s3_fullPred.hit      := s3_hit
   s3_fullPred.multiHit := s3_multi_hit
@@ -861,7 +861,7 @@ class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEv
   )
 
   // Update logic
-  val u_meta  = update.meta.ftbMeta
+  val u_meta  = 0.U.asTypeOf(new FtbMeta)
   val u_valid = update_valid && !update.old_entry && !s0_close_ftb_req
 
   val (_, delay2_pc)    = DelayNWithValid(update_pc, u_valid, 2)

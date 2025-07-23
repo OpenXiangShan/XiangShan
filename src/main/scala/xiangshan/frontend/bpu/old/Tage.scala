@@ -706,7 +706,7 @@ class Tage(implicit p: Parameters) extends XSModule with TageParams with BPUUtil
     VecInit((0 until TageBanks).map(w =>
       io.in.update.bits.ftb_entry.brValids(w) && io.in.update.valid
     )) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
-  val u_meta     = io.in.update.bits.meta.tageMeta
+  val u_meta     = 0.U.asTypeOf(new TageMeta)
   val updateMeta = Wire(new TageMeta)
   updateMeta := RegEnable(u_meta, io.in.update.valid)
   for (i <- 0 until numBr) {
