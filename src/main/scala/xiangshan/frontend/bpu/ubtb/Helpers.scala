@@ -23,7 +23,7 @@ import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasMicroBtbParameters {
   def getTag(vAddr: PrunedAddr): UInt =
-    vAddr(TagWidth, instOffsetBits)
+    vAddr(TagWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTargetUpper(vAddr: PrunedAddr): UInt =
     vAddr(VAddrBits - 1, TargetWidth + instOffsetBits)
