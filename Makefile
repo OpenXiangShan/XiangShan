@@ -77,8 +77,16 @@ MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
-MFC_ARGS = --dump-fir --target $(CHISEL_TARGET) --split-verilog \
+MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
+
+ifeq ($(CHISEL_TARGET),systemverilog)
+MFC_ARGS += --split-verilog --dump-fir
+endif
+
+ifneq ($(FIRTOOL),)
+MFC_ARGS += --firtool-binary-path $(FIRTOOL)
+endif
 
 # prefix of XSTop or XSNoCTop
 ifneq ($(XSTOP_PREFIX),)
