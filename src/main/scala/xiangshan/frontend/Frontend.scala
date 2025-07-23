@@ -123,9 +123,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val FlushITTAGEMiss      = Wire(Bool())
   val FlushRASMiss         = Wire(Bool())
 
-  val tlbCsr  = DelayN(io.tlbCsr, 2)
+  // TODO: what the fuck are these magic numbers?
+  val tlbCsr  = DelayN(io.tlbCsr, 1)
   val csrCtrl = DelayN(io.csrCtrl, 2)
-  val sfence  = RegNext(RegNext(io.sfence))
+  val sfence  = DelayN(io.sfence, 2)
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
