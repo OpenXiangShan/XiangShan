@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.WriteBuffer
 /**
   * This module stores the ahead BTB entries.
   */
-class Bank(implicit p: Parameters) extends AheadBtbModule {
+class AheadBtbBank(implicit p: Parameters) extends AheadBtbModule {
   val io: BankIO = IO(new BankIO)
 
   private val sram = Module(new SRAMTemplate(

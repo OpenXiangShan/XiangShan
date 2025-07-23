@@ -23,7 +23,7 @@ import utility.ReplacementPolicy
 /**
   * This module implement the replacement policy for the ahead BTB.
   */
-class Replacer(implicit p: Parameters) extends AheadBtbModule {
+class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
   private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)

@@ -30,8 +30,8 @@ import xiangshan.frontend.bpu.SaturateCounter
 class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParameters with Helpers with BtbHelper {
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
-  private val banks     = Seq.fill(NumBanks)(Module(new Bank))
-  private val replacers = Seq.fill(NumBanks)(Module(new Replacer))
+  private val banks     = Seq.fill(NumBanks)(Module(new AheadBtbBank))
+  private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
   private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
   // TODO: do we need useful counter?
