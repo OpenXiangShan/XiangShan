@@ -215,9 +215,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   ))
   // these info is intended to enq at the last stage of bpu
   // TODO: Change to real last stage data
-  ftq_redirect_mem.io.wen(0)   := bpu_in_fire
-  ftq_redirect_mem.io.waddr(0) := bpu_in_resp_idx
-  ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.s3SpecInfo
+  ftq_redirect_mem.io.wen(0)   := false.B
+  ftq_redirect_mem.io.waddr(0) := 0.U
+  ftq_redirect_mem.io.wdata(0) := 0.U.asTypeOf(new FtqRedirectSramEntry)
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))

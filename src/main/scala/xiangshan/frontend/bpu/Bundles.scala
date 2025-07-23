@@ -122,8 +122,6 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
   // override valid
   val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
 
-  val s3SpecInfo = new FtqRedirectSramEntry
-
   def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
     this.startVAddr      := pc
     this.ftqOffset.valid := prediction.taken
@@ -135,8 +133,10 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
 }
 
 class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
-  val abtbMeta: AheadBtbMeta = new AheadBtbMeta
-  val mbtbMeta: MainBtbMeta  = new MainBtbMeta
+  val abtbMeta:   AheadBtbMeta = new AheadBtbMeta
+  val mbtbMeta:   MainBtbMeta  = new MainBtbMeta
+  val phrHistPtr: PhrPtr       = new PhrPtr
+
   // TODO: other meta
 }
 

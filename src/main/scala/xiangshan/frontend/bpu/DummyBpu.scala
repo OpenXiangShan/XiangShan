@@ -242,8 +242,9 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
   private val predictorMeta = Wire(new NewPredictorMeta)
-  predictorMeta.abtbMeta := s3_abtbMeta
-  predictorMeta.mbtbMeta := s3_mbtbMeta
+  predictorMeta.abtbMeta   := s3_abtbMeta
+  predictorMeta.mbtbMeta   := s3_mbtbMeta
+  predictorMeta.phrHistPtr := phr.io.phrPtr
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid
@@ -259,7 +260,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // phr train
-  private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrBitsWidth, Bool())))
+  private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
@@ -289,7 +290,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val phrsWireValue = phrsWire.asUInt
   private val redirectPhrValue =
     (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.cfiUpdate.phrHistPtr.value + 1.U))(
-      PhrBitsWidth - 1,
+      PhrHistoryLength - 1,
       0
     )
 
@@ -299,9 +300,6 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(s3_foldedPhr)
   dontTouch(phrsWireValue)
   dontTouch(redirectPhrValue)
-
-  io.toFtq.resp.bits.s3SpecInfo            := DontCare
-  io.toFtq.resp.bits.s3SpecInfo.phrHistPtr := phr.io.phrPtr
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)

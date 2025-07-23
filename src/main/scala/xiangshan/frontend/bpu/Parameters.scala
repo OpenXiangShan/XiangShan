@@ -58,8 +58,9 @@ trait HasBpuParameters extends HasXSParameter {
   def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 
   // phr history
-  def Shamt:        Int = bpuParameters.phrParameters.Shamt
-  def PhrBitsWidth: Int = PhrHistoryLength
+  def Shamt:            Int      = bpuParameters.phrParameters.Shamt
+  def AllHistLens:      Seq[Int] = bpuParameters.tageParameters.TableInfos.map(_._2)
+  def PhrHistoryLength: Int      = AllHistLens.max + Shamt * FtqSize
   def TageFoldedGHistInfos: List[Tuple2[Int, Int]] =
     (bpuParameters.tageParameters.TableInfos.map { case (nRows, h, _) =>
       if (h > 0)

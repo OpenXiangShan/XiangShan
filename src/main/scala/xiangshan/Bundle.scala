@@ -134,7 +134,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   def fromFtqRedirectSram(entry: FtqRedirectSramEntry) = {
     // this.hist := entry.ghist
     this.histPtr := entry.histPtr
-    this.phrHistPtr := entry.phrHistPtr
     this.ssp := entry.rasSpecInfo.ssp
     this.sctr := entry.rasSpecInfo.sctr
     this.TOSW := entry.rasSpecInfo.TOSW

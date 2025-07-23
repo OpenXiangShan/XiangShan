@@ -26,7 +26,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   // PHR: Predicted History Register
   val io: PhrIO = IO(new PhrIO())
 
-  private val phr = RegInit(0.U.asTypeOf(Vec(PhrBitsWidth, Bool())))
+  private val phr = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   // PHR train from redirct/s2_prediction/s3_prediction
   private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
 
@@ -44,9 +44,9 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   private val s3_phrPtr    = RegEnable(s2_phrPtr, 0.U.asTypeOf(new PhrPtr), s2_fire)
 
   // phr folded history
-  private val ghistFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos))) //for diff
+  private val ghistFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos))) // for diff
 
-  private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s0_foldedPhrReg =
     RegEnable(s0_foldedPhr, 0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)), !s0_stall)
   private val s1_foldedPhrReg =
@@ -66,7 +66,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
   private val updateData      = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val updatePc        = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val updateOverride  = WireInit(false.B)
-  private val redirctPhr      = WireInit(0.U(PhrBitsWidth.W))
+  private val redirctPhr      = WireInit(0.U(PhrHistoryLength.W))
 
   redirectData.valid  := io.train.redirectValid
   redirectData.taken  := io.train.redirectTaken
@@ -101,7 +101,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
     (((updatePc >> 1) ^ (updatePc >> 3)) ^ ((updatePc >> 5) ^ (updatePc >> 7)))(Shamt - 1, 0)
 
   private def getPhr(ptr: PhrPtr): UInt =
-    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrBitsWidth - 1, 0)
+    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   when(updateData.valid) {
     when(updateData.taken) {
@@ -115,7 +115,7 @@ class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with
 
   s0_phrPtr       := phrPtr
   io.phrPtr       := phrPtr
-  io.phrs         := getPhr(phrPtr).asTypeOf(Vec(PhrBitsWidth, Bool()))
+  io.phrs         := getPhr(phrPtr).asTypeOf(Vec(PhrHistoryLength, Bool()))
   io.s0_foldedPhr := s0_foldedPhr
   io.s1_foldedPhr := s1_foldedPhrReg
   io.s2_foldedPhr := s2_foldedPhrReg

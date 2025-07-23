@@ -25,7 +25,8 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.StageCtrl
 
 class PhrPtr(implicit p: Parameters) extends CircularQueuePtr[PhrPtr](p =>
-      p(XSCoreParamsKey).PhrHistoryLength
+      p(XSCoreParamsKey).bpuParameters.tageParameters.TableInfos.map(_._2).max +
+        p(XSCoreParamsKey).bpuParameters.phrParameters.Shamt * p(XSCoreParamsKey).FtqSize
     ) {}
 
 object PhrPtr {
@@ -73,7 +74,7 @@ class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val s1_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
   val s2_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
   val s3_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
-  val phrs:         Vec[Bool]             = Output(Vec(PhrBitsWidth, Bool()))
+  val phrs:         Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
   val phrPtr:       PhrPtr                = Output(new PhrPtr)
 }
 

@@ -26,6 +26,7 @@ trait HasPhrParameters extends HasBpuParameters {
   def phrParameters: PhrParameters = bpuParameters.phrParameters
 
   def TwoTakenEnable: Boolean = false
+
   // def Shamt:          Int     = phrParameters.Shamt
-  // def PhrBitsWidth: Int = PhrHistoryLength
+  // def PhrHistoryLength: Int = PhrHistoryLength
 }

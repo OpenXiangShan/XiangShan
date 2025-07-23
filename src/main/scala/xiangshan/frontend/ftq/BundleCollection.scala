@@ -38,7 +38,6 @@ import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
 import xiangshan.frontend.bpu.abtb.AheadBtbTrain
-import xiangshan.frontend.bpu.phr.PhrPtr
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -134,8 +133,7 @@ class PrefetchPtrDb(implicit p: Parameters) extends Bundle {
 }
 
 class FtqRedirectSramEntry(implicit p: Parameters) extends XSBundle {
-  val phrHistPtr = new PhrPtr
-  val histPtr    = new CGHPtr
+  val histPtr = new CGHPtr
 //  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
   val rasSpecInfo = new RasSpeculativeInfo
 }
