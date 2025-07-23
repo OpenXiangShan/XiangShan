@@ -27,7 +27,7 @@ import xiangshan.frontend.bpu.SaturateCounter
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParameters with Helpers with BtbHelper {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with BtbHelper {
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
   private val banks     = Seq.fill(NumBanks)(Module(new AheadBtbBank))
@@ -132,6 +132,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   private val s2_positions               = s2_realEntries.map(_.position)
   private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
   private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
+
+  // When detect multi-hit, we need to invalidate one entry.
+  private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
 
   private val s2_takenPosition = s2_firstTakenEntry.position
   private val s2_target = getFullTarget(s2_startPc, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
@@ -284,8 +287,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
 
   // TODO: if the attribute of the taken branch is wrong, we need replace it or invalidate it
 
-  private val t1_writeBankValid = t1_needWriteNewEntry || t1_needCorrectTarget
-
   private val t1_writeEntry = Wire(new AheadBtbEntry)
   t1_writeEntry.valid           := true.B
   t1_writeEntry.tag             := getTag(t1_train.startPc)
@@ -294,14 +295,33 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
   t1_writeEntry.targetCarry.foreach(_ := getTargetCarry(t1_train.startPc, t1_train.target)) // if (EnableTargetFix)
 
-  banks.zip(replacers).zipWithIndex.foreach { case ((b, r), i) =>
-    b.io.writeReq.valid             := t1_valid && t1_writeBankValid && t1_bankMask(i)
-    b.io.writeReq.bits.needResetCtr := t1_needWriteNewEntry
-    b.io.writeReq.bits.setIdx       := t1_setIdx
-    b.io.writeReq.bits.wayIdx       := Mux(t1_needWriteNewEntry, r.io.victimWayIdx, t1_meta.takenWayIdx)
-    b.io.writeReq.bits.entry        := t1_writeEntry
+  replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
+  private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
-    r.io.needReplaceSetIdx := t1_setIdx
+  // TODO: the prioriority of write?
+  banks.zipWithIndex.foreach { case (b, i) =>
+    when(t1_valid && t1_needWriteNewEntry && t1_bankMask(i)) {
+      b.io.writeReq.valid             := true.B
+      b.io.writeReq.bits.needResetCtr := true.B
+      b.io.writeReq.bits.setIdx       := t1_setIdx
+      b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
+      b.io.writeReq.bits.entry        := t1_writeEntry
+    }.elsewhen(t1_valid && t1_needCorrectTarget && t1_bankMask(i)) {
+      b.io.writeReq.valid             := true.B
+      b.io.writeReq.bits.needResetCtr := false.B
+      b.io.writeReq.bits.setIdx       := t1_setIdx
+      b.io.writeReq.bits.wayIdx       := t1_meta.takenWayIdx
+      b.io.writeReq.bits.entry        := t1_writeEntry
+    }.elsewhen(s2_valid && s2_multiHit && s2_bankMask(i)) {
+      b.io.writeReq.valid             := true.B
+      b.io.writeReq.bits.needResetCtr := true.B
+      b.io.writeReq.bits.setIdx       := s2_setIdx
+      b.io.writeReq.bits.wayIdx       := s2_multiHitWayIdx
+      b.io.writeReq.bits.entry        := 0.U.asTypeOf(new AheadBtbEntry)
+    }.otherwise {
+      b.io.writeReq.valid := false.B
+      b.io.writeReq.bits  := 0.U.asTypeOf(new BankWriteReq)
+    }
   }
 
   replacers.zip(banks).foreach { case (r, b) =>
@@ -313,8 +333,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   /* --------------------------------------------------------------------------------------------------------------
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
-
-  private val perf_multiHit = detectMultiHit(s2_hitMask, s2_positions)
 
   private val perf_targetSame = if (t1_meta.target.isDefined) {
     t1_meta.target.get === t1_train.target
@@ -373,7 +391,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   XSPerfAccumulate("predict_hit_entry_num", Mux(s2_valid, PopCount(s2_hitMask), 0.U))
   XSPerfAccumulate("predict_taken", s2_valid && s2_taken)
   XSPerfAccumulate("predict_not_taken", s2_valid && s2_hit && !s2_taken)
-  XSPerfAccumulate("predict_multi_hit", s2_valid && perf_multiHit)
+  XSPerfAccumulate("predict_multi_hit", s2_valid && s2_multiHit)
 
   XSPerfAccumulate("train_req_num", io.train.valid)
   XSPerfAccumulate("train_num", t1_valid)
@@ -383,9 +401,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbPar
   XSPerfAccumulate("train_predict_not_taken", t1_valid && perf_t1_hit && !t1_meta.taken)
   XSPerfAccumulate("train_actual_taken", t1_valid && t1_train.taken)
   XSPerfAccumulate("train_actual_not_taken", t1_valid && !t1_train.taken)
-  XSPerfAccumulate("train_total_write", t1_valid && t1_writeBankValid)
+
+  XSPerfAccumulate("total_write", t1_valid && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
   XSPerfAccumulate("train_write_new_entry", t1_valid && t1_needWriteNewEntry)
   XSPerfAccumulate("train_correct_target", t1_valid && t1_needCorrectTarget)
+  XSPerfAccumulate(
+    "train_write_conflict",
+    t1_valid && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
+  )
 
   XSPerfAccumulate("train_reset_ctr", VecInit(t1_needResetCtr.flatten.flatten).reduce(_ || _))
   XSPerfAccumulate("train_decrease_ctr", VecInit(t1_needDecreaseCtr.flatten.flatten).reduce(_ || _))

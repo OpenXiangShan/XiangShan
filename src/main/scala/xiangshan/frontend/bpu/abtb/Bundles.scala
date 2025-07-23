@@ -75,9 +75,8 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val writeSetIdx: UInt = Input(UInt(SetIdxWidth.W))
   val writeWayIdx: UInt = Input(UInt(WayIdxWidth.W))
 
-//  val usefulCounter:     Vec[SaturateCounter] = Input(Vec(NumWays, new SaturateCounter(UsefulCounterWidth)))
-  val needReplaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))
-  val victimWayIdx:      UInt = Output(UInt(WayIdxWidth.W))
+  val replaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))
+  val victimWayIdx:  UInt = Output(UInt(WayIdxWidth.W))
 }
 
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {

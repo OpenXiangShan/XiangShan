@@ -40,5 +40,5 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
     replacer.access(touchSets, touchWays)
   }
 
-  io.victimWayIdx := replacer.way(io.needReplaceSetIdx)
+  io.victimWayIdx := replacer.way(io.replaceSetIdx)
 }

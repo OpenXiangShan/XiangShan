@@ -16,7 +16,6 @@
 package xiangshan.frontend.bpu.abtb
 
 import chisel3._
-import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TargetFixHelper
 
@@ -36,18 +35,22 @@ trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
   def getTargetLowerBits(target: PrunedAddr): UInt =
     target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
 
-  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): Bool = {
+  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, UInt) = {
     require(hitMask.length == position.length)
     require(hitMask.length >= 2)
-    val n = hitMask.length
-    val multiHitConditions = for {
-      i <- 0 until n
-      j <- i + 1 until n
-    } yield {
+    val isMultiHit     = WireDefault(false.B)
+    val multiHitWayIdx = WireDefault(0.U(WayIdxWidth.W))
+    for {
+      i <- 0 until NumWays
+      j <- i + 1 until NumWays
+    } {
       val bothHit      = hitMask(i) && hitMask(j)
       val samePosition = position(i) === position(j)
-      bothHit && samePosition
+      when(bothHit && samePosition) {
+        isMultiHit     := true.B
+        multiHitWayIdx := i.U
+      }
     }
-    multiHitConditions.reduce(_ || _)
+    (isMultiHit, multiHitWayIdx)
   }
 }
