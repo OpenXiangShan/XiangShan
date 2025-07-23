@@ -157,14 +157,6 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ubtb.io.train.bits.target      := t0_target
   ubtb.io.train.bits.attribute   := t0_attribute
 
-  // mbtb
-  mbtb.io.train.valid            := t0_valid
-  mbtb.io.train.bits.startVAddr  := t0_startVAddr
-  mbtb.io.train.bits.taken       := t0_taken
-  mbtb.io.train.bits.cfiPosition := t0_cfiPosition
-  mbtb.io.train.bits.target      := t0_target
-  mbtb.io.train.bits.attribute   := t0_attribute
-  mbtb.io.train.bits.meta        := t0_meta.mbtb
   // abtb
   abtb.io.train.valid          := t0_valid
   abtb.io.train.bits.startPc   := t0_startVAddr
@@ -173,6 +165,15 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.train.bits.position  := t0_cfiPosition
   abtb.io.train.bits.attribute := t0_attribute
   abtb.io.train.bits.meta      := t0_meta.abtb
+
+  // mbtb
+  mbtb.io.train.valid            := t0_valid
+  mbtb.io.train.bits.startVAddr  := t0_startVAddr
+  mbtb.io.train.bits.taken       := t0_taken
+  mbtb.io.train.bits.cfiPosition := t0_cfiPosition
+  mbtb.io.train.bits.target      := t0_target
+  mbtb.io.train.bits.attribute   := t0_attribute
+  mbtb.io.train.bits.meta        := t0_meta.mbtb
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
