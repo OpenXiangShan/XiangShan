@@ -66,6 +66,20 @@ class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
   }
 }
 
+class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
+  val decodeCanAccept = Bool()
+
+  // VTypeBuffer is resuming vtype
+  val resumingVType = Bool()
+  val walkToArchVType = Bool()
+  val walkVType   = ValidIO(new VType)
+  val vsetvlVType = new VType
+  val commitVType = new Bundle {
+    val vtype = ValidIO(new VType)
+    val hasVsetvl = Bool()
+  }
+}
+
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
