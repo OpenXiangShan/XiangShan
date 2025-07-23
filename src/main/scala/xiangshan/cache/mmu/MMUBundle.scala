@@ -1246,7 +1246,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true, hasNapot = true))
     ptw_resp.ppn := resp_pte.getPPN()(ptePPNLen - 1, sectortlbwidth)
     ptw_resp.ppn_low := resp_pte.getPPN()(sectortlbwidth - 1, 0)
-    ptw_resp.n.map(_ := resp_pte.n === true.B && ptw_resp.ppn(3, 0) === 8.U && level === 0.U)
+    ptw_resp.n.map(_ := resp_pte.n === true.B && resp_pte.getPPN()(3, 0) === 8.U && level === 0.U)
     ptw_resp.pbmt := resp_pte.pbmt
     ptw_resp.level.map(_ := level)
     ptw_resp.perm.map(_ := resp_pte.getPerm())
