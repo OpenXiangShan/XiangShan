@@ -31,6 +31,7 @@ import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.backend.fu.vector.Bundles.VType
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes
@@ -77,7 +78,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   }
 
   def toIBufOutEntry(
-      exception: IBufExceptionEntry
+    exception: IBufExceptionEntry,
   ): IBufOutEntry = {
     val result = Wire(new IBufOutEntry)
     result.inst               := inst
@@ -92,6 +93,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.isBackendException := exception.isBackendException
     result.triggered          := triggered
     result.isLastInFtqEntry   := isLastInFtqEntry
+    result.vtype              := DontCare // assign outside
+    result.specvtype          := DontCare // assign outside
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
     result
@@ -128,6 +131,9 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:          UInt          = TriggerAction()
   val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
+  val vtype:              VType         = VType()
+  val specvtype:          VType         = VType()
+
   val debug_seqNum:       InstSeqNum    = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
@@ -155,6 +161,8 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.ftqPtr                                        := ftqPtr
     cf.ftqOffset                                     := instrEndOffset
     cf.isLastInFtqEntry                              := isLastInFtqEntry
+    cf.vtype                                         := vtype
+    cf.specvtype                                     := specvtype
     cf.debug_seqNum                                  := debug_seqNum
     cf
   }

@@ -132,7 +132,7 @@ object Bundles {
   }
 
   // modify the width when support more vector data width
-  object VSew extends NamedUInt(2) {
+  object VSew extends NamedUInt(3) {
     def e8  : UInt = "b000".U(width.W)
     def e16 : UInt = "b001".U(width.W)
     def e32 : UInt = "b010".U(width.W)

@@ -367,7 +367,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ibuffer.io.SCMissBubble         := FlushSCMiss
   ibuffer.io.ITTAGEMissBubble     := FlushITTAGEMiss
   ibuffer.io.RASMissBubble        := FlushRASMiss
-  ibuffer.io.decodeCanAccept      := io.backend.canAccept
+  ibuffer.io.fromBackend          := io.backend.toIBuf
 
   FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
   FlushTAGEMiss       := ftq.io.TAGEMissBubble

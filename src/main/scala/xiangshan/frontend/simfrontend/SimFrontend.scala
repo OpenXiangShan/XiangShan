@@ -197,7 +197,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
-  val readyCount        = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
+  val readyCount        = Mux(io.backend.toIBuf.decodeCanAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
   val robCommitValidVec = io.backend.toFtq.rob_commits.map(_.valid)
   val robCommitBitsVec  = io.backend.toFtq.rob_commits.map(_.bits)
   val robCommitValid    = robCommitValidVec.reduce(_ || _)
@@ -269,7 +269,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
       (idx + 1).U,
       fetchOut.pc,
       fetchOut.instr,
-      io.backend.canAccept && cfVec.fire,
+      io.backend.toIBuf.decodeCanAccept && cfVec.fire,
       clock,
       reset
     )
