@@ -25,8 +25,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.StageCtrl
 
 class PhrPtr(implicit p: Parameters) extends CircularQueuePtr[PhrPtr](p =>
-      p(XSCoreParamsKey).bpuParameters.tageParameters.TableInfos.map(_._2).max +
-        p(XSCoreParamsKey).bpuParameters.phrParameters.Shamt * p(XSCoreParamsKey).FtqSize
+      p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.TableInfos.map(_._2).max +
+        p(XSCoreParamsKey).frontendParameters.bpuParameters.phrParameters.Shamt *
+        p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize
     ) {}
 
 object PhrPtr {

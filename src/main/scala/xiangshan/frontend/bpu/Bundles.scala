@@ -24,7 +24,6 @@ import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ftq.FtqRedirectSramEntry
 
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
@@ -131,12 +130,15 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
   // TODO: what else do we need?
 }
 
-class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
-  val abtbMeta:   AheadBtbMeta = new AheadBtbMeta
-  val mbtbMeta:   MainBtbMeta  = new MainBtbMeta
-  val phrHistPtr: PhrPtr       = new PhrPtr
+// metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
+class PredictorSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
+  val phrHistPtr: PhrPtr = new PhrPtr
+}
 
-  // TODO: other meta
+// metadata for training (e.g. aheadBtb, mainBtb-specific)
+class PredictorMeta(implicit p: Parameters) extends BpuBundle {
+  val abtb: AheadBtbMeta = new AheadBtbMeta
+  val mbtb: MainBtbMeta  = new MainBtbMeta
 }
 
 // TargetCarry is an attribute of partial target

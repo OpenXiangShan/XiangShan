@@ -501,7 +501,7 @@ class Ittage(implicit p: Parameters) extends XSModule with ITTageParams with BPU
   update := RegEnable(io.in.update.bits, io.in.update.valid)
 
   val updateMeta = Wire(new IttageMeta)
-  update.meta.ittageMeta := updateMeta
+//  update.meta.ittageMeta := updateMeta
 
   // The pc register has been moved outside of predictor
   // pc field of update bundle and other update data are not in the same stage
@@ -509,7 +509,7 @@ class Ittage(implicit p: Parameters) extends XSModule with ITTageParams with BPU
   val update_pc = io.in.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  val u_meta = io.in.update.bits.meta.ittageMeta
+  val u_meta = 0.U.asTypeOf(new IttageMeta)
   updateMeta := RegEnable(u_meta, io.in.update.valid)
   updateMeta.provider.bits := RegEnable(
     u_meta.provider.bits,

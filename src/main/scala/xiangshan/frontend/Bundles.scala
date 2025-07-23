@@ -28,13 +28,14 @@ import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
-// FIXME: remove old FullBranchPrediction
-import xiangshan.frontend.bpu.{FullBranchPrediction => NewFullBranchPrediction}
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
+// FIXME: remove old FullBranchPrediction
+import xiangshan.frontend.bpu.FullBranchPrediction
 import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.bpu.NewPredictorMeta
+import xiangshan.frontend.bpu.OldPredictorMeta // TODO: remove this
 import xiangshan.frontend.bpu.PredictorMeta
+import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 import xiangshan.frontend.bpu.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
@@ -46,9 +47,9 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
-  // FIXME: remove old FullBranchPrediction
-  val resp: DecoupledIO[NewFullBranchPrediction] = DecoupledIO(new NewFullBranchPrediction)
-  val meta: DecoupledIO[NewPredictorMeta]        = DecoupledIO(new NewPredictorMeta)
+  val prediction:      DecoupledIO[FullBranchPrediction]     = DecoupledIO(new FullBranchPrediction)
+  val speculativeMeta: DecoupledIO[PredictorSpeculativeMeta] = DecoupledIO(new PredictorSpeculativeMeta)
+  val meta:            DecoupledIO[PredictorMeta]            = DecoupledIO(new PredictorMeta)
   // TODO: topdown, etc.
 }
 
@@ -566,7 +567,7 @@ object selectByTaken {
   }
 }
 
-class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle with HasBPUConst
+class OldFullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle with HasBPUConst
     with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
@@ -715,7 +716,7 @@ class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) exten
   val valid       = Bool()
   val hasRedirect = Bool()
   val ftq_idx     = new FtqPtr
-  val full_pred   = new FullBranchPrediction(isNotS3)
+  val full_pred   = new OldFullBranchPrediction(isNotS3)
 
   def target(pc:     PrunedAddr) = full_pred.target(pc)
   def allTargets(pc: PrunedAddr) = full_pred.allTarget(pc)
@@ -744,7 +745,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 
   val s3_specInfo = new FtqRedirectSramEntry
   val s3_ftbEntry = new FTBEntry
-  val s3_meta     = new PredictorMeta
+  val s3_meta     = new OldPredictorMeta
 
   val topdown_info = new FrontendTopDownBundle
 
@@ -790,7 +791,6 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry         = Bool()
   val meta              = new PredictorMeta
-  val newMeta           = new NewPredictorMeta
   val full_target       = PrunedAddr(VAddrBits)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)
