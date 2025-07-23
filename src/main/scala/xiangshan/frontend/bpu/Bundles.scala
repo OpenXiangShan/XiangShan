@@ -127,7 +127,6 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
     this.ftqOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
     this.target          := prediction.target
   }
-
   // TODO: what else do we need?
 }
 
@@ -167,7 +166,7 @@ object TargetCarry {
     e
   }
 
-  def Fit: TargetCarry = apply(Value.Fit)
-  def Overflow:         TargetCarry = apply(Value.Overflow)
-  def Underflow:        TargetCarry = apply(Value.Underflow)
+  def Fit:       TargetCarry = apply(Value.Fit)
+  def Overflow:  TargetCarry = apply(Value.Overflow)
+  def Underflow: TargetCarry = apply(Value.Underflow)
 }

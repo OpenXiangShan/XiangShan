@@ -20,12 +20,10 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.phr.PhrPtr
 
-class Phr()(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
-
+class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
   // PHR: Predicted History Register
-  val io: PhrIO = IO(new PhrIO())
+  val io: PhrIO = IO(new PhrIO)
 
   private val phr = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   // PHR train from redirct/s2_prediction/s3_prediction
