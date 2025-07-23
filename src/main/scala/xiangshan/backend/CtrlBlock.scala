@@ -47,6 +47,16 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 }
 
+class CtrlToIBufIO(implicit p: Parameters) extends XSBundle {
+  val walkToArchVType = Input(Bool())
+  val walkVType   = Flipped(Valid(new VType))
+  val vsetvlVType = Input(new VType)
+  val commitVType = new Bundle {
+    val vtype = Flipped(Valid(new VType))
+    val hasVsetvl = Input(Bool())
+  }
+}
+
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
@@ -396,11 +406,12 @@ class CtrlBlockImp(
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
   decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
-  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
-  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
-
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+
+  io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
+  io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
+  io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
+  io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
 
   // add decode Buf for in.ready better timing
   /**
@@ -798,8 +809,6 @@ class CtrlBlockImp(
 
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
-  // exu block to decode
-  decode.io.vsetvlVType := io.toDecode.vsetvlVType
   // backend to decode
   decode.io.vstart := io.toDecode.vstart
   // backend to rob

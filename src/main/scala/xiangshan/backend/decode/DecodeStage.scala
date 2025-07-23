@@ -60,18 +60,11 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   // vtype update
   val fromRob = new Bundle {
     val isResumeVType = Input(Bool())
-    val walkToArchVType = Input(Bool())
-    val commitVType = new Bundle {
-      val vtype = Flipped(Valid(new VType))
-      val hasVsetvl = Input(Bool())
-    }
-    val walkVType = Flipped(Valid(new VType))
   }
   val stallReason = new Bundle {
     val in = Flipped(new StallReasonIO(DecodeWidth))
     val out = new StallReasonIO(DecodeWidth)
   }
-  val vsetvlVType = Input(VType())
   val vstart = Input(Vl())
 
   val toCSR = new Bundle {
@@ -103,8 +96,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val decoderComp = Module(new DecodeUnitComp)
   /** simple decoders in Seq of DecodeWidth */
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-  /** vtype generation module */
-  val vtypeGen = Module(new VTypeGen)
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
@@ -116,7 +107,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     dst.io.enq.ctrlFlow := src.bits
     dst.io.csrCtrl := io.csrCtrl
     dst.io.fromCSR := io.fromCSR
-    dst.io.enq.vtype := vtypeGen.io.vtype
     dst.io.enq.vstart := io.vstart
   }
 
@@ -152,21 +142,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   /** selected complex micro operation information for complex decoder */
   val complexUopInfo = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
 
-  vtypeGen.io.insts.zip(io.in).foreach { case (inst, in) =>
-    inst.valid := in.valid
-    inst.bits := in.bits.instr
-  }
-  // when io.redirect is True, never update vtype
-  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset && !io.redirect
-  vtypeGen.io.walkToArchVType := io.fromRob.walkToArchVType
-  vtypeGen.io.commitVType := io.fromRob.commitVType
-  vtypeGen.io.walkVType := io.fromRob.walkVType
-  vtypeGen.io.vsetvlVType := io.vsetvlVType
-
   //Comp 1
   decoderComp.io.redirect := io.redirect
   decoderComp.io.csrCtrl := io.csrCtrl
-  decoderComp.io.vtypeBypass := vtypeGen.io.vtype
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
   decoderComp.io.in.valid := complexValid && !io.fromRob.isResumeVType
