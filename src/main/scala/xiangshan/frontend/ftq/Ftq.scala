@@ -133,16 +133,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Interaction with BPU
   // --------------------------------------------------------------------------------
-  // TODO: resp is a bad name
-  io.fromBpu.resp.ready := validEntries < FtqSize.U
-  io.fromBpu.meta.ready := validEntries < FtqSize.U
+  io.fromBpu.prediction.ready      := validEntries < FtqSize.U
+  io.fromBpu.meta.ready            := validEntries < FtqSize.U
+  io.fromBpu.speculativeMeta.ready := validEntries < FtqSize.U
 
-  private val fromBpu = io.fromBpu.resp
+  private val fromBpu = io.fromBpu.prediction
 
-  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && io.fromBpu.resp.valid
+  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && fromBpu.valid
 
   io.toBpu.bpuPtr := bpuPtr(0)
-  private val bpuEnqueue = io.fromBpu.resp.fire && !redirect.valid
+  private val bpuEnqueue = io.fromBpu.prediction.fire && !redirect.valid
 
   private val fromBpuPtr = MuxCase(
     bpuPtr(0),
@@ -163,13 +163,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   metaQueue.io.wen             := io.fromBpu.meta.valid
-  metaQueue.io.waddr           := io.fromBpu.resp.bits.s3Override.bits.ftqPtr.value
-  metaQueue.io.wdata.meta      := DontCare
-  metaQueue.io.wdata.newMeta   := io.fromBpu.meta.bits
+  metaQueue.io.waddr           := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  metaQueue.io.wdata.meta      := io.fromBpu.meta.bits
   metaQueue.io.wdata.ftb_entry := DontCare
   if (metaQueue.io.wdata.paddingBit.isDefined) {
     metaQueue.io.wdata.paddingBit.get := 0.U
   }
+
+  // TODO: speculativeMetaQueue
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU

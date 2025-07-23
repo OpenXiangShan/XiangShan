@@ -25,20 +25,19 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.FTBEntry
-import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
+import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 
-class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle {
-  val histPtr     = new CGHPtr
-  val rasSpecInfo = new RasSpeculativeInfo
+class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle { // TODO: rename this
+  val histPtr         = new CGHPtr             // TODO: delete this
+  val rasSpecInfo     = new RasSpeculativeInfo // TODO: delete this
+  val speculativeMeta = new PredictorSpeculativeMeta
 }
 
-class MetaEntry(implicit p: Parameters) extends FtqBundle with HasBPUConst {
+class MetaEntry(implicit p: Parameters) extends FtqBundle {
   val meta       = new PredictorMeta
-  val newMeta    = new NewPredictorMeta
-  val ftb_entry  = new FTBEntry
-  val paddingBit = if ((meta.getWidth + newMeta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
+  val ftb_entry  = new FTBEntry // TODO: delete this
+  val paddingBit = if ((meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
