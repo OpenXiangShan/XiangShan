@@ -167,7 +167,7 @@ object TargetCarry {
     e
   }
 
-  def NoCarryAndBorrow: TargetCarry = apply(Value.Fit)
+  def Fit: TargetCarry = apply(Value.Fit)
   def Overflow:         TargetCarry = apply(Value.Overflow)
   def Underflow:        TargetCarry = apply(Value.Underflow)
 }

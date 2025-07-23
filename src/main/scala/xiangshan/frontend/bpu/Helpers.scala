@@ -107,7 +107,7 @@ trait TargetFixHelper extends HasBpuParameters {
     val startVAddrUpper = getTargetUpper(startVAddr)
     val targetUpper     = getTargetUpper(fullTarget)
     MuxCase(
-      TargetCarry.NoCarryAndBorrow,
+      TargetCarry.Fit,
       Seq(
         (targetUpper > startVAddrUpper) -> TargetCarry.Overflow,
         (targetUpper < startVAddrUpper) -> TargetCarry.Underflow
