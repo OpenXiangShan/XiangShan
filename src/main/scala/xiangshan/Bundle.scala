@@ -21,12 +21,9 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
-
 import utility._
 import utils._
-
 import org.chipsalliance.cde.config.Parameters
-
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
@@ -35,19 +32,18 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ftq.FtqToCtrlIO
 import xiangshan.frontend.FrontendRedirect
-
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
-import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
 import xiangshan.backend.decode.XDecode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.HasDCacheParameters
-
 import xiangshan.mem.LqPtr
 import xiangshan.mem.SqPtr
 import xiangshan.mem.prefetch.PrefetchCtrl
@@ -114,6 +110,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
+  val vtype            = VType()
+  val specvtype        = VType()
   val debug_seqNum = InstSeqNum()
 }
 
@@ -448,7 +446,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val fromIfu = new IfuToBackendIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
-  val canAccept = Input(Bool())
+  val toIBuf = Input(new BackendToIBufBundle)
 
   val wfi = Flipped(new WfiReqBundle)
 }

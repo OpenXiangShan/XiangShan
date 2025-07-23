@@ -784,7 +784,6 @@ object ImmUnion {
 
 class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
   val decodeInUop = Input(new DecodeInUop)
-  val vtype = Input(new VType)
   val vstart = Input(Vl())
 }
 
@@ -1045,11 +1044,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
-  decodedInst.vpu.vill := io.enq.vtype.illegal
-  decodedInst.vpu.vma := io.enq.vtype.vma
-  decodedInst.vpu.vta := io.enq.vtype.vta
-  decodedInst.vpu.vsew := io.enq.vtype.vsew
-  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.vill  := io.enq.decodeInUop.vtype.illegal
+  decodedInst.vpu.vma   := io.enq.decodeInUop.vtype.vma
+  decodedInst.vpu.vta   := io.enq.decodeInUop.vtype.vta
+  decodedInst.vpu.vsew  := io.enq.decodeInUop.vtype.vsew
+  decodedInst.vpu.vlmul := io.enq.decodeInUop.vtype.vlmul
   decodedInst.vpu.vm := inst.VM
   decodedInst.vpu.nf := inst.NF
   decodedInst.vpu.veew := inst.WIDTH
@@ -1076,11 +1075,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
-  decodedInst.vpu.specVill := io.enq.vtype.illegal
-  decodedInst.vpu.specVma := io.enq.vtype.vma
-  decodedInst.vpu.specVta := io.enq.vtype.vta
-  decodedInst.vpu.specVsew := io.enq.vtype.vsew
-  decodedInst.vpu.specVlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.specVill  := io.enq.decodeInUop.specvtype.illegal
+  decodedInst.vpu.specVma   := io.enq.decodeInUop.specvtype.vma
+  decodedInst.vpu.specVta   := io.enq.decodeInUop.specvtype.vta
+  decodedInst.vpu.specVsew  := io.enq.decodeInUop.specvtype.vsew
+  decodedInst.vpu.specVlmul := io.enq.decodeInUop.specvtype.vlmul
 
   decodedInst.vlsInstr := isVls
 

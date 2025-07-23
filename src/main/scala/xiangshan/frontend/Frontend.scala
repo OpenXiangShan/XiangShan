@@ -230,7 +230,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ibuffer.io.SCMissBubble         := FlushSCMiss
   ibuffer.io.ITTAGEMissBubble     := FlushITTAGEMiss
   ibuffer.io.RASMissBubble        := FlushRASMiss
-  ibuffer.io.decodeCanAccept      := io.backend.canAccept
+  ibuffer.io.fromBackend          := io.backend.toIBuf
 
   FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
   FlushTAGEMiss       := ftq.io.TAGEMissBubble
@@ -327,16 +327,16 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   )
   XSPerfAccumulate(
     "validCycles",
-    ibuffer.io.out.map(_.valid && io.backend.canAccept).reduce(_ || _)
+    ibuffer.io.out.map(_.valid && io.backend.toIBuf.decodeCanAccept).reduce(_ || _)
   )
   XSPerfAccumulate(
     "validInstrs",
-    PopCount(ibuffer.io.out.map(_.valid && io.backend.canAccept))
+    PopCount(ibuffer.io.out.map(_.valid && io.backend.toIBuf.decodeCanAccept))
   )
   XSPerfHistogram(
     "validInstrsDist",
     PopCount(ibuffer.io.out.map(_.valid)),
-    io.backend.canAccept,
+    io.backend.toIBuf.decodeCanAccept,
     0,
     DecodeWidth + 1
   )
@@ -370,7 +370,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   )
   XSPerfAccumulate(
     "stallCycles_decodeFull",
-    !io.backend.canAccept
+    !io.backend.toIBuf.decodeCanAccept
   )
   XSPerfAccumulate(
     "stallCycles_ibufferFull",

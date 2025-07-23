@@ -197,7 +197,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
-  val readyCount = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
+  val readyCount = Mux(io.backend.toIBuf.decodeCanAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
 
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
@@ -259,7 +259,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
       (idx + 1).U,
       fetchOut.pc,
       fetchOut.instr,
-      io.backend.canAccept && cfVec.fire,
+      io.backend.toIBuf.decodeCanAccept && cfVec.fire,
       clock,
       reset
     )

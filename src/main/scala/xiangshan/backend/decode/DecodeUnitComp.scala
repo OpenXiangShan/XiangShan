@@ -95,7 +95,6 @@ class DecodeUnitCompOutput(implicit p: Parameters) extends XSBundle {
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   val redirect = Input(Bool())
   val csrCtrl = Input(new CustomCSRCtrlIO)
-  val vtypeBypass = Input(new VType)
   // When the first inst in decode vector is complex inst, pass it in
   val in = Flipped(DecoupledIO(new DecodeUnitCompInput))
   val out = new DecodeUnitCompOutput
@@ -346,10 +345,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).rfWen := true.B
           csBundle(1).vlWen := false.B
         }
-        // use bypass vtype from vtypeGen
-        csBundle(0).vpu.connectVType(io.vtypeBypass)
-        csBundle(1).vpu.connectVType(io.vtypeBypass)
       }
+
     }
     is(UopSplitType.VEC_VVV) {
       for (i <- 0 until MAX_VLMUL) {
