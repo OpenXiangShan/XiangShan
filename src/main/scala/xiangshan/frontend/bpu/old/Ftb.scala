@@ -746,7 +746,7 @@ class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEv
 
   // After closing ftb, the hit output from s2 is the hit of FauFTB cached in s1.
   // s1_hit is the ftbBank hit.
-  val s1_hit            = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid && io.in.ctrl.btb_enable)
+  val s1_hit            = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid)
   val s2_ftb_hit        = RegEnable(s1_hit, 0.B, s1_fire)
   val s2_hit            = Mux(s2_close_ftb_req, s2_fauftb_ftb_entry_hit, s2_ftb_hit)
   val s3_hit            = RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit, s2_hit), 0.B, s2_fire)

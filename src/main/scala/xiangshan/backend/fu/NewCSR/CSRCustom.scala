@@ -68,13 +68,13 @@ trait CSRCustom { self: NewCSR =>
 }
 
 class SbpctlBundle extends CSRBundle {
-  val LOOP_ENABLE = RW(6).withReset(true.B)
-  val RAS_ENABLE  = RW(5).withReset(true.B)
-  val SC_ENABLE   = RW(4).withReset(true.B)
-  val TAGE_ENABLE = RW(3).withReset(true.B)
-  val BIM_ENABLE  = RW(2).withReset(true.B)
-  val BTB_ENABLE  = RW(1).withReset(true.B)
-  val UBTB_ENABLE = RW(0).withReset(true.B)
+  val RAS_ENABLE    = RW(6).withReset(true.B)
+  val ITTAGE_ENABLE = RW(5).withReset(true.B)
+  val SC_ENABLE     = RW(4).withReset(true.B)
+  val TAGE_ENABLE   = RW(3).withReset(true.B)
+  val MBTB_ENABLE   = RW(2).withReset(true.B)
+  val ABTB_ENABLE   = RW(1).withReset(true.B)
+  val UBTB_ENABLE   = RW(0).withReset(true.B)
 }
 
 class SpfctlBundle extends CSRBundle {

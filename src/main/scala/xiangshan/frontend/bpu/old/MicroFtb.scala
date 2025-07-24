@@ -137,7 +137,7 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
   val s1_hit_full_pred   = Mux1H(s1_hitOH, s1_possible_full_preds)
   val s1_hit_fauftbentry = Mux1H(s1_hitOH, s1_all_entries)
   XSError(PopCount(s1_hitOH) > 1.U, "fauftb has multiple hits!\n")
-  val fauftb_enable = RegNext(io.in.ctrl.ubtb_enable)
+  val fauftb_enable = true.B
   io.out.s1_fullPred            := s1_hit_full_pred
   io.out.s1_fullPred.hit        := s1_hit && fauftb_enable
   io.out.toFtb.fauftb_entry     := s1_hit_fauftbentry

@@ -34,7 +34,7 @@ import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, 
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
-import xiangshan.frontend.bpu.{HasBPUParameter, BPUCtrl, RasPtr}
+import xiangshan.frontend.bpu.{HasBPUParameter, BpuCtrl, RasPtr}
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.cache.HasDCacheParameters
 import utility._
@@ -620,7 +620,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val storeset_no_fast_wakeup = Output(Bool())
   val lvpred_timeout = Output(UInt(5.W))
   // Branch predictor
-  val bp_ctrl = Output(new BPUCtrl)
+  val bp_ctrl = Output(new BpuCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
   val ldld_vio_check_enable = Output(Bool())

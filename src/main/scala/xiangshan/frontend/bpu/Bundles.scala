@@ -25,6 +25,18 @@ import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.ftq.FtqPtr
 
+class BpuCtrl extends Bundle {
+  // s1 predictor enable
+  val ubtbEnable: Bool = Bool()
+  val abtbEnable: Bool = Bool()
+  // s3 predictor enable
+  val mbtbEnable:   Bool = Bool()
+  val tageEnable:   Bool = Bool()
+  val scEnable:     Bool = Bool() // depends on tageEnable
+  val ittageEnable: Bool = Bool()
+  val rasEnable:    Bool = Bool()
+}
+
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
   val rasAction:  UInt = BranchAttribute.RasAction()
