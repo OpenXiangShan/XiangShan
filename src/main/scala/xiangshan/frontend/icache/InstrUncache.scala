@@ -19,7 +19,10 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
+import coupledL2.MemBackTypeMM
+import coupledL2.MemBackTypeMMField
+import coupledL2.MemPageTypeNC
+import coupledL2.MemPageTypeNCField
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
