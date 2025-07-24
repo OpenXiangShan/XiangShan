@@ -52,7 +52,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val redirectValid   = io.redirectValid
   private val overrideValid   = io.overrideValid
 
-  s0_fire := predictReqValid
+  s0_fire := predictReqValid && banks.map(_.io.readReq.ready).reduce(_ && _)
   s1_fire := s1_valid && s2_ready && predictReqValid
   s2_fire := s2_valid
 
