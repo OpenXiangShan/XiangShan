@@ -88,16 +88,6 @@ trait HasBPUParameter extends HasXSParameter with HasBPUConst {
   val EnableCommit        = false
 }
 
-class BPUCtrl(implicit p: Parameters) extends XSBundle {
-  val ubtb_enable = Bool()
-  val btb_enable  = Bool()
-  val bim_enable  = Bool()
-  val tage_enable = Bool()
-  val sc_enable   = Bool()
-  val ras_enable  = Bool()
-  val loop_enable = Bool()
-}
-
 trait BPUUtils extends HasXSParameter {
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
@@ -161,14 +151,14 @@ trait HasPredictorCommonSignals extends HasXSParameter {
   val s2_fire = Bool()
   val s3_fire = Bool()
 
-  val ctrl   = new BPUCtrl
+  val ctrl   = new BpuCtrl
   val update = Valid(new BranchPredictionUpdate)
 }
 
 class BpuIO(implicit p: Parameters) extends XSBundle {
   val toFtq        = new BpuToFtqIO
   val fromFtq      = Flipped(new FtqToBpuIO)
-  val ctrl         = Input(new BPUCtrl)
+  val ctrl         = Input(new BpuCtrl)
   val reset_vector = Input(PrunedAddr(PAddrBits))
 }
 
