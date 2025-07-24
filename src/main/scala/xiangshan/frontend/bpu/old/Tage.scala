@@ -826,11 +826,7 @@ class Tage(implicit p: Parameters) extends XSModule with TageParams with BPUUtil
     tageMeta.altUsed(i)  := RegEnable(s2_altUsed(i), s2_fire)
     tageMeta.basecnts(i) := RegEnable(s2_basecnts(i), s2_fire)
 
-    when(RegNext(io.in.ctrl.tage_enable)) {
-      io.out.toFtb.s2_branchTakenMask(i) := s2_tageTakens(i)
-    }.otherwise {
-      io.out.toFtb.s2_branchTakenMask(i) := false.B
-    }
+    io.out.toFtb.s2_branchTakenMask(i) := s2_tageTakens(i)
 
     // ---------------- update logics below ------------------//
     val hasUpdate     = updateValids(i)
