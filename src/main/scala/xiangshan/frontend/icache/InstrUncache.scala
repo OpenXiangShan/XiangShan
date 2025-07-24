@@ -19,8 +19,7 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import coupledL2.MemBackTypeMM
-import coupledL2.MemPageTypeNC
+import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
@@ -168,7 +167,8 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICachePa
     clients = Seq(TLMasterParameters.v1(
       "InstrUncache",
       sourceId = IdRange(0, cacheParams.nMMIOs)
-    ))
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
   )
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
