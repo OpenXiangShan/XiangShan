@@ -699,7 +699,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.ppn_low := pte_in.getPPN()(sectortlbwidth - 1, 0)
       ptw_resp.level.map(_ := 0.U)
       ptw_resp.pbmt := pte_in.pbmt
-      ptw_resp.n.map(_ := pte_in.n === true.B && ptw_resp.ppn(3, 0) === 8.U)
+      ptw_resp.n.map(_ := pte_in.n === true.B && pte_in.getPPN()(3, 0) === 8.U)
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
       // LLPTW will not handle onlyS2 situations
