@@ -568,7 +568,7 @@ class Ras(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val s3_isRet = fromFtb.s3_isRet && !fromFtb.s3_fallThroughErr
   val s3_top   = stack.spec.popAddr
 
-  io.out.predictionValid  := io.in.ctrl.ras_enable && s3_isRet
+  io.out.predictionValid  := s3_isRet
   io.out.s3_returnAddress := s3_top
 
   val s3_meta = Wire(new RasInternalMeta)

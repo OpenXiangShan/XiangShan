@@ -35,7 +35,7 @@ import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
-    val ctrl:        BPUCtrl    = Input(new BPUCtrl)
+    val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
@@ -66,10 +66,10 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  ubtb.io.enable        := ctrl.ubtb_enable
-  abtb.io.enable        := true.B // FIXME
-  mbtb.io.enable        := true.B
-  tage.io.enable        := true.B
+  ubtb.io.enable        := ctrl.ubtbEnable
+  abtb.io.enable        := ctrl.abtbEnable
+  mbtb.io.enable        := ctrl.mbtbEnable
+  tage.io.enable        := ctrl.tageEnable
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
