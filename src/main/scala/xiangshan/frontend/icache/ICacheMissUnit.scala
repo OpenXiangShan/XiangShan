@@ -182,19 +182,20 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   private val lastFireNext = RegNext(lastFire)
   private val idNext       = RegNext(io.memGrant.bits.source)
 
-  // if any beat is corrupt, the whole response (to mainPipe/metaArray/dataArray) is corrupt
   private val corruptReg = RegInit(false.B)
-  when(io.memGrant.fire && edge.hasData(io.memGrant.bits) && io.memGrant.bits.corrupt) {
-    // Set corruptReg when any beat is corrupt
-    // This is actually when(xxx.fire && xxx.hasData) { corruptReg := corruptReg || io.mem_grant.bits.corrupt }
-    corruptReg := true.B
+  private val deniedReg  = RegInit(false.B)
+  when(io.memGrant.fire && edge.hasData(io.memGrant.bits)) {
+    // Set corruptReg / deniedReg when any beat is corrupt / denied
+    corruptReg := corruptReg || io.memGrant.bits.corrupt
+    deniedReg  := deniedReg || io.memGrant.bits.denied
   }.elsewhen(lastFireNext) {
-    // Clear corruptReg when response it sent to mainPipe
+    // Clear corruptReg / deniedReg when response it sent to mainPipe
     // This used to be io.resp.valid (lastFireNext && mshrValid) but when mshr is flushed by io.flush/fencei,
     // mshrValid is false.B and corruptReg will never be cleared, that's not correct
     // so we remove mshrValid here, and the condition leftover is lastFireNext
     // or, actually, io.resp.valid || (lastFireNext && !mshrValid)
     corruptReg := false.B
+    deniedReg  := false.B
   }
 
   /**
@@ -225,6 +226,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
   private val respValid = mshrValid && lastFireNext
   // NOTE: but we should not write meta/dataArray when flush/fencei
+  // NOTE: tilelink spec asks corrupt to be set when denied is set, so we don't need to check deniedReg here
   private val writeSramValid = respValid && !corruptReg && !io.flush && !io.fencei
 
   // write SRAM
@@ -253,6 +255,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.resp.bits.waymask  := waymask
   io.resp.bits.data     := respDataReg.asUInt
   io.resp.bits.corrupt  := corruptReg
+  io.resp.bits.denied   := deniedReg
 
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)

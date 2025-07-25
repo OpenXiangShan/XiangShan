@@ -395,12 +395,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  private val s2_l2Corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  private val s2_tlCorrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  private val s2_tlDenied  = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   (0 until PortNumber).foreach { i =>
     when(s1_fire) {
-      s2_l2Corrupt(i) := false.B
+      s2_tlCorrupt(i) := false.B
+      s2_tlDenied(i)  := false.B
     }.elsewhen(s2_mshrHits(i)) {
-      s2_l2Corrupt(i) := fromMiss.bits.corrupt
+      s2_tlCorrupt(i) := fromMiss.bits.corrupt
+      s2_tlDenied(i)  := fromMiss.bits.denied
     }
   }
 
@@ -454,8 +457,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s2_fetchFinish = !s2_shouldFetch.reduce(_ || _)
 
-  // also raise af if l2 corrupt is detected
-  private val s2_l2Exception = VecInit(s2_l2Corrupt.map(corrupt => ExceptionType(hasAf = corrupt)))
+  // also raise af if l2 denied & err if l2 corrupt
+  private val s2_l2Exception = VecInit((s2_tlCorrupt zip s2_tlDenied).map { case (corrupt, denied) =>
+    ExceptionType.fromTileLink(corrupt, denied)
+  })
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb/pmp has the highest priority, then l2
@@ -485,22 +490,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s2_flush := io.flush
   s2_ready := (s2_fetchFinish && !io.respStall) || !s2_valid
   s2_fire  := s2_valid && s2_fetchFinish && !io.respStall && !s2_flush
-
-  /**
-    ******************************************************************************
-    * report Tilelink corrupt error
-    ******************************************************************************
-    */
-  (0 until PortNumber).foreach { i =>
-    when(RegNext(s2_fire && s2_l2Corrupt(i))) {
-      io.errors(i).valid              := true.B
-      io.errors(i).bits.report_to_beu := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).bits.paddr         := RegNext(s2_pAddr(i).toUInt)
-      io.errors(i).bits.source.tag    := false.B
-      io.errors(i).bits.source.data   := false.B
-      io.errors(i).bits.source.l2     := true.B
-    }
-  }
 
   /* *****************************************************************************
    * perf
