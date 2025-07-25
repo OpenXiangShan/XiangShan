@@ -19,21 +19,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.BranchPrediction
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
-
-class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
-  val redirectValid: Bool                 = Input(Bool())
-  val overrideValid: Bool                 = Input(Bool())
-  val train:         Valid[AheadBtbTrain] = Flipped(Valid(new AheadBtbTrain))
-
-  val prediction:       BranchPrediction = Output(new BranchPrediction)
-  val meta:             AheadBtbMeta     = Output(new AheadBtbMeta)
-  val debug_startVaddr: PrunedAddr       = Output(PrunedAddr(VAddrBits))
-}
 
 class BankReadReq(implicit p: Parameters) extends AheadBtbBundle {
   val setIdx: UInt = UInt(SetIdxWidth.W)
@@ -100,13 +88,4 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
   // target fix, see comment in Parameters.scala
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
-}
-
-class AheadBtbTrain(implicit p: Parameters) extends AheadBtbBundle {
-  val startPc:   PrunedAddr      = PrunedAddr(VAddrBits)
-  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
-  val taken:     Bool            = Bool()
-  val position:  UInt            = UInt(CfiPositionWidth.W)
-  val attribute: BranchAttribute = new BranchAttribute
-  val meta:      AheadBtbMeta    = new AheadBtbMeta
 }

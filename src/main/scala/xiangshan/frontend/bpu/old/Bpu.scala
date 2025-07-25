@@ -46,7 +46,7 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.ftq.FtqToBpuIO
+import xiangshan.frontend.ftq.OldFtqToBpuIO
 import xiangshan.frontend.selectByTaken
 
 trait HasBPUConst extends HasXSParameter {
@@ -157,7 +157,7 @@ trait HasPredictorCommonSignals extends HasXSParameter {
 
 class BpuIO(implicit p: Parameters) extends XSBundle {
   val toFtq        = new BpuToFtqIO
-  val fromFtq      = Flipped(new FtqToBpuIO)
+  val fromFtq      = Flipped(new OldFtqToBpuIO)
   val ctrl         = Input(new BpuCtrl)
   val reset_vector = Input(PrunedAddr(PAddrBits))
 }

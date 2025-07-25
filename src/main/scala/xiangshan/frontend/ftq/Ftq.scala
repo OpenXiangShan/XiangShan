@@ -32,6 +32,7 @@ import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
@@ -139,7 +140,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val fromBpu = io.fromBpu.prediction
 
-  private val bpuS3Redirect = fromBpu.bits.s3Override.valid && fromBpu.valid
+  private val bpuS3Redirect = fromBpu.bits.s3Override && fromBpu.valid
 
   io.toBpu.bpuPtr := bpuPtr(0)
   private val bpuEnqueue = io.fromBpu.prediction.fire && !redirect.valid
@@ -147,12 +148,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val fromBpuPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      fromBpu.bits.s3Override.valid -> fromBpu.bits.s3Override.bits.ftqPtr
+      fromBpu.bits.s3Override -> io.fromBpu.s3FtqPtr
     )
   )
 
-  when(fromBpu.bits.s3Override.valid) {
-    bpuPtr := fromBpu.bits.s3Override.bits.ftqPtr + 1.U
+  when(fromBpu.bits.s3Override) {
+    bpuPtr := io.fromBpu.s3FtqPtr + 1.U
   }.elsewhen(bpuEnqueue) {
     bpuPtr := bpuPtr + 1.U
   }
@@ -163,7 +164,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   metaQueue.io.wen             := io.fromBpu.meta.valid
-  metaQueue.io.waddr           := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  metaQueue.io.waddr           := io.fromBpu.s3FtqPtr.value
   metaQueue.io.wdata.meta      := io.fromBpu.meta.bits
   metaQueue.io.wdata.ftb_entry := DontCare
   if (metaQueue.io.wdata.paddingBit.isDefined) {
@@ -185,8 +186,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // TODO: wait for Ifu/ICache to remove bpu s2 flush
   for (stage <- 2 to 3) {
-    val redirect = if (stage == 3) fromBpu.bits.s3Override.valid else false.B
-    val ftqIdx   = if (stage == 3) fromBpu.bits.s3Override.bits.ftqPtr else 0.U.asTypeOf(new FtqPtr)
+    val redirect = if (stage == 3) fromBpu.bits.s3Override else false.B
+    val ftqIdx   = if (stage == 3) io.fromBpu.s3FtqPtr else 0.U.asTypeOf(new FtqPtr)
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
@@ -326,7 +327,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   metaQueue.io.ren   := readyToCommit
   metaQueue.io.raddr := commitPtr(0).value
 
-  io.toBpu.update := DontCare
+  io.toBpu.train := DontCare
 
   // --------------------------------------------------------------------------------
   // MMIO fetch

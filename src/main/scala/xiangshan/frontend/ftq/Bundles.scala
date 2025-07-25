@@ -24,18 +24,18 @@ import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
+import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuSpeculativeMeta
 import xiangshan.frontend.bpu.FTBEntry
-import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 
 class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle { // TODO: rename this
   val histPtr         = new CGHPtr             // TODO: delete this
   val rasSpecInfo     = new RasSpeculativeInfo // TODO: delete this
-  val speculativeMeta = new PredictorSpeculativeMeta
+  val speculativeMeta = new BpuSpeculativeMeta
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
-  val meta       = new PredictorMeta
+  val meta       = new BpuMeta
   val ftb_entry  = new FTBEntry // TODO: delete this
   val paddingBit = if ((meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
 }
@@ -53,7 +53,8 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
   }
 }
 
-class FtqToBpuIO(implicit p: Parameters) extends FtqBundle {
+// TODO: remove this
+class OldFtqToBpuIO(implicit p: Parameters) extends FtqBundle {
   val redirect:        Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val update:          Valid[BranchPredictionUpdate]   = Valid(new BranchPredictionUpdate)
   val bpuPtr:          FtqPtr                          = Output(new FtqPtr)

@@ -21,8 +21,17 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 
+// PHR: Predicted History Register
 class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
-  // PHR: Predicted History Register
+  class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
+    val s0_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
+    val s1_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
+    val s2_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
+    val s3_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
+    val phrs:         Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
+    val phrPtr:       PhrPtr                = Output(new PhrPtr)
+    val train:        PhrTrain              = Input(new PhrTrain)
+  }
   val io: PhrIO = IO(new PhrIO)
 
   private val phr = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
@@ -67,10 +76,10 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val updateOverride  = WireInit(false.B)
   private val redirctPhr      = WireInit(0.U(PhrHistoryLength.W))
 
-  redirectData.valid  := io.train.redirectValid
-  redirectData.taken  := io.train.redirectTaken
-  redirectData.pc     := io.train.redirectPc
-  redirectData.phrPtr := io.train.redirectPhrPtr
+  redirectData.valid  := io.train.redirect.valid
+  redirectData.taken  := io.train.redirect.bits.taken
+  redirectData.pc     := io.train.redirect.bits.startVAddr
+  redirectData.phrPtr := io.train.redirect.bits.speculativeMeta.phrHistPtr
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override

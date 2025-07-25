@@ -28,14 +28,15 @@ import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
+import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuPrediction
+import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.BpuSpeculativeMeta
+import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
-// FIXME: remove old FullBranchPrediction
-import xiangshan.frontend.bpu.FullBranchPrediction
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.OldPredictorMeta // TODO: remove this
-import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 import xiangshan.frontend.bpu.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
@@ -47,10 +48,18 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val prediction:      DecoupledIO[FullBranchPrediction]     = DecoupledIO(new FullBranchPrediction)
-  val speculativeMeta: DecoupledIO[PredictorSpeculativeMeta] = DecoupledIO(new PredictorSpeculativeMeta)
-  val meta:            DecoupledIO[PredictorMeta]            = DecoupledIO(new PredictorMeta)
+  val prediction:      DecoupledIO[BpuPrediction]      = DecoupledIO(new BpuPrediction)
+  val speculativeMeta: DecoupledIO[BpuSpeculativeMeta] = DecoupledIO(new BpuSpeculativeMeta)
+  val meta:            DecoupledIO[BpuMeta]            = DecoupledIO(new BpuMeta)
+  val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
   // TODO: topdown, etc.
+}
+
+class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
+  val redirect:        Valid[BpuRedirect] = Valid(new BpuRedirect)
+  val train:           Valid[BpuTrain]    = Valid(new BpuTrain)
+  val bpuPtr:          FtqPtr             = Output(new FtqPtr)
+  val redirectFromIFU: Bool               = Output(Bool())
 }
 
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
@@ -790,7 +799,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val false_hit         = Bool()
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry         = Bool()
-  val meta              = new PredictorMeta
+  val meta              = new BpuMeta
   val full_target       = PrunedAddr(VAddrBits)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)
