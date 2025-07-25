@@ -331,9 +331,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // MMIO fetch
   // --------------------------------------------------------------------------------
-  private val mmioPtr           = io.fromIfu.mmioCommitRead.mmioFtqPtr
-  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit
-  io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted)
+  private val mmioPtr           = io.fromIfu.mmioCommitRead.ftqPtr
+  private val mmioReadValid     = io.fromIfu.mmioCommitRead.valid
+  private val mmioLastCommitted = mmioReadValid && (commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit)
+  io.fromIfu.mmioCommitRead.lastCommitted := RegNext(mmioLastCommitted)
 
   // --------------------------------------------------------------------------------
   // Performance monitoring

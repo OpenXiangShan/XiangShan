@@ -745,9 +745,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // last instruction finish
   private val isFirstInstr = RegInit(true.B)
 
-  /* Determine whether the MMIO instruction is executable based on the previous prediction block */
-  io.toFtq.mmioCommitRead.mmioFtqPtr := RegNext(s4_ftqReq.ftqIdx - 1.U)
-
   // do mmio fetch only when pmp/pbmt shows it is a un-cacheable address and no exception occurs
   private val s4_reqIsMmio =
     s4_valid && (s4_pmpMmio || Pbmt.isUncache(s4_itlbPbmt)) && s3_exception.map(_.isNone).reduce(_ && _)
@@ -759,6 +756,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_mmioWaitCommit     = s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit
   private val s4_mmioWaitCommitNext = RegNext(s4_mmioWaitCommit)
   private val s4_mmioCanGo          = s4_mmioWaitCommit && !s4_mmioWaitCommitNext
+
+  /* Determine whether the MMIO instruction is executable based on the previous prediction block */
+  io.toFtq.mmioCommitRead.valid  := RegNext(s4_reqIsMmio && s4_valid, false.B)
+  io.toFtq.mmioCommitRead.ftqPtr := RegNext(s4_ftqReq.ftqIdx - 1.U)
 
   private val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
   fromFtqRedirectReg.bits := RegEnable(
@@ -814,7 +815,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       when(isFirstInstr) {
         mmioState := MmioFsmState.SendReq
       }.otherwise {
-        mmioState := Mux(io.toFtq.mmioCommitRead.mmioLastCommit, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
+        mmioState := Mux(io.toFtq.mmioCommitRead.lastCommitted, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
       }
     }
 
