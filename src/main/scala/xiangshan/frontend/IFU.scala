@@ -839,7 +839,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   toUncache.valid      := ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
   toUncache.bits.addr  := Mux(mmio_state === m_resendReq, mmio_resend_addr, f3_paddrs(0))
   toUncache.bits.flush := f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush
-  fromUncache.ready    := true.B
+  // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
+  // we need to tell L2 Cache about this to make it work correctly
+  toUncache.bits.memBackTypeMM := !f3_pmp_mmio
+  toUncache.bits.memPageTypeNC := f3_itlb_pbmt === Pbmt.nc
+  // always ready to receive response: we just send one request at same time
+  fromUncache.ready := true.B
 
   // send itlb request in m_sendTLB state
   io.iTLBInter.req.valid                   := (mmio_state === m_sendTLB) && f3_req_is_mmio
