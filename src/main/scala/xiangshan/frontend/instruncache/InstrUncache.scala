@@ -15,6 +15,8 @@
 
 package xiangshan.frontend.instruncache
 
+import coupledL2.MemBackTypeMMField
+import coupledL2.MemPageTypeNCField
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLClientNode
@@ -26,10 +28,14 @@ class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncac
   override def shouldBeInlined: Boolean = false
 
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
+    Seq(TLMasterParameters.v1(
       "InstrUncache",
       sourceId = IdRange(0, nMmioEntry)
-    ))
+    )),
+    requestFields = Seq(
+      MemBackTypeMMField(),
+      MemPageTypeNCField()
+    )
   )
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 

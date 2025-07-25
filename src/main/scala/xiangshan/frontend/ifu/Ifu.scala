@@ -991,7 +991,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s4_reqIsMmio && s4_valid
 
   toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_icacheInfo(0).pAddr(0))
-  fromUncache.ready   := true.B
+  // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
+  // we need to tell L2 Cache about this to make it work correctly
+  toUncache.bits.memBackTypeMM := !s4_icacheInfo(0).pmpMmio
+  toUncache.bits.memPageTypeNC := s4_icacheInfo(0).itlbPbmt === Pbmt.nc
+
+  fromUncache.ready := true.B
 
   // send itlb request in MmioFsmState.SendTlb state
   io.itlb.req.valid                   := (mmioState === MmioFsmState.SendTlb) && s4_reqIsMmio
