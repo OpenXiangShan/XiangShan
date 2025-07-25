@@ -35,8 +35,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
     val mmioAcquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
     val mmioGrant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-    val flush: Bool         = Input(Bool())
-    val wfi:   WfiReqBundle = Flipped(new WfiReqBundle)
+    val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
   }
 
   val io: InstrUncacheEntryIO = IO(new InstrUncacheEntryIO(edge))
@@ -51,12 +50,13 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
   private val state = RegInit(State.Invalid)
 
-  // hold flush state
-  private val needFlush = RegInit(false.B)
-  when(io.flush && (state =/= State.Invalid) && (state =/= State.SendResp)) {
-    needFlush := true.B
-  }.elsewhen((state === State.SendResp) && needFlush) {
-    needFlush := false.B
+  private val flush = io.req.bits.flush
+  // hold flush state when bus is busy
+  private val pendingFlush = RegInit(false.B)
+  when(flush && (state =/= State.Invalid) && (state =/= State.SendResp)) {
+    pendingFlush := true.B
+  }.elsewhen((state === State.SendResp) && pendingFlush) {
+    pendingFlush := false.B
   }
 
   // receive request from InstrUncache
@@ -82,7 +82,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   private val respCorruptReg = RegEnable(io.mmioGrant.bits.corrupt, false.B, io.mmioGrant.fire)
 
   // send response to InstrUncache
-  io.resp.valid := state === State.SendResp && !needFlush
+  io.resp.valid := state === State.SendResp && !pendingFlush
   io.resp.bits.data := Mux1H(
     UIntToOH(reqReg.addr(2, 1)),
     Seq(
@@ -119,7 +119,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
     }
 
     is(State.SendResp) {
-      when(io.resp.fire || needFlush) {
+      when(io.resp.fire || flush || pendingFlush) {
         state := State.Invalid
       }
     }

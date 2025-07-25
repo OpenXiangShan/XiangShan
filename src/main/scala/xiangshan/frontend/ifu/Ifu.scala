@@ -899,13 +899,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // Exception or flush by older branch prediction
   // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend redirect
-  when(s4_ftqFlushSelf || s4_ftqFlushByOlder) {
+  when(s4_ftqFlushSelf || s4_ftqFlushByOlder || mmioF4Flush && !s4_needNotFlush) {
     mmioReset()
   }
 
   toUncache.valid := ((mmioState === MmioFsmState.SendReq) || (mmioState === MmioFsmState.ResendReq)) && s4_reqIsMmio
-  toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_pAddr(0))
-  fromUncache.ready   := true.B
+  toUncache.bits.addr  := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_pAddr(0))
+  toUncache.bits.flush := s4_ftqFlushSelf || s4_ftqFlushByOlder || mmioF4Flush && !s4_needNotFlush
+
+  fromUncache.ready := true.B
 
   // send itlb request in MmioFsmState.SendTlb state
   io.itlb.req.valid                   := (mmioState === MmioFsmState.SendTlb) && s4_reqIsMmio
