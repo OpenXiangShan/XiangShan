@@ -58,12 +58,3 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val stronglyBiasedMask = Vec(NumAlignBanks * NumWay, Bool())
   val positions          = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
 }
-
-class MainBtbTrain(implicit p: Parameters) extends MainBtbBundle {
-  val startVAddr:  PrunedAddr      = Input(PrunedAddr(VAddrBits))
-  val taken:       Bool            = Bool()
-  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
-  val attribute:   BranchAttribute = new BranchAttribute
-  val meta:        MainBtbMeta     = new MainBtbMeta
-}
