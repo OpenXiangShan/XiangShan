@@ -1584,7 +1584,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.dcacheRequireReplay  := s3_dcache_rep
 
   val s3_vp_match_fail = GatedValidRegNext(s2_fwd_vp_match_invalid) && s3_troublem
-  val s3_rep_frm_fetch = s3_vp_match_fail
+  val s3_rep_frm_fetch_rep_full = io.lq_rep_full && s3_in.rep_info.need_rep && !s3_in.isLoadReplay
+  val s3_rep_frm_fetch = s3_vp_match_fail || s3_rep_frm_fetch_rep_full
   val s3_ldld_rep_inst =
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
