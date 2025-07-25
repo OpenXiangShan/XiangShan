@@ -74,10 +74,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
   }
 
   /* *** update *** */
-  private val hits = Wire(Vec(nWayLookupSize, Bool()))
-  entries.zip(hits).foreach { case (entry, hit) =>
-    val hitVec = Wire(Vec(PortNumber, Bool()))
-    (0 until PortNumber).foreach { i =>
+  private val entryUpdate = VecInit(entries.map { entry =>
+    (0 until PortNumber).map { i =>
       val (updated, newMask, newCode) = updateMetaInfo(
         io.update,
         entry.waymask(i),
@@ -89,15 +87,28 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
         entry.waymask(i)   := newMask
         entry.metaCodes(i) := newCode
       }
-      hitVec(i) := updated
-    }
-    hit := hitVec.reduce(_ || _)
-  }
+      updated
+    }.reduce(_ || _)
+  })
+  // if the entry is being updated, we should not read it (i.e. read.valid should be false)
+  // NOTE: this is not necessary in current design:
+  //       when update is valid, DataArray is refilling at the same cycle, so DataArray.read.req.ready will be false.B
+  //       then, MainPipe will get s0_canGo (= toData.last.ready && fromWayLookup.valid && s1_ready) = false.B
+  //       then, WayLookup.read.ready (= s0_fire = s0_valid && s0_canGo && !s0_flush) will be false.B
+  //       so, even if read.valid is true, read.fire will still be false.B, and no read happens.
+//  private val updateStall = entryUpdate(readPtr.value)
+  //       currently, we use a simple assertion to avoid using extra logic
+  assert(
+    !(!empty && io.read.fire && entryUpdate(readPtr.value)),
+    "WayLookup read should not happen when entry is being updated"
+  )
+  private val updateStall = false.B
 
   /* *** read *** */
   // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
   private val canBypass = empty && io.write.valid
-  io.read.valid := !empty || io.write.valid
+  private val canRead   = !empty && !updateStall
+  io.read.valid := canRead || canBypass
   when(canBypass) {
     io.read.bits := io.write.bits
   }.otherwise { // can't bypass
