@@ -31,20 +31,20 @@ import xiangshan.frontend.PrunedAddr
 class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
   class FrontendTriggerIO(implicit p: Parameters) extends IfuBundle {
     val frontendTrigger: FrontendTdataDistributeIO = Input(new FrontendTdataDistributeIO)
-    val triggered:       Vec[UInt]                 = Output(Vec(PredictWidth, TriggerAction()))
+    val triggered:       Vec[UInt]                 = Output(Vec(IBufferInPortNum, TriggerAction()))
 
-    val pds: Vec[PreDecodeInfo] = Input(Vec(PredictWidth, new PreDecodeInfo))
-    val pc:  Vec[PrunedAddr]    = Input(Vec(PredictWidth, PrunedAddr(VAddrBits)))
+    val pds: Vec[PreDecodeInfo] = Input(Vec(IBufferInPortNum, new PreDecodeInfo))
+    val pc:  Vec[PrunedAddr]    = Input(Vec(IBufferInPortNum, PrunedAddr(VAddrBits)))
     val data: Vec[UInt] =
-      if (HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W))) else Input(Vec(PredictWidth, UInt(32.W)))
+      if (HasCExtension) Input(Vec(IBufferInPortNum + 1, UInt(16.W))) else Input(Vec(IBufferInPortNum, UInt(32.W)))
   }
   val io: FrontendTriggerIO = IO(new FrontendTriggerIO)
 
   // Currently, FrontendTrigger supports pc match only, data/pds is reserved for future use
   private val data = io.data
   private val rawInsts =
-    if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
-    else VecInit((0 until PredictWidth).map(i => data(i)))
+    if (HasCExtension) VecInit((0 until IBufferInPortNum).map(i => Cat(data(i + 1), data(i))))
+    else VecInit((0 until IBufferInPortNum).map(i => data(i)))
 
   private val tdataVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   when(io.frontendTrigger.tUpdate.valid) {
@@ -72,7 +72,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
     ).map(hit => hit && !tdataVec(j).select && !debugMode)
   }.transpose
 
-  for (i <- 0 until PredictWidth) {
+  for (i <- 0 until IBufferInPortNum) {
     val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
     TriggerCheckCanFire(TriggerNum, triggerCanFireVec, VecInit(triggerHitVec(i)), triggerTimingVec, triggerChainVec)
 

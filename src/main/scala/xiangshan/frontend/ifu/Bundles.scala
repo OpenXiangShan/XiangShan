@@ -86,8 +86,8 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle {
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
   val target     = PrunedAddr(VAddrBits)
-  val misOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
-  val cfiOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
+  val misIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val cfiIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
   val instrRange = UInt(PredictWidth.W)
 }
 

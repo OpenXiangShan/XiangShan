@@ -71,6 +71,19 @@ trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
 }
 
 trait IfuHelper extends HasXSParameter with HasIfuParameters {
+  private object ShiftType {
+    val NoShift   = 0.U(2.W)
+    val ShiftRight1 = 1.U(2.W)
+    val ShiftRight2 = 2.U(2.W)
+    val ShiftRight3 = 3.U(2.W)
+  }
+  def bitMask(index: UInt, blockSize: Int, numBlocks: Int): UInt = {
+    val selectOH  = UIntToOH(index)
+    val blocks = VecInit((0 until numBlocks).map { i =>
+      Mux(selectOH(i), Fill(blockSize, 1.U(1.W)), 0.U(blockSize.W))
+    })
+    Cat(blocks.reverse)
+  }
   def catPC(low: UInt, high: UInt, high1: UInt): PrunedAddr =
     PrunedAddrInit(Mux(
       low(PcCutPoint),
@@ -101,18 +114,13 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
     val out = WireDefault(VecInit.fill(IBufEnqWidth)(0.U.asTypeOf(default)))
     for (i <- 0 until IBufEnqWidth) {
       out(i) := MuxLookup(shiftNum, 0.U.asTypeOf(default))(Seq(
-        0.U -> Mux(prevIsHalf, if (i == IBufEnqWidth - 1) 0.U.asTypeOf(default) else dataVec(i + 1), dataVec(i)),
-        1.U -> Mux(prevIsHalf, dataVec(i), if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)),
-        2.U -> Mux(
-          prevIsHalf,
-          if (i < 1) 0.U.asTypeOf(default) else dataVec(i - 1),
-          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2)
-        ),
-        3.U -> Mux(
-          prevIsHalf,
-          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2),
-          if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3)
-        )
+        ShiftType.NoShift     -> Mux(prevIsHalf, if (i == IBufEnqWidth - 1) 0.U.asTypeOf(default) else dataVec(i + 1),
+         dataVec(i)),
+        ShiftType.ShiftRight1 -> Mux(prevIsHalf, dataVec(i), if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)),
+        ShiftType.ShiftRight2 -> Mux(prevIsHalf, if (i < 1) 0.U.asTypeOf(default) else dataVec(i - 1),
+         if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2)),
+        ShiftType.ShiftRight3 -> Mux(prevIsHalf, if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2),
+         if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3))
       ))
     }
     out
