@@ -94,10 +94,11 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   private val jalFaultVec, jalrFaultVec, retFaultVec, notCfiTaken = Wire(Vec(IBufferInPortNum, Bool()))
 
-  /** remask fault may appear together with other faults, but other faults are exclusive
-   * so other fault mast use fixed mask to keep only one fault would be found and redirect to Ftq
-   * we first detect remask fault and then use fixedRange to do second check
-   **/
+  /** Remask faults can occur alongside other faults, whereas other faults are mutually exclusive.
+    * Therefore, for non-remask faults, a fixed fault mask must be used to ensure that only one fault
+    * is detected and redirected to the FTQ.
+    * The logic first checks for remask faults, and then applies the fixed range for a secondary check.
+    */
 
   // Stage 1: detect remask fault
   /** first check: remask Fault */
@@ -114,15 +115,16 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     VecInit((0 until IBufferInPortNum).map(i => jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i)))
   private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
   private val needRemask = ParallelOR(remaskFault)
+  // Note: remaskIdx must be 5-bit wide (2^5=32) to cover all shift positions (0-31)
   private val fixedRange =
-    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | Fill(IBufferInPortNum, 1.U(1.W)) >> ~remaskIdx)
-
+    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | Fill(32, 1.U(1.W)) >> ~remaskIdx)
+  assert(remaskIdx.getWidth == 5, s"remaskIdx width mismatch!") // Temporary code.
   // Adjust this if one IBuffer input entry is later removed
-  require(
-    isPow2(IBufferInPortNum),
-    "If IBufferInPortNum does not satisfy the power of 2," +
-      "expression: Fill(IBufferInPortNum, 1.U(1.W)) >> ~remaskIdx is not right !!"
-  )
+  // require(
+  //   isPow2(IBufferInPortNum),
+  //   "If IBufferInPortNum does not satisfy the power of 2," +
+  //     "expression: Fill(IBufferInPortNum, 1.U(1.W)) >> ~remaskIdx is not right !!"
+  // )
 
   io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferInPortNum, Bool()))
 
@@ -215,22 +217,19 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
 
-  io.resp.stage2Out.fixedFirst.target          := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
-  io.resp.stage2Out.fixedFirst.misOffset.valid := fixFirstMispred
-  io.resp.stage2Out.fixedFirst.misOffset.bits :=
-    Mux(fixFirstMispred, instrOffsetNext(mispredIdxNext.bits), instrOffsetNext(firstTakenIdxNext))
+  io.resp.stage2Out.fixedFirst.target         := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
+  io.resp.stage2Out.fixedFirst.misIdx.valid   := fixFirstMispred
+  io.resp.stage2Out.fixedFirst.misIdx.bits    := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
+  io.resp.stage2Out.fixedFirst.cfiIdx.valid   := fixedFirstTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedFirst.cfiIdx.bits    := fixedFirstTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedFirst.instrRange     := fixedFirstRawInstrRange
 
-  io.resp.stage2Out.fixedFirst.cfiOffset.valid := fixedFirstTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedFirst.cfiOffset.bits  := instrOffsetNext(fixedFirstTakenInstrIdxNext.bits)
-  io.resp.stage2Out.fixedFirst.instrRange      := fixedFirstRawInstrRange
-
-  io.resp.stage2Out.fixedSecond.target          := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
-  io.resp.stage2Out.fixedSecond.misOffset.valid := fixSecondMispred
-  io.resp.stage2Out.fixedSecond.misOffset.bits :=
-    Mux(fixSecondMispred, instrOffsetNext(mispredIdxNext.bits), instrOffsetNext(secondTakenIdxNext))
-  io.resp.stage2Out.fixedSecond.cfiOffset.valid := fixedSecondTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedSecond.cfiOffset.bits  := instrOffsetNext(fixedSecondTakenInstrIdxNext.bits)
-  io.resp.stage2Out.fixedSecond.instrRange      := fixedSecondRawInstrRange
+  io.resp.stage2Out.fixedSecond.target        := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
+  io.resp.stage2Out.fixedSecond.misIdx.valid  := fixSecondMispred
+  io.resp.stage2Out.fixedSecond.misIdx.bits   := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
+  io.resp.stage2Out.fixedSecond.cfiIdx.valid  := fixedSecondTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedSecond.cfiIdx.bits   := fixedSecondTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedSecond.instrRange    := fixedSecondRawInstrRange
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
@@ -259,8 +258,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
   )
 
-  io.resp.stage2Out.fixedFirst.misOffset.valid := fixFirstMispred || firstTargetFault
-  io.resp.stage2Out.fixedFirst.misOffset.bits := Mux(
+  io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred || firstTargetFault
+  io.resp.stage2Out.fixedFirst.misIdx.bits := Mux(
     firstTargetFault,
     instrOffsetNext(firstTakenIdxNext),
     Mux(fixFirstMispred, instrOffsetNext(mispredIdxNext.bits), instrOffsetNext(firstTakenIdxNext))
