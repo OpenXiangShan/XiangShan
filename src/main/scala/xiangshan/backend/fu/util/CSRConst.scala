@@ -32,7 +32,7 @@ trait HasCSRConst {
 
   // Machine level PMA TODO: remove this
   val PmacfgBase    = 0x7C0
-  val PmaaddrBase   = 0x7C8 // 64 entry at most
+  val PmaaddrBase   = 0x7D0 // 64 entry at most
 
   // Machine level Bitmap Check(Custom Read/Write)
   val Mbmc = 0xBC2

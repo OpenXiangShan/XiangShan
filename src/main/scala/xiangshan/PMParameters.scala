@@ -28,7 +28,7 @@ case object PMParameKey extends Field[PMParameters]
 case class PMParameters
 (
   NumPMP: Int = 16,
-  NumPMA: Int = 16,
+  NumPMA: Int = 64,
 
   PlatformGrain: Int = log2Ceil(4*1024), // 4KB, a normal page
   mmpma: MMPMAConfig = MMPMAConfig(

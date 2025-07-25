@@ -169,7 +169,7 @@ trait PMAMethod extends PMAConst {
     }
 
     PMAConfigs.foreach(addPMA)
-    while (cfg_list.length < 16) {
+    while (cfg_list.length < num) {
       addPMA(PMAConfigEntry(0))
     }
 
