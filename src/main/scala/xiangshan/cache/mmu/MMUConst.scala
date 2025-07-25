@@ -282,7 +282,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   }
 
   def dupBitmapPPN(ppn1: UInt, ppn2: UInt) : Bool = {
-    ppn1(ppnLen-1, ppnLen-log2Up(XLEN)) === ppn2(ppnLen-1, ppnLen-log2Up(XLEN))
+    ppn1(ppnLen-1, log2Up(XLEN)-1) === ppn2(ppnLen-1, log2Up(XLEN)-1)
   }
 
   def genPtwL1Idx(vpn: UInt) = {
