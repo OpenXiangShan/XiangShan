@@ -25,19 +25,20 @@ xspython:
 		--tdir $(PDB_HOME)/XSPython \
 		--fs $(RTL_HOME)/picker.f \
 		-V "--no-timing;--threads;8;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src;" \
-		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(RTL_HOME) -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
+		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(RTL_HOME) -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" \
 		--autobuild false 
 	cp $(RTL_HOME)/libdifftest.so $(PDB_HOME)/XSPython
-	cd $(PDB_HOME)/XSPython/ && make
+	$(MAKE) -C $(PDB_HOME)/XSPython
 
 xspdb:
 	cp $(PDB_HOME)/python/_difftest.so $(PDB_HOME)/XSPython
 	cp $(PDB_HOME)/python/difftest.py $(PDB_HOME)/XSPython
-	ln -s $(PDB_HOME)/XSPython/_difftest.so $(PDB_HOME)/XSPython/libdifftest.so
+	#ln -s $(PDB_HOME)/XSPython/_difftest.so $(PDB_HOME)/XSPython/libdifftest.so # it will use after picker update
 	cp -r $(NOOP_HOME)/scripts/xspdb $(PDB_HOME)/XSPdb
 	mv $(PDB_HOME)/XSPython $(PDB_HOME)/XSPdb
 
 xspdb-compress:
+	rm -rf $(PDB_HOME)/xspdb.tar.gz
 	tar -C $(PDB_HOME) -czvf $(PDB_HOME)/xspdb.tar.gz XSPdb
 
 pdb-run: check-deps
