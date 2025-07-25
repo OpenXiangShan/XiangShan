@@ -1301,16 +1301,28 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
       allStage -> (s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)),
       noS2xlate -> s1.entry.level.getOrElse(0.U)
     ))
+    val allStage_n = (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.level.getOrElse(0.U) =/= 0.U) ||
+      (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
+      (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
+    val inner_n = MuxLookup(s2xlate, 2.U)(Seq(
+      onlyStage1 -> s1.entry.n.getOrElse(0.U),
+      onlyStage2 -> s2.entry.n.getOrElse(0.U),
+      allStage -> allStage_n,
+      noS2xlate -> s1.entry.n.getOrElse(0.U)
+    ))
+
     val s1tag = Cat(s1.entry.tag, OHToUInt(s1.pteidx))
     val s1_vpn = MuxLookup(level, s1tag)(Seq(
       3.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 3 - sectortlbwidth), vpn(vpnnLen * 3 - 1, 0)),
       2.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)))
+      1.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)),
+      0.U -> Mux(inner_n === 0.U, s1tag, Cat(s1.entry.tag(sectorvpnLen - 1, pteNapotBits - sectortlbwidth), vpn(pteNapotBits - 1, 0))))
     )
     val s2_vpn = MuxLookup(level, s2.entry.tag)(Seq(
       3.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
       2.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)))
+      1.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+      0.U -> Mux(inner_n === 0.U, s2.entry.tag, Cat(s2.entry.tag(gvpnLen - 1, pteNapotBits), vpn(pteNapotBits - 1, 0))))
     )
     Mux(s2xlate === onlyStage2, s2_vpn, s1_vpn)
   }
