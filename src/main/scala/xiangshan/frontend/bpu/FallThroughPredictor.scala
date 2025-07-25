@@ -24,7 +24,7 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
     with HalfAlignHelper
     with CrossPageHelper {
   class FallThroughPredictorIO extends BasePredictorIO {
-    val prediction: BranchPrediction = Output(new BranchPrediction)
+    val prediction: Prediction = Output(new Prediction)
   }
 
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)

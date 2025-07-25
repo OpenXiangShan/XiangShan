@@ -22,6 +22,7 @@ import utility.CircularQueuePtr
 import utility.XSDebug
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.StageCtrl
 
 class PhrPtr(implicit p: Parameters) extends CircularQueuePtr[PhrPtr](p =>
@@ -54,10 +55,7 @@ class PhrTrain(implicit p: Parameters) extends PhrBundle {
   val s0_stall:  Bool      = Bool()
   val stageCtrl: StageCtrl = new StageCtrl
 
-  val redirectValid:  Bool       = Bool()
-  val redirectPc:     PrunedAddr = PrunedAddr(VAddrBits)
-  val redirectTaken:  Bool       = Bool()
-  val redirectPhrPtr: PhrPtr     = new PhrPtr
+  val redirect: Valid[BpuRedirect] = Valid(new BpuRedirect)
 
   val s1_valid: Bool       = Bool()
   val s1_pc:    PrunedAddr = PrunedAddr(VAddrBits)
@@ -66,16 +64,6 @@ class PhrTrain(implicit p: Parameters) extends PhrBundle {
   val s3_override: Bool       = Bool()
   val s3_pc:       PrunedAddr = PrunedAddr(VAddrBits)
   val s3_taken:    Bool       = Bool()
-}
-
-class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val train:        PhrTrain              = Input(new PhrTrain)
-  val s0_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
-  val s1_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
-  val s2_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
-  val s3_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
-  val phrs:         Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
-  val phrPtr:       PhrPtr                = Output(new PhrPtr)
 }
 
 //NOTE: Folded history maintainance logic reuse kmh-v2 ghr folded history management logic,

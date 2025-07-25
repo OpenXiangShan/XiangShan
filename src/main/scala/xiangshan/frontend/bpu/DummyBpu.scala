@@ -23,15 +23,14 @@ import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.BpuToFtqIO
+import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
-import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
@@ -60,7 +59,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   /* *** aliases *** */
-  private val train    = io.fromFtq.update
+  private val train    = io.fromFtq.train
   private val redirect = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
@@ -108,72 +107,25 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_pc = RegEnable(s2_pc, s2_fire)
 
   /* *** common inputs *** */
+  private val stageCtrl = Wire(new StageCtrl)
+  stageCtrl.s0_fire := s0_fire
+  stageCtrl.s1_fire := s1_fire
+  stageCtrl.s2_fire := s2_fire
+  stageCtrl.s3_fire := s3_fire
+
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
-    p.io.startVAddr        := s0_pc
-    p.io.stageCtrl.s0_fire := s0_fire
-    p.io.stageCtrl.s1_fire := s1_fire
-    p.io.stageCtrl.s2_fire := s2_fire
-    p.io.stageCtrl.s3_fire := s3_fire
+    p.io.startVAddr := s0_pc
+    p.io.stageCtrl  := stageCtrl
+    p.io.train      := train
   }
 
   /* *** predictor specific inputs *** */
-  // fall-through and ubtb currently doesn't have
+  // FIXME: should use s3_prediction to train ubtb
+
   // abtb
   abtb.io.redirectValid := redirect.valid
   abtb.io.overrideValid := s3_override
-
-  /* *** train *** */
-  private val t0_valid      = train.valid
-  private val t0_startVAddr = train.bits.pc
-  private val t0_taken      = train.bits.ftqOffset.valid
-  private val (t0_cfiPosition, t0_cfiPositionCarry) = getAlignedPosition(
-    train.bits.pc,
-    train.bits.ftqOffset.bits
-  )
-  assert(
-    !(train.valid && train.bits.ftqOffset.valid && t0_cfiPositionCarry),
-    "ftqOffset exceeds 2 * 32B aligned fetch block range, cfiPosition overflow!"
-  )
-  private val t0_target = train.bits.full_target
-  private val t0_attribute = MuxCase(
-    BranchAttribute.Conditional,
-    Seq(
-      (train.bits.is_call && train.bits.is_jal)  -> BranchAttribute.DirectCall,
-      (train.bits.is_call && train.bits.is_jalr) -> BranchAttribute.IndirectCall,
-      train.bits.is_ret                          -> BranchAttribute.Return,
-      train.bits.is_jal                          -> BranchAttribute.OtherDirect,
-      train.bits.is_jalr                         -> BranchAttribute.OtherIndirect
-    )
-  )
-  private val t0_meta = train.bits.meta
-
-  // FIXME: should use s3_prediction to train ubtb
-  // ubtb
-  ubtb.io.train.valid            := t0_valid
-  ubtb.io.train.bits.startVAddr  := t0_startVAddr
-  ubtb.io.train.bits.taken       := t0_taken
-  ubtb.io.train.bits.cfiPosition := t0_cfiPosition
-  ubtb.io.train.bits.target      := t0_target
-  ubtb.io.train.bits.attribute   := t0_attribute
-
-  // abtb
-  abtb.io.train.valid          := t0_valid
-  abtb.io.train.bits.startPc   := t0_startVAddr
-  abtb.io.train.bits.target    := t0_target
-  abtb.io.train.bits.taken     := t0_taken
-  abtb.io.train.bits.position  := t0_cfiPosition
-  abtb.io.train.bits.attribute := t0_attribute
-  abtb.io.train.bits.meta      := t0_meta.abtb
-
-  // mbtb
-  mbtb.io.train.valid            := t0_valid
-  mbtb.io.train.bits.startVAddr  := t0_startVAddr
-  mbtb.io.train.bits.taken       := t0_taken
-  mbtb.io.train.bits.cfiPosition := t0_cfiPosition
-  mbtb.io.train.bits.target      := t0_target
-  mbtb.io.train.bits.attribute   := t0_attribute
-  mbtb.io.train.bits.meta        := t0_meta.mbtb
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -211,7 +163,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s1 prediction selection:
   // if ubtb or abtb find a taken branch, use the corresponding prediction
   // otherwise, use fall-through prediction
-  private val s1_prediction = Wire(new BranchPrediction)
+  private val s1_prediction = Wire(new Prediction)
   s1_prediction := MuxCase(
     fallThrough.io.prediction,
     Seq(
@@ -221,20 +173,20 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // s3 prediction: TODO
-  private val s3_prediction = Wire(new BranchPrediction)
+  private val s3_prediction = Wire(new Prediction)
   s3_prediction := DontCare
 
+  // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_fire && s3_override
-
   when(s3_override) {
     io.toFtq.prediction.bits.fromStage(s3_pc, s3_prediction)
   }.otherwise {
     io.toFtq.prediction.bits.fromStage(s1_pc, s1_prediction)
   }
+  io.toFtq.prediction.bits.s3Override := s3_override
 
-  // override
-  io.toFtq.prediction.bits.s3Override.valid       := s3_override
-  io.toFtq.prediction.bits.s3Override.bits.ftqPtr := s3_ftqPtr
+  // tell ftq s3 ftqptr for meta enqueue and s3 override
+  io.toFtq.s3FtqPtr := s3_ftqPtr
 
   // abtb meta delay to s3
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
@@ -243,10 +195,10 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // mbtb meta
   val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
-  private val s3_speculativeMeta = Wire(new PredictorSpeculativeMeta)
+  private val s3_speculativeMeta = Wire(new BpuSpeculativeMeta)
   s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
 
-  private val s3_meta = Wire(new PredictorMeta)
+  private val s3_meta = Wire(new BpuMeta)
   s3_meta.abtb := s3_abtbMeta
   s3_meta.mbtb := s3_mbtbMeta
   // TODO: other meta
@@ -260,7 +212,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s0_pc := MuxCase(
     s0_pcReg,
     Seq(
-      redirect.valid -> PrunedAddrInit(redirect.bits.cfiUpdate.target),
+      redirect.valid -> redirect.bits.target,
       s3_override    -> s3_prediction.target,
       s1_valid       -> s1_prediction.target
     )
@@ -272,21 +224,15 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
   private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  phr.io.train.s0_stall          := s0_stall
-  phr.io.train.stageCtrl.s0_fire := s0_fire
-  phr.io.train.stageCtrl.s1_fire := s1_fire
-  phr.io.train.stageCtrl.s2_fire := s2_fire
-  phr.io.train.stageCtrl.s3_fire := s3_fire
-  phr.io.train.redirectValid     := redirect.valid
-  phr.io.train.redirectPc        := PrunedAddrInit(redirect.bits.cfiUpdate.pc)
-  phr.io.train.redirectTaken     := redirect.bits.cfiUpdate.taken
-  phr.io.train.redirectPhrPtr    := redirect.bits.cfiUpdate.phrHistPtr
-  phr.io.train.s3_override       := s3_override
-  phr.io.train.s3_pc             := s3_pc
-  phr.io.train.s3_taken          := s3_prediction.taken
-  phr.io.train.s1_valid          := s1_valid
-  phr.io.train.s1_pc             := s1_pc
-  phr.io.train.s1_taken          := s1_prediction.taken
+  phr.io.train.s0_stall    := s0_stall
+  phr.io.train.stageCtrl   := stageCtrl
+  phr.io.train.redirect    := redirect
+  phr.io.train.s3_override := s3_override
+  phr.io.train.s3_pc       := s3_pc
+  phr.io.train.s3_taken    := s3_prediction.taken
+  phr.io.train.s1_valid    := s1_valid
+  phr.io.train.s1_pc       := s1_pc
+  phr.io.train.s1_taken    := s1_prediction.taken
 
   s0_foldedPhr := phr.io.s0_foldedPhr
   s1_foldedPhr := phr.io.s1_foldedPhr
@@ -296,7 +242,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val phrsWireValue = phrsWire.asUInt
   private val redirectPhrValue =
-    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.cfiUpdate.phrHistPtr.value + 1.U))(
+    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculativeMeta.phrHistPtr.value + 1.U))(
       PhrHistoryLength - 1,
       0
     )
@@ -326,7 +272,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** perf pred *** */
   XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
-  XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override.valid)
+  XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
@@ -348,5 +294,5 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
   /* *** perf train *** */
-  XSPerfAccumulate("train", io.fromFtq.update.valid)
+  XSPerfAccumulate("train", io.fromFtq.train.valid)
 }

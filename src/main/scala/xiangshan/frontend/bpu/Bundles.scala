@@ -19,24 +19,15 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
+import xiangshan.Redirect
+import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
-import xiangshan.frontend.ftq.FtqPtr
 
-class BpuCtrl extends Bundle {
-  // s1 predictor enable
-  val ubtbEnable: Bool = Bool()
-  val abtbEnable: Bool = Bool()
-  // s3 predictor enable
-  val mbtbEnable:   Bool = Bool()
-  val tageEnable:   Bool = Bool()
-  val scEnable:     Bool = Bool() // depends on tageEnable
-  val ittageEnable: Bool = Bool()
-  val rasEnable:    Bool = Bool()
-}
-
+/* *** public const & type *** */
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
   val rasAction:  UInt = BranchAttribute.RasAction()
@@ -103,37 +94,29 @@ object BranchAttribute {
   def OtherIndirect: BranchAttribute = apply(BranchType.Indirect, RasAction.None)
 }
 
-// used to sync sub-predictors
-class StageCtrl(implicit p: Parameters) extends BpuBundle {
-  // TODO: do we need ready / valid of each stage?
-  val s0_fire: Bool = Bool()
-  val s1_fire: Bool = Bool()
-  val s2_fire: Bool = Bool()
-  val s3_fire: Bool = Bool()
-}
-
-// sub predictors -> Bpu top
-class BranchPrediction(implicit p: Parameters) extends BpuBundle {
-  val taken:       Bool            = Bool()
-  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
-  val attribute:   BranchAttribute = new BranchAttribute
-  // TODO: what else do we need?
-}
-
-class OverrideBranchPrediction(implicit p: Parameters) extends BpuBundle {
-  val ftqPtr: FtqPtr = new FtqPtr
+/* *** public *** */
+// Csr -> Bpu
+class BpuCtrl extends Bundle {
+  // s1 predictor enable
+  val ubtbEnable: Bool = Bool()
+  val abtbEnable: Bool = Bool()
+  // s3 predictor enable
+  val mbtbEnable:   Bool = Bool()
+  val tageEnable:   Bool = Bool()
+  val scEnable:     Bool = Bool() // depends on tageEnable
+  val ittageEnable: Bool = Bool()
+  val rasEnable:    Bool = Bool()
 }
 
 // Bpu -> Ftq
-class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val startVAddr: PrunedAddr  = PrunedAddr(VAddrBits)
   val ftqOffset:  Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val target:     PrunedAddr  = PrunedAddr(VAddrBits)
   // override valid
-  val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+  val s3Override: Bool = Bool()
 
-  def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
+  def fromStage(pc: PrunedAddr, prediction: Prediction): Unit = {
     this.startVAddr      := pc
     this.ftqOffset.valid := prediction.taken
     this.ftqOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
@@ -142,17 +125,77 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle with HalfAl
   // TODO: what else do we need?
 }
 
+// Backend & Ftq -> Bpu
+class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters {
+  // alias for compatibility, re-write this bundle when refactoring `class Redirect`
+  def startVAddr: PrunedAddr = PrunedAddrInit(cfiUpdate.pc)
+  def target:     PrunedAddr = PrunedAddrInit(cfiUpdate.target)
+  def taken:      Bool       = cfiUpdate.taken
+  def speculativeMeta: BpuSpeculativeMeta = {
+    val m = Wire(new BpuSpeculativeMeta)
+    m.phrHistPtr := cfiUpdate.phrHistPtr
+    m
+  }
+
+//  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
+//  val target:          PrunedAddr         = PrunedAddr(VAddrBits)
+//  val taken:           Bool               = Bool()
+//  val speculativeMeta: BpuSpeculativeMeta = new BpuSpeculativeMeta
+}
+
+// Backend & Ftq -> Bpu
+class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+  val startVAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+  val meta:        BpuMeta         = new BpuMeta
+
+  // for compatibility, remove these in new Ftq, valid is for asserting
+  def fromBranchPredictionUpdate(u: BranchPredictionUpdate, valid: Bool = false.B): Unit = {
+    val (cfiPosition, cfiPositionCarry) = getAlignedPosition(
+      u.pc,
+      u.ftqOffset.bits
+    )
+    assert(
+      !(valid && u.ftqOffset.valid && cfiPositionCarry),
+      "ftqOffset exceeds 2 * 32B aligned fetch block range, cfiPosition overflow!"
+    )
+
+    this.startVAddr  := u.pc
+    this.target      := u.full_target
+    this.taken       := u.ftqOffset.valid
+    this.cfiPosition := cfiPosition
+    this.attribute := MuxCase(
+      BranchAttribute.Conditional,
+      Seq(
+        (u.is_call && u.is_jal)  -> BranchAttribute.DirectCall,
+        (u.is_call && u.is_jalr) -> BranchAttribute.IndirectCall,
+        u.is_ret                 -> BranchAttribute.Return,
+        u.is_jal                 -> BranchAttribute.OtherDirect,
+        u.is_jalr                -> BranchAttribute.OtherIndirect
+      )
+    )
+    this.meta := u.meta
+  }
+}
+
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
-class PredictorSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
+class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
   val phrHistPtr: PhrPtr = new PhrPtr
+  // TODO: rasPtr for recovery
+  // TODO: and maybe more
 }
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
-class PredictorMeta(implicit p: Parameters) extends BpuBundle {
+class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val abtb: AheadBtbMeta = new AheadBtbMeta
   val mbtb: MainBtbMeta  = new MainBtbMeta
+  // TODO: maybe more
 }
 
+/* *** internal const & type *** */
 // TargetCarry is an attribute of partial target
 // While lower part of target is recorded in predictor structure,
 // Some more bits are need when a branch target is crossing the boundary of what lower partial target bits can record.
@@ -181,4 +224,23 @@ object TargetCarry {
   def Fit:       TargetCarry = apply(Value.Fit)
   def Overflow:  TargetCarry = apply(Value.Overflow)
   def Underflow: TargetCarry = apply(Value.Underflow)
+}
+
+/* *** internal *** */
+// used to sync sub-predictors
+class StageCtrl(implicit p: Parameters) extends BpuBundle {
+  // TODO: do we need ready / valid of each stage?
+  val s0_fire: Bool = Bool()
+  val s1_fire: Bool = Bool()
+  val s2_fire: Bool = Bool()
+  val s3_fire: Bool = Bool()
+}
+
+// sub predictors -> Bpu top
+class Prediction(implicit p: Parameters) extends BpuBundle {
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute:   BranchAttribute = new BranchAttribute
+  // TODO: what else do we need?
 }

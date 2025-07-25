@@ -31,12 +31,12 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
+import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuSpeculativeMeta
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
-import xiangshan.frontend.bpu.FullBranchPrediction
+import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.bpu.PredictorMeta
-import xiangshan.frontend.bpu.PredictorSpeculativeMeta
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -75,7 +75,7 @@ class FtqRfComponents(implicit p: Parameters) extends FtqBundle with BPUUtils {
     this.fallThruError := resp.fallThruError
   }
 
-  def fromPrediction(pred: FullBranchPrediction): Unit = {
+  def fromPrediction(pred: BpuPrediction): Unit = {
     this.startAddr    := pred.startVAddr
     this.nextLineAddr := pred.startVAddr + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
@@ -135,11 +135,11 @@ class FtqRedirectSramEntry(implicit p: Parameters) extends XSBundle {
   val histPtr = new CGHPtr
 //  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
   val rasSpecInfo     = new RasSpeculativeInfo
-  val speculativeMeta = new PredictorSpeculativeMeta
+  val speculativeMeta = new BpuSpeculativeMeta
 }
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends FtqBundle with HasBPUConst {
-  val meta       = new PredictorMeta
+  val meta       = new BpuMeta
   val ftb_entry  = new FTBEntry
   val paddingBit = if ((meta.getWidth + meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
 }
@@ -162,7 +162,8 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
   }
 }
 
-class FtqToBpuIO(implicit p: Parameters) extends FtqBundle {
+// TODO: remove this
+class OldFtqToBpuIO(implicit p: Parameters) extends FtqBundle {
   val redirect       = Valid(new BranchPredictionRedirect)
   val update         = Valid(new BranchPredictionUpdate)
   val enq_ptr        = Output(new FtqPtr)

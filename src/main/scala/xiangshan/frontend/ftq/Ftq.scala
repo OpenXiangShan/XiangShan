@@ -43,14 +43,15 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
+import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BPUUtils
-import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.FTBEntry_FtqMem
 import xiangshan.frontend.bpu.HasBPUConst
@@ -187,7 +188,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 //  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
 //  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
   val bpu_s2_redirect = false.B
-  val bpu_s3_redirect = io.fromBpu.prediction.bits.s3Override.valid
+  val bpu_s3_redirect = io.fromBpu.prediction.bits.s3Override
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire    = io.fromBpu.prediction.fire && allowBpuIn // from bpu s1
@@ -217,7 +218,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // these info is intended to enq at the last stage of bpu
   // TODO: Change to real last stage data
   ftq_redirect_mem.io.wen(0)                   := io.fromBpu.speculativeMeta.valid
-  ftq_redirect_mem.io.waddr(0)                 := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  ftq_redirect_mem.io.waddr(0)                 := io.fromBpu.s3FtqPtr.value
   ftq_redirect_mem.io.wdata(0)                 := DontCare
   ftq_redirect_mem.io.wdata(0).speculativeMeta := io.fromBpu.speculativeMeta.bits
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
@@ -225,7 +226,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen             := io.fromBpu.meta.valid
-  ftq_meta_1r_sram.io.waddr           := io.fromBpu.prediction.bits.s3Override.bits.ftqPtr.value
+  ftq_meta_1r_sram.io.waddr           := io.fromBpu.s3FtqPtr.value
   ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.meta.bits
   ftq_meta_1r_sram.io.wdata.ftb_entry := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).ftb_entry)
   if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
@@ -949,18 +950,19 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // update latency stats
   val update_latency = GTimer() - pred_s1_cycle.getOrElse(dummy_s1_pred_cycle_vec)(s2_commitPtr.value) + 1.U
-  XSPerfHistogram("bpu_update_latency", update_latency, io.toBpu.update.valid, 0, 64, 2)
+  XSPerfHistogram("bpu_update_latency", update_latency, io.toBpu.train.valid, 0, 64, 2)
 
-  io.toBpu.update       := DontCare
-  io.toBpu.update.valid := s2_commitValid && s2_readyToCommit
-  val update = io.toBpu.update.bits
-  update.false_hit   := s2_commitHit === h_false_hit
-  update.pc          := s2_commitPcBundle.startAddr
-  update.meta        := s2_commitMeta
-  update.ftqOffset   := s2_commitCfi
-  update.full_target := s2_commitTarget
-  update.from_stage  := s2_commitStage
-  update.spec_info   := s2_commitSpecMeta
+  val update = Wire(new BranchPredictionUpdate)
+  update               := DontCare
+  update.false_hit     := s2_commitHit === h_false_hit
+  update.pc            := s2_commitPcBundle.startAddr
+  update.meta          := s2_commitMeta
+  update.ftqOffset     := s2_commitCfi
+  update.full_target   := s2_commitTarget
+  update.from_stage    := s2_commitStage
+  update.spec_info     := s2_commitSpecMeta
+  io.toBpu.train.valid := s2_commitValid && s2_readyToCommit
+  io.toBpu.train.bits.fromBranchPredictionUpdate(update)
 
   val s2_commitRealHit = s2_commitHit === h_hit
   val update_ftb_entry = update.ftb_entry
@@ -1112,7 +1114,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val br_correct_stage_map   = pred_stage_map(mbpBRights, "br_correct")
   val jalr_correct_stage_map = pred_stage_map(mbpIRights, "jalr_correct")
 
-  val update_valid = io.toBpu.update.valid
+  val update_valid = io.toBpu.train.valid
   def u(cond: Bool) = update_valid && cond
   val ftb_false_hit = u(update.false_hit)
   // assert(!ftb_false_hit)
