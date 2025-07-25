@@ -20,8 +20,10 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 
 class InstrUncacheReq(implicit p: Parameters) extends InstrUncacheBundle {
-  val addr:  PrunedAddr = PrunedAddr(PAddrBits)
-  val flush: Bool       = Bool()
+  val addr:          PrunedAddr = PrunedAddr(PAddrBits)
+  val memBackTypeMM: Bool       = Bool() // !pmp.mmio, pbmt.nc/io on a main memory region
+  val memPageTypeNC: Bool       = Bool() // pbmt.nc
+  val flush:         Bool       = Bool()
 }
 
 class InstrUncacheResp(implicit p: Parameters) extends InstrUncacheBundle {
