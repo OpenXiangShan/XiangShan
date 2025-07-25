@@ -23,15 +23,13 @@ import utility.XSPerfHistogram
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BranchPrediction
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val prediction: BranchPrediction = Output(new BranchPrediction)
-    val meta:       MainBtbMeta      = Output(new MainBtbMeta)
-    // training specific bundle
-    val train: Valid[MainBtbTrain] = Flipped(Valid(new MainBtbTrain))
+    val prediction: Prediction  = Output(new Prediction)
+    val meta:       MainBtbMeta = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -173,7 +171,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_thisSetIdx       = getSetIndex(t1_train.startVAddr)
   private val t1_nextSetIdx       = t1_thisSetIdx + 1.U
   private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
-  private val t1_meta             = t1_train.meta
+  private val t1_meta             = t1_train.meta.mbtb
   private val t1_LFSR             = random.LFSR(16, true.B)
   private val t1_setIdxVec: Vec[UInt] =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < t1_alignBankIdx, t1_nextSetIdx, t1_thisSetIdx))
