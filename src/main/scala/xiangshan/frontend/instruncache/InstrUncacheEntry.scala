@@ -17,6 +17,8 @@ package xiangshan.frontend.instruncache
 
 import chisel3._
 import chisel3.util._
+import coupledL2.MemBackTypeMM
+import coupledL2.MemPageTypeNC
 import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLEdgeOut
@@ -71,6 +73,8 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
     toAddress = Cat(alignedAddr, 0.U(log2Ceil(MmioBusBytes).W)),
     lgSize = log2Ceil(MmioBusBytes).U
   )._2
+  io.mmioAcquire.bits.user.lift(MemBackTypeMM).foreach(_ := reqReg.memBackTypeMM)
+  io.mmioAcquire.bits.user.lift(MemPageTypeNC).foreach(_ := reqReg.memPageTypeNC)
 
   // receive tilelink response
   io.mmioGrant.ready := state === State.RefillResp
