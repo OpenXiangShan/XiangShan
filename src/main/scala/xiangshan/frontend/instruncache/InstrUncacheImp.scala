@@ -32,7 +32,6 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
     val fromIfu: IfuToInstrUncacheIO = Flipped(new IfuToInstrUncacheIO)
     val toIfu:   InstrUncacheToIfuIO = new InstrUncacheToIfuIO
-    val flush:   Bool                = Input(Bool())
     val wfi:     WfiReqBundle        = Flipped(new WfiReqBundle)
   }
 
@@ -61,8 +60,7 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   private val entries = (0 until nMmioEntry).map { i =>
     val entry = Module(new InstrUncacheEntry(edge))
 
-    entry.io.id    := i.U(log2Up(nMmioEntry).W)
-    entry.io.flush := io.flush
+    entry.io.id := i.U(log2Up(nMmioEntry).W)
 
     entry.io.wfi.wfiReq := io.wfi.wfiReq
 

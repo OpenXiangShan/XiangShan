@@ -745,9 +745,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // last instruction finish
   private val isFirstInstr = RegInit(true.B)
 
-  /* Determine whether the MMIO instruction is executable based on the previous prediction block */
-  io.toFtq.mmioCommitRead.mmioFtqPtr := RegNext(s4_ftqReq.ftqIdx - 1.U)
-
   // do mmio fetch only when pmp/pbmt shows it is a un-cacheable address and no exception occurs
   private val s4_reqIsMmio =
     s4_valid && (s4_pmpMmio || Pbmt.isUncache(s4_itlbPbmt)) && s3_exception.map(_.isNone).reduce(_ && _)
@@ -759,6 +756,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_mmioWaitCommit     = s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit
   private val s4_mmioWaitCommitNext = RegNext(s4_mmioWaitCommit)
   private val s4_mmioCanGo          = s4_mmioWaitCommit && !s4_mmioWaitCommitNext
+
+  /* Determine whether the MMIO instruction is executable based on the previous prediction block */
+  io.toFtq.mmioCommitRead.valid  := RegNext(s4_reqIsMmio && s4_valid, false.B)
+  io.toFtq.mmioCommitRead.ftqPtr := RegNext(s4_ftqReq.ftqIdx - 1.U)
 
   private val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
   fromFtqRedirectReg.bits := RegEnable(
@@ -814,7 +815,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       when(isFirstInstr) {
         mmioState := MmioFsmState.SendReq
       }.otherwise {
-        mmioState := Mux(io.toFtq.mmioCommitRead.mmioLastCommit, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
+        mmioState := Mux(io.toFtq.mmioCommitRead.lastCommitted, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
       }
     }
 
@@ -898,13 +899,19 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // Exception or flush by older branch prediction
   // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend redirect
-  when(s4_ftqFlushSelf || s4_ftqFlushByOlder) {
+  when(s4_ftqFlushSelf || s4_ftqFlushByOlder || mmioF4Flush && !s4_needNotFlush) {
     mmioReset()
   }
 
   toUncache.valid := ((mmioState === MmioFsmState.SendReq) || (mmioState === MmioFsmState.ResendReq)) && s4_reqIsMmio
-  toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_pAddr(0))
-  fromUncache.ready   := true.B
+  toUncache.bits.addr  := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_pAddr(0))
+  toUncache.bits.flush := s4_ftqFlushSelf || s4_ftqFlushByOlder || mmioF4Flush && !s4_needNotFlush
+  // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
+  // we need to tell L2 Cache about this to make it work correctly
+  toUncache.bits.memBackTypeMM := !s4_pmpMmio
+  toUncache.bits.memPageTypeNC := s4_itlbPbmt === Pbmt.nc
+
+  fromUncache.ready := true.B
 
   // send itlb request in MmioFsmState.SendTlb state
   io.itlb.req.valid                   := (mmioState === MmioFsmState.SendTlb) && s4_reqIsMmio
