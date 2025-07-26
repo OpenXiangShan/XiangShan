@@ -49,11 +49,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // IFU
     val toIfu:   ICacheToIfuIO = new ICacheToIfuIO
     val fromIfu: IfuToICacheIO = Flipped(new IfuToICacheIO)
-    // PMP: mainPipe & prefetchPipe need PortNumber each
-    val pmp: Vec[PmpCheckBundle] = Vec(2 * PortNumber, new PmpCheckBundle)
+    // PMP: magic number 2: mainPipe & prefetchPipe both need a Pmp check
+    val pmp: Vec[PmpCheckBundle] = Vec(2, new PmpCheckBundle)
     // iTLB
-    val itlb:          Vec[TlbRequestIO] = Vec(PortNumber, new TlbRequestIO)
-    val itlbFlushPipe: Bool              = Bool()
+    val itlb:          TlbRequestIO = new TlbRequestIO
+    val itlbFlushPipe: Bool         = Bool()
     // backend/BEU
     val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
     // backend/CSR
@@ -188,13 +188,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   replacer.io.touch <> mainPipe.io.replacerTouch
   replacer.io.victim <> missUnit.io.victim
 
-  io.pmp(0) <> mainPipe.io.pmp(0)
-  io.pmp(1) <> mainPipe.io.pmp(1)
-  io.pmp(2) <> prefetcher.io.pmp(0)
-  io.pmp(3) <> prefetcher.io.pmp(1)
+  io.pmp(0) <> mainPipe.io.pmp
+  io.pmp(1) <> prefetcher.io.pmp
 
-  io.itlb(0) <> prefetcher.io.itlb(0)
-  io.itlb(1) <> prefetcher.io.itlb(1)
+  io.itlb <> prefetcher.io.itlb
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // notify IFU that Icache pipeline is available

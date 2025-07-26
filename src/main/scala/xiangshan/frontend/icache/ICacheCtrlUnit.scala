@@ -28,7 +28,6 @@ import freechips.rocketchip.regmapper.RegWriteFn
 import freechips.rocketchip.tilelink.TLRegisterNode
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.frontend.PrunedAddrInit
 
 // currently for ECC control only
 class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
@@ -146,8 +145,9 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     // inject position
     private val iVSetIdx = get_idx(eccIAddr.pAddr)
     private val iPAddr   = eccIAddr.pAddr
-    private val iWaymask =
-      RegInit(0.U(nWays.W)) // read from metaArray, valid after iState === InjectFsmState.readMetaResp
+    private val iPTag    = get_phy_tag(iPAddr)
+    // read from metaArray, valid after iState === InjectFsmState.readMetaResp
+    private val iWaymask = RegInit(0.U(nWays.W))
 
     // inject FSM
     private def nInjectFsmState: Int = 5
@@ -200,7 +200,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       }
       is(InjectFsmState.ReadMetaResp) {
         // metaArray ensures resp is valid one cycle after req
-        val waymask = getWaymask(PrunedAddrInit(iPAddr), io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
+        val waymask = getWaymask(iPTag, io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
         iWaymask := waymask
         when(!waymask.orR) {
           // not hit, refuse to inject

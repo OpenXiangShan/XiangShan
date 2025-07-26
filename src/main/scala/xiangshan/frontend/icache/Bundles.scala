@@ -214,12 +214,12 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:       Vec[UInt]          = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:       Vec[UInt]          = Vec(PortNumber, UInt(nWays.W))
-  val pTag:          Vec[UInt]          = Vec(PortNumber, UInt(tagBits.W))
-  val itlbException: Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
-  val itlbPbmt:      Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
-  val metaCodes:     Vec[UInt]          = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val vSetIdx:       Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:       Vec[UInt]     = Vec(PortNumber, UInt(nWays.W))
+  val pTag:          Vec[UInt]     = Vec(PortNumber, UInt(tagBits.W))
+  val metaCodes:     Vec[UInt]     = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val itlbException: ExceptionType = new ExceptionType
+  val itlbPbmt:      UInt          = UInt(Pbmt.width.W)
 }
 
 class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
@@ -233,14 +233,14 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGpfEntry
 
   // for compatibility
-  def vSetIdx:           Vec[UInt]          = entry.vSetIdx
-  def waymask:           Vec[UInt]          = entry.waymask
-  def pTag:              Vec[UInt]          = entry.pTag
-  def itlbException:     Vec[ExceptionType] = entry.itlbException
-  def itlbPbmt:          Vec[UInt]          = entry.itlbPbmt
-  def metaCodes:         Vec[UInt]          = entry.metaCodes
-  def gpAddr:            PrunedAddr         = gpf.gpAddr
-  def isForVSnonLeafPTE: Bool               = gpf.isForVSnonLeafPTE
+  def vSetIdx:           Vec[UInt]     = entry.vSetIdx
+  def waymask:           Vec[UInt]     = entry.waymask
+  def pTag:              Vec[UInt]     = entry.pTag
+  def metaCodes:         Vec[UInt]     = entry.metaCodes
+  def itlbException:     ExceptionType = entry.itlbException
+  def itlbPbmt:          UInt          = entry.itlbPbmt
+  def gpAddr:            PrunedAddr    = gpf.gpAddr
+  def isForVSnonLeafPTE: Bool          = gpf.isForVSnonLeafPTE
 }
 
 /* ***** Miss ***** */
