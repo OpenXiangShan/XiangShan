@@ -217,19 +217,19 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
 
-  io.resp.stage2Out.fixedFirst.target         := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
-  io.resp.stage2Out.fixedFirst.misIdx.valid   := fixFirstMispred
-  io.resp.stage2Out.fixedFirst.misIdx.bits    := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
-  io.resp.stage2Out.fixedFirst.cfiIdx.valid   := fixedFirstTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedFirst.cfiIdx.bits    := fixedFirstTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedFirst.instrRange     := fixedFirstRawInstrRange
+  io.resp.stage2Out.fixedFirst.target       := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
+  io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred
+  io.resp.stage2Out.fixedFirst.misIdx.bits  := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
+  io.resp.stage2Out.fixedFirst.cfiIdx.valid := fixedFirstTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedFirst.cfiIdx.bits  := fixedFirstTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedFirst.instrRange   := fixedFirstRawInstrRange
 
-  io.resp.stage2Out.fixedSecond.target        := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
-  io.resp.stage2Out.fixedSecond.misIdx.valid  := fixSecondMispred
-  io.resp.stage2Out.fixedSecond.misIdx.bits   := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
-  io.resp.stage2Out.fixedSecond.cfiIdx.valid  := fixedSecondTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedSecond.cfiIdx.bits   := fixedSecondTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedSecond.instrRange    := fixedSecondRawInstrRange
+  io.resp.stage2Out.fixedSecond.target       := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
+  io.resp.stage2Out.fixedSecond.misIdx.valid := fixSecondMispred
+  io.resp.stage2Out.fixedSecond.misIdx.bits  := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
+  io.resp.stage2Out.fixedSecond.cfiIdx.valid := fixedSecondTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedSecond.cfiIdx.bits  := fixedSecondTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedSecond.instrRange   := fixedSecondRawInstrRange
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
