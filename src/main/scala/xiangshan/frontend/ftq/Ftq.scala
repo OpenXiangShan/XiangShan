@@ -234,9 +234,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
-  io.toIfu.req.valid           := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toIfu.req.bits.fetch(0).valid          := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toIfu.req.bits.fetch(0).startVAddr     := entryQueue(ifuPtr(0).value)
+  io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toIfu.req.bits.fetch(0).valid      := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value)
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
     entryQueue(ifuPtr(1).value),
     Seq(
@@ -248,7 +248,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.req.bits.fetch(0).ftqIdx             := ifuPtr(0)
   io.toIfu.req.bits.fetch(0).ftqOffset          := cfiQueue(ifuPtr(0).value)
 
-  io.toIfu.req.bits.fetch(1)  := 0.U.asTypeOf(new FetchRequestBundle)
+  io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
   // --------------------------------------------------------------------------------
   // Interaction with backend
   // --------------------------------------------------------------------------------

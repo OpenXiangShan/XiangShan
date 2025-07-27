@@ -82,10 +82,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val isPredTaken      = io.req.bits.isPredTaken
 
   // Entries made invalid by offset are marked with 'ignore'
-  private val ignore = WireDefault(VecInit.fill(IBufferInPortNum)(false.B))
-  for (i <- 0 until IBufWriteBank) {
-    ignore(i) := io.req.bits.ignore(i)
-  }
+  private val ignore = VecInit((0 until IBufferInPortNum).map { i =>
+    if (i < IBufWriteBank) io.req.bits.ignore(i)
+    else false.B
+  })
 
   private val instrValid            = io.req.bits.instrValid
   private val valid                 = io.req.valid
@@ -164,7 +164,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || notCfiTaken(i) || invalidTaken(i)
   )
   mispredInstrIdx.valid := ParallelOR(stage1Fault)
-  mispredInstrIdx.bits  := ParallelPosteriorityEncoder(stage1Fault)
+  mispredInstrIdx.bits  := ParallelPriorityEncoder(stage1Fault)
 
   private val jumpTargets = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     (pc(i) + jumpOffset(i)).asTypeOf(PrunedAddr(VAddrBits))
@@ -172,8 +172,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val seqTargets =
     VecInit((0 until IBufferInPortNum).map(i => pc(i) + Mux(pds(i).isRVC, 2.U, 4.U)))
 
-  private val mispredIsJump = instrValid(mispredInstrIdx.bits) &&
-    (pds(mispredInstrIdx.bits).isJal || pds(mispredInstrIdx.bits).isBr) && mispredInstrIdx.valid
+  private val mispredIsJump =
+    instrValid(mispredInstrIdx.bits) &&
+      mispredInstrIdx.valid &&
+      (pds(mispredInstrIdx.bits).isJal || pds(mispredInstrIdx.bits).isBr)
 
   /* *****************************************************************************
    * PredChecker Stage 2
@@ -217,19 +219,19 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
 
-  io.resp.stage2Out.fixedFirst.target         := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
-  io.resp.stage2Out.fixedFirst.misIdx.valid   := fixFirstMispred
-  io.resp.stage2Out.fixedFirst.misIdx.bits    := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
-  io.resp.stage2Out.fixedFirst.cfiIdx.valid   := fixedFirstTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedFirst.cfiIdx.bits    := fixedFirstTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedFirst.instrRange     := fixedFirstRawInstrRange
+  io.resp.stage2Out.fixedFirst.target       := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
+  io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred
+  io.resp.stage2Out.fixedFirst.misIdx.bits  := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
+  io.resp.stage2Out.fixedFirst.cfiIdx.valid := fixedFirstTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedFirst.cfiIdx.bits  := fixedFirstTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedFirst.instrRange   := fixedFirstRawInstrRange
 
-  io.resp.stage2Out.fixedSecond.target        := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
-  io.resp.stage2Out.fixedSecond.misIdx.valid  := fixSecondMispred
-  io.resp.stage2Out.fixedSecond.misIdx.bits   := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
-  io.resp.stage2Out.fixedSecond.cfiIdx.valid  := fixedSecondTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedSecond.cfiIdx.bits   := fixedSecondTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedSecond.instrRange    := fixedSecondRawInstrRange
+  io.resp.stage2Out.fixedSecond.target       := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
+  io.resp.stage2Out.fixedSecond.misIdx.valid := fixSecondMispred
+  io.resp.stage2Out.fixedSecond.misIdx.bits  := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
+  io.resp.stage2Out.fixedSecond.cfiIdx.valid := fixedSecondTakenInstrIdxNext.valid
+  io.resp.stage2Out.fixedSecond.cfiIdx.bits  := fixedSecondTakenInstrIdxNext.bits
+  io.resp.stage2Out.fixedSecond.instrRange   := fixedSecondRawInstrRange
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
@@ -247,10 +249,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   // Temporary address check for one-fetch case with dirty data,
   // used to prevent backend errors due to unhandled conditions
-  private val firstTargetFault = jumpTargetsNext(firstTakenIdxNext) =/= firstPredTargetNext && firstPredTakenNext &&
-    fixedRangeNext(firstTakenIdxNext) && !fixFirstMispred && (pdsNext(firstTakenIdxNext).isBr || pdsNext(
-      firstTakenIdxNext
-    ).isJal)
+  private val firstTargetFault =
+    jumpTargetsNext(firstTakenIdxNext) =/= firstPredTargetNext &&
+      firstPredTakenNext &&
+      fixedRangeNext(firstTakenIdxNext) &&
+      !fixFirstMispred &&
+      (pdsNext(firstTakenIdxNext).isBr || pdsNext(firstTakenIdxNext).isJal)
 
   io.resp.stage2Out.fixedFirst.target := Mux(
     firstTargetFault,
