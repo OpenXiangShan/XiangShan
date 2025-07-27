@@ -140,8 +140,8 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val mmioCommitRead: MmioCommitRead                        = new MmioCommitRead
-  val pdWb:           Vec[Valid[PredecodeWritebackBundle]]  = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
+  val mmioCommitRead: MmioCommitRead                       = new MmioCommitRead
+  val pdWb:           Vec[Valid[PredecodeWritebackBundle]] = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {

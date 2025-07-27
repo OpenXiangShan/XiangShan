@@ -185,6 +185,9 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   private val bankedIBufView: Vec[Vec[IBufEntry]] = VecInit.tabulate(IBufReadBank)(bankID =>
     VecInit.tabulate(readBankSize)(inBankOffset => ibuf(bankID + inBankOffset * IBufReadBank))
   )
+  private val bankedIBufWriteWire: Vec[Vec[IBufEntry]] = WireDefault(VecInit.tabulate(IBufWriteBank)(bankID =>
+    VecInit.tabulate(writeBankSize)(inBankOffset => 0.U.asTypeOf(new IBufEntry))
+  ))
 
   // Bypass wire
   private val bypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
@@ -236,6 +239,16 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val enqOffset = VecInit.tabulate(IBufEnqWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData   = VecInit.tabulate(IBufEnqWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
+  val enqBankOffset =
+    WireDefault(0.U.asTypeOf(Vec(IBufWriteBank, Vec(IBufEnqWidth / IBufWriteBank, UInt(log2Ceil(IBufEnqWidth).W)))))
+  val enqBankEntrys =
+    WireDefault(0.U.asTypeOf(Vec(IBufWriteBank, Vec(IBufEnqWidth / IBufWriteBank, new IBufEntry))))
+  for (i <- 0 until IBufWriteBank) {
+    for (j <- 0 until IBufEnqWidth / IBufWriteBank) {
+      enqBankOffset(i)(j) := enqOffset(i + IBufWriteBank * j)
+      enqBankEntrys(i)(j) := enqData(i + IBufWriteBank * j)
+    }
+  }
 
   val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
   val numBypass              = Wire(UInt(DecodeWidth.U.getWidth.W))
@@ -265,7 +278,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   bypassEntries.zipWithIndex.foreach {
     case (entry, idx) =>
       // Select
-      val validOH = Range(0, IBufEnqWidth).map {
+      val validOH = Range(0, needBypassNum).map {
         i =>
           io.in.bits.valid(i) &&
           io.in.bits.enqEnable(i) &&
@@ -308,28 +321,28 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   io.in.ready := allowEnq
   // Data
-  ibuf.zipWithIndex.foreach {
-    case (entry, idx) => {
-      // Select
-      val validOH = Range(0, IBufEnqWidth).map {
-        i =>
-          val normalMatch = enqPtrVec(enqOffset(i)).value === idx.asUInt
-          // when using bypass, bypassed entries do not enqueue
-          val useBypassMatch = enqOffset(i) < DecodeWidth.U && useBypass
+  for (i <- 0 until IBufWriteBank) {
+    bankedIBufWriteWire(i).zipWithIndex.foreach {
+      case (entry, idx) => {
+        // Select
+        val validOH = Range(0, IBufEnqWidth / IBufWriteBank).map {
+          j =>
+            val normalMatch = enqPtrVec(enqBankOffset(i)(j)).value === (i + idx * IBufWriteBank).asUInt
+            io.in.bits.valid(i + IBufWriteBank * j) && io.in.bits.enqEnable(i + IBufWriteBank * j) && normalMatch
+        } // Should be OneHot
+        val useBypassMatch = Range(0, DecodeWidth).map(k => enqPtrVec(k).value === (i + idx * IBufWriteBank).U)
+        val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush && !(useBypassMatch.reduce(_ || _) && useBypass)
 
-          io.in.bits.valid(i) && io.in.bits.enqEnable(i) && normalMatch && !useBypassMatch
-      } // Should be OneHot
-      val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush
-
-      // Write port
-      // Each IBuffer entry has a IBufEnqWidth -> 1 Mux
-      val writeEntry = Mux1H(validOH, enqData)
-      entry := Mux(wen, writeEntry, entry)
-
-      // Debug Assertion
-      XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+        // Write port
+        // Each IBuffer entry has a PredictWidth -> 1 Mux
+        val writeEntry = Mux1H(validOH, enqBankEntrys(i))
+        ibuf(i + idx * IBufWriteBank) := Mux(wen, writeEntry, ibuf(i + idx * IBufWriteBank))
+        // Debug Assertion
+        XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+      }
     }
   }
+
   // Pointer maintenance
   when(io.in.fire && !io.flush) {
     enqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq))
