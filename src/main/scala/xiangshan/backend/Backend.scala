@@ -729,7 +729,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
       val issueTimeout =
         if (needIssueTimeout)
-          Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
+          Counter(0 until 14, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
         else
           false.B
 
