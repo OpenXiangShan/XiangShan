@@ -735,9 +735,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     difftestArchFpRegState.coreid := io.hartId
     difftestArchFpRegState.value := fpDiffReadData.get
 
-    val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
-    difftestArchVecRegState.coreid := io.hartId
-    difftestArchVecRegState.value := vecDiffReadData.get
+//    val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
+//    difftestArchVecRegState.coreid := io.hartId
+//    difftestArchVecRegState.value := vecDiffReadData.get
   }
 
   val int_regcache_size = 48
