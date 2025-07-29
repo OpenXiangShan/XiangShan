@@ -1,0 +1,7 @@
+Core  0's Commit SHA is: 031d2cd9a1, dirty: 1
+ram image:../ready-to-run/linux.bin
+disable diff-test
+set max cycles:              1000000
+simv compiled at Jul 28 2025, 16:29:47
+Using simulated 8386560MB RAM
+The image is ../ready-to-run/linux.bin
