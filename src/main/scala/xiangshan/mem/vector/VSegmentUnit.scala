@@ -428,12 +428,12 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val vaddr                           = nextBaseVaddr + realSegmentOffset
 
-  val misalignLowVaddr                = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W))
-  val misalignLowVaddrDup             = Cat(latchVaddrDup(latchVaddrDup.getWidth - 1, 3), 0.U(3.W))
-  val misalignHighVaddr               = Cat(latchVaddr(latchVaddr.getWidth - 1, 3) + 1.U, 0.U(3.W))
-  val misalignHighVaddrDup            = Cat(latchVaddrDup(latchVaddrDup.getWidth - 1, 3) + 1.U, 0.U(3.W))
-  val notCross16ByteVaddr             = Cat(latchVaddr(latchVaddr.getWidth - 1, 4), 0.U(4.W))
-  val notCross16ByteVaddrDup          = Cat(latchVaddrDup(latchVaddrDup.getWidth - 1, 4), 0.U(4.W))
+  val misalignLowVaddr                = Cat(latchVaddr(VAddrBits - 1, 3), 0.U(3.W))
+  val misalignLowVaddrDup             = Cat(latchVaddrDup(VAddrBits - 1, 3), 0.U(3.W))
+  val misalignHighVaddr               = Cat(latchVaddr(VAddrBits - 1, 3) + 1.U, 0.U(3.W))
+  val misalignHighVaddrDup            = Cat(latchVaddrDup(VAddrBits - 1, 3) + 1.U, 0.U(3.W))
+  val notCross16ByteVaddr             = Cat(latchVaddr(VAddrBits - 1, 4), 0.U(4.W))
+  val notCross16ByteVaddrDup          = Cat(latchVaddrDup(VAddrBits - 1, 4), 0.U(4.W))
  //  val misalignVaddr                   = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr))
   val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)
   val misalignVaddrDup                = Mux(isFirstSplit, misalignLowVaddrDup, misalignHighVaddrDup)
