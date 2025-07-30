@@ -47,11 +47,12 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   // to Rename
   val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
   // RAT read
-  val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(IntLogicRegs))))
-  val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(FpLogicRegs))))
-  val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
-  val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
-  val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
+  val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(log2Ceil(IntLogicRegs)))))
+  val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(log2Ceil(FpLogicRegs)))))
+  val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(log2Ceil(VecLogicRegs)))))
+  // no v0Rat and vlRat Bundle because they are only one logic register
+  val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(V0LogicRegs))))
+  val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(VlLogicRegs))))
   // csr control
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val fromCSR = Input(new CSRToDecode)
