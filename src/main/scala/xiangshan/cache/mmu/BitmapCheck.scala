@@ -139,7 +139,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
   val mem_ptr = ParallelPriorityEncoder(is_having)
-  val mem_arb = Module(new RRArbiter(new bitmapEntry(), l2tlbParams.llptwsize+2))
+  val mem_arb = Module(new RRArbiterInit(new bitmapEntry(), l2tlbParams.llptwsize+2))
 
   val bitmapdata = Wire(Vec(blockBits / XLEN, UInt(XLEN.W)))
   if (HasBitmapCheckDefault) {
