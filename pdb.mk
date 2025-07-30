@@ -1,48 +1,63 @@
-PDB_HOME    := $(abspath $(BUILD_DIR)/xspdb)
-RTL_HOME    := $(abspath $(RTL_DIR))
+#***************************************************************************************
+# Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2025 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
 
-PICKER_INCLUDE := $(shell picker --show_xcom_lib_location_cpp | grep include | awk '{print $$2}')
-PYTHON_VERSION := $(shell python3 --version | awk '{print $$2}' | cut -d'.' -f1-2)
-SIM_LDFLAGS    := $(shell cat $(PDB_HOME)/python/sim_ld_flags.txt)
+PDB_HOME          := $(abspath $(BUILD_DIR)/xspdb)
+RTL_HOME          := $(abspath $(RTL_DIR))
+DIFFTEST_HOME     := $(abspath $(PDB_HOME)/python)
+
+DIFFTEST_INCLUDE  := $(abspath difftest/src/test/vsrc/common)
+PICKER_INCLUDE    := $(shell picker --show_xcom_lib_location_cpp | grep include | awk '{print $$2}')
+PYTHON_VERSION    := $(shell python3 --version | awk '{print $$2}' | cut -d'.' -f1-2)
+SIM_LDFLAGS       := $(shell cat $(PDB_HOME)/python/sim_ld_flags.txt)
 
 PYTHON_DEPS = urwid capstone
 
-.PHONY: pdb swig-difftest xspython xspdb xspdb-compress pdb-run check-deps
+.PHONY: pdb $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so $(PDB_HOME)/xspdb $(PDB_HOME)/xspdb.tar.gz pdb-run check-deps
 
-pdb: clean swig-difftest xspython xspdb
+pdb: clean $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so
 
-swig-difftest: sim-verilog
+$(DIFFTEST_HOME)/_difftest.so: sim-verilog
 	$(MAKE) -C ./difftest difftest_python WITH_CONSTANTIN=0 WITH_CHISELDB=0
+	ln -s $(DIFFTEST_HOME)/_difftest.so $(DIFFTEST_HOME)/libdifftest.so
 
-xspython:
-	cp $(NOOP_HOME)/difftest/src/test/vsrc/common/* $(RTL_HOME)
-	cp $(PDB_HOME)/python/_difftest.so $(RTL_DIR)/libdifftest.so
-	find $(RTL_HOME) -maxdepth 1 \( -name "*.sv" -o -name "*.v" -o -name "*.cpp" -o -name "*.so" \) -not -name "SimTop.sv" -printf "%f\n" > $(RTL_HOME)/picker.f
+$(PDB_HOME)/picker.f:
+	find $(realpath $(RTL_HOME)) -maxdepth 1 \( -name "*.sv" -o -name "*.v" -o -name "*.cpp" -o -name "*.so" \) -not -name "SimTop.sv" -printf "%p\n" > $(PDB_HOME)/picker.f
+	find $(realpath $(DIFFTEST_INCLUDE)) -maxdepth 1 \( -name "*.v" \) -not -name "SimTop.sv" -printf "%p\n" >> $(PDB_HOME)/picker.f
+
+$(PDB_HOME)/libUTSimTop.so:
 	time picker export $(RTL_HOME)/SimTop.sv \
 		--rw 1 \
 		-w $(PDB_HOME)/xs.fst \
 		--lang python \
 		--tdir $(PDB_HOME)/XSPython \
-		--fs $(RTL_HOME)/picker.f \
-		-V "--no-timing;--threads;8;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src;" \
-		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(RTL_HOME) -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" \
-		--autobuild false 
-	cp $(RTL_HOME)/libdifftest.so $(PDB_HOME)/XSPython
-	$(MAKE) -C $(PDB_HOME)/XSPython
+		--fs $(PDB_HOME)/picker.f \
+		-V "--no-timing;--threads;8;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src;-I$(DIFFTEST_INCLUDE)" \
+		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(DIFFTEST_HOME) -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
 
-xspdb:
-	cp $(PDB_HOME)/python/_difftest.so $(PDB_HOME)/XSPython
-	cp $(PDB_HOME)/python/difftest.py $(PDB_HOME)/XSPython
-	#ln -s $(PDB_HOME)/XSPython/_difftest.so $(PDB_HOME)/XSPython/libdifftest.so # it will use after picker update
-	cp -r $(NOOP_HOME)/scripts/xspdb $(PDB_HOME)/XSPdb
-	mv $(PDB_HOME)/XSPython $(PDB_HOME)/XSPdb
+$(PDB_HOME)/xspdb:
+	cp -r $(NOOP_HOME)/scripts/xspdb $(PDB_HOME)/xspdb
+	cp -r $(PDB_HOME)/python $(PDB_HOME)/xspdb/difftest
+	cp -r $(PDB_HOME)/XSPython $(PDB_HOME)/xspdb/XSPython
 
-xspdb-compress:
+$(PDB_HOME)/xspdb.tar.gz: $(PDB_HOME)/xspdb
 	rm -rf $(PDB_HOME)/xspdb.tar.gz
-	tar -C $(PDB_HOME) -czvf $(PDB_HOME)/xspdb.tar.gz XSPdb
+	tar -C $(PDB_HOME) -czvf $(PDB_HOME)/xspdb.tar.gz xspdb
 
 pdb-run: check-deps
-	LD_PRELOAD=$(PDB_HOME)/XSPdb/XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=$(PDB_HOME)/XSPdb python3 $(PDB_HOME)/XSPdb/pdb-run.py
+	LD_PRELOAD=$(PDB_HOME)/XSPython/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=$(PDB_HOME) python3 scripts/xspdb/pdb-run.py
 
 check-deps:
 	@echo "--- Checking Python dependencies: $(PYTHON_DEPS) ---"
