@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, ExuVec, StaticInst, TrapInstInfo}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, ExuVec, DecodeInUop, TrapInstInfo}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -407,7 +407,7 @@ class CtrlBlockImp(
    * Decode buffer: when decode.io.in cannot accept all insts, use this buffer to temporarily store insts that cannot
    * be sent to DecodeStage.
    *
-   * Decode buffer is a "DecodeWidth"-element long register Vector of StaticInst (in decodeBufBits), with valid signals
+   * Decode buffer is a "DecodeWidth"-element long register Vector of DecodeInUop (in decodeBufBits), with valid signals
    * (in decodeBufValid). At the same time, fetch insts input from frontend and their valid bits. All valid elements
    * in these two vector of insts are at the beginning, with all invalid vector elements followed.
    *
@@ -416,7 +416,7 @@ class CtrlBlockImp(
    */
 
   /** Insts to be decoded, Registers in vector of DecodeWidth */
-  val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
+  val decodeBufBits = Reg(Vec(DecodeWidth, new DecodeInUop))
 
   /** Valid receiving signals of instructions to be decoded, Registers in vector of DecodeWidth */
   val decodeBufValid = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
@@ -480,7 +480,7 @@ class CtrlBlockImp(
     }
   }
   /** Insts input from frontend, in vector of DecodeWidth */
-  val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new StaticInst))
+  val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new DecodeInUop))
   decodeConnectFromFrontend.zip(decodeFromFrontend).map(x => x._1.connectCtrlFlow(x._2.bits))
 
   /**

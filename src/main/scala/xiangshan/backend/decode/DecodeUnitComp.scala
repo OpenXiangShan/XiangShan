@@ -29,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
-import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul, Vl}
 import yunsuan.VpermType

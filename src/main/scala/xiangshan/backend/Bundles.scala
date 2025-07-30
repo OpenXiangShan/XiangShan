@@ -30,22 +30,22 @@ import xiangshan.backend.datapath.WakeUpConfig
 
 object Bundles {
   /**
-   * Connect Same Name Port like bundleSource := bundleSinkBudle.
+   * Connect Same Name Port like sinkBundle := sourceBundle.
    *
    * There is no limit to the number of ports on both sides.
    *
    * Don't forget to connect the remaining ports!
    */
-  def connectSamePort (bundleSource: Bundle, bundleSink: Bundle):Unit = {
-    bundleSource.elements.foreach { case (name, data) =>
-      if (bundleSink.elements.contains(name))
-        data := bundleSink.elements(name)
+  def connectSamePort (sinkBundle: Bundle, sourceBundle: Bundle):Unit = {
+    sinkBundle.elements.foreach { case (name, data) =>
+      if (sourceBundle.elements.contains(name))
+        data := sourceBundle.elements(name)
     }
   }
   // frontend -> backend
-  class StaticInst(implicit p: Parameters) extends XSBundle {
+  class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val instr            = UInt(32.W)
-    val pc               = UInt(VAddrBits.W)
+    // for mdp
     val foldpc           = UInt(MemPredPCWidth.W)
     val exceptionVec     = ExceptionVec()
     val isFetchMalAddr   = Bool()
@@ -56,26 +56,23 @@ object Bundles {
     val ftqPtr           = new FtqPtr
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
-    val debug_seqNum     = InstSeqNum()
+    val debug            = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
-      this.instr            := source.instr
-      this.pc               := source.pc
-      this.foldpc           := source.foldpc
-      this.exceptionVec     := source.exceptionVec
-      this.isFetchMalAddr   := source.backendException
-      this.trigger          := source.trigger
-      this.preDecodeInfo    := source.pd
-      this.pred_taken       := source.pred_taken
-      this.crossPageIPFFix  := source.crossPageIPFFix
-      this.ftqPtr           := source.ftqPtr
-      this.ftqOffset        := source.ftqOffset
-      this.isLastInFtqEntry := source.isLastInFtqEntry
-      this.debug_seqNum     := source.debug_seqNum
+      connectSamePort(this, source)
+      this.preDecodeInfo      := source.pd
+      this.pred_taken         := source.pred_taken
+      this.isFetchMalAddr     := source.backendException
+      this.debug.foreach(_.pc := source.pc)
+      this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
   }
+  class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
+    val pc = UInt(VAddrBits.W)
+    val debug_seqNum = InstSeqNum()
+  }
 
-  // StaticInst --[Decode]--> DecodedInst
+  // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodedInst(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // passed from StaticInst
@@ -144,11 +141,13 @@ object Bundles {
       fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
     }
 
-    def connectStaticInst(source: StaticInst): Unit = {
-      for ((name, data) <- this.elements) {
-        if (source.elements.contains(name)) {
-          data := source.elements(name)
-        }
+    def connectDecodeInUop(source: DecodeInUop): Unit = {
+      connectSamePort(this, source)
+      this.pc := 0.U
+      this.debug_seqNum :=  0.U
+      source.debug.foreach{x =>
+        this.pc := x.pc
+        this.debug_seqNum := x.debug_seqNum
       }
     }
   }

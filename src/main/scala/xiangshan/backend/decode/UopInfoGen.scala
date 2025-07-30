@@ -29,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
-import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst}
 import xiangshan.backend.fu.vector.Bundles.{VType, VLmul, VSew}
 import yunsuan.VpermType
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}

@@ -43,7 +43,7 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   val redirect = Input(Bool())
   val canAccept = Output(Bool())
   // from Ibuffer
-  val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
+  val in = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
   // to Rename
   val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
   // RAT read
@@ -86,8 +86,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val io = IO(new DecodeStageIO)
 
-  io.in.zipWithIndex.foreach{ case (d, i) => 
-    PerfCCT.updateInstPos(d.bits.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
+  val debugWidth = io.in.head.bits.debug.getOrElse(0.U).asUInt.getWidth
+  println(s"[DecodeStage]: decodeInUop real width is ${io.in.head.asUInt.getWidth - debugWidth}")
+  println(s"[DecodeStage]: decodeInUop debug width is ${debugWidth}")
+
+  if (backendParams.debugEn){
+    io.in.zipWithIndex.foreach { case (d, i) =>
+      PerfCCT.updateInstPos(d.bits.debug.get.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
+    }
   }
 
   // io alias
@@ -114,7 +120,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   //Simple 6
   decoders.zip(io.in).foreach { case (dst, src) =>
-    dst.io.enq.ctrlFlow := src.bits
+    dst.io.enq.decodeInUop := src.bits
     dst.io.csrCtrl := io.csrCtrl
     dst.io.fromCSR := io.fromCSR
     dst.io.enq.vtype := vtypeGen.io.vtype

@@ -28,7 +28,7 @@ import utils._
 import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, DecodeInUop}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
@@ -774,7 +774,7 @@ case class Imm_LUI_LOAD() {
  */
 
 class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
-  val ctrlFlow = Input(new StaticInst)
+  val decodeInUop = Input(new DecodeInUop)
   val vtype = Input(new VType)
   val vstart = Input(Vl())
 }
@@ -799,9 +799,9 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
 class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitIO)
 
-  val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
+  val ctrl_flow = io.enq.decodeInUop // input with RVC Expanded
 
-  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields)
+  private val inst: XSInstBitFields = io.enq.decodeInUop.instr.asTypeOf(new XSInstBitFields)
 
   val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
     FpDecode.table ++
@@ -831,7 +831,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.fpu := fpDecoder.io.fpCtrl
   decodedInst.fpu.wflags := fpDecoder.io.fpCtrl.wflags || decodedInst.wfflags
 
-  decodedInst.connectStaticInst(io.enq.ctrlFlow)
+  decodedInst.connectDecodeInUop(io.enq.decodeInUop)
 
   decodedInst.lastInFtqEntry := ctrl_flow.isLastInFtqEntry
   decodedInst.uopIdx := 0.U
@@ -870,10 +870,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.v0Wen := false.B
   decodedInst.vlWen := false.B
 
-  private val isCboClean = CBO_CLEAN === io.enq.ctrlFlow.instr
-  private val isCboFlush = CBO_FLUSH === io.enq.ctrlFlow.instr
-  private val isCboInval = CBO_INVAL === io.enq.ctrlFlow.instr
-  private val isCboZero  = CBO_ZERO  === io.enq.ctrlFlow.instr
+  private val isCboClean = CBO_CLEAN === io.enq.decodeInUop.instr
+  private val isCboFlush = CBO_FLUSH === io.enq.decodeInUop.instr
+  private val isCboInval = CBO_INVAL === io.enq.decodeInUop.instr
+  private val isCboZero  = CBO_ZERO  === io.enq.decodeInUop.instr
 
   // Note that rnum of aes64ks1i must be in the range 0x0..0xA. The values 0xB..0xF are reserved.
   private val isAes64ks1iIllegal =
@@ -920,7 +920,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.virtualInst.cboI       && isCboInval
 
 
-  decodedInst.exceptionVec(illegalInstr) := exceptionII || io.enq.ctrlFlow.exceptionVec(EX_II)
+  decodedInst.exceptionVec(illegalInstr) := exceptionII || io.enq.decodeInUop.exceptionVec(EX_II)
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
 
   //update exceptionVec: from frontend trigger's breakpoint exception. To reduce 1 bit of overhead in ibuffer entry.
@@ -1179,7 +1179,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   // Don't compress in the same Rob entry when crossing Ftq entry boundary
-  io.deq.decodedInst.canRobCompress := decodedInst.canRobCompress && !io.enq.ctrlFlow.isLastInFtqEntry
+  io.deq.decodedInst.canRobCompress := decodedInst.canRobCompress && !io.enq.decodeInUop.isLastInFtqEntry
 
   //-------------------------------------------------------------
   // Debug Info

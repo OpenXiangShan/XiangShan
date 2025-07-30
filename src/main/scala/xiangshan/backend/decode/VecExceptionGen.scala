@@ -8,7 +8,7 @@ import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields, OPCODE7Bit}
