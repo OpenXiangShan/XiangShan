@@ -154,7 +154,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqDeqPtr := memBlock.io.mem_to_ooo.lqDeqPtr
   backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
-  backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.ldaIqFeedback := memBlock.io.mem_to_ooo.ldaIqFeedback
   backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
@@ -171,9 +170,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
-
-  // memblock error exception writeback, 1 cycle after normal writeback
-  backend.io.mem.s3_delayed_load_error := memBlock.io.mem_to_ooo.s3_delayed_load_error
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
