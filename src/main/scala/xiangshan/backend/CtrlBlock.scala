@@ -48,6 +48,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
 }
 
 class CtrlToIBufIO(implicit p: Parameters) extends XSBundle {
+  val isResumeVType = Input(Bool())
   val walkToArchVType = Input(Bool())
   val walkVType   = Flipped(Valid(new VType))
   val vsetvlVType = Input(new VType)
@@ -408,6 +409,7 @@ class CtrlBlockImp(
   decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
+  io.frontend.toIBuf.isResumeVType := rob.io.toDecode.isResumeVType
   io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
   io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
   io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
@@ -514,7 +516,7 @@ class CtrlBlockImp(
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
-  io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.canAccept := (!decodeBufValid(0) || !decodeFromFrontend(0).valid) && !rob.io.toDecode.isResumeVType
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
