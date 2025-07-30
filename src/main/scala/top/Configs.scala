@@ -29,7 +29,7 @@ import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
-import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
+import xiangshan.backend.regfile.{IntPregParams, FpPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.EnableJtag
@@ -538,6 +538,20 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(
+      p => p.copy(
+        intPreg = IntPregParams(
+          numEntries = 64,
+          numRead = None,
+          numWrite = None,
+        ),
+        fpPreg = FpPregParams(
+          numEntries = 64,
+          numRead = None,
+          numWrite = None,
+        ),
+      )
+    )
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
       AlwaysBasicDB = false

@@ -184,7 +184,7 @@ DEBUG_ARGS   += --enable-difftest
 ifneq ($(FPGA_DIFF),1)
 override PLDM_ARGS += --enable-difftest
 else
-override PLDM_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
+override PLDM_ARGS += --fpga-platform --reset-gen # --disable-all --remove-assert
 endif
 
 ifeq ($(RELEASE),1)

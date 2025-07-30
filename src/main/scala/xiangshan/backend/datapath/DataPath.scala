@@ -739,24 +739,21 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val delayedCnt = 2
 //    if (DiffFpga) {
-//      val diffIntRat = DifftestModule(new DiffArchIntRenameTable(intSchdParams.pregIdxWidth), delay = delayedCnt)
-//      diffIntRat.coreid := io.hartId
-//      diffIntRat.value := io.diffIntRat.get
-//
-//      val diffFpRat = DifftestModule(new DiffArchFpRenameTable(fpSchdParams.pregIdxWidth), delay = delayedCnt)
-//      diffFpRat.coreid := io.hartId
-//      diffFpRat.value := io.diffFpRat.get
-//
-//      val diffPhyIntReg = DifftestModule(new DiffPhyIntRegState(intSchdParams.numPregs), delay = delayedCnt)
-//      diffPhyIntReg.coreid := io.hartId
-//      diffPhyIntReg.value := intDiffAllRData.get
-//
-//      val diffPhyFpReg = DifftestModule(new DiffPhyFpRegState(fpSchdParams.numPregs), delay = delayedCnt)
-//      diffPhyFpReg.coreid := io.hartId
-//      diffPhyFpReg.value := fpDiffAllRData.get
-//      val diffIntRat = DifftestModule(new DiffArchIntRenameTable(intSchdParams.pregIdxWidth), delay = delayedCnt)
-//      diffIntRat.coreid := io.hartId
-//      diffIntRat.value := io.diffIntRat.get
+      val diffIntRat = DifftestModule(new DiffArchIntRenameTable(intSchdParams.pregIdxWidth), delay = delayedCnt)
+      diffIntRat.coreid := io.hartId
+      diffIntRat.value := io.diffIntRat.get
+
+      val diffFpRat = DifftestModule(new DiffArchFpRenameTable(fpSchdParams.pregIdxWidth), delay = delayedCnt)
+      diffFpRat.coreid := io.hartId
+      diffFpRat.value := io.diffFpRat.get
+
+      val diffPhyIntReg = DifftestModule(new DiffPhyIntRegState(intSchdParams.numPregs), delay = delayedCnt)
+      diffPhyIntReg.coreid := io.hartId
+      diffPhyIntReg.value := intDiffAllRData.get
+
+      val diffPhyFpReg = DifftestModule(new DiffPhyFpRegState(fpSchdParams.numPregs), delay = delayedCnt)
+      diffPhyFpReg.coreid := io.hartId
+      diffPhyFpReg.value := fpDiffAllRData.get
 //    } else {
       val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
       difftestArchIntRegState.coreid := io.hartId
@@ -766,9 +763,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       difftestArchFpRegState.coreid := io.hartId
       difftestArchFpRegState.value := fpDiffReadData.get
 
-      val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
-      difftestArchVecRegState.coreid := io.hartId
-      difftestArchVecRegState.value := vecDiffReadData.get
+//      val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
+//      difftestArchVecRegState.coreid := io.hartId
+//      difftestArchVecRegState.value := vecDiffReadData.get
 //    }
   }
 
