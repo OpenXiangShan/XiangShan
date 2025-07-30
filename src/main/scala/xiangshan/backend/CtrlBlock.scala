@@ -47,6 +47,17 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 }
 
+class CtrlToIBufIO(implicit p: Parameters) extends XSBundle {
+  val isResumeVType = Input(Bool())
+  val walkToArchVType = Input(Bool())
+  val walkVType   = Flipped(Valid(new VType))
+  val vsetvlVType = Input(new VType)
+  val commitVType = new Bundle {
+    val vtype = Flipped(Valid(new VType))
+    val hasVsetvl = Input(Bool())
+  }
+}
+
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
@@ -396,11 +407,13 @@ class CtrlBlockImp(
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
   decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
-  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
-  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
-
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+
+  io.frontend.toIBuf.isResumeVType := rob.io.toDecode.isResumeVType
+  io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
+  io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
+  io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
+  io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
 
   // add decode Buf for in.ready better timing
   /**
@@ -503,7 +516,7 @@ class CtrlBlockImp(
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
-  io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.canAccept := (!decodeBufValid(0) || !decodeFromFrontend(0).valid) && !rob.io.toDecode.isResumeVType
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
@@ -798,8 +811,6 @@ class CtrlBlockImp(
 
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
-  // exu block to decode
-  decode.io.vsetvlVType := io.toDecode.vsetvlVType
   // backend to decode
   decode.io.vstart := io.toDecode.vstart
   // backend to rob

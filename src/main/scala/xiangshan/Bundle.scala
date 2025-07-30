@@ -42,7 +42,7 @@ import utility._
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
-import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.{CtrlToFtqIO, CtrlToIBufIO}
 import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
@@ -170,6 +170,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isLastInFtqEntry = Bool()
+  val vtype            = new VType()
+  val specvtype        = new VType()
   val debug_seqNum = InstSeqNum()
 }
 
@@ -483,6 +485,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val fromIfu = new IfuToBackendIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
+  val toIBuf = new CtrlToIBufIO
   val canAccept = Input(Bool())
 
   val wfi = Flipped(new WfiReqBundle)

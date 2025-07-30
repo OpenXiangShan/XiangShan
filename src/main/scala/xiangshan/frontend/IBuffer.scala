@@ -24,6 +24,9 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.ExceptionNO._
+import xiangshan.backend.CtrlToIBufIO
+import xiangshan.backend.decode.VTypeGen
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](p => p(XSCoreParamsKey).IBufSize) {}
 
@@ -47,6 +50,7 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val full                 = Output(Bool())
   val decodeCanAccept      = Input(Bool())
   val stallReason          = new StallReasonIO(DecodeWidth)
+  val frombackend          = new CtrlToIBufIO()
 }
 
 object IBufferExceptionType extends EnumUInt(8) {
@@ -141,6 +145,8 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ftqPtr                            := ftqPtr
     cf.ftqOffset                         := ftqPcOffset.offset
     cf.isLastInFtqEntry                  := isLastInFtqEntry
+    cf.vtype                             := DontCare
+    cf.specvtype                         := DontCare
     cf.debug_seqNum                      := debug_seqNum
     cf
   }
@@ -148,6 +154,8 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 
 class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
+
+  val vtypeGen = Module(new VTypeGen)
 
   // io alias
   private val decodeCanAccept = io.decodeCanAccept
@@ -181,7 +189,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Normal read wire
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
-  private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  private val outputEntries     = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new CtrlFlow))))
+  private val outputEntriesNext = Wire(Vec(DecodeWidth, Valid(new CtrlFlow)))
   private val outputEntriesValidNum =
     PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse.toSeq, 0.U)
 
@@ -223,7 +232,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData   = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
 
-  val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
+  val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid && !io.frombackend.isResumeVType
   when(decodeCanAccept) {
     numOut := Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid)
   }.elsewhen(outputEntriesIsNotFull) {
@@ -270,25 +279,60 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   io.out zip outputEntries foreach {
     case (io, reg) =>
       io.valid := reg.valid
-      io.bits  := reg.bits.toCtrlFlow
+      io.bits  := reg.bits
   }
-  (outputEntries zip bypassEntries).zipWithIndex.foreach {
+  (outputEntriesNext zip bypassEntries).zipWithIndex.foreach {
     case ((out, bypass), i) =>
       when(decodeCanAccept) {
         when(useBypass && io.in.valid) {
-          out := bypass
+          out.valid := bypass.valid
+          out.bits  := bypass.bits.toCtrlFlow
         }.otherwise {
-          out := deqEntries(i)
+          out.valid := deqEntries(i).valid
+          out.bits  := deqEntries(i).bits.toCtrlFlow
         }
       }.elsewhen(outputEntriesIsNotFull) {
         out.valid := deqEntries(i).valid
         out.bits := Mux(
           i.U < outputEntriesValidNum,
-          out.bits,
-          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum)
+          outputEntries(i).bits,
+          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toCtrlFlow
         )
+      }.otherwise {
+        out := outputEntries(i)
       }
   }
+
+  /**
+   * When updating vtype from rob, ibuffer should not send new instructions to outputEntries.
+   * Therefore, "decodeCanAccept" and "outputEntriesIsNotFull" is set to false when isResumeVType is true.
+   */
+  vtypeGen.io.canUpdateVType  := decodeCanAccept || outputEntriesIsNotFull
+  vtypeGen.io.walkToArchVType := io.frombackend.walkToArchVType
+  vtypeGen.io.walkVType       := io.frombackend.walkVType
+  vtypeGen.io.vsetvlVType     := io.frombackend.vsetvlVType
+  vtypeGen.io.commitVType     := io.frombackend.commitVType
+  for (i <- 0 until DecodeWidth) {
+    when(decodeCanAccept) {
+      vtypeGen.io.insts(i).valid := outputEntriesNext(i).valid
+    }.elsewhen(outputEntriesIsNotFull) {
+      vtypeGen.io.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, true.B)
+    }.otherwise {
+      vtypeGen.io.insts(i).valid := false.B
+    }
+    vtypeGen.io.insts(i).bits := outputEntriesNext(i).bits.instr
+    outputEntriesNext(i).bits.vtype := Mux(
+      vtypeGen.io.insts(i).valid,
+      vtypeGen.io.vtype(i),
+      outputEntries(i).bits.vtype
+    )
+    outputEntriesNext(i).bits.specvtype := Mux(
+      vtypeGen.io.insts(i).valid,
+      vtypeGen.io.specvtype(i),
+      outputEntries(i).bits.specvtype
+    )
+  }
+  outputEntries := outputEntriesNext
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Enqueue
