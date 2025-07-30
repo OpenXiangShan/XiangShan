@@ -29,12 +29,14 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
       val instrRange:        Vec[Bool] = Vec(PredictWidth, Bool())
       val cacheData:         UInt      = UInt(512.W)
       val prevLastIsHalfRvi: Bool      = Bool()
-      val endPosition:       UInt      = UInt(log2Ceil(PredictWidth).W)
+      val firstEndPos:       UInt      = UInt(log2Ceil(PredictWidth).W)
+      val endPos:            UInt      = UInt(log2Ceil(PredictWidth).W)
     }
     class PreDecodeBoundResp(implicit p: Parameters) extends IfuBundle {
-      val instrValid:    Vec[Bool] = Vec(PredictWidth, Bool())
-      val isRvc:         Vec[Bool] = Vec(PredictWidth, Bool())
-      val isLastHalfRvi: Bool      = Bool()
+      val instrValid:         Vec[Bool] = Vec(PredictWidth, Bool())
+      val isRvc:              Vec[Bool] = Vec(PredictWidth, Bool())
+      val isFirstLastHalfRvi: Bool      = Bool()
+      val isLastHalfRvi:      Bool      = Bool()
     }
 
     val req:  Valid[PreDecodeBoundReq]  = Flipped(ValidIO(new PreDecodeBoundReq))
@@ -142,6 +144,8 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   io.resp.bits.isRvc := VecInit(io.resp.bits.instrValid.zip(currentIsRvc).map { case (valid, rvc) =>
     valid & rvc
   })
-  io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPosition) &&
-    !currentIsRvc(io.req.bits.endPosition)
+  io.resp.bits.isFirstLastHalfRvi := io.resp.bits.instrValid(io.req.bits.firstEndPos) &&
+    !currentIsRvc(io.req.bits.firstEndPos)
+  io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPos) &&
+    !currentIsRvc(io.req.bits.endPos)
 }

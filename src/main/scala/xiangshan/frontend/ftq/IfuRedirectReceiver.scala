@@ -33,7 +33,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.level     := RedirectLevel.flushAfter
 
     val cfiUpdate = redirect.bits.cfiUpdate
-    cfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits).toUInt
+    cfiUpdate.pc        := pdWb.bits.pc.toUInt
     cfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
     cfiUpdate.target    := pdWb.bits.target.toUInt
     cfiUpdate.taken     := pdWb.bits.cfiOffset.valid

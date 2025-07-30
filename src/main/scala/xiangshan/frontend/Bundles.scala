@@ -65,14 +65,13 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
 
   // fast path: Timing critical
+  val valid:              Bool       = Bool()
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx    = new FtqPtr
   val ftqOffset = Valid(UInt(CfiPositionWidth.W))
-
-  val topdownInfo = new FrontendTopDownBundle
 
   def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
 
@@ -130,20 +129,24 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  val req:              DecoupledIO[FetchRequestBundle] = Decoupled(new FetchRequestBundle)
+  class FtqToIfuReq(implicit p: Parameters) extends XSBundle {
+    val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
+    val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
+  }
+  val req:              DecoupledIO[FtqToIfuReq]        = Decoupled(new FtqToIfuReq)
   val redirect:         Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val topdown_redirect: Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
   val flushFromBpu:     BpuFlushInfo                    = new BpuFlushInfo
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val pdWb:           Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
-  val mmioCommitRead: MmioCommitRead                  = new MmioCommitRead
+  val mmioCommitRead: MmioCommitRead                       = new MmioCommitRead
+  val pdWb:           Vec[Valid[PredecodeWritebackBundle]] = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
-  val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
+  val pc         = PrunedAddr(VAddrBits)
   val ftqIdx     = new FtqPtr
   val ftqOffset  = UInt(log2Ceil(PredictWidth).W)
   val misOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
@@ -268,22 +271,22 @@ class FtqPcOffset(implicit p: Parameters) extends XSBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs           = Vec(PredictWidth, UInt(32.W))
-  val valid            = UInt(PredictWidth.W)
-  val enqEnable        = UInt(PredictWidth.W)
-  val pd               = Vec(PredictWidth, new PreDecodeInfo)
-  val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqPcOffset      = Vec(PredictWidth, ValidUndirectioned(new FtqPcOffset))
-  val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, new ExceptionType)
-  val crossPageIPFFix  = Vec(PredictWidth, Bool())
-  val illegalInstr     = Vec(PredictWidth, Bool())
-  val triggered        = Vec(PredictWidth, TriggerAction())
-  val isLastInFtqEntry = Vec(PredictWidth, Bool())
+  val instrs           = Vec(IBufEnqWidth, UInt(32.W))
+  val valid            = UInt(IBufEnqWidth.W)
+  val enqEnable        = UInt(IBufEnqWidth.W)
+  val pd               = Vec(IBufEnqWidth, new PreDecodeInfo)
+  val foldpc           = Vec(IBufEnqWidth, UInt(MemPredPCWidth.W))
+  val ftqPcOffset      = Vec(IBufEnqWidth, ValidUndirectioned(new FtqPcOffset))
+  val backendException = Vec(IBufEnqWidth, Bool())
+  val exceptionType    = Vec(IBufEnqWidth, new ExceptionType)
+  val crossPageIPFFix  = Vec(IBufEnqWidth, Bool())
+  val illegalInstr     = Vec(IBufEnqWidth, Bool())
+  val triggered        = Vec(IBufEnqWidth, TriggerAction())
+  val isLastInFtqEntry = Vec(IBufEnqWidth, Bool())
 
-  val pc             = Vec(PredictWidth, PrunedAddr(VAddrBits))
+  val pc             = Vec(IBufEnqWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr = new IBufPtr
-  val debug_seqNum   = Vec(PredictWidth, InstSeqNum())
+  val debug_seqNum   = Vec(IBufEnqWidth, InstSeqNum())
   val ftqPtr         = new FtqPtr
   val topdown_info   = new FrontendTopDownBundle
 }
