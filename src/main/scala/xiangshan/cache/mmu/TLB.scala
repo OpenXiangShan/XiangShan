@@ -306,7 +306,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
-    val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
+    val vaddr = SignExt(req_out(i).vaddr, PAddrBitsMax)
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
