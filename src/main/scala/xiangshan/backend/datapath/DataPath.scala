@@ -755,13 +755,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       diffPhyFpReg.coreid := io.hartId
       diffPhyFpReg.value := fpDiffAllRData.get
 //    } else {
-      val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
-      difftestArchIntRegState.coreid := io.hartId
-      difftestArchIntRegState.value := intDiffRead.get._2
-
-      val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
-      difftestArchFpRegState.coreid := io.hartId
-      difftestArchFpRegState.value := fpDiffReadData.get
+//      val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
+//      difftestArchIntRegState.coreid := io.hartId
+//      difftestArchIntRegState.value := intDiffRead.get._2
+//
+//      val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
+//      difftestArchFpRegState.coreid := io.hartId
+//      difftestArchFpRegState.value := fpDiffReadData.get
 
 //      val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
 //      difftestArchVecRegState.coreid := io.hartId
