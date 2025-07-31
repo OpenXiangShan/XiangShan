@@ -219,7 +219,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       val wakeUpIn = iqWakeUpInMap(wakeUp.bits.exuIdx)
       val exuIdx = wakeUp.bits.exuIdx
       println(s"[Backend] Connect wakeup exuIdx ${exuIdx}")
-      connectSamePort(wakeUp,wakeUpIn)
+      wakeUp.valid := wakeUpIn.valid
+      connectSamePort(wakeUp.bits, wakeUpIn.bits)
       backendParams.connectWakeup(exuIdx)
       if (backendParams.isCopyPdest(exuIdx)) {
         println(s"[Backend] exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
@@ -239,7 +240,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     }
     iq.io.wakeupFromIQDelayed.foreach { wakeUp =>
       val wakeUpIn = iqWakeUpInMapDelayed(wakeUp.bits.exuIdx)
-      connectSamePort(wakeUp, wakeUpIn)
+      wakeUp.valid := wakeUpIn.valid
+      connectSamePort(wakeUp.bits, wakeUpIn.bits)
       if (iq.params.numIntSrc == 0) wakeUp.bits.rfWen := false.B
       if (iq.params.numFpSrc == 0) wakeUp.bits.fpWen := false.B
       if (iq.params.numVfSrc == 0) wakeUp.bits.vecWen := false.B

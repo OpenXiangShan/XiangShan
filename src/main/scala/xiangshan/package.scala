@@ -374,6 +374,8 @@ package object xiangshan {
     def xorzexth   = "b110_0101".U
     def orcblsb    = "b110_0110".U
     def orcbzexth  = "b110_0111".U
+    // for xstrap
+    def xstrap     = "b111_1111".U
 
     def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
     def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)

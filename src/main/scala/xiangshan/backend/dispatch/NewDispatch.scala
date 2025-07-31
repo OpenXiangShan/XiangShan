@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
+import xiangshan.backend.Bundles.{DecodeOutUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -96,7 +96,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val io = IO(new Bundle {
     // from rename
-    val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodedInst)))
+    val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
     val toRenameAllFire = Output(Bool())
     // enq Rob
@@ -856,6 +856,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     io.enqRob.req(i).bits := updatedUop(i)
     io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
     io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
+    io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
   }
 
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR

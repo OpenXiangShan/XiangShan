@@ -30,42 +30,54 @@ import xiangshan.backend.datapath.WakeUpConfig
 
 object Bundles {
   /**
-   * Connect Same Name Port like sinkBundle := sourceBundle.
+   * Connect same name and same width port like sinkBundle := sourceBundle.
    *
    * There is no limit to the number of ports on both sides.
    *
    * Don't forget to connect the remaining ports!
    */
   def connectSamePort (sinkBundle: Bundle, sourceBundle: Bundle):Unit = {
-    sinkBundle.elements.foreach { case (name, data) =>
-      if (sourceBundle.elements.contains(name))
-        data := sourceBundle.elements(name)
+    sinkBundle.elements.foreach { case (name, data) => {
+      val hasSameName = sourceBundle.elements.contains(name)
+      if (hasSameName) {
+        val sourceData = sourceBundle.elements(name)
+        val hasSameWidth = data.asUInt.getWidth == sourceData.asUInt.getWidth
+        if (hasSameWidth) {
+          data := sourceData
+        }
+        else {
+          println(s"[connectSamePort] ${name}'s width is different")
+        }
+      }
+    }
     }
   }
   // frontend -> backend
-  class DecodeInUop(implicit p: Parameters) extends XSBundle {
-    val instr            = UInt(32.W)
-    // for mdp
-    val foldpc           = UInt(MemPredPCWidth.W)
-    val exceptionVec     = ExceptionVec()
-    val isFetchMalAddr   = Bool()
-    val trigger          = TriggerAction()
-    val preDecodeInfo    = new PreDecodeInfo
-    val pred_taken       = Bool()
-    val crossPageIPFFix  = Bool()
-    val ftqPtr           = new FtqPtr
-    val ftqOffset        = UInt(log2Up(PredictWidth).W)
+  class DecodeInBaseUop(implicit p: Parameters) extends XSBundle {
+    val foldpc = UInt(MemPredPCWidth.W) // for mdp
+    val exceptionVec = ExceptionVec()
+    val isFetchMalAddr = Bool()
+    val trigger = TriggerAction()
+    val preDecodeInfo = new PreDecodeInfo
+    val pred_taken = Bool()
+    val crossPageIPFFix = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
-    val debug            = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
+    val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
-      this.preDecodeInfo      := source.pd
-      this.pred_taken         := source.pred_taken
-      this.isFetchMalAddr     := source.backendException
+      this.preDecodeInfo := source.pd
+      this.pred_taken := source.pred_taken
+      this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
+  }
+  // DecodeInUop has an instr, but DecodeOutUop doesn't.
+  class DecodeInUop(implicit p: Parameters) extends DecodeInBaseUop {
+    val instr = UInt(32.W)
   }
   class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
@@ -73,67 +85,48 @@ object Bundles {
   }
 
   // DecodeInUop --[Decode]--> DecodeOutUop
-  class DecodedInst(implicit p: Parameters) extends XSBundle {
+  class DecodeOutUop(implicit p: Parameters) extends DecodeInUop {
+    // DecodeOutUop also needs instr because the fusion decoder uses it.
     def numSrc = backendParams.numSrc
-    // passed from StaticInst
-    val instr           = UInt(32.W)
-    val pc              = UInt(VAddrBits.W)
-    val foldpc          = UInt(MemPredPCWidth.W)
-    val exceptionVec    = ExceptionVec()
-    val isFetchMalAddr  = Bool()
-    val trigger         = TriggerAction()
-    val preDecodeInfo   = new PreDecodeInfo
-    val pred_taken      = Bool()
-    val crossPageIPFFix = Bool()
-    val ftqPtr          = new FtqPtr
-    val ftqOffset       = UInt(log2Up(PredictWidth).W)
-    // decoded
-    val srcType         = Vec(numSrc, SrcType())
-    val lsrc            = Vec(numSrc, UInt(LogicRegsWidth.W))
-    val ldest           = UInt(LogicRegsWidth.W)
-    val fuType          = FuType()
-    val fuOpType        = FuOpType()
-    val rfWen           = Bool()
-    val fpWen           = Bool()
-    val vecWen          = Bool()
-    val v0Wen           = Bool()
-    val vlWen           = Bool()
-    val isXSTrap        = Bool()
-    val waitForward     = Bool() // no speculate execution
-    val blockBackward   = Bool()
-    val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
-    val canRobCompress  = Bool()
-    val selImm          = SelImm()
-    val imm             = UInt(ImmUnion.maxLen.W)
-    val fpu             = new FPUCtrlSignals
-    val vpu             = new VPUCtrlSignals
-    val vlsInstr        = Bool()
-    val wfflags         = Bool()
-    val isMove          = Bool()
-    val uopIdx          = UopIdx()
-    val uopSplitType    = UopSplitType()
-    val isVset          = Bool()
-    val firstUop        = Bool()
-    val lastUop         = Bool()
-    val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
-    val commitType      = CommitType() // Todo: remove it
-    val needFrm         = new NeedFrmBundle
-    val lastInFtqEntry  = Bool()
-
-    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
-    val debug_seqNum    = InstSeqNum()
+    val srcType = Vec(numSrc, SrcType())
+    val lsrc = Vec(numSrc, UInt(LogicRegsWidth.W))
+    val ldest = UInt(LogicRegsWidth.W)
+    val fuType = FuType()
+    val fuOpType = FuOpType()
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
+    val waitForward = Bool() // no speculate execution
+    val blockBackward = Bool()
+    val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+    val canRobCompress = Bool()
+    val selImm = SelImm()
+    val imm = UInt(ImmUnion.maxLen.W)
+    val fpu = new FPUCtrlSignals
+    val vpu = new VPUCtrlSignals
+    val vlsInstr = Bool()
+    val wfflags = Bool()
+    val isMove = Bool()
+    val uopIdx = UopIdx()
+    val uopSplitType = UopSplitType()
+    val isVset = Bool()
+    val firstUop = Bool()
+    val lastUop = Bool()
+    val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
+    val needFrm = new NeedFrmBundle
+    override val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
+      waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
 
-    def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodedInst = {
+    def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodeOutUop = {
       val decoder: Seq[UInt] = ListLookup(
         inst, XDecode.decodeDefault.map(bitPatToUInt),
-        table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
+        table.map { case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
       )
       allSignals zip decoder foreach { case (s, d) => s := d }
-      debug_fuType.foreach(_ := fuType)
       this
     }
 
@@ -143,13 +136,11 @@ object Bundles {
 
     def connectDecodeInUop(source: DecodeInUop): Unit = {
       connectSamePort(this, source)
-      this.pc := 0.U
-      this.debug_seqNum :=  0.U
-      source.debug.foreach{x =>
-        this.pc := x.pc
-        this.debug_seqNum := x.debug_seqNum
-      }
+      this.debug.foreach(x => connectSamePort(x, source.debug.get))
     }
+  }
+  class DecodeOutUopDebug(implicit p: Parameters) extends DecodeInUopDebug {
+    val commitType = CommitType()
   }
 
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
@@ -166,15 +157,13 @@ object Bundles {
       this.ftqPtr === ftqPtr && this.ftqOffset === ftqOffset
     }
 
-    def fromDecodedInst(decodedInst: DecodedInst): this.type = {
-      this.instr     := decodedInst.instr
-      this.ftqPtr    := decodedInst.ftqPtr
-      this.ftqOffset := decodedInst.ftqOffset
+    def fromDecodedInst(decodeOutUop: DecodeOutUop): this.type = {
+      connectSamePort(this, decodeOutUop)
       this
     }
   }
 
-  // DecodedInst --[Rename]--> DynInst
+  // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
     // passed from StaticInst
@@ -192,7 +181,7 @@ object Bundles {
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     val ftqLastOffset   = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
     val stdwriteNeed    = Bool()
-    // passed from DecodedInst
+    // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
     val fuType          = FuType()

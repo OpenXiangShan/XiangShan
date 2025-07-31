@@ -28,7 +28,7 @@ import utils._
 import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, DecodeInUop}
+import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
@@ -51,14 +51,14 @@ trait DecodeConstants {
     //   srcType(0) srcType(1) srcType(2) fuType    fuOpType    rfWen
     //   |          |          |          |         |           |  fpWen
     //   |          |          |          |         |           |  |  vecWen
-    //   |          |          |          |         |           |  |  |  isXSTrap
-    //   |          |          |          |         |           |  |  |  |  noSpecExec
-    //   |          |          |          |         |           |  |  |  |  |  blockBackward
-    //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
-    //   |          |          |          |         |           |  |  |  |  |  |  |  canRobCompress
-    //   |          |          |          |         |           |  |  |  |  |  |  |  |  uopSplitType
-    //   |          |          |          |         |           |  |  |  |  |  |  |  |  |             selImm
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    //   |          |          |          |         |           |  |  |  noSpecExec
+    //   |          |          |          |         |           |  |  |  |  blockBackward
+    //   |          |          |          |         |           |  |  |  |  |  flushPipe
+    //   |          |          |          |         |           |  |  |  |  |  |  canRobCompress
+    //   |          |          |          |         |           |  |  |  |  |  |  |  uopSplitType
+    //   |          |          |          |         |           |  |  |  |  |  |  |  |               selImm
+    //   |          |          |          |         |           |  |  |  |  |  |  |  |               |
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -99,14 +99,13 @@ case class XSDecode(
   fWen: Boolean = false,
   vWen: Boolean = false,
   mWen: Boolean = false,
-  xsTrap: Boolean = false,
   noSpec: Boolean = false,
   blockBack: Boolean = false,
   flushPipe: Boolean = false,
   canRobCompress: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, canRobCompress.B, uopSplitType, selImm)
+    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, noSpec.B, blockBack.B, flushPipe.B, canRobCompress.B, uopSplitType, selImm)
   }
 }
 
@@ -118,14 +117,13 @@ case class FDecode(
   fWen: Boolean = false,
   vWen: Boolean = false,
   mWen: Boolean = false,
-  xsTrap: Boolean = false,
   noSpec: Boolean = false,
   blockBack: Boolean = false,
   flushPipe: Boolean = false,
   canRobCompress: Boolean = false,
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe, canRobCompress).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType, xWen, fWen, vWen, mWen, noSpec, blockBack, flushPipe, canRobCompress).generate()
   }
 }
 
@@ -564,7 +562,7 @@ object XSDebugDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
   def SIM_TRIG = BitPat("b11011111101010010010000000010011") // HINT, slti x0, x18, -518
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
-    TRAP    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, SelImm.IMM_I, xWen = T, xsTrap = T, noSpec = T, blockBack = T)
+    TRAP    -> XSDecode(SrcType.imm, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.xstrap, SelImm.IMM_I, blockBack = T)
   )
 }
 
@@ -780,7 +778,7 @@ class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
-  val decodedInst = Output(new DecodedInst)
+  val decodedInst = Output(new DecodeOutUop)
   val isComplex = Output(Bool())
   val uopInfo = Output(new UopInfo)
 }
@@ -816,15 +814,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     ZicondDecode.table ++
     ZimopDecode.table ++
     ZfaDecode.table
-
-  require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
+  require(decode_table.map(_._2.length == 14).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.ohid && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
   assert(luiTable.length == 1 && luiTable.head == LUI, "Conflicts: LUI is determined by FuType and SelImm in Dispatch")
 
   // output
-  val decodedInst: DecodedInst = Wire(new DecodedInst()).decode(ctrl_flow.instr, decode_table)
+  val decodedInst: DecodeOutUop = Wire(new DecodeOutUop()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
@@ -833,11 +830,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.connectDecodeInUop(io.enq.decodeInUop)
 
-  decodedInst.lastInFtqEntry := ctrl_flow.isLastInFtqEntry
   decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
-  decodedInst.numUops := 1.U
   decodedInst.numWB   := 1.U
 
   val isZimop = (BitPat("b1?00??0111??_?????_100_?????_1110011") === ctrl_flow.instr) ||
@@ -941,7 +936,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isVStore = FuType.isVStore(decodedInst.fuType)
   private val isBranch = !decodedInst.preDecodeInfo.notCFI || FuType.isJump(decodedInst.fuType)
 
-  decodedInst.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch)
+  decodedInst.debug.foreach(_.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch))
 
   decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 
@@ -1086,7 +1081,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
   uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
   io.deq.isComplex := uopInfoGen.io.out.isComplex
-  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
