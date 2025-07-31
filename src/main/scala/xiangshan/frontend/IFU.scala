@@ -669,9 +669,15 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === m_commited
 
-  val f3_mmio_to_commit      = f3_req_is_mmio && mmio_state === m_waitCommit
-  val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
-  val f3_mmio_can_go         = f3_mmio_to_commit && !f3_mmio_to_commit_next
+  val f3_mmio_to_commit       = f3_req_is_mmio && mmio_state === m_waitCommit
+  val f3_mmio_sent_to_ibuffer = RegInit(false.B)
+  val f3_mmio_can_go         = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
+
+  when(f3_fire || f3_flush) {
+    f3_mmio_sent_to_ibuffer := false.B
+  }.elsewhen(io.toIbuffer.fire) {
+    f3_mmio_sent_to_ibuffer := true.B
+  }
 
   /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
   io.mmioCommitRead.valid      := RegNext(f3_req_is_mmio && f3_valid, false.B)
@@ -808,7 +814,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(m_waitCommit) {
       // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
       // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_go relies on this)
-      mmio_state := Mux(mmio_commit || f3_itlb_pbmt === Pbmt.nc, m_commited, m_waitCommit)
+      mmio_state := Mux(mmio_commit || ((f3_itlb_pbmt === Pbmt.nc) && io.toIbuffer.ready), m_commited, m_waitCommit)
     }
 
     // normal mmio instruction
