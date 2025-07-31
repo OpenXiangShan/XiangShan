@@ -673,7 +673,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_sent_to_ibuffer     = RegInit(false.B)
   val f3_mmio_can_sent_to_ibuffer = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
 
-  when(f3_fire || f3_flush) {
+  when(f3_mmio_req_commit || f3_flush) {
     f3_mmio_sent_to_ibuffer := false.B
   }.elsewhen(io.toIbuffer.fire) {
     f3_mmio_sent_to_ibuffer := true.B
