@@ -72,3 +72,14 @@ EnableSramCtl: false
 EnableCHINS: false
 
 CHIAddrWidth: 48
+
+CVMParams:
+  MEMENCRange: { base: 0x38030000, mask: 0xFFF }
+  KeyIDBits: 0
+  MemencPipes: 4
+  HasMEMencryption: false
+  HasDelayNoencryption: false
+
+EnableBitmapCheck: false
+
+EnableBitmapCheckDefault: false
