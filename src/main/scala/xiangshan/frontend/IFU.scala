@@ -673,12 +673,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_sent_to_ibuffer     = RegInit(false.B)
   val f3_mmio_can_sent_to_ibuffer = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
 
-  when(f3_mmio_req_commit || f3_flush) {
-    f3_mmio_sent_to_ibuffer := false.B
-  }.elsewhen(io.toIbuffer.fire) {
-    f3_mmio_sent_to_ibuffer := true.B
-  }
-
   /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
   io.mmioCommitRead.valid      := RegNext(f3_req_is_mmio && f3_valid, false.B)
   io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
@@ -695,6 +689,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
   val f3_need_not_flush = f3_req_is_mmio && fromFtqRedirectReg.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
+
+  when(!f3_req_is_mmio) {
+    f3_mmio_sent_to_ibuffer := false.B
+  }.elsewhen(f3_mmio_req_commit || (mmioF3Flush && !f3_need_not_flush)) {
+    f3_mmio_sent_to_ibuffer := false.B
+  }.elsewhen(io.toIbuffer.fire) {
+    f3_mmio_sent_to_ibuffer := true.B
+  }
 
   /**
     **********************************************************************************
