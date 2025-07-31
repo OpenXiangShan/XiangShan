@@ -1,6 +1,6 @@
 #coding=utf-8
 
-from XSPdb.cmd.util import error, warn, message
+from xspdb.cmd.util import error, warn, message
 import os
 
 class CmdFlash:

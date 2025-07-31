@@ -1,7 +1,7 @@
 #coding=utf-8
 
 import os
-from XSPdb.cmd.util import message, error
+from xspdb.cmd.util import message, error
 
 class CmdRegs:
     """Register operations"""
@@ -23,35 +23,6 @@ class CmdRegs:
         self.mpc_iregs = self.iregs.copy()
         self.mpc_iregs[0] = "mpc"
 
-    def do_xlist_freg_map(self, arg):
-        """List floating-point register mappings
-
-        Args:
-            arg (None): No arguments
-        """
-        for i, r in enumerate(self.fregs):
-            message(f"x{i}: {r}", end=" ")
-        message("")
-
-    def do_xlist_flash_fregs(self, arg):
-        """List Flash floating-point registers
-
-        Args:
-            arg (None): No arguments
-        """
-        for r in self.api_get_flash_init_fregs():
-            message(f"{r[0]}: {hex(r[1])}", end=" ")
-        message("")
-
-    def do_xlist_flash_iregs(self, arg):
-        """List Flash internal registers
-
-        Args:
-            arg (None): No arguments
-        """
-        for r in self.api_get_flash_init_iregs():
-            message(f"{r[0]}: {hex(r[1])}", end=" ")
-        message("")
 
     def do_xset_fregs(self, arg):
         """Set Flash floating-point registers (general)
@@ -125,41 +96,3 @@ class CmdRegs:
 
     def complete_xset_freg(self, text, line, begidx, endidx):
         return [k for k in self.fregs if k.startswith(text)]
-
-    def do_xload_reg_file(self, arg):
-        """Load a register file
-
-        Args:
-            arg (file): Register file
-        """
-        if not arg:
-            error("load_reg_file <reg_file>")
-            return
-        if not os.path.exists(arg):
-            error("file %s not found" % arg)
-            return
-        iregs, fregs = self.api_convert_reg_file(arg)
-        self.api_set_flash_int_regs(iregs)
-        self.api_set_flash_float_regs(fregs)
-
-    def complete_xload_reg_file(self, text, line, begidx, endidx):
-        return self.api_complite_localfile(text)
-
-    def do_xparse_reg_file(self, arg):
-        """Parse a register file
-
-        Args:
-            arg (file): Register file
-        """
-        if not arg:
-            error("parse_reg_file <reg_file>")
-            return
-        if not os.path.exists(arg):
-            error("file %s not found" % arg)
-            return
-        iregs, fregs = self.api_convert_reg_file(arg)
-        message("iregs:\n", str(iregs))        
-        message("fregs:\n", str(fregs))
-
-    def complete_xparse_reg_file(self, text, line, begidx, endidx):
-        return self.api_complite_localfile(text)

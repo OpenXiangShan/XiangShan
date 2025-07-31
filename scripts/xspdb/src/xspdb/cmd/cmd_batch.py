@@ -2,7 +2,7 @@
 
 import os
 import time
-from XSPdb.cmd.util import info, error, message, warn, find_executable_in_dirs, YELLOW, RESET
+from xspdb.cmd.util import info, error, message, warn, find_executable_in_dirs, YELLOW, RESET
 
 
 class CmdBatch:
@@ -136,121 +136,9 @@ class CmdBatch:
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
-    def do_xreplay_log(self, arg):
-        """Replay a log file
-
-        Args:
-            log_file (string): Path to the log file
-            delay_time (float): time delay between each cmd
-        """
-        usage = "usage: xreplay_log <log_file> [delay_time]"
-        if not arg:
-            message(usage)
-            return
-        args = arg.split()
-        path = args[0]
-        delay = 0.2
-        if len(args) > 1:
-            try:
-                delay = float(args[1])
-            except Exception as e:
-                error("Convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
-        cmd_count = self.api_exec_script(path, gap_time=delay,
-                             target_prefix=self.log_cmd_prefix,
-                             target_subfix=self.log_cmd_suffix,
-                             )
-        if cmd_count >= 0:
-            self._exec_batch_cmds()
-            is_continue = getattr(self, "__last_batch_cmd_ret__", False)
-            message(f"Replay log: {path} success, cmd count: {cmd_count}, continue: {is_continue}")
-            return is_continue
-
-    def complete_xreplay_log(self, text, line, begidx, endidx):
-        return self.api_complite_localfile(text)
-
-    def do_xbatch_ignore_cmd(self, arg):
-        """Add a command to the ignore list
-
-        Args:
-            cmd (string): Command to ignore
-        """
-        if not arg.strip():
-            message("usage: xbatch_ignore_cmd <cmd>")
-            return
-        self.api_add_batch_ignore_list(arg.strip())
-
-    def complete_xbatch_ignore_cmd(self, text, line, begidx, endidx):
-        """Complete the command for xbatch_ignore_cmd"""
-        cmd_list = []
-        for cmd in dir(self):
-            if not cmd.startswith("do_x"):
-                continue
-            cmd = cmd[3:]
-            if cmd in self.ignore_cmds_in_batch:
-                continue
-            cmd_list.append(cmd)
-        if not text:
-            return cmd_list
-        else:
-            return [cmd for cmd in cmd_list if cmd.startswith(text)]
-
-    def do_xbatch_clear_ignore_cmd(self, arg):
-        """Clear the ignore list"""
-        self.api_clear_batch_ignore_list()
-
-    def do_xbatch_unignore_cmd(self, arg):
-        """Delete a command from the ignore list
-
-        Args:
-            cmd (string): Command to unignore
-        """
-        if not arg.strip():
-            message("usage: xbatch_unignore_cmd <cmd>")
-            return
-        self.api_del_batch_ignore_list(arg.strip())
-
     def complete_xbatch_unignore_cmd(self, text, line, begidx, endidx):
         """Complete the command for xbatch_unignore_cmd"""
         if not text:
             return self.ignore_cmds_in_batch
         else:
             return [cmd for cmd in self.ignore_cmds_in_batch if cmd.startswith(text)]
-
-    def do_xbatch_list_ignore_cmd(self, arg):
-        """List the ignore list"""
-        if not self.ignore_cmds_in_batch:
-            message("ignore cmd list is empty")
-            return
-        message(f"{YELLOW}{' '.join(self.ignore_cmds_in_batch)}{RESET}")
-
-    def do_xbatch_continue(self, arg):
-        """Continue to execute batch commands
-
-        Args:
-            arg (None): No arguments
-        """
-        bcount = len(self.batch_cmds_to_exec)
-        if bcount <= 0:
-            error("No batch commands to execute")
-            return
-        info(f"Continue to execute batch {bcount} commands")
-        self._exec_batch_cmds()
-
-    def do_xbatch_cmds(self, arg):
-        """Execute batch commands
-
-        Args:
-            show_detail: show detail [any_str]
-        """
-        detial = arg.strip()
-        if detial != "detail" and detial:
-            error("usage xbatch_cmds [detail]")
-            return
-        if detial:
-            for i, cmd in enumerate(self.batch_cmds_to_exec):
-                message(f"[{i}] => {cmd[0]}")
-        info(f"Total batched cmd is: {len(self.batch_cmds_to_exec)}")
-
-    def complete_xbatch_cmds(self, text, line, begidx, endidx):
-        """Complete the command for xbatch_cmds"""
-        return ["detail"]

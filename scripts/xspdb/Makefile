@@ -14,5 +14,11 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-urwid>=2.6.16
-capstone>=5.0.5
+all: pdb-run
+
+pdb-run: 
+	LD_PRELOAD=src/pyxscore/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=./src python3 pdb-run.py
+
+clean:
+	rm -rf ready-to-run.tar.gz
+	rm -rf XSPython.tar.gz

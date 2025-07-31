@@ -1,7 +1,6 @@
 #coding=utf-8
 
 import pdb
-from .ui import enter_simple_tui
 from collections import OrderedDict
 import os
 import inspect
@@ -10,8 +9,8 @@ import signal
 import time
 import sys
 
-from XSPdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
-from XSPdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
+from xspdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
+from xspdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
 from logging import DEBUG, INFO, WARNING, ERROR
 
 class XSPdb(pdb.Pdb):
@@ -142,8 +141,8 @@ class XSPdb(pdb.Pdb):
         return x, y
 
     def load_cmds(self):
-        import XSPdb.cmd
-        cmd_count = self.api_load_custom_pdb_cmds(XSPdb.cmd)
+        import xspdb.cmd
+        cmd_count = self.api_load_custom_pdb_cmds(xspdb.cmd)
         info(f"Loaded {cmd_count} functions from XSPdb.cmd")
 
     # override the default PDB function to avoid None cmd error
@@ -251,24 +250,6 @@ class XSPdb(pdb.Pdb):
         for cb in self.dut.xclock.ListSteFalCbDesc():
             message("\t", cb)
 
-    def do_xui(self, arg):
-        """Enter the Text UI interface
-
-        Args:
-            arg (None): No arguments
-        """
-        if self.in_tui:
-            error("Already in TUI")
-            return
-        self.tui_ret = None
-        self.in_tui = True
-        enter_simple_tui(self)
-        self.in_tui = False
-        self.on_update_tstep = None
-        self.interrupt = False
-        info("XUI Exited.")
-        return self.tui_ret
-
     def do_xcmds(self, arg):
         """Print all xcmds
 
@@ -294,32 +275,6 @@ class XSPdb(pdb.Pdb):
         for c in cmds:
             message(("%-"+str(max_cmd_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
         info(f"Total {cmd_count} xcommands")
-
-    def do_xapis(self, arg):
-        """Print all APIs
-
-        Args:
-            arg (None): No arguments
-        """
-        api_count = 0
-        max_api_len = 0
-        apis = []
-        for api in dir(self):
-            if not api.startswith("api_"):
-                continue
-            api_name = api
-            max_api_len = max(max_api_len, len(api_name))
-            api_desc = f"{YELLOW}Description not found{RESET}"
-            try:
-                api_desc = getattr(self, api).__doc__.split("\n")[0]
-            except Exception as e:
-                pass
-            apis.append((api, api_name, api_desc))
-            api_count += 1
-        apis.sort(key=lambda x: x[0])
-        for c in apis:
-            message(("%-"+str(max_api_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
-        info(f"Total {api_count} APIs")
 
     @staticmethod
     def api_log_enable_log(enable):
@@ -352,46 +307,12 @@ class XSPdb(pdb.Pdb):
         """Complete the log level"""
         return [k for k in ["on", "off"] if k.startswith(text)]
 
-    def do_xset_log_file(self, arg):
-        """Set log file
-
-        Args:
-            arg (string): Log file name
-        """
-        if not arg:
-            message("usage: xset_log_file <log file>")
-            return
-        xspdb_set_log(True)
-        xspdb_set_log_file(arg)
-        info("Enable log and set log file to: %s" % arg)
-
-    def do_xnop(self, arg):
-        """Nop cmd do nothing"""
-        pass
-
     def api_busy_sleep(self, data, delta=0.1):
         for i in range(int(data//delta)):
             time.sleep(delta)
             if self.interrupt:
                 return (i+1)*delta
         return data
-
-    def do_xpause(self, arg):
-        """Pause the interactive shell
-
-        Args:
-            time (float): time to pause, default is 1 second
-        """
-        p_time = 1
-        a = arg.strip()
-        if a:
-            try:
-                p_time = float(a)
-            except Exception as e:
-                error("Convert pause time fail: %s, from args: %s \nsage: xpause [time]" % (e, arg))
-                return
-        info("Pause for %s seconds" % p_time)
-        self.api_busy_sleep(p_time)
 
     def complete_xset_log_file(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
@@ -429,21 +350,6 @@ class XSPdb(pdb.Pdb):
             exec_count += 1
         self.batch_depth -= 1
         return exec_count
-
-    def interaction(self, frame, traceback):
-        """Override the interaction to run init cmd"""
-        if self.init_cmds:
-            self.setup(frame, traceback)
-            cmds = []
-            while len(self.init_cmds) > 0:
-                cmd = self.init_cmds.pop(0)
-                info("Find init cmd: '%s', add to batch cmd queue" % cmd)
-                cmds.append((cmd, 0.1, None))
-            if cmds:
-                self.api_batch_append_head_cmds(cmds)
-            if self._exec_batch_cmds() is not False:
-                return
-        return super().interaction(frame, traceback)
 
     def api_append_init_cmd(self, cmd):
         self.init_cmds.append(cmd)

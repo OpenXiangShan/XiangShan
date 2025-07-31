@@ -2,7 +2,7 @@
 
 import os
 
-from XSPdb.cmd.util import info, error, message, warn
+from xspdb.cmd.util import info, error, message, warn
 import os
 
 class CmdFiles:
@@ -103,66 +103,6 @@ class CmdFiles:
                 f.write(self.df.pmem_read(index*8 + mem_base).to_bytes(8, byteorder='little', signed=False))
         info(f"export {8*(end_index - last_indx) + len(bin_data)} bytes to unified bin file: {bin_file}")
         return True
-
-    def api_convert_reg_file(self, file_name):
-        """Parse a register file
-
-        Args:
-            file_name (file): Register file
-        """
-        assert os.path.exists(file_name), "file %s not found" % file_name
-        ret_iregs = {}
-        ret_fregs = {}
-        raw_iregs = {"x%d"%i : self.iregs[i] for i in range(32)}
-        raw_fregs = {"f%d"%i : self.fregs[i] for i in range(32)}
-        with open(file_name, "r") as f:
-            for i, l in enumerate(f.readlines()):
-                try:
-                    l = l.strip()
-                    if not l:
-                        continue
-                    key, value = l.split(":")
-                    key = key.strip().lower()
-                    value = int(value.strip(), 0)
-                    if key in raw_iregs:
-                        key = raw_iregs[key]
-                    if key in self.iregs:
-                        assert key not in ret_iregs, f"{key} already exists"
-                        ret_iregs[key] = value
-                    if key in raw_fregs:
-                        key = raw_fregs[key]
-                    if key in self.fregs:
-                        assert key not in ret_fregs, f"{key} already exists"
-                        ret_fregs[key] = value
-                except Exception as e:
-                    assert False, f"line {i+1} parse fail: {str(e)}"
-        return ret_iregs, ret_fregs
-
-    def do_xbytes_to_bin(self, arg):
-        """Convert bytes data to a binary file
-
-        Args:
-            arg (string): Bytes data
-        """
-        if not arg:
-            message("usage xbytes_to_bin <bytes> <file>")
-            return
-        args = arg.strip().split()
-        if len(args) < 2:
-            message("usage xbytes_to_bin <bytes> <file>")
-            return
-        try:
-            data = eval(args[0])
-            if not isinstance(data, bytes):
-                error("data must be bytes, eg b'\\x00\\x01...'")
-                return
-            with open(args[1], "wb") as f:
-                f.write(data)
-        except Exception as e:
-            error(f"convert {args[0]} to bytes fail: {str(e)}")
-
-    def complete_xbytes_to_bin(self, text, line, begidx, endidx):
-        return self.api_complite_localfile(text)
 
     def do_xexport_bin(self, arg):
         """Export Flash + memory data to a file

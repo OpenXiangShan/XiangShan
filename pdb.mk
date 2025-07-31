@@ -16,7 +16,7 @@
 
 PDB_HOME          := $(abspath $(BUILD_DIR)/xspdb)
 RTL_HOME          := $(abspath $(RTL_DIR))
-DIFFTEST_HOME     := $(abspath $(PDB_HOME)/python)
+DIFFTEST_HOME     := $(abspath $(PDB_HOME)/pydifftest)
 
 DIFFTEST_INCLUDE  := $(abspath difftest/src/test/vsrc/common)
 PICKER_INCLUDE    := $(shell picker --show_xcom_lib_location_cpp | grep include | awk '{print $$2}')
@@ -31,7 +31,6 @@ pdb: clean $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTS
 
 $(DIFFTEST_HOME)/_difftest.so: sim-verilog
 	$(MAKE) -C ./difftest difftest_python WITH_CONSTANTIN=0 WITH_CHISELDB=0
-	ln -s $(DIFFTEST_HOME)/_difftest.so $(DIFFTEST_HOME)/libdifftest.so
 
 $(PDB_HOME)/picker.f:
 	find $(realpath $(RTL_HOME)) -maxdepth 1 \( -name "*.sv" -o -name "*.v" -o -name "*.cpp" -o -name "*.so" \) -not -name "SimTop.sv" -printf "%p\n" > $(PDB_HOME)/picker.f
@@ -42,10 +41,13 @@ $(PDB_HOME)/libUTSimTop.so:
 		--rw 1 \
 		-w $(PDB_HOME)/xs.fst \
 		--lang python \
-		--tdir $(PDB_HOME)/XSPython \
+		--tdir $(PDB_HOME)/pyxscore \
 		--fs $(PDB_HOME)/picker.f \
 		-V "--no-timing;--threads;8;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src;-I$(DIFFTEST_INCLUDE)" \
-		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(DIFFTEST_HOME) -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
+		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(DIFFTEST_HOME) -l:_difftest.so -Wl,-rpath=$(DIFFTEST_HOME) -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
+		--autobuild=false
+	ln -s $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/pyxscore/libdifftest.so
+	$(MAKE) -C $(PDB_HOME)/pyxscore
 
 $(PDB_HOME)/xspdb:
 	cp -r $(NOOP_HOME)/scripts/xspdb $(PDB_HOME)/xspdb

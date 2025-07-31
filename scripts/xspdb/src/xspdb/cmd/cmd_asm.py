@@ -4,7 +4,7 @@ import os
 import subprocess
 import tempfile
 import fnmatch
-from XSPdb.cmd.util import info, error, message, warn, find_executable_in_dirs, YELLOW, RESET
+from xspdb.cmd.util import info, error, message, warn, find_executable_in_dirs, YELLOW, RESET
 
 
 class CmdASM:

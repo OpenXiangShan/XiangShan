@@ -1,7 +1,7 @@
 #coding=utf-8
 
 import os
-from XSPdb.cmd.util import message, info, error
+from xspdb.cmd.util import message, info, error
 
 class CmdTrap:
     """Trap command class

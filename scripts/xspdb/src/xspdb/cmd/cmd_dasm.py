@@ -1,6 +1,6 @@
 #coding=utf-8
 
-from XSPdb.cmd.util import dasm_bytes, error, info, message
+from xspdb.cmd.util import dasm_bytes, error, info, message
 
 class CmdDASM:
 
@@ -130,96 +130,3 @@ class CmdDASM:
             error(f"disasm fail: {str(e)} {traceback.print_exc()}")
         return dasm_list
 
-    def do_xdasm(self, arg):
-        """Disassemble memory data
-
-        Args:
-            arg (string): Memory address and length
-        """
-        if not arg:
-            error("dasm <address> [length]")
-            return
-        args = arg.strip().split()
-        length = 10
-        if len(args) < 2:
-            args.append(str(length))
-        try:
-            address = int(args[0], 0)
-            length = int(args[1])
-            for l in self.api_all_data_to_asm(address, length):
-                message("0x%x: %s\t%s\t%s" % (l[0], l[1], l[2], l[3]))
-        except Exception as e:
-            error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
-
-    def do_xdasmflash(self, arg):
-        """Disassemble Flash data
-
-        Args:
-            arg (string): Flash address and length
-        """
-        if not arg:
-            error("dasmflash <address> [length]")
-            return
-        args = arg.strip().split()
-        length = 10
-        if len(args) < 2:
-            args.append(str(length))
-        try:
-            address = int(args[0], 0)
-            length = int(args[1])
-            for l in self.api_flash_data_to_asm(address, length):
-                message("0x%x: %s\t%s\t%s" % (l[0], l[1], l[2], l[3]))
-        except Exception as e:
-            error(f"convert {args[0]} or {args[1]} to number fail: {str(e)}")
-
-    def do_xdasmbytes(self, arg):
-        """Disassemble binary data
-
-        Args:
-            arg (string): Binary data
-        """
-        if not arg:
-            error("dasmbytes <bytes> [address]")
-            return
-        try:
-            params = arg.strip().split()
-            address = 0
-            if len(params) > 1:
-                address = int(params[1], 0)
-            data_bytes = params[0].strip()
-            if not data_bytes.startswith("b'"):
-                new_data_bytes = "b'"
-                for i in range(0, len(data_bytes), 2):
-                    new_data_bytes += "\\x%s" % params[0][i:i+2]
-                data_bytes = new_data_bytes + "'"
-            for i in self.api_dasm_from_bytes(eval(data_bytes), address):
-                message("0x%x: %s\t%s\t%s" % (i[0], i[1], i[2], i[3]))
-        except Exception as e:
-            error(f"convert {arg} to bytes fail: {str(e)}")
-
-    def do_xdasmnumber(self, arg):
-        """Disassemble a number
-
-        Args:
-            arg (string): Number data
-        """
-        if not arg:
-            error("dasmbytes <number> [address]")
-            return
-        try:
-            params = arg.strip().split()
-            address = 0
-            if len(params) > 1:
-                address = int(params[1], 0)
-            for i in self.api_dasm_from_bytes(int(params[0], 0).to_bytes(4, byteorder="little", signed=False), address):
-                message("0x%x: %s\t%s\t%s" % (i[0], i[1], i[2], i[3]))
-        except Exception as e:
-            error(f"convert {arg} to bytes fail: {str(e)}")
-
-    def do_xclear_dasm_cache(self, arg):
-        """Clear disassembly cache
-
-        Args:
-            arg (None): No arguments
-        """
-        self.info_cache_asm.clear()
