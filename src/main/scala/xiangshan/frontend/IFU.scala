@@ -669,9 +669,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === m_commited
 
-  val f3_mmio_to_commit       = f3_req_is_mmio && mmio_state === m_waitCommit
-  val f3_mmio_sent_to_ibuffer = RegInit(false.B)
-  val f3_mmio_can_go         = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
+  val f3_mmio_to_commit           = f3_req_is_mmio && mmio_state === m_waitCommit
+  val f3_mmio_sent_to_ibuffer     = RegInit(false.B)
+  val f3_mmio_can_sent_to_ibuffer = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
 
   when(f3_fire || f3_flush) {
     f3_mmio_sent_to_ibuffer := false.B
@@ -813,7 +813,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     is(m_waitCommit) {
       // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
-      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_go relies on this)
+      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_sent_to_ibuffer relies on this)
       mmio_state := Mux(mmio_commit || ((f3_itlb_pbmt === Pbmt.nc) && io.toIbuffer.ready), m_commited, m_waitCommit)
     }
 
@@ -933,7 +933,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
 
   val f3_triggered       = frontendTrigger.io.triggered
-  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_sent_to_ibuffer) && !f3_flush
 
   /*** send to Ibuffer  ***/
   io.toIbuffer.valid          := f3_toIbuffer_valid
