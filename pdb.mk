@@ -18,12 +18,12 @@ PDB_HOME          := $(abspath $(BUILD_DIR)/xspdb)
 RTL_HOME          := $(abspath $(RTL_DIR))
 DIFFTEST_HOME     := $(abspath $(PDB_HOME)/pydifftest)
 
-DIFFTEST_INCLUDE  := $(abspath difftest/src/test/vsrc/common)
-PICKER_INCLUDE    := $(shell picker --show_xcom_lib_location_cpp | grep include | awk '{print $$2}')
-PYTHON_VERSION    := $(shell python3 --version | awk '{print $$2}' | cut -d'.' -f1-2)
-SIM_LDFLAGS       := $(shell cat $(PDB_HOME)/python/sim_ld_flags.txt)
+DIFFTEST_INCLUDE   = $(abspath difftest/src/test/vsrc/common)
+PICKER_INCLUDE     = $(shell picker --show_xcom_lib_location_cpp | grep include | awk '{print $$2}')
+PYTHON_VERSION     = $(shell python3 --version | awk '{print $$2}' | cut -d'.' -f1-2)
+SIM_LDFLAGS        = $(shell cat $(PDB_HOME)/python/sim_ld_flags.txt)
 
-PYTHON_DEPS = urwid capstone
+PYTHON_DEPS        = urwid capstone
 
 .PHONY: pdb $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so $(PDB_HOME)/xspdb $(PDB_HOME)/xspdb.tar.gz pdb-run check-deps
 
