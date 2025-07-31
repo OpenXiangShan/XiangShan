@@ -756,7 +756,7 @@ object OPTYPE extends CSREnum with WARLApply {
 
 class McontextBundle extends CSRBundle {
   override val len = 14
-  val HCONTEXT = RW(13, 0)
+  val HCONTEXT = RW(13, 0).withReset(0.U)
 }
 
 trait HasOfFromPerfCntBundle { self: CSRModule[_] =>
