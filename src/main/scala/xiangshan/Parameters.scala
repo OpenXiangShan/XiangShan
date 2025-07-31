@@ -20,8 +20,7 @@ import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import huancun._
-import system.SoCParamsKey
-import system.CVMParamskey
+import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
@@ -514,7 +513,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   def PmemRanges = p(SoCParamsKey).PmemRanges
-  def KeyIDBits = p(CVMParamskey).KeyIDBits
+  def KeyIDBits = p(CVMParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
