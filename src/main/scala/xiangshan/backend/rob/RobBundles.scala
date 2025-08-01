@@ -305,6 +305,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val vsew = VSew()
   val veew = VSew()
   val vlmul = VLmul()
+  val isFromFetchHWE = Bool()
 
   def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
   def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)
