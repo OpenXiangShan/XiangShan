@@ -16,19 +16,10 @@
 
 #coding=utf-8
 
-from pyxscore import DUTSimTop, xsp
-from pydifftest import difftest as df
-from xspdb import *
+from xspdbtop import XSPdbTop
 
-def run_sim_top():
-    dut = DUTSimTop()
-    XSPdb(dut, df, xsp).set_trace()
-    while True:
-        dut.Step(1000)
 
 if __name__ == "__main__":
-    from bdb import BdbQuit
-    try:
-        run_sim_top()
-    except BdbQuit:
-        pass
+    xspdb = XSPdbTop()
+    xspdb.run()
+
