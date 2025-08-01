@@ -29,6 +29,7 @@ import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
@@ -224,8 +225,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   val s3_mbtbMeta        = RegEnable(mbtb.io.meta, s2_fire)
   private val s3_rasMeta = ras.io.specMeta
 
+  // phr meta
+  val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
+  val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
+
   private val s3_speculativeMeta = Wire(new BpuSpeculativeMeta)
-  s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
+  s3_speculativeMeta.phrHistPtr := s3_phrMeta
   s3_speculativeMeta.rasMeta    := s3_rasMeta
   s3_speculativeMeta.topRetAddr := ras.io.topRetAddr
 
@@ -233,6 +238,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.abtb := s3_abtbMeta
   s3_meta.mbtb := s3_mbtbMeta
   s3_meta.ras  := s3_rasMeta
+  s3_meta.phr  := s3_phrMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid
@@ -252,19 +258,22 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // phr train
   private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
-  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  phr.io.train.s0_stall    := s0_stall
-  phr.io.train.stageCtrl   := stageCtrl
-  phr.io.train.redirect    := redirect
-  phr.io.train.s3_override := s3_override
-  phr.io.train.s3_pc       := s3_pc
-  phr.io.train.s3_taken    := s3_prediction.taken
-  phr.io.train.s1_valid    := s1_valid
-  phr.io.train.s1_pc       := s1_pc
-  phr.io.train.s1_taken    := s1_prediction.taken
+  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  phr.io.train.s0_stall      := s0_stall
+  phr.io.train.stageCtrl     := stageCtrl
+  phr.io.train.redirect      := redirect
+  phr.io.train.s3_override   := s3_override
+  phr.io.train.s3_prediction := s3_prediction
+  phr.io.train.s3_pc         := s3_pc
+  phr.io.train.s1_valid      := s1_fire
+  phr.io.train.s1_prediction := s1_prediction
+  phr.io.train.s1_pc         := s1_pc
+
+  phr.io.commit.valid := train.valid
+  phr.io.commit.bits  := train.bits
 
   s0_foldedPhr := phr.io.s0_foldedPhr
   s1_foldedPhr := phr.io.s1_foldedPhr

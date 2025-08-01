@@ -29,6 +29,29 @@ case class FrontendParameters(
     ftqParameters:    FtqParameters = FtqParameters(),
     icacheParameters: ICacheParameters = ICacheParameters()
 ) {
+  // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
+  // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
+  def getPhrHistoryLength: Int = {
+    def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
+
+    // TODO: ittage table history length
+//    def MaxTableHistoryLength: Int = (
+//      bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
+//        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
+//    ).max
+    def MaxTableHistoryLength: Int = bpuParameters.tageParameters.TableInfos.map(_.HistoryLength).max
+
+    def Shamt:   Int = bpuParameters.phrParameters.Shamt
+    def FtqSize: Int = ftqParameters.FtqSize
+
+    // when ftq is full, Phr can overflow, so we need some extra bits to save Phr overflow bits for error-recovery
+    // magic, don't touch
+    def FtqFullFix:   Int = 4
+    def HistoryAlign: Int = bpuParameters.phrParameters.HistoryAlign
+
+    nextMultipleOf(MaxTableHistoryLength + Shamt * FtqSize + FtqFullFix, HistoryAlign)
+  }
+
   // sanity check
   require(isPow2(FetchBlockSize))
 }

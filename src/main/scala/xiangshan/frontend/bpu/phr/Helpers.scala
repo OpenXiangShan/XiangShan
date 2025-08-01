@@ -17,9 +17,13 @@ package xiangshan.frontend.bpu.phr
 
 import chisel3._
 import chisel3.util._
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.PhrHelper
 
-trait Helpers extends HasPhrParameters with PhrHelper {
+trait Helpers extends HasPhrParameters with PhrHelper with HalfAlignHelper {
   // folded History
   def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
@@ -27,12 +31,13 @@ trait Helpers extends HasPhrParameters with PhrHelper {
     val shifted    = srcDoubled(srcLen * 2 - 1 - shamt, srcLen - shamt)
     shifted
   }
+
   // do xors for several bitsets at specified bits
-  def bitsetsXor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]], hisLen: Int, compLen: Int): UInt = {
-    val res = Wire(Vec(len, Bool()))
+  def bitsetsXor(info: FoldedHistoryInfo, bitsets: Seq[Seq[(Int, Bool)]]): UInt = {
+    val res = Wire(Vec(info.FoldedLength, Bool()))
     // println(f"num bitsets: ${bitsets.length}")
     // println(f"bitsets $bitsets")
-    val resArr = Array.fill(len)(List[Bool]())
+    val resArr = Array.fill(info.FoldedLength)(List[Bool]())
     for (bs <- bitsets) {
       for ((n, b) <- bs) {
         resArr(n) = b :: resArr(n)
@@ -40,14 +45,19 @@ trait Helpers extends HasPhrParameters with PhrHelper {
     }
     // println(f"${resArr.mkString}")
     // println(f"histLen: ${this.len}, foldedLen: $folded_len")
-    for (i <- 0 until len) {
+    for (i <- 0 until info.FoldedLength) {
       // println(f"bit[$i], ${resArr(i).mkString}")
-      if (resArr(i).length == 0) {
-        println(f"[error] bits $i is not assigned in folded hist update logic! histlen:$hisLen, compLen:$compLen")
+      if (resArr(i).isEmpty) {
+        println(f"[error] bits $i is not assigned in folded hist update logic! $info")
       }
       res(i) := resArr(i).foldLeft(false.B)(_ ^ _)
     }
     res.asUInt
   }
 
+  def getBranchAddr(addr: PrunedAddr, cfiPosition: UInt): PrunedAddr = {
+    val alignedAddr = Cat(getAlignedAddrUpper(addr), 0.U(FetchBlockAlignWidth.W))
+    val brOffset    = Cat(cfiPosition, 0.U(instOffsetBits.W))
+    PrunedAddrInit(alignedAddr + brOffset)
+  }
 }

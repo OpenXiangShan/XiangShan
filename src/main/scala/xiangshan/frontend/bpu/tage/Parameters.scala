@@ -18,18 +18,19 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
+import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
-    TableInfos: Seq[Tuple3[Int, Int, Int]] = Seq(
+    TableInfos: Seq[TageTableInfo] = Seq(
       // Table size, history length, NumWay
-      (1024, 4, 3),
-      (1024, 9, 3),
-      (1024, 17, 3),
-      (1024, 31, 3),
-      (1024, 58, 3),
-      (1024, 109, 3),
-      (1024, 211, 3),
-      (1024, 407, 3)
+      new TageTableInfo(1024, 4, 3),
+      new TageTableInfo(1024, 9, 3),
+      new TageTableInfo(1024, 17, 3),
+      new TageTableInfo(1024, 31, 3),
+      new TageTableInfo(1024, 58, 3),
+      new TageTableInfo(1024, 109, 3),
+      new TageTableInfo(1024, 211, 3),
+      new TageTableInfo(1024, 407, 3)
     ),
     NumInternalBanks: Int = 2,
     TagWidth:         Int = 13,
@@ -41,12 +42,12 @@ case class TageParameters(
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
-  def TableInfos:       Seq[Tuple3[Int, Int, Int]] = tageParameters.TableInfos
-  def NumInternalBanks: Int                        = tageParameters.NumInternalBanks
-  def TagWidth:         Int                        = tageParameters.TagWidth
-  def CtrWidth:         Int                        = tageParameters.CtrWidth
-  def UsefulWidth:      Int                        = tageParameters.UsefulWidth
-  def WriteBufferSize:  Int                        = tageParameters.WriteBufferSize
+  def TableInfos:       Seq[TageTableInfo] = tageParameters.TableInfos
+  def NumInternalBanks: Int                = tageParameters.NumInternalBanks
+  def TagWidth:         Int                = tageParameters.TagWidth
+  def CtrWidth:         Int                = tageParameters.CtrWidth
+  def UsefulWidth:      Int                = tageParameters.UsefulWidth
+  def WriteBufferSize:  Int                = tageParameters.WriteBufferSize
 
   def NumTables: Int = TableInfos.length
 }
