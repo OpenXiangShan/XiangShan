@@ -172,6 +172,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        BpuMeta         = new BpuMeta
+  val mispred:     UInt            = UInt(PredictWidth.W)
 
   // for compatibility, remove these in new Ftq, valid is for asserting
   def fromBranchPredictionUpdate(u: BranchPredictionUpdate, valid: Bool = false.B): Unit = {
@@ -198,7 +199,8 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
         u.is_jalr                -> BranchAttribute.OtherIndirect
       )
     )
-    this.meta := u.meta
+    this.meta    := u.meta
+    this.mispred := mispred
   }
 }
 
@@ -216,6 +218,7 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val abtb: AheadBtbMeta = new AheadBtbMeta
   val mbtb: MainBtbMeta  = new MainBtbMeta
   val ras:  RasMeta      = new RasMeta
+  val phr:  PhrPtr       = new PhrPtr
 }
 
 /* *** internal const & type *** */

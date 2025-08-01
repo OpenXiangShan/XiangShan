@@ -665,27 +665,27 @@ trait HasXSParameter {
     case ((n, cb), h) => (n, cb, h)
   }
   def ITTageTableInfos = coreParams.ITTageTableInfos
-  type FoldedHistoryInfo = Tuple2[Int, Int]
+  type OldFoldedHistoryInfo = Tuple2[Int, Int]
   def foldedGHistInfos =
     (TageTableInfos.map{ case (nRows, h, t) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows/numBr), h)), (h, min(h, t)), (h, min(h, t-1)))
       else
-        Set[FoldedHistoryInfo]()
+        Set[OldFoldedHistoryInfo]()
     }.reduce(_++_).toSet ++
     SCTableInfos.map{ case (nRows, _, h) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows/TageBanks), h)))
       else
-        Set[FoldedHistoryInfo]()
+        Set[OldFoldedHistoryInfo]()
     }.reduce(_++_).toSet ++
     ITTageTableInfos.map{ case (nRows, h, t) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
       else
-        Set[FoldedHistoryInfo]()
+        Set[OldFoldedHistoryInfo]()
     }.reduce(_++_) ++
-      Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
+      Set[OldFoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
     ).toList
 
 
