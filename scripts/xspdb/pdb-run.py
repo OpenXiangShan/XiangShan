@@ -18,7 +18,6 @@
 
 from xspdbtop import XSPdbTop
 
-
 if __name__ == "__main__":
     xspdb = XSPdbTop()
     xspdb.run()
