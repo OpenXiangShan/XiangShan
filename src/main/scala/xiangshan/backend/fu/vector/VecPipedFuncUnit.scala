@@ -24,7 +24,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vstart  = vecCtrl.vstart
 
   protected val frm     = io.frm.getOrElse(0.U(3.W))
-  protected val vxrm    = io.vxrm.getOrElse(0.U(3.W))
+  protected val vxrm    = io.vxrm.getOrElse(0.U(2.W))
   protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm
   protected val rm      = Mux(vecCtrl.fpu.isFpToVecInst && instRm =/= "b111".U, instRm, frm)
   protected val vuopIdx = vecCtrl.vuopIdx
@@ -33,6 +33,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val fuOpType  = inCtrl.fuOpType
   protected val isNarrow  = vecCtrl.isNarrow
   protected val isExt     = vecCtrl.isExt
+  protected val isDstMask = vecCtrl.isDstMask
   protected val isMove    = vecCtrl.isMove
   // swap vs1 and vs2, used by vrsub, etc
   protected val isReverse = vecCtrl.isReverse

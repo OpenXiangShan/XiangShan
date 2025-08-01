@@ -547,7 +547,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new NewVIAluFix(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),
