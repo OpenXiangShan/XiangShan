@@ -49,11 +49,12 @@ trait HasBpuParameters extends HasXSParameter {
   def bpuParameters: BpuParameters = coreParams.bpuParameters
 
   // general
-  def FetchBlockSize:       Int = bpuParameters.FetchBlockSize
-  def FetchBlockSizeWidth:  Int = log2Ceil(FetchBlockSize)
-  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
-  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
-  def FetchBlockInstNum:    Int = FetchBlockSize / instBytes
+  def FetchBlockSize:         Int = bpuParameters.FetchBlockSize
+  def FetchBlockSizeWidth:    Int = log2Ceil(FetchBlockSize)
+  def FetchBlockAlignSize:    Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
+  def FetchBlockAlignWidth:   Int = log2Ceil(FetchBlockAlignSize)
+  def FetchBlockInstNum:      Int = FetchBlockSize / instBytes
+  def FetchBlockAlignInstNum: Int = FetchBlockAlignSize / instBytes
 
   def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 

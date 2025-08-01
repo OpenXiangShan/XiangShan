@@ -20,6 +20,9 @@ import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class TageParameters(
+    BaseTableSize:          Int = 8192,
+    BaseTableInternalBanks: Int = 4,
+    BaseTableCtrWidth:      Int = 2,
     TableInfos: Seq[Tuple3[Int, Int, Int]] = Seq(
       // Table size, history length, NumWay
       (1024, 4, 3),
@@ -41,6 +44,13 @@ case class TageParameters(
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
+  def BaseTableSize:                Int = tageParameters.BaseTableSize
+  def BaseTableInternalBanks:       Int = tageParameters.BaseTableInternalBanks
+  def BaseTableInternalBanksIdxLen: Int = log2Ceil(BaseTableInternalBanks)
+  def BaseTableSramSets:            Int = BaseTableSize / BaseTableInternalBanks / FetchBlockInstNum
+  def BaseTableSetIdxLen:           Int = log2Ceil(BaseTableSramSets)
+  def BaseTableNumAlignBanks:       Int = FetchBlockSize / FetchBlockAlignSize
+  def BaseTableCtrWidth:            Int = tageParameters.BaseTableCtrWidth
   def TableInfos:       Seq[Tuple3[Int, Int, Int]] = tageParameters.TableInfos
   def NumInternalBanks: Int                        = tageParameters.NumInternalBanks
   def TagWidth:         Int                        = tageParameters.TagWidth

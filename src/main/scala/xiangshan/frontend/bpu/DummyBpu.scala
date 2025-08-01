@@ -148,6 +148,8 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
   ras.io.commit.bits.cfiPosition := commitUpdate.bits.cfiPosition
 
+  tage.io.mbtbResult := mbtb.io.result
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
@@ -221,8 +223,11 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
   // mbtb meta
-  val s3_mbtbMeta        = RegEnable(mbtb.io.meta, s2_fire)
-  private val s3_rasMeta = ras.io.specMeta
+  private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+  private val s3_rasMeta  = ras.io.specMeta
+
+  // tage meta
+  private val s3_tageMeta = tage.io.meta
 
   private val s3_speculativeMeta = Wire(new BpuSpeculativeMeta)
   s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
@@ -233,6 +238,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.abtb := s3_abtbMeta
   s3_meta.mbtb := s3_mbtbMeta
   s3_meta.ras  := s3_rasMeta
+  s3_meta.tage := s3_tageMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid
