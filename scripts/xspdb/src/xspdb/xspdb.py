@@ -325,31 +325,3 @@ class XSPdb(pdb.Pdb):
         if log_cmd:
             self.record_cmd(line)
         return super().onecmd(line)
-
-    def _exec_batch_cmds(self, exec=None, break_handler=None):
-        exec_count = 0
-        if len(self.batch_cmds_to_exec) <= 0:
-            return exec_count
-        if break_handler is None:
-            break_handler = self.api_batch_get_default_break_cb()
-        if exec is None:
-            exec = self.onecmd
-        self.batch_depth += 1
-        while len(self.batch_cmds_to_exec) > 0:
-            line, gap_time, callback = self.batch_cmds_to_exec.pop(0)
-            info(f"Batch exec: '{line}'")
-            self.api_dut_step_ready()
-            self.__last_batch_cmd_ret__ = exec(line, False)
-            if callback:
-                callback(self, line)
-            self.api_busy_sleep(gap_time)
-            if self.interrupt:
-                if callable(break_handler):
-                    self.batch_depth -= 1
-                    return break_handler(exec_count)
-            exec_count += 1
-        self.batch_depth -= 1
-        return exec_count
-
-    def api_append_init_cmd(self, cmd):
-        self.init_cmds.append(cmd)

@@ -27,7 +27,7 @@ PYTHON_DEPS        = urwid capstone
 
 .PHONY: pdb $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so $(PDB_HOME)/xspdb $(PDB_HOME)/xspdb.tar.gz pdb-run check-deps
 
-pdb: $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so
+pdb: clean $(DIFFTEST_HOME)/_difftest.so $(PDB_HOME)/picker.f $(PDB_HOME)/libUTSimTop.so
 
 $(DIFFTEST_HOME)/_difftest.so: sim-verilog
 	$(MAKE) -C ./difftest pydifftest WITH_CONSTANTIN=0 WITH_CHISELDB=0
