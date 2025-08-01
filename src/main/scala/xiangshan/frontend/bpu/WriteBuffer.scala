@@ -35,6 +35,7 @@ import xiangshan.XSModule
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
  * @param usefulWidth The width of the useful counter, used to determine if the entry is useful
+ * @param hasTag Whether the write request bundle's entry has a tag field, used to modify hitMask
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param pipe Whether the write buffer is pipelined, used to determine if the read
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write bufferq
@@ -44,6 +45,7 @@ class WriteBuffer[T <: WriteReqBundle](
     val numEntries:  Int,
     val numPorts:    Int,
     val usefulWidth: Int = 1,
+    val hasTag:      Boolean = true,
     val hasCnt:      Boolean = false,
     val pipe:        Boolean = false,
     val hasFlush:    Boolean = false
@@ -78,7 +80,7 @@ class WriteBuffer[T <: WriteReqBundle](
   for (p <- 0 until numPorts) {
     for (e <- 0 until numEntries) {
       hitMask(p)(e) := writePort.valid && writePort.bits.setIdx === entries(p)(e).setIdx &&
-        writePort.bits.tag === entries(p)(e).tag
+        writePort.bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U)
     }
   }
   assert(PopCount(hitMask.flatten) <= 1.U, "WriteBuffer hitMask should be one-hot")
