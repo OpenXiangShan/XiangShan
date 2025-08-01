@@ -47,9 +47,9 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx: UInt         = UInt(SetIdxLen.W)
-  val entry:  MainBtbEntry = new MainBtbEntry
-  def tag:    UInt         = entry.tag // use entry's tag directly
+  val setIdx:       UInt         = UInt(SetIdxLen.W)
+  val entry:        MainBtbEntry = new MainBtbEntry
+  override def tag: Option[UInt] = Some(entry.tag) // use entry's tag directly
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
