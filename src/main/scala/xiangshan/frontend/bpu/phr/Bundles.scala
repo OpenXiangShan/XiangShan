@@ -150,7 +150,6 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
 // }
 
 // class AllAheadFoldedHistoryOldestBits(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends PhrBundle {
-//   // 1.过滤出需要处理的配置（历史长度 > 压缩长度）2.去重（toSet.toList）3.生成对应的AheadFoldedHistoryOldestBits实例
 //   val afhob = MixedVec(gen.filter(t => t._1 > t._2).map(_._1)
 //     .toSet.toList.map(l => new AheadFoldedHistoryOldestBits(l, numBr))) // remove duplicates
 //   require(gen.toSet.toList.equals(gen))
