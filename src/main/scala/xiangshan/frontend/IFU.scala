@@ -692,7 +692,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   when(!f3_req_is_mmio) {
     f3_mmio_sent_to_ibuffer := false.B
-  }.elsewhen(f3_mmio_req_commit || (mmioF3Flush && !f3_need_not_flush)) {
+  }.elsewhen(f3_mmio_req_commit || (mmioF3Flush && !f3_need_not_flush) || f3_ftq_flush_self || f3_ftq_flush_by_older) {
     f3_mmio_sent_to_ibuffer := false.B
   }.elsewhen(io.toIbuffer.fire) {
     f3_mmio_sent_to_ibuffer := true.B
