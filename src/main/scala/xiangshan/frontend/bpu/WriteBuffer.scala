@@ -67,9 +67,10 @@ class WriteBuffer[T <: WriteReqBundle](
   private val usefulCnts =
     RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(new SaturateCounter(usefulWidth)))))))
   private val entries = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))))
+  private val valids  = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val hitMask = WireInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val writeValidPortVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
-  private val writePort         = io.write(OHToUInt(writeValidPortVec))
+  private val writePort         = Wire(Valid(gen.cloneType))
   private val hit               = WireInit(false.B)
 
   for (i <- 0 until numPorts) {
@@ -77,9 +78,17 @@ class WriteBuffer[T <: WriteReqBundle](
   }
   assert(PopCount(writeValidPortVec) <= 1.U, "Only one port can be written at a time")
 
+  when(!writeValidPortVec.reduce(_ || _)) {
+    writePort.valid := false.B
+    writePort.bits  := DontCare
+  }.otherwise {
+    writePort.valid := io.write(OHToUInt(writeValidPortVec)).valid
+    writePort.bits  := io.write(OHToUInt(writeValidPortVec)).bits
+  }
+
   for (p <- 0 until numPorts) {
     for (e <- 0 until numEntries) {
-      hitMask(p)(e) := writePort.valid && writePort.bits.setIdx === entries(p)(e).setIdx &&
+      hitMask(p)(e) := writePort.valid && valids(p)(e) && writePort.bits.setIdx === entries(p)(e).setIdx &&
         writePort.bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U)
     }
   }
@@ -139,15 +148,18 @@ class WriteBuffer[T <: WriteReqBundle](
       when(hit) {
         when(hitUsefulEntry) {
           entries(port)(hitTouch.bits) := io.write(port).bits
+          valids(port)(hitTouch.bits)  := true.B
         }.elsewhen(hitUselessEntry) {
           val entryChange = entries(port)(hitTouch.bits).asUInt =/= io.write(port).bits.asUInt
           when(entryChange && !hasCnt.B) {
             usefulCnts(port)(hitTouch.bits).increase()
             entries(port)(hitTouch.bits) := io.write(port).bits
+            valids(port)(hitTouch.bits)  := true.B
           }
         }
       }.elsewhen(writeFlow) {
         entries(port)(victim)    := io.write(port).bits
+        valids(port)(victim)     := true.B
         usefulCnts(port)(victim) := 0.U.asTypeOf(new SaturateCounter(usefulWidth))
         io.read(port).valid      := true.B
         io.read(port).bits       := io.write(port).bits
@@ -155,6 +167,7 @@ class WriteBuffer[T <: WriteReqBundle](
         writeTouch.bits          := victim
       }.otherwise {
         entries(port)(victim) := io.write(port).bits
+        valids(port)(victim)  := true.B
         usefulCnts(port)(victim).increase()
         writeTouch.valid := true.B
         writeTouch.bits  := victim
@@ -171,8 +184,9 @@ class WriteBuffer[T <: WriteReqBundle](
         // If a write request hits an entry, update its counter using 'taken'
         // and write other entry information
         val updateCnt = entries(port)(hitTouch.bits).cnt.get.getUpdate(io.taken.getOrElse(false.B))
-        temporarily.cnt.get    := updateCnt.asTypeOf(entries(port)(hitTouch.bits).cnt.get)
-        entries(hitTouch.bits) := temporarily
+        temporarily.cnt.get          := updateCnt.asTypeOf(entries(port)(hitTouch.bits).cnt.get)
+        entries(port)(hitTouch.bits) := temporarily
+        valids(port)(hitTouch.bits)  := true.B
         // If the write request hits a not write flag entry, update the usefulCnts
         when(usefulCnts(port)(hitTouch.bits).isNegative) {
           usefulCnts(port)(hitTouch.bits).increase()
