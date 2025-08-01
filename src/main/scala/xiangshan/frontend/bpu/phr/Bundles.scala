@@ -23,11 +23,12 @@ import utility.XSDebug
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
 class PhrPtr(implicit p: Parameters) extends CircularQueuePtr[PhrPtr](p =>
       p(XSCoreParamsKey).bpuParameters.tageParameters.TableInfos.map(_._2).max +
-        p(XSCoreParamsKey).bpuParameters.phrParameters.Shamt * p(XSCoreParamsKey).FtqSize
+        p(XSCoreParamsKey).bpuParameters.phrParameters.Shamt * p(XSCoreParamsKey).FtqSize + 13
     ) {}
 
 object PhrPtr {
@@ -50,20 +51,20 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
   // val target: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
-class PhrTrain(implicit p: Parameters) extends PhrBundle {
+class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   // NOTE: if the StageCtrl structure changes, it may require refactoring
   val s0_stall:  Bool      = Bool()
   val stageCtrl: StageCtrl = new StageCtrl
 
   val redirect: Valid[BpuRedirect] = Valid(new BpuRedirect)
 
-  val s1_valid: Bool       = Bool()
-  val s1_pc:    PrunedAddr = PrunedAddr(VAddrBits)
-  val s1_taken: Bool       = Bool()
+  val s1_valid:      Bool       = Bool()
+  val s1_prediction: Prediction = new Prediction()
+  val s1_pc:         PrunedAddr = PrunedAddr(VAddrBits)
 
-  val s3_override: Bool       = Bool()
-  val s3_pc:       PrunedAddr = PrunedAddr(VAddrBits)
-  val s3_taken:    Bool       = Bool()
+  val s3_override:   Bool       = Bool()
+  val s3_prediction: Prediction = new Prediction()
+  val s3_pc:         PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 //NOTE: Folded history maintainance logic reuse kmh-v2 ghr folded history management logic,

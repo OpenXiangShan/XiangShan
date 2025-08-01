@@ -963,6 +963,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   update.spec_info     := s2_commitSpecMeta
   io.toBpu.train.valid := s2_commitValid && s2_readyToCommit
   io.toBpu.train.bits.fromBranchPredictionUpdate(update)
+  io.toBpu.train.bits.mispred := s2_commitMispredict.asUInt
 
   val s2_commitRealHit = s2_commitHit === h_hit
   val update_ftb_entry = update.ftb_entry

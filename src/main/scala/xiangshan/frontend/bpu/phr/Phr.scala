@@ -19,7 +19,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
+import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BpuTrain
 
 // PHR: Predicted History Register
 class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
@@ -30,7 +33,8 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val s3_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(TageFoldedGHistInfos))
     val phrs:         Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
     val phrPtr:       PhrPtr                = Output(new PhrPtr)
-    val train:        PhrTrain              = Input(new PhrTrain)
+    val train:        PhrUpdate             = Input(new PhrUpdate)
+    val commit:       Valid[BpuTrain]       = Input(Valid(new BpuTrain))
   }
   val io: PhrIO = IO(new PhrIO)
 
@@ -83,14 +87,14 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
-  s3_overrideData.taken     := io.train.s3_taken
-  s3_overrideData.pc        := io.train.s3_pc
+  s3_overrideData.taken     := io.train.s3_prediction.taken
+  s3_overrideData.pc        := getBranchAddr(io.train.s3_pc, io.train.s3_prediction.cfiPosition)
   s3_overrideData.phrPtr    := s3_phrPtr
   s3_overrideData.foldedPhr := s3_foldedPhrReg
 
   s1_overrideData.valid     := s1_valid
-  s1_overrideData.taken     := io.train.s1_taken
-  s1_overrideData.pc        := io.train.s1_pc
+  s1_overrideData.taken     := io.train.s1_prediction.taken
+  s1_overrideData.pc        := getBranchAddr(io.train.s1_pc, io.train.s1_prediction.cfiPosition)
   s1_overrideData.phrPtr    := s1_phrPtr
   s1_overrideData.foldedPhr := s1_foldedPhrReg
 
@@ -125,7 +129,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   io.phrPtr       := phrPtr
-  io.phrs         := getPhr(phrPtr).asTypeOf(Vec(PhrHistoryLength, Bool()))
+  io.phrs         := phr
   io.s0_foldedPhr := s0_foldedPhr
   io.s1_foldedPhr := s1_foldedPhrReg
   io.s2_foldedPhr := s2_foldedPhrReg

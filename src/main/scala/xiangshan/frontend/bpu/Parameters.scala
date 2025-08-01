@@ -60,7 +60,7 @@ trait HasBpuParameters extends HasXSParameter {
   // phr history
   def Shamt:            Int      = bpuParameters.phrParameters.Shamt
   def AllHistLens:      Seq[Int] = bpuParameters.tageParameters.TableInfos.map(_._2)
-  def PhrHistoryLength: Int      = AllHistLens.max + Shamt * FtqSize
+  def PhrHistoryLength: Int      = AllHistLens.max + Shamt * FtqSize + 13
   def TageFoldedGHistInfos: List[Tuple2[Int, Int]] =
     (bpuParameters.tageParameters.TableInfos.map { case (nRows, h, _) =>
       if (h > 0)

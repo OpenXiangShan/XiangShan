@@ -17,9 +17,12 @@ package xiangshan.frontend.bpu.phr
 
 import chisel3._
 import chisel3.util._
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.PhrHelper
 
-trait Helpers extends HasPhrParameters with PhrHelper {
+trait Helpers extends HasPhrParameters with PhrHelper with HalfAlignHelper {
   // folded History
   def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
@@ -48,6 +51,11 @@ trait Helpers extends HasPhrParameters with PhrHelper {
       res(i) := resArr(i).foldLeft(false.B)(_ ^ _)
     }
     res.asUInt
+  }
+  def getBranchAddr(addr: PrunedAddr, cfiPosition: UInt): PrunedAddr = {
+    val alignedAddr = Cat(getAlignedAddrUpper(addr), 0.U(FetchBlockAlignWidth.W))
+    val brOffset    = Cat(cfiPosition, 0.U(instOffsetBits.W))
+    PrunedAddrInit(alignedAddr + brOffset)
   }
 
 }
