@@ -65,7 +65,19 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb_and_flush_sbuffer_req :: s_pm :: s_wait_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_cache_resp_latch :: s_finish :: s_finish2 :: Nil = Enum(9)
+  val List(
+    s_invalid, 
+    s_tlb_and_flush_sbuffer_req, 
+    s_pm, 
+    s_wait_flush_sbuffer_resp, 
+    s_cache_req, 
+    s_cache_resp,
+    s_cache_resp_latch, 
+    s_finish, 
+    s_finish2, 
+    s_extra_wb2, 
+    s_extra_wb, 
+  ) = Enum(11)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
@@ -81,13 +93,13 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val pdest1, pdest2 = Reg(UInt(PhyRegIdxWidth.W))
   val pdest1Valid, pdest2Valid = RegInit(false.B)
   /**
-    * The # of std uops that an atomic instruction require:
+    * The # of std uops that an atomic instruction require, also the # of write-back:
     * (1) For AMOs (except AMOCAS) and LR/SC, 1 std uop is wanted: X(rs2) with uopIdx = 0
     * (2) For AMOCAS.W/D, 2 std uops are wanted: X(rd), X(rs2) with uopIdx = 0, 1
     * (3) For AMOCAS.Q, 4 std uops are wanted: X(rd), X(rs2), X(rd+1), X(rs2+1) with uopIdx = 0, 1, 2, 3
     * stds are not needed for write-back.
     *
-    * The # of sta uops that an atomic instruction require, also the # of write-back:
+    * The # of sta uops that an atomic instruction require:
     * (1) For AMOs(except AMOCAS.Q) and LR/SC, 1 sta uop is wanted: X(rs1) with uopIdx = 0
     * (2) For AMOCAS.Q, 2 sta uop is wanted: X(rs1)*2 with uopIdx = 0, 2
     */
@@ -405,6 +417,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
         // enter `s_finish2` to write the 2nd uop back
         state := s_finish2
         out_valid := true.B
+      }.elsewhen (LSUOpType.isAMOCASWD(uop.fuOpType)) {
+        // enter `s_extra_wb` to write back the extra std uops
+        state := s_extra_wb
+        out_valid := true.B
       }.otherwise {
         // otherwise the FSM ends here
         resetFSM()
@@ -413,6 +429,18 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   }
 
   when (state === s_finish2) {
+    when (io.out.fire) {
+      state := s_extra_wb2
+    }
+  }
+
+  when (state === s_extra_wb2) {
+    when (io.out.fire) {
+      state := s_extra_wb
+    }
+  }
+
+  when (state === s_extra_wb) {
     when (io.out.fire) {
       resetFSM()
     }
@@ -478,10 +506,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.in.ready := state === s_invalid || LSUOpType.isAMOCASQ(uop.fuOpType) && (!pdest2Valid || !pdest1Valid)
 
   io.out.valid := out_valid && Mux(state === s_finish2, pdest2Valid, pdest1Valid)
-  XSError((state === s_finish || state === s_finish2) =/= out_valid, "out_valid reg error\n")
+  assert(!out_valid || state === s_finish || state === s_finish2 || state === s_extra_wb || state === s_extra_wb2, "out_valid reg error\n")
   io.out.bits := DontCare
   io.out.bits.uop := uop
   io.out.bits.uop.fuType := FuType.mou.U
+  io.out.bits.uop.rfWen := state === s_finish || state === s_finish2
   io.out.bits.uop.pdest := Mux(state === s_finish2, pdest2, pdest1)
   io.out.bits.uop.exceptionVec := exceptionVec
   io.out.bits.uop.trigger := trigger
