@@ -38,7 +38,7 @@ case class OPIVV(
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -55,7 +55,7 @@ case class OPIVX(
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -73,7 +73,7 @@ case class OPIVI(
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType,
-      xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = F, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -108,7 +108,7 @@ case class OPMVX(
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = xWen, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = xWen, fWen = F, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -125,14 +125,14 @@ case class OPFVV(
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
 case class OPFFF(src1: BitPat, src2: BitPat, src3: BitPat, fu: FuType.OHType, fuOp: BitPat, xWen: Boolean, fWen: Boolean, vWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = xWen, fWen = fWen, vWen = vWen, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F, canRobCompress = T).generate()
+      xWen = xWen, fWen = fWen, vWen = vWen, mWen = F, noSpec = F, blockBack = F, flushPipe = F, canRobCompress = T).generate()
   }
 }
 
@@ -149,7 +149,7 @@ case class OPFVF(
 ) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -158,7 +158,7 @@ case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean,
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp
     XSDecode(src1, src2, SrcType.X, FuType.vsetiwf, fuOp, selImm, uopSplitType,
-      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = blockBack, flushPipe = flushPipe).generate()
+      xWen = F, fWen = F, vWen = F, mWen = F, noSpec = F, blockBack = blockBack, flushPipe = flushPipe).generate()
   }
 }
 
@@ -169,7 +169,7 @@ case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Bo
     val src1 = SrcType.xp
     val src3 = SrcType.vp
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = F, vWen = T, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = F, vWen = T, mWen = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
@@ -180,7 +180,7 @@ case class VST(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Bo
     val src1 = SrcType.xp
     val src3 = SrcType.vp
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
-      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
+      xWen = F, fWen = F, vWen = F, mWen = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 

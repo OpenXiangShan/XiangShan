@@ -28,7 +28,7 @@ package xiangshan.backend.rename
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3.Bundle
-import xiangshan.backend.Bundles.DecodedInst
+import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.XSModule
 import chisel3._
 import chisel3.util._
@@ -39,7 +39,7 @@ import xiangshan.backend.fu.FuType
 
 class CompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
-    val in = Vec(RenameWidth, Flipped(Valid(new DecodedInst)))
+    val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))
     val oddFtqVec = Vec(RenameWidth, Input(Bool()))
     val out = new Bundle {
       val needRobFlags = Vec(RenameWidth, Output(Bool()))

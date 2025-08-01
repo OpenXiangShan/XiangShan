@@ -23,7 +23,7 @@ import chisel3.util.experimental.decode.TruthTable
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst}
+import xiangshan.backend.Bundles.{DecodeOutUop, DynInst, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
@@ -53,7 +53,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // from csr
     val singleStep = Input(Bool())
     // from decode
-    val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
+    val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodeOutUop)))
     // valid vec not clear by fusion(used by compress)
     val validVec = Vec(RenameWidth, Input(Bool()))
     val isFusionVec = Vec(RenameWidth, Input(Bool()))
@@ -101,7 +101,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
-    PerfCCT.updateInstPos(o.bits.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+    o.bits.debug.foreach{ x =>
+      PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+    }
   }
 
   // io alias
@@ -128,7 +130,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vlFreeList.io.debug_rat.foreach(_ <> io.debug_vl_rat.get)
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
-  def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
+  def needDestReg[T <: DecodeOutUop](reg_t: RegType, x: T): Bool = reg_t match {
     case Reg_I => x.rfWen
     case Reg_F => x.fpWen
     case Reg_V => x.vecWen
@@ -170,7 +172,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
-  val isLastFtqVec = io.in.map(_.bits.lastInFtqEntry)
+  val isLastFtqVec = io.in.map(_.bits.isLastInFtqEntry)
   val isFusionVec = io.isFusionVec
   val canRobCompressVec = io.in.map(_.bits.canRobCompress)
   // count crossftq num in may same robentry
@@ -214,22 +216,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new DynInst))
-  uops.foreach( uop => {
-    uop.srcState      := DontCare
-    uop.debugInfo     := DontCare
-    uop.lqIdx         := DontCare
-    uop.sqIdx         := DontCare
-    uop.waitForRobIdx := DontCare
-    uop.singleStep    := DontCare
-    uop.snapshot      := DontCare
-    uop.srcLoadDependency := DontCare
-    uop.numLsElem       :=  DontCare
-    uop.hasException  :=  DontCare
-    uop.useRegCache   := DontCare
-    uop.regCacheIdx   := DontCare
-    uop.traceBlockInPipe := DontCare
-    uop.isDropAmocasSta := DontCare
-  })
+  uops.zip(io.in).map{ case(uop, in) => {
+    uop := 0.U.asTypeOf(uop)
+    connectSamePort(uop, in)
+    in.bits.debug.foreach( x => {
+      uop.pc := x.pc
+      uop.debug_seqNum := x.debug_seqNum
+      uop.commitType := x.commitType
+    })
+  }}
   private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
   private val isCsr        = Wire(Vec(RenameWidth, Bool()))
   private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
@@ -307,10 +302,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
-
-  io.out.zipWithIndex.foreach{ case (o, i) =>
-    o.bits.debug_seqNum := io.in(i).bits.debug_seqNum
-  }
 
   // uop calculation
   for (i <- 0 until RenameWidth) {
@@ -739,8 +730,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /*
   Debug and performance counters
    */
-  def printRenameInfo(in: DecoupledIO[DecodedInst], out: DecoupledIO[DynInst]) = {
-    XSInfo(out.fire, p"pc:${Hexadecimal(in.bits.pc)} in(${in.valid},${in.ready}) " +
+  def printRenameInfo(in: DecoupledIO[DecodeOutUop], out: DecoupledIO[DynInst]) = {
+    val pc = if(backendParams.debugEn) in.bits.debug.get.pc else 0.U
+    XSInfo(out.fire, p"pc:${Hexadecimal(pc)} in(${in.valid},${in.ready}) " +
       p"lsrc(0):${in.bits.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
       p"lsrc(1):${in.bits.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
       p"lsrc(2):${in.bits.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +

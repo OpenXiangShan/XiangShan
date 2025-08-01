@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.DecodedInst
+import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
@@ -516,7 +516,7 @@ class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
   val src2Type = Valid(SrcType())
   val selImm = Valid(SelImm())
 
-  def update(cs: DecodedInst): Unit = {
+  def update(cs: DecodeOutUop): Unit = {
     when (fuType.valid) {
       cs.fuType := fuType.bits
     }
@@ -542,7 +542,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val in = Vec(DecodeWidth, Flipped(ValidIO(UInt(32.W))))
     val inReady = Vec(DecodeWidth - 1, Input(Bool())) // dropRight(1)
     // T1: decode result
-    val dec = Vec(DecodeWidth - 1, Input(new DecodedInst)) // dropRight(1)
+    val dec = Vec(DecodeWidth - 1, Input(new DecodeOutUop)) // dropRight(1)
     // T1: whether an instruction fusion is found
     val out = Vec(DecodeWidth - 1, ValidIO(new FusionDecodeReplace)) // dropRight(1)
     val info = Vec(DecodeWidth - 1, new FusionDecodeInfo) // dropRight(1)
@@ -622,7 +622,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     }
     def connectByUIntFunc(
       field: FusionDecodeReplace => Valid[UInt],
-      csField: DecodedInst => UInt,
+      csField: DecodeOutUop => UInt,
       replace: Seq[Option[UInt => UInt]]
     ): Unit = {
       field(out.bits).valid := false.B
@@ -642,7 +642,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       }
     }
     connectByInt((x: FusionDecodeReplace) => x.fuType, fusionList.map(_.fuType))
-    connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodedInst) => x.fuOpType, fusionList.map(_.fuOpType))
+    connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodeOutUop) => x.fuOpType, fusionList.map(_.fuOpType))
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     connectByUInt((x: FusionDecodeReplace) => x.selImm, fusionList.map(_.selImm), false)
 
