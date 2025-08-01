@@ -23,7 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle, VIAluCtrlSignals}
 import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, Resolve, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
@@ -197,6 +197,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+      sink.bits.ctrl.vialuCtrl   .foreach(x => x := source.bits.vialuCtrl.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
       sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
   }
@@ -229,6 +230,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
+      sink.vpu.foreach(x => x.maskVecGen := 0.U)
+      sink.vialuCtrl.foreach(x => x := 0.U.asTypeOf(new VIAluCtrlSignals))
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }

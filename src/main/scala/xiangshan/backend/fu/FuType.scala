@@ -185,6 +185,8 @@ object FuType extends OHEnumeration {
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
+  def isVIAluF(fuType: UInt): Bool = FuTypeOrR(fuType, vialuF)
+
   def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu)
 
   def isVnonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
