@@ -25,9 +25,10 @@ class NewPipelineConnectPipe[T <: Data](gen: T) extends Module {
     val out = DecoupledIO(gen.cloneType)
     val rightOutFire = Input(Bool())
     val isFlush = Input(Bool())
+    val isOlder = Input(Bool())
   })
 
-  NewPipelineConnect.connect(io.in, io.out, io.rightOutFire, io.isFlush)
+  NewPipelineConnect.connect(io.in, io.out, io.rightOutFire, io.isFlush, io.isOlder)
 }
 
 object NewPipelineConnect {
@@ -35,11 +36,12 @@ object NewPipelineConnect {
                           left: DecoupledIO[T],
                           right: DecoupledIO[T],
                           rightOutFire: Bool,
-                          isFlush: Bool
+                          isFlush: Bool,
+                          isOlder: Bool
                         ): T = {
     val valid = RegInit(false.B)
 
-    left.ready := right.ready || !valid
+    left.ready := right.ready || !valid || isOlder
     val data = RegEnable(left.bits, left.fire)
 
     when (rightOutFire) { valid := false.B }
@@ -57,7 +59,8 @@ object NewPipelineConnect {
                         right: DecoupledIO[T],
                         rightOutFire: Bool,
                         isFlush: Bool,
-                        moduleName: Option[String] = None
+                        moduleName: Option[String] = None,
+                        isOlder: Bool = false.B
                       ): Option[T] = {
     if (moduleName.isDefined) {
       val pipeline = Module(new NewPipelineConnectPipe(left.bits))
@@ -65,13 +68,14 @@ object NewPipelineConnect {
       pipeline.io.in <> left
       pipeline.io.rightOutFire := rightOutFire
       pipeline.io.isFlush := isFlush
+      pipeline.io.isOlder := isOlder
       pipeline.io.out <> right
       pipeline.io.out.ready := right.ready
       None
     }
     else {
       // do not use module here to please DCE
-      Some(connect(left, right, rightOutFire, isFlush))
+      Some(connect(left, right, rightOutFire, isFlush, isOlder))
     }
   }
 }
