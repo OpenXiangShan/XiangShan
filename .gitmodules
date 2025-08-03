@@ -28,3 +28,7 @@
 [submodule "ChiselAIA"]
 	path = ChiselAIA
 	url = https://github.com/OpenXiangShan/ChiselAIA.git
+[submodule "pydrofoil"]
+	path = pydrofoil
+	url = https://github.com/definfo/pydrofoil.git
+	branch = difftest-ref
