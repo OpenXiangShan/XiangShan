@@ -267,7 +267,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.fromPcTargetMem.fromDataPathFtqPtr := pcReadFtqPtr
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
-  val DiffFpga = true
+  val DiffFpga = false
   private val intDiffRead: Option[(Vec[UInt], Vec[UInt])] =
     OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
   private val fpDiffRead: Option[(Vec[UInt], Vec[UInt])] =
