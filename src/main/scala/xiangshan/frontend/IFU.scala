@@ -721,8 +721,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   switch(mmio_state) {
     is(m_idle) {
       when(f3_req_is_mmio) {
-        // in idempotent spaces, we can send request directly (i.e. can do speculative fetch)
-        mmio_state := Mux(f3_itlb_pbmt === Pbmt.nc, m_sendReq, m_waitLastCmt)
+        mmio_state := m_waitLastCmt
       }
     }
 
@@ -806,9 +805,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_waitCommit) {
-      // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
-      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_go relies on this)
-      mmio_state := Mux(mmio_commit || f3_itlb_pbmt === Pbmt.nc, m_commited, m_waitCommit)
+      mmio_state := Mux(mmio_commit, m_commited, m_waitCommit)
     }
 
     // normal mmio instruction
