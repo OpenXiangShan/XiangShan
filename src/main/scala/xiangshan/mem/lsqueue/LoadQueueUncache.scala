@@ -115,11 +115,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     * (3) s_resp: wait for response from uncache channel
     * (4) s_wait: wait for loadunit to receive writeback req
     */
-  val pendingld = GatedValidRegNext(io.rob.pendingMMIOld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    pendingld && req.uop.robIdx === pendingPtr
+    req.uop.robIdx === pendingPtr
   )
   switch (uncacheState) {
     is (s_idle) {

@@ -936,7 +936,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isVStore = FuType.isVStore(decodedInst.fuType)
   private val isBranch = !decodedInst.preDecodeInfo.notCFI || FuType.isJump(decodedInst.fuType)
 
-  decodedInst.debug.foreach(_.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch))
+  decodedInst.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch)
 
   decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 

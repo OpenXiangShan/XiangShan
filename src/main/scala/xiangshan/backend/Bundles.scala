@@ -87,6 +87,8 @@ object Bundles {
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends DecodeInUop {
     // DecodeOutUop also needs instr because the fusion decoder uses it.
+    // commitType will be used in rob to calculate lsq commit count
+    val commitType = CommitType()
     def numSrc = backendParams.numSrc
     val srcType = Vec(numSrc, SrcType())
     val lsrc = Vec(numSrc, UInt(LogicRegsWidth.W))
@@ -140,7 +142,6 @@ object Bundles {
     }
   }
   class DecodeOutUopDebug(implicit p: Parameters) extends DecodeInUopDebug {
-    val commitType = CommitType()
   }
 
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {

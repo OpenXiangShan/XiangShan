@@ -222,7 +222,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     in.bits.debug.foreach( x => {
       uop.pc := x.pc
       uop.debug_seqNum := x.debug_seqNum
-      uop.commitType := x.commitType
     })
   }}
   private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))

@@ -102,6 +102,8 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     exuCfg.updateExuIdx(i)
   }
 
+  println(s"[Backend] debugEn:${backendParams.debugEn}")
+  println(s"[Backend] basicDebugEn:${backendParams.basicDebugEn}")
   println("[Backend] ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs

@@ -98,10 +98,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val lsqio = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val pendingMMIOld = Input(Bool())
-    val pendingld = Input(Bool())
-    val pendingst = Input(Bool())
-    val pendingVst = Input(Bool())
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
@@ -1097,10 +1093,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.redirect                <> redirect
   loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  loadMisalignBuffer.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
-  loadMisalignBuffer.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
-  loadMisalignBuffer.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
-  loadMisalignBuffer.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   loadMisalignBuffer.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1111,10 +1103,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
   storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
-  storeMisalignBuffer.io.rob.pendingMMIOld      := io.ooo_to_mem.lsqio.pendingMMIOld
-  storeMisalignBuffer.io.rob.pendingld          := io.ooo_to_mem.lsqio.pendingld
-  storeMisalignBuffer.io.rob.pendingst          := io.ooo_to_mem.lsqio.pendingst
-  storeMisalignBuffer.io.rob.pendingVst         := io.ooo_to_mem.lsqio.pendingVst
   storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
   storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
   storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1272,10 +1260,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  lsq.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
-  lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
-  lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
-  lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext

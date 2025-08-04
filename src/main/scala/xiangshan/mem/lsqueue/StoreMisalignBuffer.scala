@@ -160,7 +160,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val canEnq = WireInit(false.B)
   canEnq := !req_valid && !reqRedirect && reqSelValid
-  val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
+  val robMatch = req_valid && (io.rob.pendingPtr === req.uop.robIdx)
 
   val s2_canEnq = GatedRegNext(canEnq)
   val s2_reqSelPort = GatedRegNext(reqSelPort)
