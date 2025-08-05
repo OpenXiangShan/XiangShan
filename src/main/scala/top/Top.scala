@@ -335,10 +335,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     misc.module.scntIO.update_en := false.B
     misc.module.scntIO.update_value := 0.U
     misc.module.scntIO.stop_en := false.B
-
     misc.module.rtc_clock := io.rtc_clock //syscnt clock
     misc.module.rtc_reset := ref_reset_sync.asAsyncReset
-    //timevld instance
+    misc.module.bus_clock := io.clock
+    misc.module.bus_reset := io.reset
+
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
