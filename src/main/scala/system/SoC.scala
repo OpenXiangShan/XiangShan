@@ -19,7 +19,14 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{AXI4MemEncrypt, DebugModule, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO, TimeAsync, TimeVldGen}
+import device.{AXI4MemEncrypt, DebugModule, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO}
+
+
+import huancun._
+import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import coupledL2.{EnableCHI, L2Param}
+import coupledL2.tl2chi.CHIIssue
+import openLLC.OpenLLCParam
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -27,16 +34,11 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.AsyncQueueParams
-import huancun._
+import freechips.rocketchip.util.{AsyncQueueParams}
 import top.BusPerfMonitor
-import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
-import coupledL2.{EnableCHI, L2Param}
-import coupledL2.tl2chi.CHIIssue
 import device.SYSCNTConsts.timeWidth
-import openLLC.OpenLLCParam
 
 case object SoCParamsKey extends Field[SoCParameters]
 case object CVMParamsKey extends Field[CVMParameters]
@@ -116,8 +118,6 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  EnableIOSeperateTLBus: Boolean = false,
-  EnableClintAsync: Boolean = true,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -183,8 +183,6 @@ trait HasSoCParameter {
   // seperate TL bus
   val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
 
-  val EnableIOSeperateTLBus = soc.EnableIOSeperateTLBus && SeperateTLBus
-  val EnableClintAsync = soc.EnableClintAsync
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
 
@@ -473,7 +471,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  //instant syscnt
+  // instant syscnt
   val syscnt = (LazyModule(new SYSCNT(SYSCNTParams(soc.SYSCNTRange.base), 8)))
   //  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
 
@@ -508,31 +506,37 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   if (enableCHI) { pll_node := device_xbar.get }
   else { pll_node := peripheralXbar.get }
 
-  //instance timer
-  val timer = (LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
+  // instance timer
+  val timer = LazyModule(new TIMER(TIMERParams(IsSelfTest = true, soc.TIMERRange.base), 8))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
-  val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
+  val SepTLXbarOpt = Option.when(SeperateTLBus)(TLXbar())
   if (enableCHI) {
     if (SeperateDM) {
-      debugModule.debug.node := debugModuleXbarOpt.get
-      timer.node := debugModuleXbarOpt.get
+      debugModule.debug.node := SepTLXbarOpt.get
     } else {
       debugModule.debug.node := device_xbar.get
-      timer.node := device_xbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
     }
+    if(SeperateTLBus){
+      timer.node := SepTLXbarOpt.get
+    } else{
+      timer.node := device_xbar.get
+    }
   } else {
     if (SeperateDM) {
-      debugModule.debug.node := debugModuleXbarOpt.get
-      timer.node := debugModuleXbarOpt.get
+      debugModule.debug.node := SepTLXbarOpt.get
     } else {
       debugModule.debug.node := peripheralXbar.get
-      timer.node := peripheralXbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
       l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+    }
+    if(SeperateTLBus){
+      timer.node := SepTLXbarOpt.get
+    } else{
+      timer.node := peripheralXbar.get
     }
   }
 
@@ -555,6 +559,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val rtc_clock = IO(Input(Clock()))
     val rtc_reset = IO(Input(Reset()))
+    val bus_clock = IO(Input(Clock()))
+    val bus_reset = IO(Input(Reset()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
@@ -563,7 +569,6 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
       val stop_en = Input(Bool())
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
     })
     debugModule.module.io <> debug_module_io
 
@@ -590,27 +595,19 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
 
-    //instance time async proc ip
-    //timevldgen instant to generate timestamp valid
-    val ClintVldGen = Module(new TimeVldGen())
-    ClintVldGen.io.i_time := syscnt.module.io.time
-    ClintVldGen.clock := rtc_clock
-    ClintVldGen.reset := rtc_reset
     // timer instance
-    val time_async = Module(new TimeAsync())
-    time_async.io.i_time <> ClintVldGen.io.o_time
-    clintTime := time_async.io.o_time //syscnt->timevldgen ->timeasync
-
-    timer.module.io.time <> ClintVldGen.io.o_time
+    clintTime :=   syscnt.module.io.time // syscnt ->timeasync
+    timer.module.io.time <> syscnt.module.io.time
     timer.module.io.hartId := 0.U
 
     // instance syscnt
-    syscnt.module.clock := rtc_clock
-    syscnt.module.reset := rtc_reset
+    syscnt.module.rtc_clock := rtc_clock
+    syscnt.module.rtc_reset := rtc_reset
+    syscnt.module.bus_clock := bus_clock
+    syscnt.module.bus_reset := bus_reset
     syscnt.module.io.update_en := scntIO.update_en
     syscnt.module.io.update_value := scntIO.update_value
     syscnt.module.io.stop_en := scntIO.stop_en
-    scntIO.time_freq := syscnt.module.io.time_freq
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 

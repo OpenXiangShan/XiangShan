@@ -175,17 +175,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
-    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+    misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")
-      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      println(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
       require(core_with_l2(i).sep_tl_opt.isDefined)
-      require(SeperateTLBusRanges.size == 1)
-      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
-      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+      require(SeperateTLBusRanges.size >= 1)
+      require(SeperateTLBusRanges.head.base <= p(DebugModuleKey).get.address.base)
+      require(SeperateTLBusRanges.head.base <= p(SoCParamsKey).TIMERRange.base)
+      SepTLXbarOpt := core_with_l2(i).sep_tl_opt.get
     }
   }
-
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
   l3cacheOpt.map(_.intnode.map(int => {
     misc.plic.intnode := IntBuffer() := int
@@ -328,15 +328,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
     val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
-    //syscnt io input descrip
+    // syscnt io input descrip
     val ref_reset_sync = withClockAndReset(io.rtc_clock, io.reset) { ResetGen() }
     misc.module.scntIO.update_en := false.B
     misc.module.scntIO.update_value := 0.U
     misc.module.scntIO.stop_en := false.B
-
-    misc.module.rtc_clock := io.rtc_clock //syscnt clock
+    misc.module.rtc_clock := io.rtc_clock // syscnt clock
     misc.module.rtc_reset := ref_reset_sync.asAsyncReset
-    //timevld instance
+    misc.module.bus_clock := io.clock
+    misc.module.bus_reset := io.reset
+
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {

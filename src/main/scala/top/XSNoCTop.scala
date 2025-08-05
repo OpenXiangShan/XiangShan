@@ -83,9 +83,12 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val noc_reset = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
   val soc_clock = IO(Input(Clock()))
   val soc_reset = IO(Input(AsyncReset()))
+  val clint_clock = IO(Input(Clock()))
+  val clint_reset = IO(Input(AsyncReset()))
 
   val noc_reset_sync = socParams.EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(io.dft_reset) })
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
+  val clint_reset_sync = withClockAndReset(clint_clock, clint_reset) { ResetGen(io.dft_reset) }
 }
 
 trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] =>
@@ -133,16 +136,15 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     val isNormal = lpState === sIDLE
     val wfiGateClock = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val flitpend = io_chi.rx.snp.flitpend | io_chi.rx.rsp.flitpend | io_chi.rx.dat.flitpend
-    val SeperateTLsync = socParams.SeperateTLBus && (!socParams.EnableSeperateTLAsync)
-    val msip_mux = SeperateTLsync match {
+    val msip_mux = socParams.SeperateTLBus match {
       case (true) =>
-        core_with_l2.syncClint.get.intnode.out.head._1(0)
+        core_with_l2.timer.get.intnode.out.head._1(0)
       case (false) =>
         core_with_l2.clintIntNode.get.out.head._1(0)
     }
-    val mtip_mux = SeperateTLsync match {
+    val mtip_mux = socParams.SeperateTLBus match {
       case (true) =>
-        core_with_l2.syncClint.get.intnode.out.head._1(1)
+        core_with_l2.timer.get.intnode.out.head._1(1)
       case (false) =>
         core_with_l2.clintIntNode.get.out.head._1(1)
     }
@@ -200,18 +202,13 @@ trait HasXSTile { this: BaseXSSoc =>
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
   })))
-  val asyncClint = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
   // interrupts
   val clintIntNode = Option.when(!SeperateTLBus)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  if (!SeperateTLBus)
-    core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
-  else
-    core_with_l2.clintIntNode.map(_ := asyncClint.get.intnode) //from clint integrated in xstop
-
+  core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
   core_with_l2.nmiIntNode := nmiIntNode
@@ -234,7 +231,6 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   def plic = wrapper.asInstanceOf[L].plic
   def nmi = wrapper.asInstanceOf[L].nmi
   def debug = wrapper.asInstanceOf[L].debug
-  def asyncClint = wrapper.asInstanceOf[L].asyncClint
 
   val tileio = IO(new Bundle {
     val hartId = Input(UInt(p(MaxHartIdBits).W))
@@ -257,9 +253,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
   core_with_l2.module.io.hartId := tileio.hartId
   core_with_l2.module.io.nodeID.get := tileio.nodeID
-  if (socParams.SeperateTLBus && socParams.EnableSeperateTLAsync) {
-    asyncClint.get.module.io.hartId := tileio.hartId
-  }
+
   /* dft */
   core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
   core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
@@ -281,9 +275,9 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   socParams.EnableCHIAsyncBridge match {
     case Some(param) =>
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-        val sink = Module(new CHIAsyncBridgeSink(param))
-        sink.io.async <> core_with_l2.module.io.chi
-        io_chi <> sink.io.deq
+        val time_sink = Module(new CHIAsyncBridgeSink(param))
+        time_sink.io.async <> core_with_l2.module.io.chi
+        io_chi <> time_sink.io.deq
       }
     case None =>
       io_chi <> core_with_l2.module.io.chi
@@ -297,13 +291,13 @@ trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
   )
   tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
   // synchronous sink node
-  val tlSyncSinkOpt = Option.when(EnableIOSeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
+  val tlSyncSinkOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
   tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
 
   // The Manager Node is only used to make IO
-  val tl = Option.when(EnableIOSeperateTLBus)(TLManagerNode(Seq(
+  val tl = Option.when(SeperateTLBus)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
-      managers = SeperateTLBusRanges map { address =>
+      managers = SeperateTLBusRanges.filter(address => !address.overlaps(soc.TIMERRange)) map { address =>
         TLSlaveParameters.v1(
           address = Seq(address),
           regionType = RegionType.UNCACHED,
@@ -318,10 +312,9 @@ trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
       beatBytes = 8
     )
   )))
-  val tlXbar = Option.when((SeperateTLBus && EnableSeperateTLAsync) || EnableIOSeperateTLBus)(TLXbar())
+  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
   tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
-  asyncClint.foreach(_.node := tlXbar.get)//TLXbar node out connnect with timer mmio
   tl.foreach(_ := tlXbar.get)
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
@@ -412,16 +405,15 @@ trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockIm
                                                             with HasXSTileImp[L] =>
     val io_clintTime  = IO(Input(ValidIO(UInt(64.W))))
 
-    socParams.SeperateTLBus match {
-      case true =>
-        val ref_clock = false.B.asClock
-        val ref_reset_sync = true.B
-        withClockAndReset(ref_clock, ref_reset_sync) {
-          val ClintVldGen = Module(new TimeVldGen())
-          ClintVldGen.io.i_time := io_clintTime.bits
-          core_with_l2.module.io.clintTime <> ClintVldGen.io.o_time
+    socParams.EnableClintAsyncBridge match {
+      case Some(param) =>
+        withClockAndReset(clint_clock, clint_reset_sync) {
+          val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
+          time_source.io.enq.valid := io_clintTime.valid
+          time_source.io.enq.bits := io_clintTime.bits
+          core_with_l2.module.io.clintTime <> time_source.io.async
         }
-      case false =>
+      case None =>
         core_with_l2.module.io.clintTime <> io_clintTime
     }
 }
