@@ -46,14 +46,12 @@ class StandAloneSYSCNT (
       val update_en = Input(Bool())
       val update_value = Input(UInt(64.W))
       val stop_en = Input(Bool())
-      val time = Output(UInt(64.W))
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+      val time = Output(ValidIO(UInt(64.W)))
     })
     outer.clint.module.io.stop_en := io.stop_en
     outer.clint.module.io.update_en := io.update_en
     outer.clint.module.io.update_value := io.update_value
     io.time := outer.clint.module.io.time
-    io.time_freq := outer.clint.module.io.time_freq
   }
 
   override lazy val module = new StandAloneSYSCNTImp(this)

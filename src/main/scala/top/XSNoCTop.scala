@@ -413,19 +413,7 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
 trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp
                                                             with HasXSTileImp[L] =>
     val io_clintTime  = IO(Input(ValidIO(UInt(64.W))))
-
-    socParams.SeperateTLBus match {
-      case true =>
-        val ref_clock = false.B.asClock
-        val ref_reset_sync = true.B
-        withClockAndReset(ref_clock, ref_reset_sync) {
-          val ClintVldGen = Module(new TimeVldGen())
-          ClintVldGen.io.i_time := io_clintTime.bits
-          core_with_l2.module.io.clintTime <> ClintVldGen.io.o_time
-        }
-      case false =>
-        core_with_l2.module.io.clintTime <> io_clintTime
-    }
+    core_with_l2.module.io.clintTime <> io_clintTime
 }
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc

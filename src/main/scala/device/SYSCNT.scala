@@ -57,18 +57,23 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
       val stop_en = Input(Bool())
-      val time = Output(UInt(timeWidth.W))
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+      val time = Output(ValidIO(UInt(timeWidth.W)))
     })
 
     val time = RegInit(0.U(timeWidth.W))
     val increg = RegInit(0.U(8.W))
-    val incwidth = increg(2,0) //bit[1:0] is incr width
+
+    // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+    val incwidth = increg(2,0) //bit[2:0] is incr width
     val inccutdly = RegNext(incwidth)
     val inccfg_vld = inccutdly =/= incwidth // flag is high firstly when incr update.
     val inc_up_dis = RegInit(false.B)
-    val stopen = io.stop_en
-    io.time_freq := incwidth
+
+    //async process
+    val update_sync = AsyncResetSynchronizerShiftReg(io.update_en, 3, 0)
+    val stop_sync = AsyncResetSynchronizerShiftReg(io.stop_en, 3, 0)
+    val update_en= update_sync
+    val stopen = stop_sync
     //generate the low bit: time_low= time[incwidth-1:0]
     val time_low = WireInit(1.U(7.W))
     switch(incwidth) {
@@ -111,7 +116,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     }
     val inc_update = inc_up_dis & (inczero | timelow_zero)
 
-    val incr_width_value = RegInit(0.U(2.W))
+    val incr_width_value = RegInit(0.U(3.W))
     when(inc_update) {
       incr_width_value := incwidth
     }
@@ -121,17 +126,22 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     }.elsewhen(inc_update) {
       inc_up_dis := false.B
     }
-    val time_sw = RegInit(0.U(timeWidth.W))
+
+    val time_toggle = RegInit(false.B)
+    val incwidth_mux = Mux(inc_update,incwidth,incr_width_value)
+    when(stopen) {
+      time_toggle := false.B
+    }.otherwise(time_toggle := !time_toggle)
+
     when(stopen) {
       time := time
-    }.elsewhen(io.update_en) {
+    }.elsewhen(update_en) {
       time := io.update_value
-      time_sw := io.update_value
     }.otherwise{
-      time := time + 1.U
-      time_sw := time << incr_width_value
+      time := time + (1.U << incwidth_mux)
     }
-    io.time := time_sw
+    io.time.bits := time
+    io.time.valid := time_toggle
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
@@ -149,7 +159,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       timeOffset -> RegFieldGroup(
         "mtime",
         Some("Timer Register"),
-        RegField.bytes(time_sw, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
+        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
       )
     )
   }
