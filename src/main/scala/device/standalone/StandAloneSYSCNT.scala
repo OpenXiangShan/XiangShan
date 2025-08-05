@@ -42,18 +42,24 @@ class StandAloneSYSCNT (
   clint.node := xbar
 
   class StandAloneSYSCNTImp(outer: StandAloneSYSCNT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
+    val rtc_clock = IO(Input(Clock()))
+    val rtc_reset = IO(Input(AsyncReset()))
+    val bus_clock = IO(Input(Clock()))
+    val bus_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val update_en = Input(Bool())
       val update_value = Input(UInt(64.W))
       val stop_en = Input(Bool())
-      val time = Output(UInt(64.W))
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+      val time = Output(ValidIO(UInt(64.W)))
     })
+    outer.clint.module.rtc_clock := rtc_clock
+    outer.clint.module.rtc_reset := rtc_reset
+    outer.clint.module.bus_clock := bus_clock
+    outer.clint.module.bus_reset := bus_reset
     outer.clint.module.io.stop_en := io.stop_en
     outer.clint.module.io.update_en := io.update_en
     outer.clint.module.io.update_value := io.update_value
     io.time := outer.clint.module.io.time
-    io.time_freq := outer.clint.module.io.time_freq
   }
 
   override lazy val module = new StandAloneSYSCNTImp(this)

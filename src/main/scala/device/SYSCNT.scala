@@ -18,7 +18,9 @@ import chisel3.util._
 object SYSCNTConsts {
 
   def timeOffset   = 0xbff8//0xbff8 base addr is 0x8000
-  def incOffset    = 0xC000//0xC000:0x8000+0x4000
+  def timefreq     = 0xC000//0xC000:0x8000+0x4000
+  def timefreqReq  = timefreq + 0x0008
+  def timeswReq  = timefreq + 0x0010
   def size         = 0x10000
   def timeWidth    = 64
 }
@@ -53,25 +55,47 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
   class Impl extends LazyModuleImp(this) {
     Annotated.params(this, params)
 
+    val rtc_clock = IO(Input(Clock()))
+    val rtc_reset = IO(Input(AsyncReset()))
+    val bus_clock = IO(Input(Clock()))
+    val bus_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
       val stop_en = Input(Bool())
-      val time = Output(UInt(timeWidth.W))
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+      val time = Output(ValidIO(UInt(timeWidth.W)))
     })
 
-    val time = RegInit(0.U(timeWidth.W))
-    val increg = RegInit(0.U(8.W))
-    val incwidth = increg(2,0) //bit[1:0] is incr width
-    val inccutdly = RegNext(incwidth)
-    val inccfg_vld = inccutdly =/= incwidth // flag is high firstly when incr update.
-    val inc_up_dis = RegInit(false.B)
-    val stopen = io.stop_en
-    io.time_freq := incwidth
+    // increasing time define working on rtc_clock
+    val time = withClockAndReset(rtc_clock, rtc_reset){RegInit(0.U(timeWidth.W))}
+    val time_sw = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(timeWidth.W))} //software config time register
+    val time_sw_req_byte = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
+    val time_sw_req = time_sw_req_byte(0)
+    //register define working on bus clock
+    //incfreq bit[1:0] is incr width 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+    val incfreq = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
+    val incfreq_update_byte = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
+    val incfreq_update = incfreq_update_byte(0)
+    //async process about soc signal
+    val update_sync = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(io.update_en, 3, 0)}
+    val stop_sync = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(io.stop_en, 3, 0)}
+    val incfreq_update_rtc = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(incfreq_update, 3, 0)}
+    val time_sw_req_rtc = withClockAndReset(rtc_clock, rtc_reset){AsyncResetSynchronizerShiftReg(time_sw_req, 3, 0)}
+    // generate incfreq_update_rtc's rising edge
+    val incfreq_update_rtc_1f = withClockAndReset(rtc_clock,rtc_reset){RegNext(incfreq_update_rtc, init=false.B)}
+    val inccfg_vld = incfreq_update_rtc & (!incfreq_update_rtc_1f)
+    val time_req_rtc_1f = withClockAndReset(rtc_clock,rtc_reset){RegNext(time_sw_req_rtc, init=false.B)}
+    val time_req_rtc_ris = time_sw_req_rtc & (!time_req_rtc_1f)
+    //async process from rtc clock to bus clock
+    val time_sw_update_bus = withClockAndReset(bus_clock, bus_reset){AsyncResetSynchronizerShiftReg(time_req_rtc_ris, 3, 0)}
+    when(time_sw_update_bus)(time_sw_req_byte := false.B)
+    // inc freq will be active after incfreq request is set from 0 to 1.
+    val incwidth = WireInit(0.U(3.W))
+    incwidth := withClockAndReset(rtc_clock,rtc_reset){RegEnable((incfreq(2,0)), inccfg_vld)}
+    val inc_up_dis = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
     //generate the low bit: time_low= time[incwidth-1:0]
     val time_low = WireInit(1.U(7.W))
-    switch(incwidth) {
+    switch(incwidth) { //bus clock
       is(1.U) {
         time_low := time(0)
       }
@@ -97,7 +121,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
         time_low := 1.U
       }
     }
-    val inczero = WireInit(false.B)
+    val inczero = WireInit(false.B) //rtc clock
     when(incwidth === 0.U) {
       inczero := true.B
     }.otherwise {
@@ -110,28 +134,45 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       timelow_zero := false.B
     }
     val inc_update = inc_up_dis & (inczero | timelow_zero)
-
-    val incr_width_value = RegInit(0.U(2.W))
-    when(inc_update) {
-      incr_width_value := incwidth
-    }
     // count step will not update before count arrive at 2^n,n is increg
     when(inccfg_vld) {
       inc_up_dis := true.B
     }.elsewhen(inc_update) {
       inc_up_dis := false.B
     }
-    val time_sw = RegInit(0.U(timeWidth.W))
-    when(stopen) {
-      time := time
-    }.elsewhen(io.update_en) {
-      time := io.update_value
-      time_sw := io.update_value
-    }.otherwise{
-      time := time + 1.U
-      time_sw := time << incr_width_value
+
+    //update the increasing step only when counter arrivals integer times of step config.
+    val incr_width_value = withClockAndReset(rtc_clock,rtc_reset){RegInit(0.U(3.W))}
+    when(inc_update) {
+      incr_width_value := incwidth
     }
-    io.time := time_sw
+    // async process about inc_update
+    val inc_update_bus = withClockAndReset(bus_clock,bus_reset){AsyncResetSynchronizerShiftReg(inc_update, 3, 0)}
+    when(inc_update_bus){incfreq_update_byte := false.B} //incfreq update cfg is cleared auto by hardware.
+    val time_toggle = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
+    val incwidth_mux = Mux(inc_update,incwidth,incr_width_value)
+
+    when(stop_sync) {
+      time_toggle := false.B
+    }.otherwise(time_toggle := !time_toggle)
+
+    when(time_req_rtc_ris){
+      time := time_sw
+    }.elsewhen(stop_sync){
+      time := time
+    }.elsewhen(update_sync){
+      time := io.update_value
+    }.otherwise {
+      time := time + (1.U << incwidth_mux)
+    }
+    io.time.bits := time
+    io.time.valid := time_toggle
+    //time working on rtc clock is to be synced with bus clock
+    val timeasync = withClockAndReset(bus_clock, bus_reset)(Module(new TimeAsync()))
+    when(time_sw_req){
+      time_sw := timeasync.io.o_time.bits
+    }
+    timeasync.io.i_time := io.time
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
@@ -141,10 +182,20 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
      */
 
     node.regmap(
-      incOffset -> RegFieldGroup(
-        "incwidth",
-        Some("mtime incwidth Register"),
-        RegField.bytes(increg, Some(RegFieldDesc("incwidth", "", reset = Some(0), volatile = true)))
+      timefreq -> RegFieldGroup(
+        "timefreq",
+        Some("mtime frequency Register"),
+        RegField.bytes(incfreq, Some(RegFieldDesc("timefreq", "", reset = Some(0), volatile = true)))
+      ),
+      timefreqReq -> RegFieldGroup(
+        "timefreqReq",
+        Some("mtime frequency update Request Register"),
+        RegField.bytes(incfreq_update_byte, Some(RegFieldDesc("timefreqReq", "", reset = Some(0), volatile = true)))
+      ),
+      timeswReq -> RegFieldGroup(
+        "timeswReq",
+        Some("mtime software update Request Register"),
+        RegField.bytes(time_sw_req_byte, Some(RegFieldDesc("timeswReq", "", reset = Some(0), volatile = true)))
       ),
       timeOffset -> RegFieldGroup(
         "mtime",
