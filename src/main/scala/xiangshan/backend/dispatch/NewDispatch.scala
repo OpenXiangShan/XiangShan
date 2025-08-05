@@ -857,8 +857,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
     io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
     io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
+    io.enqRob.req(i).bits.stdwriteNeed := FuType.isStore(updatedUop(i).fuType)
   }
-
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 

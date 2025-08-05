@@ -29,7 +29,7 @@ import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst}
-import xiangshan.backend.decode.isa.PseudoInstructions
+import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
@@ -214,6 +214,29 @@ object XDecode extends DecodeConstants {
     CSRRWI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
     CSRRSI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.seti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
     CSRRCI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clri, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
+    // CSROpType is useless in read only csrInstr, because Wen is false and wdata is dependent on CSROpType.
+    CSRs_readOnly -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z),
+    CSRs_fflags   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_fcsr     -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_vxsat    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_vcsr     -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_vstart   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_sstatus  -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_vsstatus -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_mstatus  -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_hstatus  -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_mnstatus -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_dcsr     -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_vtype    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T),
+    CSRs_mireg    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_sireg    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_vsireg   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_mtopi    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_stopi    -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_vstopi   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_mtopei   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_stopei   -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
+    CSRs_vstopei  -> XSDecode(SrcType.X, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, SelImm.IMM_Z, noSpec = T, blockBack = T),
 
     EBREAK  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     ECALL   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),

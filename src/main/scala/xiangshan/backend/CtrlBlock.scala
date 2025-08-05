@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst, ExceptionInfo, ExuOutput, ExuVec, TrapInstInfo}
+import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst, ExceptionInfo, ExuOutput, ExuVec, TrapInstInfo, connectSamePort}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -678,8 +678,22 @@ class CtrlBlockImp(
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
 
-  val renameOut = Wire(chiselTypeOf(rename.io.out))
-  renameOut <> rename.io.out
+  val renameOut = Wire(chiselTypeOf(dispatch.io.fromRename))
+  renameOut.zip(rename.io.out).map{ case (sink, source) => {
+    sink.valid := source.valid
+    source.ready := sink.ready
+    sink.bits := 0.U.asTypeOf(sink.bits)
+    connectSamePort(sink.bits, source.bits)
+    sink.bits.eliminatedMove := source.bits.isMove
+    source.bits.debug.foreach { x =>
+      sink.bits.pc := x.pc
+      sink.bits.debug_seqNum := x.debug_seqNum
+      sink.bits.instr := x.instr
+      sink.bits.fusionNum := x.fusionNum
+      sink.bits.debugInfo := x.debugInfo
+      sink.bits.debug_sim_trig.get := x.debug_sim_trig
+    }
+  }}
   // pass all snapshot in the first element for correctness of blockBackward
   renameOut.tail.foreach(_.bits.snapshot := false.B)
   renameOut.head.bits.snapshot := Mux(isFull(snpt.io.enqPtr, snpt.io.deqPtr),

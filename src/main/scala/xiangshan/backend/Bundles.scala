@@ -52,8 +52,8 @@ object Bundles {
     }
     }
   }
-  // frontend -> backend
-  class DecodeInBaseUop(implicit p: Parameters) extends XSBundle {
+  // Frontend --[CtrlBlock]--> DecodeInUop
+  class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
@@ -64,6 +64,7 @@ object Bundles {
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
+    val instr = UInt(32.W)
     val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
@@ -75,18 +76,25 @@ object Bundles {
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
   }
-  // DecodeInUop has an instr, but DecodeOutUop doesn't.
-  class DecodeInUop(implicit p: Parameters) extends DecodeInBaseUop {
-    val instr = UInt(32.W)
-  }
   class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
     val debug_seqNum = InstSeqNum()
   }
 
   // DecodeInUop --[Decode]--> DecodeOutUop
-  class DecodeOutUop(implicit p: Parameters) extends DecodeInUop {
+  class DecodeOutUop(implicit p: Parameters) extends XSBundle {
+    val foldpc = UInt(MemPredPCWidth.W) // for mdp
+    val exceptionVec = ExceptionVec()
+    val isFetchMalAddr = Bool()
+    val trigger = TriggerAction()
+    val preDecodeInfo = new PreDecodeInfo
+    val pred_taken = Bool()
+    val crossPageIPFFix = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
+    val instr = UInt(32.W)
     // commitType will be used in rob to calculate lsq commit count
     val commitType = CommitType()
     def numSrc = backendParams.numSrc
@@ -118,7 +126,7 @@ object Bundles {
     val lastUop = Bool()
     val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
     val needFrm = new NeedFrmBundle
-    override val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
+    val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -141,7 +149,9 @@ object Bundles {
       this.debug.foreach(x => connectSamePort(x, source.debug.get))
     }
   }
-  class DecodeOutUopDebug(implicit p: Parameters) extends DecodeInUopDebug {
+  class DecodeOutUopDebug(implicit p: Parameters) extends XSBundle {
+    val pc = UInt(VAddrBits.W)
+    val debug_seqNum = InstSeqNum()
   }
 
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
@@ -164,6 +174,78 @@ object Bundles {
     }
   }
 
+  class RenameOutUop(implicit p: Parameters) extends XSBundle {
+    def numSrc = backendParams.numSrc
+    val exceptionVec = ExceptionVec()
+    val isFetchMalAddr = Bool()
+    val trigger = TriggerAction()
+    val preDecodeInfo = new PreDecodeInfo
+    val pred_taken = Bool()
+    val crossPageIPFFix = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val commitType = CommitType()
+
+    val srcType = Vec(numSrc, SrcType())
+    val ldest = UInt(LogicRegsWidth.W)
+    val fuType = FuType()
+    val fuOpType = FuOpType()
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
+    val waitForward = Bool() // no speculate execution
+    val blockBackward = Bool()
+    val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+    val selImm = SelImm()
+    val imm = UInt(32.W)
+    val fpu = new FPUCtrlSignals
+    val vpu = new VPUCtrlSignals
+    val vlsInstr = Bool()
+    val wfflags = Bool()
+    val isMove = Bool()
+    val uopIdx = UopIdx()
+    val isVset = Bool()
+    val firstUop = Bool()
+    val lastUop = Bool()
+    val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
+    // rename
+    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val robIdx = new RobPtr
+    val dirtyFs = Bool()
+    val dirtyVs = Bool()
+    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    // Take snapshot at this CFI inst
+    val snapshot = Bool()
+    val storeSetHit = Bool() // inst has been allocated an store set
+    val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+    // Load wait is needed
+    // load inst will not be executed until former store (predicted by mdp) addr calcuated
+    val loadWaitBit = Bool()
+    // If (loadWaitBit && loadWaitStrict), strict load wait is needed
+    // load inst will not be executed until ALL former store addr calcuated
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val singleStep = Bool() // debug module
+    val numLsElem = NumLsElem()
+    val hasException = Bool()
+    val ftqLastOffset = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
+    val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
+    val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
+    val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
+    def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
+    def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
+  }
+  class RenameOutUopDebug(implicit p: Parameters) extends XSBundle {
+    val pc = UInt(VAddrBits.W)
+    val debug_seqNum = InstSeqNum()
+    val instr = UInt(32.W)
+    val fusionNum = UInt(2.W)
+    val debugInfo = new PerfDebugInfo
+    val debug_sim_trig = Bool()
+  }
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
