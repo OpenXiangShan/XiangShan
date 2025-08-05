@@ -555,6 +555,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val rtc_clock = IO(Input(Clock()))
     val rtc_reset = IO(Input(Reset()))
+    val bus_clock = IO(Input(Clock()))
+    val bus_reset = IO(Input(Reset()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
@@ -563,7 +565,6 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
       val stop_en = Input(Bool())
-      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
     })
     debugModule.module.io <> debug_module_io
 
@@ -591,26 +592,22 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
 
     //instance time async proc ip
-    //timevldgen instant to generate timestamp valid
-    val ClintVldGen = Module(new TimeVldGen())
-    ClintVldGen.io.i_time := syscnt.module.io.time
-    ClintVldGen.clock := rtc_clock
-    ClintVldGen.reset := rtc_reset
     // timer instance
     val time_async = Module(new TimeAsync())
-    time_async.io.i_time <> ClintVldGen.io.o_time
-    clintTime := time_async.io.o_time //syscnt->timevldgen ->timeasync
+    time_async.io.i_time <> syscnt.module.io.time
+    clintTime := time_async.io.o_time //syscnt ->timeasync
 
-    timer.module.io.time <> ClintVldGen.io.o_time
+    timer.module.io.time <> time_async.io.o_time
     timer.module.io.hartId := 0.U
 
     // instance syscnt
-    syscnt.module.clock := rtc_clock
-    syscnt.module.reset := rtc_reset
+    syscnt.module.rtc_clock := rtc_clock
+    syscnt.module.rtc_reset := rtc_reset
+    syscnt.module.bus_clock := bus_clock
+    syscnt.module.bus_reset := bus_reset
     syscnt.module.io.update_en := scntIO.update_en
     syscnt.module.io.update_value := scntIO.update_value
     syscnt.module.io.stop_en := scntIO.stop_en
-    scntIO.time_freq := syscnt.module.io.time_freq
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 
