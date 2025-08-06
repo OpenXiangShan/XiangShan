@@ -42,7 +42,7 @@ trait CSRPMA { self: NewCSR =>
   )
 
   val pmaCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
-    pmpCSRMods.map(csr => csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt).iterator
+    pmaCSRMods.map(csr => csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt).iterator
   )
 
   private val pmaCfgRead = Cat(pmacfgs.map(_.rdata(7, 0)).reverse)
