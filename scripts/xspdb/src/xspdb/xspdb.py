@@ -145,11 +145,6 @@ class XSPdb(pdb.Pdb):
         cmd_count = self.api_load_custom_pdb_cmds(xspdb.cmd)
         info(f"Loaded {cmd_count} functions from XSPdb.cmd")
 
-    # override the default PDB function to avoid None cmd error
-    def parseline(self, line):
-        cmd, arg, line = super().parseline(line)
-        return cmd or "", arg, line
-
     def api_load_custom_pdb_cmds(self, path_or_module):
         """Load custom command
 
@@ -178,77 +173,10 @@ class XSPdb(pdb.Pdb):
             cmd_count += register_commands(submod, self.__class__, self)
         return cmd_count
 
-    def do_xuse_custom_cmds(self, arg):
-        """Load custom command from file or directory
-
-        Args:
-            arg (string): Command file path or directory (or python module)
-        """
-        if not arg:
-            error("Please specify a file or directory")
-            message("usage: xuse_custom_cmds <file/directory/module>")
-            return
-        cmd_count = self.api_load_custom_pdb_cmds(arg)
-        info(f"Loaded {cmd_count} commands from {arg}")
-
-    def complete_xuse_custom_cmds(self, text, line, begidx, endidx):
-        """Complete the custom command file or directory"""
-        return self.api_complite_localfile(text)
-
-    def api_set_debug_level(self, level):
-        """Set log level
-
-        Args:
-            level (string): Log level
-        """
-        level_map = {
-            "debug": DEBUG,
-            "info": INFO,
-            "warn": WARNING,
-            "error": ERROR
-        }
-        if level not in level_map:
-            return False
-        set_xspdb_log_level(level_map[level])
-        return True
-
-    def do_xset_log_level(self, arg):
-        """Set log level
-
-        Args:
-            arg (string): Log level
-        """
-        if not arg:
-            message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
-            return
-        level = arg.strip().lower()
-        if not self.api_set_debug_level(level):
-            message("usage: xset_log_level <log level>, log level can be debug, info, warn, error")
-
-    def complete_xset_log_level(self, text, line, begidx, endidx):
-        """Complete the log level"""
-        return [k for k in ["debug", "info", "warn", "error"] if k.startswith(text)]
-
-    def do_xexportself(self, var):
-        """Set a variable to XSPdb self
-
-        Args:
-            var (string): Variable name
-        """
-        self.curframe.f_locals[var] = self
-
-    def do_xlist_xclock_cb(self, arg):
-        """List all xclock callbacks
-
-        Args:
-            arg (None): No arguments
-        """
-        message("Ris Cbs:")
-        for cb in self.dut.xclock.ListSteRisCbDesc():
-            message("\t", cb)
-        message("Fal Cbs:")
-        for cb in self.dut.xclock.ListSteFalCbDesc():
-            message("\t", cb)
+    # override the default PDB function to avoid None cmd error
+    def parseline(self, line):
+        cmd, arg, line = super().parseline(line)
+        return cmd or "", arg, line
 
     def do_xcmds(self, arg):
         """Print all xcmds
@@ -284,28 +212,6 @@ class XSPdb(pdb.Pdb):
     def api_log_set_log_file(log_file):
         xspdb_set_log(True)
         xspdb_set_log_file(log_file)
-
-    def do_xlogfile_enable(self, arg):
-        """Set log on or off
-
-        Args:
-            arg (string): Log level
-        """
-        if not arg:
-            message("usage: xlogfile_enable <on or off>")
-            return
-        if arg == "on":
-            info("Set log on")
-            xspdb_set_log(True)
-        elif arg == "off":
-            xspdb_set_log(False)
-            info("Set log off")
-        else:
-            message("usage: xlogfile_enable <on or off>")
-
-    def complete_xlogfile_enable(self, text, line, begidx, endidx):
-        """Complete the log level"""
-        return [k for k in ["on", "off"] if k.startswith(text)]
 
     def api_busy_sleep(self, data, delta=0.1):
         for i in range(int(data//delta)):

@@ -1,3 +1,5 @@
+#coding=utf-8
+
 #***************************************************************************************
 # Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
 # Copyright (c) 2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -14,9 +16,8 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-#coding=utf-8
 
-from xspdbtop import XSPdbTop
+from src import XSPdbTop
 
 if __name__ == "__main__":
     xspdb = XSPdbTop()

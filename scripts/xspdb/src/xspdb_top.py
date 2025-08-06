@@ -1,3 +1,5 @@
+#coding=utf-8
+
 from pyxscore import DUTSimTop, xsp
 from pydifftest import difftest as df
 from xspdb import *
@@ -7,7 +9,6 @@ from bdb import BdbQuit
 class XSPdbTop():
     def __init__(self):
         self.dut = DUTSimTop()
-
 
     def init_pdb(self):
         #dut = DUTSimTop()
@@ -20,5 +21,3 @@ class XSPdbTop():
             self.init_pdb()
         except BdbQuit:
             pass
-
-

@@ -71,4 +71,3 @@ check-deps:
 			(echo "Error: Dependency '$$dep' is not installed. Please run 'pip install -r scripts/xspdb/requirements.txt'" && exit 1); \
 	done
 	@echo "--- All dependencies are satisfied ---"
-
