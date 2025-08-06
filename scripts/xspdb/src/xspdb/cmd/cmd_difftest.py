@@ -141,41 +141,6 @@ class CmdDiffTest:
         """
         self.api_difftest_reset()
 
-#    def do_xdifftest_turn_on(self, arg):
-#        """Turn on the difftest diff
-#
-#        Args:
-#            arg (string): Turn on or off
-#        """
-#        if arg.strip() == "on":
-#            self.api_set_difftest_diff(True)
-#        elif arg.strip() == "off":
-#            self.api_set_difftest_diff(False)
-#        else:
-#            error("usage: xdifftest_turn_on <on|off>")
-#
-#    def complete_xdifftest_turn_on(self, text, line, begidx, endidx):
-#        return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
-#
-#    def do_xdifftest_turn_on_with_ref(self, arg):
-#        """Turn on the difftest diff with reference so
-#        Args:
-#            arg (string): ref so path
-#        """
-#        if self.difftest_ref_is_inited:
-#            error("difftest reference already inited")
-#            return
-#        if not arg.strip():
-#            error("difftest ref so path not found\n usage: xdifftest_turn_on_with_ref <path>")
-#            return
-#        if not self.api_load_ref_so(arg):
-#            error(f"load difftest ref so {arg} failed")
-#            return
-#        self.api_set_difftest_diff(True)
-#
-#    def complete_xdifftest_turn_on_with_ref(self, text, line, begidx, endidx):
-#        return self.api_complite_localfile(text)
-
     def api_commit_pc_list(self):
         """Get the list of all commit PCs
 
