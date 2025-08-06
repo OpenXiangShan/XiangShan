@@ -1514,7 +1514,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
-        dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+        dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.isMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
         dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }

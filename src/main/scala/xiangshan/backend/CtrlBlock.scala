@@ -682,17 +682,7 @@ class CtrlBlockImp(
   renameOut.zip(rename.io.out).map{ case (sink, source) => {
     sink.valid := source.valid
     source.ready := sink.ready
-    sink.bits := 0.U.asTypeOf(sink.bits)
-    connectSamePort(sink.bits, source.bits)
-    sink.bits.eliminatedMove := source.bits.isMove
-    source.bits.debug.foreach { x =>
-      sink.bits.pc := x.pc
-      sink.bits.debug_seqNum := x.debug_seqNum
-      sink.bits.instr := x.instr
-      sink.bits.fusionNum := x.fusionNum
-      sink.bits.debugInfo := x.debugInfo
-      sink.bits.debug_sim_trig.get := x.debug_sim_trig
-    }
+    sink.bits := source.bits
   }}
   // pass all snapshot in the first element for correctness of blockBackward
   renameOut.tail.foreach(_.bits.snapshot := false.B)

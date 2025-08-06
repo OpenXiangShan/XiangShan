@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodeOutUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
+import xiangshan.backend.Bundles.{DecodeOutUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -97,7 +97,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val io = IO(new Bundle {
     // from rename
     val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
-    val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
+    val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new RenameOutUop)))
     val toRenameAllFire = Output(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
@@ -168,7 +168,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
   for (i <- 0 until RenameWidth) {
-    fromRenameUpdate(i) := fromRename(i)
+    fromRenameUpdate(i).valid := fromRename(i).valid
+    fromRenameUpdate(i).bits.connectRenameOutUop(fromRename(i).bits)
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
   }
@@ -244,7 +245,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0, io.wbPregsVl)
   val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0, idxRegTypeVl)
   val allocPregsValid = Wire(Vec(busyTables.size, Vec(RenameWidth, Bool())))
-  allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.eliminatedMove))
+  allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.isMove))
   allocPregsValid(1) := VecInit(fromRename.map(x => x.valid && x.bits.fpWen))
   allocPregsValid(2) := VecInit(fromRename.map(x => x.valid && x.bits.vecWen))
   allocPregsValid(3) := VecInit(fromRename.map(x => x.valid && x.bits.v0Wen))
@@ -471,7 +472,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+      lsqCanAccept && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
@@ -727,7 +728,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       enqLsqIO.needAlloc(i) := 0.U
     }
     enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
-    enqLsqIO.req(i).bits := io.fromRename(i).bits
+    enqLsqIO.req(i).bits.connectRenameOutUop(io.fromRename(i).bits)
 
     // This is to make it easier to calculate in LSQ.
     // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
@@ -758,8 +759,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   for (i <- 0 until RenameWidth) {
 
-    updatedUop(i) := fromRename(i).bits
-    updatedUop(i).debugInfo.eliminatedMove := fromRename(i).bits.eliminatedMove
+    updatedUop(i).connectRenameOutUop(fromRename(i).bits)
+    updatedUop(i).debugInfo.eliminatedMove := fromRename(i).bits.isMove
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
@@ -812,12 +813,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val allResourceReady = io.enqRob.canAccept
 
-  // Instructions should enter dispatch queues in order.
+  // Instructions should enter issue queues in order.
   // blockedByWaitForward: this instruction is blocked by itself (based on waitForward)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
   val hasException = VecInit(fromRename.zip(updatedUop).map {
-    case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
+    case (fromRename, uop) =>
       fromRename.bits.hasException || uop.singleStep
   })
 
@@ -905,8 +906,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   TopDownCounters.LoadL1Stall.id.U))))))))
 
   val fusedVec = (0 until RenameWidth).map{ case i =>
-    if (i == 0) false.B
-    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.fusionNum =/= 0.U)
+    if (i == 0 || !backendParams.debugEn) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
   }
 
   val decodeReason = RegNextN(io.stallReason.reason, 2)

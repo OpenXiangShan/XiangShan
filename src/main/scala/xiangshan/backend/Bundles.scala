@@ -113,7 +113,7 @@ object Bundles {
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress = Bool()
     val selImm = SelImm()
-    val imm = UInt(ImmUnion.maxLen.W)
+    val imm = UInt(32.W)
     val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
     val vlsInstr = Bool()
@@ -237,6 +237,7 @@ object Bundles {
     val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
+    def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
   }
   class RenameOutUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
@@ -310,7 +311,6 @@ object Bundles {
     val dirtyVs         = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
 
-    val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
     val debugInfo       = new PerfDebugInfo
@@ -373,6 +373,19 @@ object Bundles {
     }
 
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
+
+    def connectRenameOutUop(source: RenameOutUop): Unit = {
+      this := 0.U.asTypeOf(this)
+      connectSamePort(this, source)
+      source.debug.foreach(x => {
+        this.pc := x.pc
+        this.debug_seqNum := x.debug_seqNum
+        this.instr := x.instr
+        this.fusionNum := x.fusionNum
+        this.debugInfo := x.debugInfo
+        this.debug_sim_trig.get := x.debug_sim_trig
+      })
+    }
   }
 
   trait BundleSource {
