@@ -247,6 +247,54 @@ object Bundles {
     val debugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
   }
+
+  class DispatchOutUop(implicit p: Parameters) extends XSBundle {
+    def numSrc = backendParams.numSrc
+    // from frontend
+    val preDecodeInfo = new PreDecodeInfo
+    val pred_taken = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    // from decode
+    val srcType = Vec(numSrc, SrcType())
+    val fuType = FuType()
+    val fuOpType = FuOpType()
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
+    val selImm = SelImm()
+    val imm = UInt(32.W)
+    val fpu = new FPUCtrlSignals
+    val vpu = new VPUCtrlSignals
+    val wfflags = Bool()
+    val uopIdx = UopIdx()
+    val lastUop = Bool()
+    // from rename
+    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val robIdx = new RobPtr
+    val numLsElem = NumLsElem()
+    // for mdp
+    val storeSetHit = Bool()
+    val waitForRobIdx = new RobPtr
+    val loadWaitBit = Bool()
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val srcState = Vec(numSrc, SrcState())
+    val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
+    val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val lqIdx = new LqPtr
+    val sqIdx = new SqPtr
+    // for scheduler drop amocas sta
+    val isDropAmocasSta = Bool()
+  }
+  class DispatchUpdateUop(implicit p: Parameters) extends DispatchOutUop {
+    // dispatch ctrl for debug bundle
+    val singleStep = Bool()
+  }
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc

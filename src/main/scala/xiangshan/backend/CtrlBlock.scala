@@ -740,7 +740,12 @@ class CtrlBlockImp(
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
 
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops, io.toIssueBlock.memUops).flatten
-  toIssueBlockUops.zip(dispatch.io.toIssueQueues).map(x => x._1 <> x._2)
+  toIssueBlockUops.zip(dispatch.io.toIssueQueues).map{ case (iq, dispatch) => {
+    iq.valid := dispatch.valid
+    iq.bits := 0.U.asTypeOf(iq.bits)
+    connectSamePort(iq.bits, dispatch.bits)
+    dispatch.ready := iq.ready
+  }}
   io.toIssueBlock.flush   <> s2_s4_redirect
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.pc_mem_wen)

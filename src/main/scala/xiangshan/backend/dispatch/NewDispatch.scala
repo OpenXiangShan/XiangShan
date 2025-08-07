@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodeOutUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -38,7 +38,7 @@ import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._
-import xiangshan.mem.{HasVLSUParameters, _}
+import xiangshan.mem._
 
 class CoreDispatchTopDownIO extends Bundle {
   val l2MissMatch = Input(Bool())
@@ -103,7 +103,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val enqRob = Flipped(new RobEnqIO)
     // IssueQueues
     val IQValidNumVec = Vec(exuNum, Input(UInt(maxIQSize.U.getWidth.W)))
-    val toIssueQueues = Vec(IQEnqSum, DecoupledIO(new DynInst))
+    val toIssueQueues = Vec(IQEnqSum, DecoupledIO(new DispatchOutUop))
     // to busyTable
     // set preg state to ready (write back regfile)
     val wbPregsInt = Vec(backendParams.numPregWb(IntData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
@@ -164,12 +164,14 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val renameIn = io.renameIn
   val fromRename = io.fromRename
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
-  val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DynInst))))
+  val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DispatchUpdateUop))))
 
   // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
   for (i <- 0 until RenameWidth) {
     fromRenameUpdate(i).valid := fromRename(i).valid
-    fromRenameUpdate(i).bits.connectRenameOutUop(fromRename(i).bits)
+    // srcLoadDependency and srcState
+    fromRenameUpdate(i).bits := 0.U.asTypeOf(fromRenameUpdate(i).bits)
+    connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
   }
@@ -464,7 +466,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
      uu := PopCount(uopSelIQ.take(i+1).map(x => x.zipWithIndex.filter(_._2 == j).map(_._1)).flatten)
     }}
   }}
-  val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DynInst)))
+  val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DispatchOutUop)))
   val uopBlockByIQ = Wire(Vec(renameWidth, Bool()))
   val allowDispatch = Wire(Vec(renameWidth, Bool()))
   val thisCanActualOut = Wire(Vec(renameWidth, Bool()))
@@ -493,7 +495,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     for (i <- 0 until issue.numEnq){
       val oh = Wire(Vec(renameWidth, Bool())).suggestName(s"oh_IQSelUop_$temp")
       oh := uopSelIQMatrix.map(_(iqidx)).map(_ === (i+1).U)
-      IQSelUop(temp) := PriorityMux(oh, fromRenameUpdate)
+      val updateUop = PriorityMux(oh, fromRenameUpdate)
+      IQSelUop(temp).valid := updateUop.valid
+      connectSamePort(IQSelUop(temp).bits, updateUop.bits)
       // there only assign valid not use PriorityMuxDefalut for better timing
       IQSelUop(temp).valid := PriorityMuxDefault(oh.zip(fromRenameUpdate.map(_.valid)), false.B)
       val allFuThisIQ = issue.exuBlockParams.map(_.fuConfigs).flatten.toSet.toSeq
