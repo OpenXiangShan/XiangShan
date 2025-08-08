@@ -93,7 +93,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val payload               = new DynInst()
+    val payload               = new IssueQueueInUop()
   }
 
   class CommonInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {

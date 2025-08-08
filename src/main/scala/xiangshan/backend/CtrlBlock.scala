@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst, ExceptionInfo, ExuOutput, ExuVec, TrapInstInfo, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DispatchOutUop, DynInst, ExceptionInfo, ExuOutput, ExuVec, TrapInstInfo, connectSamePort}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -742,8 +742,7 @@ class CtrlBlockImp(
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops, io.toIssueBlock.memUops).flatten
   toIssueBlockUops.zip(dispatch.io.toIssueQueues).map{ case (iq, dispatch) => {
     iq.valid := dispatch.valid
-    iq.bits := 0.U.asTypeOf(iq.bits)
-    connectSamePort(iq.bits, dispatch.bits)
+    iq.bits := dispatch.bits
     dispatch.ready := iq.ready
   }}
   io.toIssueBlock.flush   <> s2_s4_redirect
@@ -878,10 +877,10 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val fpUopsNum = backendParams.fpSchdParams.get.issueBlockParams.map(_.numEnq).sum
     val vfUopsNum = backendParams.vfSchdParams.get.issueBlockParams.map(_.numEnq).sum
     val memUopsNum = backendParams.memSchdParams.get.issueBlockParams.filter(x => x.StdCnt == 0).map(_.numEnq).sum
-    val intUops = Vec(intUopsNum, DecoupledIO(new DynInst))
-    val fpUops = Vec(fpUopsNum, DecoupledIO(new DynInst))
-    val vfUops = Vec(vfUopsNum, DecoupledIO(new DynInst))
-    val memUops = Vec(memUopsNum, DecoupledIO(new DynInst))
+    val intUops = Vec(intUopsNum, DecoupledIO(new DispatchOutUop))
+    val fpUops = Vec(fpUopsNum, DecoupledIO(new DispatchOutUop))
+    val vfUops = Vec(vfUopsNum, DecoupledIO(new DispatchOutUop))
+    val memUops = Vec(memUopsNum, DecoupledIO(new DispatchOutUop))
   }
   val fromMemToDispatch = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))

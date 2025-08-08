@@ -66,7 +66,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val flush = Flipped(ValidIO(new Redirect))
   }
   val fromDispatch = new Bundle {
-    val uops =  Vec(fromDispatchUopNum, Flipped(DecoupledIO(new DynInst)))
+    val uops =  Vec(fromDispatchUopNum, Flipped(DecoupledIO(new DispatchOutUop)))
   }
   val intWriteBack = MixedVec(Vec(backendParams.numPregWb(IntData()),
     new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
@@ -387,7 +387,11 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     with HasPerfEvents
 {
   val issueQueuesUopIn = issueQueues.map(_.io.enq).flatten
-  issueQueuesUopIn.zip(io.fromDispatch.uops).map(x => x._1 <> x._2)
+  issueQueuesUopIn.zip(io.fromDispatch.uops).map(x => {
+    x._1.valid := x._2.valid
+    connectSamePort(x._1.bits, x._2.bits)
+    x._2.ready := x._1.ready
+  })
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     if (!iq.params.needLoadDependency) {
@@ -425,7 +429,11 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 {
 
   val issueQueuesUopIn = issueQueues.filter(_.params.StdCnt == 0).map(_.io.enq).flatten
-  issueQueuesUopIn.zip(io.fromDispatch.uops).map(x => x._1 <> x._2)
+  issueQueuesUopIn.zip(io.fromDispatch.uops).map(x => {
+    x._1.valid := x._2.valid
+    connectSamePort(x._1.bits, x._2.bits)
+    x._2.ready := x._1.ready
+  })
   val noStdExuParams = params.issueBlockParams.map(x => Seq.fill(x.numEnq)(x.exuBlockParams)).flatten.filter{x => x.map(!_.hasStdFu).reduce(_ && _)}
   val staIdx = noStdExuParams.zipWithIndex.filter{x => x._1.map(_.hasStoreAddrFu).reduce(_ || _)}.map(_._2)
   val staReady = issueQueues.filter(iq => iq.params.StaCnt > 0).map(_.io.enq.map(_.ready)).flatten
