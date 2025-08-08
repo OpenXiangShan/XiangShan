@@ -174,6 +174,58 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     )
   }
 
+  // commit time phr checker
+  if (EnableCommitGHistDiff) {
+    val commitHist    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+    val commitHistPtr = RegInit(0.U.asTypeOf(new PhrPtr))
+    def getCommitHist(ptr: PhrPtr): UInt =
+      (Cat(commitHist.asUInt, commitHist.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
+    def shiftCommitBits(pc: PrunedAddr): UInt =
+      (((pc >> 1) ^ (pc >> 3)) ^ ((pc >> 5) ^ (pc >> 7)))(Shamt - 1, 0)
+    val commitValid = io.commit.valid
+    val commitTaken = io.commit.bits.taken
+    val commitTakenPc = Mux(
+      commitValid && io.commit.bits.mispred.asBools.reduce(_ || _),
+      io.commit.bits.startVAddr,
+      getBranchAddr(io.commit.bits.startVAddr, io.commit.bits.cfiPosition)
+    )
+    val commitShiftBits = shiftCommitBits(commitTakenPc)
+
+    when(commitValid && commitTaken) {
+      commitHist(commitHistPtr.value)         := commitShiftBits(1)
+      commitHist((commitHistPtr - 1.U).value) := commitShiftBits(0)
+      commitHistPtr                           := commitHistPtr - 2.U
+    }
+
+    val commitHistValue        = commitHist.asUInt
+    val commitTrueHist         = getCommitHist(commitHistPtr)
+    val predictHist            = getPhr(io.commit.bits.meta.phr)
+    val commitFDiffPredictFVec = WireInit(0.U.asTypeOf(Vec(TageFoldedGHistInfos.size, Bool())))
+    TageFoldedGHistInfos.zipWithIndex foreach { case ((histLen, compLen), i) =>
+      val commitTrueFHist = computeFoldedHist(commitTrueHist, compLen)(histLen)
+      val predictFHist    = computeFoldedHist(predictHist, compLen)(histLen)
+      commitFDiffPredictFVec(i) := commitTrueFHist =/= predictFHist
+      XSWarn(
+        commitValid && commitFDiffPredictFVec(i),
+        p"predict time ghist: ${predictFHist} is different from commit time: ${commitTrueFHist}\n"
+      )
+    }
+    val predictFHist_diff_commitTrueFHist = commitValid && commitFDiffPredictFVec.reduce(_ || _)
+    val predictHist_diff_commitHist =
+      commitValid && predictHist(AllHistLens.max - 1, 0) =/= commitTrueHist(AllHistLens.max - 1, 0)
+    XSPerfAccumulate(f"predictFHist_diff_commitTrueFHist", predictFHist_diff_commitTrueFHist)
+    XSPerfAccumulate(f"predictHist_diff_commitHist", predictHist_diff_commitHist)
+    dontTouch(commitHistValue)
+    dontTouch(commitTrueHist)
+    dontTouch(commitShiftBits)
+    dontTouch(predictHist)
+    dontTouch(commitHistPtr)
+    dontTouch(predictFHist_diff_commitTrueFHist)
+    dontTouch(predictHist_diff_commitHist)
+    dontTouch(commitFDiffPredictFVec.asUInt)
+    dontTouch(commitTakenPc)
+  }
+
   private val diffFoldedPhr = ghistFoldedPhr.asUInt =/= s0_foldedPhrReg.asUInt
   XSPerfAccumulate("ghistFoldedPhr_diff_s0_foldedPhrReg", diffFoldedPhr)
   // TODO: remove dontTouch
