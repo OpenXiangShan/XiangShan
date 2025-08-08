@@ -248,7 +248,7 @@ object Bundles {
     val debug_sim_trig = Bool()
   }
 
-  class DispatchOutUop(implicit p: Parameters) extends XSBundle {
+  class IssueQueueInUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
@@ -288,6 +288,14 @@ object Bundles {
     val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
+    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+  }
+  class IssueQueueInDebug(implicit p: Parameters) extends XSBundle {
+    val pc = UInt(VAddrBits.W)
+    val debug_seqNum = InstSeqNum()
+    val perfDebugInfo = new PerfDebugInfo
+  }
+  class DispatchOutUop(implicit p: Parameters) extends IssueQueueInUop {
     // for scheduler drop amocas sta
     val isDropAmocasSta = Bool()
   }
