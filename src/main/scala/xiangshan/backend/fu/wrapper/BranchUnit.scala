@@ -47,17 +47,20 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
+  val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
+  val brhRealTarget = io.in.bits.ctrl.predictInfo.get.target
+  val isMisPred = dataModule.io.mispredict || (brhRealTarget =/= brhPredictTarget)
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid && dataModule.io.mispredict
+      redirect.valid := io.out.valid
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.level := RedirectLevel.flushAfter
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
       redirect.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
       redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
       redirect.bits.fullTarget := addModule.io.target
-      redirect.bits.cfiUpdate.isMisPred := dataModule.io.mispredict
+      redirect.bits.cfiUpdate.isMisPred := isMisPred
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
