@@ -18,5 +18,16 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
+import xiangshan.frontend.PrunedAddr
 
-trait Helpers extends HasTageParameters with HasXSParameter {}
+trait Helpers extends HasTageParameters with HasXSParameter {
+  def getBaseSetIndex(pc: PrunedAddr): UInt = {
+    val highBits = pc(VAddrBits - 1, FetchBlockSizeWidth + BaseTableInternalBanksIdxLen)
+    (highBits ^ (highBits >> BaseTableSetIdxLen).asUInt)(BaseTableSetIdxLen - 1, 0)
+  }
+  def getBaseTableInternalBankIndex(pc: PrunedAddr): UInt =
+    pc(FetchBlockSizeWidth + BaseTableInternalBanksIdxLen - 1, FetchBlockSizeWidth)
+  def getAlignBankIndex(pc: PrunedAddr): UInt =
+    pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+
+}

@@ -16,16 +16,22 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
-import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasMainBtbParameters with HasXSParameter {
+trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
   def getAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+
+  def getTargetUpper(pc: PrunedAddr): UInt =
+    pc(VAddrBits - 1, TargetWidth + instOffsetBits)
+
+  def getTargetLowerBits(target: PrunedAddr): UInt =
+    target(TargetWidth + instOffsetBits - 1, instOffsetBits)
 
   def getInternalBankIndex(pc: PrunedAddr): UInt =
     pc(InternalBankIdxLen + FetchBlockSizeWidth - 1, FetchBlockSizeWidth)

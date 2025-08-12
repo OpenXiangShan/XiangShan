@@ -23,13 +23,13 @@ import utility.XSPerfHistogram
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val prediction: Prediction  = Output(new Prediction)
-    val meta:       MainBtbMeta = Output(new MainBtbMeta)
+    // prediction specific bundle
+    val result: MainBtbResult = Output(new MainBtbResult)
+    val meta:   MainBtbMeta   = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -51,7 +51,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
           hasMbist = hasMbist,
           hasSramCtl = hasSramCtl
         )
-      ).suggestName(s"mbtb_sram_bank_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
+      ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
     }
   private val writeBuffers = Seq.tabulate(NumAlignBanks, NumInternalBanks) { (_, _) =>
     Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay, pipe = true))
@@ -155,7 +155,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
   private val s2_hitMask: Vec[Bool] =
     VecInit(s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag))
-  private val s2_perBankSignals = Seq.tabulate(PredictWidth) { pos =>
+  private val s2_targets =
+    s2_rawBtbEntries.map(e =>
+      getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
+    ) // FIXME: parameterize target carry
+  private val debug_s2_perBankSignals = Seq.tabulate(PredictWidth) { pos =>
     val posHitMask = s2_hitMask zip s2_positions map { case (hit, p) =>
       hit && p === pos.U
     }
@@ -165,10 +169,19 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     val multihit = PopCount(posHitMask) > 1.U
     (hit, entry, target, multihit)
   }
-  private val (s2_brValids, s2_btbEntries, s2_targets, s2_multihits) =
-    (s2_perBankSignals.map(_._1), s2_perBankSignals.map(_._2), s2_perBankSignals.map(_._3), s2_perBankSignals.map(_._4))
+  private val (debug_s2_brValids, debug_s2_btbEntries, debug_s2_targets, debug_s2_multihits) =
+    (
+      debug_s2_perBankSignals.map(_._1),
+      debug_s2_perBankSignals.map(_._2),
+      debug_s2_perBankSignals.map(_._3),
+      debug_s2_perBankSignals.map(_._4)
+    )
 
-  io.prediction              := DontCare // FIXME: temp
+  io.result.hitMask    := s2_hitMask
+  io.result.positions  := s2_rawBtbEntries.map(_.position)
+  io.result.targets    := s2_targets
+  io.result.attributes := s2_rawBtbEntries.map(_.attribute)
+
   io.meta.valid              := s2_fire
   io.meta.hitMask            := s2_hitMask
   io.meta.positions          := s2_positions
@@ -197,13 +210,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeValid = t1_train_valid && !t1_updateHit && t1_taken
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
-  t1_writeEntry.valid          := true.B                 // FIXME: invalidate
-  t1_writeEntry.tag            := getTag(t1_train.startVAddr)
-  t1_writeEntry.position       := t1_train.cfiPosition
-  t1_writeEntry.target         := t1_train.target.asUInt // FIXME: calculate target address
-  t1_writeEntry.attribute      := t1_train.attribute
-  t1_writeEntry.stronglyBiased := false.B                // FIXME
-  t1_writeEntry.replaceCnt     := DontCare               // FIXME:
+  t1_writeEntry.valid           := true.B   // FIXME: invalidate
+  t1_writeEntry.tag             := getTag(t1_train.startVAddr)
+  t1_writeEntry.position        := t1_train.cfiPosition
+  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
+  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_train.target)
+  t1_writeEntry.attribute       := t1_train.attribute
+  t1_writeEntry.stronglyBiased  := false.B  // FIXME
+  t1_writeEntry.replaceCnt      := DontCare // FIXME:
   private val t1_writeWayMask = UIntToOH(t1_LFSR(log2Ceil(NumWay) - 1, 0))
   private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     bankIdx.U === (t1_train.cfiPosition.asBools.last + t1_alignBankIdx) // FIXME: not working for NumAlignBanks > 2
@@ -237,6 +251,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("mbtb_update_new_entry", t1_writeValid)
   XSPerfAccumulate("mbtb_update_hit", t1_updateHit)
-  XSPerfHistogram("mbtb_multihit_count", PopCount(s2_multihits), s2_fire, 0, NumWay * NumAlignBanks)
+  XSPerfHistogram("mbtb_multihit_count", PopCount(debug_s2_multihits), s2_fire, 0, NumWay * NumAlignBanks)
 
 }

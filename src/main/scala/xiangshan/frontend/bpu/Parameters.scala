@@ -45,9 +45,10 @@ trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
 
   // general
-  def FetchBlockSizeWidth:  Int = log2Ceil(FetchBlockSize)
-  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
-  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
+  def FetchBlockSizeWidth:    Int = log2Ceil(FetchBlockSize)
+  def FetchBlockAlignSize:    Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
+  def FetchBlockAlignWidth:   Int = log2Ceil(FetchBlockAlignSize)
+  def FetchBlockAlignInstNum: Int = FetchBlockAlignSize / instBytes
 
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 

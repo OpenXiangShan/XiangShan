@@ -40,8 +40,8 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
 
   //  Branch target info
-//  val targetCarry: TargetCarry = new TargetCarry // FIXME: seems not used
-  val target: UInt = UInt(TargetWidth.W)
+  val targetCarry:     TargetCarry = new TargetCarry
+  val targetLowerBits: UInt        = UInt(TargetWidth.W)
 
   val replaceCnt: UInt = UInt(2.W) // FIXME: not used for now
 }
@@ -57,4 +57,11 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val hitMask            = Vec(NumAlignBanks * NumWay, Bool())
   val stronglyBiasedMask = Vec(NumAlignBanks * NumWay, Bool())
   val positions          = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+}
+
+class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
+  val hitMask    = Vec(NumAlignBanks * NumWay, Bool())
+  val positions  = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val targets    = Vec(NumAlignBanks * NumWay, PrunedAddr(VAddrBits))
+  val attributes = Vec(NumAlignBanks * NumWay, new BranchAttribute)
 }
