@@ -43,7 +43,7 @@ trait HasMainBtbParameters extends HasBpuParameters {
   // NumSets is the number of sets in one bank, a bank coresponds to a physical SRAM
   def NumSets:            Int = mbtbParameters.NumEntries / mbtbParameters.NumWay / mbtbParameters.NumInternalBanks
   def NumInternalBanks:   Int = mbtbParameters.NumInternalBanks
-  def NumAlignBanks:      Int = mbtbParameters.NumAlignBanks
+  def NumAlignBanks:      Int = FetchBlockSize / FetchBlockAlignSize
   def TagWidth:           Int = mbtbParameters.TagWidth
   def TargetWidth:        Int = mbtbParameters.TargetWidth
   def SetIdxLen:          Int = log2Ceil(NumSets)
