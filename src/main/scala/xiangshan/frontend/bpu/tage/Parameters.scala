@@ -21,6 +21,9 @@ import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
+    BaseTableSize:          Int = 8192,
+    BaseTableInternalBanks: Int = 4,
+    BaseTableCtrWidth:      Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
       // Table size, history length, NumWay
       new TageTableInfo(1024, 4, 3),
@@ -42,12 +45,19 @@ case class TageParameters(
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
-  def TableInfos:       Seq[TageTableInfo] = tageParameters.TableInfos
-  def NumInternalBanks: Int                = tageParameters.NumInternalBanks
-  def TagWidth:         Int                = tageParameters.TagWidth
-  def CtrWidth:         Int                = tageParameters.CtrWidth
-  def UsefulWidth:      Int                = tageParameters.UsefulWidth
-  def WriteBufferSize:  Int                = tageParameters.WriteBufferSize
+  def BaseTableSize:                Int                = tageParameters.BaseTableSize
+  def BaseTableInternalBanks:       Int                = tageParameters.BaseTableInternalBanks
+  def BaseTableInternalBanksIdxLen: Int                = log2Ceil(BaseTableInternalBanks)
+  def BaseTableSramSets:            Int                = BaseTableSize / BaseTableInternalBanks / FetchBlockInstNum
+  def BaseTableSetIdxLen:           Int                = log2Ceil(BaseTableSramSets)
+  def BaseTableNumAlignBanks:       Int                = FetchBlockSize / FetchBlockAlignSize
+  def BaseTableCtrWidth:            Int                = tageParameters.BaseTableCtrWidth
+  def TableInfos:                   Seq[TageTableInfo] = tageParameters.TableInfos
+  def NumInternalBanks:             Int                = tageParameters.NumInternalBanks
+  def TagWidth:                     Int                = tageParameters.TagWidth
+  def CtrWidth:                     Int                = tageParameters.CtrWidth
+  def UsefulWidth:                  Int                = tageParameters.UsefulWidth
+  def WriteBufferSize:              Int                = tageParameters.WriteBufferSize
 
   def NumTables: Int = TableInfos.length
 }
