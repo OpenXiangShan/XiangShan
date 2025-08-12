@@ -28,7 +28,7 @@ import utils._
 import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, DynInst}
+import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop}
 import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
@@ -776,18 +776,6 @@ object ImmUnion {
     SelImm.IMM_VRORVI,
   ).zip(imms)
   println(s"ImmUnion max len: $maxLen")
-}
-
-case class Imm_LUI_LOAD() {
-  def immFromLuiLoad(lui_imm: UInt, load_imm: UInt): UInt = {
-    val loadImm = load_imm(Imm_I().len - 1, 0)
-    Cat(lui_imm(ImmUnion.maxLen - loadImm.getWidth - 1, 0), loadImm)
-  }
-  def getLuiImm(uop: DynInst): UInt = {
-    val loadImmLen = Imm_I().len
-    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.imm(ImmUnion.maxLen - 1, loadImmLen))
-    Cat(Imm_U().toImm32(imm_u)(31, loadImmLen), uop.imm(loadImmLen - 1, 0))
-  }
 }
 
 /**

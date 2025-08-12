@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U, Imm_Z, XSDebugDecode}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}

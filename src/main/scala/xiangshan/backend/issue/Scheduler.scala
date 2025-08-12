@@ -144,7 +144,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
-    val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
+    val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle)))
     val lqDeqPtr = Input(new LqPtr)
     val sqDeqPtr = Input(new SqPtr)
     // from lsq
