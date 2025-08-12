@@ -132,8 +132,8 @@ class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
     val codes: Vec[UInt] = Vec(DataBanks, UInt(DataEccBits.W))
   }
-  val req:  Vec[DecoupledIO[DataReadReqBundle]] = Vec(partWayNum, DecoupledIO(new DataReadReqBundle))
-  val resp: DataReadRespBundle                  = Input(new DataReadRespBundle)
+  val req:  DecoupledIO[DataReadReqBundle] = DecoupledIO(new DataReadReqBundle)
+  val resp: DataReadRespBundle             = Input(new DataReadRespBundle)
 }
 
 /* ***** Replacer ***** */

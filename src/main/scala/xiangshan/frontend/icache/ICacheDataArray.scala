@@ -50,10 +50,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.req.bits.poison).asUInt)
 
-  // io.read() are copies to control fan-out, we can simply use .head here
-  private val bankSel  = getBankSel(io.read.req.head.bits.blkOffset, io.read.req.head.valid)
-  private val lineSel  = getLineSel(io.read.req.head.bits.blkOffset)
-  private val waymasks = io.read.req.head.bits.waymask
+  private val bankSel  = getBankSel(io.read.req.bits.blkOffset, io.read.req.valid)
+  private val lineSel  = getLineSel(io.read.req.bits.blkOffset)
+  private val waymasks = io.read.req.bits.waymask
   private val masks    = Wire(Vec(nWays, Vec(DataBanks, Bool())))
   (0 until nWays).foreach { way =>
     (0 until DataBanks).foreach { bank =>
@@ -80,9 +79,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
       ))
 
       // read
-      sramBank.io.r.req.valid := io.read.req(bank % 4).valid && masks(way)(bank)
+      sramBank.io.r.req.valid := io.read.req.valid && masks(way)(bank)
       sramBank.io.r.req.bits.apply(setIdx =
-        Mux(lineSel(bank), io.read.req(bank % 4).bits.vSetIdx(1), io.read.req(bank % 4).bits.vSetIdx(0))
+        Mux(lineSel(bank), io.read.req.bits.vSetIdx(1), io.read.req.bits.vSetIdx(0))
       )
       // write
       sramBank.io.w.req.valid := io.write.req.valid && io.write.req.bits.waymask(way).asBool
@@ -103,7 +102,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
    * read logic
    ******************************************************************************
    */
-  private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read.req(0).valid)
+  private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read.req.valid)
   private val readDataWithCode = (0 until DataBanks).map { bank =>
     Mux1H(VecInit(masksReg.map(_(bank))).asTypeOf(UInt(nWays.W)), dataArrays.map(_(bank).io.r.resp.asUInt))
   }
@@ -124,5 +123,5 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   io.read.resp.datas := readDatas
   io.read.resp.codes := readCodes
   io.write.req.ready := true.B
-  io.read.req.foreach(_.ready := !io.write.req.valid)
+  io.read.req.ready  := !io.write.req.valid
 }
