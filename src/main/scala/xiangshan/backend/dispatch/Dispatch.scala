@@ -463,6 +463,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
   TopDownCounters.LoadL1Stall.id.U))))))))
 
+  val fusedVec = (0 until RenameWidth).map{ case i =>
+    if (i == 0) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid &&
+         CommitType.isFused(io.fromRename(i-1).bits.commitType))
+  }
+
   val decodeReason = RegNextN(io.stallReason.reason, 2)
   val renameReason = RegNext(io.stallReason.reason)
 
@@ -470,7 +476,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val firedVec = io.fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.map { case (((update, in), fire), idx) =>
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
     val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
     val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
@@ -488,9 +494,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       filterList.map(_ === in).reduce(_ || _)
     }
 
+
+
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
       (fire                                              ) -> NoStall.id.U          ,
+      (fused                                             ) -> NoStall.id.U          ,
       // dispatch not stall / core stall from decode or rename
       (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U && !inFilter(in)) -> in                    ,
       // dispatch queue stall
