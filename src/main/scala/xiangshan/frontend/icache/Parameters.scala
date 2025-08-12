@@ -70,8 +70,18 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   // implement cacheParams to use HasL1CacheParameters trait
   val cacheParams: ICacheParameters = icacheParameters
   // and nSets, nWays, rowBits, blockBytes, etc. are inherited from HasL1CacheParameters
-  def PageSize: Int = icacheParameters.pageSize
-  def SetBytes: Int = nSets * blockBytes
+
+  // If untagBits(idxBits + blockOffBits) is longer than pgIdxBits, different vSets may map to a same physical page,
+  // we need to give L2 cache alias tag to resolve the aliasing problem
+  // e.g. By default, we have 256 sets, 64B block, so idxBits = log2(256) = 8bits, blockOffBits = log2(64) = 6bits,
+  //      and, pgIdxBits = log2(4096) = 12bits,
+  //      in this case, we need vAddr(8+6-1, 12) as alias tag, it's 2 bits long
+  // Also refer to https://xiangshan-doc-en.readthedocs.io/en/latest/huancun/cache_alias/
+  // Actually, ICache aliasing may not be a functional problem, as its cached data is never dirty,
+  // and, currently ICache is using software fence.i to ensure coherency, so we can assume cached data is always newest,
+  // even when we support hardware coherency later, we can simply flush all aliased sets when receiving a probe request,
+  // therefore, this may not be necessary, but anyway, we still implement it to keep consistent with DCache.
+  def AliasTagBits: Option[Int] = Option.when(untagBits > pgIdxBits)(untagBits - pgIdxBits)
 
   def PortNumber: Int = icacheParameters.PortNumber
 
