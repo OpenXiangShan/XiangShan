@@ -23,12 +23,16 @@
 
 package xiangshan.frontend.icache
 
+import chisel3.util._
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLClientNode
 import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
+import huancun.AliasField
+import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
+import utility.ReqSourceField
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
   override def shouldBeInlined: Boolean = false
@@ -36,15 +40,20 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, cacheParams.nFetchMshr + cacheParams.nPrefetchMshr + 1)
+      sourceId = IdRange(0, NumFetchMshr + NumPrefetchMshr + 1)
     )),
-    requestFields = cacheParams.reqFields,
-    echoFields = cacheParams.echoFields
+    requestFields = Seq(
+      PrefetchField(), // FIXME: do we really need this? we didn't set it properly in Mshr
+      ReqSourceField()
+    ) ++ Option.when(SetBytes > PageSize)(
+      AliasField(log2Ceil(SetBytes / PageSize)) // FIXME: do we really need this? we didn't set it properly in Mshr
+    ),
+    echoFields = Nil
   )
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
-  val ctrlUnitOpt: Option[ICacheCtrlUnit] = ctrlUnitParamsOpt.map(params => LazyModule(new ICacheCtrlUnit(params)))
+  val ctrlUnitOpt: Option[ICacheCtrlUnit] = Option.when(EnableCtrlUnit)(LazyModule(new ICacheCtrlUnit))
 
   lazy val module: ICacheImp = new ICacheImp(this)
 }

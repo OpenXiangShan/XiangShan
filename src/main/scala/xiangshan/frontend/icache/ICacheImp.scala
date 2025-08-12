@@ -27,7 +27,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
-import utility.BoolStopWatch
 import utility.HasPerfEvents
 import utility.XSPerfAccumulate
 import xiangshan.L1CacheErrorInfo
@@ -68,17 +67,17 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val io: ICacheIO = IO(new ICacheIO)
 
   println("ICache:")
-  println("  TagECC: " + cacheParams.tagECC)
-  println("  DataECC: " + cacheParams.dataECC)
-  println("  ICacheSets: " + cacheParams.nSets)
-  println("  ICacheWays: " + cacheParams.nWays)
-  println("  PortNumber: " + cacheParams.PortNumber)
-  println("  nFetchMshr: " + cacheParams.nFetchMshr)
-  println("  nPrefetchMshr: " + cacheParams.nPrefetchMshr)
-  println("  nWayLookupSize: " + cacheParams.nWayLookupSize)
-  println("  DataCodeUnit: " + cacheParams.DataCodeUnit)
-  println("  ICacheDataBanks: " + cacheParams.ICacheDataBanks)
-  println("  ICacheDataSRAMWidth: " + cacheParams.ICacheDataSRAMWidth)
+  println(s"  Size(set * way * block): $nSets * $nWays * $blockBytes = ${nSets * nWays * blockBytes} bytes")
+  println(s"  Replacer: $Replacer")
+  println(s"  Mshr(fetch, prefetch): $NumFetchMshr, $NumPrefetchMshr entries")
+  println(s"  WayLookupSize: $WayLookupSize entries")
+  println(s"  DataBanks: $DataBanks banks")
+  println(s"  DataEccUnit: $DataEccUnit bits")
+  println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
+  println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
+  println(s"  CtrlUnit:")
+  println(s"    Enabled: $EnableCtrlUnit")
+  println(s"    Address: ${icacheParameters.ctrlUnitParameters.Address}")
 
   val (bus, edge) = outer.clientNode.out.head
 
@@ -90,10 +89,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
 
-  private val eccEnable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.eccEnable else true.B
+  private val eccEnable = if (EnableCtrlUnit) outer.ctrlUnitOpt.get.module.io.eccEnable else true.B
 
   // dataArray io
-  if (outer.ctrlUnitOpt.nonEmpty) {
+  if (EnableCtrlUnit) {
     val ctrlUnit = outer.ctrlUnitOpt.get.module
     when(ctrlUnit.io.injecting) {
       dataArray.io.write <> ctrlUnit.io.dataWrite
@@ -110,7 +109,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   // metaArray io
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaFlush
-  if (outer.ctrlUnitOpt.nonEmpty) {
+  if (EnableCtrlUnit) {
     val ctrlUnit = outer.ctrlUnitOpt.get.module
     when(ctrlUnit.io.injecting) {
       metaArray.io.write <> ctrlUnit.io.metaWrite

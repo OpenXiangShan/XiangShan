@@ -37,7 +37,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   val io: ICacheWayLookupIO = IO(new ICacheWayLookupIO)
 
-  class ICacheWayLookupPtr extends CircularQueuePtr[ICacheWayLookupPtr](nWayLookupSize)
+  class ICacheWayLookupPtr extends CircularQueuePtr[ICacheWayLookupPtr](WayLookupSize)
   private object ICacheWayLookupPtr {
     def apply(f: Bool, v: UInt): ICacheWayLookupPtr = {
       val ptr = Wire(new ICacheWayLookupPtr)
@@ -47,7 +47,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  private val entries  = RegInit(VecInit(Seq.fill(nWayLookupSize)(0.U.asTypeOf(new WayLookupEntry))))
+  private val entries  = RegInit(VecInit(Seq.fill(WayLookupSize)(0.U.asTypeOf(new WayLookupEntry))))
   private val readPtr  = RegInit(ICacheWayLookupPtr(false.B, 0.U))
   private val writePtr = RegInit(ICacheWayLookupPtr(false.B, 0.U))
 
@@ -159,6 +159,6 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     distanceBetween(writePtr, readPtr),
     true.B,
     0,
-    nWayLookupSize
+    WayLookupSize
   )
 }

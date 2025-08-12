@@ -43,6 +43,7 @@ trait HasXSDts {
         "d-cache-size" -> (dcacheParameters.nSets * dcacheParameters.nWays * dcacheParameters.blockBytes).asProperty
       ) else Map()
 
+      def icacheParameters = coreParams.frontendParameters.icacheParameters
       val icache = Map(
         "i-cache-block-size" -> icacheParameters.blockBytes.asProperty,
         "i-cache-sets" -> icacheParameters.nSets.asProperty,
