@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -136,9 +137,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   io.prediction.cfiPosition := s3_takenPosition
   io.prediction.attribute   := s3_takenAttribute
 
-  io.meta.valid         := s3_fire
-  io.meta.baseTableCtrs := s3_rawBaseTableCtrs
-  io.meta.debug_pad     := DontCare
+  io.meta.valid               := s3_fire
+  io.meta.baseTableCtrs       := s3_rawBaseTableCtrs
+  io.meta.debug_taken         := s3_taken
+  io.meta.debug_takenPosition := s3_takenPosition
 
   /* training */
   private val t1_trainValid                = RegNext(io.train.valid && io.enable)
@@ -159,6 +161,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))))
   private val t1_baseTableWriteWaymask: Vec[Vec[Bool]] =
     Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, Bool())))
+  private val t1_debug_taken         = t1_train.meta.tage.debug_taken
+  private val t1_debug_takenPosition = t1_train.meta.tage.debug_takenPosition
+  private val t1_debug_mispredict    = t1_debug_takenPosition =/= t1_cfiPosition || t1_debug_taken =/= t1_taken
 
   t1_baseTableWriteCtrs := DontCare
   t1_baseTableWriteWaymask.foreach(_.foreach(_ := false.B))
@@ -200,5 +205,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         }
       }
   }
+
+  /* *** perf counters */
+  XSPerfAccumulate("tage_mispredict", t1_debug_mispredict && t1_trainValid)
 
 }

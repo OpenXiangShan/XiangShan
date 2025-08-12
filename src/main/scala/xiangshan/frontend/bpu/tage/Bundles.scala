@@ -35,7 +35,8 @@ class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle with 
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
-  val valid:         Bool                 = Bool()
-  val baseTableCtrs: Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val debug_pad:     Bool                 = Bool() // FIXME: just to make old ftq happy
+  val valid:               Bool                 = Bool()
+  val baseTableCtrs:       Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
+  val debug_taken:         Bool                 = Bool()
+  val debug_takenPosition: UInt                 = UInt(FetchBlockInstNum.W)
 }
