@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import coupledL2.MemBackTypeMM
 import freechips.rocketchip.tilelink.TLEdgeOut
+import huancun.AliasKey
 import org.chipsalliance.cde.config.Parameters
 import utility.BoolStopWatch
 import utility.MemReqSource
@@ -61,6 +62,10 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   private val blkPAddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
   private val vSetIdx  = RegInit(UInt(idxBits.W), 0.U)
   private val way      = RegInit(UInt(wayBits.W), 0.U)
+  // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
+  // vSetIdx is vAddr(untagBits, blockOffBits), aliasTag should be vAddr(untagBits, pgIdxBits)
+  // and, AliasTagBits = untagBits - pgIdxBits, so we actually need AliasTagBits-most-significant bits of vSetIdx
+  private val aliasTag = AliasTagBits.map(w => vSetIdx.head(w))
 
   // look up and return result at the same cycle
   private val hits = io.lookUps.map { lookup =>
@@ -105,6 +110,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   io.acquire.bits.acquire := getBlock
   io.acquire.bits.acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUInst.id.U)
   io.acquire.bits.acquire.user.lift(MemBackTypeMM).foreach(_ := true.B) // icache is always requesting main memory
+  io.acquire.bits.acquire.user.lift(AliasKey).foreach(_ := aliasTag.get)
   io.acquire.bits.vSetIdx := vSetIdx
 
   // get victim way when acquire fire
