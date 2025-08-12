@@ -302,10 +302,6 @@ class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new DynInst
 }
 
-class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val flag = UInt(1.W)
-}
-
 class Redirect(implicit p: Parameters) extends XSBundle {
   val isRVC = Bool()
   val robIdx = new RobPtr
@@ -379,15 +375,6 @@ class NonmaskableInterruptIO() extends Bundle {
   val nmi_31 = Input(Bool())
   val nmi_43 = Input(Bool())
   // reserve for other nmi type
-}
-
-class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
-  val exception = Flipped(ValidIO(new DynInst))
-  val isInterrupt = Input(Bool())
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val trapTarget = Output(UInt(VAddrBits.W))
-  val externalInterrupt = new ExternalInterruptIO
-  val interrupt = Output(Bool())
 }
 
 class DiffCommitIO(implicit p: Parameters) extends XSBundle {

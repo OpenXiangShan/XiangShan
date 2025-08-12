@@ -32,7 +32,7 @@ import system.HasSoCParameter
 import utility._
 import utility.sram.SramBroadcastBundle
 import xiangshan._
-import xiangshan.backend.Bundles.{IssueQueueInUop, DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
@@ -998,7 +998,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val vstuIqFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
   val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
   val ldCancel = Vec(params.LdExuCnt, Input(new LoadCancelIO))
-  val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
+  val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
@@ -1010,7 +1010,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writebackVldu = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
-  val stIn = Input(Vec(params.StaExuCnt, ValidIO(new DynInst())))
+  val stIn = Input(Vec(params.StaExuCnt, ValidIO(new StoreUnitToLFST)))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionAddr = Input(new Bundle {
     val vaddr = UInt(XLEN.W)
@@ -1028,7 +1028,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lqCanAccept = Input(Bool())
   val sqCanAccept = Input(Bool())
 
-  val otherFastWakeup = Flipped(Vec(params.LduCnt + params.HyuCnt, ValidIO(new DynInst)))
   val stIssuePtr = Input(new SqPtr())
 
   val debugLS = Flipped(Output(new DebugLSIO))

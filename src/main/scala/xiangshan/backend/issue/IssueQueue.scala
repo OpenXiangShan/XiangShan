@@ -8,7 +8,6 @@ import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne,
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -1180,7 +1179,7 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
   val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 
   // load wakeup
-  val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new DynInst())))
+  val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new MemWakeUpBundle)))
 
   // vector
   val sqDeqPtr = Option.when(params.isVecMemIQ)(Input(new SqPtr))

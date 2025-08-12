@@ -30,6 +30,7 @@ import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.mem._
@@ -140,7 +141,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
-    sink.bits := 0.U.asTypeOf(sink.bits)
     sink.bits.robIdx := source.bits.uop.robIdx
     sink.bits.ssid := source.bits.uop.ssid
     sink.bits.storeSetHit := source.bits.uop.storeSetHit
@@ -154,7 +154,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqDeqPtr := memBlock.io.mem_to_ooo.lqDeqPtr
   backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
-  backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.ldaIqFeedback := memBlock.io.mem_to_ooo.ldaIqFeedback
   backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
@@ -162,7 +161,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
   backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
   backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
+  backend.io.mem.wakeup.zip(memBlock.io.mem_to_ooo.wakeup).map{ case (sink, source) => {
+    sink.valid := source.valid
+    connectSamePort(sink.bits, source.bits)
+  }}
   backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
   backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
   backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda

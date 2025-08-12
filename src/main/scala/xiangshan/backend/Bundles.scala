@@ -300,7 +300,7 @@ object Bundles {
     val isDropAmocasSta = Bool()
   }
   class DispatchUpdateUop(implicit p: Parameters) extends DispatchOutUop {
-    // dispatch ctrl for debug bundle
+    // dispatch ctrl for debug module
     val singleStep = Bool()
   }
   // DecodeOutUop --[Rename]--> DynInst
@@ -449,6 +449,20 @@ object Bundles {
     var idx = 0
   }
 
+  class StoreUnitToLFST(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val ssid = UInt(SSIDWidth.W)
+    val storeSetHit = Bool() // inst has been allocated an store set
+  }
+
+  class MemWakeUpBundle(implicit p: Parameters) extends XSBundle {
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool() // fof may write vl
+    val pdest = UInt(backendParams.pregIdxWidth.W)
+  }
   /**
     *
     * @param pregIdxWidth index width of preg
@@ -1119,11 +1133,6 @@ object Bundles {
     val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     def isVls = FuType.isVls(uop.fuType)
-  }
-
-  class MemMicroOpRbExt(implicit p: Parameters) extends XSBundle {
-    val uop = new DynInst
-    val flag = UInt(1.W)
   }
 
   object LoadShouldCancel {
