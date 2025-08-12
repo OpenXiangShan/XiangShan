@@ -100,10 +100,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Module(new MetaQueue)
 
-  private val readyToCommit = Wire(Bool())
-  private val canCommit     = Wire(Bool())
-  private val shouldCommit  = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
-
   private val ifuRedirect = receiveIfuRedirect(io.fromIfu.pdWb)
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
@@ -280,12 +276,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
     // TODO: When can redirect information be written to original entry instead of a new entry?
-    val newEntryPtr = redirect.bits.ftqIdx + 1.U
+    val newEntryPtr = Mux(
+      RedirectLevel.flushItself(redirect.bits.level) && redirect.bits.ftqOffset === 0.U,
+      redirect.bits.ftqIdx,
+      redirect.bits.ftqIdx + 1.U
+    )
     Seq(bpuPtr, ifuPtr, pfPtr).foreach(_ := newEntryPtr)
-    when(RedirectLevel.flushItself(redirect.bits.level)) {
-      shouldCommit(redirect.bits.ftqIdx.value) := false.B
-      shouldCommit(newEntryPtr.value)          := false.B
-    }
   }
 
   io.toIfu.redirect.valid := backendRedirect.valid
@@ -317,14 +313,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
   private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, FtqPtr(true.B, (FtqSize - 1).U), backendCommit)
   private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
-  canCommit     := commitPtr < committedPtr
-  readyToCommit := canCommit && shouldCommit(commitPtr(0).value)
-  when(canCommit) {
+  private val commit = commitPtr < committedPtr
+  when(commit) {
     commitPtr := commitPtr + 1.U
   }
 
   // TODO: Wrap metaQueue as other queues
-  metaQueue.io.ren   := readyToCommit
+  metaQueue.io.ren   := commit
   metaQueue.io.raddr := commitPtr(0).value
 
   io.toBpu.train := DontCare
@@ -333,7 +328,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // MMIO fetch
   // --------------------------------------------------------------------------------
   private val mmioPtr           = io.fromIfu.mmioCommitRead.mmioFtqPtr
-  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && canCommit
+  private val lastMmioCommitted = commitPtr > mmioPtr || commitPtr === mmioPtr && commit
   io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted)
 
   // --------------------------------------------------------------------------------
