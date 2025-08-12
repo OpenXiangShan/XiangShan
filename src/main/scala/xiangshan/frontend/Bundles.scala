@@ -94,10 +94,9 @@ class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
   val backendException: ExceptionType = new ExceptionType
 }
 
-class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val req:                Vec[FtqICacheInfo] = Vec(5, new FtqICacheInfo)
-  val readValid:          Vec[Bool]          = Vec(5, Bool())
-  val isBackendException: Bool               = Bool()
+class FtqToFetchBundle(implicit p: Parameters) extends XSBundle {
+  val req:                FtqICacheInfo = new FtqICacheInfo
+  val isBackendException: Bool          = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
