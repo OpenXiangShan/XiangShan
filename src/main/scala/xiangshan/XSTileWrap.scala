@@ -95,7 +95,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case None => new PortIO
       }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
-      val clintTime = Input(ValidIO(UInt(64.W)))
+      val clintTime = EnableClintAsyncBridge match {
+        case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
+        case None => Input(ValidIO(UInt(64.W)))
+      }
       val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
       val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
@@ -138,18 +141,16 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       powerSwitchBuffer.sleep := req
     }
 
-    // instance clint timer Module to generate interrupt
-    val clintInst = syncClint.map(_.module)
     // CLINT Async Queue Sink
-    EnableClintAsync match {
-      case true =>
-        val timeasync = withClockAndReset(clock, reset)(Module(new TimeAsync()))
-        timeasync.io.i_time <> io.clintTime
-        tile.module.io.clintTime := timeasync.io.o_time
-        clintInst.foreach(_.io.time := timeasync.io.o_time)
-      case false =>
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        val time_sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        time_sink.io.async <> io.clintTime
+        time_sink.io.deq.ready := true.B
+        tile.module.io.clintTime.valid := time_sink.io.deq.valid
+        tile.module.io.clintTime.bits := time_sink.io.deq.bits
+      case None =>
         tile.module.io.clintTime := io.clintTime
-        clintInst.foreach(_.io.time := io.clintTime)
     }
 
     // CHI Async Queue Source

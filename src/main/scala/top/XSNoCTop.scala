@@ -413,7 +413,18 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
 trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp
                                                             with HasXSTileImp[L] =>
     val io_clintTime  = IO(Input(ValidIO(UInt(64.W))))
-    core_with_l2.module.io.clintTime <> io_clintTime
+
+  socParams.EnableClintAsyncBridge match {
+    case Some(param) =>
+      withClockAndReset(soc_clock, soc_reset_sync) {
+        val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
+        time_source.io.enq.valid := io_clintTime.valid
+        time_source.io.enq.bits := io_clintTime.bits
+        core_with_l2.module.io.clintTime <> time_source.io.async
+      }
+    case None =>
+      core_with_l2.module.io.clintTime <> io_clintTime
+  }
 
 }
 

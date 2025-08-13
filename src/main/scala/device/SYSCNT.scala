@@ -11,9 +11,12 @@ import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.devices.debug.RWNotify
 import org.chipsalliance.cde.config.Field
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
+
+import scala.collection.immutable.Seq
 
 object SYSCNTConsts {
 
@@ -65,12 +68,13 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       val stop_en = Input(Bool())
       val time = Output(ValidIO(UInt(timeWidth.W)))
     })
-
+    dontTouch(io)
     // increasing time define working on rtc_clock
     val time = withClockAndReset(rtc_clock, rtc_reset){RegInit(0.U(timeWidth.W))}
     val time_sw = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(timeWidth.W))} //software config time register
     val time_sw_req_byte = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
     val time_sw_req = time_sw_req_byte(0)
+    val time_sw_vld = withClockAndReset(bus_clock, bus_reset){RegInit(false.B)}
     //register define working on bus clock
     //incfreq bit[1:0] is incr width 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
     val incfreq = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
@@ -149,12 +153,12 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     // async process about inc_update
     val inc_update_bus = withClockAndReset(bus_clock,bus_reset){AsyncResetSynchronizerShiftReg(inc_update, 3, 0)}
     when(inc_update_bus){incfreq_update_byte := false.B} //incfreq update cfg is cleared auto by hardware.
-    val time_toggle = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
+    val time_en = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
     val incwidth_mux = Mux(inc_update,incwidth,incr_width_value)
 
     when(stop_sync) {
-      time_toggle := false.B
-    }.otherwise(time_toggle := !time_toggle)
+      time_en := false.B
+    }.otherwise(time_en := true.B)
 
     when(time_req_rtc_ris){
       time := time_sw
@@ -166,12 +170,12 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       time := time + (1.U << incwidth_mux)
     }
     io.time.bits := time
-    io.time.valid := time_toggle
+    io.time.valid := time_en
     //time working on rtc clock is to be synced with bus clock
     val timeasync = withClockAndReset(bus_clock, bus_reset)(Module(new TimeAsync()))
-    when(time_sw_req){
-      time_sw := timeasync.io.o_time.bits
-    }
+    val time_rpt_bus = timeasync.io.o_time.bits
+    val time_rpt_rd = RegInit(false.B)
+
     timeasync.io.i_time := io.time
     /* 0000 msip hart 0
      * 0004 msip hart 1
@@ -180,7 +184,6 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
      * 4008 mtimecmp hart 1 lo
      * bffc mtime hi
      */
-
     node.regmap(
       timefreq -> RegFieldGroup(
         "timefreq",
@@ -200,8 +203,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       timeOffset -> RegFieldGroup(
         "mtime",
         Some("Timer Register"),
-        RegField.bytes(time_sw, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
-      )
+        Seq(RWNotify(64,time_rpt_bus,time_sw,time_rpt_rd,time_sw_vld,Some(RegFieldDesc("timeswReq", "", reset = Some(0), volatile = true)))))
     )
   }
 }
