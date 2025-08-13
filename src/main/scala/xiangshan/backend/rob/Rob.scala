@@ -71,7 +71,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
     val exuWriteback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
-    val writebackNums = Flipped(Vec(writeback.size - params.StdCnt, ValidIO(UInt(writeback.size.U.getWidth.W))))
+    val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
@@ -137,8 +137,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
   })
 
-  val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(!_.bits.params.hasStdFu).toSeq
-  val stdWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(_.bits.params.hasStdFu).toSeq
+  val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback
   val vldWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
@@ -155,10 +154,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   val numExuWbPorts = exuWBs.length
-  val numStdWbPorts = stdWBs.length
   val bankAddrWidth = log2Up(CommitWidth)
 
-  println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, numStdWbPorts: $numStdWbPorts, commitwidth: $CommitWidth")
+  println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
 
   val rab = Module(new RenameBuffer(RabSize))
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
@@ -1031,7 +1029,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U))
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
@@ -1045,18 +1042,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when(robEntries(i).valid && (needFlush || needFlushWriteBack)) {
       // exception flush
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
-      robEntries(i).stdWritebacked := true.B
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
       // enq set num of uops
       robEntries(i).uopNum := enqWBNum
-      robEntries(i).stdWritebacked := Mux(enqWriteStd, false.B, true.B)
     }.elsewhen(robEntries(i).valid) {
       // update by writing back
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
       assert(!(robEntries(i).uopNum - wbCnt > robEntries(i).uopNum), s"robEntries $i uopNum is overflow!")
-      when(canStdWbSeq.asUInt.orR) {
-        robEntries(i).stdWritebacked := true.B
-      }
     }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
@@ -1104,7 +1096,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i)))
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && (writeback.bits.robIdx.value === needUpdateRobIdx(i)))
@@ -1118,17 +1109,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when(needUpdate(i).valid && (needFlush || needFlushWriteBack)) {
       // exception flush
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
-      needUpdate(i).stdWritebacked := true.B
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
       // enq set num of uops
       needUpdate(i).uopNum := enqWBNum
-      needUpdate(i).stdWritebacked := Mux(enqWriteStd, false.B, true.B)
     }.elsewhen(needUpdate(i).valid) {
       // update by writing back
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
-      when(canStdWbSeq.asUInt.orR) {
-        needUpdate(i).stdWritebacked := true.B
-      }
     }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.wflags.getOrElse(false.B))
@@ -1349,7 +1335,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
 
   private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
-  private val deqStdNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).stdWritebacked
   private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
   private val deqHeadInfo = debug_microOp(deqPtr.value)
   val deqUopCommitType = debug_microOp(deqPtr.value).commitType
@@ -1364,20 +1349,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitBkuCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.bku.U)
   XSPerfAccumulate("waitLduCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.ldu.U)
   XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
-  XSPerfAccumulate("waitStaCycle", deqUopNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
-  XSPerfAccumulate("waitStdCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
-  XSPerfAccumulate("waitAtmCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.mou.U)
+  XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.mou.U)
 
-  XSPerfAccumulate("waitVfaluCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.vfalu.U)
-  XSPerfAccumulate("waitVfmaCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.vfma.U)
-  XSPerfAccumulate("waitVfdivCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.vfdiv.U)
+  XSPerfAccumulate("waitVfaluCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.vfalu.U)
+  XSPerfAccumulate("waitVfmaCycle" , deqNotWritebacked && deqHeadInfo.fuType === FuType.vfma.U)
+  XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.vfdiv.U)
 
   val vfalufuop = Seq(VfaluType.vfadd, VfaluType.vfwadd, VfaluType.vfwadd_w, VfaluType.vfsub, VfaluType.vfwsub, VfaluType.vfwsub_w, VfaluType.vfmin, VfaluType.vfmax,
     VfaluType.vfmerge, VfaluType.vfmv, VfaluType.vfsgnj, VfaluType.vfsgnjn, VfaluType.vfsgnjx, VfaluType.vfeq, VfaluType.vfne, VfaluType.vflt, VfaluType.vfle, VfaluType.vfgt,
     VfaluType.vfge, VfaluType.vfclass, VfaluType.vfmv_f_s, VfaluType.vfmv_s_f, VfaluType.vfredusum, VfaluType.vfredmax, VfaluType.vfredmin, VfaluType.vfredosum, VfaluType.vfwredosum)
 
   vfalufuop.zipWithIndex.map{
-    case(fuoptype,i) =>  XSPerfAccumulate(s"waitVfalu_${i}Cycle", deqStdNotWritebacked && deqHeadInfo.fuOpType === fuoptype && deqHeadInfo.fuType === FuType.vfalu.U)
+    case(fuoptype,i) =>  XSPerfAccumulate(s"waitVfalu_${i}Cycle", deqNotWritebacked && deqHeadInfo.fuOpType === fuoptype && deqHeadInfo.fuType === FuType.vfalu.U)
   }
 
 
