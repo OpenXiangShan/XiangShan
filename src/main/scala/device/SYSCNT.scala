@@ -7,7 +7,7 @@ import chisel3.util.ShiftRegister
 import chisel3.util.ValidIO
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.regmapper._
+import freechips.rocketchip.regmapper.{RegField, _}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -72,30 +72,27 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     // increasing time define working on rtc_clock
     val time = withClockAndReset(rtc_clock, rtc_reset){RegInit(0.U(timeWidth.W))}
     val time_sw = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(timeWidth.W))} //software config time register
-    val time_sw_req_byte = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
-    val time_sw_req = time_sw_req_byte(0)
-    val time_sw_vld = withClockAndReset(bus_clock, bus_reset){RegInit(false.B)}
+    val time_sw_req = withClockAndReset(bus_clock, bus_reset){RegInit(false.B)}
     //register define working on bus clock
-    //incfreq bit[1:0] is incr width 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
-    val incfreq = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
-    val incfreq_update_byte = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(8.W))}
-    val incfreq_update = incfreq_update_byte(0)
+    //freqidx bit[1:0] is incr width 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
+    val freqidx = withClockAndReset(bus_clock, bus_reset){RegInit(0.U(3.W))}
+    val freqidx_req = withClockAndReset(bus_clock, bus_reset){RegInit(false.B)}
     //async process about soc signal
     val update_sync = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(io.update_en, 3, 0)}
     val stop_sync = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(io.stop_en, 3, 0)}
-    val incfreq_update_rtc = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(incfreq_update, 3, 0)}
+    val freqidx_req_rtc = withClockAndReset(rtc_clock,rtc_reset){AsyncResetSynchronizerShiftReg(freqidx_req, 3, 0)}
     val time_sw_req_rtc = withClockAndReset(rtc_clock, rtc_reset){AsyncResetSynchronizerShiftReg(time_sw_req, 3, 0)}
-    // generate incfreq_update_rtc's rising edge
-    val incfreq_update_rtc_1f = withClockAndReset(rtc_clock,rtc_reset){RegNext(incfreq_update_rtc, init=false.B)}
-    val inccfg_vld = incfreq_update_rtc & (!incfreq_update_rtc_1f)
+    // generate freqidx_req_rtc's rising edge
+    val freqidx_req_rtc_1f = withClockAndReset(rtc_clock,rtc_reset){RegNext(freqidx_req_rtc, init=false.B)}
+    val inccfg_vld = freqidx_req_rtc & (!freqidx_req_rtc_1f)
     val time_req_rtc_1f = withClockAndReset(rtc_clock,rtc_reset){RegNext(time_sw_req_rtc, init=false.B)}
     val time_req_rtc_ris = time_sw_req_rtc & (!time_req_rtc_1f)
     //async process from rtc clock to bus clock
     val time_sw_update_bus = withClockAndReset(bus_clock, bus_reset){AsyncResetSynchronizerShiftReg(time_req_rtc_ris, 3, 0)}
-    when(time_sw_update_bus)(time_sw_req_byte := false.B)
-    // inc freq will be active after incfreq request is set from 0 to 1.
+    when(time_sw_update_bus)(time_sw_req := false.B)
+    // inc freq will be active after freqidx request is set from 0 to 1.
     val incwidth = WireInit(0.U(3.W))
-    incwidth := withClockAndReset(rtc_clock,rtc_reset){RegEnable((incfreq(2,0)), inccfg_vld)}
+    incwidth := withClockAndReset(rtc_clock,rtc_reset){RegEnable(freqidx, inccfg_vld)}
     val inc_up_dis = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
     //generate the low bit: time_low= time[incwidth-1:0]
     val time_low = WireInit(1.U(7.W))
@@ -152,7 +149,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     }
     // async process about inc_update
     val inc_update_bus = withClockAndReset(bus_clock,bus_reset){AsyncResetSynchronizerShiftReg(inc_update, 3, 0)}
-    when(inc_update_bus){incfreq_update_byte := false.B} //incfreq update cfg is cleared auto by hardware.
+    when(inc_update_bus){freqidx_req := false.B} //freqidx update cfg is cleared auto by hardware.
     val time_en = withClockAndReset(rtc_clock,rtc_reset){RegInit(false.B)}
     val incwidth_mux = Mux(inc_update,incwidth,incr_width_value)
 
@@ -174,7 +171,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     //time working on rtc clock is to be synced with bus clock
     val timeasync = withClockAndReset(bus_clock, bus_reset)(Module(new TimeAsync()))
     val time_rpt_bus = timeasync.io.o_time.bits
-    val time_rpt_rd = RegInit(false.B)
+
 
     timeasync.io.i_time := io.time
     /* 0000 msip hart 0
@@ -184,26 +181,38 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
      * 4008 mtimecmp hart 1 lo
      * bffc mtime hi
      */
+    //no use, only statement for syntax.
+    val time_rpt_rd = WireInit(false.B)
+    val time_sw_vld = WireInit(false.B)
+    val freqidx_rd= WireInit(false.B)
+    val freqidx_wr= WireInit(false.B)
+    val freqidx_req_rd= WireInit(false.B)
+    val freqidx_req_wr= WireInit(false.B)
+    val mtime_req_rd= WireInit(false.B)
+    val mtime_req_wr= WireInit(false.B)
+    //
     node.regmap(
-      timefreq -> RegFieldGroup(
-        "timefreq",
-        Some("mtime frequency Register"),
-        RegField.bytes(incfreq, Some(RegFieldDesc("timefreq", "", reset = Some(0), volatile = true)))
-      ),
-      timefreqReq -> RegFieldGroup(
-        "timefreqReq",
-        Some("mtime frequency update Request Register"),
-        RegField.bytes(incfreq_update_byte, Some(RegFieldDesc("timefreqReq", "", reset = Some(0), volatile = true)))
-      ),
-      timeswReq -> RegFieldGroup(
-        "timeswReq",
-        Some("mtime software update Request Register"),
-        RegField.bytes(time_sw_req_byte, Some(RegFieldDesc("timeswReq", "", reset = Some(0), volatile = true)))
-      ),
       timeOffset -> RegFieldGroup(
         "mtime",
         Some("Timer Register"),
-        Seq(RWNotify(64,time_rpt_bus,time_sw,time_rpt_rd,time_sw_vld,Some(RegFieldDesc("timeswReq", "", reset = Some(0), volatile = true)))))
+        Seq(RWNotify(64,time_rpt_bus,time_sw,time_rpt_rd,time_sw_vld,Some(RegFieldDesc("timeswReq", "", reset = Some(0), volatile = true))))
+      ),
+      timefreq -> RegFieldGroup(
+        "freqidx",
+        Some("mtime frequency Register"),
+        Seq(RWNotify(3, freqidx, freqidx, freqidx_rd, freqidx_wr, Some(RegFieldDesc("freqidx", "", reset = Some(0), volatile = true))))
+      ),
+      timefreqReq -> RegFieldGroup(
+        "freqidxReq",
+        Some("mtime frequency update Request Register"),
+          Seq(RWNotify(1, freqidx_req, freqidx_req, freqidx_req_rd, freqidx_req_wr, Some(RegFieldDesc("freqidxReq", "", reset = Some(0), volatile = true))))
+      ),
+      timeswReq -> RegFieldGroup(
+        "mtimeReq",
+        Some("mtime software update Request Register"),
+//        RegField.bytes(time_sw_req_byte, Some(RegFieldDesc("mtimeReq", "", reset = Some(0), volatile = true)))
+        Seq(RWNotify(1, time_sw_req, time_sw_req, mtime_req_rd, mtime_req_wr, Some(RegFieldDesc("mtime_req", "", reset = Some(0), volatile = true))))
+      )
     )
   }
 }
