@@ -19,7 +19,14 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{AXI4MemEncrypt, DebugModule, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO, TimeAsync, TimeVldGen}
+import device.{AXI4MemEncrypt, DebugModule, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO}
+
+
+import huancun._
+import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import coupledL2.{EnableCHI, L2Param}
+import coupledL2.tl2chi.CHIIssue
+import openLLC.OpenLLCParam
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -27,16 +34,11 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.AsyncQueueParams
-import huancun._
+import freechips.rocketchip.util.{AsyncQueueParams}
 import top.BusPerfMonitor
-import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
-import coupledL2.{EnableCHI, L2Param}
-import coupledL2.tl2chi.CHIIssue
 import device.SYSCNTConsts.timeWidth
-import openLLC.OpenLLCParam
 
 case object SoCParamsKey extends Field[SoCParameters]
 case object CVMParamsKey extends Field[CVMParameters]
@@ -117,7 +119,6 @@ case class SoCParameters
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   EnableIOSeperateTLBus: Boolean = false,
-  EnableClintAsync: Boolean = true,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -184,7 +185,6 @@ trait HasSoCParameter {
   val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
 
   val EnableIOSeperateTLBus = soc.EnableIOSeperateTLBus && SeperateTLBus
-  val EnableClintAsync = soc.EnableClintAsync
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
 
@@ -593,11 +593,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     //instance time async proc ip
     // timer instance
-    val time_async = Module(new TimeAsync())
-    time_async.io.i_time <> syscnt.module.io.time
-    clintTime := time_async.io.o_time //syscnt ->timeasync
-
-    timer.module.io.time <> time_async.io.o_time
+    clintTime :=   syscnt.module.io.time //syscnt ->timeasync
+    timer.module.io.time <> syscnt.module.io.time
     timer.module.io.hartId := 0.U
 
     // instance syscnt
