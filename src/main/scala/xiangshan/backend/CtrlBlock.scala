@@ -194,15 +194,17 @@ class CtrlBlockImp(
   private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
     val hasCSR = x.bits.params.hasCSR
     val out = Wire(Valid(new Redirect()))
-    out.valid := x.valid && x.bits.redirect.get.valid && (x.bits.redirect.get.bits.cfiUpdate.isMisPred || x.bits.redirect.get.bits.cfiUpdate.hasBackendFault) && !x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
+    out.valid := x.valid && x.bits.redirect.get.valid &&
+      (x.bits.redirect.get.bits.isMisPred ||
+        x.bits.redirect.get.bits.hasBackendFault) && !x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     out.bits := x.bits.redirect.get.bits
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
     // for fix timing, next cycle assgin
     if (!hasCSR) {
-      out.bits.cfiUpdate.backendIAF := false.B
-      out.bits.cfiUpdate.backendIPF := false.B
-      out.bits.cfiUpdate.backendIGPF := false.B
+      out.bits.backendIAF := false.B
+      out.bits.backendIPF := false.B
+      out.bits.backendIGPF := false.B
     }
     out
   }).toSeq
@@ -325,9 +327,9 @@ class CtrlBlockImp(
   val loadRedirectPcFtqOffset = RegEnable((memViolation.bits.ftqOffset << instOffsetBits).asUInt +& loadRedirectOffset, memViolation.valid)
   val loadRedirectPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt + loadRedirectPcFtqOffset
 
-  redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectPcRead
+  redirectGen.io.loadReplay.bits.pc := loadRedirectPcRead
   val load_target = loadRedirectPcRead
-  redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
+  redirectGen.io.loadReplay.bits.target := load_target
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
@@ -380,10 +382,10 @@ class CtrlBlockImp(
   val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
-    io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
   }
 
   for (i <- 0 until DecodeWidth) {

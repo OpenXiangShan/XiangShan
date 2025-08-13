@@ -132,40 +132,13 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
 }
 
 // Backend & Ftq -> Bpu
-class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters {
-  // alias for compatibility, re-write this bundle when refactoring `class Redirect`
-  def startVAddr: PrunedAddr = PrunedAddrInit(cfiUpdate.pc)
-  def target:     PrunedAddr = PrunedAddrInit(cfiUpdate.target)
-  def taken:      Bool       = cfiUpdate.taken
-  def attribute: BranchAttribute = {
-    val m = MuxCase(
-      BranchAttribute.Conditional,
-      Seq(
-        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJal)  -> BranchAttribute.DirectCall,
-        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJalr) -> BranchAttribute.IndirectCall,
-        (cfiUpdate.pd.isRet)                         -> BranchAttribute.Return,
-        (cfiUpdate.pd.isJal)                         -> BranchAttribute.OtherDirect,
-        (cfiUpdate.pd.isJalr)                        -> BranchAttribute.OtherIndirect
-      )
-    )
-    m
-  }
-  def speculativeMeta: BpuSpeculativeMeta = {
-    val m = Wire(new BpuSpeculativeMeta)
-    m.phrHistPtr   := cfiUpdate.phrHistPtr
-    m.rasMeta.ssp  := cfiUpdate.ssp
-    m.rasMeta.tosw := cfiUpdate.TOSW
-    m.rasMeta.tosr := cfiUpdate.TOSR
-    m.rasMeta.nos  := cfiUpdate.NOS
-    m.rasMeta.sctr := cfiUpdate.sctr
-    m.topRetAddr   := cfiUpdate.topAddr
-    m
-  }
-
-//  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
-//  val target:          PrunedAddr         = PrunedAddr(VAddrBits)
-//  val taken:           Bool               = Bool()
-//  val speculativeMeta: BpuSpeculativeMeta = new BpuSpeculativeMeta
+class BpuRedirect(implicit p: Parameters) extends BpuBundle {
+  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
+  val target:          PrunedAddr         = PrunedAddr(VAddrBits)
+  val isRvc:           Bool               = Bool()
+  val taken:           Bool               = Bool()
+  val speculativeMeta: BpuSpeculativeMeta = new BpuSpeculativeMeta
+  val attribute:       BranchAttribute    = new BranchAttribute
 }
 
 // Backend & Ftq -> Bpu

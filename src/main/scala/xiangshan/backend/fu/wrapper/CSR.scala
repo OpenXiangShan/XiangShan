@@ -300,14 +300,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.robIdx := robIdxReg
   redirect.ftqIdx := RegEnable(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
   redirect.ftqOffset := RegEnable(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
-  redirect.cfiUpdate.predTaken := true.B
-  redirect.cfiUpdate.taken := true.B
-  redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc.pc
-  redirect.cfiUpdate.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
-  redirect.cfiUpdate.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
-  redirect.cfiUpdate.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
+  redirect.taken := true.B
+  redirect.target := csrMod.io.out.bits.targetPc.pc
+  redirect.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
+  redirect.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
+  redirect.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
   // Only mispred will send redirect to frontend
-  redirect.cfiUpdate.isMisPred := true.B
+  redirect.isMisPred := true.B
 
   val rfWenReg = RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire)
   val pdestReg = RegEnable(io.in.bits.ctrl.pdest, io.in.fire)

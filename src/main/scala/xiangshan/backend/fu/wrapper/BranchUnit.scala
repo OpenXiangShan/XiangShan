@@ -60,14 +60,13 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
       redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
       redirect.bits.fullTarget := addModule.io.target
-      redirect.bits.cfiUpdate.isMisPred := isMisPred
-      redirect.bits.cfiUpdate.taken := dataModule.io.taken
-      redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
-      redirect.bits.cfiUpdate.target := addModule.io.target
-      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
-      redirect.bits.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
-      redirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
-      redirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
+      redirect.bits.isMisPred := isMisPred
+      redirect.bits.taken := dataModule.io.taken
+      redirect.bits.target := addModule.io.target
+      redirect.bits.pc := io.in.bits.data.pc.get
+      redirect.bits.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
+      redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
+      redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
   }
   connect0LatencyCtrlSingal
 }

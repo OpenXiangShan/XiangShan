@@ -119,9 +119,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val backendExceptionPtr = RegInit(FtqPtr(false.B, 0.U))
   when(backendRedirect.valid) {
     backendException := ExceptionType(
-      hasPf = backendRedirect.bits.cfiUpdate.backendIPF,
-      hasGpf = backendRedirect.bits.cfiUpdate.backendIGPF,
-      hasAf = backendRedirect.bits.cfiUpdate.backendIAF
+      hasPf = backendRedirect.bits.backendIPF,
+      hasGpf = backendRedirect.bits.backendIGPF,
+      hasAf = backendRedirect.bits.backendIAF
     )
     when(backendException.hasException) {
       backendExceptionPtr := ifuWbPtr(0)
@@ -206,7 +206,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.prefetchReq.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
   io.toICache.prefetchReq.bits.req.startVAddr := Mux(
     redirectNext.valid,
-    PrunedAddrInit(redirectNext.bits.cfiUpdate.target),
+    PrunedAddrInit(redirectNext.bits.target),
     entryQueue(pfPtr(0).value)
   )
   io.toICache.prefetchReq.bits.req.nextCachelineVAddr :=
@@ -263,20 +263,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Redirect from backend and IFU
   // --------------------------------------------------------------------------------
 
-  private def updateCfi(redirect: Valid[Redirect]): Unit = {
-    val valid     = redirect.valid
-    val ftqPtr    = redirect.bits.ftqIdx
-    val ftqOffset = redirect.bits.ftqOffset
-    val taken     = redirect.bits.cfiUpdate.taken
-  }
-
-  when(backendRedirect.valid) {
-    updateCfi(backendRedirect)
-    val redirect = backendRedirect.bits
-  }.elsewhen(ifuRedirect.valid) {
-    updateCfi(ifuRedirect)
-  }
-
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
     // TODO: When can redirect information be written to original entry instead of a new entry?
@@ -294,8 +280,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toBpu.redirect.valid := redirect.valid
   // FIXME: Modify BPU
-  io.toBpu.redirect.bits   := redirect.bits
-  io.toBpu.redirectFromIFU := ifuRedirect.valid
+  io.toBpu.redirect.bits.startVAddr      := redirect.bits.pc
+  io.toBpu.redirect.bits.target          := redirect.bits.target
+  io.toBpu.redirect.bits.isRvc           := redirect.bits.isRVC
+  io.toBpu.redirect.bits.taken           := redirect.bits.taken
+  io.toBpu.redirect.bits.attribute       := DontCare
+  io.toBpu.redirect.bits.speculativeMeta := DontCare
+  io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
