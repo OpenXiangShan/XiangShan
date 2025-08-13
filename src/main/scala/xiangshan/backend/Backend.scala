@@ -32,7 +32,7 @@ import system.HasSoCParameter
 import utility._
 import utility.sram.SramBroadcastBundle
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
+import xiangshan.backend.Bundles.{IssueQueueInUop, DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}

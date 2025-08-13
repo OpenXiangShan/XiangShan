@@ -172,6 +172,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     // srcLoadDependency and srcState
     fromRenameUpdate(i).bits := 0.U.asTypeOf(fromRenameUpdate(i).bits)
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
+    fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
   }
