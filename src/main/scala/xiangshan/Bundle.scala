@@ -96,57 +96,6 @@ class PredictorAnswer(implicit p: Parameters) extends XSBundle {
   val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
 }
 
-class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
-  // from backend
-  //TODO: This should be PrunedAddr. It remains UInt now because modifications are needed in backend.
-  val pc = UInt(VAddrBits.W)
-  // frontend -> backend -> frontend
-  val pd = new PreDecodeInfo
-  val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(RasCtrSize.W)
-  val TOSW = new RasPtr
-  val TOSR = new RasPtr
-  val NOS = new RasPtr
-  val topAddr = UInt(VAddrBits.W)
-  // val hist = new ShiftingGlobalHistory
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
-  val ghr = UInt(UbtbGHRLength.W)
-  val histPtr = new CGHPtr
-  val phrHistPtr = new PhrPtr
-  val specCnt = Vec(numBr, UInt(10.W))
-  // need pipeline update
-  val br_hit = Bool() // if in ftb entry
-  val jr_hit = Bool() // if in ftb entry
-  val sc_hit = Bool() // if used in ftb entry, invalid if !br_hit
-  val predTaken = Bool()
-  val target = UInt(VAddrBits.W)
-  val taken = Bool()
-  val isMisPred = Bool()
-  val shift = UInt((log2Ceil(numBr)+1).W)
-  val addIntoHist = Bool()
-  // raise exceptions from backend
-  val backendIGPF = Bool() // instruction guest page fault
-  val backendIPF = Bool() // instruction page fault
-  val backendIAF = Bool() // instruction access fault
-
-  def fromFtqRedirectSram(entry: FtqRedirectSramEntry) = {
-    // this.hist := entry.ghist
-    this.histPtr := entry.histPtr
-    this.ssp := entry.rasSpecInfo.ssp
-    this.sctr := entry.rasSpecInfo.sctr
-    this.TOSW := entry.rasSpecInfo.TOSW
-    this.TOSR := entry.rasSpecInfo.TOSR
-    this.NOS := entry.rasSpecInfo.NOS
-    this.topAddr := entry.rasSpecInfo.topAddr.toUInt
-    this.phrHistPtr := entry.speculativeMeta.phrHistPtr // TODO: this bundle should be re-organized
-    this
-  }
-
-  def hasBackendFault = backendIGPF || backendIPF || backendIAF
-}
-
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
@@ -303,23 +252,34 @@ class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
-  val isRVC = Bool()
-  val robIdx = new RobPtr
+  // for frontend
   val ftqIdx = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val level = RedirectLevel()
-  val interrupt = Bool()
-  val cfiUpdate = new CfiUpdateInfo
-  val fullTarget = UInt(XLEN.W) // only used for tval storage in backend
+  val ftqOffset: UInt = UInt(log2Up(PredictWidth).W)
+  val target: UInt = UInt(VAddrBits.W)
+  val isRVC: Bool = Bool()
+  val level: UInt = RedirectLevel()
+  val pc: UInt = UInt(VAddrBits.W)
+  val taken: Bool = Bool()
+  val backendIGPF: Bool = Bool() // instruction guest page fault
+  val backendIPF: Bool = Bool() // instruction page fault
+  val backendIAF: Bool = Bool() // instruction access fault
+
+  def hasBackendFault: Bool = backendIGPF || backendIPF || backendIAF
+  def flushItself(): Bool = RedirectLevel.flushItself(level)
+
+  // for backend and memory
+  val robIdx = new RobPtr
+  val interrupt: Bool = Bool()
+  val isMisPred: Bool = Bool()
+
+  val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
   val stFtqIdx = new FtqPtr // for load violation predict
-  val stFtqOffset = UInt(log2Up(PredictWidth).W)
+  val stFtqOffset: UInt = UInt(log2Up(PredictWidth).W)
 
-  val debug_runahead_checkpoint_id = UInt(64.W)
-  val debugIsCtrl = Bool()
-  val debugIsMemVio = Bool()
-
-  def flushItself() = RedirectLevel.flushItself(level)
+  val debug_runahead_checkpoint_id: UInt = UInt(64.W)
+  val debugIsCtrl: Bool = Bool()
+  val debugIsMemVio: Bool = Bool()
 }
 
 object Redirect extends HasCircularQueuePtrHelper {

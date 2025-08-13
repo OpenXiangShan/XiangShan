@@ -830,11 +830,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   val BTBMissBubble         = Bool()
   def ControlRedirectBubble = debugIsCtrl
   // if mispred br not in ftb, count as BTB miss
-  def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
-  def TAGEMissBubble       = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
-  def SCMissBubble         = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
-  def ITTAGEMissBubble     = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
-  def RASMissBubble        = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
+
   def MemVioRedirectBubble = debugIsMemVio
   def OtherRedirectBubble  = !debugIsCtrl && !debugIsMemVio
 
@@ -844,25 +840,4 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
         data := source.elements(name)
       }
     }
-
-  def display(cond: Bool): Unit = {
-    XSDebug(cond, p"-----------BranchPredictionRedirect----------- \n")
-    XSDebug(cond, p"-----------cfiUpdate----------- \n")
-    XSDebug(cond, p"[pc] ${Hexadecimal(cfiUpdate.pc)}\n")
-    // XSDebug(cond, p"[hist] ${Binary(cfiUpdate.hist.predHist)}\n")
-    XSDebug(cond, p"[br_hit] ${cfiUpdate.br_hit} [isMisPred] ${cfiUpdate.isMisPred}\n")
-    XSDebug(
-      cond,
-      p"[pred_taken] ${cfiUpdate.predTaken} [taken] ${cfiUpdate.taken} [isMisPred] ${cfiUpdate.isMisPred}\n"
-    )
-    XSDebug(cond, p"[target] ${Hexadecimal(cfiUpdate.target)} \n")
-    XSDebug(cond, p"[shift] ${cfiUpdate.shift}\n")
-    XSDebug(cond, p"------------------------------- \n")
-    XSDebug(cond, p"[robPtr] f=${robIdx.flag} v=${robIdx.value}\n")
-    XSDebug(cond, p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} \n")
-    XSDebug(cond, p"[ftqOffset] ${ftqOffset} \n")
-    XSDebug(cond, p"[stFtqIdx] f=${stFtqIdx.flag} v=${stFtqIdx.value}\n")
-    XSDebug(cond, p"[stFtqOffset] ${stFtqOffset}\n")
-    XSDebug(cond, p"---------------------------------------------- \n")
-  }
 }
