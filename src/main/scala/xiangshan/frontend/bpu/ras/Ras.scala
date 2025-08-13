@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -28,27 +28,29 @@ package xiangshan.frontend.bpu.ras
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.CircularQueuePtr
 import utility.HasCircularQueuePtrHelper
 import utility.RegNextWithEnable
 import utility.XSDebug
-import utility.XSError
 import utility.XSPerfAccumulate
-import xiangshan.XSBundle
-import xiangshan.XSCoreParamsKey
-import xiangshan.XSModule
-import xiangshan.backend.datapath.DataConfig.VAddrBits
-import xiangshan.frontend.BranchPredictionRedirect
-import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BasePredictor
-import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BasePredictorIO
 
 class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtrHelper {
-  val io:        RasIO = IO(new RasIO)
-  def alignMask: UInt  = (~0.U(VAddrBits.W)) << FetchBlockAlignWidth
+  class RasIO(implicit p: Parameters) extends BasePredictorIO {
+    val specIn:   Valid[RasSpecInfo]     = Flipped(Valid(new RasSpecInfo))
+    val commit:   Valid[RasCommitInfo]   = Flipped(Valid(new RasCommitInfo))
+    val redirect: Valid[RasRedirectInfo] = Flipped(Valid(new RasRedirectInfo))
+
+    val rasOverride: Bool            = Output(Bool())
+    val topRetAddr:  PrunedAddr      = Output(PrunedAddr(VAddrBits))
+    val specMeta:    RasInternalMeta = Output(new RasInternalMeta)
+  }
+
+  val io: RasIO = IO(new RasIO)
+
+  def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
   private val stack = Module(new RasStack(RasSize, RasSpecSize)).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.

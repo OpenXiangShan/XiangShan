@@ -14,12 +14,8 @@
 // See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.bpu.ras
+
 import chisel3._
-import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
-import xiangshan.XSCoreParamsKey
-import xiangshan.XSModule
 import xiangshan.frontend.bpu.HasBpuParameters
 
 trait Helpers extends HasBpuParameters {

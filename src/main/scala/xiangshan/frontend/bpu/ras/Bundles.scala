@@ -12,18 +12,16 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
+
 package xiangshan.frontend.bpu.ras
+
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
-import utility.HasCircularQueuePtrHelper
 import xiangshan.RedirectLevel
-import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
-import xiangshan.XSModule
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 
 class RasEntry()(implicit p: Parameters) extends RasBundle {
@@ -127,14 +125,4 @@ class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
   val isRvc:     Bool            = Bool()
   val meta:      RasInternalMeta = new RasInternalMeta
   val level = RedirectLevel()
-}
-
-class RasIO(implicit p: Parameters) extends BasePredictorIO {
-  val specIn:   Valid[RasSpecInfo]     = Flipped(Valid(new RasSpecInfo))
-  val commit:   Valid[RasCommitInfo]   = Flipped(Valid(new RasCommitInfo))
-  val redirect: Valid[RasRedirectInfo] = Flipped(Valid(new RasRedirectInfo))
-
-  val rasOverride: Bool            = Output(Bool())
-  val topRetAddr:  PrunedAddr      = Output(PrunedAddr(VAddrBits))
-  val specMeta:    RasInternalMeta = Output(new RasInternalMeta)
 }
