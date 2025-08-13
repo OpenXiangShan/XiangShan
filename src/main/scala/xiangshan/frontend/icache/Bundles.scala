@@ -116,7 +116,7 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
   class MetaReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
-    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(ICacheMetaCodeBits.W)))
+    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(MetaEccBits.W)))
     val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
     // for compatibility
     def tags: Vec[Vec[UInt]] = VecInit(metas.map(port => VecInit(port.map(way => way.tag))))
@@ -129,8 +129,8 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
 class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
   class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
-    val datas: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataBits.W))
-    val codes: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataCodeBits.W))
+    val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
+    val codes: Vec[UInt] = Vec(DataBanks, UInt(DataEccBits.W))
   }
   val req:  Vec[DecoupledIO[DataReadReqBundle]] = Vec(partWayNum, DecoupledIO(new DataReadReqBundle))
   val resp: DataReadRespBundle                  = Input(new DataReadRespBundle)
@@ -219,7 +219,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val pTag:          Vec[UInt]          = Vec(PortNumber, UInt(tagBits.W))
   val itlbException: Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
   val itlbPbmt:      Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
-  val metaCodes:     Vec[UInt]          = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val metaCodes:     Vec[UInt]          = Vec(PortNumber, UInt(MetaEccBits.W))
 }
 
 class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {

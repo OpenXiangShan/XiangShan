@@ -75,10 +75,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
    *                                -----------------
    * ***************************************************************************** */
 
-  private val fetchDemux    = Module(new DeMultiplexer(new MissReqBundle, nFetchMshr))
-  private val prefetchDemux = Module(new DeMultiplexer(new MissReqBundle, nPrefetchMshr))
-  private val prefetchArb   = Module(new MuxBundle(new MshrAcquireBundle(edge), nPrefetchMshr))
-  private val acquireArb    = Module(new Arbiter(new MshrAcquireBundle(edge), nFetchMshr + 1))
+  private val fetchDemux    = Module(new DeMultiplexer(new MissReqBundle, NumFetchMshr))
+  private val prefetchDemux = Module(new DeMultiplexer(new MissReqBundle, NumPrefetchMshr))
+  private val prefetchArb   = Module(new MuxBundle(new MshrAcquireBundle(edge), NumPrefetchMshr))
+  private val acquireArb    = Module(new Arbiter(new MshrAcquireBundle(edge), NumFetchMshr + 1))
 
   // To avoid duplicate request reception.
   private val fetchHit    = Wire(Bool())
@@ -96,8 +96,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.memAcquire.bits      := acquireArb.io.out.bits.acquire
   acquireArb.io.out.ready := io.memAcquire.ready
 
-  private val allMshr = (0 until nFetchMshr + nPrefetchMshr).map { i =>
-    val isFetch = i < nFetchMshr
+  private val allMshr = (0 until NumFetchMshr + NumPrefetchMshr).map { i =>
+    val isFetch = i < NumFetchMshr
     val mshr    = Module(new ICacheMshr(edge, isFetch, i))
     mshr.io.fencei               := io.fencei
     mshr.io.wfi.wfiReq           := io.wfi.wfiReq
@@ -112,8 +112,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
       acquireArb.io.in(i) <> mshr.io.acquire
     } else {
       mshr.io.flush := io.flush
-      mshr.io.req <> prefetchDemux.io.out(i - nFetchMshr)
-      prefetchArb.io.in(i - nFetchMshr) <> mshr.io.acquire
+      mshr.io.req <> prefetchDemux.io.out(i - NumFetchMshr)
+      prefetchArb.io.in(i - NumFetchMshr) <> mshr.io.acquire
     }
     mshr
   }
@@ -142,7 +142,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   // When the FIFO is full, enqueue and dequeue operations do not occur at the same cycle.
   // So the depth of the FIFO is set to match the number of MSHRs.
   // val priorityFIFO = Module(new Queue(UInt(log2Ceil(nPrefetchMshr).W), nPrefetchMshr, hasFlush=true))
-  private val priorityFIFO = Module(new FIFOReg(UInt(log2Ceil(nPrefetchMshr).W), nPrefetchMshr, hasFlush = true))
+  private val priorityFIFO = Module(new FIFOReg(UInt(log2Ceil(NumPrefetchMshr).W), NumPrefetchMshr, hasFlush = true))
   priorityFIFO.io.flush.get := io.flush || io.fencei
   priorityFIFO.io.enq.valid := prefetchDemux.io.in.fire
   priorityFIFO.io.enq.bits  := prefetchDemux.io.chosen
@@ -202,7 +202,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     * invalid mshr when finish transition
     ******************************************************************************
     */
-  (0 until (nFetchMshr + nPrefetchMshr)).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
+  (0 until (NumFetchMshr + NumPrefetchMshr)).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
 
   /* *****************************************************************************
    * response fetch and write SRAM
@@ -275,14 +275,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     PopCount(fetchDemux.io.out.map(_.ready)),
     true.B,
     0,
-    nFetchMshr
+    NumFetchMshr
   )
   XSPerfHistogram(
     "prefetchMshrEmptyCnt",
     PopCount(prefetchDemux.io.out.map(_.ready)),
     true.B,
     0,
-    nPrefetchMshr
+    NumPrefetchMshr
   )
 
   /**

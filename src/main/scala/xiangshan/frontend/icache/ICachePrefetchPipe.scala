@@ -286,7 +286,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrValid    = fromMiss.valid && !fromMiss.bits.corrupt
   private val s1_waymasks     = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
   private val s1_waymasksReg  = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_sramValid || s1_mshrValid)
-  private val s1_metaCodes    = WireInit(VecInit(Seq.fill(PortNumber)(0.U(ICacheMetaCodeBits.W))))
+  private val s1_metaCodes    = WireInit(VecInit(Seq.fill(PortNumber)(0.U(MetaEccBits.W))))
   private val s1_metaCodesReg = RegEnable(s1_metaCodes, 0.U.asTypeOf(s1_metaCodes), s1_sramValid || s1_mshrValid)
 
   // update waymasks and meta_codes

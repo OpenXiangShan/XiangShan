@@ -17,98 +17,121 @@ package xiangshan.frontend.icache
 
 import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
-import freechips.rocketchip.util.BundleFieldBase
-import freechips.rocketchip.util.SetAssocReplacementPolicy
-import huancun.AliasField
-import huancun.PrefetchField
 import utility.Code
-import utility.ReplacementPolicy
-import utility.ReqSourceField
-import utils.OptionWrapper
 import xiangshan.cache.HasL1CacheParameters
 import xiangshan.cache.L1CacheParameters
+import xiangshan.frontend.HasFrontendParameters
 
+// For users: these are default ICache parameters set by dev, do not change them here,
+// use top-level Parameters.scala to change them on initialization.
 case class ICacheParameters(
-    nSets:               Int = 256,
-    nWays:               Int = 4,
-    rowBits:             Int = 64,
-    nTLBEntries:         Int = 32,
-    tagECC:              Option[String] = None,
-    dataECC:             Option[String] = None,
-    replacer:            Option[String] = Option("random"),
-    PortNumber:          Int = 2,
-    nFetchMshr:          Int = 4,
-    nPrefetchMshr:       Int = 10,
-    nWayLookupSize:      Int = 32,
-    DataCodeUnit:        Int = 64,
-    ICacheDataBanks:     Int = 8,
-    ICacheDataSRAMWidth: Int = 66,
-    // TODO: hard code, need delete
-    partWayNum:          Int = 4,
-    blockBytes:          Int = 64,
-    cacheCtrlAddressOpt: Option[AddressSet] = None
+    /* *** from trait L1CacheParameters *** */
+    nSets:      Int = 256,
+    nWays:      Int = 4,
+    rowBits:    Int = 64, // per bank, by default we split 64B cacheline into 8 banks, so each bank has 8B (64b)
+    blockBytes: Int = 64, // cacheline size
+    /* *** ICache specific *** */
+    PortNumber: Int = 2, // TODO: remove this when dropping cross-page fetch
+    // replacer
+    Replacer: String = "setplru", // "random", "setlru", "setplru"
+    // missUnit
+    NumFetchMshr:    Int = 4,
+    NumPrefetchMshr: Int = 10,
+    // wayLookup
+    WayLookupSize: Int = 32,
+    // ecc
+    // NOTE: we call it "ecc" since it can be configured to use ecc like "secded", but by default it is parity
+    // TODO: support disabling ecc completely (currently "none" will use "identity", we want to remove entire ecc logic)
+    MetaEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
+    DataEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
+    DataEccUnit: Option[Int] = None, // if None, use blockBytes
+    // data array
+    // by default we store 64data + 1parity + 1padding, this is better than 65bits (from physical design)
+    DataPaddingBits: Int = 1,
+    /* *** submodule enable *** */
+    // if not enabled, the whole CtrlUnit will not be created, and parity-fault injection will not be supported
+    EnableCtrlUnit: Boolean = true,
+    /* *** submodule parameters *** */
+    ctrlUnitParameters: ICacheCtrlUnitParameters = ICacheCtrlUnitParameters(),
+    /* *** testing *** */
+    ForceMetaEccFail: Boolean = false,
+    ForceDataEccFail: Boolean = false
 ) extends L1CacheParameters {
-
-  val setBytes:     Int         = nSets * blockBytes
-  val aliasBitsOpt: Option[Int] = Option.when(setBytes > pageSize)(log2Ceil(setBytes / pageSize))
-  val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField(),
-    ReqSourceField()
-  ) ++ aliasBitsOpt.map(AliasField)
-  val echoFields:  Seq[BundleFieldBase]      = Nil
-  def tagCode:     Code                      = Code.fromString(tagECC)
-  def dataCode:    Code                      = Code.fromString(dataECC)
-  def replacement: SetAssocReplacementPolicy = ReplacementPolicy.fromString(replacer, nWays, nSets)
+  require(isPow2(nSets), s"nSets($nSets) must be pow2")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(isPow2(rowBits), s"rowBits($rowBits) must be pow2")
+  require(isPow2(blockBytes), s"blockBytes($blockBytes) must be pow2")
+  require(rowBits < blockBytes * 8, s"rowBits($rowBits) must be less than blockBits(${blockBytes * 8})")
 }
 
-trait HasICacheParameters extends HasL1CacheParameters {
+trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameters {
+  def icacheParameters: ICacheParameters = frontendParameters.icacheParameters
+
+  // implement cacheParams to use HasL1CacheParameters trait
   val cacheParams: ICacheParameters = icacheParameters
+  // and nSets, nWays, rowBits, blockBytes, etc. are inherited from HasL1CacheParameters
+  def PageSize: Int = icacheParameters.pageSize
+  def SetBytes: Int = nSets * blockBytes
 
-  def ctrlUnitParamsOpt: Option[ICacheCtrlUnitParameters] = OptionWrapper(
-    cacheParams.cacheCtrlAddressOpt.nonEmpty,
-    ICacheCtrlUnitParameters(
-      address = cacheParams.cacheCtrlAddressOpt.get,
-      regWidth = XLEN
-    )
-  )
+  def PortNumber: Int = icacheParameters.PortNumber
 
-  def ICacheSets:          Int = cacheParams.nSets
-  def ICacheWays:          Int = cacheParams.nWays
-  def PortNumber:          Int = cacheParams.PortNumber
-  def nFetchMshr:          Int = cacheParams.nFetchMshr
-  def nPrefetchMshr:       Int = cacheParams.nPrefetchMshr
-  def nWayLookupSize:      Int = cacheParams.nWayLookupSize
-  def DataCodeUnit:        Int = cacheParams.DataCodeUnit
-  def ICacheDataBanks:     Int = cacheParams.ICacheDataBanks
-  def ICacheDataSRAMWidth: Int = cacheParams.ICacheDataSRAMWidth
-  def partWayNum:          Int = cacheParams.partWayNum
+  // replacer
+  def Replacer: String = icacheParameters.Replacer
 
-  def ICacheMetaBits:      Int = tagBits // FIXME: unportable: maybe use somemethod to get width
-  def ICacheMetaCodeBits:  Int = 1       // FIXME: unportable: maybe use cacheParams.tagCode.somemethod to get width
-  def ICacheMetaEntryBits: Int = ICacheMetaBits + ICacheMetaCodeBits
+  // missUnit
+  def NumFetchMshr:    Int = icacheParameters.NumFetchMshr
+  def NumPrefetchMshr: Int = icacheParameters.NumPrefetchMshr
 
-  def ICacheDataBits: Int = blockBits / ICacheDataBanks
-  def ICacheDataCodeSegs: Int =
-    math.ceil(ICacheDataBits / DataCodeUnit).toInt // split data to segments for ECC checking
-  def ICacheDataCodeBits: Int =
-    ICacheDataCodeSegs * 1 // FIXME: unportable: maybe use cacheParams.dataCode.somemethod to get width
-  def ICacheDataEntryBits: Int = ICacheDataBits + ICacheDataCodeBits
-  def ICacheBankVisitNum:  Int = 32 * 8 / ICacheDataBits + 1
-  def highestIdxBit:       Int = log2Ceil(nSets) - 1
+  // wayLookup
+  def WayLookupSize: Int = icacheParameters.WayLookupSize
 
-  require((ICacheDataBanks >= 2) && isPow2(ICacheDataBanks))
-  require(ICacheDataSRAMWidth >= ICacheDataEntryBits)
-  require(isPow2(ICacheSets), s"nSets($ICacheSets) must be pow2")
-  require(isPow2(ICacheWays), s"nWays($ICacheWays) must be pow2")
+  // metaArray w/ parity
+  def MetaEcc:       String = icacheParameters.MetaEcc
+  def MetaCode:      Code   = Code.fromString(MetaEcc)
+  def MetaBits:      Int    = tagBits
+  def MetaEntryBits: Int    = MetaCode.width(MetaBits)
+  def MetaEccBits:   Int    = MetaEntryBits - MetaBits
+
+  // dataArray w/ parity
+  def DataEcc:         String = icacheParameters.DataEcc
+  def DataEccUnit:     Int    = icacheParameters.DataEccUnit.getOrElse(blockBytes)
+  def DataPaddingBits: Int    = icacheParameters.DataPaddingBits
+  def DataBanks:       Int    = blockBits / rowBits
+  def DataCode:        Code   = Code.fromString(DataEcc)
+  def ICacheDataBits:  Int    = rowBits // FIXME: this should be "DataBits", but it's already declared in XSParameters
+  def DataEccSegments: Int    = math.ceil(ICacheDataBits / DataEccUnit).toInt
+  def DataEccBitsPerSegment: Int = DataCode.width(DataEccUnit) - DataEccUnit // ecc bits per segment
+  def DataEccBits:           Int = DataEccSegments * DataEccBitsPerSegment
+  def DataEntryBits:         Int = ICacheDataBits + DataEccBits
+  def DataSramWidth:         Int = DataEntryBits + DataPaddingBits
+
+  // submodule enable
+  def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit
+
+  // testing
+  def ForceMetaEccFail: Boolean = icacheParameters.ForceMetaEccFail
+  def ForceDataEccFail: Boolean = icacheParameters.ForceDataEccFail
+
+  // constants
+  def partWayNum: Int = 4 // TODO: hard code, need delete
 }
 
-// for ICacheCtrlUnit
+// For users: these are default ICache parameters set by dev, do not change them here,
+// use top-level Parameters.scala to change them on initialization.
 case class ICacheCtrlUnitParameters(
-    address:   AddressSet,
-    regWidth:  Int,
-    beatBytes: Int = 8
+    Address:   AddressSet = AddressSet(0x38022080, 0x7f),
+    BeatBytes: Int = 8 // by default, we can transfer entire 8B data of one ctrlUnit register in one beat
 ) {
-  def RegBytes: Int = regWidth / 8
+  require(BeatBytes > 0 && isPow2(BeatBytes), s"BeatBytes($BeatBytes) must be pow2 and > 0")
+}
+
+trait HasICacheCtrlUnitParameters extends HasICacheParameters {
+  def ctrlUnitParameters: ICacheCtrlUnitParameters = icacheParameters.ctrlUnitParameters
+
+  def Address:   AddressSet = ctrlUnitParameters.Address
+  def BeatBytes: Int        = ctrlUnitParameters.BeatBytes
+  def RegWidth:  Int        = XLEN // 64 bits
+  def RegBytes:  Int        = RegWidth / 8
 
   def EccCtrlOffset:  Int = 0
   def EccIAddrOffset: Int = EccCtrlOffset + RegBytes

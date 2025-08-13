@@ -95,7 +95,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufSize = 24,
         IBufNBank = 8,
         frontendParameters = FrontendParameters(
-          ftqParameters = FtqParameters(FtqSize = 8)
+          ftqParameters = FtqParameters(
+            FtqSize = 8,
+          ),
+          icacheParameters = ICacheParameters( // default 64B blockBytes, 4way, 256set (64KB ICache)
+            nSets = 64, // override to 64set in MinimalConfig (16KB ICache)
+          ),
         ),
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
@@ -110,13 +115,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           numEntries = 160,
           numRead = None,
           numWrite = None,
-        ),
-        icacheParameters = ICacheParameters(
-          nSets = 64, // 16KB ICache
-          tagECC = Some("parity"),
-          dataECC = Some("parity"),
-          replacer = Some("setplru"),
-          cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f)),
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache

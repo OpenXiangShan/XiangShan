@@ -20,12 +20,14 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.ftq.FtqParameters
+import xiangshan.frontend.icache.ICacheParameters
 
 case class FrontendParameters(
     FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
 
-    bpuParameters: BpuParameters = BpuParameters(),
-    ftqParameters: FtqParameters = FtqParameters()
+    bpuParameters:    BpuParameters = BpuParameters(),
+    ftqParameters:    FtqParameters = FtqParameters(),
+    icacheParameters: ICacheParameters = ICacheParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))

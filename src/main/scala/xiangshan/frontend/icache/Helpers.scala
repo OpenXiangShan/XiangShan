@@ -23,15 +23,15 @@ import xiangshan.frontend.PrunedAddrInit
 trait ICacheEccHelper extends HasICacheParameters {
   // per-port
   def encodeMetaEccByPort(meta: UInt, poison: Bool = false.B): UInt = {
-    require(meta.getWidth == ICacheMetaBits)
-    val code = cacheParams.tagCode.encode(meta, poison) >> ICacheMetaBits
-    code.asTypeOf(UInt(ICacheMetaCodeBits.W))
+    require(meta.getWidth == MetaBits)
+    val code = MetaCode.encode(meta, poison) >> MetaBits
+    code.asTypeOf(UInt(MetaEccBits.W))
   }
 
   // per-port
   def checkMetaEccByPort(meta: UInt, code: UInt, waymask: Vec[Bool], enable: Bool): Bool = {
-    require(meta.getWidth == ICacheMetaBits)
-    require(code.getWidth == ICacheMetaCodeBits)
+    require(meta.getWidth == MetaBits)
+    require(code.getWidth == MetaEccBits)
     val hitNum = PopCount(waymask)
     // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
     // hit one way, but parity code does not match => ECC failure
@@ -62,14 +62,14 @@ trait ICacheEccHelper extends HasICacheParameters {
   // per-bank
   def encodeDataEccByBank(data: UInt, poison: Bool = false.B): UInt = {
     require(data.getWidth == ICacheDataBits)
-    val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
-    val codes = VecInit(datas.map(cacheParams.dataCode.encode(_, poison) >> (ICacheDataBits / ICacheDataCodeSegs)))
-    codes.asTypeOf(UInt(ICacheDataCodeBits.W))
+    val datas = data.asTypeOf(Vec(DataEccSegments, UInt((ICacheDataBits / DataEccSegments).W)))
+    val codes = VecInit(datas.map(DataCode.encode(_, poison) >> (ICacheDataBits / DataEccSegments)))
+    codes.asTypeOf(UInt(DataEccBits.W))
   }
 
   def checkDataEccByBank(data: UInt, code: UInt, enable: Bool): Bool = {
     require(data.getWidth == ICacheDataBits)
-    require(code.getWidth == ICacheDataCodeBits)
+    require(code.getWidth == DataEccBits)
     enable && (encodeDataEccByBank(data) =/= code)
   }
 
@@ -82,11 +82,11 @@ trait ICacheEccHelper extends HasICacheParameters {
       bankValid: Vec[Bool],
       portHit:   Vec[Bool]
   ): Vec[Bool] = {
-    require(data.length == ICacheDataBanks)
-    require(code.length == ICacheDataBanks)
+    require(data.length == DataBanks)
+    require(code.length == DataBanks)
     require(bankSel.length == PortNumber)
-    require(bankSel.head.length == ICacheDataBanks)
-    require(bankValid.length == ICacheDataBanks)
+    require(bankSel.head.length == DataBanks)
+    require(bankValid.length == DataBanks)
     require(portHit.length == PortNumber)
 
     val bankCorrupt = VecInit((data zip code).map { case (d, c) =>
@@ -121,7 +121,7 @@ trait ICacheMetaHelper extends HasICacheParameters {
 }
 
 trait ICacheDataHelper extends HasICacheParameters {
-  def bankOffBits: Int = log2Ceil(blockBytes / ICacheDataBanks)
+  def bankOffBits: Int = log2Ceil(blockBytes / DataBanks)
 
   def getBankIdxLow(blkOffset: UInt): UInt =
     (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
@@ -132,27 +132,19 @@ trait ICacheDataHelper extends HasICacheParameters {
   def getBankValid(portValid: Vec[Bool], blkOffset: UInt): Vec[Bool] = {
     require(portValid.length == PortNumber)
     val bankIdxLow = getBankIdxLow(blkOffset)
-    VecInit((0 until ICacheDataBanks).map { i =>
-      (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)
-    })
+    VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)))
   }
 
   def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[Vec[Bool]] = {
     val bankIdxLow  = getBankIdxLow(blkOffset)
     val bankIdxHigh = getBankIdxHigh(blkOffset)
-    val bankSel     = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
-    assert(
-      !valid || PopCount(bankSel) === ICacheBankVisitNum.U,
-      "The number of bank visits must be %d, but bankSel=0x%x",
-      ICacheBankVisitNum.U,
-      bankSel.asUInt
-    )
-    bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, Vec(ICacheDataBanks, Bool())))
+    val bankSel     = VecInit((0 until DataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
+    bankSel.asTypeOf(UInt((DataBanks * 2).W)).asTypeOf(Vec(2, Vec(DataBanks, Bool())))
   }
 
   def getLineSel(blkOffset: UInt): Vec[Bool] = {
-    val bankIdxLow = (blkOffset >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val lineSel    = VecInit((0 until ICacheDataBanks).map(i => i.U < bankIdxLow))
+    val bankIdxLow = (blkOffset >> log2Ceil(blockBytes / DataBanks)).asUInt
+    val lineSel    = VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
     lineSel
   }
 }

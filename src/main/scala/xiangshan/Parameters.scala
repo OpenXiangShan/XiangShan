@@ -67,7 +67,6 @@ case class XSCoreParameters
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
   HasDiv: Boolean = true,
-  HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   PAddrBitsMax: Int = 56,   // The bits of physical address from Sv39/Sv48/Sv57 virtual address translation.
@@ -125,8 +124,6 @@ case class XSCoreParameters
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
   // old bpu deprecate end
-  ICacheForceMetaECCError: Boolean = false,
-  ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
   IBufNBank: Int = 8, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 8,
@@ -308,12 +305,6 @@ case class XSCoreParameters
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
-  icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = Some("parity"),
-    dataECC = Some("parity"),
-    replacer = Some("setplru"),
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
-  ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -602,7 +593,6 @@ trait HasXSParameter {
   def HasHExtension = coreParams.HasHExtension
   def EnableSv48 = coreParams.EnableSv48
   def HasDiv = coreParams.HasDiv
-  def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   def PAddrBitsMax = coreParams.PAddrBitsMax
@@ -712,8 +702,6 @@ trait HasXSParameter {
   def CacheLineHalfWord = CacheLineSize / 16
   def ExtHistoryLength = HistoryLength + 64
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
-  def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
-  def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
   def IBufEnqWidth = coreParams.IBufWriteBank + PredictWidth
   def IBufWriteBank = coreParams.IBufWriteBank
@@ -854,7 +842,9 @@ trait HasXSParameter {
   def instBytes = if (HasCExtension) 2 else 4
   def instOffsetBits = log2Ceil(instBytes)
 
-  def icacheParameters = coreParams.icacheParameters
+  def icacheCtrlEnabled = coreParams.frontendParameters.icacheParameters.EnableCtrlUnit
+  def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
+
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
