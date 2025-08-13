@@ -1210,7 +1210,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.rollback.bits.ftqIdx      := s3_out.bits.uop.ftqPtr
   io.ldu_io.rollback.bits.ftqOffset   := s3_out.bits.uop.ftqOffset
   io.ldu_io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush, RedirectLevel.flushAfter)
-  io.ldu_io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.pc
+  io.ldu_io.rollback.bits.target      := s3_out.bits.uop.pc
   io.ldu_io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.ldu_io.lsq.ldin.bits.uop := s3_out.bits.uop

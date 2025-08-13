@@ -31,13 +31,9 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
     redirect.bits.ftqOffset := pdWb.bits.ftqOffset
     redirect.bits.level     := RedirectLevel.flushAfter
-
-    val cfiUpdate = redirect.bits.cfiUpdate
-    cfiUpdate.pc        := pdWb.bits.pc.toUInt
-    cfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
-    cfiUpdate.target    := pdWb.bits.target.toUInt
-    cfiUpdate.taken     := pdWb.bits.cfiOffset.valid
-    cfiUpdate.isMisPred := pdWb.bits.misOffset.valid
+    redirect.bits.pc        := pdWb.bits.pc.toUInt
+    redirect.bits.target    := pdWb.bits.target.toUInt
+    redirect.bits.taken     := pdWb.bits.cfiOffset.valid
 
     redirect
   }

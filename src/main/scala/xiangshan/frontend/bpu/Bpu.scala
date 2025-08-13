@@ -137,7 +137,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.redirect.valid          := redirect.valid
   ras.io.redirect.bits.attribute := redirect.bits.attribute
   ras.io.redirect.bits.brPc      := redirect.bits.startVAddr
-  ras.io.redirect.bits.isRvc     := redirect.bits.isRVC
+  ras.io.redirect.bits.isRvc     := redirect.bits.isRvc
   ras.io.redirect.bits.meta      := redirect.bits.speculativeMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
 
