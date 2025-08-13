@@ -89,7 +89,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val pc               = PrunedAddr(VAddrBits)
   val foldpc           = UInt(MemPredPCWidth.W)
   val pd               = new PreDecodeInfo
-  val pred_taken       = Bool()
+  val predTaken        = Bool()
   val ftqPtr           = new FtqPtr
   val ftqPcOffset      = new FtqPcOffset
   val exceptionType    = IBufferExceptionType()
@@ -103,7 +103,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     pc          := fetch.pc(i)
     foldpc      := fetch.foldpc(i)
     pd          := fetch.pd(i)
-    pred_taken  := fetch.ftqPcOffset(i).valid
+    predTaken   := fetch.ftqPcOffset(i).valid
     ftqPtr      := fetch.ftqPtr
     ftqPcOffset := fetch.ftqPcOffset(i).bits
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
@@ -118,6 +118,39 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     this
   }
 
+  def toIBufOutEntry: IBufOutEntry = {
+    val result = Wire(new IBufOutEntry)
+    result.inst             := inst
+    result.pc               := pc
+    result.foldpc           := foldpc
+    result.pd               := pd
+    result.predTaken        := predTaken
+    result.ftqPtr           := ftqPtr
+    result.exceptionType    := exceptionType
+    result.backendException := backendException
+    result.triggered        := triggered
+    result.isLastInFtqEntry := isLastInFtqEntry
+    result.debug_seqNum     := debug_seqNum
+    result.ftqInstrEndOffset :=
+      Mux(pd.isRVC || ftqPcOffset.borrow, ftqPcOffset.offset, ftqPcOffset.offset + 1.U)
+    result
+  }
+}
+
+class IBufOutEntry(implicit p: Parameters) extends XSBundle {
+  val inst              = UInt(32.W)
+  val pc                = PrunedAddr(VAddrBits)
+  val foldpc            = UInt(MemPredPCWidth.W)
+  val pd                = new PreDecodeInfo
+  val predTaken         = Bool()
+  val ftqPtr            = new FtqPtr
+  val exceptionType     = IBufferExceptionType()
+  val backendException  = Bool()
+  val triggered         = TriggerAction()
+  val isLastInFtqEntry  = Bool()
+  val debug_seqNum      = InstSeqNum()
+  val ftqInstrEndOffset = UInt(log2Ceil(PredictWidth).W)
+
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
     cf.instr                             := inst
@@ -131,7 +164,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.backendException                  := backendException
     cf.trigger                           := triggered
     cf.pd                                := pd
-    cf.pred_taken                        := pred_taken
+    cf.pred_taken                        := predTaken
     cf.crossPageIPFFix                   := IBufferExceptionType.isCrossPage(this.exceptionType)
     cf.storeSetHit                       := DontCare
     cf.waitForRobIdx                     := DontCare
@@ -139,7 +172,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.loadWaitStrict                    := DontCare
     cf.ssid                              := DontCare
     cf.ftqPtr                            := ftqPtr
-    cf.ftqOffset                         := ftqPcOffset.offset
+    cf.ftqOffset                         := ftqInstrEndOffset
     cf.isLastInFtqEntry                  := isLastInFtqEntry
     cf.debug_seqNum                      := debug_seqNum
     cf
@@ -194,7 +227,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Normal read wire
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
-  private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufOutEntry))))
   private val outputEntriesValidNum =
     PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse.toSeq, 0.U)
 
@@ -302,16 +335,18 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     case ((out, bypass), i) =>
       when(decodeCanAccept) {
         when(useBypass && io.in.valid) {
-          out := bypass
+          out.valid := bypass.valid
+          out.bits  := bypass.bits.toIBufOutEntry
         }.otherwise {
-          out := deqEntries(i)
+          out.valid := deqEntries(i).valid
+          out.bits  := deqEntries(i).bits.toIBufOutEntry
         }
       }.elsewhen(outputEntriesIsNotFull) {
         out.valid := deqEntries(i).valid
         out.bits := Mux(
           i.U < outputEntriesValidNum,
           out.bits,
-          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum)
+          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry
         )
       }
   }
