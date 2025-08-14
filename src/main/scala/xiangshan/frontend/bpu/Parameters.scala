@@ -40,6 +40,28 @@ case class BpuParameters(
     tageParameters: TageParameters = TageParameters(),
     scParameters:   ScParameters = ScParameters()
 ) {
+  // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
+  // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
+  def getPhrHistoryLength(ftqSize: Int): Int = {
+    def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
+
+    // TODO: ittage table history length
+    //    def MaxTableHistoryLength: Int = (
+    //      bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
+    //        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
+    //    ).max
+    def MaxTableHistoryLength: Int = tageParameters.TableInfos.map(_.HistoryLength).max
+
+    def Shamt: Int = phrParameters.Shamt
+
+    // when ftq is full, Phr can overflow, so we need some extra bits to save Phr overflow bits for error-recovery
+    // magic, don't touch
+    def FtqFullFix:   Int = 4
+    def HistoryAlign: Int = phrParameters.HistoryAlign
+
+    nextMultipleOf(MaxTableHistoryLength + Shamt * ftqSize + FtqFullFix, HistoryAlign)
+  }
+
   // sanity check
   require(isPow2(FetchBlockSize))
   require(isPow2(FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)))
@@ -58,20 +80,21 @@ trait HasBpuParameters extends HasXSParameter {
 
   def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 
+  def PhrHistoryLength: Int = bpuParameters.getPhrHistoryLength(FtqSize)
+
   // phr history
-  def Shamt:            Int      = bpuParameters.phrParameters.Shamt
-  def AllHistLens:      Seq[Int] = bpuParameters.tageParameters.TableInfos.map(_._2)
-  def PhrHistoryLength: Int      = AllHistLens.max + Shamt * FtqSize + 13
-  def TageFoldedGHistInfos: List[Tuple2[Int, Int]] =
-    (bpuParameters.tageParameters.TableInfos.map { case (nRows, h, _) =>
-      if (h > 0)
-        Set(
-          (h, min(log2Ceil(nRows), h)),
-          (h, min(h, bpuParameters.tageParameters.TagWidth)),
-          (h, min(h, bpuParameters.tageParameters.TagWidth - 1))
-        )
-      else
-        Set[FoldedHistoryInfo]()
-    }.reduce(_ ++ _).toSet ++
-      Set[FoldedHistoryInfo]()).toList
+  // TODO: add ittage info
+//    def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
+//      (bpuParameters.tageParameters.TableInfos ++
+//        bpuParameters.ittageParameters.TableInfos).map {
+//        _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
+//      }.reduce(_ ++ _)
+  def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
+    bpuParameters.tageParameters.TableInfos.map {
+      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
+    }.reduce(_ ++ _)
+
+  // sanity check
+  // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there
+  require(isPow2(FetchBlockAlignSize))
 }

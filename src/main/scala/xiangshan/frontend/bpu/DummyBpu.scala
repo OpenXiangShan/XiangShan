@@ -264,10 +264,10 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // phr train
   private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
-  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
+  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   phr.io.train.s0_stall      := s0_stall
   phr.io.train.stageCtrl     := stageCtrl
   phr.io.train.redirect      := redirect

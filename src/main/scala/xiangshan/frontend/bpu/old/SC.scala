@@ -239,7 +239,7 @@ object SCThreshold {
 
 trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
-  var sc_fh_info                          = Set[FoldedHistoryInfo]()
+  var sc_fh_info                          = Set[OldFoldedHistoryInfo]()
   if (EnableSC) {
     val scTables = SCTableInfos.map {
       case (nRows, ctrBits, histLen) => {

@@ -18,14 +18,19 @@ package xiangshan.frontend.bpu.phr
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class PhrParameters(
-    Shamt: Int = 2 // shift amount for PHR
+    Shamt:          Int = 2,         // shift amount for Phr
+    EnableTwoTaken: Boolean = false, // enable two-taken support in Phr
+    // ensure history length is a multiple of this value
+    // default is 4, when history value is displayed in hexadecimal, it has better readability
+    HistoryAlign: Int = 4
 ) {}
 
 trait HasPhrParameters extends HasBpuParameters {
   def phrParameters: PhrParameters = bpuParameters.phrParameters
 
-  def TwoTakenEnable: Boolean = false
+  def Shamt:          Int     = phrParameters.Shamt
+  def EnableTwoTaken: Boolean = phrParameters.EnableTwoTaken
 
-  // def Shamt:          Int     = phrParameters.Shamt
+  // inherited from HasBpuParameters
   // def PhrHistoryLength: Int = PhrHistoryLength
 }
