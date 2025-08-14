@@ -15,13 +15,12 @@
 
 package xiangshan.frontend.bpu
 
-import chisel3._
 import chisel3.util._
-import scala.math.min
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.phr.PhrParameters
+import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
@@ -38,7 +37,8 @@ case class BpuParameters(
     abtbParameters: AheadBtbParameters = AheadBtbParameters(),
     mbtbParameters: MainBtbParameters = MainBtbParameters(),
     tageParameters: TageParameters = TageParameters(),
-    scParameters:   ScParameters = ScParameters()
+    scParameters:   ScParameters = ScParameters(),
+    rasParameters:  RasParameters = RasParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.

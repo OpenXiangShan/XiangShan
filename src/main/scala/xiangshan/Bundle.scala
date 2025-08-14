@@ -103,8 +103,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
-  val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(RasCtrSize.W)
+  val ssp = UInt(log2Up(coreParams.bpuParameters.rasParameters.StackSize).W)
+  val sctr = UInt(coreParams.bpuParameters.rasParameters.StackCounterWidth.W)
   val TOSW = new RasPtr
   val TOSR = new RasPtr
   val NOS = new RasPtr
@@ -137,9 +137,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.histPtr := entry.histPtr
     this.ssp     := entry.speculativeMeta.rasMeta.ssp
     this.sctr    := entry.speculativeMeta.rasMeta.sctr
-    this.TOSW    := entry.speculativeMeta.rasMeta.TOSW
-    this.TOSR    := entry.speculativeMeta.rasMeta.TOSR
-    this.NOS     := entry.speculativeMeta.rasMeta.NOS
+    this.TOSW    := entry.speculativeMeta.rasMeta.tosw
+    this.TOSR    := entry.speculativeMeta.rasMeta.tosr
+    this.NOS     := entry.speculativeMeta.rasMeta.nos
     this.topAddr := entry.speculativeMeta.topRetAddr.toUInt
     this.phrHistPtr := entry.speculativeMeta.phrHistPtr // TODO: this bundle should be re-organized
     this

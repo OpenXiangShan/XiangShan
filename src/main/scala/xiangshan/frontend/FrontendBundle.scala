@@ -722,15 +722,6 @@ class OldFullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) exte
     XSDebug(cond, p"[taken_mask] ${Binary(br_taken_mask.asUInt)} [hit] $hit\n")
 }
 
-class RasSpeculativeInfo(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils {
-  val ssp     = UInt(log2Up(RasSize).W)
-  val sctr    = UInt(RasCtrSize.W)
-  val TOSW    = new RasPtr
-  val TOSR    = new RasPtr
-  val NOS     = new RasPtr
-  val topAddr = PrunedAddr(VAddrBits)
-}
-
 class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle
     with HasBPUConst with BPUUtils {
   val pc          = PrunedAddr(VAddrBits)

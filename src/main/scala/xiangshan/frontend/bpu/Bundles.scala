@@ -151,9 +151,9 @@ class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters
     val m = Wire(new BpuSpeculativeMeta)
     m.phrHistPtr   := cfiUpdate.phrHistPtr
     m.rasMeta.ssp  := cfiUpdate.ssp
-    m.rasMeta.TOSW := cfiUpdate.TOSW
-    m.rasMeta.TOSR := cfiUpdate.TOSR
-    m.rasMeta.NOS  := cfiUpdate.NOS
+    m.rasMeta.tosw := cfiUpdate.TOSW
+    m.rasMeta.tosr := cfiUpdate.TOSR
+    m.rasMeta.nos  := cfiUpdate.NOS
     m.rasMeta.sctr := cfiUpdate.sctr
     m.topRetAddr   := cfiUpdate.topAddr
     m

@@ -24,9 +24,9 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 
-class RasEntry()(implicit p: Parameters) extends RasBundle {
-  val retAddr = PrunedAddr(VAddrBits)
-  val ctr     = UInt(RasCtrSize.W) // layer of nested call functions
+class RasEntry(implicit p: Parameters) extends RasBundle {
+  val retAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val ctr:     UInt       = UInt(StackCounterWidth.W) // layer of nested call functions
 }
 
 object RasEntry {
@@ -38,7 +38,9 @@ object RasEntry {
   }
 }
 
-class RasPtr(implicit p: Parameters) extends CircularQueuePtr[RasPtr](p => p(XSCoreParamsKey).RasSpecSize) {}
+class RasPtr(implicit p: Parameters) extends CircularQueuePtr[RasPtr](p =>
+      p(XSCoreParamsKey).bpuParameters.rasParameters.StackSize
+    ) {}
 
 object RasPtr {
   def apply(f: Bool, v: UInt)(implicit p: Parameters): RasPtr = {
@@ -52,49 +54,44 @@ object RasPtr {
 }
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
-  val ssp  = UInt(log2Up(RasSize).W)
-  val sctr = UInt(RasCtrSize.W)
-  val TOSW = new RasPtr
-  val TOSR = new RasPtr
-  val NOS  = new RasPtr
+  val ssp:  UInt   = UInt(log2Up(StackSize).W)
+  val sctr: UInt   = UInt(StackCounterWidth.W)
+  val tosw: RasPtr = new RasPtr
+  val tosr: RasPtr = new RasPtr
+  val nos:  RasPtr = new RasPtr
 }
 
 object RasInternalMeta {
-  def apply(ssp: UInt, sctr: UInt, TOSW: RasPtr, TOSR: RasPtr, NOS: RasPtr)(implicit p: Parameters): RasInternalMeta = {
+  def apply(ssp: UInt, sctr: UInt, tosw: RasPtr, tosr: RasPtr, nos: RasPtr)(implicit p: Parameters): RasInternalMeta = {
     val e = Wire(new RasInternalMeta)
     e.ssp  := ssp
     e.sctr := sctr
-    e.TOSW := TOSW
-    e.TOSR := TOSR
-    e.NOS  := NOS
+    e.tosw := tosw
+    e.tosr := tosr
+    e.nos  := nos
     e
   }
 }
 
 class RasMeta(implicit p: Parameters) extends RasBundle {
-  val ssp  = UInt(log2Up(RasSize).W)
-  val TOSW = new RasPtr
+  val ssp:  UInt   = UInt(log2Up(StackSize).W)
+  val tosw: RasPtr = new RasPtr
 }
 
 object RasMeta {
-  def apply(ssp: UInt, TOSW: RasPtr)(implicit p: Parameters): RasMeta = {
+  def apply(ssp: UInt, tosw: RasPtr)(implicit p: Parameters): RasMeta = {
     val e = Wire(new RasMeta)
     e.ssp  := ssp
-    e.TOSW := TOSW
+    e.tosw := tosw
     e
   }
 }
 
-class CfiOffset(implicit p: Parameters) extends RasBundle {
-  val carry:  Bool = Bool()
-  val offset: UInt = UInt(log2Ceil(PredictWidth).W)
-}
-
 class RasDebug(implicit p: Parameters) extends RasBundle {
-  val specQueue   = Output(Vec(RasSpecSize, new RasEntry))
-  val specNOS     = Output(Vec(RasSpecSize, new RasPtr))
-  val commitStack = Output(Vec(RasSize, new RasEntry))
-  val BOS         = Output(new RasPtr)
+  val specQueue:   Vec[RasEntry] = Output(Vec(SpecQueueSize, new RasEntry))
+  val specNos:     Vec[RasPtr]   = Output(Vec(SpecQueueSize, new RasPtr))
+  val commitStack: Vec[RasEntry] = Output(Vec(StackSize, new RasEntry))
+  val bos:         RasPtr        = Output(new RasPtr)
 }
 
 class RasBypass(implicit p: Parameters) extends RasBundle {
@@ -124,5 +121,5 @@ class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
   val brPc:      PrunedAddr      = PrunedAddr(VAddrBits)
   val isRvc:     Bool            = Bool()
   val meta:      RasInternalMeta = new RasInternalMeta
-  val level = RedirectLevel()
+  val level:     UInt            = RedirectLevel()
 }

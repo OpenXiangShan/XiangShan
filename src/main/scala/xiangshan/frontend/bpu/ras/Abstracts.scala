@@ -19,6 +19,6 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-abstract class RasBundle(implicit p: Parameters) extends BpuBundle
+abstract class RasBundle(implicit p: Parameters) extends BpuBundle with HasRasParameters
 
-abstract class RasModule(implicit p: Parameters) extends BpuModule
+abstract class RasModule(implicit p: Parameters) extends BpuModule with HasRasParameters

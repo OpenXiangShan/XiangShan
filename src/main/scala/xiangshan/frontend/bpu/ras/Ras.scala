@@ -37,7 +37,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 
-class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtrHelper {
+class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters with HasCircularQueuePtrHelper {
   class RasIO(implicit p: Parameters) extends BasePredictorIO {
     val specIn:   Valid[RasSpecInfo]     = Flipped(Valid(new RasSpecInfo))
     val commit:   Valid[RasCommitInfo]   = Flipped(Valid(new RasCommitInfo))
@@ -52,7 +52,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
 
   def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
-  private val stack = Module(new RasStack(RasSize, RasSpecSize)).io
+  private val stack = Module(new RasStack(StackSize, SpecQueueSize)).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
   // io.specIn.valid = s3_fire
   private val stackNearOverflow = stack.specNearOverflow
@@ -71,9 +71,9 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   val specMeta = Wire(new RasInternalMeta)
   specMeta.ssp  := stack.meta.ssp
   specMeta.sctr := stack.meta.sctr
-  specMeta.TOSR := stack.meta.TOSR
-  specMeta.TOSW := stack.meta.TOSW
-  specMeta.NOS  := stack.meta.NOS
+  specMeta.tosr := stack.meta.tosr
+  specMeta.tosw := stack.meta.tosw
+  specMeta.nos  := stack.meta.nos
 
   io.rasOverride := io.specIn.valid && (io.specIn.bits.target =/= stack.spec.popAddr) && specPop && io.enable
   io.specMeta    := specMeta
@@ -82,8 +82,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   private val redirect = RegNextWithEnable(io.redirect)
   // when we mispredict a call, we must redo a push operation
   // similarly, when we mispredict a return, we should redo a pop
-  private val stackTOSW    = stack.meta.TOSW
-  private val redirectTOSW = redirect.bits.meta.TOSW
+  private val stackTOSW    = stack.meta.tosw
+  private val redirectTOSW = redirect.bits.meta.tosw
 
   stack.redirect.valid    := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
   stack.redirect.isCall   := redirect.bits.attribute.isCall && (redirect.bits.level === 0.U)
@@ -99,7 +99,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
   stack.commit.popValid  := commitValid && commitInfo.attribute.isReturn
   stack.commit.pushAddr  := PrunedAddrInit(commitPushAddr)
-  stack.commit.metaTOSW  := commitInfo.meta.TOSW
+  stack.commit.metaTosw  := commitInfo.meta.tosw
   stack.commit.metaSsp   := commitInfo.meta.ssp
 
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
@@ -109,22 +109,22 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   XSDebug(specFire, "----------------RAS----------------\n")
   XSDebug(specFire, " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
   XSDebug(specFire, "  index       addr           ctr           nos (spec part)\n")
-  for (i <- 0 until RasSpecSize) {
+  for (i <- 0 until SpecQueueSize) {
     XSDebug(
       specFire,
       "  (%d)   0x%x      %d       %d",
       i.U,
       specDebug.specQueue(i).retAddr.toUInt,
       specDebug.specQueue(i).ctr,
-      specDebug.specNOS(i).value
+      specDebug.specNos(i).value
     )
-    XSDebug(specFire && i.U === stack.meta.TOSW.value, "   <----TOSW")
-    XSDebug(specFire && i.U === stack.meta.TOSR.value, "   <----TOSR")
-    XSDebug(specFire && i.U === specDebug.BOS.value, "   <----BOS")
+    XSDebug(specFire && i.U === stack.meta.tosw.value, "   <----TOSW")
+    XSDebug(specFire && i.U === stack.meta.tosr.value, "   <----TOSR")
+    XSDebug(specFire && i.U === specDebug.bos.value, "   <----BOS")
     XSDebug(specFire, "\n")
   }
   XSDebug(specFire, "  index       addr           ctr   (committed part)\n")
-  for (i <- 0 until RasSize) {
+  for (i <- 0 until StackSize) {
     XSDebug(
       specFire,
       "  (%d)   0x%x      %d",

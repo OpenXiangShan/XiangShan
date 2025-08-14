@@ -15,13 +15,22 @@
 
 package xiangshan.frontend.bpu.ras
 
-import chisel3._
+import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
-trait Helpers extends HasBpuParameters {
-  def ptrInc(ptr: UInt): UInt = ptr + 1.U
-  def ptrDec(ptr: UInt): UInt = ptr - 1.U
+case class RasParameters(
+    StackSize:         Int = 16, // Size of the RAS stack
+    SpecSize:          Int = 32, // Size of the RAS speculative queue
+    StackCounterWidth: Int = 3   // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+) {
+  require(isPow2(SpecSize), "SpecSize must be a power of 2")
+}
 
-  def specPtrInc(ptr: RasPtr): RasPtr = ptr + 1.U
-  def specPtrDec(ptr: RasPtr): RasPtr = ptr - 1.U
+trait HasRasParameters extends HasBpuParameters {
+  def rasParameters: RasParameters = bpuParameters.rasParameters
+
+  def StackSize:         Int = rasParameters.StackSize
+  def SpecQueueSize:     Int = rasParameters.SpecSize
+  def StackCounterWidth: Int = rasParameters.StackCounterWidth
+  def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
 }

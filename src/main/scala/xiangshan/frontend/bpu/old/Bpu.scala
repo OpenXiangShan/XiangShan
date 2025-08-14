@@ -359,8 +359,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   bpuResp.s3_ftbEntry := ftb.io.out.s3_ftbEntry
 
-  bpuResp.s3_specInfo.histPtr     := s3_ghist_ptr
-  bpuResp.s3_specInfo.rasSpecInfo := DontCare // ras.io.out.s3_rasSpecInfo
+  bpuResp.s3_specInfo.histPtr := s3_ghist_ptr
 //  if (bpuResp.s3_specInfo.sc_disagree.isDefined && tage.io.out.sc_disagree.isDefined) {
 //    bpuResp.s3_specInfo.sc_disagree.get := tage.io.out.sc_disagree.get
 //  }

@@ -26,6 +26,8 @@ import system._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
 import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.frontend.bpu.BpuParameters
+import xiangshan.frontend.bpu.ras.RasParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
@@ -133,8 +135,6 @@ class MinimalConfig(n: Int = 1) extends Config(
         EnableGHistDiff = false,
         FtbSize = 256,
         FtbWays = 2,
-        RasSize = 8,
-        RasSpecSize = 16,
         TageTableInfos =
           Seq((512, 4, 6),
             (512, 9, 6),
@@ -146,6 +146,12 @@ class MinimalConfig(n: Int = 1) extends Config(
           Seq((256, 4, 7),
             (256, 8, 7),
             (512, 16, 7)),
+        bpuParameters = BpuParameters(
+          rasParameters = RasParameters(
+            StackSize = 8,
+            SpecSize = 16
+          ),
+        ),
         // ================================
         itlbParameters = TLBParameters(
           name = "itlb",
