@@ -27,7 +27,6 @@ import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.ParallelPriorityMux
 import utility.XSError
-import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
@@ -39,6 +38,7 @@ import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BpuSpeculationMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
@@ -96,6 +96,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // FIXME: Do we need cfiQueue when backend sends instruction information with commit?
   private val cfiQueue = Reg(Vec(FtqSize, Valid(UInt(CfiPositionWidth.W))))
 
+  // speculationQueue stores speculation information needed by BPU when redirect happens.
+  private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
+
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Module(new MetaQueue)
 
@@ -134,33 +137,35 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with BPU
   // --------------------------------------------------------------------------------
   io.fromBpu.prediction.ready      := validEntries < FtqSize.U
-  io.fromBpu.meta.ready            := validEntries < FtqSize.U
-  io.fromBpu.speculativeMeta.ready := validEntries < FtqSize.U
+  io.fromBpu.meta.ready            := true.B
+  io.fromBpu.speculationMeta.ready := true.B
 
-  private val fromBpu = io.fromBpu.prediction
+  private val prediction = io.fromBpu.prediction
 
-  private val bpuS3Redirect = fromBpu.bits.s3Override && fromBpu.valid
+  private val bpuS3Redirect = prediction.valid && prediction.bits.s3Override
 
   io.toBpu.bpuPtr := bpuPtr(0)
-  private val bpuEnqueue = io.fromBpu.prediction.fire && !redirect.valid
+  private val bpuEnqueue = prediction.fire && !redirect.valid
 
-  private val fromBpuPtr = MuxCase(
+  private val predictionPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      fromBpu.bits.s3Override -> io.fromBpu.s3FtqPtr
+      prediction.bits.s3Override -> io.fromBpu.s3FtqPtr
     )
   )
 
-  when(fromBpu.bits.s3Override) {
+  when(prediction.bits.s3Override) {
     bpuPtr := io.fromBpu.s3FtqPtr + 1.U
   }.elsewhen(bpuEnqueue) {
     bpuPtr := bpuPtr + 1.U
   }
 
-  when((fromBpu.fire || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(fromBpuPtr.value) := fromBpu.bits.startVAddr
-    cfiQueue(fromBpuPtr.value)   := fromBpu.bits.ftqOffset
+  when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
+    entryQueue(predictionPtr.value) := prediction.bits.startVAddr
+    cfiQueue(predictionPtr.value)   := prediction.bits.ftqOffset
   }
+
+  speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
 
   metaQueue.io.wen        := io.fromBpu.meta.valid
   metaQueue.io.waddr      := io.fromBpu.s3FtqPtr.value
@@ -168,8 +173,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   if (metaQueue.io.wdata.paddingBit.isDefined) {
     metaQueue.io.wdata.paddingBit.get := 0.U
   }
-
-  // TODO: speculativeMetaQueue
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -184,7 +187,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // TODO: wait for Ifu/ICache to remove bpu s2 flush
   for (stage <- 2 to 3) {
-    val redirect = if (stage == 3) fromBpu.bits.s3Override else false.B
+    val redirect = if (stage == 3) prediction.bits.s3Override else false.B
     val ftqIdx   = if (stage == 3) io.fromBpu.s3FtqPtr else 0.U.asTypeOf(new FtqPtr)
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
@@ -237,8 +240,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
     entryQueue(ifuPtr(1).value),
     Seq(
-      (bpuPtr(0) === ifuPtr(0)) -> fromBpu.bits.target,
-      (bpuPtr(0) === ifuPtr(1)) -> fromBpu.bits.startVAddr
+      (bpuPtr(0) === ifuPtr(0)) -> prediction.bits.target,
+      (bpuPtr(0) === ifuPtr(1)) -> prediction.bits.startVAddr
     )
   )
   io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
@@ -250,9 +253,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.pc_mem_wen   := (fromBpu.fire || bpuS3Redirect) && !redirect.valid
-  io.toBackend.pc_mem_waddr := fromBpuPtr.value
-  io.toBackend.pc_mem_wdata := fromBpu.bits.startVAddr
+  io.toBackend.pc_mem_wen   := (prediction.fire || bpuS3Redirect) && !redirect.valid
+  io.toBackend.pc_mem_waddr := predictionPtr.value
+  io.toBackend.pc_mem_wdata := prediction.bits.startVAddr
 
   // TODO: remove or reconsider this
   io.toBackend.newest_entry_en     := false.B
@@ -285,7 +288,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.isRvc           := redirect.bits.isRVC
   io.toBpu.redirect.bits.taken           := redirect.bits.taken
   io.toBpu.redirect.bits.attribute       := DontCare
-  io.toBpu.redirect.bits.speculativeMeta := DontCare
+  io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
   // --------------------------------------------------------------------------------

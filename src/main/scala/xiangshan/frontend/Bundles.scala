@@ -21,7 +21,10 @@ import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.CircularQueuePtr
+import utility.GTimer
+import utility.ParallelPriorityMux
+import utility.XSDebug
 import utils.EnumUInt
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
@@ -30,7 +33,7 @@ import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
-import xiangshan.frontend.bpu.BpuSpeculativeMeta
+import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
@@ -43,7 +46,7 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   val prediction:      DecoupledIO[BpuPrediction]      = DecoupledIO(new BpuPrediction)
-  val speculativeMeta: DecoupledIO[BpuSpeculativeMeta] = DecoupledIO(new BpuSpeculativeMeta)
+  val speculationMeta: DecoupledIO[BpuSpeculationMeta] = DecoupledIO(new BpuSpeculationMeta)
   val meta:            DecoupledIO[BpuMeta]            = DecoupledIO(new BpuMeta)
   val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
   // TODO: topdown, etc.

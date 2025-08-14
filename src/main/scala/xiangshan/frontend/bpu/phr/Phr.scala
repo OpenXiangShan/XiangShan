@@ -83,7 +83,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   redirectData.valid  := io.train.redirect.valid
   redirectData.taken  := io.train.redirect.bits.taken
   redirectData.pc     := io.train.redirect.bits.startVAddr
-  redirectData.phrPtr := io.train.redirect.bits.speculativeMeta.phrHistPtr
+  redirectData.phrPtr := io.train.redirect.bits.speculationMeta.phrHistPtr
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
