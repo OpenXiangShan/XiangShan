@@ -195,8 +195,8 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // mbtb meta
   val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
-  private val s3_speculativeMeta = Wire(new BpuSpeculativeMeta)
-  s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
+  private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
+  s3_speculationMeta.phrHistPtr := phr.io.phrPtr
 
   private val s3_meta = Wire(new BpuMeta)
   s3_meta.abtb := s3_abtbMeta
@@ -206,8 +206,8 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
 
-  io.toFtq.speculativeMeta.valid := s3_valid
-  io.toFtq.speculativeMeta.bits  := s3_speculativeMeta
+  io.toFtq.speculationMeta.valid := s3_valid
+  io.toFtq.speculationMeta.bits  := s3_speculationMeta
 
   s0_pc := MuxCase(
     s0_pcReg,
@@ -242,7 +242,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val phrsWireValue = phrsWire.asUInt
   private val redirectPhrValue =
-    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculativeMeta.phrHistPtr.value + 1.U))(
+    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
       PhrHistoryLength - 1,
       0
     )
