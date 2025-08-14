@@ -166,7 +166,7 @@ case class XSCoreParameters
   Vl_IDX: Int = 0,
   NRPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 120,
-  LoadQueueRARSize: Int = 104,
+  LoadQueueRARSize: Int = 96,
   LoadQueueRAWSize: Int = 32, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 120,
