@@ -21,7 +21,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuMeta
-import xiangshan.frontend.bpu.BpuSpeculativeMeta
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
   val meta       = new BpuMeta

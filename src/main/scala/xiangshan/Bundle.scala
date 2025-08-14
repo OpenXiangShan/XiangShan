@@ -16,36 +16,37 @@
 
 package xiangshan
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util._
 import chisel3.experimental.BundleLiterals._
-import utility._
-import utils._
-import xiangshan.backend.decode.{ImmUnion, XDecode}
-import xiangshan.backend.fu.FuType
-import xiangshan.backend.rob.RobPtr
-import xiangshan.frontend._
-import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, UopIdx}
-import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
-import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
-import xiangshan.frontend.bpu.BpuCtrl
-import xiangshan.frontend.bpu.phr.PhrPtr
-import xiangshan.frontend.bpu.ras.RasPtr
-import xiangshan.cache.HasDCacheParameters
-import utility._
-
-import org.chipsalliance.cde.config.Parameters
+import chisel3.util._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
+
+import utility._
+import utils._
+
+import org.chipsalliance.cde.config.Parameters
+
+import xiangshan.frontend.IfuToBackendIO
+import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.bpu.BpuCtrl
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.FtqToCtrlIO
+
+import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
-import xiangshan.backend.fu.PMPEntry
+import xiangshan.backend.decode.XDecode
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.NewCSR.Mcontrol6
+import xiangshan.backend.fu.NewCSR.Tdata1Bundle
+import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
-import xiangshan.backend.trace._
+import xiangshan.backend.rob.RobPtr
+import xiangshan.cache.HasDCacheParameters
+
+import xiangshan.mem.LqPtr
+import xiangshan.mem.SqPtr
 import xiangshan.mem.prefetch.PrefetchCtrl
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
