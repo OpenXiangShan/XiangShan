@@ -1,5 +1,6 @@
 
 from .xspdb import *
+from pyxscore import DUTSimTop
 #from .ui import *
 
 from .cmd.util import info, debug, warn, message, set_xspdb_log_level, GREEN, YELLOW, RED, RESET

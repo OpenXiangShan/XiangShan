@@ -1,20 +1,23 @@
 #coding=utf-8
 
-import pdb
+from pyxscore import DUTSimTop, xsp
+from pydifftest import difftest as df
 from collections import OrderedDict
+from bdb import BdbQuit
+import pdb
 import os
 import inspect
 import pkgutil
 import signal
 import time
 import sys
-
+ 
 from xspdb.cmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
 from xspdb.cmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
 from logging import DEBUG, INFO, WARNING, ERROR
 
 class XSPdb(pdb.Pdb):
-    def __init__(self, dut, df, xsp, default_file=None,
+    def __init__(self, dut, default_file=None,
                  mem_base=0x80000000,
                  flash_base=0x10000000,
                  finstr_addr=None,
@@ -78,6 +81,15 @@ class XSPdb(pdb.Pdb):
         self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
+
+    def run(self):
+        try:
+            self.set_trace()
+            while True:
+                dut.Step(1000)
+        except BdbQuit:
+            pass
+
 
     def _sigint_handler(self, s, f):
         self.interrupt = True

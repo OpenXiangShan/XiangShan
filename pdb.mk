@@ -62,7 +62,7 @@ $(PDB_HOME)/xspdb.tar.gz: $(PDB_HOME)/xspdb
 	tar -C $(PDB_HOME) -czvf $(PDB_HOME)/xspdb.tar.gz xspdb
 
 pdb-run: check-deps
-	LD_PRELOAD="$(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1 $(PDB_HOME)/pyxscore/libdifftest.so" PYTHONPATH="$(PDB_HOME):scripts/xspdb/src" python3 scripts/xspdb/pdb-run.py
+	LD_PRELOAD="$(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1 $(PDB_HOME)/pyxscore/libdifftest.so" PYTHONPATH="$(PDB_HOME):scripts/xspdb/src" python3 scripts/pdb-run.py
 
 check-deps:
 	@echo "--- Checking Python dependencies: $(PYTHON_DEPS) ---"

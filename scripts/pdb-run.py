@@ -1,3 +1,5 @@
+#coding=utf-8
+
 #***************************************************************************************
 # Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
 # Copyright (c) 2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -14,11 +16,10 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-all: pdb-run
 
-pdb-run: 
-	LD_PRELOAD=src/pyxscore/xspcomm/libxspcomm.so.0.0.1 PYTHONPATH=./src python3 pdb-run.py
+from xspdb import XSPdb, DUTSimTop
 
-clean:
-	rm -rf ready-to-run.tar.gz
-	rm -rf XSPython.tar.gz
+if __name__ == "__main__":
+    dut = DUTSimTop();
+    XSPdb(dut).run();
+
