@@ -36,5 +36,5 @@ jobs:
     if: needs.check-run.outputs.should_run == 'true'
     uses: ./.github/workflows/perf-template.yml
     with:
-      test_branch: "kunminghu-v3"
+      test_branch: kunminghu-v3
       test_commit: ${{ github.event.inputs.test_commit }}
