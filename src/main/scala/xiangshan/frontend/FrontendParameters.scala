@@ -34,12 +34,10 @@ case class FrontendParameters(
   def getPhrHistoryLength: Int = {
     def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
 
-    // TODO: ittage table history length
-//    def MaxTableHistoryLength: Int = (
-//      bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
-//        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
-//    ).max
-    def MaxTableHistoryLength: Int = bpuParameters.tageParameters.TableInfos.map(_.HistoryLength).max
+    def MaxTableHistoryLength: Int = (
+      bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
+        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
+    ).max
 
     def Shamt:   Int = bpuParameters.phrParameters.Shamt
     def FtqSize: Int = ftqParameters.FtqSize
