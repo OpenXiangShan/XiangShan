@@ -16,9 +16,9 @@
 package xiangshan.frontend.bpu
 
 import chisel3.util._
-import scala.math.min
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
+import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.phr.PhrParameters
 import xiangshan.frontend.bpu.ras.RasParameters
@@ -33,12 +33,13 @@ case class BpuParameters(
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     phrParameters:       PhrParameters = PhrParameters(),
     // sub predictors
-    ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
-    abtbParameters: AheadBtbParameters = AheadBtbParameters(),
-    mbtbParameters: MainBtbParameters = MainBtbParameters(),
-    tageParameters: TageParameters = TageParameters(),
-    scParameters:   ScParameters = ScParameters(),
-    rasParameters:  RasParameters = RasParameters()
+    ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
+    abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
+    mbtbParameters:   MainBtbParameters = MainBtbParameters(),
+    tageParameters:   TageParameters = TageParameters(),
+    scParameters:     ScParameters = ScParameters(),
+    ittageParameters: IttageParameters = IttageParameters(),
+    rasParameters:    RasParameters = RasParameters()
 ) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
@@ -53,16 +54,13 @@ trait HasBpuParameters extends HasFrontendParameters {
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
   // phr history
-  // TODO: add ittage info
-//    def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
-//      (bpuParameters.tageParameters.TableInfos ++
-//        bpuParameters.ittageParameters.TableInfos).map {
-//        _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
-//      }.reduce(_ ++ _)
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {
       _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
-    }.reduce(_ ++ _)
+    }.reduce(_ ++ _) ++
+      bpuParameters.ittageParameters.TableInfos.map {
+        _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth)
+      }.reduce(_ ++ _)
   // sanity check
   // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there
   require(isPow2(FetchBlockAlignSize))

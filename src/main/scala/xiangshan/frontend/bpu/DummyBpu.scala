@@ -240,12 +240,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculativeMeta.topRetAddr := ras.io.topRetAddr
 
   private val s3_meta = Wire(new BpuMeta)
-  s3_meta.abtb := s3_abtbMeta
-  s3_meta.mbtb := s3_mbtbMeta
-  s3_meta.ras  := s3_rasMeta
-  s3_meta.phr  := s3_phrMeta
-  s3_meta.tage := s3_tageMeta
-  // TODO: other meta
+  s3_meta.abtb   := s3_abtbMeta
+  s3_meta.mbtb   := s3_mbtbMeta
+  s3_meta.ras    := s3_rasMeta
+  s3_meta.phr    := s3_phrMeta
+  s3_meta.tage   := s3_tageMeta
+  s3_meta.ittage := DontCare // TODO: add ittage
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
