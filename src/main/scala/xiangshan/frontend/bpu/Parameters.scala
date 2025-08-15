@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
+import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.phr.PhrParameters
 import xiangshan.frontend.bpu.ras.RasParameters
@@ -33,12 +34,13 @@ case class BpuParameters(
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     phrParameters:       PhrParameters = PhrParameters(),
     // sub predictors
-    ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
-    abtbParameters: AheadBtbParameters = AheadBtbParameters(),
-    mbtbParameters: MainBtbParameters = MainBtbParameters(),
-    tageParameters: TageParameters = TageParameters(),
-    scParameters:   ScParameters = ScParameters(),
-    rasParameters:  RasParameters = RasParameters()
+    ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
+    abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
+    mbtbParameters:   MainBtbParameters = MainBtbParameters(),
+    tageParameters:   TageParameters = TageParameters(),
+    scParameters:     ScParameters = ScParameters(),
+    ittageParameters: IttageParameters = IttageParameters(),
+    rasParameters:    RasParameters = RasParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
@@ -46,11 +48,10 @@ case class BpuParameters(
     def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
 
     // TODO: ittage table history length
-    //    def MaxTableHistoryLength: Int = (
-    //      bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
-    //        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
-    //    ).max
-    def MaxTableHistoryLength: Int = tageParameters.TableInfos.map(_.HistoryLength).max
+    def MaxTableHistoryLength: Int = (
+      tageParameters.TableInfos.map(_.HistoryLength) ++
+        ittageParameters.TableInfos.map(_.HistoryLength)
+    ).max
 
     def Shamt: Int = phrParameters.Shamt
 
@@ -83,16 +84,13 @@ trait HasBpuParameters extends HasXSParameter {
   def PhrHistoryLength: Int = bpuParameters.getPhrHistoryLength(FtqSize)
 
   // phr history
-  // TODO: add ittage info
-//    def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
-//      (bpuParameters.tageParameters.TableInfos ++
-//        bpuParameters.ittageParameters.TableInfos).map {
-//        _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
-//      }.reduce(_ ++ _)
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {
       _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
-    }.reduce(_ ++ _)
+    }.reduce(_ ++ _) ++
+      bpuParameters.ittageParameters.TableInfos.map {
+        _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth)
+      }.reduce(_ ++ _)
 
   // sanity check
   // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there

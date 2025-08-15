@@ -46,6 +46,8 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.ittage.Ittage
+import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.ftq.OldFtqToBpuIO
@@ -167,16 +169,16 @@ class BpuIO(implicit p: Parameters) extends XSBundle {
 class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new BpuIO)
 
-  val uftb   = Module(new MicroFtb)
-  val ftb    = Module(new Ftb)
-  val tage   = Module(new Tage)
-  val ittage = Module(new Ittage)
+  val uftb = Module(new MicroFtb)
+  val ftb  = Module(new Ftb)
+  val tage = Module(new Tage)
+//  val ittage = Module(new Ittage)
 //  val ras    = Module(new Ras)
 
   ftb.io.in.fromFauFtb        := uftb.io.out.toFtb
   ftb.io.in.fromTage          := tage.io.out.toFtb
   ftb.io.in.isRedirectFromIfu := RegNext(io.fromFtq.redirctFromIFU, init = false.B)
-  ittage.io.in.fromFtb        := ftb.io.out.toIttage
+//  ittage.io.fromFtb           := ftb.io.out.toIttage
 //  ras.io.in.fromFtb           := ftb.io.out.toRas
 
   val s0_stall = Wire(Bool()) // For some reason s0 stalled, usually FTQ Full
@@ -211,7 +213,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val s2_pc = RegEnable(s1_pc, s1_fire)
   val s3_pc = RegEnable(s2_pc, s2_fire)
 
-  val predictorsIn = Seq(uftb.io.in, tage.io.in, ftb.io.in, ittage.io.in)
+  val predictorsIn = Seq(uftb.io.in, tage.io.in, ftb.io.in)
   predictorsIn.foreach { in =>
     in.ctrl := DelayN(io.ctrl, 2)
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -281,11 +283,8 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   predictorsIn.foreach(_.update.bits.ghist := getHist(io.fromFtq.update.bits.spec_info.histPtr))
 
-  tage.io.in.ghist            := s0_ghist
-  tage.io.in.folded_hist      := s0_folded_gh
-  ittage.io.in.ghist          := s0_ghist
-  ittage.io.in.folded_hist    := s0_folded_gh
-  ittage.io.in.s1_folded_hist := s1_folded_gh
+  tage.io.in.ghist       := s0_ghist
+  tage.io.in.folded_hist := s0_folded_gh
 
   val redirect_req = io.fromFtq.redirect
   val do_redirect  = RegNextWithEnable(redirect_req) // TODO: reduce one cycle delay
@@ -300,7 +299,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
-  val s1_predictorsReady = ftb.io.out.s1_ready && tage.io.out.s1_ready && ittage.io.out.s1_ready
+  val s1_predictorsReady = ftb.io.out.s1_ready && tage.io.out.s1_ready
 
   s0_fire := s1_predictorsReady && s1_ready
   s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
@@ -348,7 +347,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     ftb.io.out.s3_fullPred.targets.last, // default
     Seq(
       // ras.io.out.predictionValid    -> ras.io.out.s3_returnAddress,
-      ittage.io.out.predictionValid -> ittage.io.out.s3_jalrTarget
+//      ittage.io.out.predictionValid -> ittage.io.out.s3_jalrTarget
     )
   )
 
@@ -367,7 +366,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3_meta.uftbMeta   := uftb.io.out.s3_meta
   bpuResp.s3_meta.tageMeta   := tage.io.out.s3_meta
   bpuResp.s3_meta.ftbMeta    := ftb.io.out.s3_meta
-  bpuResp.s3_meta.ittageMeta := ittage.io.out.s3_meta
+  bpuResp.s3_meta.ittageMeta := DontCare // ittage.io.out.s3_meta
   bpuResp.s3_meta.rasMeta    := DontCare // ras.io.out.s3_meta
 
   val totalMetaSize = (new OldPredictorMeta).getWidth
@@ -692,7 +691,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     Mux(
       shift === 0.U,
       VecInit(0.U((1 << (log2Ceil(numBr) + 1)).W).asBools),
-      VecInit(LowerMask(1.U << (shift - 1.U)).asBools)
+      VecInit(LowerMask((1.U << (shift - 1.U)).asUInt).asBools)
     )
 
   // TODO end

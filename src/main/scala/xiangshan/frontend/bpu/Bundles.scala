@@ -24,6 +24,7 @@ import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
+import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
@@ -39,6 +40,9 @@ class BranchAttribute extends Bundle {
   def isConditional: Bool = branchType === BranchAttribute.BranchType.Conditional
   def isDirect:      Bool = branchType === BranchAttribute.BranchType.Direct
   def isIndirect:    Bool = branchType === BranchAttribute.BranchType.Indirect
+
+  def isOtherIndirect: Bool =
+    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.None
 
   // NOTE: maybe we should check branchType === BranchAttribute.BranchType.Direct/Indirect,
   //       but as BranchAttribute.BranchType is declared as private,
@@ -216,11 +220,12 @@ class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val abtb: AheadBtbMeta = new AheadBtbMeta
-  val mbtb: MainBtbMeta  = new MainBtbMeta
-  val ras:  RasMeta      = new RasMeta
-  val phr:  PhrPtr       = new PhrPtr
-  val tage: TageMeta     = new TageMeta
+  val abtb:   AheadBtbMeta = new AheadBtbMeta
+  val mbtb:   MainBtbMeta  = new MainBtbMeta
+  val ras:    RasMeta      = new RasMeta
+  val phr:    PhrPtr       = new PhrPtr
+  val tage:   TageMeta     = new TageMeta
+  val ittage: IttageMeta   = new IttageMeta
 }
 
 /* *** internal const & type *** */
