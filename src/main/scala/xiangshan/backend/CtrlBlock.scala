@@ -142,15 +142,15 @@ class CtrlBlockImp(
       (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
-  val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
+  val wbData = io.fromWB.wbData
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
-  val staScheWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreAddrFu)
+  val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
-  private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
+  private val delayedNotFlushedWriteBackNums = wbData.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
@@ -161,7 +161,7 @@ class CtrlBlockImp(
     val isMemVload = memVloadWbData.contains(x)
     val isi2v = i2vWbData.contains(x)
     val isf2v = f2vWbData.contains(x)
-    val isStaSche = staScheWbData.contains(x)
+    val isStore = storeWbData.contains(x)
     val canSameRobidxWbData = if(isVfSche) {
       i2vWbData ++ f2vWbData ++ vfScheWbData
     } else if(isi2v) {
@@ -172,8 +172,8 @@ class CtrlBlockImp(
       intScheWbData ++ fpScheWbData
     } else if (isFpSche) {
       intScheWbData ++ fpScheWbData
-//    } else if (isStaSche) {
-//      intScheWbData ++ fpScheWbData ++ staScheWbData
+    } else if (isStore) {
+      storeWbData
     } else if (isMemVload) {
       memVloadWbData
     } else {

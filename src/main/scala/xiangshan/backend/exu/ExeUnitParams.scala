@@ -302,6 +302,8 @@ case class ExeUnitParams(
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
 
+  def hasStoreFu = hasStoreAddrFu || hasStdFu
+
   def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasHyldaFu || hasHystaFu || hasVLoadFu || hasVStoreFu
 
   def hasHyldaFu = fuConfigs.map(_.name == "hylda").reduce(_ || _)
