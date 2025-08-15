@@ -770,7 +770,7 @@ object Bundles {
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
     val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
     val imm           = UInt(64.W)
-    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((log2Up(PredictWidth) + 1).W))
+    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((log2Up(PredictWidth) + 2).W))
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
@@ -819,6 +819,19 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
 
     def exuIdx = this.params.exuIdx
+
+    def getPcOffset() = {
+      val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
+      val rvcOffset = Mux(this.preDecode.get.isRVC, 0.U, 2.U)
+      val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
+      thisPcOffset
+    }
+
+    def getNextPcOffset() = {
+      val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
+      val nextPcOffset = ftqOffset +& 2.U
+      nextPcOffset
+    }
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData

@@ -184,7 +184,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       )
     }
     if (exuInput.bits.params.hasBrhFu) {
-      val nextPcOffset = exuInput.bits.ftqOffset.get +& Mux(exuInput.bits.preDecode.get.isRVC, 1.U, 2.U)
+      val thisPcOffset = exuInput.bits.getPcOffset()
+      val nextPcOffset = exuInput.bits.getNextPcOffset()
       val imm = ImmExtractor(
         immInfo(exuIdx).imm,
         immInfo(exuIdx).immType,
@@ -192,7 +193,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         exuInput.bits.params.immType.map(_.litValue)
       )
       val isJALR = FuType.isJump(exuInput.bits.fuType) && JumpOpType.jumpOpisJalr(exuInput.bits.fuOpType)
-      val immBJU = imm + Mux(isJALR, 0.U, (exuInput.bits.ftqOffset.getOrElse(0.U) << instOffsetBits).asUInt)
+      val immBJU = imm + Mux(isJALR, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = immInfo(exuIdx).imm
       exuInput.bits.imm := Mux((FuType.isCsr(exuInput.bits.fuType) || FuType.isFence(exuInput.bits.fuType))&& exuInput.bits.params.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.get := nextPcOffset

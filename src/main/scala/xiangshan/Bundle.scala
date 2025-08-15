@@ -320,6 +320,19 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val debugIsMemVio = Bool()
 
   def flushItself() = RedirectLevel.flushItself(level)
+
+  def getPcOffset() = {
+    val ftqOffset = (this.ftqOffset << instOffsetBits).asUInt
+    val rvcOffset = Mux(this.isRVC, 0.U, 2.U)
+    val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
+    thisPcOffset
+  }
+
+  def getNextPcOffset() = {
+    val ftqOffset = (this.ftqOffset << instOffsetBits).asUInt
+    val nextPcOffset = ftqOffset +& 2.U
+    nextPcOffset
+  }
 }
 
 object Redirect extends HasCircularQueuePtrHelper {
