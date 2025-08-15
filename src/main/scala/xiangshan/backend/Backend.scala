@@ -1009,8 +1009,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writebackHyuSta = Vec(params.HyuCnt, Flipped(DecoupledIO(new MemExuOutput)))
   val writebackVldu = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
 
-  val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new StoreUnitToLFST)))
+
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionAddr = Input(new Bundle {
     val vaddr = UInt(XLEN.W)
