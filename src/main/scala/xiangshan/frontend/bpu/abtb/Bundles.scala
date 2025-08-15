@@ -37,7 +37,7 @@ class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasAheadB
   val wayIdx:       UInt          = UInt(WayIdxWidth.W)
   val entry:        AheadBtbEntry = new AheadBtbEntry
 
-  def tag: UInt = entry.tag
+  override def tag: Option[UInt] = Some(entry.tag)
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {

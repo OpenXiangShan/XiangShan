@@ -13,24 +13,24 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.phr
+package xiangshan.frontend.bpu.ras
 
+import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
-case class PhrParameters(
-    Shamt:          Int = 2,         // shift amount for Phr
-    EnableTwoTaken: Boolean = false, // enable two-taken support in Phr
-    // ensure history length is a multiple of this value
-    // default is 4, when history value is displayed in hexadecimal, it has better readability
-    HistoryAlign: Int = 4
-) {}
+case class RasParameters(
+    StackSize:         Int = 16, // Size of the RAS stack
+    SpecSize:          Int = 32, // Size of the RAS speculative queue
+    StackCounterWidth: Int = 3   // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+) {
+  require(isPow2(SpecSize), "SpecSize must be a power of 2")
+}
 
-trait HasPhrParameters extends HasBpuParameters {
-  def phrParameters: PhrParameters = bpuParameters.phrParameters
+trait HasRasParameters extends HasBpuParameters {
+  def rasParameters: RasParameters = bpuParameters.rasParameters
 
-  def Shamt:          Int     = phrParameters.Shamt
-  def EnableTwoTaken: Boolean = phrParameters.EnableTwoTaken
-
-  // inherited from HasBpuParameters
-  // def PhrHistoryLength: Int = PhrHistoryLength
+  def StackSize:         Int = rasParameters.StackSize
+  def SpecQueueSize:     Int = rasParameters.SpecSize
+  def StackCounterWidth: Int = rasParameters.StackCounterWidth
+  def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
 }

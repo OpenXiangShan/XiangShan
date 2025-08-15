@@ -17,15 +17,15 @@ package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
+import xiangshan.Redirect
 import xiangshan.RedirectLevel
-import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.PredecodeWritebackBundle
 
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
       pdWb: Valid[PredecodeWritebackBundle]
-  ): Valid[BranchPredictionRedirect] = {
-    val redirect = WireInit(0.U.asTypeOf(Valid(new BranchPredictionRedirect)))
+  ): Valid[Redirect] = {
+    val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
     redirect.valid          := pdWb.valid && pdWb.bits.misOffset.valid
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx

@@ -23,12 +23,12 @@ import utility.XSDebug
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
 class PhrPtr(implicit p: Parameters) extends CircularQueuePtr[PhrPtr](p =>
-      p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.TableInfos.map(_._2).max +
-        p(XSCoreParamsKey).frontendParameters.bpuParameters.phrParameters.Shamt *
-        p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize
+      p(XSCoreParamsKey).frontendParameters.getPhrHistoryLength
     ) {}
 
 object PhrPtr {
@@ -47,44 +47,43 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
   val taken:     Bool                  = Bool()
   val pc:        PrunedAddr            = PrunedAddr(VAddrBits)
   val phrPtr:    PhrPtr                = new PhrPtr
-  val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(TageFoldedGHistInfos)
+  val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
   // val target: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
-class PhrTrain(implicit p: Parameters) extends PhrBundle {
+class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   // NOTE: if the StageCtrl structure changes, it may require refactoring
   val s0_stall:  Bool      = Bool()
   val stageCtrl: StageCtrl = new StageCtrl
 
   val redirect: Valid[BpuRedirect] = Valid(new BpuRedirect)
 
-  val s1_valid: Bool       = Bool()
-  val s1_pc:    PrunedAddr = PrunedAddr(VAddrBits)
-  val s1_taken: Bool       = Bool()
+  val s1_valid:      Bool       = Bool()
+  val s1_prediction: Prediction = new Prediction()
+  val s1_pc:         PrunedAddr = PrunedAddr(VAddrBits)
 
-  val s3_override: Bool       = Bool()
-  val s3_pc:       PrunedAddr = PrunedAddr(VAddrBits)
-  val s3_taken:    Bool       = Bool()
+  val s3_override:   Bool       = Bool()
+  val s3_prediction: Prediction = new Prediction()
+  val s3_pc:         PrunedAddr = PrunedAddr(VAddrBits)
 }
 
-//NOTE: Folded history maintainance logic reuse kmh-v2 ghr folded history management logic,
+// NOTE: Folded history maintenance logic reuse kmh-v2 ghr folded history management logic,
 // with only minor modifications made for phr characteristics.
-class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(implicit p: Parameters)
+class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(implicit p: Parameters)
     extends PhrBundle with Helpers {
-  require(compLen >= 1)
-  require(len > 0)
   // require(folded_len <= len)
-  require(compLen >= maxUpdateNum)
-  val foldedHist = UInt(compLen.W)
+  require(info.FoldedLength >= maxUpdateNum)
 
-  def needOldestBits        = len > compLen
-  def info                  = (len, compLen)
-  def oldestBitToGetFromPhr = (0 until maxUpdateNum).map(len - _ - 1)
-  def oldestBitPosInFolded  = oldestBitToGetFromPhr map (_ % compLen)
-  def oldestBitWrapAround   = oldestBitToGetFromPhr map (_ / compLen > 0)
-  def oldestBitStart        = oldestBitPosInFolded.head
+  val foldedHist: UInt = UInt(info.FoldedLength.W)
 
-  def getOldestBitFromGhr(phr: Vec[Bool], histPtr: PhrPtr) =
+  def needOldestBits: Boolean = info.HistoryLength > info.FoldedLength
+
+  def oldestBitToGetFromPhr: Seq[Int]     = (0 until maxUpdateNum).map(info.HistoryLength - _ - 1)
+  def oldestBitPosInFolded:  Seq[Int]     = oldestBitToGetFromPhr.map(_ % info.FoldedLength)
+  def oldestBitWrapAround:   Seq[Boolean] = oldestBitToGetFromPhr.map(_ / info.FoldedLength > 0)
+  def oldestBitStart:        Int          = oldestBitPosInFolded.head
+
+  def getOldestBitFromGhr(phr: Vec[Bool], histPtr: PhrPtr): Seq[Bool] =
     // TODO: wrap inc for histPtr value
     oldestBitToGetFromPhr.map(i => phr(i))
 
@@ -96,7 +95,6 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
 
   // fast path, use pre-read oldest bits
   def update(ob: Vec[Bool], num: Int, shiftBits: UInt): PhrFoldedHistory = {
-
     val newFoldedHist = if (needOldestBits) {
       val oldestBits = ob
       require(oldestBits.length == maxUpdateNum)
@@ -115,21 +113,21 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
       val newestBitsMasked = shiftBits
       // val newestBitsMasked = VecInit((0 until maxUpdateNum).map(i => taken && ((i + 1) == num).B)).asUInt
       // if a bit does not wrap around, newest bits should not be xored onto it either
-      val newestBitsSet = (0 until maxUpdateNum).map(i => (compLen - 1 - i, newestBitsMasked(num - i - 1)))
+      val newestBitsSet = (0 until maxUpdateNum).map(i => (info.FoldedLength - 1 - i, newestBitsMasked(num - i - 1)))
 
       // println(f"new bits set ${newestBitsSet.map(_._1)}")
       //
       val originalBitsMasked = VecInit(foldedHist.asBools.zipWithIndex.map {
-        case (fb, i) => fb && !(num >= (len - i)).B
+        case (fb, i) => fb && !(num >= (info.HistoryLength - i)).B
       })
-      val originalBitsSet = (0 until compLen).map(i => (i, originalBitsMasked(i)))
+      val originalBitsSet = (0 until info.FoldedLength).map(i => (i, originalBitsMasked(i)))
 
       // do xor then shift
-      val xored = bitsetsXor(compLen, Seq(originalBitsSet, oldestBitsSet, newestBitsSet), this.len, compLen)
+      val xored = bitsetsXor(info, Seq(originalBitsSet, oldestBitsSet, newestBitsSet))
       circularShiftLeft(xored, num)
     } else {
       // histLen too short to wrap around
-      ((foldedHist << num) | shiftBits)(compLen - 1, 0)
+      ((foldedHist << num).asUInt | shiftBits)(info.FoldedLength - 1, 0).asUInt
     }
 
     val fh = WireInit(this)
@@ -151,7 +149,6 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
 // }
 
 // class AllAheadFoldedHistoryOldestBits(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends PhrBundle {
-//   // 1.过滤出需要处理的配置（历史长度 > 压缩长度）2.去重（toSet.toList）3.生成对应的AheadFoldedHistoryOldestBits实例
 //   val afhob = MixedVec(gen.filter(t => t._1 > t._2).map(_._1)
 //     .toSet.toList.map(l => new AheadFoldedHistoryOldestBits(l, numBr))) // remove duplicates
 //   require(gen.toSet.toList.equals(gen))
@@ -175,17 +172,19 @@ class PhrFoldedHistory(val len: Int, val compLen: Int, val maxUpdateNum: Int)(im
 //   }
 // }
 
-class PhrAllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends PhrBundle
+class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
     with HasPhrParameters {
-  val hist = MixedVec(gen.map { case (l, cl) => new PhrFoldedHistory(l, cl, Shamt) })
-  // println(gen.mkString)
-  require(gen.toSet.toList.equals(gen))
-  def getHistWithInfo(info: Tuple2[Int, Int]) = {
+
+  val hist: MixedVec[PhrFoldedHistory] =
+    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistory(info, Shamt)))
+
+  def getHistWithInfo(info: FoldedHistoryInfo): PhrFoldedHistory = {
     val selected = hist.filter(_.info.equals(info))
     require(selected.length == 1)
-    selected(0)
+    selected.head
   }
-  def autoConnectFrom(that: PhrAllFoldedHistories) = {
+
+  def autoConnectFrom(that: PhrAllFoldedHistories): Unit = {
     require(this.hist.length <= that.hist.length)
     for (h <- this.hist) {
       h := that.getHistWithInfo(h.info)
@@ -195,7 +194,7 @@ class PhrAllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Paramete
   def update(ghv: Vec[Bool], ptr: PhrPtr, shift: Int, shiftBits: UInt): PhrAllFoldedHistories = {
     require(shiftBits.getWidth == shift)
     val res = WireInit(this)
-    for (i <- 0 until this.hist.length) {
+    for (i <- this.hist.indices) {
       res.hist(i) := this.hist(i).update(ghv, ptr, shift, shiftBits)
     }
     res
@@ -219,8 +218,11 @@ class PhrAllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Paramete
   //   res
   // }
 
-  def display(cond: Bool) =
+  def display(cond: Bool): Unit =
     for (h <- hist) {
-      XSDebug(cond, p"hist len ${h.len}, folded len ${h.compLen}, value ${Binary(h.foldedHist)}\n")
+      XSDebug(
+        cond,
+        p"hist len ${h.info.HistoryLength}, folded len ${h.info.FoldedLength}, value ${Binary(h.foldedHist)}\n"
+      )
     }
 }

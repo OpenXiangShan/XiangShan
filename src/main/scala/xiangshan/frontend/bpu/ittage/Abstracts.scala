@@ -13,21 +13,12 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.tage
+package xiangshan.frontend.bpu.ittage
 
-import chisel3._
-import chisel3.util._
-import xiangshan.HasXSParameter
-import xiangshan.frontend.PrunedAddr
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.BpuBundle
+import xiangshan.frontend.bpu.BpuModule
 
-trait Helpers extends HasTageParameters with HasXSParameter {
-  def getBaseSetIndex(pc: PrunedAddr): UInt = {
-    val highBits = pc(VAddrBits - 1, FetchBlockSizeWidth + BaseTableInternalBanksIdxLen)
-    (highBits ^ (highBits >> BaseTableSetIdxLen).asUInt)(BaseTableSetIdxLen - 1, 0)
-  }
-  def getBaseTableInternalBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth + BaseTableInternalBanksIdxLen - 1, FetchBlockSizeWidth)
-  def getAlignBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+abstract class IttageBundle(implicit p: Parameters) extends BpuBundle with HasIttageParameters
 
-}
+abstract class IttageModule(implicit p: Parameters) extends BpuModule with HasIttageParameters

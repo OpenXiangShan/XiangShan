@@ -23,13 +23,13 @@ import utility.XSPerfHistogram
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val prediction: Prediction  = Output(new Prediction)
-    val meta:       MainBtbMeta = Output(new MainBtbMeta)
+    // prediction specific bundle
+    val result: MainBtbResult = Output(new MainBtbResult)
+    val meta:   MainBtbMeta   = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -39,7 +39,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   /* *** submodules *** */
   private val sramBanks =
-    Seq.tabulate(NumAlignBanks, NumWay, NumInternalBanks) { (alignIdx, wayIdx, bankIdx) =>
+    Seq.tabulate(NumAlignBanks, NumInternalBanks, NumWay) { (alignIdx, bankIdx, wayIdx) =>
       Module(
         new SRAMTemplate(
           new MainBtbEntry,
@@ -51,10 +51,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
           hasMbist = hasMbist,
           hasSramCtl = hasSramCtl
         )
-      ).suggestName(s"mbtb_sram_bank_align${alignIdx}_way${wayIdx}_bank${bankIdx}")
+      ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
     }
-  private val writeBuffers = Seq.tabulate(NumAlignBanks, NumWay, NumInternalBanks) { (_, _, _) =>
-    Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, pipe = true))
+  private val writeBuffers = Seq.tabulate(NumAlignBanks, NumInternalBanks) { (_, _) =>
+    Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay, pipe = true))
   }
 
   sramBanks.map(_.map(_.map { m =>
@@ -65,12 +65,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     m.io.w.req.bits.data   := DontCare
   })) // Default closed, addrs are pulled to 0 to reduce power.
 
-  sramBanks.flatten.flatten.zip(writeBuffers.flatten.flatten).foreach {
-    case (bank: SRAMTemplate[MainBtbEntry], buf: WriteBuffer[MainBtbSramWriteReq]) =>
-      bank.io.w.req.valid        := buf.io.read.valid && !bank.io.r.req.valid
-      bank.io.w.req.bits.data(0) := buf.io.read.bits.entry
-      bank.io.w.req.bits.setIdx  := buf.io.read.bits.setIdx
-      buf.io.read.ready          := bank.io.w.req.ready && !bank.io.r.req.valid
+  sramBanks.flatten.zip(writeBuffers.flatten).foreach {
+    case (ways, buffer) =>
+      ways zip buffer.io.read foreach {
+        case (way: SRAMTemplate[MainBtbEntry], buf: DecoupledIO[MainBtbSramWriteReq]) =>
+          way.io.w.req.valid        := buf.valid && !way.io.r.req.valid
+          way.io.w.req.bits.data(0) := buf.bits.entry
+          way.io.w.req.bits.setIdx  := buf.bits.setIdx
+          buf.ready                 := way.io.w.req.ready && !way.io.r.req.valid
+      }
   }
 
   /* predict stage 0
@@ -91,14 +94,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     s"Invalid internal bank index: $s0_internalBankIdx, max: ${NumInternalBanks - 1}"
   )
   sramBanks zip s0_setIdxVec foreach { case (alignmentBank, setIdx) =>
-    alignmentBank.foreach { way =>
-      way zip s0_internalBankMask.asBools foreach { case (internalBank, bankEnable) =>
-        internalBank.io.r.req.valid := bankEnable
-        internalBank.io.r.req.bits.setIdx := Mux(
-          bankEnable,
-          setIdx,
-          0.U
-        ) // pull to 0 when not firing to reduce power.
+    alignmentBank zip s0_internalBankMask.asBools foreach { case (internalBank, bankEnable) =>
+      when(bankEnable) {
+        internalBank.foreach { way =>
+          way.io.r.req.valid       := true.B
+          way.io.r.req.bits.setIdx := setIdx
+        }
+      }.otherwise {
+        // pull to 0 when not firing to reduce power.
+        internalBank.foreach { way =>
+          way.io.r.req.valid       := false.B
+          way.io.r.req.bits.setIdx := 0.U
+        }
       }
     }
   }
@@ -119,10 +126,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
       bankIdx <- 0 until NumAlignBanks
       _       <- 0 until NumWay
     } yield bankIdx.U + s1_alignBankIdx) // FIXME: not working for NumAlignBanks > 2
-  private val s1_rawBtbEntries: Vec[MainBtbEntry] =
-    VecInit(sramBanks.flatMap(a =>
-      VecInit(a.map(w => Mux1H(s1_internalBankMask, VecInit(w.map(_.io.r.resp.data(0))))))
-    ))
+
+  private val s1_rawBtbEntries: Vec[MainBtbEntry] = VecInit(sramBanks.map(a =>
+    VecInit(for {
+      wayIdx <- 0 until NumWay
+    } yield {
+      val way = VecInit(a.map(_(wayIdx).io.r.resp.data(0)))
+      Mux1H(s1_internalBankMask, way)
+    })
+  ).flatten)
 
   require(s1_alignBankIdx.getWidth == log2Ceil(NumAlignBanks))
 
@@ -143,7 +155,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
   private val s2_hitMask: Vec[Bool] =
     VecInit(s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag))
-  private val s2_perBankSignals = Seq.tabulate(PredictWidth) { pos =>
+  private val s2_targets =
+    s2_rawBtbEntries.map(e =>
+      getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
+    ) // FIXME: parameterize target carry
+  private val debug_s2_perBankSignals = Seq.tabulate(PredictWidth) { pos =>
     val posHitMask = s2_hitMask zip s2_positions map { case (hit, p) =>
       hit && p === pos.U
     }
@@ -153,10 +169,19 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     val multihit = PopCount(posHitMask) > 1.U
     (hit, entry, target, multihit)
   }
-  private val (s2_brValids, s2_btbEntries, s2_targets, s2_multihits) =
-    (s2_perBankSignals.map(_._1), s2_perBankSignals.map(_._2), s2_perBankSignals.map(_._3), s2_perBankSignals.map(_._4))
+  private val (debug_s2_brValids, debug_s2_btbEntries, debug_s2_targets, debug_s2_multihits) =
+    (
+      debug_s2_perBankSignals.map(_._1),
+      debug_s2_perBankSignals.map(_._2),
+      debug_s2_perBankSignals.map(_._3),
+      debug_s2_perBankSignals.map(_._4)
+    )
 
-  io.prediction              := DontCare // FIXME: temp
+  io.result.hitMask    := s2_hitMask
+  io.result.positions  := s2_rawBtbEntries.map(_.position)
+  io.result.targets    := s2_targets
+  io.result.attributes := s2_rawBtbEntries.map(_.attribute)
+
   io.meta.valid              := s2_fire
   io.meta.hitMask            := s2_hitMask
   io.meta.positions          := s2_positions
@@ -185,34 +210,40 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeValid = t1_train_valid && !t1_updateHit && t1_taken
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
-  t1_writeEntry.valid          := true.B                 // FIXME: invalidate
-  t1_writeEntry.tag            := getTag(t1_train.startVAddr)
-  t1_writeEntry.position       := t1_train.cfiPosition
-  t1_writeEntry.target         := t1_train.target.asUInt // FIXME: calculate target address
-  t1_writeEntry.attribute      := t1_train.attribute
-  t1_writeEntry.stronglyBiased := false.B                // FIXME
-  t1_writeEntry.replaceCnt     := DontCare               // FIXME:
+  t1_writeEntry.valid           := true.B   // FIXME: invalidate
+  t1_writeEntry.tag             := getTag(t1_train.startVAddr)
+  t1_writeEntry.position        := t1_train.cfiPosition
+  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
+  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_train.target)
+  t1_writeEntry.attribute       := t1_train.attribute
+  t1_writeEntry.stronglyBiased  := false.B  // FIXME
+  t1_writeEntry.replaceCnt      := DontCare // FIXME:
   private val t1_writeWayMask = UIntToOH(t1_LFSR(log2Ceil(NumWay) - 1, 0))
   private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     bankIdx.U === (t1_train.cfiPosition.asBools.last + t1_alignBankIdx) // FIXME: not working for NumAlignBanks > 2
   )
-  dontTouch(t1_writeAlignBankMask)
 
   // Write to SRAM
-  writeBuffers zip t1_setIdxVec zip t1_writeAlignBankMask foreach { case ((alignmentBank, setIdx), alignBankEnable) =>
-    alignmentBank zip t1_writeWayMask.asBools foreach { case (way, wayEnable) =>
-      way zip t1_internalBankMask.asBools foreach { case (internalBank, bankEnable) =>
-        val writeEnable = t1_writeValid && wayEnable && alignBankEnable && bankEnable
-        internalBank.io.write.valid := writeEnable
-        internalBank.io.write.bits.setIdx := Mux(
-          writeEnable,
-          setIdx,
-          0.U
-        ) // pull to 0 when not firing to reduce power.
-        internalBank.io.write.bits.entry := t1_writeEntry
+  writeBuffers zip t1_setIdxVec zip t1_writeAlignBankMask foreach {
+    case ((alignmentBank, setIdx), alignBankEnable) =>
+      alignmentBank zip t1_internalBankMask.asBools foreach { case (buffer, bankEnable) =>
+        buffer.io.write zip t1_writeWayMask.asBools foreach { case (port, wayEnable) =>
+          val writeEnable = t1_writeValid && wayEnable && alignBankEnable && bankEnable
+          port.valid := writeEnable
+          port.bits.setIdx := Mux(
+            writeEnable,
+            setIdx,
+            0.U
+          ) // pull to 0 when not firing to reduce power.
+          port.bits.entry := t1_writeEntry
+        }
       }
-    }
   }
+
+  dontTouch(t1_writeValid)
+  dontTouch(t1_writeAlignBankMask)
+  dontTouch(t1_internalBankMask)
+  dontTouch(t1_writeWayMask)
 
   /* ** statistics ** */
 
@@ -220,6 +251,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("mbtb_update_new_entry", t1_writeValid)
   XSPerfAccumulate("mbtb_update_hit", t1_updateHit)
-  XSPerfHistogram("mbtb_multihit_count", PopCount(s2_multihits), s2_fire, 0, NumWay * NumAlignBanks)
+  XSPerfHistogram("mbtb_multihit_count", PopCount(debug_s2_multihits), s2_fire, 0, NumWay * NumAlignBanks)
 
 }

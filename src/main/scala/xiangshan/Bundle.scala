@@ -30,12 +30,11 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, CGHPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
-import xiangshan.frontend.ftq.FtqRedirectSramEntry
-import xiangshan.frontend.bpu.{HasBPUParameter, BpuCtrl, RasPtr}
+import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.frontend.bpu.phr.PhrPtr
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
@@ -45,9 +44,6 @@ import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
-import xiangshan.frontend.ftq.FtqRedirectSramEntry
-import xiangshan.frontend.AllFoldedHistories
-import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.trace._
 import xiangshan.mem.prefetch.PrefetchCtrl
@@ -90,32 +86,19 @@ object RSFeedbackType {
   }
 }
 
-class PredictorAnswer(implicit p: Parameters) extends XSBundle {
-  val hit    = if (!env.FPGAPlatform) Bool() else UInt(0.W)
-  val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
-  val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
-}
-
-class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
+class CfiUpdateInfo(implicit p: Parameters) extends XSBundle {
   // from backend
   //TODO: This should be PrunedAddr. It remains UInt now because modifications are needed in backend.
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
-  val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(RasCtrSize.W)
+  val ssp = UInt(log2Up(coreParams.frontendParameters.bpuParameters.rasParameters.StackSize).W)
+  val sctr = UInt(coreParams.frontendParameters.bpuParameters.rasParameters.StackCounterWidth.W)
   val TOSW = new RasPtr
   val TOSR = new RasPtr
   val NOS = new RasPtr
   val topAddr = UInt(VAddrBits.W)
-  // val hist = new ShiftingGlobalHistory
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
-  val ghr = UInt(UbtbGHRLength.W)
-  val histPtr = new CGHPtr
   val phrHistPtr = new PhrPtr
-  val specCnt = Vec(numBr, UInt(10.W))
   // need pipeline update
   val br_hit = Bool() // if in ftb entry
   val jr_hit = Bool() // if in ftb entry
@@ -124,25 +107,11 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val target = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
-  val shift = UInt((log2Ceil(numBr)+1).W)
   val addIntoHist = Bool()
   // raise exceptions from backend
   val backendIGPF = Bool() // instruction guest page fault
   val backendIPF = Bool() // instruction page fault
   val backendIAF = Bool() // instruction access fault
-
-  def fromFtqRedirectSram(entry: FtqRedirectSramEntry) = {
-    // this.hist := entry.ghist
-    this.histPtr := entry.histPtr
-    this.ssp := entry.rasSpecInfo.ssp
-    this.sctr := entry.rasSpecInfo.sctr
-    this.TOSW := entry.rasSpecInfo.TOSW
-    this.TOSR := entry.rasSpecInfo.TOSR
-    this.NOS := entry.rasSpecInfo.NOS
-    this.topAddr := entry.rasSpecInfo.topAddr.toUInt
-    this.phrHistPtr := entry.speculativeMeta.phrHistPtr // TODO: this bundle should be re-organized
-    this
-  }
 
   def hasBackendFault = backendIGPF || backendIPF || backendIAF
 }

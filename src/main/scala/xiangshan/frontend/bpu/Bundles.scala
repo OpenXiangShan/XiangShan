@@ -20,12 +20,15 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.Redirect
-import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
+import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
+import xiangshan.frontend.bpu.ras.RasInternalMeta
+import xiangshan.frontend.bpu.ras.RasMeta
+import xiangshan.frontend.bpu.tage.TageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -36,6 +39,9 @@ class BranchAttribute extends Bundle {
   def isConditional: Bool = branchType === BranchAttribute.BranchType.Conditional
   def isDirect:      Bool = branchType === BranchAttribute.BranchType.Direct
   def isIndirect:    Bool = branchType === BranchAttribute.BranchType.Indirect
+
+  def isOtherIndirect: Bool =
+    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.None
 
   // NOTE: maybe we should check branchType === BranchAttribute.BranchType.Direct/Indirect,
   //       but as BranchAttribute.BranchType is declared as private,
@@ -131,9 +137,28 @@ class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters
   def startVAddr: PrunedAddr = PrunedAddrInit(cfiUpdate.pc)
   def target:     PrunedAddr = PrunedAddrInit(cfiUpdate.target)
   def taken:      Bool       = cfiUpdate.taken
+  def attribute: BranchAttribute = {
+    val m = MuxCase(
+      BranchAttribute.Conditional,
+      Seq(
+        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJal)  -> BranchAttribute.DirectCall,
+        (cfiUpdate.pd.isCall && cfiUpdate.pd.isJalr) -> BranchAttribute.IndirectCall,
+        (cfiUpdate.pd.isRet)                         -> BranchAttribute.Return,
+        (cfiUpdate.pd.isJal)                         -> BranchAttribute.OtherDirect,
+        (cfiUpdate.pd.isJalr)                        -> BranchAttribute.OtherIndirect
+      )
+    )
+    m
+  }
   def speculativeMeta: BpuSpeculativeMeta = {
     val m = Wire(new BpuSpeculativeMeta)
-    m.phrHistPtr := cfiUpdate.phrHistPtr
+    m.phrHistPtr   := cfiUpdate.phrHistPtr
+    m.rasMeta.ssp  := cfiUpdate.ssp
+    m.rasMeta.tosw := cfiUpdate.TOSW
+    m.rasMeta.tosr := cfiUpdate.TOSR
+    m.rasMeta.nos  := cfiUpdate.NOS
+    m.rasMeta.sctr := cfiUpdate.sctr
+    m.topRetAddr   := cfiUpdate.topAddr
     m
   }
 
@@ -151,48 +176,26 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        BpuMeta         = new BpuMeta
-
-  // for compatibility, remove these in new Ftq, valid is for asserting
-  def fromBranchPredictionUpdate(u: BranchPredictionUpdate, valid: Bool = false.B): Unit = {
-    val (cfiPosition, cfiPositionCarry) = getAlignedPosition(
-      u.pc,
-      u.ftqOffset.bits
-    )
-    assert(
-      !(valid && u.ftqOffset.valid && cfiPositionCarry),
-      "ftqOffset exceeds 2 * 32B aligned fetch block range, cfiPosition overflow!"
-    )
-
-    this.startVAddr  := u.pc
-    this.target      := u.full_target
-    this.taken       := u.ftqOffset.valid
-    this.cfiPosition := cfiPosition
-    this.attribute := MuxCase(
-      BranchAttribute.Conditional,
-      Seq(
-        (u.is_call && u.is_jal)  -> BranchAttribute.DirectCall,
-        (u.is_call && u.is_jalr) -> BranchAttribute.IndirectCall,
-        u.is_ret                 -> BranchAttribute.Return,
-        u.is_jal                 -> BranchAttribute.OtherDirect,
-        u.is_jalr                -> BranchAttribute.OtherIndirect
-      )
-    )
-    this.meta := u.meta
-  }
+  val mispred:     UInt            = UInt(PredictWidth.W)
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
-  val phrHistPtr: PhrPtr = new PhrPtr
+  val phrHistPtr: PhrPtr          = new PhrPtr
+  val rasMeta:    RasInternalMeta = new RasInternalMeta
+  val topRetAddr: PrunedAddr      = PrunedAddr(VAddrBits)
   // TODO: rasPtr for recovery
   // TODO: and maybe more
 }
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val abtb: AheadBtbMeta = new AheadBtbMeta
-  val mbtb: MainBtbMeta  = new MainBtbMeta
-  // TODO: maybe more
+  val abtb:   AheadBtbMeta = new AheadBtbMeta
+  val mbtb:   MainBtbMeta  = new MainBtbMeta
+  val ras:    RasMeta      = new RasMeta
+  val phr:    PhrPtr       = new PhrPtr
+  val tage:   TageMeta     = new TageMeta
+  val ittage: IttageMeta   = new IttageMeta
 }
 
 /* *** internal const & type *** */

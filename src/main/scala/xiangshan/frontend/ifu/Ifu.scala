@@ -155,32 +155,33 @@ class Ifu(implicit p: Parameters) extends IfuModule
       }
       io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
        */
-      when(fromFtq.topdown_redirect.bits.ControlBTBMissBubble) {
-        for (i <- 0 until numOfStage) {
-          topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
-        }
-        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      }.elsewhen(fromFtq.topdown_redirect.bits.TAGEMissBubble) {
-        for (i <- 0 until numOfStage) {
-          topdownStages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-        }
-        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      }.elsewhen(fromFtq.topdown_redirect.bits.SCMissBubble) {
-        for (i <- 0 until numOfStage) {
-          topdownStages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
-        }
-        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      }.elsewhen(fromFtq.topdown_redirect.bits.ITTAGEMissBubble) {
-        for (i <- 0 until numOfStage) {
-          topdownStages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-        }
-        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      }.elsewhen(fromFtq.topdown_redirect.bits.RASMissBubble) {
-        for (i <- 0 until numOfStage) {
-          topdownStages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
-        }
-        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
-      }
+      // FIXME
+//      when(fromFtq.topdown_redirect.bits.ControlBTBMissBubble) {
+//        for (i <- 0 until numOfStage) {
+//          topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
+//        }
+//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+//      }.elsewhen(fromFtq.topdown_redirect.bits.TAGEMissBubble) {
+//        for (i <- 0 until numOfStage) {
+//          topdownStages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+//        }
+//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+//      }.elsewhen(fromFtq.topdown_redirect.bits.SCMissBubble) {
+//        for (i <- 0 until numOfStage) {
+//          topdownStages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
+//        }
+//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+//      }.elsewhen(fromFtq.topdown_redirect.bits.ITTAGEMissBubble) {
+//        for (i <- 0 until numOfStage) {
+//          topdownStages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+//        }
+//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+//      }.elsewhen(fromFtq.topdown_redirect.bits.RASMissBubble) {
+//        for (i <- 0 until numOfStage) {
+//          topdownStages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
+//        }
+//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+//      }
     }.elsewhen(fromFtq.topdown_redirect.bits.debugIsMemVio) {
       for (i <- 0 until numOfStage) {
         topdownStages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B

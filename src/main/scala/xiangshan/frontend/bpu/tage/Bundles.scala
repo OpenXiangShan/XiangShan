@@ -18,10 +18,25 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
-  val valid:  Bool = Bool()
-  val tag:    UInt = UInt(TagWidth.W)
-  val ctr:    UInt = UInt(CtrWidth.W)
-  val useful: UInt = UInt(UsefulWidth.W)
+  val valid:  Bool            = Bool()
+  val tag:    UInt            = UInt(TagWidth.W)
+  val ctr:    SaturateCounter = new SaturateCounter(CtrWidth)
+  val useful: SaturateCounter = new SaturateCounter(UsefulWidth)
+}
+
+class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasTageParameters {
+  val setIdx:   UInt                 = UInt(BaseTableSetIdxLen.W)
+  val ctrs:     Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))
+  val waymasks: UInt                 = UInt(FetchBlockAlignInstNum.W)
+}
+
+class TageMeta(implicit p: Parameters) extends TageBundle {
+  val valid:               Bool                 = Bool()
+  val baseTableCtrs:       Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
+  val debug_taken:         Bool                 = Bool()
+  val debug_takenPosition: UInt                 = UInt(FetchBlockInstNum.W)
 }

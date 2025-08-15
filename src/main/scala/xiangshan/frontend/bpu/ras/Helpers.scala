@@ -13,24 +13,15 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.phr
+package xiangshan.frontend.bpu.ras
 
+import chisel3._
 import xiangshan.frontend.bpu.HasBpuParameters
 
-case class PhrParameters(
-    Shamt:          Int = 2,         // shift amount for Phr
-    EnableTwoTaken: Boolean = false, // enable two-taken support in Phr
-    // ensure history length is a multiple of this value
-    // default is 4, when history value is displayed in hexadecimal, it has better readability
-    HistoryAlign: Int = 4
-) {}
+trait Helpers extends HasBpuParameters {
+  def ptrInc(ptr: UInt): UInt = ptr + 1.U
+  def ptrDec(ptr: UInt): UInt = ptr - 1.U
 
-trait HasPhrParameters extends HasBpuParameters {
-  def phrParameters: PhrParameters = bpuParameters.phrParameters
-
-  def Shamt:          Int     = phrParameters.Shamt
-  def EnableTwoTaken: Boolean = phrParameters.EnableTwoTaken
-
-  // inherited from HasBpuParameters
-  // def PhrHistoryLength: Int = PhrHistoryLength
+  def specPtrInc(ptr: RasPtr): RasPtr = ptr + 1.U
+  def specPtrDec(ptr: RasPtr): RasPtr = ptr - 1.U
 }

@@ -39,14 +39,12 @@ import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.HasBPUConst
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
-    with BackendRedirectReceiver
-    with HasBPUConst {
+    with BackendRedirectReceiver {
 
   class FtqIO extends FtqBundle {
     val fromBpu: BpuToFtqIO = Flipped(new BpuToFtqIO)
@@ -164,10 +162,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     cfiQueue(fromBpuPtr.value)   := fromBpu.bits.ftqOffset
   }
 
-  metaQueue.io.wen             := io.fromBpu.meta.valid
-  metaQueue.io.waddr           := io.fromBpu.s3FtqPtr.value
-  metaQueue.io.wdata.meta      := io.fromBpu.meta.bits
-  metaQueue.io.wdata.ftb_entry := DontCare
+  metaQueue.io.wen        := io.fromBpu.meta.valid
+  metaQueue.io.waddr      := io.fromBpu.s3FtqPtr.value
+  metaQueue.io.wdata.meta := io.fromBpu.meta.bits
   if (metaQueue.io.wdata.paddingBit.isDefined) {
     metaQueue.io.wdata.paddingBit.get := 0.U
   }
