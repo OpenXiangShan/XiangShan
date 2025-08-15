@@ -111,9 +111,6 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   // testing
   def ForceMetaEccFail: Boolean = icacheParameters.ForceMetaEccFail
   def ForceDataEccFail: Boolean = icacheParameters.ForceDataEccFail
-
-  // constants
-  def partWayNum: Int = 4 // TODO: hard code, need delete
 }
 
 // For users: these are default ICache parameters set by dev, do not change them here,

@@ -104,21 +104,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   /** s0 control */
-  // 0,1,2,3 -> dataArray(data); 4 -> mainPipe
-  // Ftq RegNext Register
-  private val fromFtqReq      = fromFtq.bits.req
-  private val s0_valid        = fromFtq.valid
-  private val s0_readValidAll = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i))
-  private val s0_vAddrAll =
-    (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startVAddr, fromFtqReq(i).nextCachelineVAddr)))
-  private val s0_vSetIdxAll = (0 until partWayNum + 1).map(i => VecInit(s0_vAddrAll(i).map(get_idx)))
-  private val s0_offsetAll  = (0 until partWayNum + 1).map(i => s0_vAddrAll(i)(0)(log2Ceil(blockBytes) - 1, 0))
-  private val s0_doublelineAll =
-    (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) && fromFtqReq(i).crossCacheline)
+  private val fromFtqReq = fromFtq.bits.req
+  private val s0_valid   = fromFtq.valid
 
-  private val s0_vAddr      = s0_vAddrAll.last
-  private val s0_vSetIdx    = s0_vSetIdxAll.last
-  private val s0_doubleline = s0_doublelineAll.last
+  private val s0_vAddr      = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
+  private val s0_vSetIdx    = VecInit(s0_vAddr.map(get_idx))
+  private val s0_blkOffset  = fromFtqReq.startVAddr(blockOffBits - 1, 0)
+  private val s0_doubleline = s0_valid && fromFtqReq.crossCacheline
 
   private val s0_isBackendException = fromFtq.bits.isBackendException
 
@@ -154,15 +146,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * data SRAM request
     ******************************************************************************
     */
-  (0 until partWayNum).foreach { i =>
-    toData(i).valid             := s0_readValidAll(i)
-    toData(i).bits.isDoubleLine := s0_doublelineAll(i)
-    toData(i).bits.vSetIdx      := s0_vSetIdxAll(i)
-    toData(i).bits.blkOffset    := s0_offsetAll(i)
-    toData(i).bits.waymask      := s0_waymasks
-  }
+  toData.valid             := s0_valid
+  toData.bits.isDoubleLine := s0_doubleline
+  toData.bits.vSetIdx      := s0_vSetIdx
+  toData.bits.blkOffset    := s0_blkOffset
+  toData.bits.waymask      := s0_waymasks
 
-  private val s0_canGo = toData.last.ready && fromWayLookup.valid && s1_ready
+  private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
   s0_flush := io.flush
   s0_fire  := s0_valid && s0_canGo && !s0_flush
 

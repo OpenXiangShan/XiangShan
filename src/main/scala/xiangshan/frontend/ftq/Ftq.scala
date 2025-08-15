@@ -221,18 +221,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ExceptionType.None
   )
 
-  // TODO: we should not need both fetchReq.valid and fetchReq.bits.readValid
   // TODO: consider BPU bypass
-  io.toICache.fetchReq.valid := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toICache.fetchReq.bits.readValid.foreach(valid =>
-    valid := io.toICache.fetchReq.valid
-  )
-  io.toICache.fetchReq.bits.req.foreach { req =>
-    req.startVAddr         := entryQueue(ifuPtr(0).value)
-    req.nextCachelineVAddr := req.startVAddr + (CacheLineSize / 8).U
-    req.ftqIdx             := ifuPtr(0)
-  }
-  io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
+  io.toICache.fetchReq.valid                       := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toICache.fetchReq.bits.req.startVAddr         := entryQueue(ifuPtr(0).value)
+  io.toICache.fetchReq.bits.req.nextCachelineVAddr := entryQueue(ifuPtr(0).value) + (CacheLineSize / 8).U
+  io.toICache.fetchReq.bits.req.ftqIdx             := ifuPtr(0)
+  io.toICache.fetchReq.bits.isBackendException     := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid
   io.toIfu.req.bits.fetch(0).valid      := bpuPtr(0) > ifuPtr(0) && !redirect.valid
