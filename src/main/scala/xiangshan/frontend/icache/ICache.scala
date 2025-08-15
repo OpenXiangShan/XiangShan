@@ -23,14 +23,13 @@
 
 package xiangshan.frontend.icache
 
-import chisel3.util._
+import coupledL2.MemBackTypeMMField
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLClientNode
 import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import huancun.AliasField
-import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility.ReqSourceField
 
@@ -43,12 +42,19 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
       sourceId = IdRange(0, NumFetchMshr + NumPrefetchMshr + 1)
     )),
     requestFields = Seq(
-      PrefetchField(), // FIXME: do we really need this? we didn't set it properly in Mshr
-      ReqSourceField()
-    ) ++ Option.when(SetBytes > PageSize)(
-      AliasField(log2Ceil(SetBytes / PageSize)) // FIXME: do we really need this? we didn't set it properly in Mshr
-    ),
-    echoFields = Nil
+      // distinguish between i/d cache
+      ReqSourceField(),
+      // tell L2 back type is main memory
+      MemBackTypeMMField()
+    ) ++
+      // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
+      AliasTagBits.map(AliasField).toSeq
+  )
+
+  // currently, L2 cache supports only 2 bits alias tag
+  require(
+    AliasTagBits.isEmpty || AliasTagBits.get <= 2,
+    s"L2 cache supports only 2bits alias tag, ICache with ${nSets}sets * ${blockBytes}B need ${AliasTagBits.get}bits"
   )
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))

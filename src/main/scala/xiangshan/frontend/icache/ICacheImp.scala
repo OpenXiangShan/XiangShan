@@ -75,6 +75,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  DataEccUnit: $DataEccUnit bits")
   println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
   println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
+  println(s"  AliasTagBits: $AliasTagBits")
   println(s"  CtrlUnit:")
   println(s"    Enabled: $EnableCtrlUnit")
   println(s"    Address: ${icacheParameters.ctrlUnitParameters.Address}")
