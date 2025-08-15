@@ -35,7 +35,7 @@ import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
-class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
