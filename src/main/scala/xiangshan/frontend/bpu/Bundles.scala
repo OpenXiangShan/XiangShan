@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.Redirect
-import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
@@ -178,35 +177,6 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        BpuMeta         = new BpuMeta
   val mispred:     UInt            = UInt(PredictWidth.W)
-
-  // for compatibility, remove these in new Ftq, valid is for asserting
-  def fromBranchPredictionUpdate(u: BranchPredictionUpdate, valid: Bool = false.B): Unit = {
-    val (cfiPosition, cfiPositionCarry) = getAlignedPosition(
-      u.pc,
-      u.ftqOffset.bits
-    )
-    assert(
-      !(valid && u.ftqOffset.valid && cfiPositionCarry),
-      "ftqOffset exceeds 2 * 32B aligned fetch block range, cfiPosition overflow!"
-    )
-
-    this.startVAddr  := u.pc
-    this.target      := u.full_target
-    this.taken       := u.ftqOffset.valid
-    this.cfiPosition := cfiPosition
-    this.attribute := MuxCase(
-      BranchAttribute.Conditional,
-      Seq(
-        (u.is_call && u.is_jal)  -> BranchAttribute.DirectCall,
-        (u.is_call && u.is_jalr) -> BranchAttribute.IndirectCall,
-        u.is_ret                 -> BranchAttribute.Return,
-        u.is_jal                 -> BranchAttribute.OtherDirect,
-        u.is_jalr                -> BranchAttribute.OtherIndirect
-      )
-    )
-    this.meta    := u.meta
-    this.mispred := mispred
-  }
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)

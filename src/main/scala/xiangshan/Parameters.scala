@@ -81,45 +81,12 @@ case class XSCoreParameters
   FetchPorts: Int = 2,
   AsidLength: Int = 16,
   VmidLength: Int = 14,
-  EnableBPU: Boolean = true,
-  EnableBPD: Boolean = true,
-  EnableLB: Boolean = false,
-  EnableLoop: Boolean = true,
-  EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
-  EnableFauFTB: Boolean = true,
   EnableSv48: Boolean = true,
-  UbtbGHRLength: Int = 4,
-  // HistoryLength: Int = 512,
-  EnableGHistDiff: Boolean = true,
   EnableCommitGHistDiff: Boolean = true,
-  // old bpu deprecate start, TODO: remove when v3 Bpu is ready
-  UbtbSize: Int = 256,
-  FtbSize: Int = 2048,
-  FtbWays: Int = 4,
-  FtbTagLength: Int = 20,
   CacheLineSize: Int = 512,
-  TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
-  //       Sets  Hist   Tag
-    Seq(( 4096,    8,    8),
-        ( 4096,   13,    8),
-        ( 4096,   32,    8),
-        ( 4096,  119,    8)),
-  ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
-  //      Sets  Hist   Tag
-    Seq(( 256,    4,    9),
-        ( 256,    8,    9),
-        ( 512,   13,    9),
-        ( 512,   16,    9),
-        ( 512,   32,    9)),
-  SCNRows: Int = 512,
-  SCNTables: Int = 4,
-  SCCtrBits: Int = 6,
-  SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
-  numBr: Int = 2,
-  // old bpu deprecate end
   IBufSize: Int = 48,
   IBufNBank: Int = 8, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 8,
@@ -354,10 +321,6 @@ case class XSCoreParameters
    * the maximum number of elements in vector register
    */
   val maxElemPerVreg: Int = VLEN / minVecElen
-
-  val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
-  val HistoryLength = allHistLens.max + numBr * 64 + 9 // FIXME: original code below
-//  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
   val RegCacheSize = IntRegCacheSize + MemRegCacheSize
   val RegCacheIdxWidth = log2Up(RegCacheSize)
@@ -637,62 +600,12 @@ trait HasXSParameter {
   def FetchWidth = coreParams.FetchWidth
   def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   def FetchPorts = coreParams.FetchPorts
-  def EnableBPU = coreParams.EnableBPU
-  def EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
-  def EnableLB = coreParams.EnableLB
-  def EnableLoop = coreParams.EnableLoop
-  def EnableSC = coreParams.EnableSC
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
-  def HistoryLength = coreParams.HistoryLength
-  def EnableGHistDiff = coreParams.EnableGHistDiff
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
-  def UbtbGHRLength = coreParams.UbtbGHRLength
-  def UbtbSize = coreParams.UbtbSize
-  def EnableFauFTB = coreParams.EnableFauFTB
-  def FtbSize = coreParams.FtbSize
-  def FtbWays = coreParams.FtbWays
-  def FtbTagLength = coreParams.FtbTagLength
-  def numBr = coreParams.numBr
-  def TageTableInfos = coreParams.TageTableInfos
-  def TageBanks = coreParams.numBr
-  def SCNRows = coreParams.SCNRows
-  def SCCtrBits = coreParams.SCCtrBits
-  def SCHistLens = coreParams.SCHistLens
-  def SCNTables = coreParams.SCNTables
-
-  def SCTableInfos = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {
-    case ((n, cb), h) => (n, cb, h)
-  }
-  def ITTageTableInfos = coreParams.ITTageTableInfos
-  type OldFoldedHistoryInfo = Tuple2[Int, Int]
-  def foldedGHistInfos =
-    (TageTableInfos.map{ case (nRows, h, t) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows/numBr), h)), (h, min(h, t)), (h, min(h, t-1)))
-      else
-        Set[OldFoldedHistoryInfo]()
-    }.reduce(_++_).toSet ++
-    SCTableInfos.map{ case (nRows, _, h) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows/TageBanks), h)))
-      else
-        Set[OldFoldedHistoryInfo]()
-    }.reduce(_++_).toSet ++
-    ITTageTableInfos.map{ case (nRows, h, t) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
-      else
-        Set[OldFoldedHistoryInfo]()
-    }.reduce(_++_) ++
-      Set[OldFoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
-    ).toList
-
-
 
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
-  def ExtHistoryLength = HistoryLength + 64
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
   def IBufSize = coreParams.IBufSize
   def IBufEnqWidth = coreParams.IBufWriteBank + PredictWidth
