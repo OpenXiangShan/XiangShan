@@ -108,7 +108,11 @@ class CtrlBlockImp(
 
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
-  private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + (RegEnable(s0_robFlushRedirect.bits.ftqOffset, s0_robFlushRedirect.valid) << instOffsetBits)
+  val robFlushPCOffset = Reg(UInt(VAddrBits.W))
+  when(s0_robFlushRedirect.valid) {
+    robFlushPCOffset := s0_robFlushRedirect.bits.getPcOffset()
+  }
+  private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + robFlushPCOffset
   private val s3_redirectGen = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
@@ -225,7 +229,11 @@ class CtrlBlockImp(
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
   pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("memPred").head) := memViolation.bits.stFtqIdx.value
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).toUInt + (RegEnable(memViolation.bits.stFtqOffset, memViolation.valid) << instOffsetBits)
+  val memPredPCOffset = Reg(UInt(VAddrBits.W))
+  when(memViolation.valid) {
+    memPredPCOffset := memViolation.bits.getPcOffset()
+  }
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).toUInt + memPredPCOffset
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
@@ -272,6 +280,7 @@ class CtrlBlockImp(
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
+      // memStPcRead.data is not right bucasue memStPcRead don't have isRvc
       io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
     }
   } else {
@@ -323,13 +332,21 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
   redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
-  val loadRedirectOffset = Mux(memViolation.bits.flushItself(), 0.U, Mux(memViolation.bits.isRVC, 2.U, 4.U))
-  val loadRedirectPcFtqOffset = RegEnable((memViolation.bits.ftqOffset << instOffsetBits).asUInt +& loadRedirectOffset, memViolation.valid)
-  val loadRedirectPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt + loadRedirectPcFtqOffset
-
-  redirectGen.io.loadReplay.bits.pc := loadRedirectPcRead
-  val load_target = loadRedirectPcRead
-  redirectGen.io.loadReplay.bits.target := load_target
+  val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
+  when(memViolation.valid) {
+    val thisPcOffset = memViolation.bits.getPcOffset()
+    val nextPcOffset = memViolation.bits.getNextPcOffset()
+    loadRedirectTargetOffset := Mux(memViolation.bits.flushItself(), thisPcOffset, nextPcOffset)
+  }
+  val loadRedirectStartPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt
+  val load_target = loadRedirectStartPcRead + loadRedirectTargetOffset
+  redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
+  // TODO loadRedirectPcOffset is useful?
+  val loadRedirectPcOffset = Reg(UInt(VAddrBits.W))
+  when(memViolation.valid) {
+    loadRedirectPcOffset := memViolation.bits.getPcOffset()
+  }
+  redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectStartPcRead + loadRedirectPcOffset
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 

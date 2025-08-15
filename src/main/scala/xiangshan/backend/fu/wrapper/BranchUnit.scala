@@ -16,13 +16,13 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
     val isRVC = Input(Bool())
     val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(XLEN.W))
-    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 1).W))
+    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 2).W))
   })
   val immMinWidth = FuConfig.BrhCfg.immType.map(x => SelImm.getImmUnion(x).len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
     io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),
-    io.pcExtend + (io.nextPcOffset << instOffsetBits).asUInt
+    io.pcExtend + io.nextPcOffset
   ), XLEN)
 }
 
