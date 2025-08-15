@@ -647,7 +647,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   when (flush || s2_needRevoke) {
     bufferState := s_idle
     req_valid := Mux(
-      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect && !s2_needRevoke,
+      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect,
       req_valid, // when s2_needRevoke is true, previous request is valid, so req_valid = true
       false.B
     )
