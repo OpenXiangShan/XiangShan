@@ -186,8 +186,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val maxSegIdx         = instMicroOp.vl - 1.U
   val maxNfields        = instMicroOp.uop.vpu.nf
-  val latchVaddr        = RegInit(0.U(VAddrBits.W))
-  val latchVaddrDup     = RegInit(0.U(VAddrBits.W))
+  val latchVaddr        = RegInit(0.U(XLEN.W))
+  val latchVaddrDup     = RegInit(0.U(XLEN.W))
 
   XSError((segmentIdx > maxSegIdx) && instMicroOpValid, s"segmentIdx > vl, something error!\n")
   XSError((fieldIdx > maxNfields) &&  instMicroOpValid, s"fieldIdx > nfields, something error!\n")
@@ -440,8 +440,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val tlbReqVaddr                     = Mux(isMisalignReg, misalignVaddr, vaddr)
   //latch vaddr
   when(state === s_tlb_req && !isMisalignReg){
-    latchVaddr := vaddr(VAddrBits - 1, 0)
-    latchVaddrDup := vaddr(VAddrBits - 1, 0)
+    latchVaddr := vaddr
+    latchVaddrDup := vaddr
   }
   /**
    * tlb req and tlb resq
