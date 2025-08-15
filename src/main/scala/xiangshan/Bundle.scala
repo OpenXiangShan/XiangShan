@@ -268,9 +268,24 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset: UInt = UInt(log2Up(PredictWidth).W)
 
-  val debug_runahead_checkpoint_id: UInt = UInt(64.W)
-  val debugIsCtrl: Bool = Bool()
-  val debugIsMemVio: Bool = Bool()
+  val debug_runahead_checkpoint_id = UInt(64.W)
+  val debugIsCtrl = Bool()
+  val debugIsMemVio = Bool()
+
+  def flushItself() = RedirectLevel.flushItself(level)
+
+  def getPcOffset() = {
+    val ftqOffset = (this.ftqOffset << instOffsetBits).asUInt
+    val rvcOffset = Mux(this.isRVC, 0.U, 2.U)
+    val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
+    thisPcOffset
+  }
+
+  def getNextPcOffset() = {
+    val ftqOffset = (this.ftqOffset << instOffsetBits).asUInt
+    val nextPcOffset = ftqOffset +& 2.U
+    nextPcOffset
+  }
 }
 
 object Redirect extends HasCircularQueuePtrHelper {
