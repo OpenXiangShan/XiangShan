@@ -1510,13 +1510,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       || io.misalign_ldout.bits.rep_info.rar_nack || io.misalign_ldout.bits.rep_info.raw_nack)
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_frm_mis_flush) && !s3_exception
-  io.rollback.bits             := DontCare
-  io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
-  io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
-  io.rollback.bits.ftqIdx      := s3_out.bits.uop.ftqPtr
-  io.rollback.bits.ftqOffset   := s3_out.bits.uop.ftqOffset
-  io.rollback.bits.level       := Mux(s3_rep_frm_fetch || s3_frm_mis_flush, RedirectLevel.flush, RedirectLevel.flushAfter)
-  io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.pc
+  io.rollback.bits           := DontCare
+  io.rollback.bits.isRVC     := s3_out.bits.uop.preDecodeInfo.isRVC
+  io.rollback.bits.robIdx    := s3_out.bits.uop.robIdx
+  io.rollback.bits.ftqIdx    := s3_out.bits.uop.ftqPtr
+  io.rollback.bits.ftqOffset := s3_out.bits.uop.ftqOffset
+  io.rollback.bits.level     := Mux(s3_rep_frm_fetch || s3_frm_mis_flush, RedirectLevel.flush, RedirectLevel.flushAfter)
+  io.rollback.bits.target    := s3_out.bits.uop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

@@ -46,7 +46,6 @@ import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
-import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.bpu.DummyBpu
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._

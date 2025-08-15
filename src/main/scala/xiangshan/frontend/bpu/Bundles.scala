@@ -126,21 +126,11 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
 }
 
 // Backend & Ftq -> Bpu
-class BpuRedirect(implicit p: Parameters) extends Redirect with HasBpuParameters {
-  // alias for compatibility, re-write this bundle when refactoring `class Redirect`
-  def startVAddr: PrunedAddr = PrunedAddrInit(cfiUpdate.pc)
-  def target:     PrunedAddr = PrunedAddrInit(cfiUpdate.target)
-  def taken:      Bool       = cfiUpdate.taken
-  def speculativeMeta: BpuSpeculativeMeta = {
-    val m = Wire(new BpuSpeculativeMeta)
-    m.phrHistPtr := cfiUpdate.phrHistPtr
-    m
-  }
-
-//  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
-//  val target:          PrunedAddr         = PrunedAddr(VAddrBits)
-//  val taken:           Bool               = Bool()
-//  val speculativeMeta: BpuSpeculativeMeta = new BpuSpeculativeMeta
+class BpuRedirect(implicit p: Parameters) extends BpuBundle {
+  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
+  val target:          PrunedAddr         = PrunedAddr(VAddrBits)
+  val taken:           Bool               = Bool()
+  val speculationMeta: BpuSpeculationMeta = new BpuSpeculationMeta
 }
 
 // Backend & Ftq -> Bpu
@@ -182,7 +172,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
-class BpuSpeculativeMeta(implicit p: Parameters) extends BpuBundle {
+class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
   val phrHistPtr: PhrPtr = new PhrPtr
   // TODO: rasPtr for recovery
   // TODO: and maybe more

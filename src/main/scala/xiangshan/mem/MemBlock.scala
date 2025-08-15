@@ -1241,9 +1241,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
   // memory replay would not cause IAF/IPF/IGPF
-  oldestRedirect.bits.cfiUpdate.backendIAF := false.B
-  oldestRedirect.bits.cfiUpdate.backendIPF := false.B
-  oldestRedirect.bits.cfiUpdate.backendIGPF := false.B
+  oldestRedirect.bits.backendIAF := false.B
+  oldestRedirect.bits.backendIPF := false.B
+  oldestRedirect.bits.backendIGPF := false.B
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept

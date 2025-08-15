@@ -25,14 +25,8 @@ import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BpuMeta
-import xiangshan.frontend.bpu.BpuSpeculativeMeta
+import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.FTBEntry
-
-class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle { // TODO: rename this
-  val histPtr         = new CGHPtr             // TODO: delete this
-  val rasSpecInfo     = new RasSpeculativeInfo // TODO: delete this
-  val speculativeMeta = new BpuSpeculativeMeta
-}
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
   val meta       = new BpuMeta

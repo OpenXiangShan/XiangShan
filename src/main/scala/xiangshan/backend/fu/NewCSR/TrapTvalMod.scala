@@ -24,8 +24,8 @@ class TrapTvalMod(implicit p: Parameters) extends XSModule with HasCircularQueue
   private val tval = Reg(UInt(XLEN.W))
   private val robIdx = Reg(new RobPtr)
 
-  private val updateFromFlush = io.fromCtrlBlock.flush.valid && io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
-  private val clearFromFlush = io.fromCtrlBlock.flush.valid && !io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
+  private val updateFromFlush = io.fromCtrlBlock.flush.valid && io.fromCtrlBlock.flush.bits.hasBackendFault
+  private val clearFromFlush = io.fromCtrlBlock.flush.valid && !io.fromCtrlBlock.flush.bits.hasBackendFault
 
   when(io.targetPc.valid && io.targetPc.bits.raiseFault) {
     valid := true.B

@@ -20,9 +20,11 @@ import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
-import ftq.FtqRedirectSramEntry
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.CircularQueuePtr
+import utility.GTimer
+import utility.ParallelPriorityMux
+import utility.XSDebug
 import utils.EnumUInt
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
@@ -31,7 +33,7 @@ import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
-import xiangshan.frontend.bpu.BpuSpeculativeMeta
+import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
@@ -49,7 +51,7 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   val prediction:      DecoupledIO[BpuPrediction]      = DecoupledIO(new BpuPrediction)
-  val speculativeMeta: DecoupledIO[BpuSpeculativeMeta] = DecoupledIO(new BpuSpeculativeMeta)
+  val speculationMeta: DecoupledIO[BpuSpeculationMeta] = DecoupledIO(new BpuSpeculationMeta)
   val meta:            DecoupledIO[BpuMeta]            = DecoupledIO(new BpuMeta)
   val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
   // TODO: topdown, etc.
@@ -755,7 +757,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s2 = new BranchPredictionBundle(isNotS3 = true)
   val s3 = new BranchPredictionBundle(isNotS3 = false)
 
-  val s3_specInfo = new FtqRedirectSramEntry
+  val s3_specInfo = new BpuSpeculationMeta
   val s3_ftbEntry = new FTBEntry
   val s3_meta     = new OldPredictorMeta
 
@@ -790,7 +792,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = PrunedAddr(VAddrBits)
-  val spec_info = new FtqRedirectSramEntry
+  val spec_info = new BpuSpeculationMeta
   val ftb_entry = new FTBEntry
 
   val ftqOffset         = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
@@ -830,11 +832,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   val BTBMissBubble         = Bool()
   def ControlRedirectBubble = debugIsCtrl
   // if mispred br not in ftb, count as BTB miss
-  def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
-  def TAGEMissBubble       = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
-  def SCMissBubble         = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
-  def ITTAGEMissBubble     = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
-  def RASMissBubble        = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
+
   def MemVioRedirectBubble = debugIsMemVio
   def OtherRedirectBubble  = !debugIsCtrl && !debugIsMemVio
 
@@ -844,25 +842,4 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
         data := source.elements(name)
       }
     }
-
-  def display(cond: Bool): Unit = {
-    XSDebug(cond, p"-----------BranchPredictionRedirect----------- \n")
-    XSDebug(cond, p"-----------cfiUpdate----------- \n")
-    XSDebug(cond, p"[pc] ${Hexadecimal(cfiUpdate.pc)}\n")
-    // XSDebug(cond, p"[hist] ${Binary(cfiUpdate.hist.predHist)}\n")
-    XSDebug(cond, p"[br_hit] ${cfiUpdate.br_hit} [isMisPred] ${cfiUpdate.isMisPred}\n")
-    XSDebug(
-      cond,
-      p"[pred_taken] ${cfiUpdate.predTaken} [taken] ${cfiUpdate.taken} [isMisPred] ${cfiUpdate.isMisPred}\n"
-    )
-    XSDebug(cond, p"[target] ${Hexadecimal(cfiUpdate.target)} \n")
-    XSDebug(cond, p"[shift] ${cfiUpdate.shift}\n")
-    XSDebug(cond, p"------------------------------- \n")
-    XSDebug(cond, p"[robPtr] f=${robIdx.flag} v=${robIdx.value}\n")
-    XSDebug(cond, p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} \n")
-    XSDebug(cond, p"[ftqOffset] ${ftqOffset} \n")
-    XSDebug(cond, p"[stFtqIdx] f=${stFtqIdx.flag} v=${stFtqIdx.value}\n")
-    XSDebug(cond, p"[stFtqOffset] ${stFtqOffset}\n")
-    XSDebug(cond, p"---------------------------------------------- \n")
-  }
 }
