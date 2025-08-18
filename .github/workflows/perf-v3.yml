@@ -11,8 +11,7 @@ on:
         required: false
         default: ""
       benchmark_type:
-        required: true
-        default: spec06-1.0c
+        required: false
         type: string
         description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
   #only for test push
@@ -43,4 +42,4 @@ jobs:
     with:
       test_branch: kunminghu-v3
       test_commit: ${{ github.event.inputs.test_commit }}
-      benchmark_type: ${{ github.event.inputs.benchmark_type }}
+      benchmark_type: ${{ github.event.inputs.benchmark_type || 'spec06-1.0c' }}
