@@ -13,15 +13,37 @@ on:
         required: false
         type: string
         default: ''
+      benchmark_type:
+        required: true
+        type: string
+        description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
 
 jobs:
   run:
     runs-on: perf
-    continue-on-error: true
-    #At most 3 days to finish
-    timeout-minutes: 4320
+    continue-on-error: false
+    #At most 2 days to finish
+    timeout-minutes: 2880
     name: Checkpoints
     steps:
+      - name: Set benchmark configuration
+        run: |
+          case "${{ inputs.benchmark_type }}" in
+            "spec06-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              ;;
+            "spec06-0.8c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              ;;
+            "spec06-1.0c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c"
+              exit 1
+              ;;
+          esac
+
       - name: Set test branch or commit
         id: set_test
         run: |
@@ -51,7 +73,6 @@ jobs:
           echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
           echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
-          echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
 
       - name: Clean Up
         run: |
