@@ -183,7 +183,7 @@ trait HasSoCParameter {
   val EnablePowerDown = soc.EnablePowerDown
 
   def HasMEMencryption = cvm.HasMEMencryption
-  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)),
+  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
     "HasMEMencryption most set with KeyIDBits > 0")
 }
 
