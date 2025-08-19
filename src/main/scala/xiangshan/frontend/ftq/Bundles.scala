@@ -19,25 +19,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
-import xiangshan.frontend.BranchPredictionRedirect
-import xiangshan.frontend.BranchPredictionUpdate
-import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BpuMeta
-import xiangshan.frontend.bpu.BpuSpeculativeMeta
-import xiangshan.frontend.bpu.FTBEntry
-
-class FtqRedirectSramEntry(implicit p: Parameters) extends FtqBundle { // TODO: rename this
-  val histPtr         = new CGHPtr             // TODO: delete this
-  val rasSpecInfo     = new RasSpeculativeInfo // TODO: delete this
-  val speculativeMeta = new BpuSpeculativeMeta
-}
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
   val meta       = new BpuMeta
-  val ftb_entry  = new FTBEntry // TODO: delete this
-  val paddingBit = if ((meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
+  val paddingBit = if (meta.getWidth % 2 != 0) Some(UInt(1.W)) else None
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
@@ -51,14 +38,6 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
     this.offset := offset
     this.data
   }
-}
-
-// TODO: remove this
-class OldFtqToBpuIO(implicit p: Parameters) extends FtqBundle {
-  val redirect:        Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
-  val update:          Valid[BranchPredictionUpdate]   = Valid(new BranchPredictionUpdate)
-  val bpuPtr:          FtqPtr                          = Output(new FtqPtr)
-  val redirectFromIFU: Bool                            = Output(Bool())
 }
 
 class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQueuePtrHelper {

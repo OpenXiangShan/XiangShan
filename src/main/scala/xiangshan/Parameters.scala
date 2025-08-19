@@ -67,7 +67,6 @@ case class XSCoreParameters
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
   HasDiv: Boolean = true,
-  HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   PAddrBitsMax: Int = 56,   // The bits of physical address from Sv39/Sv48/Sv57 virtual address translation.
@@ -79,58 +78,21 @@ case class XSCoreParameters
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
+  FetchPorts: Int = 2,
   AsidLength: Int = 16,
   VmidLength: Int = 14,
-  EnableBPU: Boolean = true,
-  EnableBPD: Boolean = true,
-  EnableRAS: Boolean = true,
-  EnableLB: Boolean = false,
-  EnableLoop: Boolean = true,
-  EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
-  EnableFauFTB: Boolean = true,
   EnableSv48: Boolean = true,
-  UbtbGHRLength: Int = 4,
-  // HistoryLength: Int = 512,
-  EnableGHistDiff: Boolean = true,
   EnableCommitGHistDiff: Boolean = true,
-  // old bpu deprecate start, TODO: remove when v3 Bpu is ready
-  UbtbSize: Int = 256,
-  FtbSize: Int = 2048,
-  FtbWays: Int = 4,
-  FtbTagLength: Int = 20,
-  RasSize: Int = 16,
-  RasSpecSize: Int = 32,
-  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
-  TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
-  //       Sets  Hist   Tag
-    Seq(( 4096,    8,    8),
-        ( 4096,   13,    8),
-        ( 4096,   32,    8),
-        ( 4096,  119,    8)),
-  ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
-  //      Sets  Hist   Tag
-    Seq(( 256,    4,    9),
-        ( 256,    8,    9),
-        ( 512,   13,    9),
-        ( 512,   16,    9),
-        ( 512,   32,    9)),
-  SCNRows: Int = 512,
-  SCNTables: Int = 4,
-  SCCtrBits: Int = 6,
-  SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
-  numBr: Int = 2,
-  // old bpu deprecate end
-  ICacheForceMetaECCError: Boolean = false,
-  ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
-  IBufEnqWidth: Int = 16,
   IBufNBank: Int = 8, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 8,
   RenameWidth: Int = 8,
+  IBufWriteBank: Int = 4, 
+  IBufReadBank: Int = 8,
   CommitWidth: Int = 8,
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
@@ -306,12 +268,6 @@ case class XSCoreParameters
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
-  icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = Some("parity"),
-    dataECC = Some("parity"),
-    replacer = Some("setplru"),
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
-  ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -365,10 +321,6 @@ case class XSCoreParameters
    * the maximum number of elements in vector register
    */
   val maxElemPerVreg: Int = VLEN / minVecElen
-
-  val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
-  val HistoryLength = allHistLens.max + numBr * 64 + 9 // FIXME: original code below
-//  val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
   val RegCacheSize = IntRegCacheSize + MemRegCacheSize
   val RegCacheIdxWidth = log2Up(RegCacheSize)
@@ -600,7 +552,6 @@ trait HasXSParameter {
   def HasHExtension = coreParams.HasHExtension
   def EnableSv48 = coreParams.EnableSv48
   def HasDiv = coreParams.HasDiv
-  def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   def PAddrBitsMax = coreParams.PAddrBitsMax
@@ -648,72 +599,19 @@ trait HasXSParameter {
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   def FetchWidth = coreParams.FetchWidth
   def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
-  def EnableBPU = coreParams.EnableBPU
-  def EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
-  def EnableRAS = coreParams.EnableRAS
-  def EnableLB = coreParams.EnableLB
-  def EnableLoop = coreParams.EnableLoop
-  def EnableSC = coreParams.EnableSC
+  def FetchPorts = coreParams.FetchPorts
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
-  def HistoryLength = coreParams.HistoryLength
-  def EnableGHistDiff = coreParams.EnableGHistDiff
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
-  def UbtbGHRLength = coreParams.UbtbGHRLength
-  def UbtbSize = coreParams.UbtbSize
-  def EnableFauFTB = coreParams.EnableFauFTB
-  def FtbSize = coreParams.FtbSize
-  def FtbWays = coreParams.FtbWays
-  def FtbTagLength = coreParams.FtbTagLength
-  def RasSize = coreParams.RasSize
-  def RasSpecSize = coreParams.RasSpecSize
-  def RasCtrSize = coreParams.RasCtrSize
-  def numBr = coreParams.numBr
-  def TageTableInfos = coreParams.TageTableInfos
-  def TageBanks = coreParams.numBr
-  def SCNRows = coreParams.SCNRows
-  def SCCtrBits = coreParams.SCCtrBits
-  def SCHistLens = coreParams.SCHistLens
-  def SCNTables = coreParams.SCNTables
-
-  def SCTableInfos = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {
-    case ((n, cb), h) => (n, cb, h)
-  }
-  def ITTageTableInfos = coreParams.ITTageTableInfos
-  type FoldedHistoryInfo = Tuple2[Int, Int]
-  def foldedGHistInfos =
-    (TageTableInfos.map{ case (nRows, h, t) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows/numBr), h)), (h, min(h, t)), (h, min(h, t-1)))
-      else
-        Set[FoldedHistoryInfo]()
-    }.reduce(_++_).toSet ++
-    SCTableInfos.map{ case (nRows, _, h) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows/TageBanks), h)))
-      else
-        Set[FoldedHistoryInfo]()
-    }.reduce(_++_).toSet ++
-    ITTageTableInfos.map{ case (nRows, h, t) =>
-      if (h > 0)
-        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
-      else
-        Set[FoldedHistoryInfo]()
-    }.reduce(_++_) ++
-      Set[FoldedHistoryInfo]((UbtbGHRLength, log2Ceil(UbtbSize)))
-    ).toList
-
-
 
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
-  def ExtHistoryLength = HistoryLength + 64
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
-  def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
-  def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
-  def IBufEnqWidth = coreParams.IBufEnqWidth
-  def IBufNBank = coreParams.IBufNBank
+  def IBufEnqWidth = coreParams.IBufWriteBank + PredictWidth
+  def IBufWriteBank = coreParams.IBufWriteBank
+  def IBufReadBank = coreParams.IBufReadBank
+  def IBufNRank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams
   def DecodeWidth = coreParams.DecodeWidth
   def RenameWidth = coreParams.RenameWidth
@@ -849,7 +747,9 @@ trait HasXSParameter {
   def instBytes = if (HasCExtension) 2 else 4
   def instOffsetBits = log2Ceil(instBytes)
 
-  def icacheParameters = coreParams.icacheParameters
+  def icacheCtrlEnabled = coreParams.frontendParameters.icacheParameters.EnableCtrlUnit
+  def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
+
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles

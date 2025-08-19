@@ -26,14 +26,14 @@ import xiangshan.frontend.PrunedAddr
 class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper with HasIfuParameters {
   class PreDecodeIO(implicit p: Parameters) extends IfuBundle {
     class PreDecodeReq(implicit p: Parameters) extends IfuBundle {
-      val data:       Vec[UInt] = Vec(PredictWidth, UInt(32.W))
-      val isRvc:      Vec[Bool] = Vec(PredictWidth, Bool())
-      val instrValid: Vec[Bool] = Vec(PredictWidth, Bool())
+      val data:       Vec[UInt] = Vec(IBufferInPortNum, UInt(32.W))
+      val isRvc:      Vec[Bool] = Vec(IBufferInPortNum, Bool())
+      val instrValid: Vec[Bool] = Vec(IBufferInPortNum, Bool())
     }
     class PreDecodeResp(implicit p: Parameters) extends IfuBundle {
-      val pd:         Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
-      val instr:      Vec[UInt]          = Vec(PredictWidth, UInt(32.W))
-      val jumpOffset: Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
+      val pd:         Vec[PreDecodeInfo] = Vec(IBufferInPortNum, new PreDecodeInfo)
+      val instr:      Vec[UInt]          = Vec(IBufferInPortNum, UInt(32.W))
+      val jumpOffset: Vec[PrunedAddr]    = Vec(IBufferInPortNum, PrunedAddr(VAddrBits))
     }
 
     val req:  Valid[PreDecodeReq] = Flipped(ValidIO(new PreDecodeReq))
@@ -42,9 +42,9 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper w
   val io: PreDecodeIO = IO(new PreDecodeIO)
 
   private val data     = io.req.bits.data
-  private val rawInsts = VecInit((0 until PredictWidth).map(i => data(i)))
+  private val rawInsts = VecInit((0 until IBufferInPortNum).map(i => data(i)))
 
-  for (i <- 0 until PredictWidth) {
+  for (i <- 0 until IBufferInPortNum) {
     val inst = WireInit(rawInsts(i))
 
     val (brType, isCall, isRet) = getBrInfo(inst)
@@ -63,7 +63,7 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper w
     io.resp.jumpOffset(i) := Mux(io.resp.pd(i).isBr, brOffset, jalOffset)
   }
 
-  for (i <- 0 until PredictWidth) {
+  for (i <- 0 until IBufferInPortNum) {
     XSDebug(
       true.B,
       p"instr ${Hexadecimal(io.resp.instr(i))}, " +

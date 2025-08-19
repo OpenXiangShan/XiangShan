@@ -848,7 +848,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cboMmioPAddr = Reg(UInt(PAddrBits.W))
   switch(mmioState) {
     is(s_idle) {
-      when(RegNext(io.rob.pendingst && uop(deqPtr).robIdx === io.rob.pendingPtr && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))) {
+      when(RegNext(uop(deqPtr).robIdx === io.rob.pendingPtr && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))) {
         mmioState := s_req
         uncacheUop := uop(deqPtr)
         uncacheUop.exceptionVec := 0.U.asTypeOf(ExceptionVec())

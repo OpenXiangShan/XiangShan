@@ -31,21 +31,22 @@ import utils.EnumUInt
 import xiangshan.frontend.PrunedAddrInit
 
 // currently for ECC control only
-class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
+class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
+    with HasICacheCtrlUnitParameters {
   lazy val module = new ICacheCtrlUnitImp(this)
 
   // register tilelink node
   val device: SimpleDevice = new SimpleDevice("L1ICacheCtrl", Seq("xiangshan,l1icache_ctrl"))
 
   val node: TLRegisterNode = TLRegisterNode(
-    address = Seq(params.address),
+    address = Seq(Address),
     device = device,
-    beatBytes = params.beatBytes,
+    beatBytes = BeatBytes,
     concurrency = 1
   )
 
   class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
-      with HasICacheParameters
+      with HasICacheCtrlUnitParameters
       with ICacheMetaHelper {
     class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
       // ecc control
@@ -136,8 +137,8 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     private val eccIAddr = RegInit(EccIAddrBundle.default)
 
     // sanity check
-    require(params.regWidth >= eccCtrl.asUInt.getWidth)
-    require(params.regWidth >= eccIAddr.asUInt.getWidth)
+    require(RegWidth >= eccCtrl.asUInt.getWidth)
+    require(RegWidth >= eccIAddr.asUInt.getWidth)
 
     // control signal
     io.eccEnable := eccCtrl.enable
@@ -249,7 +250,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     private def eccctrlRegField(x: EccCtrlBundle): RegField =
       RegField(
-        params.regWidth,
+        RegWidth,
         RegReadFn { ready =>
           val res = WireInit(x)
           res.inject := false.B // read always 0
@@ -292,11 +293,11 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       )
 
     private def ecciaddrRegField(x: EccIAddrBundle): RegField =
-      RegField(params.regWidth, x.asUInt, ecciaddrRegDesc)
+      RegField(RegWidth, x.asUInt, ecciaddrRegDesc)
 
     node.regmap(
-      params.EccCtrlOffset  -> Seq(eccctrlRegField(eccCtrl)),
-      params.EccIAddrOffset -> Seq(ecciaddrRegField(eccIAddr))
+      EccCtrlOffset  -> Seq(eccctrlRegField(eccCtrl)),
+      EccIAddrOffset -> Seq(ecciaddrRegField(eccIAddr))
     )
   }
 }

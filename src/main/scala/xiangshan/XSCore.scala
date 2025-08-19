@@ -30,6 +30,7 @@ import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.mem._
@@ -68,7 +69,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
-  if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+  if (icacheCtrlEnabled) {
     frontend.inner.icache.ctrlUnitOpt.get.node := memBlock.inner.frontendBridge.icachectrl_node
   }
 }
@@ -140,7 +141,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
-    sink.bits := 0.U.asTypeOf(sink.bits)
     sink.bits.robIdx := source.bits.uop.robIdx
     sink.bits.ssid := source.bits.uop.ssid
     sink.bits.storeSetHit := source.bits.uop.storeSetHit
@@ -154,7 +154,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqDeqPtr := memBlock.io.mem_to_ooo.lqDeqPtr
   backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
-  backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.ldaIqFeedback := memBlock.io.mem_to_ooo.ldaIqFeedback
   backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
@@ -162,7 +161,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
   backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
   backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
+  backend.io.mem.wakeup.zip(memBlock.io.mem_to_ooo.wakeup).map{ case (sink, source) => {
+    sink.valid := source.valid
+    connectSamePort(sink.bits, source.bits)
+  }}
   backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
   backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
   backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
@@ -171,9 +173,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
-
-  // memblock error exception writeback, 1 cycle after normal writeback
-  backend.io.mem.s3_delayed_load_error := memBlock.io.mem_to_ooo.s3_delayed_load_error
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
@@ -228,10 +227,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.tlbCsr := backend.io.mem.tlbCsr
   memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
   memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit
-  memBlock.io.ooo_to_mem.lsqio.pendingMMIOld    := backend.io.mem.robLsqIO.pendingMMIOld
-  memBlock.io.ooo_to_mem.lsqio.pendingld        := backend.io.mem.robLsqIO.pendingld
-  memBlock.io.ooo_to_mem.lsqio.pendingst        := backend.io.mem.robLsqIO.pendingst
-  memBlock.io.ooo_to_mem.lsqio.pendingVst       := backend.io.mem.robLsqIO.pendingVst
   memBlock.io.ooo_to_mem.lsqio.commit           := backend.io.mem.robLsqIO.commit
   memBlock.io.ooo_to_mem.lsqio.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
   memBlock.io.ooo_to_mem.lsqio.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext

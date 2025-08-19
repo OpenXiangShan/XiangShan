@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
+import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -38,7 +38,7 @@ import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._
-import xiangshan.mem.{HasVLSUParameters, _}
+import xiangshan.mem._
 
 class CoreDispatchTopDownIO extends Bundle {
   val l2MissMatch = Input(Bool())
@@ -96,14 +96,14 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val io = IO(new Bundle {
     // from rename
-    val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodedInst)))
-    val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
+    val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
+    val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new RenameOutUop)))
     val toRenameAllFire = Output(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // IssueQueues
     val IQValidNumVec = Vec(exuNum, Input(UInt(maxIQSize.U.getWidth.W)))
-    val toIssueQueues = Vec(IQEnqSum, DecoupledIO(new DynInst))
+    val toIssueQueues = Vec(IQEnqSum, DecoupledIO(new DispatchOutUop))
     // to busyTable
     // set preg state to ready (write back regfile)
     val wbPregsInt = Vec(backendParams.numPregWb(IntData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
@@ -164,11 +164,15 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val renameIn = io.renameIn
   val fromRename = io.fromRename
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
-  val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DynInst))))
+  val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DispatchUpdateUop))))
 
   // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
   for (i <- 0 until RenameWidth) {
-    fromRenameUpdate(i) := fromRename(i)
+    fromRenameUpdate(i).valid := fromRename(i).valid
+    // srcLoadDependency and srcState
+    fromRenameUpdate(i).bits := 0.U.asTypeOf(fromRenameUpdate(i).bits)
+    connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
+    fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
   }
@@ -244,7 +248,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0, io.wbPregsVl)
   val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0, idxRegTypeVl)
   val allocPregsValid = Wire(Vec(busyTables.size, Vec(RenameWidth, Bool())))
-  allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.eliminatedMove))
+  allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.isMove))
   allocPregsValid(1) := VecInit(fromRename.map(x => x.valid && x.bits.fpWen))
   allocPregsValid(2) := VecInit(fromRename.map(x => x.valid && x.bits.vecWen))
   allocPregsValid(3) := VecInit(fromRename.map(x => x.valid && x.bits.v0Wen))
@@ -463,7 +467,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
      uu := PopCount(uopSelIQ.take(i+1).map(x => x.zipWithIndex.filter(_._2 == j).map(_._1)).flatten)
     }}
   }}
-  val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DynInst)))
+  val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DispatchOutUop)))
   val uopBlockByIQ = Wire(Vec(renameWidth, Bool()))
   val allowDispatch = Wire(Vec(renameWidth, Bool()))
   val thisCanActualOut = Wire(Vec(renameWidth, Bool()))
@@ -471,7 +475,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+      lsqCanAccept && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
@@ -492,7 +496,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     for (i <- 0 until issue.numEnq){
       val oh = Wire(Vec(renameWidth, Bool())).suggestName(s"oh_IQSelUop_$temp")
       oh := uopSelIQMatrix.map(_(iqidx)).map(_ === (i+1).U)
-      IQSelUop(temp) := PriorityMux(oh, fromRenameUpdate)
+      val updateUop = PriorityMux(oh, fromRenameUpdate)
+      IQSelUop(temp).valid := updateUop.valid
+      connectSamePort(IQSelUop(temp).bits, updateUop.bits)
       // there only assign valid not use PriorityMuxDefalut for better timing
       IQSelUop(temp).valid := PriorityMuxDefault(oh.zip(fromRenameUpdate.map(_.valid)), false.B)
       val allFuThisIQ = issue.exuBlockParams.map(_.fuConfigs).flatten.toSet.toSeq
@@ -727,7 +733,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       enqLsqIO.needAlloc(i) := 0.U
     }
     enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
-    enqLsqIO.req(i).bits := io.fromRename(i).bits
+    enqLsqIO.req(i).bits.connectRenameOutUop(io.fromRename(i).bits)
 
     // This is to make it easier to calculate in LSQ.
     // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
@@ -758,8 +764,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   for (i <- 0 until RenameWidth) {
 
-    updatedUop(i) := fromRename(i).bits
-    updatedUop(i).debugInfo.eliminatedMove := fromRename(i).bits.eliminatedMove
+    updatedUop(i).connectRenameOutUop(fromRename(i).bits)
+    updatedUop(i).debugInfo.eliminatedMove := fromRename(i).bits.isMove
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
@@ -812,12 +818,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val allResourceReady = io.enqRob.canAccept
 
-  // Instructions should enter dispatch queues in order.
+  // Instructions should enter issue queues in order.
   // blockedByWaitForward: this instruction is blocked by itself (based on waitForward)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
   val hasException = VecInit(fromRename.zip(updatedUop).map {
-    case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
+    case (fromRename, uop) =>
       fromRename.bits.hasException || uop.singleStep
   })
 
@@ -856,8 +862,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     io.enqRob.req(i).bits := updatedUop(i)
     io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
     io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
+    io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
+    io.enqRob.req(i).bits.stdwriteNeed := FuType.isStore(updatedUop(i).fuType)
   }
-
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 
@@ -904,8 +911,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   TopDownCounters.LoadL1Stall.id.U))))))))
 
   val fusedVec = (0 until RenameWidth).map{ case i =>
-    if (i == 0) false.B
-    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.fusionNum =/= 0.U)
+    if (i == 0 || !backendParams.debugEn) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
   }
 
   val decodeReason = RegNextN(io.stallReason.reason, 2)

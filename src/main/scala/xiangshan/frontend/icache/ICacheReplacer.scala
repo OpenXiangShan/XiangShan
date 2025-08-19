@@ -28,8 +28,7 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
 
   val io: ICacheReplacerIO = IO(new ICacheReplacerIO)
 
-  private val replacers =
-    Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets / PortNumber))
+  private val replacers = Seq.fill(PortNumber)(ReplacementPolicy.fromString(Replacer, nWays, nSets / PortNumber))
 
   // touch
   private val touchSets = Seq.fill(PortNumber)(Wire(Vec(PortNumber, UInt(log2Ceil(nSets / PortNumber).W))))
@@ -37,8 +36,8 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
   (0 until PortNumber).foreach { i =>
     touchSets(i)(0) := Mux(
       io.touch.req(i).bits.vSetIdx(0),
-      io.touch.req(1).bits.vSetIdx(highestIdxBit, 1),
-      io.touch.req(0).bits.vSetIdx(highestIdxBit, 1)
+      io.touch.req(1).bits.vSetIdx(idxBits - 1, 1),
+      io.touch.req(0).bits.vSetIdx(idxBits - 1, 1)
     )
     touchWays(i)(0).bits  := Mux(io.touch.req(i).bits.vSetIdx(0), io.touch.req(1).bits.way, io.touch.req(0).bits.way)
     touchWays(i)(0).valid := Mux(io.touch.req(i).bits.vSetIdx(0), io.touch.req(1).valid, io.touch.req(0).valid)
@@ -47,8 +46,8 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
   // victim
   io.victim.resp.way := Mux(
     io.victim.req.bits.vSetIdx(0),
-    replacers(1).way(io.victim.req.bits.vSetIdx(highestIdxBit, 1)),
-    replacers(0).way(io.victim.req.bits.vSetIdx(highestIdxBit, 1))
+    replacers(1).way(io.victim.req.bits.vSetIdx(idxBits - 1, 1)),
+    replacers(0).way(io.victim.req.bits.vSetIdx(idxBits - 1, 1))
   )
 
   // touch the victim in next cycle
@@ -56,7 +55,7 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
     RegEnable(io.victim.req.bits.vSetIdx, 0.U.asTypeOf(io.victim.req.bits.vSetIdx), io.victim.req.valid)
   private val victimWayReg = RegEnable(io.victim.resp.way, 0.U.asTypeOf(io.victim.resp.way), io.victim.req.valid)
   (0 until PortNumber).foreach { i =>
-    touchSets(i)(1)       := victimVSetIdxReg(highestIdxBit, 1)
+    touchSets(i)(1)       := victimVSetIdxReg(idxBits - 1, 1)
     touchWays(i)(1).bits  := victimWayReg
     touchWays(i)(1).valid := RegNext(io.victim.req.valid) && (victimVSetIdxReg(0) === i.U)
   }

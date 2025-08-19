@@ -98,10 +98,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val lsqio = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val pendingMMIOld = Input(Bool())
-    val pendingld = Input(Bool())
-    val pendingst = Input(Bool())
-    val pendingVst = Input(Bool())
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
@@ -128,7 +124,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val topToBackendBypass = new TopToBackendBundle
 
-  val otherFastWakeup = Vec(LdExuCnt, ValidIO(new DynInst))
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -182,8 +177,6 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO(isVector = true))
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
-
-  val s3_delayed_load_error = Vec(LdExuCnt, Output(Bool()))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -476,9 +469,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
   io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
-  io.mem_to_ooo.otherFastWakeup := DontCare
-  io.mem_to_ooo.otherFastWakeup.drop(HyuCnt).take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
-  io.mem_to_ooo.otherFastWakeup.take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
   val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyuSta
 
   // TODO: fast load wakeup
@@ -676,7 +666,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_loadFireHint := loadUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_load := loadUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
-  prefetcher.io.trainSource.s3_ptrChasing := loadUnits.map(_.io.s3_ptr_chasing) ++ hybridUnits.map(_.io.ldu_io.s3_ptr_chasing)
+  prefetcher.io.trainSource.s3_ptrChasing := loadUnits.map(_ => false.B) ++ hybridUnits.map(_ => false.B) // TODO: remove ptr chasing logic in prefetcher
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
@@ -913,22 +903,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     for (s <- 0 until StorePipelineWidth) {
       loadUnits(i).io.stld_nuke_query(s) := stld_nuke_query(s)
     }
-    loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
 
-    // load to load fast forward: load(i) prefers data(i)
-    val l2l_fwd_out = loadUnits.map(_.io.l2l_fwd_out) ++ hybridUnits.map(_.io.ldu_io.l2l_fwd_out)
-    val fastPriority = (i until LduCnt + HyuCnt) ++ (0 until i)
-    val fastValidVec = fastPriority.map(j => l2l_fwd_out(j).valid)
-    val fastDataVec = fastPriority.map(j => l2l_fwd_out(j).data)
-    val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
-    val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
-    loadUnits(i).io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
-    loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
-    loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
-    val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
-    loadUnits(i).io.ld_fast_match := fastMatch
-    loadUnits(i).io.ld_fast_imm := io.ooo_to_mem.loadFastImm(i)
-    loadUnits(i).io.ld_fast_fuOpType := io.ooo_to_mem.loadFastFuOpType(i)
+    // load replay
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     val l2_hint = RegNext(io.l2_hint)
@@ -936,7 +912,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // L2 Hint for DCache
     dcache.io.l2_hint <> l2_hint
 
-    loadUnits(i).io.l2_hint <> l2_hint
     loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
     loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||
       tlbreplay_reg(i) || dtlb_ld0_tlbreplay_reg(i)
@@ -968,9 +943,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       loadUnits(i).io.misalign_ldin.valid := false.B
       loadUnits(i).io.misalign_ldin.bits := DontCare
     }
-
-    // alter writeback exception info
-    io.mem_to_ooo.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
     // update mem dependency predictor
     // io.memPredUpdate(i) := DontCare
@@ -1030,22 +1002,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // st-ld violation query
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
-    hybridUnits(i).io.ldu_io.lq_rep_full <> lsq.io.lq_rep_full
 
-    // load to load fast forward: load(i) prefers data(i)
-    val l2l_fwd_out = loadUnits.map(_.io.l2l_fwd_out) ++ hybridUnits.map(_.io.ldu_io.l2l_fwd_out)
-    val fastPriority = (LduCnt + i until LduCnt + HyuCnt) ++ (0 until LduCnt + i)
-    val fastValidVec = fastPriority.map(j => l2l_fwd_out(j).valid)
-    val fastDataVec = fastPriority.map(j => l2l_fwd_out(j).data)
-    val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
-    val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(LduCnt + i)(j))
-    hybridUnits(i).io.ldu_io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
-    hybridUnits(i).io.ldu_io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
-    hybridUnits(i).io.ldu_io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
-    val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
-    hybridUnits(i).io.ldu_io.ld_fast_match := fastMatch
-    hybridUnits(i).io.ldu_io.ld_fast_imm := io.ooo_to_mem.loadFastImm(LduCnt + i)
-    hybridUnits(i).io.ldu_io.ld_fast_fuOpType := io.ooo_to_mem.loadFastFuOpType(LduCnt + i)
     hybridUnits(i).io.ldu_io.replay <> lsq.io.replay(LduCnt + i)
     hybridUnits(i).io.ldu_io.l2_hint <> io.l2_hint
 
@@ -1066,8 +1023,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.std.storeDataIn(StaCnt + i).valid := stData(StaCnt + i).valid && !st_data_atomics(StaCnt + i)
     // prefetch
     hybridUnits(i).io.stu_io.prefetch_req <> sbuffer.io.store_prefetch(StaCnt + i)
-
-    io.mem_to_ooo.s3_delayed_load_error(LduCnt + i) := hybridUnits(i).io.ldu_io.s3_dly_ld_err
 
     // ------------------------------------
     //  Store Port
@@ -1097,10 +1052,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.redirect                <> redirect
   loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  loadMisalignBuffer.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
-  loadMisalignBuffer.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
-  loadMisalignBuffer.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
-  loadMisalignBuffer.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   loadMisalignBuffer.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1111,10 +1062,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
   storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
-  storeMisalignBuffer.io.rob.pendingMMIOld      := io.ooo_to_mem.lsqio.pendingMMIOld
-  storeMisalignBuffer.io.rob.pendingld          := io.ooo_to_mem.lsqio.pendingld
-  storeMisalignBuffer.io.rob.pendingst          := io.ooo_to_mem.lsqio.pendingst
-  storeMisalignBuffer.io.rob.pendingVst         := io.ooo_to_mem.lsqio.pendingVst
   storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
   storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
   storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1272,10 +1219,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  lsq.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
-  lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
-  lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
-  lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1298,9 +1241,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
   // memory replay would not cause IAF/IPF/IGPF
-  oldestRedirect.bits.cfiUpdate.backendIAF := false.B
-  oldestRedirect.bits.cfiUpdate.backendIPF := false.B
-  oldestRedirect.bits.cfiUpdate.backendIGPF := false.B
+  oldestRedirect.bits.backendIAF := false.B
+  oldestRedirect.bits.backendIPF := false.B
+  oldestRedirect.bits.backendIGPF := false.B
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept

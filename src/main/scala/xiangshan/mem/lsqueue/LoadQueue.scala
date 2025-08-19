@@ -27,7 +27,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._

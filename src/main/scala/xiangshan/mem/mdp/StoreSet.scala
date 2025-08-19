@@ -31,7 +31,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles._
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -353,7 +353,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val redirect = Input(Valid(new Redirect))
     val dispatch = Flipped(new DispatchLFSTIO)
     // when store issued, mark store as invalid
-    val storeIssue = Vec(backendParams.StaExuCnt, Flipped(Valid(new DynInst)))
+    val storeIssue = Vec(backendParams.StaExuCnt, Flipped(Valid(new StoreUnitToLFST)))
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 

@@ -20,6 +20,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.ValidUndirectioned
+import xiangshan.cache.mmu.Pbmt
+import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.IBufPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
@@ -58,35 +60,55 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParam
 }
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
-  val ftqIdx:           FtqPtr                   = new FtqPtr
-  val predTakenIdx:     ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val invalidTaken:     Bool                     = Bool()
-  val target:           PrunedAddr               = PrunedAddr(VAddrBits)
-  val instrRange:       UInt                     = UInt(PredictWidth.W)
-  val bubbleInstrValid: UInt                     = UInt(PredictWidth.W)
-  val pcHigh:           UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val pcHighPlus1:      UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val fetchSize:        UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
+  val ftqIdx:        FtqPtr                   = new FtqPtr
+  val doubline:      Bool                     = Bool()
+  val predTakenIdx:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset:     ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val invalidTaken:  Bool                     = Bool()
+  val startAddr:     PrunedAddr               = PrunedAddr(VAddrBits)
+  val target:        PrunedAddr               = PrunedAddr(VAddrBits)
+  val instrRange:    UInt                     = UInt(PredictWidth.W)
+  val rawInstrValid: UInt                     = UInt(PredictWidth.W)
+  val pcHigh:        UInt                     = UInt((VAddrBits - PcCutPoint).W)
+  val pcHighPlus1:   UInt                     = UInt((VAddrBits - PcCutPoint).W)
+  val fetchSize:     UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
+}
+
+class ICacheInfo(implicit p: Parameters) extends IfuBundle {
+  val exception:          Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+  val pmpMmio:            Bool               = Bool()
+  val itlbPbmt:           UInt               = UInt(Pbmt.width.W)
+  val isBackendException: Bool               = Bool()
+  val isForVSnonLeafPTE:  Bool               = Bool()
+  val gpAddr:             PrunedAddr         = PrunedAddr(PAddrBitsMax)
+  val pAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(PAddrBits))
+}
+
+class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
+  val target     = PrunedAddr(VAddrBits)
+  val misIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val cfiIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val instrRange = UInt(PredictWidth.W)
 }
 
 /* ***** DB ***** */
 class FetchToIBufferDB(implicit p: Parameters) extends IfuBundle {
-  val startAddr:  UInt = UInt(VAddrBits.W) // do not use PrunedAddr for DB
-  val instrCount: UInt = UInt(32.W)        // magic number: just uint32_t field
-  val exception:  Bool = Bool()
-  val isCacheHit: Bool = Bool()
+  val startAddr:  Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W)) // do not use PrunedAddr for DB
+  val instrCount: UInt      = UInt(32.W)                         // magic number: just uint32_t field
+  val exception:  Bool      = Bool()
+  val isCacheHit: Bool      = Bool()
 }
 
 class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
-  val startAddr:         UInt = UInt(VAddrBits.W) // do not use PrunedAddr for DB
-  val isMissPred:        Bool = Bool()
-  val missPredOffset:    UInt = UInt(log2Ceil(PredictWidth).W)
-  val checkJalFault:     Bool = Bool()
-  val checkJalrFault:    Bool = Bool()
-  val checkRetFault:     Bool = Bool()
-  val checkTargetFault:  Bool = Bool()
-  val checkNotCFIFault:  Bool = Bool()
-  val checkInvalidTaken: Bool = Bool()
+  val startAddr:         Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W)) // do not use PrunedAddr for DB
+  val isMissPred:        Vec[Bool] = Vec(FetchPorts, Bool())
+  val missPredOffset:    Vec[UInt] = Vec(FetchPorts, UInt(log2Ceil(PredictWidth).W))
+  val checkJalFault:     Bool      = Bool()
+  val checkJalrFault:    Bool      = Bool()
+  val checkRetFault:     Bool      = Bool()
+  val checkTargetFault:  Bool      = Bool()
+  val checkNotCFIFault:  Bool      = Bool()
+  val checkInvalidTaken: Bool      = Bool()
 }
 
 class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {

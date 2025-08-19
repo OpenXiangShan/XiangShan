@@ -8,7 +8,7 @@ import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodeOutUop}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields, OPCODE7Bit}
@@ -42,7 +42,7 @@ object LmultoRegNum {
 class VecExceptionGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle(){
     val inst = Input(UInt(32.W))
-    val decodedInst = Input(new DecodedInst)
+    val decodedInst = Input(new DecodeOutUop)
     val vtype = Input(new VType)
     val vstart = Input(Vl())
 

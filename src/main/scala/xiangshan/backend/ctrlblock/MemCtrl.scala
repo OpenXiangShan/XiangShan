@@ -6,7 +6,7 @@ import chisel3._
 import xiangshan.backend.BackendParams
 import xiangshan.{CustomCSRCtrlIO, MemPredUpdateReq, Redirect, XSBundle, XSModule}
 import xiangshan.mem.mdp.{DispatchLFSTIO, LFST, SSIT, SSITEntry, WaitTable}
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles._
 
 class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemCtrlIO(params))
@@ -36,7 +36,7 @@ class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
 class MemCtrlIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val csrCtrl = Input(new CustomCSRCtrlIO)
-  val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
+  val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, robIdx
   val memPredUpdate = Input(new MemPredUpdateReq)
   val mdpFoldPcVecVld = Input(Vec(DecodeWidth, Bool()))
   val mdpFlodPcVec = Input(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))

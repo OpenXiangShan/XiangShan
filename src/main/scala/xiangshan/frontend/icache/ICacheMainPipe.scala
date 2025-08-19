@@ -74,7 +74,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val (toPmp, fromPmp)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   private val fromWayLookup      = io.wayLookupRead
   private val eccEnable =
-    if (ICacheForceMetaECCError || ICacheForceDataECCError) true.B else io.eccEnable
+    if (ForceMetaEccFail || ForceDataEccFail) true.B else io.eccEnable
 
   // Statistics on the frequency distribution of FTQ fire interval
   private val cntFtqFireInterval      = RegInit(0.U(32.W))
@@ -239,7 +239,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s1_pTags,
     VecInit(s1_valid, s1_valid && s1_doubleline)
   )
-  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits / ICacheDataBanks).W)))
+  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
 
   private val s1_hits = VecInit((0 until PortNumber).map { i =>
     ValidHoldBypass(s1_mshrHits(i) || (RegNext(s0_fire) && s1_sramHits(i)), s1_fire || s1_flush)
@@ -247,10 +247,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
 
-  private val s1_datas = VecInit((0 until ICacheDataBanks).map { i =>
+  private val s1_datas = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(Mux(s1_bankMshrHit(i), s1_mshrDatas(i), fromData.datas(i)), s1_bankMshrHit(i) || RegNext(s0_fire))
   })
-  private val s1_dataIsFromMshr = VecInit((0 until ICacheDataBanks).map { i =>
+  private val s1_dataIsFromMshr = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(s1_bankMshrHit(i), s1_bankMshrHit(i) || RegNext(s0_fire))
   })
   private val s1_codes = DataHoldBypass(fromData.codes, RegNext(s0_fire))
@@ -288,8 +288,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_sramHits       = RegEnable(s1_sramHits, 0.U.asTypeOf(s1_sramHits), s1_fire)
   private val s2_codes          = RegEnable(s1_codes, 0.U.asTypeOf(s1_codes), s1_fire)
   private val s2_hits           = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  private val s2_datas          = RegInit(VecInit(Seq.fill(ICacheDataBanks)(0.U((blockBits / ICacheDataBanks).W))))
-  private val s2_dataIsFromMshr = RegInit(VecInit(Seq.fill(ICacheDataBanks)(false.B)))
+  private val s2_datas          = RegInit(VecInit(Seq.fill(DataBanks)(0.U((blockBits / DataBanks).W))))
+  private val s2_dataIsFromMshr = RegInit(VecInit(Seq.fill(DataBanks)(false.B)))
 
   /**
     ******************************************************************************
@@ -366,11 +366,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit(s2_valid, s2_valid && s2_doubleline),
     allowCorrupt = true // we also need to update s2_hits when fromMiss.bits.corrupt
   )
-  private val s2_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits / ICacheDataBanks).W)))
+  private val s2_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
 
   private val s2_bankMshrHit = getBankValid(s2_mshrHits, s2_offset)
 
-  (0 until ICacheDataBanks).foreach { i =>
+  (0 until DataBanks).foreach { i =>
     when(s1_fire) {
       s2_datas          := s1_datas
       s2_dataIsFromMshr := s1_dataIsFromMshr
@@ -550,7 +550,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       Pbmt.isUncache(toIfu.bits.itlbPbmt(i))
     }
     val blkPaddrAll = s2_pAddr.map(addr => (addr(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt)
-    (0 until ICacheDataBanks).foreach { i =>
+    (0 until DataBanks).foreach { i =>
       val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index  := (3 + i).U
@@ -561,8 +561,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
       diffMainPipeOut.addr := Mux(
         lineSel(i),
-        blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt,
-        blkPaddrAll(0) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt
+        blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / DataBanks)).asUInt,
+        blkPaddrAll(0) + (i.U << log2Ceil(blockBytes / DataBanks)).asUInt
       )
 
       diffMainPipeOut.data  := s2_datas(i).asTypeOf(diffMainPipeOut.data)

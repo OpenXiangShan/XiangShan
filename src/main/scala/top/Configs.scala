@@ -25,6 +25,16 @@ import utility._
 import system._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
+import xiangshan.frontend.FrontendParameters
+import xiangshan.frontend.bpu.BpuParameters
+import xiangshan.frontend.bpu.TageTableInfo
+import xiangshan.frontend.bpu.IttageTableInfo
+import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.tage.TageParameters
+import xiangshan.frontend.bpu.sc.ScParameters
+import xiangshan.frontend.bpu.ittage.IttageParameters
+import xiangshan.frontend.bpu.ras.RasParameters
+import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
@@ -36,8 +46,6 @@ import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
-import xiangshan.frontend.FrontendParameters
-import xiangshan.frontend.ftq.FtqParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -95,7 +103,45 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufSize = 24,
         IBufNBank = 8,
         frontendParameters = FrontendParameters(
-          ftqParameters = FtqParameters(FtqSize = 8)
+          bpuParameters = BpuParameters(
+            // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
+            mbtbParameters = MainBtbParameters(
+              NumEntries = 512,
+              NumWay = 2
+            ),
+            tageParameters = TageParameters(
+              TableInfos = Seq(
+                new TageTableInfo(512, 4, 3),
+                new TageTableInfo(512, 9, 3),
+                new TageTableInfo(1024, 19, 3)
+              ),
+              TagWidth = 6
+            ),
+            // FIXME: these are from V2 SC, we don't have equivalent parameters now
+            scParameters = ScParameters(
+              // NumRows = 128,
+              // NumTables = 2,
+              // HistLens = Seq(0, 5),
+            ),
+            ittageParameters = IttageParameters(
+              TableInfos = Seq(
+                new IttageTableInfo(256, 4),
+                new IttageTableInfo(256, 8),
+                new IttageTableInfo(512, 16)
+              ),
+              TagWidth = 7
+            ),
+            rasParameters = RasParameters(
+              StackSize = 8,
+              SpecSize = 16
+            ),
+          ),
+          ftqParameters = FtqParameters(
+            FtqSize = 8,
+          ),
+          icacheParameters = ICacheParameters( // default 64B blockBytes, 4way, 256set (64KB ICache)
+            nSets = 64, // override to 64set in MinimalConfig (16KB ICache)
+          ),
         ),
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
@@ -111,13 +157,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           numRead = None,
           numWrite = None,
         ),
-        icacheParameters = ICacheParameters(
-          nSets = 64, // 16KB ICache
-          tagECC = Some("parity"),
-          dataECC = Some("parity"),
-          replacer = Some("setplru"),
-          cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f)),
-        ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
           nWays = 8,
@@ -132,25 +171,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           enableDataEcc = true,
           cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
         )),
-        // ============ BPU ===============
-        EnableLoop = false,
-        EnableGHistDiff = false,
-        FtbSize = 256,
-        FtbWays = 2,
-        RasSize = 8,
-        RasSpecSize = 16,
-        TageTableInfos =
-          Seq((512, 4, 6),
-            (512, 9, 6),
-            (1024, 19, 6)),
-        SCNRows = 128,
-        SCNTables = 2,
-        SCHistLens = Seq(0, 5),
-        ITTageTableInfos =
-          Seq((256, 4, 7),
-            (256, 8, 7),
-            (512, 16, 7)),
-        // ================================
         itlbParameters = TLBParameters(
           name = "itlb",
           fetchi = true,

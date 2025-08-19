@@ -29,10 +29,13 @@ import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.phr.PhrPtr
+import xiangshan.frontend.bpu.ras.Ras
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
-class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -48,6 +51,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtb        = Module(new AheadBtb)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
+  private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
 
   private def predictors: Seq[BasePredictor] = Seq(
@@ -55,12 +59,14 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     ubtb,
     abtb,
     mbtb,
-    tage
+    tage,
+    ras
   )
 
   /* *** aliases *** */
-  private val train    = io.fromFtq.train
-  private val redirect = io.fromFtq.redirect
+  private val train        = io.fromFtq.train
+  private val commitUpdate = io.fromFtq.train
+  private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
@@ -69,6 +75,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
+  ras.io.enable         := false.B
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -127,6 +134,23 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.redirectValid := redirect.valid
   abtb.io.overrideValid := s3_override
 
+  ras.io.redirect.valid          := redirect.valid
+  ras.io.redirect.bits.attribute := redirect.bits.attribute
+  ras.io.redirect.bits.brPc      := redirect.bits.startVAddr
+  ras.io.redirect.bits.isRvc     := redirect.bits.isRvc
+  ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
+  ras.io.redirect.bits.level     := 0.U(1.W)
+
+  // ras
+  ras.io.commit.valid            := commitUpdate.valid
+  ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
+  ras.io.commit.bits.startPc     := commitUpdate.bits.startVAddr.toUInt
+  ras.io.commit.bits.isRvc       := false.B // commitUpdate.bits.isRvc
+  ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
+  ras.io.commit.bits.cfiPosition := commitUpdate.bits.cfiPosition
+
+  tage.io.mbtbResult := mbtb.io.result
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
@@ -171,10 +195,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       abtb.io.prediction.taken -> abtb.io.prediction
     )
   )
-
+  private val s2_prediction   = RegEnable(s1_prediction, s1_fire)
+  private val s3_inPrediction = RegEnable(s2_prediction, s2_fire)
   // s3 prediction: TODO
   private val s3_prediction = Wire(new Prediction)
-  s3_prediction := DontCare
+  s3_prediction                  := DontCare
+  ras.io.specIn.valid            := s3_fire
+  ras.io.specIn.bits.startPc     := s3_pc.toUInt
+  ras.io.specIn.bits.isRvc       := false.B
+  ras.io.specIn.bits.attribute   := s3_inPrediction.attribute
+  ras.io.specIn.bits.cfiPosition := s3_inPrediction.cfiPosition
+  ras.io.specIn.bits.target      := s3_inPrediction.target
 
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_fire && s3_override
@@ -193,21 +224,34 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
   // mbtb meta
-  val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+  private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+  private val s3_rasMeta  = ras.io.specMeta
 
-  private val s3_speculativeMeta = Wire(new BpuSpeculativeMeta)
-  s3_speculativeMeta.phrHistPtr := phr.io.phrPtr
+  // tage meta
+  private val s3_tageMeta = tage.io.meta
+
+  // phr meta
+  val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
+  val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
+
+  private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
+  s3_speculationMeta.phrHistPtr := s3_phrMeta
+  s3_speculationMeta.rasMeta    := s3_rasMeta
+  s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
   private val s3_meta = Wire(new BpuMeta)
-  s3_meta.abtb := s3_abtbMeta
-  s3_meta.mbtb := s3_mbtbMeta
-  // TODO: other meta
+  s3_meta.abtb   := s3_abtbMeta
+  s3_meta.mbtb   := s3_mbtbMeta
+  s3_meta.ras    := s3_rasMeta
+  s3_meta.phr    := s3_phrMeta
+  s3_meta.tage   := s3_tageMeta
+  s3_meta.ittage := DontCare // TODO: add ittage
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
 
-  io.toFtq.speculativeMeta.valid := s3_valid
-  io.toFtq.speculativeMeta.bits  := s3_speculativeMeta
+  io.toFtq.speculationMeta.valid := s3_valid
+  io.toFtq.speculationMeta.bits  := s3_speculationMeta
 
   s0_pc := MuxCase(
     s0_pcReg,
@@ -220,19 +264,22 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // phr train
   private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
-  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(TageFoldedGHistInfos)))
-  phr.io.train.s0_stall    := s0_stall
-  phr.io.train.stageCtrl   := stageCtrl
-  phr.io.train.redirect    := redirect
-  phr.io.train.s3_override := s3_override
-  phr.io.train.s3_pc       := s3_pc
-  phr.io.train.s3_taken    := s3_prediction.taken
-  phr.io.train.s1_valid    := s1_valid
-  phr.io.train.s1_pc       := s1_pc
-  phr.io.train.s1_taken    := s1_prediction.taken
+  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  phr.io.train.s0_stall      := s0_stall
+  phr.io.train.stageCtrl     := stageCtrl
+  phr.io.train.redirect      := redirect
+  phr.io.train.s3_override   := s3_override
+  phr.io.train.s3_prediction := s3_prediction
+  phr.io.train.s3_pc         := s3_pc
+  phr.io.train.s1_valid      := s1_fire
+  phr.io.train.s1_prediction := s1_prediction
+  phr.io.train.s1_pc         := s1_pc
+
+  phr.io.commit.valid := train.valid
+  phr.io.commit.bits  := train.bits
 
   s0_foldedPhr := phr.io.s0_foldedPhr
   s1_foldedPhr := phr.io.s1_foldedPhr
@@ -242,7 +289,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val phrsWireValue = phrsWire.asUInt
   private val redirectPhrValue =
-    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculativeMeta.phrHistPtr.value + 1.U))(
+    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
       PhrHistoryLength - 1,
       0
     )

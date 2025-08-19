@@ -30,7 +30,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
 
   class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
     val data: UInt = UInt(ICacheDataBits.W)
-    val code: UInt = UInt(ICacheDataCodeBits.W)
+    val code: UInt = UInt(DataEccBits.W)
   }
 
   private object ICacheDataEntry {
@@ -47,16 +47,16 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
    * data array
    ******************************************************************************
    */
-  private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt(ICacheDataBits.W)))
+  private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.req.bits.poison).asUInt)
 
   // io.read() are copies to control fan-out, we can simply use .head here
   private val bankSel  = getBankSel(io.read.req.head.bits.blkOffset, io.read.req.head.valid)
   private val lineSel  = getLineSel(io.read.req.head.bits.blkOffset)
   private val waymasks = io.read.req.head.bits.waymask
-  private val masks    = Wire(Vec(nWays, Vec(ICacheDataBanks, Bool())))
+  private val masks    = Wire(Vec(nWays, Vec(DataBanks, Bool())))
   (0 until nWays).foreach { way =>
-    (0 until ICacheDataBanks).foreach { bank =>
+    (0 until DataBanks).foreach { bank =>
       masks(way)(bank) := Mux(
         lineSel(bank),
         waymasks(1)(way) && bankSel(1)(bank),
@@ -66,11 +66,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   }
 
   private val dataArrays = (0 until nWays).map { way =>
-    val banks = (0 until ICacheDataBanks).map { bank =>
+    val banks = (0 until DataBanks).map { bank =>
       val sramBank = Module(new SRAMTemplateWithFixedWidth(
-        UInt(ICacheDataEntryBits.W),
+        UInt(DataEntryBits.W),
         set = nSets,
-        width = ICacheDataSRAMWidth,
+        width = DataSramWidth, // DataEntryBits + DataPaddingBits
         shouldReset = true,
         holdRead = true,
         singlePort = true,
@@ -104,7 +104,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
    ******************************************************************************
    */
   private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read.req(0).valid)
-  private val readDataWithCode = (0 until ICacheDataBanks).map { bank =>
+  private val readDataWithCode = (0 until DataBanks).map { bank =>
     Mux1H(VecInit(masksReg.map(_(bank))).asTypeOf(UInt(nWays.W)), dataArrays.map(_(bank).io.r.resp.asUInt))
   }
   private val readEntries = readDataWithCode.map(_.asTypeOf(new ICacheDataEntry()))
@@ -112,7 +112,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   private val readCodes   = VecInit(readEntries.map(_.code))
 
   // TEST: force ECC to fail by setting readCodes to 0
-  if (ICacheForceDataECCError) {
+  if (ForceDataEccFail) {
     readCodes.foreach(_ := 0.U)
   }
 

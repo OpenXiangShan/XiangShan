@@ -8,7 +8,6 @@ import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne,
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -47,7 +46,7 @@ class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) e
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
   val flush = Flipped(ValidIO(new Redirect))
-  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new DynInst)))
+  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueueInUop)))
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
@@ -117,8 +116,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   lazy val io = IO(new IssueQueueIO())
 
-  io.enq.zipWithIndex.foreach { case (enq, i) =>
-    PerfCCT.updateInstPos(enq.bits.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset)
+  if(backendParams.debugEn){
+    io.enq.zipWithIndex.foreach { case (enq, i) =>
+      PerfCCT.updateInstPos(enq.bits.debug.get.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset)
+    }
   }
 
   // Modules
@@ -854,7 +855,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen)
     deq.bits.common.v0Wen.foreach(_ := deqEntryVec(i).bits.payload.v0Wen)
     deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen)
-    deq.bits.common.flushPipe.foreach(_ := deqEntryVec(i).bits.payload.flushPipe)
+    deq.bits.common.flushPipe.foreach(_ := false.B)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
 
@@ -879,10 +880,14 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
 
-    deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
+    deq.bits.common.perfDebugInfo := 0.U.asTypeOf(deq.bits.common.perfDebugInfo)
+    deq.bits.common.debug_seqNum := 0.U.asTypeOf(deq.bits.common.debug_seqNum)
+    deqEntryVec(i).bits.payload.debug.foreach(x => {
+      deq.bits.common.perfDebugInfo := x.perfDebugInfo
+      deq.bits.common.debug_seqNum := x.debug_seqNum
+    })
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
-    deq.bits.common.debug_seqNum := deqEntryVec(i).bits.payload.debug_seqNum
   }
 
   val deqDelay = Reg(params.genIssueValidBundle)
@@ -1174,7 +1179,7 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
   val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 
   // load wakeup
-  val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new DynInst())))
+  val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new MemWakeUpBundle)))
 
   // vector
   val sqDeqPtr = Option.when(params.isVecMemIQ)(Input(new SqPtr))

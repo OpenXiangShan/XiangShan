@@ -23,8 +23,8 @@ import chisel3.util.experimental.decode.TruthTable
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U, Imm_Z, XSDebugDecode}
+import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
@@ -53,7 +53,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // from csr
     val singleStep = Input(Bool())
     // from decode
-    val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
+    val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodeOutUop)))
     // valid vec not clear by fusion(used by compress)
     val validVec = Vec(RenameWidth, Input(Bool()))
     val isFusionVec = Vec(RenameWidth, Input(Bool()))
@@ -82,7 +82,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vl_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Input(Bool()))
     // to dispatch1
-    val out = Vec(RenameWidth, DecoupledIO(new DynInst))
+    val out = Vec(RenameWidth, DecoupledIO(new RenameOutUop))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
@@ -101,7 +101,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
-    PerfCCT.updateInstPos(o.bits.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+    o.bits.debug.foreach{ x =>
+      PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+    }
   }
 
   // io alias
@@ -128,7 +130,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vlFreeList.io.debug_rat.foreach(_ <> io.debug_vl_rat.get)
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
-  def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
+  def needDestReg[T <: DecodeOutUop](reg_t: RegType, x: T): Bool = reg_t match {
     case Reg_I => x.rfWen
     case Reg_F => x.fpWen
     case Reg_V => x.vecWen
@@ -170,7 +172,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
-  val isLastFtqVec = io.in.map(_.bits.lastInFtqEntry)
+  val isLastFtqVec = io.in.map(_.bits.isLastInFtqEntry)
   val isFusionVec = io.isFusionVec
   val canRobCompressVec = io.in.map(_.bits.canRobCompress)
   // count crossftq num in may same robentry
@@ -213,28 +215,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
     * Rename: allocate free physical register and update rename table
     */
-  val uops = Wire(Vec(RenameWidth, new DynInst))
-  uops.foreach( uop => {
-    uop.srcState      := DontCare
-    uop.debugInfo     := DontCare
-    uop.lqIdx         := DontCare
-    uop.sqIdx         := DontCare
-    uop.waitForRobIdx := DontCare
-    uop.singleStep    := DontCare
-    uop.snapshot      := DontCare
-    uop.srcLoadDependency := DontCare
-    uop.numLsElem       :=  DontCare
-    uop.hasException  :=  DontCare
-    uop.useRegCache   := DontCare
-    uop.regCacheIdx   := DontCare
-    uop.traceBlockInPipe := DontCare
-    uop.isDropAmocasSta := DontCare
-  })
-  private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
-  private val isCsr        = Wire(Vec(RenameWidth, Bool()))
-  private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
-  private val isNotWaitForwardCsrr = Wire(Vec(RenameWidth, Bool()))
-  private val isNotBlockBackwardCsrr = Wire(Vec(RenameWidth, Bool()))
+  val uops = Wire(Vec(RenameWidth, new RenameOutUop))
+  uops.zip(io.in.map(_.bits)).map{ case(uop, in) => {
+    uop := 0.U.asTypeOf(uop)
+    connectSamePort(uop, in)
+    uop.debug.foreach({ debug =>
+      connectSamePort(uop.debug.get, in.debug.get)
+      debug.instr := in.instr
+    })
+  }}
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -308,32 +297,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
 
-  io.out.zipWithIndex.foreach{ case (o, i) =>
-    o.bits.debug_seqNum := io.in(i).bits.debug_seqNum
-  }
-
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
-
-    // read only CSRR instruction support: remove blockBackward and waitForward
-    inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
-    isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
-    isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
-    isNotWaitForwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
-      inst(i).CSRIDX, true.B, CSROoORead.waitForwardInOrderCsrReadList.map(_.U -> false.B))
-    isNotBlockBackwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
-      inst(i).CSRIDX, true.B, CSROoORead.blockBackwardInOrderCsrReadList.map(_.U -> false.B))
-
-    /*
-     * For most CSRs, CSRR instructions do not need to wait forward instructions.
-     *
-     * For most CSRs, CSRR instructions do not need to block backward instructions.
-     *
-     * Signal "isCsrr" contains not only "CSRR", but also other CSR instructions that do not require writing to CSR.
-     */
-    uops(i).waitForward := io.in(i).bits.waitForward && !isNotWaitForwardCsrr(i)
-    uops(i).blockBackward := io.in(i).bits.blockBackward && !isNotBlockBackwardCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
@@ -342,12 +308,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     // update cf according to waittable result
     uops(i).loadWaitBit := io.waittable(i)
-
-    uops(i).replayInst := false.B // set by IQ or MemQ
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
-    uops(i).stdwriteNeed := false.B
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -378,10 +341,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
-    uops(i).fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse))
+    uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
     val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
-      uops(i).numUops := 0.U
       uops(i).numWB := 0.U
     }
     if (i > 0) {
@@ -393,23 +355,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).firstUop := false.B
         uops(i).ftqPtr := uops(i - 1).ftqPtr
         uops(i).ftqOffset := uops(i - 1).ftqOffset
-        uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
         uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
       uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
-        uops(i).stdwriteNeed := uops(i + 1).stdwriteNeed
       }
     }.elsewhen(needRobFlags(i)) {
       uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
       uops(i).crossFtq := uops(i).crossFtqCommit(1) || (uops(i).crossFtqCommit(0) && !isLastFtqVec(i))
-      uops(i).stdwriteNeed := FuType.isStore(uops(i).fuType)
     }
     if (i < RenameWidth - 1){
       when(!needRobFlags(i)) {
@@ -434,7 +392,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
       ).reverse)
     ).orR
-    uops(i).debug_sim_trig.foreach(_ := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR)
+    uops(i).debug.foreach(_.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR)
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
@@ -450,7 +408,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).psrc(1) := 0.U
       }
     }
-    uops(i).eliminatedMove := isMove(i)
     uops(i).isMove := isMove(i)
 
     // update pdest
@@ -463,7 +420,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     ))
 
     // Assign performance counters
-    uops(i).debugInfo.renameTime := GTimer()
+    uops(i).debug.foreach(_.debugInfo.renameTime := GTimer())
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)
@@ -704,23 +661,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // I. RAT Update
     // When redirect happens (mis-prediction), don't update the rename table
     io.intRenamePorts(i).wen  := intSpecWen(i)
-    io.intRenamePorts(i).addr := uops(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
+    io.intRenamePorts(i).addr := inVec(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
     io.intRenamePorts(i).data := io.out(i).bits.pdest
 
     io.fpRenamePorts(i).wen  := fpSpecWen(i)
-    io.fpRenamePorts(i).addr := uops(i).ldest(log2Ceil(FpLogicRegs) - 1, 0)
+    io.fpRenamePorts(i).addr := inVec(i).ldest(log2Ceil(FpLogicRegs) - 1, 0)
     io.fpRenamePorts(i).data := fpFreeList.io.allocatePhyReg(i)
 
     io.vecRenamePorts(i).wen := vecSpecWen(i)
-    io.vecRenamePorts(i).addr := uops(i).ldest(log2Ceil(VecLogicRegs) - 1, 0)
+    io.vecRenamePorts(i).addr := inVec(i).ldest(log2Ceil(VecLogicRegs) - 1, 0)
     io.vecRenamePorts(i).data := vecFreeList.io.allocatePhyReg(i)
 
     io.v0RenamePorts(i).wen := v0SpecWen(i)
-    io.v0RenamePorts(i).addr := uops(i).ldest(log2Ceil(V0LogicRegs) - 1, 0)
+    io.v0RenamePorts(i).addr := inVec(i).ldest(log2Ceil(V0LogicRegs) - 1, 0)
     io.v0RenamePorts(i).data := v0FreeList.io.allocatePhyReg(i)
 
     io.vlRenamePorts(i).wen := vlSpecWen(i)
-    io.vlRenamePorts(i).addr := uops(i).ldest(log2Ceil(VlLogicRegs) - 1, 0)
+    io.vlRenamePorts(i).addr := inVec(i).ldest(log2Ceil(VlLogicRegs) - 1, 0)
     io.vlRenamePorts(i).data := vlFreeList.io.allocatePhyReg(i)
 
     // II. Free List Update
@@ -739,8 +696,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /*
   Debug and performance counters
    */
-  def printRenameInfo(in: DecoupledIO[DecodedInst], out: DecoupledIO[DynInst]) = {
-    XSInfo(out.fire, p"pc:${Hexadecimal(in.bits.pc)} in(${in.valid},${in.ready}) " +
+  def printRenameInfo(in: DecoupledIO[DecodeOutUop], out: DecoupledIO[RenameOutUop]) = {
+    val pc = if(backendParams.debugEn) in.bits.debug.get.pc else 0.U
+    XSInfo(out.fire, p"pc:${Hexadecimal(pc)} in(${in.valid},${in.ready}) " +
       p"lsrc(0):${in.bits.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
       p"lsrc(1):${in.bits.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
       p"lsrc(2):${in.bits.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
@@ -753,7 +711,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   io.out.map { case x =>
-    when(x.valid && x.bits.rfWen){
+    when(x.valid && x.bits.rfWen) {
       assert(x.bits.ldest =/= 0.U, "rfWen cannot be 1 when Int regfile ldest is 0")
     }
   }

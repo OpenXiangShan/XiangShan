@@ -18,13 +18,13 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import utility.XSError
+import xiangshan.Redirect
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.frontend.BranchPredictionRedirect
 
 trait BackendRedirectReceiver extends HasFtqParameters {
   def receiveBackendRedirect(
       fromBackend: CtrlToFtqIO
-  ): (Valid[FtqPtr], Valid[BranchPredictionRedirect]) = {
+  ): (Valid[FtqPtr], Valid[Redirect]) = {
     // Backend sends the redirect index from bju to FTQ one cycle in advance, and FTQ uses this index to read queues.
     // Other redirect indexes are sent to FTQ when the real redirect happens. If ftqIdxInAdvance is sent in advance,
     // FTQ can process the redirect when it comes. Otherwise, FTQ has to delay the redirect for one cycle.
@@ -44,10 +44,7 @@ trait BackendRedirectReceiver extends HasFtqParameters {
 //      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
 //    )
 
-    val redirect = Wire(Valid(new BranchPredictionRedirect))
-    redirect.valid := fromBackend.redirect.valid
-    redirect.bits.connectRedirect(fromBackend.redirect.bits)
-    redirect.bits.BTBMissBubble := false.B // FIXME: wtf?
+    val redirect    = fromBackend.redirect
     val redirectReg = RegNext(redirect)
     redirectReg.valid := redirect.valid && !ftqIdxInAdvanceValidNext
 

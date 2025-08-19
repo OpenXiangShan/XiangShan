@@ -40,7 +40,6 @@ import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
@@ -762,7 +761,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
-    wb.bits.redirect.get.bits.cfiUpdate.isMisPred && wb.bits.redirect.get.valid && wb.valid
+    wb.bits.redirect.get.bits.isMisPred && wb.bits.redirect.get.valid && wb.valid
   ).toSeq)).orR
   val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
@@ -851,13 +850,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
-  // indicate a pending load or store
-  io.lsq.pendingMMIOld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && deqPtrEntryValid && deqPtrEntry.mmio)
-  io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && deqPtrEntryValid)
-  // TODO: Check if need deassert pendingst when it is vst
-  io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && deqPtrEntryValid)
-  // TODO: Check if set correctly when vector store is at the head of ROB
-  io.lsq.pendingVst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && deqPtrEntryValid && deqPtrEntry.vls)
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
@@ -1084,7 +1076,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     // trace
-    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
+    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
     when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
       robEntries(i).traceBlockInPipe.itype := Itype.Taken
@@ -1148,7 +1140,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     needUpdate(i).vxsat := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).vxsat | vxsatRes)
 
     // trace
-    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
+    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
     when(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
       needUpdate(i).traceBlockInPipe.itype := Itype.Taken
@@ -1521,7 +1513,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
-        dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+        dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.isMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
         dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }

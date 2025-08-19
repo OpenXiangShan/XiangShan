@@ -99,7 +99,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   private val getBlock = edge.Get(
     fromSource = ID.U,
     toAddress = Cat(blkPAddr, 0.U(blockOffBits.W)),
-    lgSize = log2Up(cacheParams.blockBytes).U
+    lgSize = log2Up(blockBytes).U
   )._2
   io.acquire.bits.acquire := getBlock
   io.acquire.bits.acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUInst.id.U)

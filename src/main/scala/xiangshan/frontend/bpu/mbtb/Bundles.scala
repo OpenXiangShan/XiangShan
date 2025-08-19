@@ -40,16 +40,16 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
 
   //  Branch target info
-//  val targetCarry: TargetCarry = new TargetCarry // FIXME: seems not used
-  val target: UInt = UInt(TargetWidth.W)
+  val targetCarry:     TargetCarry = new TargetCarry
+  val targetLowerBits: UInt        = UInt(TargetWidth.W)
 
   val replaceCnt: UInt = UInt(2.W) // FIXME: not used for now
 }
 
 class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx: UInt         = UInt(SetIdxLen.W)
-  val entry:  MainBtbEntry = new MainBtbEntry
-  def tag:    UInt         = entry.tag // use entry's tag directly
+  val setIdx:       UInt         = UInt(SetIdxLen.W)
+  val entry:        MainBtbEntry = new MainBtbEntry
+  override def tag: Option[UInt] = Some(entry.tag) // use entry's tag directly
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
@@ -57,4 +57,11 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val hitMask            = Vec(NumAlignBanks * NumWay, Bool())
   val stronglyBiasedMask = Vec(NumAlignBanks * NumWay, Bool())
   val positions          = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+}
+
+class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
+  val hitMask    = Vec(NumAlignBanks * NumWay, Bool())
+  val positions  = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val targets    = Vec(NumAlignBanks * NumWay, PrunedAddr(VAddrBits))
+  val attributes = Vec(NumAlignBanks * NumWay, new BranchAttribute)
 }

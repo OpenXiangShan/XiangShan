@@ -64,6 +64,7 @@ class WPUBaseIO(portNum: Int, nWays: Int)(implicit p:Parameters) extends BaseWPU
 }
 
 abstract class BaseWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) extends WPUModule {
+  def icacheParameters = coreParams.frontendParameters.icacheParameters
   val cacheParams: L1CacheParameters = if (wpuParam.isICache) icacheParameters else dcacheParameters
 
   val setSize = nSets

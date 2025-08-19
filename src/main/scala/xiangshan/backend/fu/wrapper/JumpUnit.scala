@@ -30,8 +30,10 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
 
-  val jmpTarget = io.in.bits.ctrl.predictInfo.get.target
   val predTaken = io.in.bits.ctrl.predictInfo.get.taken
+  val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
+  val jumpRealTarget = jumpDataModule.io.target(VAddrData().dataWidth - 1, 0)
+  val isMisPred = !predTaken || (jumpRealTarget =/= jmpPredictTarget)
 
   val redirect = io.out.bits.res.redirect.get.bits
   val redirectValid = io.out.bits.res.redirect.get.valid
@@ -42,14 +44,13 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   redirect.fullTarget := jumpDataModule.io.target
-  redirect.cfiUpdate.predTaken := true.B
-  redirect.cfiUpdate.taken := true.B
-  redirect.cfiUpdate.target := jumpDataModule.io.target
-  redirect.cfiUpdate.pc := io.in.bits.data.pc.get
-  redirect.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken
-  redirect.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
-  redirect.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
-  redirect.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
+  redirect.taken := true.B
+  redirect.target := jumpDataModule.io.target
+  redirect.pc := io.in.bits.data.pc.get
+  redirect.isMisPred := isMisPred
+  redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
+  redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
+  redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready

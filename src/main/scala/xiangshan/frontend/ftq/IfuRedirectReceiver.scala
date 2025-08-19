@@ -17,27 +17,23 @@ package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
+import xiangshan.Redirect
 import xiangshan.RedirectLevel
-import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.PredecodeWritebackBundle
 
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
       pdWb: Valid[PredecodeWritebackBundle]
-  ): Valid[BranchPredictionRedirect] = {
-    val redirect = WireInit(0.U.asTypeOf(Valid(new BranchPredictionRedirect)))
+  ): Valid[Redirect] = {
+    val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
     redirect.valid          := pdWb.valid && pdWb.bits.misOffset.valid
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
     redirect.bits.ftqOffset := pdWb.bits.ftqOffset
     redirect.bits.level     := RedirectLevel.flushAfter
-
-    val cfiUpdate = redirect.bits.cfiUpdate
-    cfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits).toUInt
-    cfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
-    cfiUpdate.target    := pdWb.bits.target.toUInt
-    cfiUpdate.taken     := pdWb.bits.cfiOffset.valid
-    cfiUpdate.isMisPred := pdWb.bits.misOffset.valid
+    redirect.bits.pc        := pdWb.bits.pc.toUInt
+    redirect.bits.target    := pdWb.bits.target.toUInt
+    redirect.bits.taken     := pdWb.bits.cfiOffset.valid
 
     redirect
   }

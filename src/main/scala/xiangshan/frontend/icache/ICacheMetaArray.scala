@@ -34,7 +34,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
 
   class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
     val meta: ICacheMetadata = new ICacheMetadata
-    val code: UInt           = UInt(ICacheMetaCodeBits.W)
+    val code: UInt           = UInt(MetaEccBits.W)
   }
 
   private object ICacheMetaEntry {
@@ -47,7 +47,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   }
 
   // sanity check
-  require(ICacheMetaEntryBits == (new ICacheMetaEntry).getWidth)
+  require(MetaEntryBits == (new ICacheMetaEntry).getWidth)
 
   private val port0Read0 = io.read.req.valid && !io.read.req.bits.vSetIdx(0)(0)
   private val port0Read1 = io.read.req.valid && io.read.req.bits.vSetIdx(0)(0)
@@ -90,20 +90,20 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     // meta connection
     if (bank == 0) {
       tagArray.io.r.req.valid := port0Read0 || port1Read0
-      tagArray.io.r.req.bits.apply(setIdx = bank0Idx(highestIdxBit, 1))
+      tagArray.io.r.req.bits.apply(setIdx = bank0Idx(idxBits - 1, 1))
       tagArray.io.w.req.valid := writeBank0
       tagArray.io.w.req.bits.apply(
         data = writeMetaBits,
-        setIdx = io.write.req.bits.vSetIdx(highestIdxBit, 1),
+        setIdx = io.write.req.bits.vSetIdx(idxBits - 1, 1),
         waymask = io.write.req.bits.waymask
       )
     } else {
       tagArray.io.r.req.valid := port0Read1 || port1Read1
-      tagArray.io.r.req.bits.apply(setIdx = bank1Idx(highestIdxBit, 1))
+      tagArray.io.r.req.bits.apply(setIdx = bank1Idx(idxBits - 1, 1))
       tagArray.io.w.req.valid := writeBank1
       tagArray.io.w.req.bits.apply(
         data = writeMetaBits,
-        setIdx = io.write.req.bits.vSetIdx(highestIdxBit, 1),
+        setIdx = io.write.req.bits.vSetIdx(idxBits - 1, 1),
         waymask = io.write.req.bits.waymask
       )
     }
@@ -140,7 +140,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   private val readCodes       = readMetaEntries.map(_.map(_.code))
 
   // TEST: force ECC to fail by setting readCodes to 0
-  if (ICacheForceMetaECCError) {
+  if (ForceMetaEccFail) {
     readCodes.foreach(_.foreach(_ := 0.U))
   }
 

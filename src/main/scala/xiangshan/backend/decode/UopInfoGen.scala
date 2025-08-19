@@ -29,7 +29,6 @@ import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
-import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.fu.vector.Bundles.{VType, VLmul, VSew}
 import yunsuan.VpermType
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
@@ -194,8 +193,8 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   indexedLSTable.src := Cat(simple_emul, simple_lmul, nf)
   val numOfUopVLoadStoreIndexed = indexedLSTable.out
 
-  //number of uop
-  val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W))(Seq(
+  //number of writeback num
+  val numOfWB = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W))(Seq(
     UopSplitType.VSET -> 2.U,
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
@@ -241,12 +240,8 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.AMO_CAS_Q -> 4.U,
   ))
 
-  // number of writeback num
-  val numOfWB = Mux(UopSplitType.isAMOCAS(typeOfSplit), numOfUop >> 1, numOfUop)
-
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
   isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS
-  io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
 
@@ -277,7 +272,6 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {
-  val numOfUop = UInt(log2Up(MaxUopSize + 1).W)
   val numOfWB = UInt(log2Up(MaxUopSize + 1).W)
   val lmul = UInt(4.W)
 }

@@ -115,11 +115,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     * (3) s_resp: wait for response from uncache channel
     * (4) s_wait: wait for loadunit to receive writeback req
     */
-  val pendingld = GatedValidRegNext(io.rob.pendingMMIOld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    pendingld && req.uop.robIdx === pendingPtr
+    req.uop.robIdx === pendingPtr
   )
   switch (uncacheState) {
     is (s_idle) {
@@ -560,7 +559,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.cfiUpdate.target := reqSelUops(i).pc // TODO: check if need pc
+    redirect.bits.target      := reqSelUops(i).pc // TODO: check if need pc
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
