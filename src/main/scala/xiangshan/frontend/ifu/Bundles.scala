@@ -63,9 +63,9 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val ftqIdx:        FtqPtr                   = new FtqPtr
   val doubline:      Bool                     = Bool()
   val predTakenIdx:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val ftqOffset:     ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqEndOffset:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val invalidTaken:  Bool                     = Bool()
-  val startAddr:     PrunedAddr               = PrunedAddr(VAddrBits)
+  val startVAddr:    PrunedAddr               = PrunedAddr(VAddrBits)
   val target:        PrunedAddr               = PrunedAddr(VAddrBits)
   val instrRange:    UInt                     = UInt(PredictWidth.W)
   val rawInstrValid: UInt                     = UInt(PredictWidth.W)

@@ -45,7 +45,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
       val selectFetchBlock: Vec[Bool]  = Vec(IBufferInPortNum, Bool())
       val invalidTaken:     Vec[Bool]  = Vec(IBufferInPortNum, Bool())
-      val instrOffset:      Vec[UInt]  = Vec(IBufferInPortNum, UInt(log2Ceil(PredictWidth).W))
+      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(log2Ceil(PredictWidth).W))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
@@ -78,7 +78,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val secondPredTarget = io.req.bits.secondTarget
   private val selectFetchBlock = io.req.bits.selectFetchBlock
   private val invalidTaken     = io.req.bits.invalidTaken
-  private val instrOffset      = io.req.bits.instrOffset
+  private val instrEndOffset   = io.req.bits.instrEndOffset
   private val isPredTaken      = io.req.bits.isPredTaken
 
   // Entries made invalid by offset are marked with 'ignore'
@@ -180,14 +180,14 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   /* *****************************************************************************
    * PredChecker Stage 2
    * ***************************************************************************** */
-  private val mispredIdxNext          = RegEnable(mispredInstrIdx, io.req.valid)
-  private val mispredIsFirstBlockNext = RegEnable(!selectFetchBlock(mispredInstrIdx.bits), io.req.valid)
-  private val mispredInstrOffsetNext  = RegEnable(instrOffset(mispredInstrIdx.bits), io.req.valid)
-  private val mispredIsJumpNext       = RegEnable(mispredIsJump, io.req.valid)
+  private val mispredIdxNext            = RegEnable(mispredInstrIdx, io.req.valid)
+  private val mispredIsFirstBlockNext   = RegEnable(!selectFetchBlock(mispredInstrIdx.bits), io.req.valid)
+  private val mispredInstrEndOffsetNext = RegEnable(instrEndOffset(mispredInstrIdx.bits), io.req.valid)
+  private val mispredIsJumpNext         = RegEnable(mispredIsJump, io.req.valid)
 
   private val fixedFirstTakenInstrIdxNext  = RegEnable(fixedFirstTakenInstrIdx, io.req.valid)
   private val fixedSecondTakenInstrIdxNext = RegEnable(fixedSecondTakenInstrIdx, io.req.valid)
-  private val instrOffsetNext              = RegEnable(instrOffset, io.req.valid)
+  private val instrEndOffsetNext           = RegEnable(instrEndOffset, io.req.valid)
   private val firstTakenIdxNext            = RegEnable(firstTakenIdx, io.req.valid)
   private val secondTakenIdxNext           = RegEnable(secondTakenIdx, io.req.valid)
   private val firstPredTargetNext          = RegEnable(firstPredTarget, io.req.valid)
@@ -210,11 +210,11 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val fixSecondMispred = mispredIdxNext.valid && !mispredIsFirstBlockNext
   private val fixedFirstRawInstrRange =
     Fill(PredictWidth, !fixFirstMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
 
   private val fixedSecondRawInstrRange =
     Fill(PredictWidth, !fixSecondMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
 
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
@@ -265,8 +265,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred || firstTargetFault
   io.resp.stage2Out.fixedFirst.misIdx.bits := Mux(
     firstTargetFault,
-    instrOffsetNext(firstTakenIdxNext),
-    Mux(fixFirstMispred, instrOffsetNext(mispredIdxNext.bits), instrOffsetNext(firstTakenIdxNext))
+    instrEndOffsetNext(firstTakenIdxNext),
+    Mux(fixFirstMispred, instrEndOffsetNext(mispredIdxNext.bits), instrEndOffsetNext(firstTakenIdxNext))
   )
   // private val firstTargetFault  = fixedFirstTakenInstrIdxNext.valid && jumpTargetsNext(mispredIdxNext.bits) =/= firstPredTargetNext
 }

@@ -27,14 +27,13 @@ trait IfuRedirectReceiver extends HasFtqParameters {
   ): Valid[Redirect] = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
-    redirect.valid          := pdWb.valid && pdWb.bits.misOffset.valid
+    redirect.valid          := pdWb.valid && pdWb.bits.misEndOffset.valid
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
-    redirect.bits.ftqOffset := pdWb.bits.ftqOffset
+    redirect.bits.ftqOffset := pdWb.bits.ftqEndOffset
     redirect.bits.level     := RedirectLevel.flushAfter
     redirect.bits.pc        := pdWb.bits.pc.toUInt
     redirect.bits.target    := pdWb.bits.target.toUInt
-    redirect.bits.taken     := pdWb.bits.cfiOffset.valid
-
+    redirect.bits.taken     := pdWb.bits.cfiEndOffset.valid
     redirect
   }
 }
