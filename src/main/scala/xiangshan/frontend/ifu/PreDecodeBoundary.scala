@@ -144,6 +144,7 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   io.resp.bits.isRvc := VecInit(io.resp.bits.instrValid.zip(currentIsRvc).map { case (valid, rvc) =>
     valid & rvc
   })
+  io.resp.bits.isRvc(0) := Mux(io.req.bits.prevLastIsHalfRvi, false.B, io.resp.bits.instrValid(0) && currentIsRvc(0))
   io.resp.bits.isFirstLastHalfRvi := io.resp.bits.instrValid(io.req.bits.firstEndPos) &&
     !currentIsRvc(io.req.bits.firstEndPos)
   io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPos) &&

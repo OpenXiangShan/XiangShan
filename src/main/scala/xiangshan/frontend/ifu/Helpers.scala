@@ -104,35 +104,19 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
     result
   }
 
-  def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, prevIsHalf: Bool, default: T): Vec[T] = {
+  def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, default: T): Vec[T] = {
     require(shiftNum.getWidth == 2)
     val dataVec = VecInit((0 until IBufEnqWidth).map(i =>
       if (i < indataVec.length) indataVec(i) else 0.U.asTypeOf(default)
     ))
     VecInit((0 until IBufEnqWidth).map { i =>
       MuxLookup(shiftNum, 0.U.asTypeOf(default))(Seq(
-        ShiftType.NoShift -> Mux(
-          prevIsHalf,
-          if (i == IBufEnqWidth - 1) 0.U.asTypeOf(default) else dataVec(i + 1),
-          dataVec(i)
-        ),
-        ShiftType.ShiftRight1 -> Mux(
-          prevIsHalf,
-          dataVec(i),
-          if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)
-        ),
-        ShiftType.ShiftRight2 -> Mux(
-          prevIsHalf,
-          if (i < 1) 0.U.asTypeOf(default) else dataVec(i - 1),
-          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2)
-        ),
-        ShiftType.ShiftRight3 -> Mux(
-          prevIsHalf,
-          if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2),
-          if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3)
-        )
+        ShiftType.NoShift     -> dataVec(i),
+        ShiftType.ShiftRight1 -> (if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)),
+        ShiftType.ShiftRight2 -> (if (i < 2) 0.U.asTypeOf(default) else dataVec(i - 2)),
+        ShiftType.ShiftRight3 -> (if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3))
       ))
     })
-  }
 
+  }
 }
