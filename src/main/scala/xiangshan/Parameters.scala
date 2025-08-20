@@ -497,7 +497,8 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
-  EnableRollingDB: Boolean = false
+  EnableRollingDB: Boolean = false,
+  EnableSimFrontend: Boolean = false
 )
 
 case object DFTOptionsKey extends Field[DFTOptions]
