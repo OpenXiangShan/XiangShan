@@ -201,11 +201,11 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
     def getMaxHistLens: Int = bpuParameters.tageParameters.TableInfos.map(_.HistoryLength).max
 
-    val commitTaken = commit.taken
+    val commitTaken = commit.branches(0).bits.taken
     val commitTakenPc = Mux(
-      commitValid && commit.mispred.asBools.reduce(_ || _),
+      commitValid && commit.branches(0).bits.mispredict.asBools.reduce(_ || _),
       commit.startVAddr,
-      getBranchAddr(commit.startVAddr, commit.cfiPosition)
+      getBranchAddr(commit.startVAddr, commit.branches(0).bits.cfiPosition)
     )
     val commitShiftBits = shiftCommitBits(commitTakenPc)
 

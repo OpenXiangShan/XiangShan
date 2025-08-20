@@ -42,9 +42,12 @@ import xiangshan.backend.trace._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
+
   val redirect = Valid(new Redirect)
   val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
+
+  val resolve = Vec(3, Valid(new Resolve))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {

@@ -86,12 +86,12 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val t0_startVAddr  = io.train.bits.startVAddr
   private val t0_tag         = getTag(t0_startVAddr)
-  private val t0_actualTaken = io.train.bits.taken
-  private val t0_position    = io.train.bits.cfiPosition
-  private val t0_target      = getEntryTarget(io.train.bits.target)
-  private val t0_attribute   = io.train.bits.attribute
+  private val t0_actualTaken = io.train.bits.branches(0).bits.taken
+  private val t0_position    = io.train.bits.branches(0).bits.cfiPosition
+  private val t0_target      = getEntryTarget(io.train.bits.branches(0).bits.target)
+  private val t0_attribute   = io.train.bits.branches(0).bits.attribute
   private val t0_targetCarry =
-    if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, io.train.bits.target)) else None
+    if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, io.train.bits.branches(0).bits.target)) else None
 
   private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
   // t0 may hit t1, so we add a "real" prefix for entries hit
