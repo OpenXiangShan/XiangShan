@@ -21,10 +21,23 @@ import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BranchInfo
+
+class FtqEntry(implicit p: Parameters) extends FtqBundle {
+  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
+  val identifiedCfi: UInt       = UInt(FetchBlockInstNum.W)
+}
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
   val meta       = new BpuMeta
   val paddingBit = if (meta.getWidth % 2 != 0) Some(UInt(1.W)) else None
+}
+
+class ResolveEntry(implicit p: Parameters) extends FtqBundle {
+  val ftqIdx:     FtqPtr                 = new FtqPtr
+  val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
+  val branches:   Vec[Valid[BranchInfo]] = Vec(3, Valid(new BranchInfo)) // FIXME: Should be BJU number
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
