@@ -44,8 +44,6 @@ class StandAloneSYSCNT (
   class StandAloneSYSCNTImp(outer: StandAloneSYSCNT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val rtc_clock = IO(Input(Clock()))
     val rtc_reset = IO(Input(AsyncReset()))
-    val bus_clock = IO(Input(Clock()))
-    val bus_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val update_en = Input(Bool())
       val update_value = Input(UInt(64.W))
@@ -54,8 +52,8 @@ class StandAloneSYSCNT (
     })
     outer.clint.module.rtc_clock := rtc_clock
     outer.clint.module.rtc_reset := rtc_reset
-    outer.clint.module.bus_clock := bus_clock
-    outer.clint.module.bus_reset := bus_reset
+    outer.clint.module.bus_clock := clock
+    outer.clint.module.bus_reset := reset
     outer.clint.module.io.stop_en := io.stop_en
     outer.clint.module.io.update_en := io.update_en
     outer.clint.module.io.update_value := io.update_value

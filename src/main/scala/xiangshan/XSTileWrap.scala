@@ -116,9 +116,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     childClock := clock
     childReset := reset_sync
 
-    if (SeperateTLBus && !EnableSeperateTLAsync) {
-      syncClint.get.module.io.hartId := io.hartId
+    syncClint.foreach { timerInst =>
+      timerInst.module.io.hartId := io.hartId
+      timerInst.module.io.time := tile.module.io.clintTime
     }
+
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := io.msiInfo
     tile.module.io.reset_vector := io.reset_vector
