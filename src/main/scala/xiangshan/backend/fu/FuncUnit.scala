@@ -8,13 +8,14 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
-import xiangshan.frontend.{PreDecodeInfo}
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.frontend.bpu.BranchInfo
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -99,6 +100,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
+  val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
