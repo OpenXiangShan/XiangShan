@@ -283,9 +283,9 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   socParams.EnableCHIAsyncBridge match {
     case Some(param) =>
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-        val sink = Module(new CHIAsyncBridgeSink(param))
-        sink.io.async <> core_with_l2.module.io.chi
-        io_chi <> sink.io.deq
+        val time_sink = Module(new CHIAsyncBridgeSink(param))
+        time_sink.io.async <> core_with_l2.module.io.chi
+        io_chi <> time_sink.io.deq
       }
     case None =>
       io_chi <> core_with_l2.module.io.chi
