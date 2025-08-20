@@ -68,8 +68,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val valid = Bool()
     val fflags = UInt(5.W)
     val mmio = Bool()
-    // store will be commited if both sta & std have been writebacked
-    val stdWritebacked = Bool()
     val vxsat = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
@@ -86,7 +84,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
     // debug_end
 
-    def isWritebacked: Bool = !uopNum.orR && stdWritebacked
+    def isWritebacked: Bool = !uopNum.orR
     def isUopWritebacked: Bool = !uopNum.orR
 
   }
@@ -155,7 +153,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
-    robCommitEntry.commit_w := (robEntry.uopNum === 0.U) && (robEntry.stdWritebacked === true.B)
+    robCommitEntry.commit_w := robEntry.uopNum === 0.U
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe
     robCommitEntry.rfWen := robEntry.rfWen
