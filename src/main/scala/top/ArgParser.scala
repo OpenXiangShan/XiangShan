@@ -49,6 +49,7 @@ object ArgParser {
       |--disable-perf
       |--disable-alwaysdb
       |--enable-dfx
+      |--enable-simfrontend
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -140,6 +141,10 @@ object ArgParser {
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+          }), tail)
+        case "--enable-simfrontend" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableSimFrontend = true)
           }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
