@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
 
   class ResolveQueueIO extends Bundle {
-    val backendResolve: Vec[Valid[Resolve]] = Input(Vec(3, Valid(new Resolve))) // FIXME: Should be BJU number
+    val backendResolve: Vec[Valid[Resolve]] = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
     val bpuTrain:       Valid[ResolveEntry] = Output(Valid(new ResolveEntry))
   }
 

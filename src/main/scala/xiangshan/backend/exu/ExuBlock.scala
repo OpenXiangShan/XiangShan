@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
-import xiangshan.{HasXSParameter, Redirect, XSBundle}
+import xiangshan.{HasXSParameter, Redirect, Resolve, XSBundle}
 import utility._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
@@ -54,6 +54,12 @@ class ExuBlockImp(
 //      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
 //    }
     XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
+  }
+  if (params.isIntSchd) {
+    val bjuExus = exus.filter(_.wrapper.exuParams.hasBrhFu).map(_.wrapper.module)
+    assert(bjuExus.size == io.toFrontendBJUResolve.get.size, "bju num is different")
+    val fromBJUResolve = bjuExus.map(_.io.toFrontendBJUResolve.get)
+    io.toFrontendBJUResolve.get := fromBJUResolve
   }
   io.I2FWakeupOut.foreach{ x =>
     val exuI2FIn = exus.filter(x => x.wrapper.exuParams.fuConfigs.contains(I2fCfg)).head.io.in
@@ -114,6 +120,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
   val F2IDataOut = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
   val F2IDataIn = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
