@@ -151,13 +151,13 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     t0_meta.altProviderTarget,
     io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt === 0.U
   )
-  t1_train.target := RegEnable(
-    io.train.bits.target,
+  t1_train.branches(0).bits.target := RegEnable(
+    io.train.bits.branches(0).bits.target,
     io.train.valid // not using mispred_mask, because mispred_mask timing is bad
   )
-  t1_train.cfiPosition := RegEnable(
-    io.train.bits.cfiPosition,
-    io.train.valid && io.train.bits.taken
+  t1_train.branches(0).bits.cfiPosition := RegEnable(
+    io.train.bits.branches(0).bits.cfiPosition,
+    io.train.valid && io.train.bits.branches(0).bits.taken
   )
   // TODO: add hist to class BpuTrain and use phr
 //  t1_train.ghist := RegEnable(io.t1_train.bits.ghist, io.t1_train.valid)
@@ -167,7 +167,8 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
 //    t1_train.ftqOffset.bits === t1_train.ftb_entry.tailSlot.offset && !t1_train.ftb_entry.strong_bias(numBr - 1)
   // FIXME: original code is above, need to adapt to mbtb, not sure if this is correct
   private val updateValid =
-    t1_train.attribute.isOtherIndirect && RegNext(io.train.valid, init = false.B) && t1_train.taken
+    t1_train.branches(0).bits.attribute.isOtherIndirect && RegNext(io.train.valid, init = false.B) &&
+      t1_train.branches(0).bits.taken
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
@@ -298,7 +299,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   ittageMeta.allocate.bits  := RegEnable(s2_allocEntry, s2_fire)
 
   // Update in loop
-  private val updateRealTarget       = t1_train.target
+  private val updateRealTarget       = t1_train.branches(0).bits.target
   private val updatePCRegion         = targetGetRegion(t1_train.startVAddr)
   private val updateRealTargetRegion = targetGetRegion(updateRealTarget)
   private val metaProviderTargetOffset, metaAltProviderTargetOffset, updateRealTargetOffset =
@@ -505,7 +506,10 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
       )
     }
   }
-  XSDebug(updateValid, p"pc: ${Hexadecimal(updatePc.toUInt)}, target: ${Hexadecimal(t1_train.target.toUInt)}\n")
+  XSDebug(
+    updateValid,
+    p"pc: ${Hexadecimal(updatePc.toUInt)}, target: ${Hexadecimal(t1_train.branches(0).bits.target.toUInt)}\n"
+  )
   XSDebug(updateValid, t1_meta.toPrintable + p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
 }

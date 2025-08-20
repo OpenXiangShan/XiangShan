@@ -160,8 +160,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t1_mbtbPositions             = t1_train.meta.mbtb.positions
   private val t1_mbtbHitMasks              = t1_train.meta.mbtb.hitMask
   // FIXME: train only on conditional
-  private val t1_cfiPosition = t1_train.cfiPosition
-  private val t1_taken       = t1_train.taken
+  private val t1_cfiPosition = t1_train.branches(0).bits.cfiPosition
+  private val t1_taken       = t1_train.branches(0).bits.taken
   // FIXME: halfAlign
   private val t1_baseTableWriteCtrs: Vec[Vec[SaturateCounter]] =
     Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))))
