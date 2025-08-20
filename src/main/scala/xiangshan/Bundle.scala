@@ -256,7 +256,6 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val backendIAF: Bool = Bool() // instruction access fault
 
   def hasBackendFault: Bool = backendIGPF || backendIPF || backendIAF
-  def flushItself(): Bool = RedirectLevel.flushItself(level)
 
   // for backend and memory
   val robIdx = new RobPtr

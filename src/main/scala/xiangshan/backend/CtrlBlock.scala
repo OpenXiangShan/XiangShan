@@ -340,13 +340,13 @@ class CtrlBlockImp(
   }
   val loadRedirectStartPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt
   val load_target = loadRedirectStartPcRead + loadRedirectTargetOffset
-  redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
+  redirectGen.io.loadReplay.bits.target := load_target
   // TODO loadRedirectPcOffset is useful?
   val loadRedirectPcOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
     loadRedirectPcOffset := memViolation.bits.getPcOffset()
   }
-  redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectStartPcRead + loadRedirectPcOffset
+  redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead + loadRedirectPcOffset
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
