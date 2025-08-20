@@ -196,6 +196,7 @@ class Sbuffer(implicit p: Parameters)
     val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPfFlag)))  //Todo: store logic only support Width == 2 now
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val prefetchForwardCheck = Vec(LoadPipelineWidth, Flipped(new PrefetchForwardQueryIO))
     val sqempty = Input(Bool())
     val sbempty = Output(Bool())
     val flush = Flipped(new SbufferFlushBundle)
@@ -770,6 +771,14 @@ class Sbuffer(implicit p: Parameters)
     }}
   }
 
+  // ---------------------- Prefetch Forward Check ---------------------
+  for ((forward, i) <- io.prefetchForwardCheck.zipWithIndex) {
+    val f0_ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr) && forward.valid))
+    val f0_valid_tag_matches = widthMap(w => f0_ptag_matches(w) && validMask(w))
+    val f0_forward_mask_candidate = VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr))))
+    val f0_selected_valid_mask = Mux1H(f0_valid_tag_matches, f0_forward_mask_candidate)
+    forward.forwardMask := RegEnable(f0_selected_valid_mask, forward.valid)
+  }
   // ---------------------- Load Data Forward ---------------------
   val mismatch = Wire(Vec(LoadPipelineWidth, Bool()))
   XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))

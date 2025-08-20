@@ -912,6 +912,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
+    loadUnits(i).io.prefetch_forward_check <> sbuffer.io.prefetchForwardCheck(i)
     loadUnits(i).io.ubuffer <> uncache.io.forward(i)
     loadUnits(i).io.tl_d_channel := dcache.io.lsu.forward_D(i)
     loadUnits(i).io.forward_mshr <> dcache.io.lsu.forward_mshr(i)

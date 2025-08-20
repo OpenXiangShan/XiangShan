@@ -161,6 +161,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val s2_prefetch_spec = Output(Bool())
 
     val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
+    val prefetch_forward_check    = new PrefetchForwardQueryIO
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
 
@@ -955,6 +956,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.s1_kill             := s1_kill || s1_dly_err || s1_tlb_miss || s1_exception
   io.dcache.s1_kill_data_read   := s1_kill || s1_dly_err || s1_tlb_fast_miss
 
+  // prefetch forward check
+  io.prefetch_forward_check.valid := s1_valid && s1_hw_prf && !(s1_exception || s1_kill)
+  io.prefetch_forward_check.paddr := s1_in.paddr
+
   // store to load forwarding
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
@@ -1380,6 +1385,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       Mux(s2_nc_with_data, io.ubuffer.forwardData(i),
       io.sbuffer.forwardData(i)))
   }
+  // cancel prefetch when can be forward full data
+  val hartId = p(XSCoreParamsKey).HartId
+  val cancelPrefetchInSbuffer = Constantin.createRecord(s"cancelPrefetchInSbuffer$hartId", initValue = true)
+  val s2_cancel_prefetch = cancelPrefetchInSbuffer && s2_hw_prf && (PopCount(io.prefetch_forward_check.forwardMask) >= 8.U)
 
   XSDebug(s2_fire, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_in.uop.pc,
@@ -1500,7 +1509,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.dcache.s1_pc := s1_out.uop.pc
     io.dcache.s2_pc := s2_out.uop.pc
   }
-  io.dcache.s2_kill := s2_pmp.ld || s2_pmp.st || s2_actually_uncache || s2_kill
+  io.dcache.s2_kill := s2_pmp.ld || s2_pmp.st || s2_actually_uncache || s2_cancel_prefetch || s2_kill
 
   val s1_ld_left_fire = s1_valid && !s1_kill && s2_ready
   val s2_ld_valid_dup = RegInit(0.U(6.W))
@@ -1910,6 +1919,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_sel_src.prf && s0_src_select_vec(int_iss_idx))
   XSPerfAccumulate("s0_hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select)
   XSPerfAccumulate("s0_hardware_prefetch_total",   io.prefetch_req.valid)
+
+  XSPerfAccumulate("s1_prefetch_forward_check", io.prefetch_forward_check.valid)
+  XSPerfAccumulate("s2_cancel_prefetch_for_forward_full", s2_cancel_prefetch)
 
   XSPerfAccumulate("s3_rollback_total",             io.rollback.valid)
   XSPerfAccumulate("s3_rep_frm_fetch_rollback",     io.rollback.valid && s3_rep_frm_fetch)

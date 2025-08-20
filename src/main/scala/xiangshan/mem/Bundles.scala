@@ -181,6 +181,12 @@ object Bundles {
     val need_rep = Bool()
   }
 
+  class PrefetchForwardQueryIO(implicit p: Parameters) extends XSBundle {
+    val valid = Output(Bool())
+    val paddr = Output(UInt(PAddrBits.W))
+    val forwardMask = Input(Vec((VLEN/8), Bool())) // resp to load_s2
+  }
+
   class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
     val vaddr = Output(UInt(VAddrBits.W))
     val paddr = Output(UInt(PAddrBits.W))
