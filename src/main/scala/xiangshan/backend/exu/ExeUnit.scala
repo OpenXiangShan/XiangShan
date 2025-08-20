@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
-import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
+import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, Resolve, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -39,6 +39,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(DecoupledIO(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val toFrontendBJUResolve = Option.when(params.hasBrhFu)(Valid(new Resolve))
   val I2FDataIn = Option.when(params.needDataFromI2F)(Flipped(ValidIO(UInt(XLEN.W))))
   val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped(ValidIO(UInt(XLEN.W))))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
@@ -397,6 +398,12 @@ class ExeUnitImp(
   io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
   io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
 
+  io.toFrontendBJUResolve.foreach{ case resolve => {
+    val bjus = funcUnits.filter(x => x.cfg.isJmp || x.cfg.isBrh)
+    val resolveVec = VecInit(bjus.map(_.io.toFrontendBJUResolve.get))
+    resolve.valid := resolveVec.map(_.valid).reduce(_ || _)
+    resolve.bits := Mux1H(resolveVec.map(_.valid), resolveVec.map(_.bits))
+  }}
   io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach{
     fuio =>
       exuio <> fuio
