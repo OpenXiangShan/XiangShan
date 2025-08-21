@@ -3,6 +3,7 @@
 package device
 
 import chisel3._
+import chisel3.util._
 import chisel3.util.{ShiftRegister, ValidIO}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy._
@@ -93,8 +94,9 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
      * bff8 mtime lo
      * bffc mtime hi
      */
-    val ipi_hartoffset =io.hartId * msipBytes.U
-    node.regmapClint(ipi_hartoffset,
+    val shift_msip = log2Ceil(msipBytes).U
+    val ipi_hartoffset =io.hartId << shift_msip
+    node.regmap(ipi_hartoffset,
       0 -> RegFieldGroup("msip", Some("MSIP Bits"), ipi.zipWithIndex.flatMap { case (r, i) =>
         RegField(1, r, RegFieldDesc(s"msip_$i", s"MSIP bit for Hart $i", reset = Some(0))) :: RegField(ipiWidth - 1) :: Nil
       }),
@@ -105,14 +107,15 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
 //        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true))))
     )
     //timecmp rw reg.
-    val timecmp_hartoffset =io.hartId * timecmpBytes.U
-    node.regmapClint(timecmp_hartoffset,
+    val shift_timecmp = log2Ceil(timecmpBytes).U
+    val timecmp_hartoffset =io.hartId << shift_timecmp 
+    node.regmap(timecmp_hartoffset,
       timecmpOffset -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
         RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
       },
     )
     //mtime report r reg.
-    node.regmapClint(0.asUInt,
+    node.regmap(0.U,
       timeOffset -> Seq(RegField.r(64, io.time.bits, RegFieldDesc("mtime", "Timer Register", volatile=true))))
 
   }
