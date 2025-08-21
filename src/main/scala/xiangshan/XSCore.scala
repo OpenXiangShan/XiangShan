@@ -20,20 +20,22 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import device.MsiInfoBundle
+import coupledL2.PrefetchCtrlFromCore
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
 import utility._
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
+import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.mem._
 import xiangshan.cache.mmu._
-import xiangshan.frontend._
-import xiangshan.mem.L1PrefetchFuzzer
-import scala.collection.mutable.ListBuffer
 import xiangshan.cache.mmu.TlbRequestIO
+import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -82,14 +84,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
-    val msiInfo = Input(ValidIO(new MsiInfoBundle))
+    val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+    val msiAck = Output(Bool())
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
+    val l2_flush_done = Input(Bool())
+    val l2_flush_en = Output(Bool())
+    val power_down_en = Output(Bool())
     val cpu_critical_error = Output(Bool())
     val resetInFrontend = Output(Bool())
     val traceCoreInterface = new TraceCoreInterface
-    val l2_pf_enable = Output(Bool())
+    val l2PfCtrl = Output(new PrefetchCtrlFromCore)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
@@ -102,7 +108,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
     }
+    val topDownInfo = Input(new Bundle {
+      val l2Miss = Bool()
+      val l3Miss = Bool()
+    })
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
   })
+
+  dontTouch(io.l2_flush_done)
+  dontTouch(io.l2_flush_en)
+  dontTouch(io.power_down_en)
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
@@ -183,11 +199,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
   memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
   memBlock.io.hartId := io.hartId
+  memBlock.io.l2_flush_done := io.l2_flush_done
   memBlock.io.outer_reset_vector := io.reset_vector
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
-  memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
@@ -243,20 +259,40 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.l2_flush_en := memBlock.io.outer_l2_flush_en
+  io.power_down_en := memBlock.io.outer_power_down_en
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
+  io.msiAck := memBlock.io.outer_msi_ack
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
-  io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
+  io.beu_errors.dcache <> memBlock.io.dcacheError.bits.toL1BusErrorUnitInfo(memBlock.io.dcacheError.valid)
+  io.beu_errors.uncache <> memBlock.io.uncacheError
   io.beu_errors.l2 <> DontCare
-  io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
+  io.l2PfCtrl := backend.io.mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl()
 
   memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
   memBlock.io.traceCoreInterfaceBypass.fromBackend <> backend.io.traceCoreInterface
   io.traceCoreInterface <> memBlock.io.traceCoreInterfaceBypass.toL2Top
+  memBlock.io.wfi <> backend.io.mem.wfi
+  memBlock.io.topDownInfo.fromL2Top.l2Miss := io.topDownInfo.l2Miss
+  memBlock.io.topDownInfo.fromL2Top.l3Miss := io.topDownInfo.l3Miss
+  memBlock.io.topDownInfo.toBackend.noUopsIssued := backend.io.topDownInfo.noUopsIssued
+  backend.io.topDownInfo.lqEmpty := memBlock.io.topDownInfo.toBackend.lqEmpty
+  backend.io.topDownInfo.sqEmpty := memBlock.io.topDownInfo.toBackend.sqEmpty
+  backend.io.topDownInfo.l1Miss := memBlock.io.topDownInfo.toBackend.l1Miss
+  backend.io.topDownInfo.l2TopMiss.l2Miss := memBlock.io.topDownInfo.toBackend.l2TopMiss.l2Miss
+  backend.io.topDownInfo.l2TopMiss.l3Miss := memBlock.io.topDownInfo.toBackend.l2TopMiss.l3Miss
 
 
   if (debugOpts.ResetGen) {
     backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
   }
+
+  memBlock.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+  memBlock.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  frontend.io.dft.zip(memBlock.io.dft_frnt).foreach({ case (a, b) => a := b })
+  frontend.io.dft_reset.zip(memBlock.io.dft_reset_frnt).foreach({ case (a, b) => a := b })
+  backend.io.dft.zip(memBlock.io.dft_bcknd).foreach({ case (a, b) => a := b })
+  backend.io.dft_reset.zip(memBlock.io.dft_reset_bcknd).foreach({ case (a, b) => a := b })
 }

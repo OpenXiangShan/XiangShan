@@ -3,10 +3,13 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
+import org.chipsalliance.cde.config.Parameters
 import CSRConfig._
+import system.HasSoCParameter
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
+import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap
 
@@ -90,25 +93,69 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vstopi)
 
-  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, mie.asUInt(i))
+    }
+    regOut := reg & mask.asUInt
+  })
     .setAddr(0x30)
 
-  val miprios: Seq[CSRModule[_]] = (2 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle))
+  val miprio2 = Module(new CSRModule(s"Iprio2", new MIprio2Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, mie.asUInt(i+8))
+    }
+    regOut := reg & mask.asUInt
+  })
+    .setAddr(0x32)
+
+  val miprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle {
+      val mask = Wire(Vec(8, UInt(8.W)))
+      for (i <- 0 until 8) {
+        mask(i) := Fill(8, mie.asUInt(num*4+i))
+      }
+      regOut := reg & mask.asUInt
+    })
       .setAddr(0x30 + num)
   )
 
-  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, sie.asUInt(i))
+    }
+    regOut := reg & mask.asUInt
+  })
     .setAddr(0x30)
 
-  val siprios: Seq[CSRModule[_]] = (2 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle))
+  val siprio2 = Module(new CSRModule(s"Iprio2", new SIprio2Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, sie.asUInt(i+8))
+    }
+    regOut := reg & mask.asUInt
+  })
+    .setAddr(0x32)
+
+  val siprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle{
+      val mask = Wire(Vec(8, UInt(8.W)))
+      for (i <- 0 until 8) {
+        mask(i) := Fill(8, sie.asUInt(num*4+i))
+      }
+      regOut := reg & mask.asUInt
+    })
     .setAddr(0x30 + num)
   )
 
-  val miregiprios: Seq[CSRModule[_]] = Seq(miprio0) ++: miprios
+  val miregiprios: Seq[CSRModule[_]] = Seq(miprio0, miprio2) ++: miprios
 
-  val siregiprios: Seq[CSRModule[_]] = Seq(siprio0) ++: siprios
+  val siregiprios: Seq[CSRModule[_]] = Seq(siprio0, siprio2) ++: siprios
+
+  val iregiprios = miregiprios ++ siregiprios
 
   val aiaCSRMods = Seq(
     miselect,
@@ -157,11 +204,11 @@ class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnu
 }
 
 object VSISelectField extends ISelectField(
-  0x1FF,
+  0xFFF,
   reserved = Seq(
     Range.inclusive(0x000, 0x02F),
     Range.inclusive(0x040, 0x06F),
-    Range.inclusive(0x100, 0x1FF),
+    Range.inclusive(0x100, 0xFFF),
   ),
 )
 
@@ -174,15 +221,16 @@ object MISelectField extends ISelectField(
 )
 
 object SISelectField extends ISelectField(
-  maxValue = 0xFF,
+  maxValue = 0xFFF,
   reserved = Seq(
-    Range.inclusive(0x00, 0x2F),
-    Range.inclusive(0x40, 0x6F),
+    Range.inclusive(0x000, 0x02F),
+    Range.inclusive(0x040, 0x06F),
+    Range.inclusive(0x100, 0xFFF),
   ),
 )
 
 class VSISelectBundle extends CSRBundle {
-  val ALL = VSISelectField(log2Up(0x1FF), 0, null).withReset(0.U)
+  val ALL = VSISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
 }
 
 class MISelectBundle extends CSRBundle {
@@ -190,7 +238,7 @@ class MISelectBundle extends CSRBundle {
 }
 
 class SISelectBundle extends CSRBundle {
-  val ALL = SISelectField(log2Up(0xFF), 0, null).withReset(0.U)
+  val ALL = SISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
 }
 
 class TopIBundle extends CSRBundle {
@@ -214,16 +262,34 @@ class Iprio0Bundle extends CSRBundle {
   val PrioMTI  = RW(63, 56).withReset(0.U)
 }
 
-class CSRToAIABundle extends Bundle {
-  private final val AddrWidth = 12
+class MIprio2Bundle extends CSRBundle {
+  val PrioSEI   = RW(15,  8).withReset(0.U)
+  val PrioVSEI  = RW(23, 16).withReset(0.U)
+  val PrioMEI   = RO(31, 24).withReset(0.U)
+  val PrioSGEI  = RW(39, 32).withReset(0.U)
+  val PrioLCOFI = RW(47, 40).withReset(0.U)
+  val Prio14    = RW(55, 48).withReset(0.U)
+  val Prio15    = RW(63, 56).withReset(0.U)
+}
 
+class SIprio2Bundle extends CSRBundle {
+  val PrioSEI   = RO(15,  8).withReset(0.U)
+  val PrioVSEI  = RW(23, 16).withReset(0.U)
+  val PrioMEI   = RW(31, 24).withReset(0.U)
+  val PrioSGEI  = RW(39, 32).withReset(0.U)
+  val PrioLCOFI = RW(47, 40).withReset(0.U)
+  val Prio14    = RW(55, 48).withReset(0.U)
+  val Prio15    = RW(63, 56).withReset(0.U)
+}
+
+class CSRToAIABundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val addr = ValidIO(new Bundle {
-    val addr = UInt(AddrWidth.W)
+    val addr = UInt(soc.IMSICParams.iselectWidth.W)
     val v = VirtMode()
     val prvm = PrivMode()
   })
 
-  val vgein = UInt(VGEINWidth.W)
+  val vgein = UInt(soc.IMSICParams.vgeinWidth.W)
 
   val wdata = ValidIO(new Bundle {
     val op = UInt(2.W)
@@ -235,15 +301,14 @@ class CSRToAIABundle extends Bundle {
   val vsClaim = Bool()
 }
 
-class AIAToCSRBundle extends Bundle {
-  private val NumVSIRFiles = 63
+class AIAToCSRBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val rdata = ValidIO(new Bundle {
     val data = UInt(XLEN.W)
     val illegal = Bool()
   })
   val meip    = Bool()
   val seip    = Bool()
-  val vseip   = UInt(NumVSIRFiles.W)
+  val vseip   = UInt(soc.IMSICParams.geilen.W)
   val mtopei  = new TopEIBundle
   val stopei  = new TopEIBundle
   val vstopei = new TopEIBundle
@@ -272,4 +337,9 @@ trait HasIregSink { self: CSRModule[_] =>
     val sireg = UInt(XLEN.W)
     val vsireg = UInt(XLEN.W)
   }))
+}
+
+trait HasIeBundle { self: CSRModule[_] =>
+  val mie = IO(Input(new MieBundle))
+  val sie = IO(Input(new SieBundle))
 }

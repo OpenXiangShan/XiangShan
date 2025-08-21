@@ -10,7 +10,7 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecInfo, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
 import yunsuan.{VfaluType, VfpuType}
-import yunsuan.vector.VectorFloatAdder
+import yunsuan.vector.{LZD, VectorFloatAdder}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 
 class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -105,7 +105,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     )
     val f16FirstFoldMaskUnorder = Mux1H(
       Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(7,4), f16Mask(3,0)),
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(3,0), f16Mask(7,4)),
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(2.W), f16Mask(1), f16Mask(0), 0.U(2.W), f16Mask(3), f16Mask(2)),
         vecCtrl.fpu.isFoldTo1_8 -> Cat(0.U(3.W), f16Mask(0), 0.U(3.W), f16Mask(1)),
       )
@@ -258,7 +258,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val outVuopidx = outVecCtrl.vuopIdx(2, 0) // for vfadd max vuopidx=7
   val numOfUopVFRED = Wire(UInt(4.W))
   val numofUopVFREDReg = RegEnable(numOfUopVFRED, io.in.fire)
   val vs1Reg = RegEnable(vs1, io.in.fire)
@@ -361,9 +361,10 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
 
-  val outIsFisrtGroup = outVuopidx === 0.U ||
-    (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
-    ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
+  val outVuopidxForRed = outVecCtrl.vuopIdx(3, 0) // lmul=8 sew=16, (4+2+1)(vector)+(1+1+1)(fold)+(1)(scala) max vuopIdx=10
+  val outIsFisrtGroup = outVuopidxForRed === 0.U ||
+    (outVuopidxForRed === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
+    ((outVuopidxForRed === 2.U || outVuopidxForRed === 3.U) && outVlmul === VLmul.m8)
   val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnComp
   val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnComp
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
@@ -406,8 +407,15 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(allFFlagsEn)
     dontTouch(fflagsRedMask)
   }
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+  // use srcMask(XLEN-1, 0) because float format hasn't fp8
+  val allVmZero = RegEnable(LZD(Reverse(srcMask(XLEN-1, 0))) >= outVl_s0, io.in.fire)
+  allFFlagsEn := Mux(outIsResuction,
+    Cat(
+      Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum && !outVecCtrl.lastUop) & fflagsRedMask(4*numVecModule - 1, 1),
+      !allVmZero && (lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum)
+    ),
+    fflagsEn & vlMaskEn
+  ).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{

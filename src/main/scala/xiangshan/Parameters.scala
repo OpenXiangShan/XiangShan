@@ -20,10 +20,9 @@ import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import huancun._
-import system.SoCParamsKey
+import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
@@ -61,6 +60,8 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasBitmapCheck: Boolean = true,
+  HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -179,15 +180,6 @@ case class XSCoreParameters
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 24,
   IssueQueueCompEntrySize: Int = 16,
-  dpParams: DispatchParameters = DispatchParameters(
-    IntDqSize = 16,
-    FpDqSize = 16,
-    LsDqSize = 18,
-    IntDqDeqWidth = 8,
-    FpDqDeqWidth = 6,
-    VecDqDeqWidth = 6,
-    LsDqDeqWidth = 6,
-  ),
   intPreg: PregParams = IntPregParams(
     numEntries = 224,
     numRead = None,
@@ -240,8 +232,6 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
-  VFOFBufferSize: Int = 8,
-  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -249,7 +239,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableAccurateLoadError: Boolean = false,
+  EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
   EnableHardwareStoreMisalign: Boolean = true,
   EnableHardwareLoadMisalign: Boolean = true,
@@ -361,7 +351,8 @@ case class XSCoreParameters
   usePTWRepeater: Boolean = false,
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
-  softPTWDelay: Int = 1
+  softPTWDelay: Int = 1,
+  wfiResume: Boolean = true,
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -372,11 +363,11 @@ case class XSCoreParameters
     "shvstvecd", "smaia", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
     "ss1p13", "ssaia", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zba", "zbb",
-    "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
-    "zicbom", "zicbop", "zicboz", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond", "zicsr",
-    "zifencei", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh", "zksed", "zksh",
-    "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
+    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zawrs", "zba",
+    "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
+    "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
+    "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
+    "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
   )
 
   def vlWidth = log2Up(VLEN) + 1
@@ -421,7 +412,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = intPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.IntDqDeqWidth,
     )
   }
 
@@ -444,7 +434,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = fpPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.FpDqDeqWidth,
     )
   }
 
@@ -467,7 +456,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = vfPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.VecDqDeqWidth,
     )
   }
 
@@ -508,7 +496,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = rfDataWidth,
-      numUopIn = dpParams.LsDqDeqWidth,
     )
   }
 
@@ -569,11 +556,20 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
+  PerfLevel: String = "VERBOSE",
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false
+)
+
+case object DFTOptionsKey extends Field[DFTOptions]
+
+case class DFTOptions
+(
+  EnableMbist: Boolean = true, // enable mbist default
+  EnableSramCtl: Boolean = false,
 )
 
 trait HasXSParameter {
@@ -582,8 +578,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   def PmemRanges = p(SoCParamsKey).PmemRanges
-  def PmemLowBounds = PmemRanges.unzip._1
-  def PmemHighBounds = PmemRanges.unzip._2
+  def KeyIDBits = p(CVMParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
@@ -601,6 +596,8 @@ trait HasXSParameter {
   def hartIdLen = p(MaxHartIdBits)
   val xLen = XLEN
 
+  def HasBitmapCheck = coreParams.HasBitmapCheck
+  def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension
@@ -772,22 +769,25 @@ trait HasXSParameter {
   def maxElemPerVreg: Int = coreParams.maxElemPerVreg
 
   def IntRefCounterWidth = log2Ceil(RobSize)
-  def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
+  def LSQEnqWidth = RenameWidth
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
   def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
   def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
   def RollbackGroupSize = coreParams.RollbackGroupSize
+  val RAWlgSelectGroupSize = log2Ceil(RollbackGroupSize)
+  val RAWTotalDelayCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / RAWlgSelectGroupSize).toInt + 1 - 2
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   def StoreQueueSize = coreParams.StoreQueueSize
+  def StoreQueueForceWriteSbufferUpper = coreParams.StoreQueueSize - 4
+  def StoreQueueForceWriteSbufferLower = StoreQueueForceWriteSbufferUpper - 5
   def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueueSize
   def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   def VlsQueueSize = coreParams.VlsQueueSize
-  def dpParams = coreParams.dpParams
 
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
@@ -816,8 +816,8 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
-  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
+  def UncacheBufferIndexWidth = log2Up(UncacheBufferSize)
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward
   def EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
@@ -908,7 +908,12 @@ trait HasXSParameter {
   def PrivWidth              = coreParams.traceParams.PrivWidth
   def IaddrWidth             = coreParams.traceParams.IaddrWidth
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
-  def IretireWidthInPipe     = log2Up(RenameWidth * 2)
-  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IretireWidthInPipe     = log2Up(RenameWidth * 2 + 1)
+  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2 + 1)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
+
+  def wfiResume              = coreParams.wfiResume
+  def hasMbist               = p(DFTOptionsKey).EnableMbist
+  def hasSramCtl             = p(DFTOptionsKey).EnableSramCtl
+  def hasDFT                 = hasMbist || hasSramCtl
 }

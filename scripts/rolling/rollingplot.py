@@ -3,6 +3,7 @@ import argparse
 import sqlite3
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
 
 # usage: python3 rollingplot.py DB_FILE_PATH PERF_NAME [--aggregate AGGREGATE_RATIO]
@@ -35,7 +36,13 @@ class DataSet:
     
     def plot(self):
         plt.plot(self.xdata, self.ydata, lw=1, ls='-', c='black')
-        plt.show()
+        dirName = "results"
+        if not os.path.exists(dirName):
+            os.mkdir(dirName)
+        # temporary label for tutorial 
+        plt.ylabel('IPC')
+        plt.xlabel('Sampling Index')
+        plt.savefig(os.path.join(dirName, 'perf.png'), bbox_inches='tight', pad_inches=0.05, dpi=200)
 
 
 if __name__ == "__main__":

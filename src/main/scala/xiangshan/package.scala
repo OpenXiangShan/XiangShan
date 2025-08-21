@@ -16,6 +16,7 @@
 
 import chisel3._
 import chisel3.util._
+import utils.NamedUInt
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
@@ -229,18 +230,22 @@ package object xiangshan {
 
 
   object CSROpType {
-    //               | func3|
-    def jmp   = "b010_000".U
-    def wfi   = "b100_000".U
-    def wrt   = "b001_001".U
-    def set   = "b001_010".U
-    def clr   = "b001_011".U
-    def wrti  = "b001_101".U
-    def seti  = "b001_110".U
-    def clri  = "b001_111".U
+    //                 | func3|
+    def jmp     = "b010_000".U
+    def wfi     = "b100_000".U
+    def wrs_nto = "b100_010".U
+    def wrs_sto = "b100_011".U
+    def wrt     = "b001_001".U
+    def set     = "b001_010".U
+    def clr     = "b001_011".U
+    def wrti    = "b001_101".U
+    def seti    = "b001_110".U
+    def clri    = "b001_111".U
 
     def isSystemOp (op: UInt): Bool = op(4)
-    def isWfi      (op: UInt): Bool = op(5)
+    def isWfi      (op: UInt): Bool = op(5) && !op(1)
+    def isWrsNto   (op: UInt): Bool = op(5) && op(1, 0) === "b10".U
+    def isWrsSto   (op: UInt): Bool = op(5) && op(1, 0) === "b11".U
     def isCsrAccess(op: UInt): Bool = op(3)
     def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
     def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
@@ -585,6 +590,7 @@ package object xiangshan {
     def cbo_inval = "b1110".U
 
     def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
+    def isCboAll(op: UInt): Bool = isCbo(op) || op(3,0) === cbo_zero
     def isCboClean(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_clean)
     def isCboFlush(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_flush)
     def isCboInval(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_inval)
@@ -856,6 +862,7 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
+    def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
     def EX_VI     = virtualInstr
@@ -873,9 +880,9 @@ package object xiangshan {
 
     def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
 
-    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
+    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF, EX_HWE)
 
-    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
+    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF, EX_HWE)
 
     def priorities = Seq(
       doubleTrap,
@@ -934,6 +941,8 @@ package object xiangshan {
       partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
 
+  object InstSeqNum extends NamedUInt(64)
+
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base
     // frontend
@@ -966,10 +975,6 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
-    // dispatch queue full
-    val IntDqStall = Value("IntDqStall")
-    val FpDqStall = Value("FpDqStall")
-    val LsDqStall = Value("LsDqStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")

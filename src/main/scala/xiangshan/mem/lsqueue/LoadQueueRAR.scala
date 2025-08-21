@@ -15,15 +15,16 @@
 ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -46,6 +47,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     // global
     val lqFull = Output(Bool())
+
+    val validCount = Output(UInt())
   })
 
   private val PartialPAddrStride: Int = 6
@@ -99,8 +102,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
-    numCamPort = LoadPipelineWidth
+    numWDelay = 1,
+    numCamPort = LoadPipelineWidth,
+    enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
+    paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
@@ -113,7 +118,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     size = LoadQueueRARSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
-    enablePreAlloc = true,
+    enablePreAlloc = false,
     moduleName = "LoadQueueRAR freelist"
   ))
   freeList.io := DontCare
@@ -263,6 +268,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   })
 
   io.lqFull := freeList.io.empty
+  io.validCount := freeList.io.validCount
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))

@@ -47,6 +47,7 @@ import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.trace._
+import xiangshan.mem.prefetch.PrefetchCtrl
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -163,6 +164,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isLastInFtqEntry = Bool()
+  val debug_seqNum = InstSeqNum()
 }
 
 
@@ -343,12 +345,12 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
 
 class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
-  val isNC = Bool()
+  val isNCIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
 
-  def isSkipDiff: Bool = isMMIO || isNC || isPerfCnt
+  def isSkipDiff: Bool = isMMIO || isNCIO || isPerfCnt
   /* add L/S inst info in EXU */
   // val L1toL2TlbLatency = UInt(XLEN.W)
   // val levelTlbHit = UInt(2.W)
@@ -462,6 +464,11 @@ class LoadCancelIO(implicit p: Parameters) extends XSBundle {
   val ld2Cancel = Bool()
 }
 
+class WfiReqBundle extends Bundle {
+  val wfiReq = Output(Bool())
+  val wfiSafe = Input(Bool())
+}
+
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
@@ -471,6 +478,8 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
   val canAccept = Input(Bool())
+
+  val wfi = Flipped(new WfiReqBundle)
 }
 
 class SatpStruct(implicit p: Parameters) extends XSBundle {
@@ -513,16 +522,37 @@ class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
   }
 }
 
+// add mbmc csr
+class MbmcStruct(implicit p: Parameters) extends XSBundle {
+  val BME = UInt(1.W)
+  val CMODE = UInt(1.W)
+  val BCLEAR = UInt(1.W)
+  val BMA = UInt(58.W)
+}
+
+class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
+  def apply(mbmc_value: UInt): Unit = {
+    require(mbmc_value.getWidth == XLEN)
+    val mc = mbmc_value.asTypeOf(new MbmcStruct)
+    BME := mc.BME
+    CMODE := mc.CMODE
+    BCLEAR := mc.BCLEAR
+    BMA := mc.BMA
+  }
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
   val vsatp = new TlbSatpBundle()
   val hgatp = new TlbHgatpBundle()
+  val mbmc = new TlbMbmcBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
     val vmxr = Bool()
     val vsum = Bool()
     val virt = Bool()
+    val virt_changed = Bool()
     val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
@@ -576,16 +606,7 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val l1I_pf_enable = Output(Bool())
-  val l2_pf_enable = Output(Bool())
-  val l1D_pf_enable = Output(Bool())
-  val l1D_pf_train_on_hit = Output(Bool())
-  val l1D_pf_enable_agt = Output(Bool())
-  val l1D_pf_enable_pht = Output(Bool())
-  val l1D_pf_active_threshold = Output(UInt(4.W))
-  val l1D_pf_active_stride = Output(UInt(6.W))
-  val l1D_pf_enable_stride = Output(Bool())
-  val l2_pf_store_only = Output(Bool())
+  val pf_ctrl = Output(new PrefetchCtrl)
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
@@ -602,6 +623,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val uncache_write_outstanding_enable = Output(Bool())
   val hd_misalign_st_enable = Output(Bool())
   val hd_misalign_ld_enable = Output(Bool())
+  val power_down_enable = Output(Bool())
+  val flush_l2_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())
@@ -655,6 +678,9 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
     sv48 && target(XLEN - 1, 48) =/= VecInit.fill(XLEN - 48)(target(47)).asUInt
   def checkGuestPageFault(target: UInt): Bool =
     sv39x4 && target(XLEN - 1, 41).orR || sv48x4 && target(XLEN - 1, 50).orR
+
+  def shouldBeSext: Bool = sv39 || sv48
+  def shouldBeZext: Bool = bare || sv39x4 || sv48x4
 }
 
 object AddrTransType {
@@ -783,3 +809,26 @@ class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParamete
   val isKeyword = Bool()                             // miss entry keyword -> L1 load queue replay
 }
 
+class TopDownInfo(implicit p: Parameters) extends XSBundle {
+  val lqEmpty = Input(Bool())
+  val sqEmpty = Input(Bool())
+  val l1Miss = Input(Bool())
+  val noUopsIssued = Output(Bool())
+  val l2TopMiss = Input(new TopDownFromL2Top)
+}
+
+class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
+  val l2Miss = Bool()
+  val l3Miss = Bool()
+}
+
+class LowPowerIO(implicit p: Parameters) extends Bundle {
+  /* i_*: SoC -> CPU   o_*: CPU -> SoC */
+  val o_cpu_no_op = Output(Bool()) 
+  //physical power down 
+  val i_cpu_pwrdown_req_n = Input(Bool())
+  val o_cpu_pwrdown_ack_n = Output(Bool())
+  // power on/off sequence control for Core iso/rst
+  val i_cpu_iso_en= Input(Bool())
+  val i_cpu_sw_rst_n = Input(Bool())
+}

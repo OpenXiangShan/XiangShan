@@ -58,7 +58,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val simAXIMem = Module(l_simAXIMem.module)
   l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
 
-  soc.io.clock := clock.asBool
+  soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.sram_config := 0.U

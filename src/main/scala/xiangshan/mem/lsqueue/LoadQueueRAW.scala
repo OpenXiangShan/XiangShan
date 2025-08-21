@@ -16,17 +16,18 @@
 
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.cache._
-import xiangshan.frontend.FtqPtr
-import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.frontend.FtqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -54,8 +55,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
 
   private def PartialPAddrWidth: Int = 24
+  private def paddrOffset: Int = DCacheVWordOffset
   private def genPartialPAddr(paddr: UInt) = {
-    paddr(DCacheVWordOffset + PartialPAddrWidth - 1, DCacheVWordOffset)
+    paddr(DCacheVWordOffset + PartialPAddrWidth - 1, paddrOffset)
   }
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
@@ -80,7 +82,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = StorePipelineWidth
+    numCamPort = StorePipelineWidth,
+    enableCacheLineCheck = true,
+    paddrOffset = paddrOffset
   ))
   paddrModule.io := DontCare
   val maskModule = Module(new LqMaskModule(
@@ -286,6 +290,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   def detectRollback(i: Int) = {
     paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
+    paddrModule.io.violationCheckLine.get(i) := storeIn(i).bits.wlineflag
     maskModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.mask, storeIn(i).valid)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt

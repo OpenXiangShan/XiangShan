@@ -34,6 +34,7 @@ import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 import xiangshan.backend.trace._
+import freechips.rocketchip.rocket.CSRs
 
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
@@ -117,6 +118,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // instruction fetch address translation type
   val instrAddrTransType = Output(new AddrTransType)
+  // ack for axireg from imsic. which indicates imsic can work actively
+  val msiAck = Output(Bool())
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {
@@ -1638,8 +1641,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
-*/
-class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
+class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
     val hpmevent = Output(Vec(29, UInt(XLEN.W)))
@@ -1653,7 +1655,7 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
                    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
 
   val perfEventMapping = (0 until 29).map(i => {Map(
-    MaskedRegMap(addr = Mhpmevent3 +i,
+    MaskedRegMap(addr = CSRs.mhpmevent3 + i,
                  reg  = perfEvents(i),
                  wmask = "hf87fff3fcff3fcff".U(XLEN.W))
   )}).fold(Map())((a,b) => a ++ b)
@@ -1664,3 +1666,4 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
     io.hpmevent(i) := perfEvents(i)
   }
 }
+*/

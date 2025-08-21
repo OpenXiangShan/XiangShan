@@ -1,0 +1,98 @@
+#***************************************************************************************
+# Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
+#
+# Docker image info
+#
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
+GIT_BRANCH_CLEAN := $(shell echo $(GIT_BRANCH) | sed -e "s/[^[:alnum:]]/-/g")
+XSDEV_IMAGE := ghcr.io/openxiangshan/xsdev$(if $(GIT_BRANCH_CLEAN),:$(GIT_BRANCH_CLEAN))
+HAVE_XSDEV_IMAGE := $(shell docker image inspect --format '{{.ID}}' $(XSDEV_IMAGE) 2> /dev/null)
+NO_XSDEV_IMAGE := $(if $(HAVE_XSDEV_IMAGE),,1)
+
+# check if fd0 refers to tty
+HAVE_TTY = $(shell [ -t 0 ] && echo y)
+
+# helper to escape MAKEOVERRIDES
+space_escape := _-_SPACE_-_
+define escape_overrides
+$(subst $(space_escape),\ ,$(addprefix -e ,$(subst \ ,$(space_escape),$(MAKEOVERRIDES))))
+endef
+
+# command for docker run
+MILL_WORK_DIR := /work
+MILL_OUTPUT_DIR := .docker-mill-out
+DOCKER_RUN = docker run --init --rm -i $(if $(HAVE_TTY),-t) -e IN_XSDEV_DOCKER=y \
+			-e NOOP_HOME=$(MILL_WORK_DIR) \
+			$(escape_overrides) \
+			-v .:$(MILL_WORK_DIR):ro \
+			-v ./$(MILL_OUTPUT_DIR):$(MILL_WORK_DIR)/out:rw \
+			-v $(BUILD_DIR):$(MILL_WORK_DIR)/$(BUILD_DIR):rw \
+		    $(XSDEV_IMAGE) $(1) || exit 1
+
+# mill proxy support
+HTTP_PROXY ?=
+PROXY_HOST := $(shell echo $(HTTP_PROXY) | sed -e 's|http://\(.*\):\(.*\)|\1|')
+PROXY_PORT := $(shell echo $(HTTP_PROXY) | sed -e 's|http://\(.*\):\(.*\)|\2|')
+.mill-jvm-opts:
+	@{ echo -Dhttp.proxyHost=$(PROXY_HOST);		\
+	   echo -Dhttp.proxyPort=$(PROXY_PORT);		\
+	   echo -Dhttps.proxyHost=$(PROXY_HOST);	\
+	   echo -Dhttps.proxyPort=$(PROXY_PORT); } > $@
+__prep_proxy: .mill-jvm-opts
+
+# build docker image
+image: $(if $(HTTP_PROXY),__prep_proxy) init
+	@docker build -t $(XSDEV_IMAGE) \
+		$(if $(HTTP_PROXY),--build-arg  HTTP_PROXY=$(HTTP_PROXY) \
+				  --build-arg HTTPS_PROXY=$(HTTP_PROXY)) . \
+		|| (echo ""; \
+		    echo "Docker image build failed, maybe you need a proxy?"; \
+		    echo "\n make image HTTP_PROXY=\"http://<proxy-ip>:<port>\"\n"; false)
+
+# pull docker image
+pull-image:
+	@docker pull $(XSDEV_IMAGE)
+
+# run interactive shell
+sh:
+	$(if $(HAVE_XSDEV_IMAGE),,\
+	     $(error Docker unavailable or "$(XSDEV_IMAGE)" image not exist))
+	@mkdir -p out $(MILL_OUTPUT_DIR)
+	@$(call DOCKER_RUN)
+
+.PHONY: image __prep_proxy sh
+
+#
+# docker envrionment switch helper
+#
+__switch_docker_env:
+	@mkdir -p out $(MILL_OUTPUT_DIR) $(BUILD_DIR)
+	@if [ -z "$(IN_XSDEV_DOCKER)" ]; then \
+		echo "\e[32mSwitching to Docker environment...\e[0m"; \
+		$(call DOCKER_RUN, -c "make $(DOCKER_TARGET)"); \
+		echo "\e[32mLeaving Docker envrionment...\e[0m"; \
+	fi
+.PHONY: __switch_docker_env
+
+define rule_docker_target
+$(1): | __$(1)
+__$(1): DOCKER_TARGET=$(1)
+__$(1): __switch_docker_env
+endef
+
+# run selected target in docker envrionment
+docker-deps = $(if $(NO_XSDEV_IMAGE)$(IN_XSDEV_DOCKER),$(1),__$(1) \
+		   $(eval $(rule_docker_target)))

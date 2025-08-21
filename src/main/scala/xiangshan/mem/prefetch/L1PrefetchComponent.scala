@@ -1,17 +1,19 @@
 package xiangshan.mem.prefetch
 
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.util._
 import chisel3._
 import chisel3.util._
-import xiangshan._
+import freechips.rocketchip.util._
 import utils._
 import utility._
-import xiangshan.cache.HasDCacheParameters
-import xiangshan.cache.mmu._
-import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
+import xiangshan._
+import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.trace._
 import xiangshan.mem.L1PrefetchSource
+import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.mmu._
 
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
@@ -100,7 +102,7 @@ trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParame
 }
 
 trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
-  def reorder[T <: LdPrefetchTrainBundle](source: Vec[ValidIO[T]]): Vec[ValidIO[T]] = {
+  def reorder[T <: LsPrefetchTrainBundle](source: Vec[ValidIO[T]]): Vec[ValidIO[T]] = {
     if(source.length == 1) {
       source
     }else if(source.length == 2) {
@@ -153,7 +155,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     val enable = Input(Bool())
     val flush = Input(Bool())
     // train input, only from load for now
-    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LsPrefetchTrainBundle())))
     // filter out
     val train_req = DecoupledIO(new PrefetchReqBundle())
   })
@@ -181,7 +183,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   require(size >= enqLen)
 
   val ld_in_reordered = reorder(io.ld_in)
-  val reqs_l = ld_in_reordered.map(_.bits.asPrefetchReqBundle())
+  val reqs_l = ld_in_reordered.map(_.bits.toPrefetchReqBundle())
   val reqs_vl = ld_in_reordered.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
@@ -369,6 +371,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val l1_prefetch_req = Flipped(ValidIO(new StreamPrefetchReqBundle))
     val l2_l3_prefetch_req = Flipped(ValidIO(new StreamPrefetchReqBundle))
     val tlb_req = new TlbRequestIO(nRespDups = 2)
+    val pmp_resp = Flipped(new PMPRespBundle())
     val l1_req = DecoupledIO(new L1PrefetchReq())
     val l2_pf_addr = ValidIO(new L2PrefetchReq())
     val l3_pf_addr = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
@@ -589,15 +592,19 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s0_tlb_fire_vec = VecInit((0 until MLP_SIZE).map{case i => tlb_req_arb.io.in(i).fire})
   val s1_tlb_fire_vec = GatedValidRegNext(s0_tlb_fire_vec)
   val s2_tlb_fire_vec = GatedValidRegNext(s1_tlb_fire_vec)
+  val s3_tlb_fire_vec = GatedValidRegNext(s2_tlb_fire_vec)
+  val not_tlbing_vec = VecInit((0 until MLP_SIZE).map{case i =>
+    !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !s3_tlb_fire_vec(i)
+  })
 
   for(i <- 0 until MLP_SIZE) {
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
     val l2_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === i.U)
     if(i < MLP_L1_SIZE) {
-      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l1_evict
+      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && not_tlbing_vec(i) && !l1_evict
       tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
     }else {
-      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l2_evict
+      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && not_tlbing_vec(i) && !l2_evict
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
@@ -632,42 +639,61 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   XSPerfAccumulate("s1_tlb_req_evict", s1_tlb_req_valid && s1_tlb_evict)
 
   // s2: get response from tlb
-  val s2_tlb_resp = io.tlb_req.resp
+  val s2_tlb_resp_valid = io.tlb_req.resp.valid
+  val s2_tlb_resp = io.tlb_req.resp.bits
   val s2_tlb_update_index = RegEnable(s1_tlb_req_index, s1_tlb_req_valid)
   val s2_l1_tlb_evict = s1_l1_alloc && (s1_l1_index === s2_tlb_update_index)
   val s2_l2_tlb_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === s2_tlb_update_index)
   val s2_tlb_evict = s2_l1_tlb_evict || s2_l2_tlb_evict
-  when(s2_tlb_resp.valid && !s2_tlb_evict) {
-    when(s2_tlb_update_index < MLP_L1_SIZE.U) {
-      l1_array(s2_tlb_update_index).is_vaddr := s2_tlb_resp.bits.miss
 
-      when(!s2_tlb_resp.bits.miss) {
-        l1_array(s2_tlb_update_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
-          invalid_array(s2_tlb_update_index, false)
+  // s3: get pmp response form PMPChecker
+  val s3_tlb_resp_valid = RegNext(s2_tlb_resp_valid)
+  val s3_tlb_resp = RegEnable(s2_tlb_resp, s2_tlb_resp_valid)
+  val s3_tlb_update_index = RegEnable(s2_tlb_update_index, s2_tlb_resp_valid)
+  val s3_tlb_evict = RegNext(s2_tlb_evict)
+  val s3_pmp_resp = io.pmp_resp
+  val s3_update_valid = s3_tlb_resp_valid && !s3_tlb_evict && !s3_tlb_resp.miss
+  val s3_drop = s3_update_valid && (
+    // page/access fault
+    s3_tlb_resp.excp.head.pf.ld || s3_tlb_resp.excp.head.gpf.ld || s3_tlb_resp.excp.head.af.ld ||
+    // uncache
+    s3_pmp_resp.mmio || Pbmt.isUncache(s3_tlb_resp.pbmt.head) ||
+    // pmp access fault
+    s3_pmp_resp.ld
+  )
+  when(s3_tlb_resp_valid && !s3_tlb_evict) {
+    when(s3_tlb_update_index < MLP_L1_SIZE.U) {
+      l1_array(s3_tlb_update_index).is_vaddr := s3_tlb_resp.miss
+
+      when(!s3_tlb_resp.miss) {
+        l1_array(s3_tlb_update_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s3_tlb_resp.paddr.head(s3_tlb_resp.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
+        when(s3_drop) {
+          invalid_array(s3_tlb_update_index, false)
         }
       }
     }.otherwise {
-      val inner_index = s2_tlb_update_index - MLP_L1_SIZE.U
-      l2_array(inner_index).is_vaddr := s2_tlb_resp.bits.miss
-  
-      when(!s2_tlb_resp.bits.miss) {
-        l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
+      val inner_index = s3_tlb_update_index - MLP_L1_SIZE.U
+      l2_array(inner_index).is_vaddr := s3_tlb_resp.miss
+
+      when(!s3_tlb_resp.miss) {
+        l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s3_tlb_resp.paddr.head(s3_tlb_resp.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
+        when(s3_drop) {
           invalid_array(inner_index, true)
         }
       }
     }
   }
-  s2_tlb_resp.ready := true.B
+  io.tlb_req.resp.ready := true.B
 
-  XSPerfAccumulate("s2_tlb_resp_valid", s2_tlb_resp.valid)
-  XSPerfAccumulate("s2_tlb_resp_evict", s2_tlb_resp.valid && s2_tlb_evict)
-  XSPerfAccumulate("s2_tlb_resp_miss", s2_tlb_resp.valid && !s2_tlb_evict && s2_tlb_resp.bits.miss)
-  XSPerfAccumulate("s2_tlb_resp_updated", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss)
-  XSPerfAccumulate("s2_tlb_resp_page_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.pf.ld)
-  XSPerfAccumulate("s2_tlb_resp_guestpage_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.gpf.ld)
-  XSPerfAccumulate("s2_tlb_resp_access_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.af.ld)
+  XSPerfAccumulate("s3_tlb_resp_valid", s3_tlb_resp_valid)
+  XSPerfAccumulate("s3_tlb_resp_evict", s3_tlb_resp_valid && s3_tlb_evict)
+  XSPerfAccumulate("s3_tlb_resp_miss", s3_tlb_resp_valid && !s3_tlb_evict && s3_tlb_resp.miss)
+  XSPerfAccumulate("s3_tlb_resp_updated", s3_update_valid)
+  XSPerfAccumulate("s3_tlb_resp_page_fault", s3_update_valid && s3_tlb_resp.excp.head.pf.ld)
+  XSPerfAccumulate("s3_tlb_resp_guestpage_fault", s3_update_valid && s3_tlb_resp.excp.head.gpf.ld)
+  XSPerfAccumulate("s3_tlb_resp_access_fault", s3_update_valid && s3_tlb_resp.excp.head.af.ld)
+  XSPerfAccumulate("s3_tlb_resp_pmp_access_fault", s3_update_valid && s3_pmp_resp.ld)
+  XSPerfAccumulate("s3_tlb_resp_uncache", s3_update_valid && (Pbmt.isUncache(s3_tlb_resp.pbmt.head) || s3_pmp_resp.mmio))
 
   // l1 pf
   // s0: generate prefetch req paddr per entry, arb them
@@ -717,7 +743,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_array(s1_pf_index).bit_vec := l1_array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  val in_pmem = PmemRanges.map(range => s1_pf_bits.req.paddr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  val in_pmem = PmemRanges.map(_.cover(s1_pf_bits.req.paddr)).reduce(_ || _)
   io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && in_pmem && io.enable
   io.l1_req.bits := s1_pf_bits.req
 
@@ -808,7 +834,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   XSPerfAccumulate("l2_prefetche_queue_busby", io.l2PfqBusy)
   XSPerfHistogram("filter_active", PopCount(VecInit(
-    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++ 
+    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++
     l2_array.zip(l2_valids).map{ case (e, v) => e.can_send_pf(v) }
     ).asUInt), true.B, 0, MLP_SIZE, 1)
   XSPerfHistogram("l1_filter_active", PopCount(VecInit(l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v)}).asUInt), true.B, 0, MLP_L1_SIZE, 1)
@@ -818,7 +844,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
-  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LdPrefetchTrainBundle()))))
+  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LsPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
@@ -881,16 +907,17 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
 
   pf_queue_filter.io.l1_req.ready := Mux(pf_ctrl.enable, io.l1_req.ready, true.B)
   pf_queue_filter.io.tlb_req <> io.tlb_req
+  pf_queue_filter.io.pmp_resp := io.pmp_resp
   pf_queue_filter.io.enable := enable
   pf_queue_filter.io.flush := flush
   pf_queue_filter.io.confidence := pf_ctrl.confidence
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
-  val l2_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  val l2_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l2_pf_addr.bits.addr)).reduce(_ || _)
   io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && enable && pf_ctrl.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
 
-  val l3_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l3_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits)).reduce(_ || _)
   io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && enable && pf_ctrl.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
 }

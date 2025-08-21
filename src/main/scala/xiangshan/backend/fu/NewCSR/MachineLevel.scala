@@ -15,10 +15,27 @@ import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
+import xiangshan.backend.fu.util.CSRConst._
 
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
+  // Machine level Custom Read/Write
+  val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
+    val mbmc_lock = reg.BME.asBool
+    if (!HasBitmapCheckDefault) {
+      reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+      reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
+      reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
+    } else {
+      reg.BME := 1.U
+      reg.CMODE := 0.U
+      reg.BMA := BMAField.TestBMA
+    }
+    reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
+  })
+    .setAddr(Mbmc))  else  None
+
   val mstatus = Module(new MstatusModule)
     .setAddr(CSRs.mstatus)
 
@@ -165,14 +182,14 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasOfFromPerfCntBundle {
+    Module(new CSRModule(s"Mhpmevent", new MhpmeventBundle) with HasOfFromPerfCntBundle {
       when(wen){
         reg.OF := wdata.OF
       }.elsewhen(ofFromPerfCnt) {
         reg.OF := ofFromPerfCnt
       }
     })
-      .setAddr(CSRs.mhpmevent3 - 3 + num)
+      .setAddr(CSRs.mhpmevent3 - 3 + num).suggestName(s"Mhpmevent$num")
   )
 
   val mscratch = Module(new CSRModule("Mscratch"))
@@ -335,7 +352,9 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  val mvendorid = Module(new CSRModule("Mvendorid") { rdata := 0.U })
+  val mvendorid = Module(new CSRModule("Mvendorid", new CSRBundle {
+    val ALL = RO(63, 0)
+  }))
     .setAddr(CSRs.mvendorid)
 
   // architecture id for XiangShan is 25
@@ -362,7 +381,13 @@ trait MachineLevel { self: NewCSR =>
   }))
     .setAddr(CSRs.mconfigptr)
 
-  val mstateen0 = Module(new CSRModule("Mstateen", new MstateenBundle0)).setAddr(CSRs.mstateen0)
+  val mstateen0 = Module(new CSRModule("Mstateen0", new Mstateen0Bundle)).setAddr(CSRs.mstateen0)
+
+  val mstateen1 = Module(new CSRModule("Mstateen1", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen1)
+
+  val mstateen2 = Module(new CSRModule("Mstateen2", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen2)
+
+  val mstateen3 = Module(new CSRModule("Mstateen3", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen3)
 
   // smrnmi extension
   val mnepc = Module(new CSRModule("Mnepc", new Epc) with TrapEntryMNEventSinkBundle {
@@ -384,6 +409,18 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mnstatus)
   val mnscratch = Module(new CSRModule("Mnscratch"))
     .setAddr(CSRs.mnscratch)
+
+  val mcontext = Module(new CSRModule("Mcontext", new McontextBundle) {
+    val fromHcontext = IO(Flipped(ValidIO(new McontextBundle)))
+    val toHcontext   = IO(Output(new McontextBundle))
+    toHcontext.HCONTEXT := regOut.HCONTEXT.asUInt
+    when(wen) {
+      reg.HCONTEXT := wdata.HCONTEXT.asUInt
+    }.elsewhen(fromHcontext.valid) {
+      reg.HCONTEXT := fromHcontext.bits.HCONTEXT
+    }
+  })
+    .setAddr(CSRs.mcontext)
 
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
@@ -413,11 +450,16 @@ trait MachineLevel { self: NewCSR =>
     mhartid,
     mconfigptr,
     mstateen0,
+    mstateen1,
+    mstateen2,
+    mstateen3,
     mnepc,
     mncause,
     mnstatus,
     mnscratch,
-  ) ++ mhpmevents ++ mhpmcounters
+    mcontext,
+  ) ++ mhpmevents ++ mhpmcounters ++ (if (HasBitmapCheck) Seq(mbmc.get) else Seq())
+
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
@@ -427,6 +469,13 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
+}
+
+class MbmcBundle extends  CSRBundle {
+  val BMA  = BMAField(63,6,null).withReset(BMAField.ResetBMA)
+  val BME  = RW(2).withReset(0.U)
+  val BCLEAR = RW(1).withReset(0.U)
+  val CMODE  = RW(0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {
@@ -490,7 +539,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
     reg.FS := ContextStatus.Dirty
   }
 
-  when (robCommit.vsDirty || writeVCSR) {
+  when (robCommit.vsDirty || writeVCSR || robCommit.vstart.valid && robCommit.vstart.bits =/= 0.U) {
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
@@ -613,11 +662,13 @@ class MvienBundle extends InterruptEnableBundle {
   this.SSIE.setRW().withReset(0.U)
   this.SEIE.setRW().withReset(0.U)
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIE.setRO().withReset(0.U)
 }
 
 class MvipBundle extends InterruptPendingBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIP.setRO().withReset(0.U)
 }
 
 class Epc extends CSRBundle {
@@ -703,6 +754,11 @@ object OPTYPE extends CSREnum with WARLApply {
   override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(OR, AND, XOR, ADD)
 }
 
+class McontextBundle extends CSRBundle {
+  override val len = 14
+  val HCONTEXT = RW(13, 0).withReset(0.U)
+}
+
 trait HasOfFromPerfCntBundle { self: CSRModule[_] =>
   val ofFromPerfCnt = IO(Input(Bool()))
 }
@@ -763,4 +819,8 @@ trait HasPerfEventBundle { self: CSRModule[_] =>
 
 trait HasLocalInterruptReqBundle { self: CSRModule[_] =>
   val lcofiReq = IO(Input(Bool()))
+}
+
+trait HasMachineFlushL2Bundle { self: CSRModule[_] =>
+  val l2FlushDone = IO(Input(Bool()))
 }

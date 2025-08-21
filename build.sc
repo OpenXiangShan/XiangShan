@@ -43,6 +43,9 @@ def defaultVersions = Map(
   "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.6.0",
   "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
 )
+/* resolve firtool dependency */
+import $ivy.`org.chipsalliance::chisel:6.6.0`
+import $ivy.`org.chipsalliance::firtool-resolver:1.3.0`
 
 trait HasChisel extends SbtModule {
   def chiselModule: Option[ScalaModule] = None
@@ -61,6 +64,13 @@ trait HasChisel extends SbtModule {
   override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
+
+  def resolveFirtoolDeps = T {
+    firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
+      case Right(bin) => bin.path.getAbsolutePath
+      case Left(err) => err
+    }
+  }
 }
 
 object rocketchip
@@ -117,6 +127,13 @@ object utility extends HasChisel {
     rocketchip
   )
 
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    ivy"com.lihaoyi::sourcecode:0.4.2",
+  )
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    override def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.7")
+  }
 }
 
 object yunsuan extends HasChisel {
@@ -177,7 +194,7 @@ object difftest extends HasChisel {
 
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources = T.sources {
-      super.sources() ++ Seq(PathRef(millSourcePath / "src" / "generator" / "chisel"))
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
     }
   }
 
@@ -187,6 +204,15 @@ object fudian extends HasChisel {
 
   override def millSourcePath = pwd / "fudian"
 
+}
+
+object chiselAIA extends HasChisel {
+  override def millSourcePath = pwd / "ChiselAIA"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    utility
+  )
 }
 
 object macros extends ScalaModule {
@@ -219,6 +245,8 @@ trait XiangShanModule extends ScalaModule {
 
   def yunsuanModule: ScalaModule
 
+  def chiselAIAModule: ScalaModule
+
   def macrosModule: ScalaModule
 
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -230,6 +258,7 @@ trait XiangShanModule extends ScalaModule {
     yunsuanModule,
     fudianModule,
     utilityModule,
+    chiselAIAModule,
     macrosModule,
   )
 
@@ -259,6 +288,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   def yunsuanModule = yunsuan
 
+  def chiselAIAModule = chiselAIA
+
   def macrosModule = macros
 
   // properties may be changed by user. Use `Task.Input` here.
@@ -270,6 +301,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
+    ivy"io.circe::circe-yaml:1.15.0",
+    ivy"io.circe::circe-generic-extras:0.14.4"
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
@@ -291,7 +324,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
       LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
-  def gitStatus: T[String] = {
+  // gitStatus changes frequently and unpredictably. Use `Task.Input` here.
+  def gitStatus: T[String] = Task.Input {
     val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
     val gitRevParseProcess = gitRevParseBuilder.start()
     val shaReader = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
@@ -342,10 +376,6 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     )
 
     override def forkArgs = forkArgsTask()
-
-    override def ivyDeps = super.ivyDeps() ++ Agg(
-      defaultVersions("chiseltest")
-    )
 
     override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
 

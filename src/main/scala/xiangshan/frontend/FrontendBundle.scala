@@ -103,6 +103,7 @@ class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {
+  val valid          = Output(Bool())
   val mmioFtqPtr     = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
 }
@@ -168,6 +169,9 @@ object ExceptionType {
    */
   def fromECC(enable: Bool, corrupt: Bool): UInt =
     Mux(enable && corrupt, af, none)
+
+  def fromTilelink(corrupt: Bool): UInt =
+    Mux(corrupt, af, none)
 
   /**Generates exception mux tree
    *
@@ -247,6 +251,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
   val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
+  val debug_seqNum = Vec(PredictWidth, InstSeqNum())
   val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
 }

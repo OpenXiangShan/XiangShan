@@ -4,15 +4,17 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 中文说明[在此](readme.zh-cn.md)。
 
-Copyright 2020-2022 by Institute of Computing Technology, Chinese Academy of Sciences.
+## Documentation
 
-Copyright 2020-2022 by Peng Cheng Laboratory.
+XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
 
-## Docs and slides
+XiangShan Design Document for Kunminghu V2R2 has been published separately. You can find it at [docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/).
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorials and more.
+XiangShan User Guide has been published separately. You can find it at [docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/) or [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
 
-* Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
+We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
+
+All XiangShan documents are licensed under the CC-BY-4.0.
 
 ## Publications
 
@@ -90,7 +92,7 @@ make idea
 
 ## Generate Verilog
 
-* Run `make verilog` to generate verilog code. The output file is `build/XSTop.v`.
+* Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
 * Refer to `Makefile` for more information.
 
 
@@ -102,7 +104,7 @@ make idea
 * Set environment variable `NEMU_HOME` to the **absolute path** of the [NEMU project](https://github.com/OpenXiangShan/NEMU).
 * Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project.
 * Set environment variable `AM_HOME` to the **absolute path** of the [AM project](https://github.com/OpenXiangShan/nexus-am).
-* Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/0.11.11/Scala_Installation_IDE_Support.html#_bootstrap_scripts).
+* Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts).
 * Clone this project and run `make init` to initialize submodules.
 
 ### Run with simulator
@@ -126,3 +128,13 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Acknowledgement
 
 The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
+
+## LICENSE
+
+Copyright © 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences.
+
+Copyright © 2021-2025 Beijing Institute of Open Source Chip
+
+Copyright © 2020-2022 by Peng Cheng Laboratory.
+
+XiangShan is licensed under [Mulan PSL v2](LICENSE).

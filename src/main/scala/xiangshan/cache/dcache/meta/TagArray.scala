@@ -19,8 +19,9 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{SRAMTemplate, XSPerfAccumulate, ClockGate}
-import xiangshan.cache.CacheInstrucion._
+import utility.{XSPerfAccumulate, ClockGate}
+import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
@@ -51,11 +52,15 @@ abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
   val TagEccParam = if(EnableTagEcc) Some(HasTagEccParam) else None
 }
 
-class TagArray(implicit p: Parameters) extends AbstractTagArray {
+class TagSRAMBank(index: Int)(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
-    val read = Flipped(DecoupledIO(new TagReadReq))
-    val resp = Output(Vec(nWays, UInt(encTagBits.W)))
-    val write = Flipped(DecoupledIO(new TagWriteReq))
+    val read = Flipped(DecoupledIO(new TagReadReq {
+      override val way_en = UInt(DCacheWayDiv.W)
+    }))
+    val resp = Output(Vec(DCacheWayDiv, UInt(encTagBits.W)))
+    val write = Flipped(DecoupledIO(new TagWriteReq {
+      override val way_en = UInt(DCacheWayDiv.W)
+    }))
   })
   // TODO: reset is unnecessary?
   val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
@@ -63,14 +68,15 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   val rstVal = 0.U
   val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
   val wdata = Mux(rst, rstVal, io.write.bits.asECCTag())
-  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
-  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
+  val wmask = Mux(rst || (DCacheWayDiv == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
+  val rmask = Mux(rst || (DCacheWayDiv == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
   when (rst) {
     rst_cnt := rst_cnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true))
+  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = DCacheWayDiv,
+    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true,
+    hasMbist = hasMbist,  hasSramCtl = hasSramCtl, suffix = Some("dcsh_tag")))
 
   val wen = rst || io.write.valid
   io.write.ready := !rst
@@ -88,7 +94,27 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
 
-  XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
+  XSPerfAccumulate("part_tag_read_counter_" + index, tag_array.io.r.req.valid)
+}
+
+class TagArray(implicit p: Parameters) extends AbstractTagArray {
+  val io = IO(new Bundle() {
+    val read = Flipped(DecoupledIO(new TagReadReq))
+    val resp = Output(Vec(nWays, UInt(encTagBits.W)))
+    val write = Flipped(DecoupledIO(new TagWriteReq))
+  })
+
+  val tag_arrays = List.tabulate(nWays / DCacheWayDiv)(i => Module(new TagSRAMBank(i)))
+  tag_arrays.zipWithIndex.foreach { case (tag_array, i) =>
+    tag_array.io.read <> io.read
+    tag_array.io.read.bits.way_en := io.read.bits.way_en((i + 1) * DCacheWayDiv - 1, i * DCacheWayDiv)
+    tag_array.io.write <> io.write
+    tag_array.io.write.bits.way_en := io.write.bits.way_en((i + 1) * DCacheWayDiv - 1, i * DCacheWayDiv)
+  }
+  io.resp.zip(tag_arrays.map(_.io.resp).flatten).foreach {
+    case (resp, bank_resp) =>
+      resp := bank_resp
+  }
 }
 
 class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends AbstractTagArray {
@@ -99,6 +125,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
+  val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeDcacheTag", hasMbist)
 
   def getECCFromEncTag(encTag: UInt) = {
     if (EnableDataEcc) {

@@ -4,7 +4,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRRWField => RW}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{
+  CSRRWField => RW,
+  CSRROField => RO,
+}
 import xiangshan.HasXSParameter
 
 import scala.collection.immutable.SeqMap
@@ -31,12 +34,28 @@ trait CSRCustom { self: NewCSR =>
   val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
+  // Machine Level Custom Read/Write
+
+  // mcorepwr: Core Power Down Status Enable
+  val mcorepwr = Module(new CSRModule("Mcorepwr", new McorepwrBundle))
+    .setAddr(0xBC0)
+
+  // mflushpwr: Flush L2 Cache Enable
+  val mflushpwr = Module(new CSRModule("Mflushpwr", new MflushpwrBundle)
+    with HasMachineFlushL2Bundle
+  {
+    regOut.L2_FLUSH_DONE := l2FlushDone
+  })
+    .setAddr(0xBC1)
+
   val customCSRMods = Seq(
     sbpctl,
     spfctl,
     slvpredctl,
     smblockctl,
     srnctl,
+    mcorepwr,
+    mflushpwr,
   )
 
   val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
@@ -59,7 +78,10 @@ class SbpctlBundle extends CSRBundle {
 }
 
 class SpfctlBundle extends CSRBundle {
-  // turn off L2 BOP, turn on L1 SMS by default
+  val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B)  // (Train L2, Prefetch L2) TP
+  val L2_PF_VBOP_ENABLE       = RW(    20).withReset(true.B)  // (Train L2, Prefetch L2) VBOP
+  val L2_PF_PBOP_ENABLE       = RW(    19).withReset(true.B)  // (Train L2, Prefetch L2) PBOP
+  val L2_PF_RECV_ENABLE       = RW(    18).withReset(true.B)  // (Train L1, Prefetch L2) receive from sms
   val L2_PF_STORE_ONLY        = RW(    17).withReset(false.B)     // L2 pf store only
   val L1D_PF_ENABLE_STRIDE    = RW(    16).withReset(true.B)      // L1D prefetch enable stride
   val L1D_PF_ACTIVE_STRIDE    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue)   // L1D prefetch active page stride
@@ -68,7 +90,7 @@ class SpfctlBundle extends CSRBundle {
   val L1D_PF_ENABLE_AGT       = RW(     4).withReset(true.B)      // L1D prefetch enable agt
   val L1D_PF_TRAIN_ON_HIT     = RW(     3).withReset(false.B)     // L1D train prefetch on hit
   val L1D_PF_ENABLE           = RW(     2).withReset(true.B)      // L1D Cache Prefetcher Enable
-  val L2_PF_ENABLE            = RW(     1).withReset(true.B)      // L2  Cache Prefetcher Enable
+  val L2_PF_ENABLE            = RW(     1).withReset(true.B)      // L2  Cache Prefetcher master Enable
   val L1I_PF_ENABLE           = RW(     0).withReset(true.B)      // L1I Cache Prefetcher Enable
 }
 
@@ -93,6 +115,15 @@ class SmblockctlBundle extends CSRBundle {
 class SrnctlBundle extends CSRBundle {
   val WFI_ENABLE     = RW(2).withReset(true.B)
   val FUSION_ENABLE  = RW(0).withReset(true.B)
+}
+
+class McorepwrBundle extends CSRBundle {
+  val POWER_DOWN_ENABLE = RW(0).withReset(false.B)
+}
+
+class MflushpwrBundle extends CSRBundle {
+  val FLUSH_L2_ENABLE = RW(0).withReset(false.B)
+  val L2_FLUSH_DONE   = RO(1).withReset(false.B)
 }
 
 object SbufferThreshold extends CSREnum with RWApply {

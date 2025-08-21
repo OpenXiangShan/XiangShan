@@ -261,6 +261,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid && (activeNum =/= 0.U) // if activeNum == 0, this uop do nothing, can be killed.
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
+  io.out.bits.uopAddr   := s1_in.baseAddr + uopOffset
   io.out.bits.stride    := stride
   io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
   io.out.bits.usLowBitsAddr := usLowBitsAddr
@@ -311,6 +312,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueMbIndex     = issueEntry.mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
+  val issueUopAddr     = issueEntry.uopAddr
   val issueUop         = issueEntry.uop
   val issueUopIdx      = issueUop.vpu.vuopIdx
   val issueInstType    = issueEntry.instType
@@ -351,7 +353,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     eew = issueEew
   )
   val issueStride = Mux(isIndexed(issueInstType), indexedStride, strideOffsetReg)
-  val vaddr = issueBaseAddr + issueUopOffset + issueStride
+  val vaddr = issueUopAddr + issueStride
   val mask = genVWmask128(vaddr ,issueAlignedType) // scala maske for flow
   val flowMask = issueEntry.flowMask
   /*
@@ -363,13 +365,13 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usNoSplit        = (issueUsAligned128 || usMaskInSingleUop) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
-  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx, XLEN)
+  val usSplitVaddr     = genUSSplitAddr(issueUopAddr, splitIdx, XLEN)
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
   val vecActive = Mux(!issuePreIsSplit, usSplitMask.orR, (flowMask & UIntToOH(splitIdx)).orR)
   // no-unit-stride can trigger misalign
-  val addrAligned = LookupTree(issueEew, List(
+  val addrAligned = LookupTree(Mux(isIndexed(issueInstType), issueSew, issueEew), List(
     "b00".U   -> true.B,                //b
     "b01".U   -> (vaddr(0)    === 0.U), //h
     "b10".U   -> (vaddr(1, 0) === 0.U), //w
@@ -416,7 +418,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
       when (activeIssue || inActiveIssue) {
         // The uop has not been entirly splited yet
         splitIdx := splitIdx + issueCount
-        strideOffsetReg := Mux(!issuePreIsSplit, strideOffsetReg, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
+        strideOffsetReg := Mux(!issuePreIsSplit, 0.U, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
       }
     }.otherwise {
       when (activeIssue || inActiveIssue) {
@@ -449,7 +451,11 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
-  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty && io.vstdMisalign.get.storeMisalignBufferEmpty
+  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty &&
+    (io.vstdMisalign.get.storeMisalignBufferEmpty ||
+      io.vstdMisalign.get.storeMisalignBufferRobIdx > io.out.bits.uop.robIdx ||
+      io.vstdMisalign.get.storeMisalignBufferRobIdx === io.out.bits.uop.robIdx &&
+        io.vstdMisalign.get.storeMisalignBufferUopIdx > io.out.bits.uop.uopIdx)
 
   // split data
   val splitData = genVSData(
@@ -466,16 +472,29 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := issueValid && (vecActive || !issuePreIsSplit)
+  vstd.valid := io.out.valid
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.uop.fuType := FuType.vstu.U
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
   vstd.bits.debug := DontCare
+  vstd.bits.vecDebug.get := DontCare // maybe assign later
   vstd.bits.vdIdx.get := DontCare
   vstd.bits.vdIdxInField.get := DontCare
   vstd.bits.isFromLoadUnit   := DontCare
   vstd.bits.mask.get := Mux(!issuePreIsSplit, usSplitMask, mask)
+
+  if(env.EnableDifftest){
+    val usVaddrOffset   = LookupTree(issueEew, List(
+      "b00".U -> 0.U,
+      "b01".U -> vaddr(0),
+      "b10".U -> vaddr(1, 0),
+      "b11".U -> vaddr(2, 0)
+    ))
+
+    vstd.bits.vecDebug.get.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
+    vstd.bits.vecDebug.get.offset := usVaddrOffset
+  }
 
 }
 

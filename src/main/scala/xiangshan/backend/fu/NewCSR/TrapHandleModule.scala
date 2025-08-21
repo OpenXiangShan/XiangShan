@@ -22,7 +22,6 @@ class TrapHandleModule extends Module {
   private val hedeleg = io.in.hedeleg.asUInt
   private val mvien = io.in.mvien.asUInt
   private val hvien = io.in.hvien.asUInt
-  private val virtualInterruptIsHvictlInject = io.in.virtualInterruptIsHvictlInject
 
   private val hasTrap = trapInfo.valid
   private val hasNMI = hasTrap && trapInfo.bits.nmi
@@ -141,8 +140,6 @@ class TrapHandleIO extends Bundle {
     val mtvec = Input(new XtvecBundle)
     val stvec = Input(new XtvecBundle)
     val vstvec = Input(new XtvecBundle)
-    // virtual interrupt is hvictl inject
-    val virtualInterruptIsHvictlInject = Input(Bool())
   })
 
   val out = new Bundle {
@@ -150,6 +147,6 @@ class TrapHandleIO extends Bundle {
     val causeNO = new CauseBundle
     val dbltrpToMN = Bool()
     val hasDTExcp = Bool()
-    val pcFromXtvec = UInt()
+    val pcFromXtvec = UInt(64.W)
   }
 }

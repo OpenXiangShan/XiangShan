@@ -85,6 +85,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val io = IO(new DecodeStageIO)
 
+  io.in.zipWithIndex.foreach{ case (d, i) => 
+    PerfCCT.updateInstPos(d.bits.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
+  }
+
   // io alias
   private val outReadys = io.out.map(_.ready)
   private val inValids = io.in.map(_.valid)
@@ -240,6 +244,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       SrcType.isVp(s) && (l === 0.U)
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
+    when (inst.bits.uopIdx =/= 0.U) {
+      inst.bits.debug_seqNum := 0.U
+    }
   }
 
   io.out.map(x =>
@@ -294,11 +301,20 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   io.toCSR.trapInstInfo.valid := hasIllegalInst && !io.redirect
   io.toCSR.trapInstInfo.bits.fromDecodedInst(illegalInst)
 
+  val recoveryFlag = RegInit(false.B)
+  when(io.redirect) {
+    recoveryFlag := true.B
+  }.elsewhen(io.in.map(_.fire).reduce(_ || _)) {
+    recoveryFlag := false.B
+  }
+
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
   XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
   XSPerfAccumulate("stall_cycle", io.in.head match { case x => x.valid && !x.ready})
   XSPerfAccumulate("wait_cycle", !io.in.head.valid && io.out.head.ready)
+  XSPerfAccumulate("inst_spec", PopCount(io.in.map(_.fire)))
+  XSPerfAccumulate("recovery_bubble", recoveryFlag)
 
   XSPerfHistogram("in_valid_range", PopCount(io.in.map(_.valid)), true.B, 0, DecodeWidth + 1, 1)
   XSPerfHistogram("in_fire_range", PopCount(io.in.map(_.fire)), true.B, 0, DecodeWidth + 1, 1)
@@ -312,6 +328,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     ("decoder_waitInstr",   PopCount(inValidNotReady)   ),
     ("decoder_stall_cycle", hasValid && !io.out(0).ready),
     ("decoder_utilization", PopCount(io.in.map(_.valid))),
+    ("INST_SPEC",           PopCount(io.in.map(_.fire))),
+    ("RECOVERY_BUBBLE",     recoveryFlag)
   )
   generatePerfEvent()
 

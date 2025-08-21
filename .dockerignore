@@ -1,0 +1,4 @@
+# ignore temporary files for docker build
+out/
+build/
+.docker-mill-out/

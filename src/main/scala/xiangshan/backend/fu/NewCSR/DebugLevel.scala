@@ -43,9 +43,9 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tdata2)
 
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
-    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasdebugModeBundle {
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle {
       when(wen){
-        reg := wdata.writeTdata1(debugMode, chainable).asUInt
+        reg := wdata.writeTdata1(canWriteDmode, chainable).asUInt
       }
     })
   )
@@ -131,10 +131,10 @@ class Tdata1Bundle extends CSRBundle{
     res.ACTION
   }
 
-  def writeTdata1(debugMode: Bool, chainable: Bool): Tdata1Bundle = {
+  def writeTdata1(canWriteDmode: Bool, chainable: Bool): Tdata1Bundle = {
     val res = Wire(new Tdata1Bundle)
     res := this.asUInt
-    val dmode = this.DMODE.asBool && debugMode
+    val dmode = this.DMODE.asBool && canWriteDmode
     res.TYPE := this.TYPE.legalize.asUInt
     res.DMODE := dmode
     when(this.TYPE.isLegal) {
@@ -272,7 +272,7 @@ class DscratchBundle extends OneFieldBundle
 
 class DcsrBundle extends CSRBundle {
   override val len: Int = 32
-  val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec) // Debug implementation as it described in 0.13 draft // todo
+  val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec) // Debug implementation as it described in 0.13 draft
   val EXTCAUSE  =           RO(26, 24).withReset(0.U)
   val CETRIG    =           RW(    19).withReset(0.U)
   // All ebreak Privileges are RW, instead of WARL, since XiangShan support U/S/VU/VS.
@@ -290,7 +290,6 @@ class DcsrBundle extends CSRBundle {
   // MPRVEN is RW, instead of WARL, since XiangShan support use mstatus.mprv in debug mode
   // Whether use mstatus.mprv
   val MPRVEN    =           RW(     4).withReset(0.U)
-  // TODO: support non-maskable interrupt
   val NMIP      =           RO(     3).withReset(0.U)
   // MPRVEN is RW, instead of WARL, since XiangShan support use mstatus.mprv in debug mode
   val STEP      =           RW(     2).withReset(0.U)
@@ -316,12 +315,12 @@ object DcsrCause extends CSREnum with ROApply {
 
 trait HasTdataSink { self: CSRModule[_] =>
   val tdataRead = IO(Input(new Bundle {
-    val tdata1 = UInt(XLEN.W) // Todo: check if use ireg bundle, and shrink the width
+    val tdata1 = UInt(XLEN.W)
     val tdata2 = UInt(XLEN.W)
   }))
 }
-trait HasdebugModeBundle { self: CSRModule[_] =>
-  val debugMode = IO(Input(Bool()))
+trait HasTriggerBundle { self: CSRModule[_] =>
+  val canWriteDmode = IO(Input(Bool()))
   val chainable = IO(Input(Bool()))
 }
 

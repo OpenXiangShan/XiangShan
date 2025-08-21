@@ -16,19 +16,20 @@
 ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.ExceptionNO._
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.FuType
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -52,6 +53,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    // for topdown
+    val noUopsIssued = Input(Bool())
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -243,32 +246,29 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
+    val need_rep = io.ldin(i).bits.rep_info.need_rep
+    val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      val need_rep = io.ldin(i).bits.rep_info.need_rep
-      val need_valid = io.ldin(i).bits.updateAddrValid
-
       when (!need_rep && need_valid && !io.ldin(i).bits.isvec) {
         committed(loadWbIndex) := true.B
-
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
       }
-
-      XSInfo(!need_rep && need_valid,
-        "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
-        io.ldin(i).bits.uop.lqIdx.asUInt,
-        io.ldin(i).bits.uop.pc,
-        io.ldin(i).bits.vaddr,
-        io.ldin(i).bits.paddr,
-        io.ldin(i).bits.mask,
-        io.ldin(i).bits.forwardData.asUInt,
-        io.ldin(i).bits.forwardMask.asUInt,
-        io.ldin(i).bits.mmio,
-        io.ldin(i).bits.isvec
-      )
     }
+    XSInfo(io.ldin(i).valid && !need_rep && need_valid,
+      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+      io.ldin(i).bits.uop.lqIdx.asUInt,
+      io.ldin(i).bits.uop.pc,
+      io.ldin(i).bits.vaddr,
+      io.ldin(i).bits.paddr,
+      io.ldin(i).bits.mask,
+      io.ldin(i).bits.forwardData.asUInt,
+      io.ldin(i).bits.forwardMask.asUInt,
+      io.ldin(i).bits.mmio,
+      io.ldin(i).bits.isvec
+    )
   }
 
   //  perf counter
@@ -276,7 +276,18 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val vecValidVec = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => allocated(i) && isvec(i))))
   QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
-  val perfEvents: Seq[(String, UInt)] = Seq()
+
+  def NLoadNotCompleted = 1
+  val validCountReg = RegNext(validCount)
+  val noUopsIssued = io.noUopsIssued
+  val stallLoad = io.noUopsIssued && (validCountReg >= NLoadNotCompleted.U)
+  val memStallAnyLoad = RegNext(stallLoad)
+
+  XSPerfAccumulate("mem_stall_anyload", memStallAnyLoad)
+
+  val perfEvents: Seq[(String, UInt)] = Seq(
+    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
+  )
   generatePerfEvent()
 
   // debug info

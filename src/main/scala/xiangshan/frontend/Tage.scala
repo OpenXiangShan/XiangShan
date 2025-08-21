@@ -34,6 +34,9 @@ import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
+import utility.mbist.MbistPipeline
+import utility.sram.FoldedSRAMTemplate
+import utility.sram.SRAMConflictBehavior
 import xiangshan._
 
 trait TageParams extends HasBPUConst with HasXSParameter {
@@ -157,14 +160,18 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val bt = Module(
     new FoldedSRAMTemplate(
       UInt(2.W),
+      setSplit = 2,
+      waySplit = 1,
+      dataSplit = 1,
       set = BtSize,
       width = foldWidth,
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true,
+      conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
       withClockGate = true,
-      avoidSameAddr = true
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     )
   )
 
@@ -323,7 +330,9 @@ class TageTable(
     extraReset = true,
     holdRead = true,
     singlePort = true,
-    withClockGate = true
+    withClockGate = true,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -336,7 +345,9 @@ class TageTable(
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true
+      withClockGate = true,
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
   )
 
@@ -620,7 +631,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val bt = Module(new TageBTable)
   bt.io.req.valid := io.s0_fire(1)
   bt.io.req.bits  := s0_pc_dup(1)
-
+  private val mbistPl           = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeTage", hasMbist)
   val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit(((1 << TickWidth) - 1).U(TickWidth.W)))
   val bankTickCtrs              = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
@@ -698,7 +709,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     updateMeta.altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
     updateMeta.allocates(i) := RegEnable(
       u_meta.allocates(i),
-      io.update.valid && io.update.bits.mispred_mask(i)
+      io.update.valid // not using mispred_mask, because mispred_mask timing is bad
     )
   }
   if (EnableSC) {

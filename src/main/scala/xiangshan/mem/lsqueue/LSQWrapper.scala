@@ -22,15 +22,15 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
-import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.cache.{CMOReq, CMOResp}
-import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
-import xiangshan.mem._
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
 import xiangshan.backend._
-import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
+import xiangshan.cache.{CMOReq, CMOResp}
+import xiangshan.cache.mmu.{TlbHintIO, TlbRequestIO}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -89,7 +89,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
-    val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
@@ -101,6 +100,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
+    val cboZeroStout = DecoupledIO(new MemExuOutput)
     // TODO: implement vector store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true)) // vec writeback uncached store
     val sqEmpty = Output(Bool())
@@ -115,8 +115,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqCanAccept = Output(Bool())
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
+    val sqDeqUopIdx = Output(UopIdx())
+    val sqDeqRobIdx = Output(new RobPtr)
     val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
+    val misalignAllowSpec = Input(Bool())
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -125,9 +128,13 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val flushSbuffer = new SbufferFlushBundle
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
-
+    val rarValidCount = Output(UInt())
+    val wfi = Flipped(new WfiReqBundle)
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
+    val noUopsIssued = Input(Bool())
+
+    val diffStore = Flipped(new DiffStoreIO)
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -135,6 +142,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   storeQueue.io.hartId := io.hartId
   storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
+  storeQueue.io.wfi <> io.wfi
 
   if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
 
@@ -152,6 +160,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   io.lqDeqPtr := loadQueue.io.lqDeqPtr
   io.sqDeqPtr := storeQueue.io.sqDeqPtr
+  io.sqDeqRobIdx := storeQueue.io.sqDeqRobIdx
+  io.sqDeqUopIdx := storeQueue.io.sqDeqUopIdx
+  io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
     loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
@@ -175,8 +186,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.sbuffer     <> io.sbuffer
-  storeQueue.io.sbufferVecDifftestInfo <> io.sbufferVecDifftestInfo
   storeQueue.io.mmioStout   <> io.mmioStout
+  storeQueue.io.cboZeroStout <> io.cboZeroStout
   storeQueue.io.vecmmioStout <> io.vecmmioStout
   storeQueue.io.rob         <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
@@ -190,6 +201,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.cmoOpResp    <> io.cmoOpResp
   storeQueue.io.flushSbuffer <> io.flushSbuffer
   storeQueue.io.maControl    <> io.maControl
+  io.diffStore := storeQueue.io.diffStore
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -209,6 +221,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.release             <> io.release
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.loadMisalignFull    := io.loadMisalignFull
+  loadQueue.io.misalignAllowSpec   := io.misalignAllowSpec
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec
@@ -243,13 +256,17 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
   val pendingstate = RegInit(s_idle)
+  val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.uncache.req.valid) || (
+    loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid &&
+    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.uncache.req.bits.robIdx
+  )
 
   switch(pendingstate){
     is(s_idle){
       when(io.uncache.req.fire){
-        pendingstate := 
+        pendingstate :=
           Mux(io.uncacheOutstanding && io.uncache.req.bits.nc, s_idle,
-          Mux(loadQueue.io.uncache.req.valid, s_load,
+          Mux(selectLq, s_load,
           s_store))
       }
     }
@@ -270,9 +287,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.uncache.req.ready := false.B
   storeQueue.io.uncache.req.ready := false.B
   loadQueue.io.uncache.resp.valid := false.B
+  loadQueue.io.uncache.idResp.valid := false.B
   storeQueue.io.uncache.resp.valid := false.B
+  storeQueue.io.uncache.idResp.valid := false.B
   when(pendingstate === s_idle){
-    when(loadQueue.io.uncache.req.valid){
+    when(selectLq){
       io.uncache.req <> loadQueue.io.uncache.req
     }.otherwise{
       io.uncache.req <> storeQueue.io.uncache.req
@@ -286,10 +305,17 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   } .otherwise {
     io.uncache.resp <> storeQueue.io.uncache.resp
   }
+  when(io.uncache.idResp.bits.is2lq) {
+    loadQueue.io.uncache.idResp <> io.uncache.idResp
+  }.otherwise {
+    storeQueue.io.uncache.idResp <> io.uncache.idResp
+  }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
+  loadQueue.io.noUopsIssed := io.noUopsIssued
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
+  assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.uncache.idResp.valid))
   when (!io.uncacheOutstanding) {
     assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
   }

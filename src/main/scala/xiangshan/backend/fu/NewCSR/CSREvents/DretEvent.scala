@@ -11,7 +11,8 @@ import xiangshan.AddrTransType
 
 class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
-  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
+  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV, _.MDT, _.SDT))
+  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val debugMode = ValidIO(Bool())
   val debugIntrEnable = ValidIO(Bool())
   val targetPc = ValidIO(new TargetPCBundle)
@@ -21,6 +22,7 @@ class DretEventInput extends Bundle {
   val dcsr = Input(new DcsrBundle)
   val dpc = Input(new Epc)
   val mstatus = Input(new MstatusBundle)
+  val vsstatus = Input(new SstatusBundle)
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
@@ -53,12 +55,16 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.privState.valid       := valid
   out.dcsr.valid            := valid
   out.mstatus.valid         := valid
+  out.vsstatus.valid        := valid
   out.debugIntrEnable.valid := valid
   out.targetPc.valid        := valid
 
   out.privState.bits.PRVM     := in.dcsr.PRV.asUInt
   out.privState.bits.V        := Mux(in.dcsr.PRV === PrivMode.M, VirtMode.Off.asUInt, in.dcsr.V.asUInt)
   out.mstatus.bits.MPRV       := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MPRV.asUInt)
+  out.mstatus.bits.MDT        := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MDT.asBool)
+  out.mstatus.bits.SDT        := Mux(out.privState.bits.isVirtual || out.privState.bits.isModeHU, 0.U, in.mstatus.SDT.asBool)
+  out.vsstatus.bits.SDT       := Mux(out.privState.bits.isModeVU, 0.U, in.vsstatus.SDT.asBool)
   out.debugMode.bits          := false.B
   out.debugIntrEnable.bits    := true.B
   out.targetPc.bits.pc        := in.dpc.asUInt

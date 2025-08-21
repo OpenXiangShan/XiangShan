@@ -5,8 +5,10 @@ import psutil
 import json
 import sys
 import math
+import time
+from datetime import datetime
 
-# usage: python3 constantHelper.py JSON_FILE_PATH
+# usage: python3 constantHelper.py JSON_FILE_PATH [BUILD_PATH]
 # 
 # an example json config file is as follow:
 # visit https://bosc.yuque.com/yny0gi/gr7hyo/oy3dagqi9v97p696 for detail
@@ -58,10 +60,27 @@ import math
 
 # parameters according to noop
 NOOP_HOME = os.getenv("NOOP_HOME")
+XS_PROJECT_ROOT = os.getenv("XS_PROJECT_ROOT")
+if NOOP_HOME is None:
+    print("Please set NOOP_HOME first.")
+    exit(1)
+if XS_PROJECT_ROOT is None:
+    print("Please set XS_PROJECT_ROOT first.")
+    exit(1)
 DIFF_PATH = os.path.join(NOOP_HOME, "ready-to-run", "riscv64-nemu-interpreter-so")
-BUILD_PATH = os.path.join(NOOP_HOME, "build")
-EMU_PATH = os.path.join(BUILD_PATH, "emu")
 
+# get arguments
+if len(sys.argv) > 1:
+    JSON_FILE_PATH=sys.argv[1]
+else:
+    print("Please specify the json file path")
+    exit(1)
+if len(sys.argv) > 2:
+    BUILD_PATH = sys.argv[2]
+else:
+    BUILD_PATH = os.path.join(NOOP_HOME, "build")
+
+EMU_PATH = os.path.join(BUILD_PATH, "emu")
 CONFIG_FILE_PREFIX = ".constant_result_"
 PERF_FILE_POSTFIX = "tmp"
 MAXVAL = (1 << 63) - 1
@@ -77,7 +96,7 @@ class Constant:
 
 
 class Config:
-    def __init__(self, constants, opt_target, population_num, iteration_num, crossover_rate, mutation_rate, emu_threads, concurrent_emu, max_instr, seed, work_load) -> None:
+    def __init__(self, constants, opt_target, population_num, iteration_num, crossover_rate, mutation_rate, emu_threads, concurrent_emu, max_instr, seed, work_load, tag) -> None:
         self.constants = constants
         self.opt_target = opt_target
         self.population_num = int(population_num)
@@ -89,22 +108,23 @@ class Config:
         self.max_instr = int(max_instr)
         self.seed = int(seed)
         self.work_load = work_load
+        self.tag = tag
     def get_ith_constant(self, i) -> Constant:
         return self.constants[i]
     def get_constain_num(self) -> int:
         return len(self.constants)
 
 
-def loadConfig(json_path) -> Config:
+def loadConfig(json_path, tag) -> Config:
     obj = json.load(open(json_path, "r"))
     constants = [Constant(obj['constants'][i]) for i in range(len(obj['constants']))]
-    config = Config(constants, obj['opt_target'], obj['population_num'], obj['iteration_num'], obj['crossover_rate'], obj['mutation_rate'], obj['emu_threads'], obj['concurrent_emu'], obj['max_instr'], obj['seed'], obj['work_load'])
+    config = Config(constants, obj['opt_target'], obj['population_num'], obj['iteration_num'], obj['crossover_rate'], obj['mutation_rate'], obj['emu_threads'], obj['concurrent_emu'], obj['max_instr'], obj['seed'], obj['work_load'], tag)
     return config
 
 class RunContext:
     def __init__(self, config: Config) -> None:
         self.config = config
-    def checkCoreFree(self) -> None:
+    def checkCoreFree(self) -> bool:
         percent_per_core = psutil.cpu_percent(interval=1 ,percpu=True)
         acc = 0
         for i in range(self.config.concurrent_emu * self.config.emu_threads):
@@ -115,6 +135,20 @@ class RunContext:
             print("no free {} core, core usage:".format(self.config.concurrent_emu * self.config.emu_threads))
             print(percent_per_core)
             return False
+    def get_free_cores(self) -> tuple[bool, int, int, int]:
+        thread = self.config.emu_threads
+        # return (Success?, numa node, start_core, end_core)
+        num_core = psutil.cpu_count(logical=False) # SMT is not allowed
+        core_usage = psutil.cpu_percent(interval=2, percpu=True)
+        num_window = num_core // thread
+        for i in range(num_window):
+            start = i * thread
+            end = (i + 1) * thread
+            window_usage = core_usage[start:end]
+            free = sum(window_usage) < 30 * thread and True not in map(lambda x: x > 80, window_usage)
+            if free:
+                return (True, int(start >= (num_core // 2)), start, end - 1)
+        return (False, 0, 0, 0)
     def getStdIn(self, population: list, id: int) -> str:
         res = 'echo \"'
         res += str(len(population[id]))
@@ -124,11 +158,24 @@ class RunContext:
         res += '\"'
         return res
 
-    def genRunCMD(self, population, id) -> str:
-        coreStart = (id % self.config.concurrent_emu) * self.config.emu_threads
-        coreEnd = ((id % self.config.concurrent_emu) + 1) * self.config.emu_threads - 1
+    def genRunCMD(self, population, id, numa = None, coreStart = None, coreEnd = None) -> str:
         stdinStr = self.getStdIn(population, id)
-        return "{} | numactl -m 1 -C {}-{} {} --i {} --diff {} -I {} -s {} 2>{}.{}".format(stdinStr, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed, os.path.join(BUILD_PATH, CONFIG_FILE_PREFIX + str(id)), PERF_FILE_POSTFIX)
+        if None in [numa, coreStart, coreEnd]:
+            return "{} | {} -i {} --diff {} -I {} -s {}".format(stdinStr, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
+        return "{} | numactl -m {} -C {}-{} {} -i {} --diff {} -I {} -s {}".format(stdinStr, numa, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
+    
+    def getOutPath(self, iterid, i):
+        dirPath = os.path.join(BUILD_PATH, self.config.tag)
+        if not os.path.exists(dirPath):
+            os.mkdir(dirPath)
+        return os.path.join(dirPath, f"{iterid}-{i}-out.txt")
+
+    def getPerfPath(self, iterid, i):
+        # return os.path.join(BUILD_PATH, CONFIG_FILE_PREFIX + str(i) + '.' + PERF_FILE_POSTFIX)
+        dirPath = os.path.join(BUILD_PATH, self.config.tag)
+        if not os.path.exists(dirPath):
+            os.mkdir(dirPath)
+        return os.path.join(dirPath, f"{iterid}-{i}-err.txt")
 
 class Solution:
     def __init__(self, config: Config) -> None:
@@ -146,12 +193,11 @@ class Solution:
             res.append(candidate)
         assert(len(res) == config.population_num)
         return res
-    def profilling_fitness(self) -> list:
+    def profilling_fitness(self, iterid: int) -> list:
         fitness = []
         lines = []
         for idx in range(self.config.population_num):
-            perfFilePath = os.path.join(BUILD_PATH, CONFIG_FILE_PREFIX + str(idx) + '.' + PERF_FILE_POSTFIX)
-            with open(perfFilePath, "r") as fp:
+            with open(self.context.getPerfPath(iterid, idx), "r") as fp:
                 lines = fp.readlines()
                 res = 0
                 for line in lines:
@@ -165,7 +211,7 @@ class Solution:
                 fitness.append(res)
         assert(len(fitness) == self.config.population_num)
         return fitness
-    def run_one_round(self, population: list) -> None:
+    def run_one_round(self, iterid: int, population: list) -> None:
         procs = []
         i = 0
         while i < len(population):
@@ -173,9 +219,19 @@ class Solution:
                 for proc in procs:
                     proc.wait()
                 procs.clear()
-            # print(self.context.genRunCMD(population, i))
             print(population[i])
-            procs.append(Popen(args=self.context.genRunCMD(population, i), shell=True, encoding='utf-8', stdin=PIPE, stdout=PIPE, stderr=PIPE))
+            # while True:
+            #     (succ, numa, coreStart, coreEnd) = self.context.get_free_cores()
+            #     if succ:
+            #         with open(self.context.getOutPath(iterid, i), "w") as stdout, open(self.context.getPerfPath(iterid, i), "w") as stderr:
+            #             # print(self.context.genRunCMD(population, i, numa, coreStart, coreEnd), flush=True)
+            #             procs.append(Popen(args=self.context.genRunCMD(population, i, numa, coreStart, coreEnd), shell=True, encoding='utf-8', stdin=PIPE, stdout=stdout, stderr=stderr))
+            #         break
+            #     print("no free {} core".format(self.config.concurrent_emu * self.config.emu_threads))
+            #     time.sleep(5)
+            ## only for tutorial
+            with open(self.context.getOutPath(iterid, i), "w") as stdout, open(self.context.getPerfPath(iterid, i), "w") as stderr:
+                procs.append(Popen(args=self.context.genRunCMD(population, i), shell=True, encoding='utf-8', stdin=PIPE, stdout=stdout, stderr=stderr))
             i += 1
         for proc in procs:
             proc.wait()
@@ -282,17 +338,16 @@ class Solution:
                 print()
             print("iteration ", i, " begins")
             print()
-            while True:
-                if self.context.checkCoreFree():
-                    self.run_one_round(parentPoplation)
-                    fitness = self.profilling_fitness()
-                    for (pop, fit) in zip(parentPoplation, fitness):
-                        globalMap[self.HashList(pop)] = fit
-                    parentPoplation = self.genNextPop(parentPoplation, fitness)
-                    break
+            self.run_one_round(i, parentPoplation)
+            fitness = self.profilling_fitness(i)
+            for (pop, fit) in zip(parentPoplation, fitness):
+                globalMap[self.HashList(pop)] = fit
+            parentPoplation = self.genNextPop(parentPoplation, fitness)
+
         globalMap = zip(globalMap.keys(), globalMap.values())
         globalMap = sorted(globalMap, key=lambda x : x[1], reverse=True)
         print("opt constant for gene algrithom is ", list(globalMap)[0][0].obj, " fitness", int(list(globalMap)[0][1]))
 
-config = loadConfig(sys.argv[1])
+tid = datetime.now().strftime("%m%d%H%M")
+config = loadConfig(JSON_FILE_PATH, f"constantin_{tid}")
 Solution(config).gene_cal()

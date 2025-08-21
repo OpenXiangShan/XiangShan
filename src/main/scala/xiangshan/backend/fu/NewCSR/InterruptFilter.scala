@@ -7,7 +7,6 @@ import utils._
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
-import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.NewCSR.InterruptNO
 
 
@@ -38,7 +37,8 @@ class InterruptFilter extends Module {
   val miprios = io.in.miprios
   val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
-
+  val fromAIAValid = io.in.fromAIA.meip || io.in.fromAIA.seip
+  val platformValid = io.in.platform.meip || io.in.platform.seip
 
   /**
    * Sort by implemented interrupt default priority
@@ -52,29 +52,95 @@ class InterruptFilter extends Module {
 
   val mtopiIsNotZero: Bool = (mip & mie & (~mideleg).asUInt) =/= 0.U
   val stopiIsNotZero: Bool = (hsip & hsie & (~hideleg).asUInt) =/= 0.U
+  val mtopiIsNotZeroReg: Bool = GatedValidRegNext(mtopiIsNotZero)
+  val stopiIsNotZeroReg: Bool = GatedValidRegNext(stopiIsNotZero)
 
-  val mIpriosIsZero : Bool = miprios  === 0.U
-  val hsIpriosIsZero: Bool = hsiprios === 0.U
-
+  val NoSEIMask = (~(BigInt(1) << InterruptNO.SEI).U(64.W)).asUInt
   val mtopigather = mip & mie & (~mideleg).asUInt
   val hstopigather = hsip & hsie & (~hideleg).asUInt
-  val vstopigather = vsip & vsie
-  val mipriosSort:  Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
-  val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
-  val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
-  val indexSort   : Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W)))
+  val vstopigather = vsip & vsie & NoSEIMask
 
-  InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (value, index) =>
-    mipriosSort(index)  := Mux(mtopigather(value), Cat(1.U, miprios(7 + 8 * value, 8 * value)), 0.U)
-    hsipriosSort(index) := Mux(hstopigather(value), Cat(1.U, hsiprios(7 + 8 * value, 8 * value)), 0.U)
-    hvipriosSort(index) := Mux(vstopigather(value), Cat(1.U, 0.U(8.W)), 0.U)
-    indexSort(index) := index.U
+  val flag = RegInit(false.B)
+  when (platformValid) {
+    flag := true.B
+  }.elsewhen(fromAIAValid) {
+    flag := false.B
   }
-  hvipriosSort(findIndex(1.U)) := Mux(vstopigather(1).asBool, Cat(1.U, hviprio1.PrioSSI.asUInt), 0.U)
-  hvipriosSort(findIndex(5.U)) := Mux(vstopigather(5).asBool, Cat(1.U, hviprio1.PrioSTI.asUInt), 0.U)
+
+  val mipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
+  mipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
+    iprio.idx := i.U
+    when (mtopigather(defaultPrio)) {
+      iprio.enable := true.B
+      when (defaultPrio.U === InterruptNO.MEI.U) {
+        iprio.isZero := platformValid || flag
+        val mtopeiGreaterThan255 = mtopei.IPRIO.asUInt(10, 8).orR
+        iprio.greaterThan255 := mtopeiGreaterThan255
+        iprio.prioNum := mtopei.IPRIO.asUInt(7, 0)
+      }.otherwise {
+        iprio.isZero := !miprios(7 + 8 * defaultPrio, 8 * defaultPrio).orR
+        iprio.greaterThan255 := false.B
+        iprio.prioNum := miprios(7 + 8 * defaultPrio, 8 * defaultPrio)
+      }
+    }.otherwise {
+      iprio.enable := false.B
+      iprio.isZero := false.B
+      iprio.greaterThan255 := false.B
+      iprio.prioNum := 0.U
+    }
+  }
+  val hsipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
+  hsipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
+    iprio.idx := i.U
+    when (hstopigather(defaultPrio)) {
+      iprio.enable := true.B
+      when (defaultPrio.U === InterruptNO.SEI.U) {
+        iprio.isZero := platformValid || flag
+        val stopeiGreaterThan255 = stopei.IPRIO.asUInt(10, 8).orR
+        iprio.greaterThan255 := stopeiGreaterThan255
+        iprio.prioNum := stopei.IPRIO.asUInt(7, 0)
+      }.otherwise {
+        iprio.isZero := !hsiprios(7 + 8 * defaultPrio, 8 * defaultPrio).orR
+        iprio.greaterThan255 := false.B
+        iprio.prioNum := hsiprios(7 + 8 * defaultPrio, 8 * defaultPrio)
+      }
+    }.otherwise {
+      iprio.enable := false.B
+      iprio.isZero := false.B
+      iprio.greaterThan255 := false.B
+      iprio.prioNum := 0.U
+    }
+  }
+  val hvipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
+  hvipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
+    iprio.idx := i.U
+    when(vstopigather(defaultPrio)) {
+      iprio.enable := true.B
+      iprio.isZero := true.B
+      iprio.greaterThan255 := false.B
+      iprio.prioNum := 0.U
+    }.otherwise {
+      iprio.enable := false.B
+      iprio.isZero := false.B
+      iprio.greaterThan255 := false.B
+      iprio.prioNum := 0.U
+    }
+  }
+  when(vstopigather(1).asBool) {
+    hvipriosSort(findIndex(1.U)).isZero := !hviprio1.PrioSSI.asUInt.orR
+    hvipriosSort(findIndex(1.U)).prioNum := hviprio1.PrioSSI.asUInt
+  }
+
+  when(vstopigather(5).asBool) {
+    hvipriosSort(findIndex(5.U)).isZero := !hviprio1.PrioSTI.asUInt.orR
+    hvipriosSort(findIndex(5.U)).prioNum := hviprio1.PrioSTI.asUInt
+  }
 
   for (i <- 0 to 10) {
-    hvipriosSort(findIndex((i+13).U)) := Mux(vstopigather(i+13).asBool, Cat(1.U, hviprios(7 + 8 * (i+5), 8 * (i+5))), 0.U)
+    when(vstopigather(i + 13).asBool) {
+      hvipriosSort(findIndex((i + 13).U)).isZero := !hviprios(7 + 8 * (i + 5), 8 * (i + 5)).orR
+      hvipriosSort(findIndex((i + 13).U)).prioNum := hviprios(7 + 8 * (i + 5), 8 * (i + 5))
+    }
   }
 
   def findNum(input: UInt): UInt = {
@@ -93,179 +159,124 @@ class InterruptFilter extends Module {
   }
 
   // value lower, priority higher
-  def minSelect(index: Vec[UInt], value: Vec[UInt], xei: UInt): (Vec[UInt], Vec[UInt]) = {
-    value.size match {
+  def minSelect(iprios: Vec[IpriosSort], xei: UInt): Vec[IpriosSort] = {
+    iprios.size match {
       case 1 =>
-        (index, value)
+        iprios
       case 2 =>
-        /**
-         * default: index(0) priority > index(1) priority
-         *
-         * AIA Spec table 5.3/5.5
-         *
-         * xei is InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U for M
-         * xei is InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U for S
-         *
-         * if index(0) enable, index(1) disable:
-         *    select index(0)
-         * else if index(0) disable, index(1) enable:
-         *    select index(1)
-         * else if index(0), index(1) all enable:
-         *    if index(0), index(1) priority number all 0s:
-         *      select index(0)
-         *    else if index(0) priority number is 0, index(1) priority number is not 0:
-         *      if index(0) <= xei, index(1) > xei:
-         *        select index(0)
-         *      else:
-         *        select index(1)
-         *    else if index(0) priority number is not 0, index(1) priority number is 0:
-         *      if index(1) <= xei, index(0) > xei:
-         *        select index(1)
-         *      else:
-         *        select index(0)
-         *    else if index(0) priority number is not 0, index(1) priority number is not 0:
-         *      if value(0) <= value(1):
-         *        select index(0)
-         *      else:
-         *        select index(1)
-         */
-        val minIndex = Mux1H(Seq(
-          ( value(0)(8).asBool && !value(1)(8).asBool) -> index(0),
-          (!value(0)(8).asBool &&  value(1)(8).asBool) -> index(1),
-          ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
-            (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> index(0),
-            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei && index(1) > xei, index(0), index(1)),
-            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei && index(0) > xei, index(1), index(0)),
-            ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), index(0), index(1)),
+        val left = iprios(0)
+        val right = iprios(1)
+        val minIprio = Mux1H(Seq(
+          (left.enable && !right.enable) -> left,
+          (!left.enable && right.enable) -> right,
+          (left.enable && right.enable) -> Mux1H(Seq(
+            (left.isZero && right.isZero) -> left,
+            (left.isZero && !right.isZero) -> Mux(left.idx <= xei, left, right),
+            (!left.isZero && right.isZero) -> Mux(right.idx <= xei, right, left),
+            (!left.isZero && !right.isZero) -> Mux1H(Seq(
+              (left.greaterThan255 && !right.greaterThan255) -> right,
+              (!left.greaterThan255 && right.greaterThan255) -> left,
+              (!left.greaterThan255 && !right.greaterThan255) -> Mux(left.prioNum <= right.prioNum, left, right),
+            ))
           ))
         ))
-        val minValue = Mux1H(Seq(
-          ( value(0)(8).asBool && !value(1)(8).asBool) -> value(0),
-          (!value(0)(8).asBool &&  value(1)(8).asBool) -> value(1),
-          ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
-            (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> value(0),
-            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei && index(1) > xei, value(0), value(1)),
-            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei && index(0) > xei, value(1), value(0)),
-            ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), value(0), value(1)),
-          ))
-        ))
-        (VecInit(minIndex), VecInit(minValue))
+        VecInit(minIprio)
       case _ =>
-        val (leftIndex,  leftValue)  = minSelect(VecInit(index.take((value.size + 1)/2)), VecInit(value.take((value.size + 1)/2)), xei)
-        val (rightIndex, rightValue) = minSelect(VecInit(index.drop((value.size + 1)/2)), VecInit(value.drop((value.size + 1)/2)), xei)
-        minSelect(VecInit(leftIndex ++ rightIndex), VecInit(leftValue ++ rightValue), xei)
+        val leftIprio = minSelect(VecInit(iprios.take((iprios.size + 1) / 2)), xei)
+        val rightIprio = minSelect(VecInit(iprios.drop((iprios.size + 1) / 2)), xei)
+        minSelect(VecInit(leftIprio ++ rightIprio), xei)
     }
   }
 
-  def highIprio(index: Vec[UInt], iprios: Vec[UInt], xei: UInt = 0.U): (UInt, UInt, UInt) = {
-    val result = minSelect(index, iprios, xei)
-    (result._1(0), result._2(0)(8), result._2(0)(7, 0))
+  def highIprio(iprios: Vec[IpriosSort], xei: UInt): IpriosSort = {
+    val result = minSelect(iprios, xei)
+    result(0)
   }
 
-  private val indexTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(6.W)))))
-  (0 until 8).foreach { i =>
-    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
-    val slice = indexSort.slice(8*i, end).map(_.asUInt)
-    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(6.W))
-    indexTmp(i) := VecInit(paddingSlice)
+  def sliceIpriosSort(ipriosSort: Vec[IpriosSort]): Vec[Vec[IpriosSort]] = {
+    val ipriosSortTmp = Wire(Vec(8, Vec(8, new IpriosSort)))
+    for (i <- 0 until 8) {
+      val end = math.min(8 * (i + 1), InterruptNO.interruptDefaultPrio.size)
+      val ipriosSlice = ipriosSort.slice(8 * i, end)
+      val paddingSlice = ipriosSlice ++ Seq.fill(8 - ipriosSlice.length)(0.U.asTypeOf(new IpriosSort))
+      ipriosSortTmp(i) := VecInit(paddingSlice)
+    }
+    ipriosSortTmp
   }
 
-  private val mipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
-  (0 until 8).foreach { i =>
-    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
-    val slice = mipriosSort.slice(8*i, end).map(_.asUInt)
-    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
-    mipriosSortTmp(i) := VecInit(paddingSlice)
+  private val mipriosSortTmp  = sliceIpriosSort(mipriosSort)
+  private val hsipriosSortTmp = sliceIpriosSort(hsipriosSort)
+  private val hvipriosSortTmp = sliceIpriosSort(hvipriosSort)
+
+  private val meiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val seiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+  private val vseiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U
+
+  private val mipriosTmp = Wire(Vec(8, new IpriosSort))
+  mipriosSortTmp.zipWithIndex.foreach { case (iprios, i) =>
+    val ipriosTmp = highIprio(iprios, meiPrioIdx)
+    mipriosTmp(i) := ipriosTmp
   }
 
-  private val hsipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
-  (0 until 8).foreach { i =>
-    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
-    val slice = hsipriosSort.slice(8 * i, end).map(_.asUInt)
-    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
-    hsipriosSortTmp(i) := VecInit(paddingSlice)
+  private val hsipriosTmp = Wire(Vec(8, new IpriosSort))
+  hsipriosSortTmp.zipWithIndex.foreach { case (iprios, i) =>
+    val ipriosTmp = highIprio(iprios, seiPrioIdx)
+    hsipriosTmp(i) := ipriosTmp
   }
 
-  private val mIidIdx   = VecInit(Seq.fill(8)(0.U(6.W)))
-  private val hsIidIdx  = VecInit(Seq.fill(8)(0.U(6.W)))
-  private val mEnable   = VecInit(Seq.fill(8)(0.U(1.W)))
-  private val hsEnable  = VecInit(Seq.fill(8)(0.U(1.W)))
-  private val mPrioNum  = VecInit(Seq.fill(8)(0.U(8.W)))
-  private val hsPrioNum = VecInit(Seq.fill(8)(0.U(8.W)))
-
-  indexTmp.zip(mipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
-    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
-    mIidIdx(i) := iidTmp
-    mEnable(i) := enableTmp
-    mPrioNum(i) := prioTmp
+  private val hvipriosTmp = Wire(Vec(8, new IpriosSort))
+  hvipriosSortTmp.zipWithIndex.foreach { case (iprios, i) =>
+    val ipriosTmp = highIprio(iprios, vseiPrioIdx)
+    hvipriosTmp(i) := ipriosTmp
   }
 
+  private val mipriosReg = Reg(Vec(8, new IpriosSort))
+  private val hsipriosReg = Reg(Vec(8, new IpriosSort))
+  private val hvipriosReg = Reg(Vec(8, new IpriosSort))
 
-  indexTmp.zip(hsipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
-    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
-    hsIidIdx(i) := iidTmp
-    hsEnable(i) := enableTmp
-    hsPrioNum(i) := prioTmp
+  for (i <- 0 until 8) {
+    mipriosReg(i) := mipriosTmp(i)
+    hsipriosReg(i) := hsipriosTmp(i)
+    hvipriosReg(i) := hvipriosTmp(i)
   }
 
-  private val mIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
-  (0 until 8).foreach(i => mIndexReg(i) := mIidIdx(i))
+  private val mipriosRegTmp = highIprio(mipriosReg, meiPrioIdx)
+  private val hsipriosRegTmp = highIprio(hsipriosReg, seiPrioIdx)
+  private val hvipriosRegTmp = highIprio(hvipriosReg, vseiPrioIdx)
 
-  private val hsIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
-  (0 until 8).foreach(i => hsIndexReg(i) := hsIidIdx(i))
-
-  private val mipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
-  (0 until 8).foreach(i => mipriosSortReg(i) := Cat(mEnable(i), mPrioNum(i)))
-
-  private val hsipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
-  (0 until 8).foreach(i => hsipriosSortReg(i) := Cat(hsEnable(i), hsPrioNum(i)))
-
-
-  private val (mIidIdxReg, mEnableReg, mPrioNumReg)  = highIprio(mIndexReg, mipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
-  private val (hsIidIdxReg, hsEnableReg, hsPrioNumReg) = highIprio(hsIndexReg, hsipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
-
+  private val mIidIdxReg = mipriosRegTmp.idx
+  private val hsIidIdxReg = hsipriosRegTmp.idx
+  private val vsIidIdxReg = hvipriosRegTmp.idx
 
   private val mIidNum  = findNum(mIidIdxReg)
   private val hsIidNum = findNum(hsIidIdxReg)
+  private val vsIidNum = findNum(vsIidIdxReg)
 
-  private val mIidDefaultPrioHighMEI: Bool = mIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
-  private val mIidDefaultPrioLowMEI : Bool = mIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val mIidDefaultPrioHighMEI: Bool = mIidIdxReg < meiPrioIdx
+  private val mIidDefaultPrioLowMEI : Bool = mIidIdxReg > meiPrioIdx
 
-  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-
-  val mtopiPrioNumReal = mPrioNumReg
-  val stopiPrioNumReal = hsPrioNumReg
+  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdxReg < seiPrioIdx
+  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdxReg > seiPrioIdx
 
   // update mtopi
-  io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
-  io.out.mtopi.IPRIO := Mux(
-    mtopiIsNotZero,
-    Mux(
-      mIpriosIsZero,
-      1.U,
-      Mux1H(Seq(
-        (mtopiPrioNumReal >= 1.U && mtopiPrioNumReal <= 255.U) -> mtopiPrioNumReal(7, 0),
-        ((mtopiPrioNumReal > 255.U) || ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioLowMEI)) -> 255.U,
-        ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioHighMEI) -> 0.U,
-      ))
-    ),
+  io.out.mtopi.IID := Mux(mtopiIsNotZeroReg, mIidNum, 0.U)
+  io.out.mtopi.IPRIO := Mux(mtopiIsNotZeroReg,
+    Mux1H(Seq(
+      (!mipriosRegTmp.isZero && !mipriosRegTmp.greaterThan255) -> mipriosRegTmp.prioNum,
+      (mipriosRegTmp.greaterThan255 || mipriosRegTmp.isZero && mIidDefaultPrioLowMEI) -> 255.U,
+      (mipriosRegTmp.isZero && mIidDefaultPrioHighMEI) -> 0.U,
+    )),
     0.U
   )
 
   // upadte stopi
-  io.out.stopi.IID := Mux(stopiIsNotZero, hsIidNum, 0.U)
-  io.out.stopi.IPRIO := Mux(
-    stopiIsNotZero,
-    Mux(
-      hsIpriosIsZero,
-      1.U,
-      Mux1H(Seq(
-        (stopiPrioNumReal >= 1.U && stopiPrioNumReal <= 255.U) -> stopiPrioNumReal(7, 0),
-        ((stopiPrioNumReal > 255.U) || ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioLowSEI)) -> 255.U,
-        ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioHighSEI) -> 0.U,
-      ))
-    ),
+  io.out.stopi.IID := Mux(stopiIsNotZeroReg, hsIidNum, 0.U)
+  io.out.stopi.IPRIO := Mux(stopiIsNotZeroReg,
+    Mux1H(Seq(
+      (!hsipriosRegTmp.isZero && !hsipriosRegTmp.greaterThan255) -> hsipriosRegTmp.prioNum,
+      (hsipriosRegTmp.greaterThan255 || hsipriosRegTmp.isZero && hsIidDefaultPrioLowSEI) -> 255.U,
+      (hsipriosRegTmp.isZero && hsIidDefaultPrioHighSEI) -> 0.U,
+    )),
     0.U
   )
 
@@ -273,95 +284,183 @@ class InterruptFilter extends Module {
   val Candidate1: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
   val Candidate2: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
   val Candidate3: Bool = vsip.SEIP && vsie.SEIE && !Candidate1 && !Candidate2
-  val Candidate4: Bool = (hvictl.VTI.asUInt === 0.U) && (vsie & vsip & "hfffffffffffffdff".U).orR
+  val Candidate4: Bool = (hvictl.VTI.asUInt === 0.U) && vstopigather.orR
   val Candidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
   val CandidateNoValid: Bool = !Candidate1 && !Candidate2 && !Candidate3 && !Candidate4 && !Candidate5
 
   assert(PopCount(Cat(Candidate1, Candidate2, Candidate3)) < 2.U, "Only one Candidate could be select from Candidate1/2/3 in VS-level!")
   assert(PopCount(Cat(Candidate4, Candidate5)) < 2.U, "Only one Candidate could be select from Candidate4/5 in VS-level!")
-
-  private val hvipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
-  (0 until 8).foreach { i =>
-    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
-    val slice = hvipriosSort.slice(8*i, end).map(_.asUInt)
-    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
-    hvipriosSortTmp(i) := VecInit(paddingSlice)
-  }
-
-  private val vsIidIdx  = VecInit(Seq.fill(8)(0.U(6.W)))
-  private val vsEnable  = VecInit(Seq.fill(8)(0.U(1.W)))
-  private val vsPrioNum = VecInit(Seq.fill(8)(0.U(8.W)))
-
-  indexTmp.zip(hvipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
-    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
-    vsIidIdx(i) := iidTmp
-    vsEnable(i) := enableTmp
-    vsPrioNum(i) := prioTmp
-  }
-
-  private val vsIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
-  (0 until 8).foreach(i => vsIndexReg(i) := vsIidIdx(i))
-
-  private val hvipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
-  (0 until 8).foreach(i => hvipriosSortReg(i) := Cat(vsEnable(i), vsPrioNum(i)))
-
-  private val (vsIidIdxReg, vsEnableReg, vsPrioNumReg) = highIprio(vsIndexReg, hvipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
-
-  private val vsIidNum = findNum(vsIidIdxReg)
-
-
-  val iidCandidate123   = Wire(UInt(12.W))
-  val iidCandidate45    = Wire(UInt(12.W))
-  val iprioCandidate123 = Wire(UInt(11.W))
-  val iprioCandidate45  = Wire(UInt(11.W))
-  iidCandidate123 := InterruptNO.SEI.U
-  iprioCandidate123 := Mux1H(Seq(
-    Candidate1 -> vstopei.IPRIO.asUInt,
-    Candidate2 -> hvictl.IPRIO.asUInt,
-    Candidate3 -> 256.U,
-  ))
-  iidCandidate45 := Mux1H(Seq(
-    Candidate4 -> vsIidNum,
-    Candidate5 -> hvictl.IID.asUInt,
-  ))
-  iprioCandidate45 := Mux1H(Seq(
-    Candidate4 -> vsPrioNumReg,
-    Candidate5 -> hvictl.IPRIO.asUInt,
-  ))
+  assert(PopCount(Cat(Candidate2, Candidate5)) < 2.U, "Candidate2 and candidate5 cannot be true at the same time. ")
 
   val Candidate123 = Candidate1 || Candidate2 || Candidate3
   val Candidate45 = Candidate4 || Candidate5
 
-  val Candidate123HighCandidate45 = Mux1H(Seq(
-    (Candidate123 && Candidate4)   -> ((iprioCandidate123 < iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && (findIndex(iidCandidate123) <= findIndex(iidCandidate45)))),
-    (Candidate123 && Candidate5)   -> ((iprioCandidate123 < iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && hvictl.DPR.asBool)),
-    (Candidate123 && !Candidate45) -> true.B,
-  ))
-  val Candidate123LowCandidate45 = Mux1H(Seq(
-    (Candidate123 && Candidate4)   -> ((iprioCandidate123 > iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && (findIndex(iidCandidate123) > findIndex(iidCandidate45)))),
-    (Candidate123 && Candidate5)   -> ((iprioCandidate123 > iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && !hvictl.DPR.asBool)),
-    (!Candidate123 && Candidate45) -> true.B,
-  ))
+  // Candidate2,Candidate5 不可能同时成立
+  val onlyC1Enable = Candidate1 & !Candidate45
+  val onlyC2Enable = Candidate2 & !Candidate45
+  val onlyC3Enable = Candidate3 & !Candidate123
+  val onlyC4Enable = Candidate4 & !Candidate123
+  val onlyC5Enable = Candidate5 & !Candidate123
+  val C1C4Enable   = Candidate1 & Candidate4
+  val C1C5Enable   = Candidate1 & Candidate5
+  val C2C4Enable   = Candidate2 & Candidate4
+  val C3C4Enable   = Candidate3 & Candidate4
+  val C3C5Enable   = Candidate3 & Candidate5
 
-  val iidCandidate = Wire(UInt(12.W))
-  val iprioCandidate = Wire(UInt(11.W))
-  iidCandidate := Mux1H(Seq(
-    Candidate123HighCandidate45 -> iidCandidate123,
-    Candidate123LowCandidate45 -> iidCandidate45,
-  ))
-  iprioCandidate := Mux1H(Seq(
-    Candidate123HighCandidate45 -> iprioCandidate123,
-    Candidate123LowCandidate45 -> iprioCandidate45,
-  ))
+  val CandidateNoValidReg: Bool = GatedValidRegNext(CandidateNoValid)
+  val Candidate123Reg = GatedValidRegNext(Candidate123)
+  val NoCandidate45Reg = GatedValidRegNext(!Candidate45)
+  val onlyC1EnableReg = GatedValidRegNext(onlyC1Enable)
+  val onlyC2EnableReg = GatedValidRegNext(onlyC2Enable)
+  val onlyC3EnableReg = GatedValidRegNext(onlyC3Enable)
+  val onlyC4EnableReg = GatedValidRegNext(onlyC4Enable)
+  val onlyC5EnableReg = GatedValidRegNext(onlyC5Enable)
+  val C1C4EnableReg = GatedValidRegNext(C1C4Enable)
+  val C1C5EnableReg = GatedValidRegNext(C1C5Enable)
+  val C2C4EnableReg = GatedValidRegNext(C2C4Enable)
+  val C3C4EnableReg = GatedValidRegNext(C3C4Enable)
+  val C3C5EnableReg = GatedValidRegNext(C3C5Enable)
+
+  val hvictlReg = RegNext(hvictl)
+  val vstopeiReg = RegNext(vstopei)
+
+  val iidOnlyC1 = Wire(UInt(12.W))
+  val iidOnlyC4 = Wire(UInt(12.W))
+  val iidOnlyC5 = Wire(UInt(12.W))
+  val iprioOnlyC1 = Wire(UInt(8.W))
+  val iprioOnlyC2 = Wire(UInt(8.W))
+  val iprioOnlyC3 = Wire(UInt(8.W))
+  val iprioOnlyC4 = Wire(UInt(8.W))
+  val iprioOnlyC5 = Wire(UInt(8.W))
+  val iidC1C4 = Wire(UInt(12.W))
+  val iidC1C5 = Wire(UInt(12.W))
+  val iidC2C4 = Wire(UInt(12.W))
+  val iidC3C4 = Wire(UInt(12.W))
+  val iidC3C5 = Wire(UInt(12.W))
+  val iprioC1C4 = Wire(UInt(8.W))
+  val iprioC1C5 = Wire(UInt(8.W))
+  val iprioC2C4 = Wire(UInt(8.W))
+  val iprioC3C4 = Wire(UInt(8.W))
+  val iprioC3C5 = Wire(UInt(8.W))
+
+  iidOnlyC1 := InterruptNO.SEI.U
+  iidOnlyC4 := vsIidNum
+  iidOnlyC5 := hvictlReg.IID.asUInt
+
+  val iidC4Idx = Wire(UInt(12.W))
+  iidC4Idx := vsIidIdxReg
+
+  val iprioC1   = Wire(UInt(11.W))
+  val iprioC2C5 = Wire(UInt(11.W))
+  val iprioC4   = Wire(UInt(11.W))
+  val iprioC1Tmp = Wire(UInt(8.W))
+  val iprioC4Tmp = Wire(UInt(8.W))
+  val iprioC3C5Tmp = Wire(UInt(8.W))
+
+  val hvictlDPR = Mux(hvictlReg.DPR.asBool, 255.U, 0.U)
+  val C1GreaterThan255 = vstopeiReg.IPRIO.asUInt(10, 8).orR
+  val C4IsZero = !hvipriosRegTmp.prioNum.orR
+  val C2C5IsZero = !hvictlReg.IPRIO.asUInt.orR
+  val C4HighVSEI = iidC4Idx < findIndex(InterruptNO.VSEI.U)
+  val SEIHighC4 = findIndex(InterruptNO.SEI.U) < iidC4Idx
+  val iprioC1GreaterThan255 = Mux(C1GreaterThan255, 255.U, iprioC1Tmp)
+
+  iprioC1 := vstopeiReg.IPRIO.asUInt
+  iprioC2C5 := hvictlReg.IPRIO.asUInt
+  iprioC4 := hvipriosRegTmp.prioNum
+
+  iprioC1Tmp := iprioC1(7, 0)
+  iprioC4Tmp := Mux(C4IsZero, Mux(C4HighVSEI, 0.U, 255.U), iprioC4)
+  iprioC3C5Tmp := Mux(C2C5IsZero, hvictlDPR, iprioC2C5)
+
+  iprioOnlyC1 := iprioC1GreaterThan255
+  iprioOnlyC2 := iprioC2C5
+  iprioOnlyC3 := 255.U
+  iprioOnlyC4 := iprioC4Tmp
+  iprioOnlyC5 := iprioC3C5Tmp
+
+  // C1,C4 enable
+  when(C4IsZero) {
+    iidC1C4 := Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1)
+    iprioC1C4 := Mux(C4HighVSEI, 0.U, iprioC1GreaterThan255)
+  }.elsewhen(iprioC1 < iprioC4) {
+    iidC1C4 := iidOnlyC1
+    iprioC1C4 := iprioC1Tmp
+  }.elsewhen(iprioC1 === iprioC4) {
+    iidC1C4 := Mux(SEIHighC4, iidOnlyC1, iidOnlyC4)
+    iprioC1C4 := Mux(SEIHighC4, iprioC1Tmp, iprioC4)
+  }.otherwise {
+    iidC1C4 := iidOnlyC4
+    iprioC1C4 := iprioC4
+  }
+
+  // C1,C5 enable
+  iidC1C5 := Mux(hvictlReg.DPR.asBool, iidOnlyC1, iidOnlyC5)
+  when(C2C5IsZero) {
+    iprioC1C5 := Mux(hvictlReg.DPR.asBool, iprioC1GreaterThan255, 0.U)
+  }.elsewhen(iprioC1 < iprioC2C5) {
+    iidC1C5 := iidOnlyC1
+    iprioC1C5 := iprioC1Tmp
+  }.elsewhen(iprioC1 === iprioC2C5) {
+    iprioC1C5 := Mux(hvictlReg.DPR.asBool, iprioC1Tmp, iprioC2C5)
+  }.otherwise {
+    iidC1C5 := iidOnlyC5
+    iprioC1C5 := iprioC3C5Tmp
+  }
+  
+  // C2,C4 enable
+  when(C4IsZero) {
+    iidC2C4 := Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1)
+    iprioC2C4 := Mux(C4HighVSEI, 0.U, iprioC2C5)
+  }.elsewhen(iprioC2C5 < iprioC4) {
+    iidC2C4 := iidOnlyC1
+    iprioC2C4 := iprioC2C5
+  }.elsewhen(iprioC2C5 === iprioC4) {
+    iidC2C4 := Mux(SEIHighC4, iidOnlyC1, iidOnlyC4)
+    iprioC2C4 := Mux(SEIHighC4, iprioC2C5, iprioC4)
+  }.otherwise {
+    iidC2C4 := iidOnlyC4
+    iprioC2C4 := iprioC4
+  }
+
+  // C3,C4 enable
+  iidC3C4 := Mux(C4IsZero, Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1), iidOnlyC4)
+  iprioC3C4 := iprioC4Tmp
+  // C3,C5 enable
+  iidC3C5 := Mux(C2C5IsZero, Mux(hvictlReg.DPR.asBool, iidOnlyC5, iidOnlyC1), iidOnlyC5)
+  iprioC3C5 := iprioC3C5Tmp
 
   // update vstopi
-  io.out.vstopi.IID := Mux(CandidateNoValid, 0.U, iidCandidate)
-  io.out.vstopi.IPRIO := Mux1H(Seq(
-    CandidateNoValid -> 0.U,
-    (iprioCandidate > 255.U) -> 255.U,
-    (Candidate123LowCandidate45 && Candidate5 && !hvictl.IPRIOM.asBool) -> 1.U,
-    ((Candidate123HighCandidate45 && iprioCandidate <= 255.U) || (Candidate123LowCandidate45 && Candidate4) || (Candidate123LowCandidate45 && Candidate5 && hvictl.IPRIOM.asBool)) -> iprioCandidate(7, 0),
-  ))
+  io.out.vstopi.IID := Mux(CandidateNoValidReg,
+    0.U,
+    Mux1H(Seq(
+      (Candidate123Reg & NoCandidate45Reg) -> iidOnlyC1,
+      onlyC4EnableReg -> iidOnlyC4,
+      onlyC5EnableReg -> iidOnlyC5,
+      C1C4EnableReg -> iidC1C4,
+      C1C5EnableReg -> iidC1C5,
+      C2C4EnableReg -> iidC2C4,
+      C3C4EnableReg -> iidC3C4,
+      C3C5EnableReg -> iidC3C5,
+    ))
+  )
+  io.out.vstopi.IPRIO := Mux(CandidateNoValidReg,
+    0.U,
+    Mux(!hvictlReg.IPRIOM.asBool, 1.U,
+      Mux1H(Seq(
+        onlyC1EnableReg -> iprioOnlyC1,
+        onlyC2EnableReg -> iprioOnlyC2,
+        onlyC3EnableReg -> iprioOnlyC3,
+        onlyC4EnableReg -> iprioOnlyC4,
+        onlyC5EnableReg -> iprioOnlyC5,
+        C1C4EnableReg -> iprioC1C4,
+        C1C5EnableReg -> iprioC1C5,
+        C2C4EnableReg -> iprioC2C4,
+        C3C4EnableReg -> iprioC3C4,
+        C3C5EnableReg -> iprioC3C5,
+      ))
+    )
+  )
 
   val mIRVecTmp = Mux(
     privState.isModeM && mstatusMIE || privState < PrivState.ModeM,
@@ -388,7 +487,7 @@ class InterruptFilter extends Module {
   val irToHS = !mIRNotZero && hsIRNotZero
   val irToVS = !mIRNotZero && !hsIRNotZero && vsIRNotZero
 
-  val mIRVec  = Mux(mIRNotZero, mIRVecTmp, 0.U)
+  val mIRVec  = mIRVecTmp
   val hsIRVec = Mux(irToHS, hsIRVecTmp, 0.U)
   val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecTmp, 64), 0.U)
 
@@ -438,7 +537,8 @@ class InterruptFilter extends Module {
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
-  val SelectCandidate5 = Candidate123LowCandidate45 && Candidate5
+  val SelectCandidate5 = onlyC5EnableReg || C3C5EnableReg ||
+                         C1C5EnableReg && (iprioC1 === iprioC2C5 && !hvictlReg.DPR.asBool || iprioC1 > iprioC2C5)
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
   val intrVecReg = RegInit(0.U(8.W))
@@ -450,7 +550,7 @@ class InterruptFilter extends Module {
   intrVecReg := intrVec
   debugIntrReg := enableDebugIntr
   nmiReg := io.in.nmi
-  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
+  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
   irToHSReg := irToHS
   irToVSReg := irToVS
   val delayedIntrVec = DelayN(intrVecReg, 5)
@@ -508,6 +608,14 @@ class InterruptFilterIO extends Bundle {
     val nmi = Bool()
     val nmiVec = UInt(64.W)
     val mnstatusNMIE = Bool()
+    val platform = new Bundle {
+      val meip = Bool()
+      val seip = Bool()
+    }
+    val fromAIA = new Bundle {
+      val meip = Bool()
+      val seip = Bool()
+    }
   })
 
   val out = Output(new Bundle {
@@ -521,4 +629,13 @@ class InterruptFilterIO extends Bundle {
     val irToHS = Bool()
     val irToVS = Bool()
   })
+}
+
+
+class IpriosSort extends Bundle {
+  val idx = UInt(6.W)
+  val enable = Bool()
+  val isZero = Bool()
+  val greaterThan255 = Bool()
+  val prioNum = UInt(8.W)
 }

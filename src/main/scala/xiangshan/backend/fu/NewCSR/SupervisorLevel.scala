@@ -161,13 +161,22 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     ))
   }).setAddr(CSRs.scountovf)
 
-  val sstateen0 = Module(new CSRModule("Sstateen", new SstateenBundle0) with HasStateen0Bundle {
+  val sstateen0 = Module(new CSRModule("Sstateen0", new Sstateen0Bundle) with HasStateenBundle {
     // For every bit in an mstateen CSR that is zero (whether read-only zero or set to zero), the same bit
     // appears as read-only zero in the matching hstateen and sstateen CSRs. For every bit in an hstateen
     // CSR that is zero (whether read-only zero or set to zero), the same bit appears as read-only zero in
     // sstateen when accessed in VS-mode.
     regOut := Mux(privState.isVirtual, fromHstateen0.asUInt, fromMstateen0.asUInt) & reg.asUInt
   }).setAddr(CSRs.sstateen0)
+
+  // sstateen[1|2|3] read-only zero
+  val sstateen1 = Module(new CSRModule("Sstateen1", new SstateenNonZeroBundle)).setAddr(CSRs.sstateen1)
+
+  val sstateen2 = Module(new CSRModule("Sstateen2", new SstateenNonZeroBundle)).setAddr(CSRs.sstateen2)
+
+  val sstateen3 = Module(new CSRModule("Sstateen3", new SstateenNonZeroBundle)).setAddr(CSRs.sstateen3)
+
+  val scontext = Module(new CSRModule("Scontext", new ScontextBundle)).setAddr(CSRs.scontext)
 
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
     sie,
@@ -183,6 +192,10 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     satp,
     scountovf,
     sstateen0,
+    sstateen1,
+    sstateen2,
+    sstateen3,
+    scontext,
   )
 
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
@@ -236,6 +249,11 @@ class SatpBundle extends CSRBundle {
   val ASID = RW(44 - 1 + ASIDLEN, 44).withReset(0.U)
   // Do WARL in SatpModule/VSatpModule
   val PPN  = RW(43, 0).withReset(0.U)
+}
+
+class ScontextBundle extends CSRBundle {
+  override val len = 32
+  val ALL = RW(31, 0).withReset(0.U)
 }
 
 class SEnvCfg extends EnvCfg

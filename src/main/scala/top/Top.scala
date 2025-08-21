@@ -23,17 +23,19 @@ import chisel3.experimental.dataview._
 import difftest.DifftestModule
 import xiangshan._
 import utils._
+import utility._
+import utility.sram.SramBroadcastBundle
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.CHILogger
 import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import openLLC.TargetBinder._
 import cc.xiangshan.openncb._
-import utility._
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
@@ -44,20 +46,18 @@ import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
 
+import difftest.common.DifftestWiring
+import difftest.util.Profile
+
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
+  with HasSoCParameter
   with BindingScope
 {
-  // val misc = LazyModule(new SoCMisc())
+  lazy val tlManagers: List[TLNexusNode] = List()
   lazy val dts = DTS(bindingTree)
   lazy val json = JSON(bindingTree)
-}
 
-class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
-{
-  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
-  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
-  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
-
+  // collect info for DTS
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "xiangshan," + os.read(os.resource / "publishVersion")
@@ -73,11 +73,28 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         manager.resources.foreach(r => r.bind(manager.toResource))
       }
     }
-    if (!enableCHI) {
-      bindManagers(misc.l3_xbar.get.asInstanceOf[TLNexusNode])
-      bindManagers(misc.peripheralXbar.get.asInstanceOf[TLNexusNode])
-    }
+    tlManagers.foreach(xbar => bindManagers(xbar))
   }
+}
+
+trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
+  val dtsLM = wrapper.asInstanceOf[L]
+  FileRegisters.add("dts", dtsLM.dts)
+  FileRegisters.add("graphml", dtsLM.graphML)
+  FileRegisters.add("json", dtsLM.json)
+  FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+}
+
+class XSTop()(implicit p: Parameters) extends BaseXSSoc()
+{
+  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
+  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
+  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
+
+  override lazy val tlManagers = List(
+    misc.l3_xbar.map(_.asInstanceOf[TLNexusNode]),
+    misc.peripheralXbar.map(_.asInstanceOf[TLNexusNode])
+  ).flatten
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
@@ -108,7 +125,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         readCompDMT         = false,
         writeCancelable     = false,
         writeNoError        = true,
-        axiBurstAlwaysIncr  = true
+        axiBurstAlwaysIncr  = true,
+        chiDataCheck        = EnumCHIDataCheck.OddParity
       )
     })))
   )
@@ -125,7 +143,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         acceptOrderEndpoint         = true,
         acceptMemAttrDevice         = true,
         readReceiptAfterAcception   = true,
-        axiBurstAlwaysIncr          = true
+        axiBurstAlwaysIncr          = true,
+        chiDataCheck                = EnumCHIDataCheck.OddParity
       )
     })))
   ))
@@ -156,6 +175,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
+    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+      // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
+      println(s"SeparateDM: ${SeperateDM}")
+      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      require(core_with_l2(i).sep_tl_opt.isDefined)
+      require(SeperateTLBusRanges.size == 1)
+      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
+      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+    }
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
@@ -211,18 +239,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     }
   }
 
-  class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+  class XSTopImp(wrapper: XSTop) extends LazyRawModuleImp(wrapper)
+    with HasDTSImp[XSTop]
+  {
     soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
       annotate(new ChiselAnnotation {
         def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
       })
     }
-
-    FileRegisters.add("dts", dts)
-    FileRegisters.add("graphml", graphML)
-    FileRegisters.add("json", json)
-    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
     val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))
@@ -239,7 +264,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
-      val clock = Input(Bool())
+      val clock = Input(Clock())
       val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
@@ -275,10 +300,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       })
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
     val chi_openllc_opt = Option.when(enableCHI)(
-      withClockAndReset(io.clock.asClock, io.reset) {
+      withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
             hartIds = tiles.map(_.HartId),
@@ -289,7 +314,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     )
 
     // override LazyRawModuleImp's clock and reset
-    childClock := io.clock.asClock
+    childClock := io.clock
     childReset := reset_sync
 
     // output
@@ -305,7 +330,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(new MsiInfoBundle)))
+    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
@@ -325,10 +350,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
+      core.module.io.dft.foreach(dontTouch(_) := DontCare)
+      core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
-    withClockAndReset(io.clock.asClock, io.reset) {
+    withClockAndReset(io.clock, io.reset) {
       Option.when(enableCHI)(true.B).foreach { _ =>
         for ((core, i) <- core_with_l2.zipWithIndex) {
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
@@ -343,6 +370,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
           )
           chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
           chi_openllc_opt.get.io.rn(i) <> llcLogger.io.down
+          require(core.module.io.chi.get.getWidth == llcLogger.io.up.getWidth)
+          require(llcLogger.io.down.getWidth == chi_openllc_opt.get.io.rn(i).getWidth)
         }
         val memLogger = CHILogger(s"LLC_MEM", true)
         chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
@@ -354,6 +383,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
           tile.module.io.debugTopDown.l3MissMatch := l3Match
         }
+        core_with_l2.map(_.module.io.l3Miss := (if (chi_openllc_opt.nonEmpty) chi_openllc_opt.get.io.l3Miss else false.B))
       }
     }
 
@@ -379,11 +409,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         }
         l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
         core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
+        core_with_l2.foreach(_.module.io.l3Miss := l3.module.io.l3Miss)
       case None =>
     }
 
     (chi_openllc_opt, l3cacheOpt) match {
-      case (None, None) => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+      case (None, None) =>
+        core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+        core_with_l2.foreach(_.module.io.l3Miss := false.B)
       case _ =>
     }
 
@@ -399,7 +432,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.debug_module_io.reset := reset_sync
 
     misc.module.debug_module_io.debugIO.reset := misc.module.reset
-    misc.module.debug_module_io.debugIO.clock := io.clock.asClock
+    misc.module.debug_module_io.debugIO.clock := io.clock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
@@ -411,7 +444,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, reset_sync) {
+    withClockAndReset(io.clock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module))
@@ -429,6 +462,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   lazy val module = new XSTopImp(this)
 }
 
+class XSTileDiffTop(implicit p: Parameters) extends XSTop {
+  //TODO: need to keep the same module name as XSNoCDiffTop
+  override lazy val desiredName: String = "XSTop"
+  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) {
+    DifftestWiring.createAndConnectExtraIOs()
+    Profile.generateJson("XiangShan")
+  }
+
+  override lazy val module = new XSTileDiffTopImp(this)
+}
+
 object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
@@ -440,16 +484,24 @@ object TopMain extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
-  val soc = if (config(SoCParamsKey).UseXSNoCTop)
-    DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
-  else
-    DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+  if (config(SoCParamsKey).UseXSNoCDiffTop) {
+    val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
+    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+  } else if (config(SoCParamsKey).UseXSTileDiffTop) {
+    val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
+    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+  } else {
+    val soc = if (config(SoCParamsKey).UseXSNoCTop)
+      DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
+    else
+      DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
 
-  Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
 
-  // generate difftest bundles (w/o DifftestTopIO)
-  if (enableDifftest) {
-    DifftestModule.finish("XiangShan", false)
+    // generate difftest bundles (w/o DifftestTopIO)
+    if (enableDifftest) {
+      DifftestModule.finish("XiangShan", false)
+    }
   }
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")

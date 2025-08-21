@@ -19,7 +19,7 @@ package top
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.{DebugOptionsKey, DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -27,6 +27,7 @@ import scala.annotation.tailrec
 import scala.sys.exit
 import chisel3.util.log2Up
 import utility._
+import device.IMSICBusType
 
 object ArgParser {
   // TODO: add more explainations
@@ -47,6 +48,7 @@ object ArgParser {
       |--with-rollingdb
       |--disable-perf
       |--disable-alwaysdb
+      |--enable-dfx
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -89,7 +91,7 @@ object ArgParser {
           }), tail)
         case "--hartidbits" :: hartidbits :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case MaxHartIdBits => hartidbits
+            case MaxHartIdBits => hartidbits.toInt
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -131,6 +133,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
+        case "--perf-level" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(PerfLevel = value)
+          }), tail)
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
@@ -139,9 +145,13 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)
-        case "--imsic-use-tl" :: tail =>
+        case "--imsic-bus-type" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICBusType = device.IMSICBusType.withName(value))
+          }), tail)
+        case "--enable-ns" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.NonSecureKey => true
           }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
@@ -184,6 +194,32 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
+        case "--dfx" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableMbist = value.toBoolean)
+          }), tail)
+        case "--sram-with-ctl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = true)
+          }), tail)
+        case "--seperate-tl-bus" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+          }), tail)
+        case "--seperate-dm" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
+          }), tail)
+        case "--chi-addr-width" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIAddrWidthKey => value.toInt
+          }), tail)
+        case "--wfi-resume" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
+          }), tail)
+        case "--yaml-config" :: yamlFile :: tail =>
+          nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
@@ -200,6 +236,7 @@ object ArgParser {
       case PerfCounterOptionsKey => PerfCounterOptions(
         here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
         here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
         0
       )
     })

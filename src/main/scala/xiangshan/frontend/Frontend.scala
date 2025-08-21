@@ -34,8 +34,12 @@ import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.mbist.MbistInterface
+import utility.mbist.MbistPipeline
+import utility.sram.SramBroadcastBundle
+import utility.sram.SramHelper
 import xiangshan._
-import xiangshan.backend.fu.PFEvent
+import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
@@ -54,7 +58,7 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
@@ -92,6 +96,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
+    val dft       = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
   })
 
   // decouped-frontend modules
@@ -135,7 +141,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   pmp_req_vec.last <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
-    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+    if (HasBitmapCheck) {
+      pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+    } else {
+      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+    }
   }
   (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
   ifu.io.pmp.resp <> pmp_check.last.resp
@@ -157,6 +167,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   icache.io.ftqPrefetch <> ftq.io.toPrefetch
   icache.io.softPrefetch <> io.softPrefetch
+
+  // wfi (backend-icache, backend-instrUncache)
+  // DelayN for better timing, FIXME: maybe 1 cycle is not enough, to be evaluated
+  private val wfiReq = DelayN(io.backend.wfi.wfiReq, 1)
+  icache.io.wfi.wfiReq       := wfiReq
+  instrUncache.io.wfi.wfiReq := wfiReq
+  // return safe only when both icache & instrUncache are safe, also only when has wfiReq (like, safe := wfiReq.fire)
+  io.backend.wfi.wfiSafe := DelayN(wfiReq && icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe, 1)
 
   // IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
@@ -181,7 +199,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr_pf_enable := RegNext(csrCtrl.l1I_pf_enable)
+  icache.io.csr_pf_enable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
 
   icache.io.fencei := RegNext(io.fencei)
 
@@ -403,15 +421,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   instrUncache.io.req <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
-  instrUncache.io.flush := false.B
   io.error <> RegNext(RegNext(icache.io.error))
 
   icache.io.hartId := io.hartId
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
-  val frontendBubble = Mux(io.backend.canAccept, DecodeWidth.U - PopCount(ibuffer.io.out.map(_.valid)), 0.U)
-  XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
   io.resetInFrontend       := reset.asBool
 
@@ -435,4 +450,49 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
+
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeFrontend", hasMbist)
+  private val mbistIntf = if (hasMbist) {
+    val params = mbistPl.get.nodeParams
+    val intf = Some(Module(new MbistInterface(
+      params = Seq(params),
+      ids = Seq(mbistPl.get.childrenIds),
+      name = s"MbistIntfFrontend",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> mbistPl.get.mbist
+    mbistPl.get.registerCSV(intf.get.info, "MbistFrontend")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    // TODO: add mbist controller connections here
+    intf
+  } else {
+    None
+  }
+  private val sigFromSrams = if (hasDFT) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val cg           = ClockGate.genTeSrc
+  dontTouch(cg)
+
+  if (hasMbist) {
+    cg.cgen := io.dft.get.cgen
+  } else {
+    cg.cgen := false.B
+  }
+
+  sigFromSrams.foreach { case sig => sig := DontCare }
+  sigFromSrams.zip(io.dft).foreach {
+    case (sig, dft) =>
+      if (hasMbist) {
+        sig.ram_hold     := dft.ram_hold
+        sig.ram_bypass   := dft.ram_bypass
+        sig.ram_bp_clken := dft.ram_bp_clken
+        sig.ram_aux_clk  := dft.ram_aux_clk
+        sig.ram_aux_ckbp := dft.ram_aux_ckbp
+        sig.ram_mcp_hold := dft.ram_mcp_hold
+        sig.cgen         := dft.cgen
+      }
+      if (hasSramCtl) {
+        sig.ram_ctl := dft.ram_ctl
+      }
+  }
 }

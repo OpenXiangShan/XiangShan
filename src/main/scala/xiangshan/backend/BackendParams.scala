@@ -113,7 +113,6 @@ case class BackendParams(
   def CsrCnt = allSchdParams.map(_.CsrCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
-  def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
   def numPcMemReadPort = allExuParams.filter(_.needPc).size
   def numTargetReadPort = allRealExuParams.count(x => x.needTarget)
 
@@ -179,7 +178,7 @@ case class BackendParams(
 
   def getFpWbArbiterParams: WbArbiterParams = {
     val fpWbCfgs: Seq[FpWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeFp)).map(_.asInstanceOf[FpWB])
-    datapath.WbArbiterParams(fpWbCfgs, vfPregParams, this)
+    datapath.WbArbiterParams(fpWbCfgs, fpPregParams, this)
   }
 
   def getV0WbArbiterParams: WbArbiterParams = {

@@ -27,6 +27,7 @@ import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 
@@ -38,6 +39,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val excp_eew_index      = UInt(elemIdxBits.W)
   // val exceptionVec   = ExceptionVec() // uop has exceptionVec
   val baseAddr            = UInt(XLEN.W)
+  val uopAddr             = UInt(XLEN.W)
   val stride              = UInt(VLEN.W)
   // val flow_counter = UInt(flowIdxBits.W)
 
@@ -219,8 +221,10 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 }
 
 class storeMisaignIO(implicit p: Parameters) extends Bundle{
-  val storePipeEmpty           = Input(Bool())
-  val storeMisalignBufferEmpty = Input(Bool())
+  val storePipeEmpty            = Input(Bool())
+  val storeMisalignBufferEmpty  = Input(Bool())
+  val storeMisalignBufferRobIdx = Input(new RobPtr)
+  val storeMisalignBufferUopIdx = Input(UopIdx())
 }
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -257,15 +261,16 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 
-  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
+//  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
 }
 
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
+  val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
-  val vecDifftestInfo     = Decoupled(new DynInst) // to sbuffer
+  val vecDifftestInfo     = Decoupled(new ToSbufferDifftestInfoBundle) // to sbuffer
   val dtlb                = new TlbRequestIO(2)
   val pmpResp             = Flipped(new PMPRespBundle())
   val flush_sbuffer       = new SbufferFlushBundle
@@ -279,7 +284,7 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
 class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
-  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExuOutput(isVector=true))))
+  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new FeedbackToLsqIO)))
 
   val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
 }

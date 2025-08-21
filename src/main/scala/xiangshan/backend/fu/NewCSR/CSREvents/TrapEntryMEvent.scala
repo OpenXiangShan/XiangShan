@@ -65,6 +65,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
+  private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
@@ -116,9 +117,9 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.MIE          := 0.U
   out.mstatus.bits.MDT          := 1.U
   out.mepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
-  out.mcause.bits.Interrupt     := isInterrupt
+  out.mcause.bits.Interrupt     := isInterrupt && !isDTExcp
   out.mcause.bits.ExceptionCode := Mux(isDTExcp, ExceptionNO.EX_DT.U, highPrioTrapNO)
-  out.mtval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
+  out.mtval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   out.mtval2.bits.ALL           := Mux(isDTExcp, precause, tval2 >> 2)
   out.mtinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
   out.targetPc.bits.pc          := in.pcFromXtvec

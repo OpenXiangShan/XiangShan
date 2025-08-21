@@ -610,7 +610,7 @@ object GenElemIdx extends VLSUConstants {
       eewUopFlowsLog2
     )
     LookupTree(uopFlowsLog2, List(
-      0.U -> uopIdx,
+      0.U -> uopIdx ## flowIdx(0), // for hardware misalign
       1.U -> uopIdx ## flowIdx(0),
       2.U -> uopIdx ## flowIdx(1, 0),
       3.U -> uopIdx ## flowIdx(2, 0),
@@ -723,7 +723,8 @@ object genVWmask128 {
       "b001".U -> 0x3.U, //0011
       "b010".U -> 0xf.U, //1111
       "b011".U -> 0xff.U, //11111111
-      "b100".U -> 0xffff.U //1111111111111111
+      "b100".U -> 0xffff.U, //1111111111111111
+      "b111".U -> 0xffff.U  //cbo
     )) << addr(3, 0)).asUInt
   }
 }

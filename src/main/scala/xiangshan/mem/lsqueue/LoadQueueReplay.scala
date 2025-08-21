@@ -15,23 +15,23 @@
 ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.cache._
-import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.fu.FuConfig._
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.cache.wpu.ReplayCarry
-import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.mem.Bundles._
+import xiangshan.mem.mdp._
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.cache.mmu._
 import math._
 
 object LoadReplayCauses {
@@ -206,6 +206,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
     val loadMisalignFull = Input(Bool())
+    val misalignAllowSpec = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
@@ -364,7 +365,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_MF
     when (cause(i)(LoadReplayCauses.C_MF)) {
-      blocking(i) := Mux(!io.loadMisalignFull, false.B, blocking(i))
+      blocking(i) := Mux(!io.loadMisalignFull && (io.misalignAllowSpec || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
     }
   })
 

@@ -9,6 +9,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.fpu.Bundles.Fflags
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxsat}
 import xiangshan.frontend.BPUCtrl
+import xiangshan.mem.prefetch.PrefetchCtrl
 import chisel3.experimental.noPrefix
 
 object CSRBundles {
@@ -171,16 +172,7 @@ object CSRBundles {
 
   class CSRCustomState(implicit p: Parameters) extends Bundle {
     // Prefetcher
-    val l1I_pf_enable = Output(Bool())
-    val l2_pf_enable = Output(Bool())
-    val l1D_pf_enable = Output(Bool())
-    val l1D_pf_train_on_hit = Output(Bool())
-    val l1D_pf_enable_agt = Output(Bool())
-    val l1D_pf_enable_pht = Output(Bool())
-    val l1D_pf_active_threshold = Output(UInt(4.W))
-    val l1D_pf_active_stride = Output(UInt(6.W))
-    val l1D_pf_enable_stride = Output(Bool())
-    val l2_pf_store_only = Output(Bool())
+    val pf_ctrl = Output(new PrefetchCtrl)
     // Load violation predictor
     val lvpred_disable = Output(Bool())
     val no_spec_load = Output(Bool())
@@ -197,6 +189,8 @@ object CSRBundles {
     val uncache_write_outstanding_enable = Output(Bool())
     val hd_misalign_st_enable = Output(Bool())
     val hd_misalign_ld_enable = Output(Bool())
+    val power_down_enable = Output(Bool())
+    val flush_l2_enable = Output(Bool())
     // Rename
     val fusion_enable = Output(Bool())
     val wfi_enable = Output(Bool())

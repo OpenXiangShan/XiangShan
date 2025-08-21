@@ -19,18 +19,15 @@ package xiangshan.backend.dispatch
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.MemCoreTopDownIO
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.mem.mdp._
-import xiangshan.mem.{HasVLSUParameters, _}
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.rename.BusyTable
-import chisel3.util.experimental.decode._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.backend.datapath.DataConfig._
@@ -38,10 +35,16 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu.FuType.FuTypeOrR
-import xiangshan.backend.dispatch.Dispatch2IqFpImp
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
+import xiangshan.mem.MemCoreTopDownIO
+import xiangshan.mem.mdp._
+import xiangshan.mem.{HasVLSUParameters, _}
 
-
+class CoreDispatchTopDownIO extends Bundle {
+  val l2MissMatch = Input(Bool())
+  val l3MissMatch = Input(Bool())
+  val fromMem = Flipped(new MemCoreTopDownIO)
+}
 // TODO delete trigger message from frontend to iq
 class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with HasVLSUParameters {
   // std IQ donot need dispatch, only copy sta IQ, but need sta IQ's ready && std IQ's ready
@@ -116,6 +119,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }
     val og0Cancel = Input(ExuVec())
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    // to vlbusytable
+    val vlWriteBackInfo = new Bundle {
+      val vlFromIntIsZero  = Input(Bool())
+      val vlFromIntIsVlmax = Input(Bool())
+      val vlFromVfIsZero   = Input(Bool())
+      val vlFromVfIsVlmax  = Input(Bool())
+    }
     // from MemBlock
     val fromMem = new Bundle {
       val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
@@ -221,7 +231,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val fpBusyTable = Module(new BusyTable(numRegSrcFp * renameWidth, backendParams.numPregWb(FpData()), FpPhyRegs, FpWB()))
   val vecBusyTable = Module(new BusyTable(numRegSrcVf * renameWidth, backendParams.numPregWb(VecData()), VfPhyRegs, VfWB()))
   val v0BusyTable = Module(new BusyTable(numRegSrcV0 * renameWidth, backendParams.numPregWb(V0Data()), V0PhyRegs, V0WB()))
-  val vlBusyTable = Module(new BusyTable(numRegSrcVl * renameWidth, backendParams.numPregWb(VlData()), VlPhyRegs, VlWB()))
+  val vlBusyTable = Module(new VlBusyTable(numRegSrcVl * renameWidth, backendParams.numPregWb(VlData()), VlPhyRegs, VlWB()))
+  vlBusyTable.io_vl_Wb.vlWriteBackInfo := io.vlWriteBackInfo
   val busyTables = Seq(intBusyTable, fpBusyTable, vecBusyTable, v0BusyTable, vlBusyTable)
   val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0, io.wbPregsVl)
   val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0, idxRegTypeVl)
@@ -296,27 +307,53 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }
   }
 
+  // eliminate old vd
+  val ignoreOldVdVec = Wire(Vec(renameWidth, Bool()))
+  for (i <- 0 until renameWidth){
+    // numRegSrcVf - 1 is old vd
+    var j = numRegSrcVf - 1
+    // 2 is type of vec
+    var k = 2
+    val readidx = i * idxRegType(k).size + idxRegType(k).indexOf(j)
+    val readEn = SrcType.isVp(fromRename(i).bits.srcType(j))
+    val isDependOldVd = fromRename(i).bits.vpu.isDependOldVd
+    val isWritePartVd = fromRename(i).bits.vpu.isWritePartVd
+    val vta = fromRename(i).bits.vpu.vta
+    val vma = fromRename(i).bits.vpu.vma
+    val vm = fromRename(i).bits.vpu.vm
+    val vlIsVlmax = vlBusyTable.io_vl_read.vlReadInfo(i).is_vlmax
+    val vlIsNonZero = vlBusyTable.io_vl_read.vlReadInfo(i).is_nonzero
+    val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
+    val ignoreWhole = (vm =/= 0.U || vma) && vta
+    val ignoreOldVd = vlBusyTable.io.read(i).resp && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
+    ignoreOldVdVec(i) := readEn && ignoreOldVd
+    allSrcState(i)(j)(k) := readEn && (busyTables(k).io.read(readidx).resp || ignoreOldVd) || SrcType.isImm(fromRename(i).bits.srcType(j))
+  }
+
   // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
 
-  val robidxStepNext  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxStepHold  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  robidxStepReg := robidxCanCommitStepping
 
   when(!io.singleStep) {
     singleStepState := s_updateRobidx
   }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
     singleStepState := s_holdRobidx
-    robidxStepNext := fromRename(0).bits.robIdx
+    robidxStepHold := fromRename(0).bits.robIdx
   }
 
   when(singleStepState === s_updateRobidx) {
-    robidxStepReg := robidxStepNext
-    robidxCanCommitStepping := robidxStepNext
+    robidxCanCommitStepping := robidxStepHold
   }.elsewhen(singleStepState === s_holdRobidx) {
-    robidxStepReg := robidxStepReg
-    robidxCanCommitStepping := robidxStepReg
+    when(io.redirect.valid){
+      robidxCanCommitStepping.flag := !robidxStepReg.flag
+    }.otherwise {
+      robidxCanCommitStepping := robidxStepReg
+    }
   }
 
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
@@ -412,10 +449,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
       lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
+    // update src type if eliminate old vd
+    fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
   }
   for (i <- 0 until RenameWidth){
     // check is drop amocas sta
-    fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 1.U
+    fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 0.U
     // update singleStep
     fromRenameUpdate(i).bits.singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
   }
@@ -711,10 +750,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
-    when (fromRename(i).fire) {
-      XSDebug(TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
-      XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
-    }
+    XSDebug(
+      fromRename(i).fire &&
+        (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
+    XSDebug(fromRename(i).fire && updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
@@ -835,6 +874,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
   TopDownCounters.LoadL1Stall.id.U))))))))
 
+  val fusedVec = (0 until RenameWidth).map{ case i =>
+    if (i == 0) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid &&
+         CommitType.isFused(io.fromRename(i-1).bits.commitType))
+  }
+
   val decodeReason = RegNextN(io.stallReason.reason, 2)
   val renameReason = RegNext(io.stallReason.reason)
 
@@ -842,7 +887,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val firedVec = fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.map { case (((update, in), fire), idx) =>
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
     val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
     val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
@@ -855,7 +900,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     import TopDownCounters._
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
-      (fire                                              ) -> NoStall.id.U          ,
+      (fire || fused                                     ) -> NoStall.id.U          ,
       // dispatch not stall / core stall from decode or rename
       (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                    ,
       // rob stall
@@ -870,7 +915,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     ))
   }
 
-  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)), XSPerfLevel.CRITICAL))
 
   val robTrueCommit = io.debugTopDown.fromRob.robTrueCommit
   TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),

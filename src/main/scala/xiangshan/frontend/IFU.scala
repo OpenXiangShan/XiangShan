@@ -120,6 +120,7 @@ class IfuWbToFtqDB extends Bundle {
   val is_miss_pred      = Bool()
   val miss_pred_offset  = UInt(32.W)
   val checkJalFault     = Bool()
+  val checkJalrFault    = Bool()
   val checkRetFault     = Bool()
   val checkTargetFault  = Bool()
   val checkNotCFIFault  = Bool()
@@ -243,10 +244,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_vSetIdx    = VecInit(get_idx(f0_ftq_req.startAddr), get_idx(f0_ftq_req.nextlineStart))
   val f0_fire       = fromFtq.req.fire
 
-  val f0_flush, f1_flush, f2_flush, f3_flush                                     = WireInit(false.B)
-  val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
+  val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
 
-  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
+  val f0_flush_from_bpu = fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
     fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
 
   val wb_redirect, mmio_redirect, backend_redirect = WireInit(false.B)
@@ -255,8 +255,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   backend_redirect := fromFtq.redirect.valid
   f3_flush         := backend_redirect || (wb_redirect && !f3_wb_not_flush)
   f2_flush         := backend_redirect || mmio_redirect || wb_redirect
-  f1_flush         := f2_flush || from_bpu_f1_flush
-  f0_flush         := f1_flush || from_bpu_f0_flush
+  f1_flush         := f2_flush
+  f0_flush         := f1_flush || f0_flush_from_bpu
 
   val f1_ready, f2_ready, f3_ready = WireInit(false.B)
 
@@ -279,8 +279,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // XSPerfAccumulate("fetch_bubble_icache_1_busy",   f0_valid && !toICache(1).ready  )
   XSPerfAccumulate("fetch_flush_backend_redirect", backend_redirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", wb_redirect)
-  XSPerfAccumulate("fetch_flush_bpu_f1_flush", from_bpu_f1_flush)
-  XSPerfAccumulate("fetch_flush_bpu_f0_flush", from_bpu_f0_flush)
+  XSPerfAccumulate("fetch_flush_f0_flush_from_bpu", f0_flush_from_bpu)
 
   /**
     ******************************************************************************
@@ -298,8 +297,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f1_ready := f1_fire || !f1_valid
 
-  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx) && f1_valid
-  // from_bpu_f1_flush := false.B
+  assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx) && f1_valid))
 
   when(f1_flush)(f1_valid := false.B)
     .elsewhen(f0_fire && !f0_flush)(f1_valid := true.B)
@@ -644,19 +642,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /*** MMIO State Machine***/
-  val f3_mmio_data          = Reg(Vec(2, UInt(16.W)))
-  val mmio_is_RVC           = RegInit(false.B)
-  val mmio_resend_addr      = RegInit(0.U(PAddrBits.W))
-  val mmio_resend_exception = RegInit(0.U(ExceptionType.width.W))
+  val f3_mmio_data     = Reg(Vec(2, UInt(16.W)))
+  val mmio_exception   = RegInit(0.U(ExceptionType.width.W))
+  val mmio_is_RVC      = RegInit(false.B)
+  val mmio_has_resend  = RegInit(false.B)
+  val mmio_resend_addr = RegInit(0.U(PAddrBits.W))
   // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
   val mmio_resend_gpaddr            = RegInit(0.U(PAddrBitsMax.W))
   val mmio_resend_isForVSnonLeafPTE = RegInit(false.B)
 
   // last instuction finish
   val is_first_instr = RegInit(true.B)
-
-  /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
-  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
 
   val m_idle :: m_waitLastCmt :: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil =
     Enum(11)
@@ -673,9 +669,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === m_commited
 
-  val f3_mmio_to_commit      = f3_req_is_mmio && mmio_state === m_waitCommit
-  val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
-  val f3_mmio_can_go         = f3_mmio_to_commit && !f3_mmio_to_commit_next
+  val f3_mmio_to_commit           = f3_req_is_mmio && mmio_state === m_waitCommit
+  val f3_mmio_sent_to_ibuffer     = RegInit(false.B)
+  val f3_mmio_can_sent_to_ibuffer = f3_mmio_to_commit && !f3_mmio_sent_to_ibuffer
+
+  /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
+  io.mmioCommitRead.valid      := RegNext(f3_req_is_mmio && f3_valid, false.B)
+  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
 
   val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
   fromFtqRedirectReg.bits := RegEnable(
@@ -689,6 +689,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_flush_by_older = fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
   val f3_need_not_flush = f3_req_is_mmio && fromFtqRedirectReg.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
+
+  when(!f3_req_is_mmio) {
+    f3_mmio_sent_to_ibuffer := false.B
+  }.elsewhen(f3_mmio_req_commit || (mmioF3Flush && !f3_need_not_flush) || f3_ftq_flush_self || f3_ftq_flush_by_older) {
+    f3_mmio_sent_to_ibuffer := false.B
+  }.elsewhen(io.toIbuffer.fire) {
+    f3_mmio_sent_to_ibuffer := true.B
+  }
 
   /**
     **********************************************************************************
@@ -741,9 +749,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(m_waitResp) {
       when(fromUncache.fire) {
         val isRVC      = fromUncache.bits.data(1, 0) =/= 3.U
-        val needResend = !isRVC && f3_paddrs(0)(2, 1) === 3.U
+        val exception  = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        val needResend = !isRVC && f3_paddrs(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
         mmio_state      := Mux(needResend, m_sendTLB, m_waitCommit)
+        mmio_exception  := exception
         mmio_is_RVC     := isRVC
+        mmio_has_resend := needResend
         f3_mmio_data(0) := fromUncache.bits.data(15, 0)
         f3_mmio_data(1) := fromUncache.bits.data(31, 16)
       }
@@ -768,8 +779,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
         // if tlb has exception, abort checking pmp, just send instr & exception to ibuffer and wait for commit
         mmio_state := Mux(ExceptionType.hasException(exception), m_waitCommit, m_sendPMP)
         // also save itlb response
+        mmio_exception                := exception
         mmio_resend_addr              := io.iTLBInter.resp.bits.paddr(0)
-        mmio_resend_exception         := exception
         mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)
         mmio_resend_isForVSnonLeafPTE := io.iTLBInter.resp.bits.isForVSnonLeafPTE(0)
       }
@@ -787,7 +798,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       // if pmp has exception, abort sending request, just send instr & exception to ibuffer and wait for commit
       mmio_state := Mux(ExceptionType.hasException(exception), m_waitCommit, m_resendReq)
       // also save pmp response
-      mmio_resend_exception := exception
+      mmio_exception := exception
     }
 
     is(m_resendReq) {
@@ -797,22 +808,24 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(m_waitResendResp) {
       when(fromUncache.fire) {
         mmio_state      := m_waitCommit
+        mmio_exception  := ExceptionType.fromTilelink(fromUncache.bits.corrupt)
         f3_mmio_data(1) := fromUncache.bits.data(15, 0)
       }
     }
 
     is(m_waitCommit) {
       // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
-      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_go relies on this)
-      mmio_state := Mux(mmio_commit || f3_itlb_pbmt === Pbmt.nc, m_commited, m_waitCommit)
+      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_sent_to_ibuffer relies on this)
+      mmio_state := Mux(mmio_commit || ((f3_itlb_pbmt === Pbmt.nc) && io.toIbuffer.ready), m_commited, m_waitCommit)
     }
 
     // normal mmio instruction
     is(m_commited) {
       mmio_state                    := m_idle
+      mmio_exception                := ExceptionType.none
       mmio_is_RVC                   := false.B
+      mmio_has_resend               := false.B
       mmio_resend_addr              := 0.U
-      mmio_resend_exception         := ExceptionType.none
       mmio_resend_gpaddr            := 0.U
       mmio_resend_isForVSnonLeafPTE := false.B
     }
@@ -820,19 +833,26 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   // Exception or flush by older branch prediction
   // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend rediect
-  when(f3_ftq_flush_self || f3_ftq_flush_by_older) {
+  when(f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush) {
     mmio_state                    := m_idle
+    mmio_exception                := ExceptionType.none
     mmio_is_RVC                   := false.B
+    mmio_has_resend               := false.B
     mmio_resend_addr              := 0.U
-    mmio_resend_exception         := ExceptionType.none
     mmio_resend_gpaddr            := 0.U
     mmio_resend_isForVSnonLeafPTE := false.B
     f3_mmio_data.map(_ := 0.U)
   }
 
-  toUncache.valid     := ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
-  toUncache.bits.addr := Mux(mmio_state === m_resendReq, mmio_resend_addr, f3_paddrs(0))
-  fromUncache.ready   := true.B
+  toUncache.valid      := ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
+  toUncache.bits.addr  := Mux(mmio_state === m_resendReq, mmio_resend_addr, f3_paddrs(0))
+  toUncache.bits.flush := f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush
+  // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
+  // we need to tell L2 Cache about this to make it work correctly
+  toUncache.bits.memBackTypeMM := !f3_pmp_mmio
+  toUncache.bits.memPageTypeNC := f3_itlb_pbmt === Pbmt.nc
+  // always ready to receive response: we just send one request at same time
+  fromUncache.ready := true.B
 
   // send itlb request in m_sendTLB state
   io.iTLBInter.req.valid                   := (mmio_state === m_sendTLB) && f3_req_is_mmio
@@ -915,7 +935,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
 
   val f3_triggered       = frontendTrigger.io.triggered
-  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_sent_to_ibuffer) && !f3_flush
 
   /*** send to Ibuffer  ***/
   io.toIbuffer.valid          := f3_toIbuffer_valid
@@ -948,11 +968,28 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid.asUInt
   }
 
+  when(io.toIbuffer.valid && io.toIbuffer.ready) {
+    val enqVec = io.toIbuffer.bits.enqEnable
+    val allocateSeqNum = VecInit((0 until PredictWidth).map { i =>
+      val idx  = PopCount(enqVec.take(i + 1))
+      val pc   = f3_pc(i)
+      val code = io.toIbuffer.bits.instrs(i)
+      PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
+    })
+    io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
+      a := allocateSeqNum(i)
+    }
+  }.otherwise {
+    io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
+      a := 0.U
+    }
+  }
+
   /** to backend */
   // f3_gpaddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := f3_toIbuffer_valid && Mux(
     f3_req_is_mmio,
-    mmio_resend_exception === ExceptionType.gpf,
+    mmio_exception === ExceptionType.gpf,
     f3_exception.map(_ === ExceptionType.gpf).reduce(_ || _)
   )
   io.toBackend.gpaddrMem_waddr        := f3_ftq_req.ftqIdx.value
@@ -994,29 +1031,29 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio) {
-    val inst         = Cat(f3_mmio_data(1), f3_mmio_data(0))
-    val currentIsRVC = isRVC(inst)
+    val inst = Cat(f3_mmio_data(1), f3_mmio_data(0))
 
     val brType :: isCall :: isRet :: Nil = brInfo(inst)
-    val jalOffset                        = jal_offset(inst, currentIsRVC)
-    val brOffset                         = br_offset(inst, currentIsRVC)
+    val jalOffset                        = jal_offset(inst, mmio_is_RVC)
+    val brOffset                         = br_offset(inst, mmio_is_RVC)
 
     io.toIbuffer.bits.instrs(0) := Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
 
     io.toIbuffer.bits.pd(0).valid  := true.B
-    io.toIbuffer.bits.pd(0).isRVC  := currentIsRVC
+    io.toIbuffer.bits.pd(0).isRVC  := mmio_is_RVC
     io.toIbuffer.bits.pd(0).brType := brType
     io.toIbuffer.bits.pd(0).isCall := isCall
     io.toIbuffer.bits.pd(0).isRet  := isRet
 
-    io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
-    io.toIbuffer.bits.crossPageIPFFix(0) := ExceptionType.hasException(mmio_resend_exception)
+    io.toIbuffer.bits.exceptionType(0) := mmio_exception
+    // exception can happens in next page only when resend
+    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_has_resend && ExceptionType.hasException(mmio_exception)
     io.toIbuffer.bits.illegalInstr(0)    := mmioRVCExpander.io.ill
 
     io.toIbuffer.bits.enqEnable := f3_mmio_range.asUInt
 
     mmioFlushWb.bits.pd(0).valid  := true.B
-    mmioFlushWb.bits.pd(0).isRVC  := currentIsRVC
+    mmioFlushWb.bits.pd(0).isRVC  := mmio_is_RVC
     mmioFlushWb.bits.pd(0).brType := brType
     mmioFlushWb.bits.pd(0).isCall := isCall
     mmioFlushWb.bits.pd(0).isRet  := isRet
@@ -1118,12 +1155,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   /*write back flush type*/
   val checkFaultType    = wb_check_result_stage2.faultType
   val checkJalFault     = wb_valid && checkFaultType.map(_.isjalFault).reduce(_ || _)
+  val checkJalrFault    = wb_valid && checkFaultType.map(_.isjalrFault).reduce(_ || _)
   val checkRetFault     = wb_valid && checkFaultType.map(_.isRetFault).reduce(_ || _)
   val checkTargetFault  = wb_valid && checkFaultType.map(_.istargetFault).reduce(_ || _)
   val checkNotCFIFault  = wb_valid && checkFaultType.map(_.notCFIFault).reduce(_ || _)
   val checkInvalidTaken = wb_valid && checkFaultType.map(_.invalidTakenFault).reduce(_ || _)
 
   XSPerfAccumulate("predecode_flush_jalFault", checkJalFault)
+  XSPerfAccumulate("predecode_flush_jalrFault", checkJalrFault)
   XSPerfAccumulate("predecode_flush_retFault", checkRetFault)
   XSPerfAccumulate("predecode_flush_targetFault", checkTargetFault)
   XSPerfAccumulate("predecode_flush_notCFIFault", checkNotCFIFault)
@@ -1204,6 +1243,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   ifuWbToFtqDumpData.is_miss_pred      := checkFlushWb.bits.misOffset.valid
   ifuWbToFtqDumpData.miss_pred_offset  := checkFlushWb.bits.misOffset.bits
   ifuWbToFtqDumpData.checkJalFault     := checkJalFault
+  ifuWbToFtqDumpData.checkJalrFault    := checkJalrFault
   ifuWbToFtqDumpData.checkRetFault     := checkRetFault
   ifuWbToFtqDumpData.checkTargetFault  := checkTargetFault
   ifuWbToFtqDumpData.checkNotCFIFault  := checkNotCFIFault

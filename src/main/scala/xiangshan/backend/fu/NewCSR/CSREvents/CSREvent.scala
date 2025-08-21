@@ -34,9 +34,11 @@ trait CSREvents { self: NewCSR =>
     trapEntryMEvent,
     trapEntryHSEvent,
     trapEntryVSEvent,
+    trapEntryMNEvent,
     mretEvent,
     sretEvent,
     dretEvent,
+    mnretEvent,
   )
 
   events.foreach(x => dontTouch(x.out))
@@ -146,6 +148,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
+  val mbmc = Input(new MbmcBundle)
   // from mem
   val memExceptionVAddr = Input(UInt(XLEN.W))
   val memExceptionGPAddr = Input(UInt(XLEN.W))

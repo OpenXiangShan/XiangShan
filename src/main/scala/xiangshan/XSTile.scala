@@ -24,10 +24,10 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import device.MsiInfoBundle
 import system.HasSoCParameter
-import top.{BusPerfMonitor, ArgParser, Generator}
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
+import top.{ArgParser, BusPerfMonitor, Generator}
+import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, IntBuffer, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.sram.SramBroadcastBundle
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
 import xiangshan.backend.trace.TraceCoreInterface
@@ -46,7 +46,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_l3_pf_port = memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
   val tl_uncache = l2top.inner.mmio_port
-  // val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
+  val sep_tl_opt = l2top.inner.sep_tl_port_opt
   val beu_int_source = l2top.inner.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.inner.clint_int_node
@@ -57,6 +57,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.plic_int_sink :*= plic_int_node
   memBlock.debug_int_sink := debug_int_node
   memBlock.nmi_int_sink := nmi_int_node
+  memBlock.beu_local_int_sink := IntBuffer() := l2top.inner.beu_local_int_source
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
@@ -100,7 +101,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
-      val msiInfo = Input(ValidIO(new MsiInfoBundle))
+      val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+      val msiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -110,9 +112,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
+      val l3Miss = Input(Bool())
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
+      val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
     })
 
     dontTouch(io.hartId)
@@ -124,13 +131,17 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
-    core.module.io.msiInfo := io.msiInfo
-    core.module.io.clintTime := io.clintTime
+    core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
+    l2top.module.io.msiInfo.fromTile := io.msiInfo
+    core.module.io.clintTime := l2top.module.io.clintTime.toCore
+    l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
     l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
     l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
+    l2top.module.io.msiAck.fromCore := core.module.io.msiAck
+    io.msiAck := l2top.module.io.msiAck.toTile
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
@@ -139,8 +150,21 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
+    l2top.module.io.beu_errors.uncache <> core.module.io.beu_errors.uncache
+
+    l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
+    io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
+    core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
+    io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
+
+    l2top.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+    l2top.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+    core.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+    core.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+
     if (enableL2) {
       // TODO: add ECC interface of L2
+      l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
@@ -153,6 +177,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+      core.module.io.topDownInfo.l2Miss := l2top.module.io.l2Miss
 
       core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
@@ -164,6 +189,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := false.B
+      core.module.io.topDownInfo.l2Miss := false.B
 
       core.module.io.l2_tlb_req.req.valid := false.B
       core.module.io.l2_tlb_req.req.bits := DontCare
@@ -175,6 +201,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
     core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
+    l2top.module.io.l3Miss.fromTile := io.l3Miss
+    core.module.io.topDownInfo.l3Miss := l2top.module.io.l3Miss.toCore
 
     io.chi.foreach(_ <> l2top.module.io.chi.get)
     l2top.module.io.nodeID.foreach(_ := io.nodeID.get)

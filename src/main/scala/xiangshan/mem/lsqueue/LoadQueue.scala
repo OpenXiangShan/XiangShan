@@ -22,16 +22,17 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.mmu._
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).VirtualLoadQueueSize
@@ -111,8 +112,8 @@ trait HasLoadHelper { this: XSModule =>
   }
 
   def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
-    require(addrOffset.getWidth == 3)
-    VecInit((0 until 8).map{ case i =>
+    require(addrOffset.getWidth == 4)
+    VecInit((0 until 16).map{ case i =>
       addrOffset === i.U
     })
   }
@@ -192,6 +193,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
+    val misalignAllowSpec = Input(Bool())
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -203,7 +205,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val lqDeqPtr = Output(new LqPtr)
 
+    val rarValidCount = Output(UInt())
+
     val debugTopDown = new LoadQueueTopDownIO
+    val noUopsIssed = Input(Bool())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -218,6 +223,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.validCount<> io.rarValidCount
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
@@ -277,6 +283,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth).bits.vaNeedExt := true.B
 
   loadQueueReplay.io.loadMisalignFull := io.loadMisalignFull
+  loadQueueReplay.io.misalignAllowSpec := io.misalignAllowSpec
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
@@ -293,7 +300,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3
     val ldinBits = io.ldu.ldin(w).bits
-    buff.valid := io.ldu.ldin(w).valid && (ldinBits.nc || ldinBits.mmio) && !ldinBits.rep_info.need_rep
+    buff.valid := io.ldu.ldin(w).valid && !ldinBits.nc_with_data
     buff.bits := ldinBits
   }
 
@@ -331,6 +338,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
+
+  virtualLoadQueue.io.noUopsIssued := io.noUopsIssed
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)

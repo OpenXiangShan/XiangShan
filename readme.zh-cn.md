@@ -4,16 +4,17 @@
 
 English Readme is [here](README.md).
 
-©2020-2022 中国科学院计算技术研究所版权所有
-
-©2020-2022 鹏城实验室版权所有
-
 ## 文档和报告
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) 是我们的官方文档仓库，其中包含了设计文档、技术报告、使用教程等内容。
+香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
 
-* 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
+香山设计文档（适用于昆明湖 V2R2）已经发布，您可在此处查看：[docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/)
 
+香山用户文档已单独发布，您可在此处查看：[docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/)、[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
+
+我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
+
+所有香山文档均采用 CC-BY-4.0 协议授权。
 
 ## 论文发表情况
 
@@ -87,7 +88,7 @@ make idea
 
 ## 生成 Verilog
 
-* 运行 `make verilog` 以生成 verilog 代码。输出文件为 `build/XSTop.v`。
+* 运行 `make verilog` 以生成 verilog 代码。该命令会在 `build/rtl/` 目录下生成多个 `.sv` 文件（例如 `build/rtl/XSTop.sv`）。
 * 更多信息详见 `Makefile`。
 
 ## 仿真运行
@@ -121,3 +122,13 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## 致谢
 
 香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。
+
+## 许可证
+
+版权所有 © 2020-2025 中国科学院计算技术研究所
+
+版权所有 © 2021-2025 北京开源芯片研究院
+
+版权所有 © 2020-2022 鹏城实验室
+
+香山以 [木兰宽松许可证 第2版](LICENSE) 授权。

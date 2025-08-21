@@ -19,7 +19,7 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{DebugModule, TLPMA, TLPMAIO}
+import device.{DebugModule, TLPMA, TLPMAIO, AXI4MemEncrypt}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -31,20 +31,45 @@ import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import xiangshan.backend.fu.PMAConst
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
+import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
 import openLLC.OpenLLCParam
-import xiangshan.PMParameKey
 
 case object SoCParamsKey extends Field[SoCParameters]
+case object CVMParamsKey extends Field[CVMParameters]
+
+case class CVMParameters
+(
+  MEMENCRange: AddressSet = AddressSet(0x38030000L, 0xfff),
+  KeyIDBits: Int = 0,
+  MemencPipes: Int = 4,
+  HasMEMencryption: Boolean = false,
+  HasDelayNoencryption: Boolean = false, // Test specific
+)
 
 case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 48,
-  PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
+  PmemRanges: Seq[MemoryRange] = Seq(MemoryRange(0x80000000L, 0x80000000000L)),
+  PMAConfigs: Seq[PMAConfigEntry] = Seq(
+    PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
+    PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x3A000000L, a = 1),
+    PMAConfigEntry(0x39002000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x39000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x38022000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x38020000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x30050000L, a = 1, w = true, r = true), // FIXME: GPU space is cacheable?
+    PMAConfigEntry(0x30010000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x20000000L, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0)
+  ),
   CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
@@ -58,26 +83,44 @@ case class SoCParameters
     ways = 8,
     sets = 2048 // 1MB per bank
   )),
-  OpenLLCParamsOpt: Option[OpenLLCParam] = Some(OpenLLCParam(
-    name = "LLC",
-    ways = 8,
-    sets = 2048,
-    banks = 4,
-    clientCaches = Seq(L2Param())
-  )),
+  OpenLLCParamsOpt: Option[OpenLLCParam] = None,
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
     "B" -> 7,
+    "C" -> 9,
     "E.b" -> 11
   ),
   NumHart: Int = 64,
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
+  UseXSNoCDiffTop: Boolean = false,
+  UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  SeperateTLBus: Boolean = false,
+  SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
+  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
+  IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
+  IMSICParams: aia.IMSICParams = aia.IMSICParams(
+    imsicIntSrcWidth = 8,
+    mAddr = 0x3A800000,
+    sgAddr = 0x3B000000,
+    geilen = 5,
+    vgeinWidth = 6,
+    iselectWidth = 12,
+    EnableImsicAsyncBridge = true,
+    HasTEEIMSIC = false
+  ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  WFIClockGate: Boolean = false,
+  EnablePowerDown: Boolean = false
 ){
+  require(
+    L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
+    "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
+  )
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
@@ -90,6 +133,7 @@ trait HasSoCParameter {
   implicit val p: Parameters
 
   val soc = p(SoCParamsKey)
+  val cvm = p(CVMParamsKey)
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
@@ -105,7 +149,7 @@ trait HasSoCParameter {
   val TracePrivWidth              = tiles.head.traceParams.PrivWidth
   val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
   val TraceItypeWidth             = tiles.head.traceParams.ItypeWidth
-  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2)
+  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2 + 1)
   val TraceIlastsizeWidth         = tiles.head.traceParams.IlastsizeWidth
 
   // L3 configurations
@@ -122,14 +166,31 @@ trait HasSoCParameter {
 
   val NumIRSrc = soc.NumIRSrc
 
+  val SeperateDM = soc.SeperateDM
+  val SeperateTLBus = soc.SeperateTLBus
+  val SeperateTLBusRanges = soc.SeperateTLBusRanges
+
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
+  val SeperateTLAsyncBridge = if (SeperateTLBus && soc.SeperateTLAsyncBridge.isDefined)
+    soc.SeperateTLAsyncBridge else None
+
+  // seperate TL bus
+  val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
+
+  val WFIClockGate = soc.WFIClockGate
+  val EnablePowerDown = soc.EnablePowerDown
+
+  def HasMEMencryption = cvm.HasMEMencryption
+  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
+    "HasMEMencryption most set with KeyIDBits > 0")
 }
 
 trait HasPeripheralRanges {
   implicit val p: Parameters
 
+  private def cvm = p(CVMParamsKey)
   private def soc = p(SoCParamsKey)
   private def dm = p(DebugModuleKey)
   private def pmParams = p(PMParameKey)
@@ -147,6 +208,11 @@ trait HasPeripheralRanges {
   ) ++ (
     if (soc.L3CacheParamsOpt.map(_.ctrl.isDefined).getOrElse(false))
       Map("L3CTL" -> AddressSet(soc.L3CacheParamsOpt.get.ctrl.get.address, 0xffff))
+    else
+      Map()
+  ) ++ (
+    if (cvm.HasMEMencryption)
+      Map("MEMENC"  -> cvm.MEMENCRange)
     else
       Map()
   )
@@ -259,15 +325,30 @@ trait HaveAXI4MemPort {
       TLBuffer.chainNode(2) :=
       mem_xbar
   }
+  val axi4memencrpty = Option.when(HasMEMencryption)(LazyModule(new AXI4MemEncrypt(cvm.MEMENCRange)))
+  if (HasMEMencryption) {
+    memAXI4SlaveNode :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(idBits = 14) :=
+      AXI4UserYanker() :=
+      axi4memencrpty.get.node
 
-  memAXI4SlaveNode :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-    AXI4IdIndexer(idBits = 14) :=
-    AXI4UserYanker() :=
-    AXI4Deinterleaver(L3BlockSize) :=
-    axi4mem_node
+    axi4memencrpty.get.node :=
+      AXI4Deinterleaver(L3BlockSize) :=
+      axi4mem_node
+  } else {
+    memAXI4SlaveNode :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(idBits = 14) :=
+      AXI4UserYanker() :=
+      AXI4Deinterleaver(L3BlockSize) :=
+      axi4mem_node
+  }
+
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
@@ -415,24 +496,38 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { pll_node := peripheralXbar.get }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
+  val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
   if (enableCHI) {
-    debugModule.debug.node := device_xbar.get
-    // TODO: l3_xbar
+    if (SeperateDM) {
+      debugModule.debug.node := debugModuleXbarOpt.get
+    } else {
+      debugModule.debug.node := device_xbar.get
+    }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
     }
   } else {
-    debugModule.debug.node := peripheralXbar.get
+    if (SeperateDM) {
+      debugModule.debug.node := debugModuleXbarOpt.get
+    } else {
+      debugModule.debug.node := peripheralXbar.get
+    }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-      l3_xbar.get := TLBuffer() := sb2tl.node
+      l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
   }
 
   val pma = LazyModule(new TLPMA)
   if (enableCHI) {
     pma.node := TLBuffer.chainNode(4) := device_xbar.get
+    if (HasMEMencryption) {
+      axi4memencrpty.get.ctrl_node := TLToAPB() := device_xbar.get
+    }
   } else {
     pma.node := TLBuffer.chainNode(4) := peripheralXbar.get
+    if (HasMEMencryption) {
+      axi4memencrpty.get.ctrl_node := TLToAPB() := peripheralXbar.get
+    }
   }
 
   class SoCMiscImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
@@ -457,6 +552,11 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     pma.module.io <> cacheable_check
 
+    if (HasMEMencryption) {
+      val cnt = Counter(true.B, 8)._1
+      axi4memencrpty.get.module.io.random_val := axi4memencrpty.get.module.io.random_req && cnt(2).asBool
+      axi4memencrpty.get.module.io.random_data := cnt(0).asBool
+    }
     // positive edge sampling of the lower-speed rtc_clock
     val rtcTick = RegInit(0.U(3.W))
     rtcTick := Cat(rtcTick(1, 0), rtc_clock)

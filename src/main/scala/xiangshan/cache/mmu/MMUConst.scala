@@ -69,6 +69,10 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
+  // hash asid width
+  hashAsidWidth: Int = 3,
+  // hash vpn width
+  hashVpnWidth: Int = 6,
   // filter
   ifilterSize: Int = 8,
   dfilterSize: Int = 32,
@@ -106,6 +110,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteFlagLen = 8
   val pteRswLen = 2
   val ptePPNLen = 44
+  val ptePaddrLen = 56
   val pteResLen = 7
   val ptePbmtLen = 2
   val pteNLen = 1
@@ -132,6 +137,11 @@ trait HasTlbConst extends HasXSParameter {
   def allStage = "b11".U
   def onlyStage1 = "b01".U
   def onlyStage2 = "b10".U
+
+  def noSfence = "b00".U
+  def isSfence = "b01".U
+  def isVSfence = "b10".U
+  def isGSfence = "b11".U
 
   def Sv39 = "h8".U
   def Sv48 = "h9".U
@@ -258,10 +268,22 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = l2tlbParams.llptwsize + 1 + 1
+  val MemReqWidth = if (HasBitmapCheck) 2 *(l2tlbParams.llptwsize + 1 + 1) else (l2tlbParams.llptwsize + 1 + 1)
   val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
+
+  def ptwTranVec(flushMask: UInt): Vec[Bool] = {
+    val vec = Wire(Vec(tlbcontiguous, Bool()))
+    for (i <- 0 until tlbcontiguous) {
+      vec(i) := flushMask(i)
+    }
+    vec
+  }
+
+  def dupBitmapPPN(ppn1: UInt, ppn2: UInt) : Bool = {
+    ppn1(ppnLen-1, log2Up(XLEN)-1) === ppn2(ppnLen-1, log2Up(XLEN)-1)
+  }
 
   def genPtwL1Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL1IdxLen - 1, 0)

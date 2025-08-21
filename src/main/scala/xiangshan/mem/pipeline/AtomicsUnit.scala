@@ -22,16 +22,17 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
-import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
+import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
+import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
+import difftest._
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule
   with MemoryOpConstants
@@ -58,6 +59,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
+
+  PerfCCT.updateInstPos(io.in.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
@@ -104,7 +107,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val vaddr = rs1
 
   val is_mmio = Reg(Bool())
-  val is_nc = RegInit(false.B)
   val isForVSnonLeafPTE = Reg(Bool())
 
   // dcache response data
@@ -263,7 +265,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       trigger                  := triggerAction
 
       when (!io.dtlb.resp.bits.miss) {
-        is_nc := Pbmt.isNC(io.dtlb.resp.bits.pbmt(0))
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
           // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
@@ -288,7 +289,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st || pmp.ld || pmp.mmio
+    val exception_pa_mmio_nc = pmp.mmio || Pbmt.isIO(pbmtReg) || Pbmt.isNC(pbmtReg)
+    val exception_pa = pmp.st || pmp.ld || exception_pa_mmio_nc
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -298,8 +300,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
     // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || (pmp.ld || pmp.mmio) && isLr
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || (pmp.ld || pmp.mmio) && !isLr
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
+      (pmp.ld || exception_pa_mmio_nc) && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
+      (pmp.ld || exception_pa_mmio_nc) && !isLr
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
@@ -462,7 +466,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
   // send req to sbuffer to flush it if it is not empty
-  io.flush_sbuffer.valid := !sbuffer_empty && state === s_tlb_and_flush_sbuffer_req
+  io.flush_sbuffer.valid := !sbuffer_empty && (
+    state === s_tlb_and_flush_sbuffer_req ||
+    state === s_pm ||
+    state === s_wait_flush_sbuffer_resp
+  )
 
   // When is sta issue port ready:
   // (1) AtomicsUnit is idle, or
@@ -528,6 +536,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   pipe_req.amo_data := genWdataAMO(rs2, uop.fuOpType)
   pipe_req.amo_mask := genWmaskAMO(paddr, uop.fuOpType)
   pipe_req.amo_cmp  := genWdataAMO(rd, uop.fuOpType)
+  pipe_req.miss_fail_cause_evict_btot := false.B
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)

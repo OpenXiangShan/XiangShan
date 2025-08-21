@@ -7,7 +7,7 @@ import freechips.rocketchip.rocket.CSRs
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{VirtMode, CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
-import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, MretEventSinkBundle, MNretEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRConfig.PPNLength
@@ -20,8 +20,10 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsstatus = Module(
     new CSRModule("VSstatus", new SstatusBundle)
       with SretEventSinkBundle
+      with SretEventSDTSinkBundle
       with MretEventSinkBundle
       with MNretEventSinkBundle
+      with DretEventSinkBundle
       with TrapEntryVSEventSinkBundle
       with HasRobCommitBundle
       with HasVirtualSupervisorEnvBundle
@@ -31,7 +33,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         reg.FS := ContextStatus.Dirty
       }
 
-      when ((robCommit.vsDirty || writeVCSR) && isVirtMode) {
+      when ((robCommit.vsDirty || writeVCSR || robCommit.vstart.valid && robCommit.vstart.bits =/= 0.U) && isVirtMode) {
         assert(reg.VS =/= ContextStatus.Off, "The vsstatus.VS should not be Off when set dirty, please check decode")
         reg.VS := ContextStatus.Dirty
       }

@@ -12,6 +12,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryHSEventSinkBundle}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
+import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap
 
@@ -166,11 +167,31 @@ trait HypervisorLevel { self: NewCSR =>
   })
     .setAddr(CSRs.hgeip)
 
-  val hstateen0 = Module(new CSRModule("Hstateen", new HstateenBundle0) with HasStateen0Bundle {
+  val hstateen0 = Module(new CSRModule("Hstateen0", new Hstateen0Bundle) with HasStateenBundle {
     // For every bit in an mstateen CSR that is zero (whether read-only zero or set to zero), the same bit
     // appears as read-only zero in the matching hstateen and sstateen CSRs.
     regOut := reg.asUInt & fromMstateen0.asUInt
   }).setAddr(CSRs.hstateen0)
+
+  val hstateen1 = Module(new CSRModule("Hstateen1", new HstateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen1.asUInt
+  }).setAddr(CSRs.hstateen1)
+
+  val hstateen2 = Module(new CSRModule("Hstateen2", new HstateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen2.asUInt
+  }).setAddr(CSRs.hstateen2)
+
+  val hstateen3 = Module(new CSRModule("Hstateen3", new HstateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen3.asUInt
+  }).setAddr(CSRs.hstateen3)
+
+  val hcontext = Module(new CSRModule("Hcontext", new McontextBundle) {
+    val fromMcontext = IO(Input(new McontextBundle))
+    val toMcontext   = IO(ValidIO(new McontextBundle))
+    toMcontext.valid := wen
+    toMcontext.bits.HCONTEXT := wdata.HCONTEXT.asUInt
+    regOut.HCONTEXT := fromMcontext.HCONTEXT.asUInt
+  }).setAddr(CSRs.hcontext)
 
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,
@@ -192,6 +213,10 @@ trait HypervisorLevel { self: NewCSR =>
     hgatp,
     hgeip,
     hstateen0,
+    hstateen1,
+    hstateen2,
+    hstateen3,
+    hcontext,
   )
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
@@ -219,9 +244,7 @@ class HstatusBundle extends CSRBundle {
 
 }
 
-object HstatusVgeinField extends CSREnum with WLRLApply {
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.asUInt <= GEILEN.U
-}
+object HstatusVgeinField extends CSREnum with WLRLApply
 
 class HstatusModule(implicit p: Parameters) extends CSRModule("Hstatus", new HstatusBundle)
   with SretEventSinkBundle
@@ -231,6 +254,7 @@ class HvipBundle extends InterruptPendingBundle {
   // VSSIP, VSTIP, VSEIP, localIP is writable
   this.getVS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIP.setRO().withReset(0.U)
 }
 
 class HieBundle extends InterruptEnableBundle {
@@ -250,16 +274,16 @@ class HvienBundle extends InterruptEnableBundle {
   // For interrupt numbers 13–63, implementations may freely choose which bits of hvien are writable
   // and which bits are read-only zero or one.
   this.getLocal.foreach(_.setRW().withReset(0.U))
-
+  this.LCOFIE.setRO().withReset(0.U)
 }
 
-class HgeieBundle extends CSRBundle {
-  val ie = RW(GEILEN, 1).withReset(0.U)
+class HgeieBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
+  val ie = RW(soc.IMSICParams.geilen, 1).withReset(0.U)
   // bit 0 is read only 0
 }
 
-class HgeipBundle extends CSRBundle {
-  val ip = RO(GEILEN, 1)
+class HgeipBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
+  val ip = RO(soc.IMSICParams.geilen, 1)
   // bit 0 is read only 0
 }
 

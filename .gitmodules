@@ -6,25 +6,25 @@
 	url = https://github.com/OpenXiangShan/difftest.git
 [submodule "ready-to-run"]
 	path = ready-to-run
-	url = https://github.com/OpenXiangShan/ready-to-run
+	url = https://github.com/OpenXiangShan/ready-to-run.git
 [submodule "huancun"]
 	path = huancun
-	url = https://github.com/OpenXiangshan/huancun.git
+	url = https://github.com/OpenXiangShan/HuanCun.git
 [submodule "fudian"]
 	path = fudian
 	url = https://github.com/OpenXiangShan/fudian.git
 [submodule "utility"]
 	path = utility
-	url = https://github.com/OpenXiangShan/utility
+	url = https://github.com/OpenXiangShan/Utility.git
 [submodule "yunsuan"]
 	path = yunsuan
 	url = https://github.com/OpenXiangShan/YunSuan.git
 [submodule "coupledL2"]
 	path = coupledL2
-	url = https://github.com/OpenXiangShan/coupledL2
+	url = https://github.com/OpenXiangShan/CoupledL2.git
 [submodule "openLLC"]
 	path = openLLC
 	url = https://github.com/OpenXiangShan/OpenLLC.git
-[submodule "src/main/resources/aia"]
-	path = src/main/resources/aia
-	url = https://github.com/OpenXiangShan/OpenAIA.git
+[submodule "ChiselAIA"]
+	path = ChiselAIA
+	url = https://github.com/OpenXiangShan/ChiselAIA.git

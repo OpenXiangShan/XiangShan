@@ -34,6 +34,23 @@ case class MMPMAConfig
   num: Int
 )
 
+case class MemoryRange(lower: BigInt, upper: BigInt) {
+  def cover(addr: BigInt): Boolean = addr >= lower && addr < upper
+  def cover(addr: UInt): Bool = addr >= lower.U && addr < upper.U
+}
+
+case class PMAConfigEntry(
+  base_addr: BigInt,
+  range: BigInt = 0L, // only use for napot mode
+  l: Boolean = false,
+  c: Boolean = false,
+  atomic: Boolean = false,
+  a: Int = 0,
+  x: Boolean = false,
+  w: Boolean = false,
+  r: Boolean = false
+)
+
 trait PMAConst extends PMPConst
 
 trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
@@ -142,38 +159,18 @@ trait PMAMethod extends PMAConst {
     val cfg_list = ListBuffer[UInt]()
     val addr_list = ListBuffer[UInt]()
     val mask_list = ListBuffer[UInt]()
-    def addPMA(base_addr: BigInt,
-               range: BigInt = 0L, // only use for napot mode
-               l: Boolean = false,
-               c: Boolean = false,
-               atomic: Boolean = false,
-               a: Int = 0,
-               x: Boolean = false,
-               w: Boolean = false,
-               r: Boolean = false) = {
-      val addr = if (a < 2) { shift_addr(base_addr) }
-        else { get_napot(base_addr, range) }
-      cfg_list.append(PMPConfigUInt(l, c, atomic, a, x, w, r))
+
+    def addPMA(conf: PMAConfigEntry) = {
+      val addr = if (conf.a < 2) { shift_addr(conf.base_addr) }
+        else { get_napot(conf.base_addr, conf.range) }
+      cfg_list.append(PMPConfigUInt(conf.l, conf.c, conf.atomic, conf.a, conf.x, conf.w, conf.r))
       addr_list.append(genAddr(addr))
-      mask_list.append(genMask(addr, a))
+      mask_list.append(genMask(addr, conf.a))
     }
 
-    addPMA(0x0L, range = 0x1000000000000L, a = 3)
-    addPMA(PMPPmemHighBounds(0), c = true, atomic = true, a = 1, x = true, w = true, r = true)
-    addPMA(PMPPmemLowBounds(0), a = 1, w = true, r = true)
-    addPMA(0x3A000000L, a = 1)
-    addPMA(0x39002000L, a = 1, w = true, r = true)
-    addPMA(0x39000000L, a = 1, w = true, r = true)
-    addPMA(0x38022000L, a = 1, w = true, r = true)
-    addPMA(0x38021000L, a = 1, x = true, w = true, r = true)
-    addPMA(0x38020000L, a = 1, w = true, r = true)
-    addPMA(0x30050000L, a = 1, w = true, r = true) // FIXME: GPU space is cacheable?
-    addPMA(0x30010000L, a = 1, w = true, r = true)
-    addPMA(0x20000000L, a = 1, x = true, w = true, r = true)
-    addPMA(0x10000000L, a = 1, w = true, r = true)
-    addPMA(0)
+    PMAConfigs.foreach(addPMA)
     while (cfg_list.length < 16) {
-      addPMA(0)
+      addPMA(PMAConfigEntry(0))
     }
 
     val cfgInitMerge = Seq.tabulate(num / 8)(i => {
@@ -213,14 +210,11 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && !cfg.w
+    resp.ld := TlbCmd.isRead(cmd) && !cfg.r
+    resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     //TODO We require that a `PMA` can generate an mmio response only if the address has the appropriate `PMA` permissions.
-    resp.mmio := !cfg.c &&
-                 (TlbCmd.isRead(cmd) && cfg.r ||
-                 (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && cfg.w ||
-                 TlbCmd.isExec(cmd) && cfg.x)
+    resp.mmio := !cfg.c && !(resp.ld || resp.st || resp.instr)
     resp.atomic := cfg.atomic
     resp
   }

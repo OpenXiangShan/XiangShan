@@ -16,19 +16,19 @@
  ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
-import xiangshan.ExceptionNO._
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.backend.rob.{RobPtr, RobLsqIO}
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
-import xiangshan.backend.HasMemBlockParameters
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -43,6 +43,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     // mmio select
     val mmioSelect = Output(Bool())
+    // slaveId
+    val slaveId = ValidIO(UInt(UncacheBufferIndexWidth.W))
 
     /* transaction */
     // from ldu
@@ -59,25 +61,27 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   })
 
   val req_valid = RegInit(false.B)
-  val isNC = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
+  val slaveAccept = RegInit(false.B)
+  val slaveId = Reg(UInt(UncacheBufferIndexWidth.W))
 
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
-  
+
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
+  val slaveAck = req_valid && io.uncache.idResp.valid && io.uncache.idResp.bits.mid === entryIndex.U
 
   /**
     * Flush
-    * 
+    *
     * 1. direct flush during idle
     * 2. otherwise delayed flush until receiving uncache resp
     */
   val needFlushReg = RegInit(false.B)
   val needFlush = req_valid && req.uop.robIdx.needFlush(io.redirect)
-  val flush = (needFlush && uncacheState===s_idle) || (io.uncache.resp.fire && needFlushReg)
+  val flush = WireInit(false.B)
   when(flush){
     needFlushReg := false.B
   }.elsewhen(needFlush){
@@ -87,12 +91,18 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   /* enter req */
   when (flush) {
     req_valid := false.B
+    slaveAccept := false.B
   } .elsewhen (io.req.valid) {
     req_valid := true.B
+    slaveAccept := false.B
     req := io.req.bits
     nderr := false.B
+  } .elsewhen(slaveAck) {
+    slaveAccept := true.B
+    slaveId := io.uncache.idResp.bits.sid
   } .elsewhen (writeback) {
     req_valid := false.B
+    slaveAccept := false.B
   }
   XSError(!flush && io.req.valid && req_valid, p"LoadQueueUncache: You can not write an valid entry: $entryIndex")
 
@@ -113,27 +123,35 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   )
   switch (uncacheState) {
     is (s_idle) {
-      when (canSendReq) {
+      when (needFlush) {
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen (canSendReq) {
         uncacheState := s_req
       }
     }
     is (s_req) {
-      when (io.uncache.req.fire) {
+      when(needFlush){
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen(io.uncache.req.fire) {
         uncacheState := s_resp
       }
     }
     is (s_resp) {
       when (io.uncache.resp.fire) {
-        when (needFlushReg) {
+        when (needFlush || needFlushReg) {
           uncacheState := s_idle
+          flush := true.B
         }.otherwise{
           uncacheState := s_wait
         }
       }
     }
     is (s_wait) {
-      when (writeback) {
+      when (needFlush || writeback) {
         uncacheState := s_idle
+        flush := true.B
       }
     }
   }
@@ -143,9 +161,11 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
+  io.slaveId.valid := slaveAccept
+  io.slaveId.bits := slaveId
 
   /* uncahce req */
-  io.uncache.req.valid     := uncacheState === s_req
+  io.uncache.req.valid     := uncacheState === s_req && !needFlush
   io.uncache.req.bits      := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.data := DontCare
@@ -155,7 +175,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.id   := entryIndex.U
   io.uncache.req.bits.instrtype := DontCare
   io.uncache.req.bits.replayCarry := DontCare
-  io.uncache.req.bits.atomic := req.atomic
+  io.uncache.req.bits.robIdx := req.uop.robIdx
   io.uncache.req.bits.nc := req.nc
   io.uncache.req.bits.memBackTypeMM := req.memBackTypeMM
 
@@ -168,21 +188,6 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   }
 
   /* uncahce writeback */
-  val selUop = req.uop
-  val func = selUop.fuOpType
-  val raddr = req.paddr
-  val rdataSel = LookupTree(raddr(2, 0), List(
-      "b000".U -> uncacheData(63,  0),
-      "b001".U -> uncacheData(63,  8),
-      "b010".U -> uncacheData(63, 16),
-      "b011".U -> uncacheData(63, 24),
-      "b100".U -> uncacheData(63, 32),
-      "b101".U -> uncacheData(63, 40),
-      "b110".U -> uncacheData(63, 48),
-      "b111".U -> uncacheData(63, 56)
-    ))
-  val rdataPartialLoad = rdataHelper(selUop, rdataSel)
-
   io.mmioOut.valid := false.B
   io.mmioOut.bits := DontCare
   io.mmioRawData := DontCare
@@ -190,12 +195,12 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.ncOut.bits := DontCare
 
   when(req.nc){
-    io.ncOut.valid := (uncacheState === s_wait)
+    io.ncOut.valid := (uncacheState === s_wait) && !needFlush
     io.ncOut.bits := DontCare
-    io.ncOut.bits.uop := selUop
+    io.ncOut.bits.uop := req.uop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.ncOut.bits.uop.exceptionVec(loadAccessFault) := nderr
-    io.ncOut.bits.data := rdataPartialLoad
+    io.ncOut.bits.uop.exceptionVec(hardwareError) := nderr
+    io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
     io.ncOut.bits.vaddr := req.vaddr
     io.ncOut.bits.nc := true.B
@@ -205,14 +210,14 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.is128bit := req.is128bit
     io.ncOut.bits.vecActive := req.vecActive
   }.otherwise{
-    io.mmioOut.valid := (uncacheState === s_wait)
+    io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
     io.mmioOut.bits := DontCare
-    io.mmioOut.bits.uop := selUop
+    io.mmioOut.bits.uop := req.uop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.mmioOut.bits.uop.exceptionVec(loadAccessFault) := nderr
-    io.mmioOut.bits.data := rdataPartialLoad
+    io.mmioOut.bits.uop.exceptionVec(hardwareError) := nderr
+    io.mmioOut.bits.data := uncacheData
     io.mmioOut.bits.debug.isMMIO := true.B
-    io.mmioOut.bits.debug.isNC := false.B
+    io.mmioOut.bits.debug.isNCIO := false.B
     io.mmioOut.bits.debug.paddr := req.paddr
     io.mmioOut.bits.debug.vaddr := req.vaddr
     io.mmioRawData.lqData := uncacheData
@@ -222,7 +227,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   io.exception.valid := writeback
   io.exception.bits := req
-  io.exception.bits.uop.exceptionVec(loadAccessFault) := nderr
+  io.exception.bits.uop.exceptionVec(hardwareError) := nderr
 
   /* debug log */
   XSDebug(io.uncache.req.fire,
@@ -277,7 +282,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     // exception generated by outer bus
     val exception = Valid(new LqWriteBundle)
   })
-  
+
   /******************************************************************
    * Structure
    ******************************************************************/
@@ -298,6 +303,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
       e.io.req.valid := false.B
       e.io.req.bits := DontCare
       e.io.uncache.req.ready := false.B
+      e.io.uncache.idResp.valid := false.B
+      e.io.uncache.idResp.bits := DontCare
       e.io.uncache.resp.valid := false.B
       e.io.uncache.resp.bits := DontCare
       e.io.ncOut.ready := false.B
@@ -317,13 +324,13 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   /******************************************************************
    * Enqueue
-   * 
+   *
    * s1: hold
    * s2: confirm enqueue and write entry
    *    valid: no redirect, no exception, no replay, is mmio/nc
    *    ready: freelist can allocate
    ******************************************************************/
-  
+
   val s1_sortedVec = HwSort(VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
   val s1_req = VecInit(s1_sortedVec.map(_.bits))
   val s1_valid = VecInit(s1_sortedVec.map(_.valid))
@@ -367,17 +374,17 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   /******************************************************************
    * Uncache Transaction
-   * 
+   *
    * 1. uncache req
    * 2. uncache resp
    * 3. writeback
    ******************************************************************/
   private val NC_WB_MOD = NCWBPorts.length
-  
+
   val uncacheReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
   val mmioSelect = entries.map(e => e.io.mmioSelect).reduce(_ || _)
   val mmioReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
-  // TODO lyq: It's best to choose in robIdx order / the order in which they enter 
+  // TODO lyq: It's best to choose in robIdx order / the order in which they enter
   val ncReqArb = Module(new RRArbiterInit(io.uncache.req.bits.cloneType, LoadUncacheBufferSize))
 
   val mmioOut = Wire(DecoupledIO(io.mmioOut(0).bits.cloneType))
@@ -445,8 +452,13 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
       }
 
+      // uncache idResp
+      when(i.U === io.uncache.idResp.bits.mid) {
+        e.io.uncache.idResp <> io.uncache.idResp
+      }
+
       // uncache resp
-      when (i.U === io.uncache.resp.bits.id) {
+      when (e.io.slaveId.valid && e.io.slaveId.bits === io.uncache.resp.bits.id) {
         e.io.uncache.resp <> io.uncache.resp
       }
 
@@ -504,16 +516,16 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   /******************************************************************
    * Uncache rollback detection
-   * 
+   *
    * When uncache loads enqueue, it searches uncache loads, They can not enqueue and need re-execution.
-   * 
+   *
    * Cycle 0: uncache enqueue.
    * Cycle 1: Select oldest uncache loads.
    * Cycle 2: Redirect Fire.
    *   Choose the oldest load from LoadPipelineWidth oldest loads.
    *   Prepare redirect request according to the detected rejection.
    *   Fire redirect request (if valid)
-   * 
+   *
    *               Load_S3  .... Load_S3
    * stage 0:        lq            lq
    *                 |             | (can not enqueue)
@@ -524,7 +536,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    * stage 2:               lq
    *                        |
    *                     rollback req
-   * 
+   *
    ******************************************************************/
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
     val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))

@@ -119,6 +119,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
     val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
     val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
     val dirtyFs = Bool()
