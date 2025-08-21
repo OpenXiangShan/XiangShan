@@ -33,4 +33,7 @@ trait HasRasParameters extends HasBpuParameters {
   def SpecQueueSize:     Int = rasParameters.SpecSize
   def StackCounterWidth: Int = rasParameters.StackCounterWidth
   def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
+
+  // ras cannot be fast-trained, this is required by abstract class BasePredictor
+  def EnableFastTrain: Boolean = false
 }
