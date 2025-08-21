@@ -21,6 +21,9 @@ RTL_DIR = $(BUILD_DIR)/rtl
 # import docker support
 include scripts/Makefile.docker
 
+# import pdb support
+include scripts/Makefile.pdb
+
 # if XSTopPrefix is specified in yaml, use it.
 ifneq ($(YAML_CONFIG),)
 HAS_PREFIX_FROM_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG))
