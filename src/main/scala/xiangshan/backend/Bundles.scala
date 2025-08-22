@@ -59,6 +59,7 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
+    val identifiedCfi = Bool()
     val pred_taken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -72,6 +73,7 @@ object Bundles {
       this.preDecodeInfo := source.pd
       this.pred_taken := source.pred_taken
       this.isFetchMalAddr := source.backendException
+      this.identifiedCfi := source.identifiedCfi
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
@@ -88,6 +90,7 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
+    val identifiedCfi = Bool()
     val pred_taken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -181,6 +184,7 @@ object Bundles {
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
     val pred_taken = Bool()
+    val identifiedCfi = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -254,6 +258,7 @@ object Bundles {
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
     val pred_taken = Bool()
+    val identifiedCfi = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
     // from decode
@@ -801,6 +806,7 @@ object Bundles {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
+    val identifiedCfi  = OptionWrapper(params.hasBrhFu, Bool())
     val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
     val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
     val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
@@ -860,6 +866,7 @@ object Bundles {
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
+      this.identifiedCfi .foreach(_ := source.common.identifiedCfi.get)
       this.loadWaitBit   .foreach(_ := source.common.loadWaitBit.get)
       this.waitForRobIdx .foreach(_ := source.common.waitForRobIdx.get)
       this.storeSetHit   .foreach(_ := source.common.storeSetHit.get)

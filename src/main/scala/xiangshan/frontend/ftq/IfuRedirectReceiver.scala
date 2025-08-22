@@ -29,7 +29,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
 
     redirect.valid          := pdWb.valid && pdWb.bits.misEndOffset.valid
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
-    redirect.bits.ftqOffset := pdWb.bits.ftqEndOffset
+    redirect.bits.ftqOffset := pdWb.bits.takenCfiOffset
     redirect.bits.level     := RedirectLevel.flushAfter
     redirect.bits.pc        := pdWb.bits.pc.toUInt
     redirect.bits.target    := pdWb.bits.target.toUInt
