@@ -217,10 +217,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build DefaultConfig Release emu
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --threads 8 --release
-      - name: run DefaultConfig - Linux
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --release --trace-fst
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --threads 8 --release --trace-fst
       - name: run DefaultConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
