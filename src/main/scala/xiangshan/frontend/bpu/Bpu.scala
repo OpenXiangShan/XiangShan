@@ -99,14 +99,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s3_override = WireDefault(false.B)
 
-  private val resetDone = RegInit(false.B)
-
   private val s0_pc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val s0_pcReg = RegEnable(s0_pc, !s0_stall)
 
   when(RegNext(RegNext(reset.asBool)) && !reset.asBool) {
-    s0_pcReg  := io.resetVector
-    resetDone := true.B
+    s0_pcReg := io.resetVector
   }
 
   private val s1_pc = RegEnable(s0_pc, s0_fire)
@@ -162,9 +159,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
-  private val predictorsReady = true.B // FIXME
-
-  s0_fire := s1_ready && predictorsReady && resetDone
+  s0_fire := s1_ready && predictors.map(_.io.resetDone).reduce(_ && _)
   s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
   s2_fire := s2_valid && s3_ready
   s3_fire := s3_valid

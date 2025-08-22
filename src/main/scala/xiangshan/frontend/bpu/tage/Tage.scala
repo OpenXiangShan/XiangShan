@@ -55,6 +55,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       ).suggestName(s"tage_base_table_sram_align${alignIdx}_bank${bankIdx}")
     }
 
+  private val resetDone = RegInit(false.B)
+  when(baseTableSramBanks.flatMap(_.map(_.io.r.req.ready)).reduce(_ && _)) {
+    resetDone := true.B
+  }
+  io.resetDone := resetDone
+
   private val baseTableWriteBuffers =
     Seq.tabulate(BaseTableNumAlignBanks, BaseTableInternalBanks) { (_, _) =>
       Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1, pipe = true, hasTag = false))
