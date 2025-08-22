@@ -321,8 +321,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.prediction.bits.ftqOffset.valid,
-      io.toFtq.prediction.bits.ftqOffset.bits,
+      io.toFtq.prediction.bits.takenCfiOffset.valid,
+      io.toFtq.prediction.bits.takenCfiOffset.bits,
       FetchBlockInstNum.U
     ),
     io.toFtq.prediction.fire,
