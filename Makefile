@@ -189,6 +189,10 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+ifeq ($(GSIM), 1)
+override SIM_ARGS += --difftest-config G
+endif
+
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
@@ -316,6 +320,12 @@ emu: $(call docker-deps,emu-mk)
 emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
+gsim: sim-verilog
+	$(MAKE) -C ./difftest gsim SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+gsim-run: gsim
+	./build/gsim -b 0 -e 0 -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
+
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -344,4 +354,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog gsim emu clean help init bump bsp $(REF_SO)
