@@ -368,9 +368,11 @@ class XiangShan(object):
         return misc_tests
     
     def __get_ci_rvhtest(self, name=None):
-        base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
+        # base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
+        base_dir = "/nfs/home/share/youzhaoyang/ci-workloads/H-extension-tests"
         workloads = [
             "riscv-hyp-tests/rvh_test.bin",
+            "riscv-hyp-tests/rvh_test_xie.bin",
             "xvisor_wboxtest/checkpoint.gz",
             "pointer-masking-test/M_HS_test/rvh_test.bin",
             "pointer-masking-test/U_test/hint_UMode_hupmm2/rvh_test.bin",
