@@ -141,15 +141,15 @@ class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
-  val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
-  val pc         = PrunedAddr(VAddrBits)
-  val ftqIdx     = new FtqPtr
-  val ftqOffset  = UInt(log2Ceil(PredictWidth).W)
-  val misOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val cfiOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target     = PrunedAddr(VAddrBits)
-  val jalTarget  = PrunedAddr(VAddrBits)
-  val instrRange = Vec(PredictWidth, Bool())
+  val pd           = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
+  val pc           = PrunedAddr(VAddrBits)
+  val ftqIdx       = new FtqPtr
+  val ftqEndOffset = UInt(log2Ceil(PredictWidth).W)
+  val misEndOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val cfiEndOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val target       = PrunedAddr(VAddrBits)
+  val jalTarget    = PrunedAddr(VAddrBits)
+  val instrRange   = Vec(PredictWidth, Bool())
 }
 
 class MmioCommitRead(implicit p: Parameters) extends XSBundle {
@@ -266,13 +266,19 @@ class FtqPcOffset(implicit p: Parameters) extends XSBundle {
   val offset = UInt(log2Ceil(PredictWidth).W)
 }
 
+class InstrEndOffset(implicit p: Parameters) extends XSBundle {
+  val taken  = Bool()
+  val offset = UInt(log2Ceil(PredictWidth).W)
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs           = Vec(IBufEnqWidth, UInt(32.W))
-  val valid            = UInt(IBufEnqWidth.W)
-  val enqEnable        = UInt(IBufEnqWidth.W)
-  val pd               = Vec(IBufEnqWidth, new PreDecodeInfo)
-  val foldpc           = Vec(IBufEnqWidth, UInt(MemPredPCWidth.W))
-  val ftqPcOffset      = Vec(IBufEnqWidth, ValidUndirectioned(new FtqPcOffset))
+  val instrs         = Vec(IBufEnqWidth, UInt(32.W))
+  val valid          = UInt(IBufEnqWidth.W)
+  val enqEnable      = UInt(IBufEnqWidth.W)
+  val pd             = Vec(IBufEnqWidth, new PreDecodeInfo)
+  val foldpc         = Vec(IBufEnqWidth, UInt(MemPredPCWidth.W))
+  val instrEndOffset = Vec(IBufEnqWidth, new InstrEndOffset)
+  // val ftqPcOffset      = Vec(IBufEnqWidth, ValidUndirectioned(new FtqPcOffset))
   val backendException = Vec(IBufEnqWidth, Bool())
   val exceptionType    = Vec(IBufEnqWidth, new ExceptionType)
   val crossPageIPFFix  = Vec(IBufEnqWidth, Bool())
