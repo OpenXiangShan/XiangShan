@@ -753,10 +753,45 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
 
   val vxsat = Wire(Valid(Bool()))
-  vxsat.valid := io.commits.isCommit && vxsat.bits
-  vxsat.bits := io.commits.commitValid.zip(vxsatDataRead).map {
-    case (valid, vxsat) => valid & vxsat
+  val updateVxsat = RegInit(false.B)
+  val oldestRobidxUpdateVxsat = RegInit(0.U.asTypeOf(new RobPtr))
+
+  vxsat.valid := io.commits.isCommit && vxsat.bits && updateVxsat
+  vxsat.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
+    case (valid, idx) => valid & (idx === oldestRobidxUpdateVxsat)
   }.reduce(_ | _)
+
+  val wbUpdateVxsat = vxsatWBs.map(wb => wb.valid && wb.bits.vxsat.get).reduce(_ | _)
+
+  class WbSel extends Bundle{
+    val validvxsat = Bool()
+    val robIdx = new RobPtr
+  }
+  val wbUpdateVxsatSeq = vxsatWBs.map(wb =>
+    {
+      val s = Wire(new WbSel())
+      s.validvxsat := wb.valid && wb.bits.vxsat.get
+      s.robIdx := wb.bits.robIdx
+      s
+    }
+  )
+  val oldestWbUpdateVxsat = wbUpdateVxsatSeq.reduce{
+    (wb1, wb2) => Mux(
+      wb1.validvxsat && wb2.validvxsat,
+      Mux(isBefore(wb1.robIdx, wb2.robIdx), wb1, wb2),
+      Mux(wb1.validvxsat, wb1, wb2)
+    )
+  }
+
+  when(!updateVxsat || vxsat.valid) {
+    updateVxsat := wbUpdateVxsat
+  }
+
+  when((!updateVxsat || vxsat.valid) && wbUpdateVxsat){
+    oldestRobidxUpdateVxsat := oldestWbUpdateVxsat.robIdx
+  }.elsewhen(updateVxsat && wbUpdateVxsat && isBefore(oldestWbUpdateVxsat.robIdx, oldestRobidxUpdateVxsat)){
+    oldestRobidxUpdateVxsat := oldestWbUpdateVxsat.robIdx
+  }
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
