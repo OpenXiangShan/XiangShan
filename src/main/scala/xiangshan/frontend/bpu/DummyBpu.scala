@@ -263,11 +263,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // phr train
-  private val phrsWire     = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
-  private val s0_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-  private val s1_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-  private val s2_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-  private val s3_foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val phrsWire       = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s1_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s3_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val trainFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   phr.io.train.s0_stall      := s0_stall
   phr.io.train.stageCtrl     := stageCtrl
   phr.io.train.redirect      := redirect
@@ -281,11 +282,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.commit.valid := train.valid
   phr.io.commit.bits  := train.bits
 
-  s0_foldedPhr := phr.io.s0_foldedPhr
-  s1_foldedPhr := phr.io.s1_foldedPhr
-  s2_foldedPhr := phr.io.s2_foldedPhr
-  s3_foldedPhr := phr.io.s3_foldedPhr
-  phrsWire     := phr.io.phrs
+  s0_foldedPhr   := phr.io.s0_foldedPhr
+  s1_foldedPhr   := phr.io.s1_foldedPhr
+  s2_foldedPhr   := phr.io.s2_foldedPhr
+  s3_foldedPhr   := phr.io.s3_foldedPhr
+  trainFoldedPhr := phr.io.trainFoldedPhr
+  phrsWire       := phr.io.phrs
 
   private val phrsWireValue = phrsWire.asUInt
   private val redirectPhrValue =
@@ -298,6 +300,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(s1_foldedPhr)
   dontTouch(s2_foldedPhr)
   dontTouch(s3_foldedPhr)
+  dontTouch(trainFoldedPhr)
   dontTouch(phrsWireValue)
   dontTouch(redirectPhrValue)
 
