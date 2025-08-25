@@ -150,6 +150,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.bits.isDoubleLine := s0_doubleline
   toData.bits.vSetIdx      := s0_vSetIdx
   toData.bits.blkOffset    := s0_blkOffset
+  toData.bits.blkSize      := 34.U // TODO: get this from Ftq
   toData.bits.waymask      := s0_waymasks
 
   private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
@@ -291,7 +292,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s2_datas,
     s2_codes,
     eccEnable,
-    getBankSel(s2_offset, s2_valid),
+    getBankSel(s2_offset, 34.U), // TODO: get blkSize from Ftq
     VecInit(s2_dataIsFromMshr.map(!_)),
     s2_sramHits
   )
@@ -545,7 +546,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index  := (3 + i).U
 
-      val bankSel = getBankSel(s2_offset, s2_valid).map(_.asUInt).reduce(_ | _)
+      val bankSel = getBankSel(s2_offset, 32.U).map(_.asUInt).reduce(_ | _) // TODO: get blkSize from Ftq
       val lineSel = getLineSel(s2_offset)
 
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))

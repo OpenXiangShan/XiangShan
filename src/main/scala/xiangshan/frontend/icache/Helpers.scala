@@ -121,13 +121,11 @@ trait ICacheMetaHelper extends HasICacheParameters {
 }
 
 trait ICacheDataHelper extends HasICacheParameters {
-  def bankOffBits: Int = log2Ceil(blockBytes / DataBanks)
-
   def getBankIdxLow(blkOffset: UInt): UInt =
-    (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
+    (blkOffset >> rowOffBits).asUInt
 
-  def getBankIdxHigh(blkOffset: UInt): UInt =
-    ((Cat(0.U(1.W), blkOffset) + 32.U) >> bankOffBits).asUInt
+  def getBankIdxHigh(blkOffset: UInt, blkSize: UInt): UInt =
+    ((blkOffset +& blkSize - 2.U) >> rowOffBits).asUInt
 
   def getBankValid(portValid: Vec[Bool], blkOffset: UInt): Vec[Bool] = {
     require(portValid.length == PortNumber)
@@ -135,9 +133,9 @@ trait ICacheDataHelper extends HasICacheParameters {
     VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)))
   }
 
-  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[Vec[Bool]] = {
+  def getBankSel(blkOffset: UInt, blkSize: UInt): Vec[Vec[Bool]] = {
     val bankIdxLow  = getBankIdxLow(blkOffset)
-    val bankIdxHigh = getBankIdxHigh(blkOffset)
+    val bankIdxHigh = getBankIdxHigh(blkOffset, blkSize)
     val bankSel     = VecInit((0 until DataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
     bankSel.asTypeOf(UInt((DataBanks * 2).W)).asTypeOf(Vec(2, Vec(DataBanks, Bool())))
   }

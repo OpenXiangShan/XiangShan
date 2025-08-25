@@ -105,10 +105,8 @@ class MetaFlushBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** Array read ***** */
 class ArrayReadReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:      Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
-  val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
-  val isDoubleLine: Bool           = Bool()
+  val vSetIdx:      Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val isDoubleLine: Bool      = Bool()
 }
 
 // ICachePrefetchPipe / ICacheCtrlUnit <-> ICacheMetaArray
@@ -127,7 +125,12 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
 
 // ICacheMainPipe -> ICacheDataArray
 class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
-  class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
+  class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle {
+    val waymask:   Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
+    val blkOffset: UInt           = UInt(log2Ceil(blockBytes).W)
+    val blkSize: UInt =
+      UInt((log2Ceil(FetchBlockSize) + 1).W) // TODO: remove this +1, when 34B fetch support is dropped
+  }
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
     val codes: Vec[UInt] = Vec(DataBanks, UInt(DataEccBits.W))
