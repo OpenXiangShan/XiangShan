@@ -726,13 +726,58 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_ | _)
-  val dirtyVs = (0 until CommitWidth).map(i => {
-    val v = io.commits.commitValid(i)
-    val info = io.commits.info(i)
-    v & info.dirtyVs
-  })
   val dirty_fs = io.commits.isCommit && VecInit(dirtyFs).asUInt.orR
-  val dirty_vs = io.commits.isCommit && VecInit(dirtyVs).asUInt.orR
+
+  val dirtyVs = Wire(Valid(Bool()))
+  val updateDirtyVs = RegInit(false.B)
+  val oldestRobidxupdateDirtyVs = RegInit(0.U.asTypeOf(new RobPtr))
+
+  dirtyVs.valid := io.commits.isCommit && dirtyVs.bits && updateDirtyVs
+  dirtyVs.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
+    case (valid, idx) => valid & (idx === oldestRobidxupdateDirtyVs)
+  }.reduce(_ | _)
+
+  val enqUpdateDirtyVsSeq = io.enq.req.map(req => req.valid && req.bits.dirtyVs).zip(canEnqueue).map {
+    case (validDirtyVs, canEnq) => validDirtyVs && canEnq
+  }
+
+  val enqUpdateDirtyVs = enqUpdateDirtyVsSeq.reduce(_ | _)
+
+//  class EnqSel extends  Bundle{
+//    val validDirtyVs = Bool()
+//    val robIdx = new RobPtr
+//  }
+//
+//  val enqUpdateDirtySeq = enqUpdateDirtyVsSeq.zip(allocatePtrVec).map { case (validDirtyVs, robIdx) =>
+//    {
+//      val s = Wire(new EnqSel())
+//      s.validDirtyVs := validDirtyVs
+//      s.robIdx := robIdx
+//      s
+//    }
+//  }
+
+  // Because enqRobidx is sequential, it is sufficient to find the first dirtyVs RobIdx.
+  val oldestRobidxEnqUpdateDirtyVs = PriorityMuxDefault(enqUpdateDirtyVsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
+//  val oldestEnqUpdateDirtyVs = enqUpdateDirtySeq.reduce{
+//    (enq1, enq2) => Mux(
+//      enq1.validDirtyVs && enq2.validDirtyVs,
+//      Mux(isBefore(enq1.robIdx, enq2.robIdx), enq1, enq2),
+//      Mux(enq1.validDirtyVs, enq1, enq2)
+//    )
+//  }
+
+  when(!updateDirtyVs || dirtyVs.valid) {
+    updateDirtyVs := enqUpdateDirtyVs
+  }
+
+  when((!updateDirtyVs || dirtyVs.valid) && enqUpdateDirtyVs) {
+    oldestRobidxupdateDirtyVs := oldestRobidxEnqUpdateDirtyVs
+  }.elsewhen(updateDirtyVs && enqUpdateDirtyVs && isBefore(oldestRobidxEnqUpdateDirtyVs, oldestRobidxupdateDirtyVs)) {
+    oldestRobidxupdateDirtyVs := oldestRobidxEnqUpdateDirtyVs
+  }
+
+  val dirty_vs = dirtyVs.valid
 
   val resetVstart = dirty_vs && !io.vstartIsZero
 
