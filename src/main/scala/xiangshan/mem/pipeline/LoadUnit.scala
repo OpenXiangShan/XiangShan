@@ -1333,7 +1333,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at load s3 **
-  val s2_prefetch_train_valid = s2_valid && !s2_actually_uncache
+  val s2_prefetch_train_valid = s2_valid && s2_in.isFirstIssue && !s2_actually_uncache
   io.prefetch_train.valid := GatedValidRegNext(s2_prefetch_train_valid)
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
@@ -1346,8 +1346,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.updateAddrValid := false.B
   io.prefetch_train.bits.isMisalign := false.B
   io.prefetch_train.bits.hasException := false.B
-  io.s1_prefetch_spec := s1_fire
-  io.s2_prefetch_spec := s2_fire
+  io.s1_prefetch_spec := s1_fire && s1_in.isFirstIssue
+  io.s2_prefetch_spec := s2_prefetch_train_valid
 
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
