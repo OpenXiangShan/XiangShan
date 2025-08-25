@@ -60,18 +60,19 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParam
 }
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
-  val ftqIdx:        FtqPtr                   = new FtqPtr
-  val doubline:      Bool                     = Bool()
-  val predTakenIdx:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val ftqOffset:     ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val invalidTaken:  Bool                     = Bool()
-  val startAddr:     PrunedAddr               = PrunedAddr(VAddrBits)
-  val target:        PrunedAddr               = PrunedAddr(VAddrBits)
-  val instrRange:    UInt                     = UInt(PredictWidth.W)
-  val rawInstrValid: UInt                     = UInt(PredictWidth.W)
-  val pcHigh:        UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val pcHighPlus1:   UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val fetchSize:     UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
+  val ftqIdx:        FtqPtr      = new FtqPtr
+  val doubleline:    Bool        = Bool()
+  val predTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset:     Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+  val invalidTaken:  Bool        = Bool()
+  val startAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val target:        PrunedAddr  = PrunedAddr(VAddrBits)
+  val instrRange:    UInt        = UInt(PredictWidth.W)
+  val rawInstrValid: UInt        = UInt(PredictWidth.W)
+  val pcHigh:        UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val pcHighPlus1:   UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val fetchSize:     UInt        = UInt(log2Ceil(PredictWidth + 1).W)
+  val identifiedCfi: Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
 
 class ICacheInfo(implicit p: Parameters) extends IfuBundle {

@@ -90,6 +90,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val foldpc           = UInt(MemPredPCWidth.W)
   val pd               = new PreDecodeInfo
   val pred_taken       = Bool()
+  val identifiedCfi    = Bool()
   val ftqPtr           = new FtqPtr
   val ftqPcOffset      = new FtqPcOffset
   val exceptionType    = IBufferExceptionType()
@@ -99,13 +100,14 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val debug_seqNum     = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst        := fetch.instrs(i)
-    pc          := fetch.pc(i)
-    foldpc      := fetch.foldpc(i)
-    pd          := fetch.pd(i)
-    pred_taken  := fetch.ftqPcOffset(i).valid
-    ftqPtr      := fetch.ftqPtr
-    ftqPcOffset := fetch.ftqPcOffset(i).bits
+    inst          := fetch.instrs(i)
+    pc            := fetch.pc(i)
+    foldpc        := fetch.foldpc(i)
+    pd            := fetch.pd(i)
+    pred_taken    := fetch.ftqPcOffset(i).valid
+    identifiedCfi := fetch.identifiedCfi(i)
+    ftqPtr        := fetch.ftqPtr
+    ftqPcOffset   := fetch.ftqPcOffset(i).bits
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       fetch.exceptionType(i),
       fetch.crossPageIPFFix(i),
@@ -132,6 +134,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.trigger                           := triggered
     cf.pd                                := pd
     cf.pred_taken                        := pred_taken
+    cf.identifiedCfi                     := identifiedCfi
     cf.crossPageIPFFix                   := IBufferExceptionType.isCrossPage(this.exceptionType)
     cf.storeSetHit                       := DontCare
     cf.waitForRobIdx                     := DontCare

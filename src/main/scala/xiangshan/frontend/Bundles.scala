@@ -67,15 +67,16 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
-  val ftqIdx    = new FtqPtr
-  val ftqOffset = Valid(UInt(CfiPositionWidth.W))
+  val ftqIdx:         FtqPtr      = new FtqPtr
+  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 
   def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
 
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
-      p"[tgt] ${Hexadecimal(nextStartVAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
-      p" offset: ${ftqOffset.bits}\n"
+      p"[tgt] ${Hexadecimal(nextStartVAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${takenCfiOffset.valid}" +
+      p" offset: ${takenCfiOffset.bits}\n"
 }
 
 class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -124,8 +125,8 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
   val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 }
 
-class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  class FtqToIfuReq(implicit p: Parameters) extends XSBundle {
+class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
+  class FtqToIfuReq(implicit p: Parameters) extends Bundle {
     val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
     val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
   }
@@ -285,6 +286,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val debug_seqNum   = Vec(IBufEnqWidth, InstSeqNum())
   val ftqPtr         = new FtqPtr
   val topdown_info   = new FrontendTopDownBundle
+
+  val identifiedCfi: Vec[Bool] = Vec(IBufEnqWidth, Bool())
 }
 
 class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
