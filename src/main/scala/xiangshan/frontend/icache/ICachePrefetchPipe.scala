@@ -87,7 +87,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_ftqIdx           = io.req.bits.ftqIdx
   private val s0_isSoftPrefetch   = io.req.bits.isSoftPrefetch
   private val s0_doubleline       = io.req.bits.crossCacheline
-  private val s0_vSetIdx          = s0_vAddr.map(get_idx)
+  private val s0_vSetIdx          = VecInit(s0_vAddr.map(get_idx))
   private val s0_backendException = io.req.bits.backendException
 
   fromBpuS0Flush := !s0_isSoftPrefetch && (
@@ -203,10 +203,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
   private val s1_needMeta = ((s1_state === S1FsmState.ItlbResend) && tlbFinish) || (s1_state === S1FsmState.MetaResend)
   toMeta.valid             := s1_needMeta || s0_valid
-  toMeta.bits              := DontCare
   toMeta.bits.isDoubleLine := Mux(s1_needMeta, s1_doubleline, s0_doubleline)
-
-  (0 until PortNumber).foreach(i => toMeta.bits.vSetIdx(i) := Mux(s1_needMeta, s1_vSetIdx(i), s0_vSetIdx(i)))
+  toMeta.bits.vSetIdx      := Mux(s1_needMeta, s1_vSetIdx, s0_vSetIdx)
 
   /**
     ******************************************************************************
