@@ -39,15 +39,19 @@ case class ICacheParameters(
     NumPrefetchMshr: Int = 10,
     // wayLookup
     WayLookupSize: Int = 32,
-    // ecc
+    // ecc, used only when EnableEcc = true
     // NOTE: we call it "ecc" since it can be configured to use ecc like "secded", but by default it is parity
-    // TODO: support disabling ecc completely (currently "none" will use "identity", we want to remove entire ecc logic)
     MetaEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEccUnit: Option[Int] = None, // if None, use blockBytes
     // data array
     // by default we store 64data + 1parity + 1padding, this is better than 65bits (from physical design)
     DataPaddingBits: Int = 1,
+    /* *** feature enable *** */
+    EnablePrefetch:       Boolean = true, // FDIP prefetcher, note that prefetchPipe s1 is always enabled
+    EnableEcc:            Boolean = true, // enable parity/ecc
+    EnableEccAutoRefetch: Boolean = true, // if ecc error is detected, automatically refetch from L2, must EnableEcc
+    EnableAliasFix:       Boolean = true, // set alias field in L2 request
     /* *** submodule enable *** */
     // if not enabled, the whole CtrlUnit will not be created, and parity-fault injection will not be supported
     EnableCtrlUnit: Boolean = true,
@@ -62,6 +66,7 @@ case class ICacheParameters(
   require(isPow2(rowBits), s"rowBits($rowBits) must be pow2")
   require(isPow2(blockBytes), s"blockBytes($blockBytes) must be pow2")
   require(rowBits < blockBytes * 8, s"rowBits($rowBits) must be less than blockBits(${blockBytes * 8})")
+  require(!(EnableEccAutoRefetch && !EnableEcc), s"EnableEccAutoRefetch depends on EnableEcc")
 }
 
 trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameters {
@@ -81,7 +86,7 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   // and, currently ICache is using software fence.i to ensure coherency, so we can assume cached data is always newest,
   // even when we support hardware coherency later, we can simply flush all aliased sets when receiving a probe request,
   // therefore, this may not be necessary, but anyway, we still implement it to keep consistent with DCache.
-  def AliasTagBits: Option[Int] = Option.when(untagBits > pgIdxBits)(untagBits - pgIdxBits)
+  def AliasTagBits: Option[Int] = Option.when(EnableAliasFix && untagBits > pgIdxBits)(untagBits - pgIdxBits)
 
   def PortNumber: Int = icacheParameters.PortNumber
 
@@ -114,6 +119,12 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   def DataEccBits:           Int = DataEccSegments * DataEccBitsPerSegment
   def DataEntryBits:         Int = ICacheDataBits + DataEccBits
   def DataSramWidth:         Int = DataEntryBits + DataPaddingBits
+
+  // feature enable
+  def EnablePrefetch:       Boolean = icacheParameters.EnablePrefetch
+  def EnableEcc:            Boolean = icacheParameters.EnableEcc
+  def EnableEccAutoRefetch: Boolean = icacheParameters.EnableEccAutoRefetch
+  def EnableAliasFix:       Boolean = icacheParameters.EnableAliasFix
 
   // submodule enable
   def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit
