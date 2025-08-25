@@ -215,8 +215,8 @@ case class XSCoreParameters
     useDmode = false,
     NWays = 48,
   ),
-  itlbPortNum: Int = ICacheParameters().PortNumber + 1,
-  ipmpPortNum: Int = 2 * ICacheParameters().PortNumber + 1,
+  itlbPortNum: Int = 1 + 1, // ICache + Ifu
+  ipmpPortNum: Int = 2 + 1, // ICache(PrefetchPipe + MainPipe) + Ifu
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     NWays = 48,
