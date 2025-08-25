@@ -57,6 +57,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay, pipe = true))
   }
 
+  private val resetDone = RegInit(false.B)
+  when(sramBanks.flatMap(_.flatMap(_.map(_.io.r.req.ready))).reduce(_ && _)) {
+    resetDone := true.B
+  }
+  io.resetDone := resetDone
+
   sramBanks.map(_.map(_.map { m =>
     m.io.r.req.valid       := false.B
     m.io.r.req.bits.setIdx := 0.U

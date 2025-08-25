@@ -32,6 +32,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
 
+  io.resetDone := true.B
+
   /* *** submodules *** */
   private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))
 

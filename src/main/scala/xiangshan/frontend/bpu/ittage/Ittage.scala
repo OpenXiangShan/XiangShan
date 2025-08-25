@@ -62,6 +62,8 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
 
   val io: IttageIO = IO(new IttageIO)
 
+  io.resetDone := true.B // FIXME: sram read ready
+
   private val s0_pc   = io.startVAddr
   private val s0_fire = io.stageCtrl.s0_fire
   private val s1_fire = io.stageCtrl.s1_fire
