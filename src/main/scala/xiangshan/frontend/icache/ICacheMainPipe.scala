@@ -107,10 +107,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val fromFtqReq = fromFtq.bits.req
   private val s0_valid   = fromFtq.valid
 
-  private val s0_vAddr      = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
-  private val s0_vSetIdx    = VecInit(s0_vAddr.map(get_idx))
-  private val s0_blkOffset  = fromFtqReq.startVAddr(blockOffBits - 1, 0)
-  private val s0_doubleline = s0_valid && fromFtqReq.crossCacheline
+  private val s0_vAddr        = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
+  private val s0_vSetIdx      = VecInit(s0_vAddr.map(get_idx))
+  private val s0_blkOffset    = fromFtqReq.startVAddr(blockOffBits - 1, 0)
+  private val s0_blkEndOffset = s0_blkOffset +& (FetchBlockSize - 2).U // TODO: get this from Ftq
+  private val s0_doubleline   = s0_valid && fromFtqReq.crossCacheline
 
   private val s0_isBackendException = fromFtq.bits.isBackendException
 
@@ -150,6 +151,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.bits.isDoubleLine := s0_doubleline
   toData.bits.vSetIdx      := s0_vSetIdx
   toData.bits.blkOffset    := s0_blkOffset
+  toData.bits.blkEndOffset := s0_blkEndOffset
   toData.bits.waymask      := s0_waymasks
 
   private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
@@ -183,6 +185,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_vSetIdx = VecInit(s1_vAddr.map(get_idx))
   private val s1_offset  = s1_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
+
+  private val s1_blkEndOffset = RegEnable(s0_blkEndOffset, 0.U.asTypeOf(s0_blkEndOffset), s0_fire)
 
   // do metaArray ECC check
   // NOTE: we may have meta other that pTag in the future, we do a VecInit.fill now
@@ -273,6 +277,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_vSetIdx = VecInit(s2_vAddr.map(get_idx))
   private val s2_offset  = s2_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
 
+  private val s2_blkEndOffset = RegEnable(s1_blkEndOffset, 0.U.asTypeOf(s1_blkEndOffset), s1_fire)
+
   private val s2_sramHits       = RegEnable(s1_sramHits, 0.U.asTypeOf(s1_sramHits), s1_fire)
   private val s2_codes          = RegEnable(s1_codes, 0.U.asTypeOf(s1_codes), s1_fire)
   private val s2_hits           = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
@@ -289,7 +295,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s2_datas,
     s2_codes,
     eccEnable,
-    getBankSel(s2_offset, s2_valid),
+    getBankSel(s2_offset, s2_blkEndOffset),
     VecInit(s2_dataIsFromMshr.map(!_)),
     s2_sramHits
   )
@@ -533,7 +539,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index  := (3 + i).U
 
-      val bankSel = getBankSel(s2_offset, s2_valid).map(_.asUInt).reduce(_ | _)
+      val bankSel =
+        getBankSel(s2_offset, s2_blkEndOffset).map(_.asUInt).reduce(_ | _)
       val lineSel = getLineSel(s2_offset)
 
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && !discard
