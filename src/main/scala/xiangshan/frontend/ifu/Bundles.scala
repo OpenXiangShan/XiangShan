@@ -19,7 +19,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.ValidUndirectioned
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.IBufPtr
@@ -88,11 +87,11 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
-  val target       = PrunedAddr(VAddrBits)
-  val misIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val cfiIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val instrRange   = UInt(FetchBlockInstNum.W)
-  val invalidTaken = Bool()
+  val target:       PrunedAddr  = PrunedAddr(VAddrBits)
+  val misIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val cfiIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val instrRange:   UInt        = UInt(FetchBlockInstNum.W)
+  val invalidTaken: Bool        = Bool()
 }
 
 /* ***** DB ***** */

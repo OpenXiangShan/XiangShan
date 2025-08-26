@@ -22,15 +22,11 @@ import utility.ChiselDB
 import utility.Constantin
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
-import utility.ParallelOR
-import utility.ParallelPosteriorityEncoder
-import utility.ParallelPriorityEncoder
 import utility.PerfCCT
 import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
 import utility.XSDebug
-import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utils.EnumUInt
@@ -266,13 +262,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s1_jumpRange = VecInit.tabulate(FetchPorts)(i =>
     Fill(FetchBlockInstNum, !s1_takenCfiOffset(i).valid) |
-      Fill(FetchBlockInstNum, 1.U(1.W)) >> ~s1_takenCfiOffset(i).bits
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_takenCfiOffset(i).bits).asUInt).asUInt
   )
   private val s1_ftrRange = VecInit.tabulate(FetchPorts)(i =>
-    Fill(FetchBlockInstNum, s1_takenCfiOffset(i).valid) | Fill(FetchBlockInstNum, 1.U(1.W)) >> ~getBasicBlockIdx(
-      s1_ftqFetch(i).nextStartVAddr,
-      s1_ftqFetch(i).startVAddr
-    )
+    Fill(FetchBlockInstNum, s1_takenCfiOffset(i).valid) |
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~getBasicBlockIdx(
+        s1_ftqFetch(i).nextStartVAddr,
+        s1_ftqFetch(i).startVAddr
+      )).asUInt).asUInt
   )
   private val s1_instrRange = VecInit.tabulate(FetchPorts)(i =>
     s1_jumpRange(i) & s1_ftrRange(i)
@@ -284,7 +281,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndPos  = s1_fetchSize(0) - 1.U
   private val s1_secondEndPos = s1_fetchSize(1) - 1.U
   private val s1_toatalInstrRange =
-    Mux(!s1_secondValid, s1_instrRange(0), (s1_instrRange(1) << s1_fetchSize(0)) | s1_instrRange(0))
+    Mux(!s1_secondValid, s1_instrRange(0), (s1_instrRange(1) << s1_fetchSize(0)).asUInt | s1_instrRange(0))
   /* *****************************************************************************
    * IFU Stage 2
    * - icache response data (latched for pipeline stop)
@@ -306,9 +303,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_totalInstrRange   = RegEnable(s1_toatalInstrRange, s1_fire)
   private val s2_firstEndPos       = RegEnable(s1_firstEndPos, s1_fire)
   private val s2_totalEndPos       = RegEnable(s1_totalEndPos, s1_fire)
-  private val s2_firstMaskEndPos   = RegEnable(~(1.U << s1_firstEndPos), s1_fire)
-  private val s2_secondMaskEndPos  = RegEnable(~(1.U << s1_secondEndPos), s1_fire)
-  private val s2_totalMaskEndPos   = RegEnable(~(1.U << s1_totalEndPos), s1_fire)
+  private val s2_firstMaskEndPos   = RegEnable((~(1.U << s1_firstEndPos)).asUInt, s1_fire)
+  private val s2_secondMaskEndPos  = RegEnable((~(1.U << s1_secondEndPos)).asUInt, s1_fire)
+  private val s2_totalMaskEndPos   = RegEnable((~(1.U << s1_totalEndPos)).asUInt, s1_fire)
   private val s2_takenCfiOffset    = RegEnable(s1_takenCfiOffset, s1_fire)
 
   private val s2_instrPcLowerResult = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U((PcCutPoint + 1).W)))
@@ -352,7 +349,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   preDecodeBounder.io.req.bits.endPos            := s2_totalEndPos
   preDecodeBounder.io.req.bits.prevLastIsHalfRvi := s2_prevLastIsHalfRvi
   preDecodeBounder.io.req.bits.cacheData :=
-    Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqFetch(0).startVAddr(5, 0), 0.U(3.W))
+    (Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqFetch(0).startVAddr(5, 0), 0.U(3.W))).asUInt
 
   private val s2_firstFetchEndIsHalf = preDecodeBounder.io.resp.bits.isFirstLastHalfRvi
   private val s2_fetchEndIsHalf      = preDecodeBounder.io.resp.bits.isLastHalfRvi
@@ -379,14 +376,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* *****************************************************************************
    * instrCountBeforeCurrent(i), not include rawInstrValid(i)
    * ***************************************************************************** */
-  val instrCountBeforeCurrent = WireDefault(VecInit.fill(FetchBlockInstNum + 1)(0.U(log2Ceil(FetchBlockInstNum + 1).W)))
+  private val instrCountBeforeCurrent =
+    WireDefault(VecInit.fill(FetchBlockInstNum + 1)(0.U(log2Ceil(FetchBlockInstNum + 1).W)))
   for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(rawInstrValid.take(i))
   }
   instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(rawInstrValid)
 
-  val instrIndexEntry = Wire(Vec(FetchBlockInstNum, new InstrIndexEntry))
-  val fetchBlockSelect =
+  private val instrIndexEntry = Wire(Vec(FetchBlockInstNum, new InstrIndexEntry))
+  private val fetchBlockSelect =
     VecInit.tabulate(FetchBlockInstNum)(i =>
       Mux(s2_fetchSize(0) > i.U, false.B, true.B)
     )
@@ -482,7 +480,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // valid signals at the end and beginning need to be updated.
   s2_fetchBlock(0).rawInstrValid := (rawInstrValid.asUInt & s2_instrRange(0)) &
     Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
-  s2_fetchBlock(1).rawInstrValid := (rawInstrValid.asUInt >> s2_fetchSize(0)) & s2_instrRange(1) &
+  s2_fetchBlock(1).rawInstrValid := (rawInstrValid.asUInt >> s2_fetchSize(0)).asUInt & s2_instrRange(1) &
     Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
   private val s2_rawFirstData         = s2_rawData
   private val s2_rawSecondData        = 0.U((ICacheLineBytes * 8).W)
@@ -1182,9 +1180,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // According to the discussed version, IFU will no longer need to send predecode information to FTQ in the future.
   // Therefore, this part of the logic will not be optimized further and will be removed later.
-  val firstRawPds  = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
-  val secondRawPds = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
-  firstRawPds.zipWithIndex.map {
+  private val firstRawPds  = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
+  private val secondRawPds = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
+  firstRawPds.zipWithIndex.foreach {
     case (rawPd, i) =>
       rawPd := Mux(
         s4_rawInstrValid(i),
@@ -1192,7 +1190,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
         0.U.asTypeOf(new PreDecodeInfo)
       )
   }
-  secondRawPds.zipWithIndex.map {
+  secondRawPds.zipWithIndex.foreach {
     case (rawPd, i) =>
       rawPd := Mux(
         s4_rawInstrValid(i.U + s4_fetchBlock(0).fetchSize),
@@ -1342,8 +1340,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     PopCount(io.toIBuffer.bits.valid & io.toIBuffer.bits.enqEnable),
     io.toIBuffer.fire,
     0,
-    FetchBlockInstNum + 1,
-    1
+    FetchBlockInstNum + 1
   )
 
   // DB
