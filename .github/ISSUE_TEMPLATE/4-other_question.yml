@@ -1,11 +1,12 @@
 name: Other Question
 description: Any other question about XiangShan.
-labels: 'question'
+labels:
+  'type: question'
 body:
   - type: markdown
     attributes:
       value: |
-        You could use English or Chineses to open an issue.
+        You could use English or Chinese to open an issue.
         您可以使用中文或英文提问，我们推荐使用英文。
 
         This template is only used for the questions that do not fit other templates. Please check other templates before using this.
@@ -36,7 +37,8 @@ body:
     attributes:
       label: Describe the question
       description: |
-        A clear and concise description of your question. 请清晰、准确地描述您的问题。
-      placeholder: 
+        A clear and concise description of your question.
+        请清晰、准确地描述您的问题。
+      placeholder:
     validations:
       required: true
