@@ -87,10 +87,10 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
-  val target     = PrunedAddr(VAddrBits)
-  val misIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val cfiIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val instrRange = UInt(FetchBlockInstNum.W)
+  val target:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val misIdx:     Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val cfiIdx:     Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val instrRange: UInt        = UInt(FetchBlockInstNum.W)
 }
 
 /* ***** DB ***** */
