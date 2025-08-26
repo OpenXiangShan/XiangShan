@@ -158,7 +158,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
-    when(notUseful) {
+    when(notUseful && t1_actualTaken) { // only train taken branches to ubtb
       t1_updatedEntry.valid := true.B
       t1_updatedEntry.tag   := t1_tag
       t1_updatedEntry.usefulCnt.resetPositive() // usefulCnt inits at strong positive, in/decrease by policy
