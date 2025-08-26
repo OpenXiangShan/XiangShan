@@ -143,53 +143,53 @@ class Ifu(implicit p: Parameters) extends IfuModule
   when(itlbMissBubble) {
     topdownStages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
   }
-  io.toIBuffer.bits.topdown_info := topdownStages(numOfStage - 1)
-  when(fromFtq.topdown_redirect.valid) {
+  io.toIBuffer.bits.topdownInfo := topdownStages(numOfStage - 1)
+  when(fromFtq.topdownRedirect.valid) {
     // only redirect from backend, IFU redirect itself is handled elsewhere
-    when(fromFtq.topdown_redirect.bits.debugIsCtrl) {
+    when(fromFtq.topdownRedirect.bits.debugIsCtrl) {
       /*
       for (i <- 0 until numOfStage) {
         topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
       }
-      io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+      io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
        */
       // FIXME
 //      when(fromFtq.topdown_redirect.bits.ControlBTBMissBubble) {
 //        for (i <- 0 until numOfStage) {
 //          topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
 //        }
-//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+//        io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.BTBMissBubble.id) := true.B
 //      }.elsewhen(fromFtq.topdown_redirect.bits.TAGEMissBubble) {
 //        for (i <- 0 until numOfStage) {
 //          topdownStages(i).reasons(TopDownCounters.TAGEMissBubble.id) := true.B
 //        }
-//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+//        io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
 //      }.elsewhen(fromFtq.topdown_redirect.bits.SCMissBubble) {
 //        for (i <- 0 until numOfStage) {
 //          topdownStages(i).reasons(TopDownCounters.SCMissBubble.id) := true.B
 //        }
-//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+//        io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.SCMissBubble.id) := true.B
 //      }.elsewhen(fromFtq.topdown_redirect.bits.ITTAGEMissBubble) {
 //        for (i <- 0 until numOfStage) {
 //          topdownStages(i).reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
 //        }
-//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+//        io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
 //      }.elsewhen(fromFtq.topdown_redirect.bits.RASMissBubble) {
 //        for (i <- 0 until numOfStage) {
 //          topdownStages(i).reasons(TopDownCounters.RASMissBubble.id) := true.B
 //        }
-//        io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+//        io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.RASMissBubble.id) := true.B
 //      }
-    }.elsewhen(fromFtq.topdown_redirect.bits.debugIsMemVio) {
+    }.elsewhen(fromFtq.topdownRedirect.bits.debugIsMemVio) {
       for (i <- 0 until numOfStage) {
         topdownStages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
       }
-      io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
     }.otherwise {
       for (i <- 0 until numOfStage) {
         topdownStages(i).reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
       }
-      io.toIBuffer.bits.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      io.toIBuffer.bits.topdownInfo.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
     }
   }
 
@@ -1091,14 +1091,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /** to backend */
   // s4_gpAddr is valid iff gpf is detected
-  io.toBackend.gpaddrMem_wen := s4_toIBufferValid && Mux(
+  io.toBackend.gpAddrMem.wen := s4_toIBufferValid && Mux(
     s4_reqIsMmio,
     mmioException.isGpf,
     s4_icacheInfo(0).exception.isGpf
   )
-  io.toBackend.gpaddrMem_waddr        := s4_fetchBlock(0).ftqIdx.value
-  io.toBackend.gpaddrMem_wdata.gpaddr := Mux(s4_reqIsMmio, mmioResendGpAddr.toUInt, s4_icacheInfo(0).gpAddr.toUInt)
-  io.toBackend.gpaddrMem_wdata.isForVSnonLeafPTE := Mux(
+  io.toBackend.gpAddrMem.waddr        := s4_fetchBlock(0).ftqIdx.value
+  io.toBackend.gpAddrMem.wdata.gpaddr := Mux(s4_reqIsMmio, mmioResendGpAddr.toUInt, s4_icacheInfo(0).gpAddr.toUInt)
+  io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := Mux(
     s4_reqIsMmio,
     mmioResendIsForVSnonLeafPTE,
     s4_icacheInfo(0).isForVSnonLeafPTE
