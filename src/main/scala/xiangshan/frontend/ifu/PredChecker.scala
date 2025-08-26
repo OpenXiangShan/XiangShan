@@ -115,7 +115,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val needRemask = ParallelOR(remaskFault)
   // Note: remaskIdx must be 5-bit wide (2^5=32) to cover all shift positions (0-31)
   private val fixedRange =
-    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | Fill(32, 1.U(1.W)) >> ~remaskIdx)
+    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | (Fill(32, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt)
   assert(remaskIdx.getWidth == 5, s"remaskIdx width mismatch!") // Temporary code.
   // Adjust this if one IBuffer input entry is later removed
   // require(
@@ -126,14 +126,14 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferInPortNum, Bool()))
 
-  val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
+  private val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
       pd.isRet || pd.isJal || pd.isJalr ||
         (isPredTaken(i) && !selectFetchBlock(i) && !pd.notCFI)
     ) && !ignore(i)
   })
 
-  val fixedTwoFetchSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
+  private val fixedTwoFetchSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
       pd.isRet || pd.isJal || pd.isJalr ||
         (isPredTaken(i) && selectFetchBlock(i) && !pd.notCFI)
@@ -210,11 +210,17 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val fixSecondMispred = mispredIdxNext.valid && !mispredIsFirstBlockNext
   private val fixedFirstRawInstrRange =
     Fill(FetchBlockInstNum, !fixFirstMispred) |
-      (Fill(FetchBlockInstNum, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(FetchBlockInstOffsetWidth - 1, 0))
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
+        FetchBlockInstOffsetWidth - 1,
+        0
+      )).asUInt).asUInt
 
   private val fixedSecondRawInstrRange =
     Fill(FetchBlockInstNum, !fixSecondMispred) |
-      (Fill(FetchBlockInstNum, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(FetchBlockInstOffsetWidth - 1, 0))
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
+        FetchBlockInstOffsetWidth - 1,
+        0
+      )).asUInt).asUInt
 
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))

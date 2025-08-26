@@ -84,7 +84,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
     io.triggered(i) := triggerAction
     XSDebug(
       triggerCanFireVec.asUInt.orR,
-      p"Debug Mode: Predecode Inst No. ${i} has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
+      p"Debug Mode: Predecode Inst No. $i has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
     )
   }
 }
