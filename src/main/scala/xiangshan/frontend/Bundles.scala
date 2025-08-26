@@ -126,7 +126,7 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  class FtqToIfuReq(implicit p: Parameters) extends Bundle {
+  class FtqToIfuReq extends Bundle {
     val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
     val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
   }
@@ -136,7 +136,7 @@ class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
   val flushFromBpu:     BpuFlushInfo             = new BpuFlushInfo
 }
 
-class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
+class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val mmioCommitRead: MmioCommitRead                       = new MmioCommitRead
   val pdWb:           Vec[Valid[PredecodeWritebackBundle]] = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
 }
