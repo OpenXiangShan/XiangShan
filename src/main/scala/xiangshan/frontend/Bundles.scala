@@ -124,8 +124,8 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
   val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 }
 
-class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  class FtqToIfuReq(implicit p: Parameters) extends XSBundle {
+class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
+  class FtqToIfuReq(implicit p: Parameters) extends FrontendBundle {
     val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
     val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
   }
@@ -135,7 +135,7 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
   val flushFromBpu:     BpuFlushInfo             = new BpuFlushInfo
 }
 
-class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
+class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val mmioCommitRead: MmioCommitRead                       = new MmioCommitRead
   val pdWb:           Vec[Valid[PredecodeWritebackBundle]] = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
 }
