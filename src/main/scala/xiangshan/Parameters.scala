@@ -78,7 +78,6 @@ case class XSCoreParameters
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
-  FetchPorts: Int = 2,
   AsidLength: Int = 16,
   VmidLength: Int = 14,
   EnbaleTlbDebug: Boolean = false,
@@ -599,7 +598,6 @@ trait HasXSParameter {
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   def FetchWidth = coreParams.FetchWidth
   def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
-  def FetchPorts = coreParams.FetchPorts
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate

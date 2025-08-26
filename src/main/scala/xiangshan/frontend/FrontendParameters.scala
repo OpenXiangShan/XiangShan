@@ -25,6 +25,7 @@ import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
     FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchPorts:     Int = 2,  // 2-fetch
 
     bpuParameters:    BpuParameters = BpuParameters(),
     ftqParameters:    FtqParameters = FtqParameters(),
@@ -58,6 +59,8 @@ case class FrontendParameters(
 
 trait HasFrontendParameters extends HasXSParameter {
   def frontendParameters: FrontendParameters = coreParams.frontendParameters
+
+  def FetchPorts: Int = frontendParameters.FetchPorts
 
   def FetchBlockSize:    Int = frontendParameters.FetchBlockSize
   def FetchBlockInstNum: Int = FetchBlockSize / instBytes
