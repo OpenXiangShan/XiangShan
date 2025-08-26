@@ -51,7 +51,7 @@ class GPAMemIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
 
   val exceptionReadAddr = Input(ValidIO(new Bundle {
     val ftqPtr = new FtqPtr()
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   }))
   val exceptionReadData = Output(new GPAMemEntry)
 }

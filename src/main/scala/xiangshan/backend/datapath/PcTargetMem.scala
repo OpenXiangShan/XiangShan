@@ -66,7 +66,7 @@ class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   //Ftq
   val fromDataPathValid = Input(Vec(params.numPcMemReadPort, Bool()))
   val fromDataPathFtqPtr = Input(Vec(params.numPcMemReadPort, new FtqPtr))
-  val fromDataPathFtqOffset = Input(Vec(params.numPcMemReadPort, UInt(log2Up(PredictWidth).W)))
+  val fromDataPathFtqOffset = Input(Vec(params.numPcMemReadPort, UInt(FetchBlockInstOffsetWidth.W)))
   //Target PC
   val toDataPathTargetPC = Output(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   //PC

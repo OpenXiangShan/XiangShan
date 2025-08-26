@@ -27,7 +27,7 @@ trait HasIfuParameters extends HasFrontendParameters {
   def ICacheLineBytes: Int = frontendParameters.icacheParameters.blockBytes
   // equal lower_result overflow bit
   def PcCutPoint:       Int = ifuParameters.PcCutPoint.getOrElse((VAddrBits / 4) - 1)
-  def IBufferInPortNum: Int = PredictWidth + IBufWriteBank
+  def IBufferInPortNum: Int = FetchBlockInstNum + IBufWriteBank
   def IfuAlignWidth:    Int = IBufWriteBank
 
   require(PcCutPoint > 0 && PcCutPoint < VAddrBits, s"PcCutPoint($PcCutPoint) must be in range (0, $VAddrBits)")
