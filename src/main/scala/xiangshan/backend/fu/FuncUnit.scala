@@ -29,7 +29,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
-  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(log2Up(PredictWidth).W))
+  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(FetchBlockInstOffsetWidth.W))
   val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
@@ -59,7 +59,7 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.destDataBits.W)
   val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
-  val nextPcOffset = OptionWrapper(cfg.needPc, UInt((log2Up(PredictWidth) + 2).W))
+  val nextPcOffset = OptionWrapper(cfg.needPc, UInt((FetchBlockInstOffsetWidth + 2).W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)
   def getSrcMask    : UInt = src(cfg.maskSrcIdx)

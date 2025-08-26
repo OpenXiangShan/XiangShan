@@ -24,7 +24,7 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val iaddr     = if (hasIaddr)   Some(UInt(IaddrWidth.W))                else None
   val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
-  val ftqOffset = if (!hasIaddr)  Some(UInt(log2Up(PredictWidth).W))      else None
+  val ftqOffset = if (!hasIaddr)  Some(UInt(FetchBlockInstOffsetWidth.W))      else None
   val tracePipe = new TracePipe(iretireWidth)
 }
 
@@ -50,7 +50,7 @@ class TraceCoreInterface(hasOffset: Boolean = false)(implicit val p: Parameters)
     }
     val groups = Vec(TraceGroupNum, ValidIO(new Bundle{
       val iaddr     = UInt(IaddrWidth.W)
-      val ftqOffset = if (hasOffset)  Some(UInt(log2Up(PredictWidth).W)) else None
+      val ftqOffset = if (hasOffset)  Some(UInt(FetchBlockInstOffsetWidth.W)) else None
       val itype     = UInt(ItypeWidth.W)
       val iretire   = UInt(IretireWidthCompressed.W)
       val ilastsize = UInt(IlastsizeWidth.W)

@@ -77,7 +77,6 @@ case class XSCoreParameters
   HasFPU: Boolean = true,
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
-  FetchWidth: Int = 8,
   AsidLength: Int = 16,
   VmidLength: Int = 14,
   EnbaleTlbDebug: Boolean = false,
@@ -596,8 +595,6 @@ trait HasXSParameter {
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
-  def FetchWidth = coreParams.FetchWidth
-  def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
@@ -605,8 +602,9 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
+  def FetchBlockInstOffsetWidth: Int = log2Ceil(coreParams.frontendParameters.FetchBlockSize / instBytes)
   def IBufSize = coreParams.IBufSize
-  def IBufEnqWidth = coreParams.IBufWriteBank + PredictWidth
+  def IBufEnqWidth = coreParams.IBufWriteBank + coreParams.frontendParameters.FetchBlockSize / instBytes
   def IBufWriteBank = coreParams.IBufWriteBank
   def IBufReadBank = coreParams.IBufReadBank
   def IBufNRank = coreParams.IBufNBank

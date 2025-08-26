@@ -56,7 +56,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val dirtyVs = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isRVC = Bool()
     val isVset = Bool()
     val isHls = Bool()
@@ -106,7 +106,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val mmio = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val fpWen = Bool()
     val rfWen = Bool()
     val needFlush = Bool()
@@ -275,7 +275,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   // val valid = Bool()
   val robIdx = new RobPtr
   val ftqPtr = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   // set 1 if there is 1 exists in exceptionVec
   val hasException = Bool()
   // This signal is valid iff currentValid is true
@@ -312,6 +312,6 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val robIdx = new RobPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val replayInst = Bool()
 }

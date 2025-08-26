@@ -62,7 +62,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
 
   private val debugMode            = io.frontendTrigger.debugMode
   private val triggerCanRaiseBpExp = io.frontendTrigger.triggerCanRaiseBpExp
-  // val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
+  // val triggerHitVec = Wire(Vec(FetchBlockInstNum, Vec(TriggerNum, Bool())))
   private val triggerHitVec = (0 until TriggerNum).map { j =>
     TriggerCmpConsecutive(
       VecInit(io.pc.map(_.toUInt)),

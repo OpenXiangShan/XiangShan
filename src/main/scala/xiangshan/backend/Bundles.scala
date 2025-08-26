@@ -63,7 +63,7 @@ object Bundles {
     val pred_taken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
     val instr = UInt(32.W)
     val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
@@ -94,7 +94,7 @@ object Bundles {
     val pred_taken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
     val instr = UInt(32.W)
@@ -160,7 +160,7 @@ object Bundles {
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
     val instr = UInt(32.W)
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
     def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
       val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
@@ -187,7 +187,7 @@ object Bundles {
     val identifiedCfi = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -235,7 +235,7 @@ object Bundles {
     val singleStep = Bool() // debug module
     val numLsElem = NumLsElem()
     val hasException = Bool()
-    val ftqLastOffset = UInt(log2Up(PredictWidth).W) // store ftqoffset before change in rename
+    val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
     val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
@@ -260,7 +260,7 @@ object Bundles {
     val pred_taken = Bool()
     val identifiedCfi = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     // from decode
     val srcType = Vec(numSrc, SrcType())
     val fuType = FuType()
@@ -324,8 +324,8 @@ object Bundles {
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
-    val ftqOffset       = UInt(log2Up(PredictWidth).W)
-    val ftqLastOffset   = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
+    val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
+    val ftqLastOffset   = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before channge in rename
     val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
@@ -776,7 +776,7 @@ object Bundles {
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
     val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
     val imm           = UInt(64.W)
-    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((log2Up(PredictWidth) + 2).W))
+    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((FetchBlockInstOffsetWidth + 2).W))
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
@@ -801,7 +801,7 @@ object Bundles {
     val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
-                                                  Some(UInt(log2Up(PredictWidth).W))  else None
+                                                  Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()

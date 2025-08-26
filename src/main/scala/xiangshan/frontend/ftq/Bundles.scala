@@ -44,7 +44,7 @@ class ResolveEntry(implicit p: Parameters) extends FtqBundle {
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
   val valid  = Output(Bool())
   val ptr    = Output(new FtqPtr)
-  val offset = Output(UInt(log2Ceil(PredictWidth).W))
+  val offset = Output(UInt(FetchBlockInstOffsetWidth.W))
   val data   = Input(gen)
   def apply(valid: Bool, ptr: FtqPtr, offset: UInt) = {
     this.valid  := valid

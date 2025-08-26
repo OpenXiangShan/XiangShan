@@ -63,16 +63,16 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val ftqIdx:         FtqPtr      = new FtqPtr
   val doubleline:     Bool        = Bool()
-  val predTakenIdx:   Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+  val predTakenIdx:   Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val invalidTaken:   Bool        = Bool()
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
-  val instrRange:     UInt        = UInt(PredictWidth.W)
-  val rawInstrValid:  UInt        = UInt(PredictWidth.W)
+  val instrRange:     UInt        = UInt(FetchBlockInstNum.W)
+  val rawInstrValid:  UInt        = UInt(FetchBlockInstNum.W)
   val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
-  val fetchSize:      UInt        = UInt(log2Ceil(PredictWidth + 1).W)
+  val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
   val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
 
@@ -91,7 +91,7 @@ class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
   val target       = PrunedAddr(VAddrBits)
   val misIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
   val cfiIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val instrRange   = UInt(PredictWidth.W)
+  val instrRange   = UInt(FetchBlockInstNum.W)
   val invalidTaken = Bool()
 }
 
@@ -106,7 +106,7 @@ class FetchToIBufferDB(implicit p: Parameters) extends IfuBundle {
 class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
   val startAddr:         Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W)) // do not use PrunedAddr for DB
   val isMissPred:        Vec[Bool] = Vec(FetchPorts, Bool())
-  val missPredOffset:    Vec[UInt] = Vec(FetchPorts, UInt(log2Ceil(PredictWidth).W))
+  val missPredOffset:    Vec[UInt] = Vec(FetchPorts, UInt(FetchBlockInstOffsetWidth.W))
   val checkJalFault:     Bool      = Bool()
   val checkJalrFault:    Bool      = Bool()
   val checkRetFault:     Bool      = Bool()
@@ -117,7 +117,7 @@ class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
 
 class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val valid:          Bool    = Bool()
-  val instrCount:     UInt    = UInt(log2Ceil(PredictWidth + 1).W)
+  val instrCount:     UInt    = UInt(log2Ceil(FetchBlockInstNum + 1).W)
   val prevIBufEnqPtr: IBufPtr = new IBufPtr
   // A fallthrough does not always correspond to a half RVI instruction.
   val isHalfInstr: Bool       = Bool()

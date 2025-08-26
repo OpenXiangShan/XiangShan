@@ -17,7 +17,7 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
     val isRVC = Input(Bool())
     val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(XLEN.W))
-    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 2).W))
+    val nextPcOffset = Input(UInt((FetchBlockInstOffsetWidth + 2).W))
   })
   val immMinWidth = FuConfig.BrhCfg.immType.map(x => SelImm.getImmUnion(x).len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
