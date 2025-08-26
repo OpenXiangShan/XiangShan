@@ -108,7 +108,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
     val readGPAMemAddr = ValidIO(new Bundle {
       val ftqPtr = new FtqPtr()
-      val ftqOffset = UInt(log2Up(PredictWidth).W)
+      val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     })
     val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
@@ -498,7 +498,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val vsetvlState = RegInit(vs_idle)
 
   val firstVInstrFtqPtr = RegInit(0.U.asTypeOf(new FtqPtr))
-  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(log2Up(PredictWidth).W)))
+  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(FetchBlockInstOffsetWidth.W)))
   val firstVInstrRobIdx = RegInit(0.U.asTypeOf(new RobPtr))
 
   val enq0 = io.enq.req(0)

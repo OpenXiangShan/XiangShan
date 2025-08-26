@@ -12,7 +12,7 @@ import xiangshan.backend.decode.isa.bitfield.OPCODE5Bit
 
 class FtqInfo(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr()
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePtrHelper {

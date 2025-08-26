@@ -21,8 +21,8 @@ import xiangshan.frontend.PreDecodeInfo
 
 class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class F3PreDecodeIO(implicit p: Parameters) extends IfuBundle {
-    val instr: Vec[UInt]          = Input(Vec(PredictWidth, UInt(32.W)))
-    val pd:    Vec[PreDecodeInfo] = Output(Vec(PredictWidth, new PreDecodeInfo))
+    val instr: Vec[UInt]          = Input(Vec(FetchBlockInstNum, UInt(32.W)))
+    val pd:    Vec[PreDecodeInfo] = Output(Vec(FetchBlockInstNum, new PreDecodeInfo))
   }
   val io: F3PreDecodeIO = IO(new F3PreDecodeIO)
 
