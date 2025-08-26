@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -19,11 +19,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSDebug
-import utility.XSError
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 
-class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper with HasIfuParameters {
+class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class PreDecodeIO(implicit p: Parameters) extends IfuBundle {
     class PreDecodeReq(implicit p: Parameters) extends IfuBundle {
       val data:       Vec[UInt] = Vec(IBufferInPortNum, UInt(32.W))

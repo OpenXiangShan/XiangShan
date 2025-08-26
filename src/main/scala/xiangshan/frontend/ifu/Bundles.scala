@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -55,7 +55,7 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
   val middlePC: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
-class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParameters {
+class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
   val valid: Bool = Bool()
   val value: UInt = UInt(log2Ceil(ICacheLineBytes / 2).W)
 }
@@ -75,6 +75,7 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val fetchSize:     UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
 }
 
+// HasICacheParameters is for PortNumber
 class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
