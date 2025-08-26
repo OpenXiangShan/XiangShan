@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -18,14 +18,13 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import utility.SignExt
-import xiangshan.HasXSParameter
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.BrType
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.icache.HasICacheParameters
 
-trait PreDecodeHelper extends HasXSParameter {
+trait PreDecodeHelper extends HasIfuParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
 
   def isLink(reg: UInt): Bool = reg === 1.U || reg === 5.U
@@ -57,7 +56,8 @@ trait PreDecodeHelper extends HasXSParameter {
   }
 }
 
-trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
+// HasICacheParameters is for blockOffBits, maybe should remove it
+trait FetchBlockHelper extends HasIfuParameters with HasICacheParameters {
   def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
     val byteOffset = (pc - start).toUInt
     (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
@@ -70,7 +70,7 @@ trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
     pc(blockOffBits - 1, 0) === "b111110".U
 }
 
-trait IfuHelper extends HasXSParameter with HasIfuParameters {
+trait IfuHelper extends HasIfuParameters {
   private object ShiftType {
     val NoShift     = 0.U(2.W)
     val ShiftRight1 = 1.U(2.W)
@@ -117,6 +117,5 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
         ShiftType.ShiftRight3 -> (if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3))
       ))
     })
-
   }
 }

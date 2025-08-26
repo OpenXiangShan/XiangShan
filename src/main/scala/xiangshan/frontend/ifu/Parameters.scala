@@ -15,14 +15,20 @@
 
 package xiangshan.frontend.ifu
 
-import chisel3.util._
-import xiangshan.HasXSParameter
-import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.HasFrontendParameters
 
-trait HasIfuParameters extends HasICacheParameters {
-  def ICacheLineBytes: Int = 64
+case class IfuParameters(
+    PcCutPoint: Option[Int] = None // default cut at lower VAddrBits/4
+) {}
+
+trait HasIfuParameters extends HasFrontendParameters {
+  def ifuParameters: IfuParameters = frontendParameters.ifuParameters
+
+  def ICacheLineBytes: Int = frontendParameters.icacheParameters.blockBytes
   // equal lower_result overflow bit
-  def PcCutPoint:       Int = (VAddrBits / 4) - 1
+  def PcCutPoint:       Int = ifuParameters.PcCutPoint.getOrElse((VAddrBits / 4) - 1)
   def IBufferInPortNum: Int = PredictWidth + IBufWriteBank
   def IfuAlignWidth:    Int = IBufWriteBank
+
+  require(PcCutPoint > 0 && PcCutPoint < VAddrBits, s"PcCutPoint($PcCutPoint) must be in range (0, $VAddrBits)")
 }
