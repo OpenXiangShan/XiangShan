@@ -21,13 +21,15 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
     FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
 
     bpuParameters:    BpuParameters = BpuParameters(),
     ftqParameters:    FtqParameters = FtqParameters(),
-    icacheParameters: ICacheParameters = ICacheParameters()
+    icacheParameters: ICacheParameters = ICacheParameters(),
+    ifuParameters:    IfuParameters = IfuParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
