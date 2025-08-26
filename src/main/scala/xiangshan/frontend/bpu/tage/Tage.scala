@@ -173,7 +173,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   t1_baseTableWriteCtrs := DontCare
   t1_baseTableWriteWaymask.foreach(_.foreach(_ := false.B))
-  for (pos <- 0 until PredictWidth) {
+  for (pos <- 0 until FetchBlockInstNum) {
     // FIXME: won't work when alignment bank is not 2
     when(pos.U < t1_cfiPosition) {
       t1_baseTableWriteCtrs(pos.U.asBools.last + t1_alignBankIdx)(

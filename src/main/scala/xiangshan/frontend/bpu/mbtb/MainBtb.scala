@@ -165,7 +165,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     s2_rawBtbEntries.map(e =>
       getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
     ) // FIXME: parameterize target carry
-  private val debug_s2_perBankSignals = Seq.tabulate(PredictWidth) { pos =>
+  private val debug_s2_perBankSignals = Seq.tabulate(FetchBlockInstNum) { pos =>
     val posHitMask = s2_hitMask zip s2_positions map { case (hit, p) =>
       hit && p === pos.U
     }

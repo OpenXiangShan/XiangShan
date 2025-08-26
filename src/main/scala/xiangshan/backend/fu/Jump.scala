@@ -36,7 +36,7 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     val src = Input(UInt(XLEN.W))
     val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
     val imm = Input(UInt(33.W)) // imm-U need 32 bits, highest bit is sign bit
-    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 2).W))
+    val nextPcOffset = Input(UInt((FetchBlockInstOffsetWidth + 2).W))
     val func = Input(FuOpType())
     val isRVC = Input(Bool())
     val result, target = Output(UInt(XLEN.W))

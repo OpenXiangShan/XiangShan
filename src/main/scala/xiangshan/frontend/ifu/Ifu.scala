@@ -259,17 +259,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_fetchSize = VecInit.tabulate(FetchPorts) { i =>
     Mux(
       s1_takenCfiOffset(i).valid,
-      s1_takenCfiOffset(i).bits + 1.U(log2Ceil(PredictWidth + 1).W),
-      (s1_ftqFetch(i).nextStartVAddr - s1_ftqFetch(i).startVAddr)(log2Ceil(PredictWidth + 1) + 1, 1)
+      s1_takenCfiOffset(i).bits + 1.U(log2Ceil(FetchBlockInstNum + 1).W),
+      (s1_ftqFetch(i).nextStartVAddr - s1_ftqFetch(i).startVAddr)(log2Ceil(FetchBlockInstNum + 1) + 1, 1)
     )
   }
 
   private val s1_jumpRange = VecInit.tabulate(FetchPorts)(i =>
-    Fill(PredictWidth, !s1_takenCfiOffset(i).valid) |
-      Fill(PredictWidth, 1.U(1.W)) >> ~s1_takenCfiOffset(i).bits
+    Fill(FetchBlockInstNum, !s1_takenCfiOffset(i).valid) |
+      Fill(FetchBlockInstNum, 1.U(1.W)) >> ~s1_takenCfiOffset(i).bits
   )
   private val s1_ftrRange = VecInit.tabulate(FetchPorts)(i =>
-    Fill(PredictWidth, s1_takenCfiOffset(i).valid) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(
+    Fill(FetchBlockInstNum, s1_takenCfiOffset(i).valid) | Fill(FetchBlockInstNum, 1.U(1.W)) >> ~getBasicBlockIdx(
       s1_ftqFetch(i).nextStartVAddr,
       s1_ftqFetch(i).startVAddr
     )
@@ -311,10 +311,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_totalMaskEndPos   = RegEnable(~(1.U << s1_totalEndPos), s1_fire)
   private val s2_takenCfiOffset    = RegEnable(s1_takenCfiOffset, s1_fire)
 
-  private val s2_instrPcLowerResult = WireDefault(VecInit.fill(PredictWidth)(0.U((PcCutPoint + 1).W)))
-  private val s2_instrIsRvc         = WireDefault(VecInit.fill(PredictWidth)(false.B))
-  private val s2_instrEndOffset     = WireDefault(VecInit.fill(PredictWidth)(0.U(log2Ceil(PredictWidth).W)))
-  private val s2_identifiedCfi      = WireDefault(VecInit.fill(PredictWidth)(false.B))
+  private val s2_instrPcLowerResult = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U((PcCutPoint + 1).W)))
+  private val s2_instrIsRvc         = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
+  private val s2_instrEndOffset     = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U(FetchBlockInstOffsetWidth.W)))
+  private val s2_identifiedCfi      = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
 
   s2_fire  := s2_valid && s3_ready && icacheRespAllValid
   s2_ready := s2_fire || !s2_valid
@@ -347,7 +347,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_rawData  = fromICache.bits.data
   private val s2_perfInfo = io.fromICache.perf
   preDecodeBounder.io.req.valid                  := fromICache.valid
-  preDecodeBounder.io.req.bits.instrRange        := s2_totalInstrRange.asTypeOf(Vec(PredictWidth, Bool()))
+  preDecodeBounder.io.req.bits.instrRange        := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
   preDecodeBounder.io.req.bits.firstEndPos       := s2_firstEndPos
   preDecodeBounder.io.req.bits.endPos            := s2_totalEndPos
   preDecodeBounder.io.req.bits.prevLastIsHalfRvi := s2_prevLastIsHalfRvi
@@ -379,47 +379,47 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* *****************************************************************************
    * instrCountBeforeCurrent(i), not include rawInstrValid(i)
    * ***************************************************************************** */
-  val instrCountBeforeCurrent = WireDefault(VecInit.fill(PredictWidth + 1)(0.U(log2Ceil(PredictWidth + 1).W)))
-  for (i <- 0 until PredictWidth) {
+  val instrCountBeforeCurrent = WireDefault(VecInit.fill(FetchBlockInstNum + 1)(0.U(log2Ceil(FetchBlockInstNum + 1).W)))
+  for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(rawInstrValid.take(i))
   }
-  instrCountBeforeCurrent(PredictWidth) := PopCount(rawInstrValid)
+  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(rawInstrValid)
 
-  val instrIndexEntry = Wire(Vec(PredictWidth, new InstrIndexEntry))
+  val instrIndexEntry = Wire(Vec(FetchBlockInstNum, new InstrIndexEntry))
   val fetchBlockSelect =
-    VecInit.tabulate(PredictWidth)(i =>
+    VecInit.tabulate(FetchBlockInstNum)(i =>
       Mux(s2_fetchSize(0) > i.U, false.B, true.B)
     )
 
   private val s2_fetchPcLowerResult = VecInit.tabulate(FetchPorts)(i =>
-    VecInit((0 until PredictWidth).map(j =>
+    VecInit((0 until FetchBlockInstNum).map(j =>
       Cat(0.U(1.W), s2_ftqFetch(i).startVAddr(PcCutPoint - 1, 0)) + (j * 2).U
     ))
   ) // cat with overflow bit
 
   private val s2_fetchBlockIndex = VecInit.tabulate(FetchPorts)(i =>
-    VecInit.tabulate(PredictWidth)(j =>
+    VecInit.tabulate(FetchBlockInstNum)(j =>
       s2_fetchPcLowerResult(i)(j)(log2Ceil(ICacheLineBytes) - 1, 1)
     )
   )
 
-  private val twoFetchBlockIndex = VecInit.tabulate(PredictWidth)(i =>
+  private val twoFetchBlockIndex = VecInit.tabulate(FetchBlockInstNum)(i =>
     Mux(s2_fetchSize(0) > i.U, s2_fetchBlockIndex(0)(i), s2_fetchBlockIndex(1)(i))
   )
 
-  private val twoFetchPcLowerResult = VecInit.tabulate(PredictWidth)(i =>
+  private val twoFetchPcLowerResult = VecInit.tabulate(FetchBlockInstNum)(i =>
     Mux(s2_fetchSize(0) > i.U, s2_fetchPcLowerResult(0)(i), s2_fetchPcLowerResult(1)(i))
   )
 
   private val s2_rawPcLowerResult = twoFetchPcLowerResult
 
-  private val instrSelectLowIndex   = WireDefault(VecInit.fill(PredictWidth)(true.B))
-  private val instrSelectFetchBlock = WireDefault(VecInit.fill(PredictWidth)(false.B))
+  private val instrSelectLowIndex   = WireDefault(VecInit.fill(FetchBlockInstNum)(true.B))
+  private val instrSelectFetchBlock = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
 
   // Fetch PC and index info for valid instructions based on their positions.
   instrIndexEntry.zipWithIndex.foreach {
     case (instrIndex, idx) =>
-      val instrRange = idx until Math.min(2 * idx + 2, PredictWidth)
+      val instrRange = idx until Math.min(2 * idx + 2, FetchBlockInstNum)
 
       val validOH = instrRange.map {
         i => rawInstrValid(i) & (instrCountBeforeCurrent(i) === idx.U)
@@ -444,7 +444,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_instrEndOffset(0) := Mux(s2_prevLastIsHalfRvi, 0.U, Mux(rawIsRvc(0), 0.U, 1.U))
 
   private val s2_fetchTakenIdx = VecInit((0 until FetchPorts).map { i =>
-    val b = Wire(new Valid(UInt(log2Ceil(PredictWidth).W)))
+    val b = Wire(new Valid(UInt(FetchBlockInstOffsetWidth.W)))
     b.valid := s2_takenCfiOffset(i).valid
     b.bits  := PopCount(rawInstrValid.asUInt & s2_instrRange(i)) - 1.U
     b
@@ -474,16 +474,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_fetchBlock(0).takenCfiOffset.valid := s2_takenCfiOffset(0).valid && s2_firstValid
   s2_fetchBlock(1).takenCfiOffset.valid := s2_takenCfiOffset(1).valid && s2_secondValid
   s2_fetchBlock(0).instrRange := s2_instrRange(0) &
-    Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(PredictWidth, 1.U(1.W)))
+    Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
   s2_fetchBlock(1).instrRange := s2_instrRange(1) &
-    Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(PredictWidth, 1.U(1.W)))
+    Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
 
   // After completing the adjustment of a half prediction block, the instruction
   // valid signals at the end and beginning need to be updated.
   s2_fetchBlock(0).rawInstrValid := (rawInstrValid.asUInt & s2_instrRange(0)) &
-    Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(PredictWidth, 1.U(1.W)))
+    Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
   s2_fetchBlock(1).rawInstrValid := (rawInstrValid.asUInt >> s2_fetchSize(0)) & s2_instrRange(1) &
-    Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(PredictWidth, 1.U(1.W)))
+    Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
   private val s2_rawFirstData         = s2_rawData
   private val s2_rawSecondData        = 0.U((ICacheLineBytes * 8).W)
   private val s2_rawFirstDataDupWire  = VecInit(Seq.fill(FetchPorts)(s2_rawFirstData))
@@ -513,7 +513,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_selectFetchBlock = RegEnable(instrSelectFetchBlock, s2_fire)
   private val s3_instrIsRvc       = RegEnable(s2_instrIsRvc, s2_fire)
   private val s3_instrCount       = RegEnable(PopCount(s2_realRawInstrValid), s2_fire)
-  private val s3_instrValid       = RegEnable(UIntToMask(PopCount(s2_realRawInstrValid), PredictWidth), s2_fire)
+  private val s3_instrValid       = RegEnable(UIntToMask(PopCount(s2_realRawInstrValid), FetchBlockInstNum), s2_fire)
 
   private val s3_rawIndex           = RegEnable(instrCountBeforeCurrent, s2_fire)
   private val s3_rawInstrValid      = RegEnable(s2_realRawInstrValid, s2_fire)
@@ -570,14 +570,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_secondLowICacheData  = cutICacheData(s3_rawSecondDataDup(0))
   private val s3_secondHighICacheData = cutICacheData(s3_rawSecondDataDup(1))
 
-  private val s3_isPredTaken = VecInit.tabulate(PredictWidth)(i =>
+  private val s3_isPredTaken = VecInit.tabulate(FetchBlockInstNum)(i =>
     ((s3_fetchBlock(0).predTakenIdx.bits === i.U && s3_fetchBlock(0).predTakenIdx.valid) &&
       !s3_selectFetchBlock(i) && s3_firstValid) ||
       ((s3_fetchBlock(1).predTakenIdx.bits === i.U && s3_fetchBlock(1).predTakenIdx.valid) &&
         s3_selectFetchBlock(i) && s3_secondValid)
   )
 
-  private val s3_invalidTaken = WireDefault(VecInit.fill(PredictWidth)(false.B))
+  private val s3_invalidTaken = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
   s3_invalidTaken(s3_fetchBlock(0).predTakenIdx.bits) := s3_fetchBlock(0).invalidTaken && s3_firstValid
 
   private val s3_alignShiftNum = s3_prevIBufEnqPtr.value(1, 0)
@@ -592,12 +592,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     alignData(s3_instrIndex, s3_alignShiftNum, 0.U.asTypeOf(new InstrIndexEntry))
   private val s3_alignInstrIsRvc = alignData(s3_instrIsRvc, s3_alignShiftNum, false.B)
   private val s3_alignInstrValid =
-    alignData(s3_instrValid.asTypeOf(Vec(PredictWidth, Bool())), s3_alignShiftNum, false.B)
+    alignData(s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool())), s3_alignShiftNum, false.B)
   private val s3_alignInvalidTaken = alignData(s3_invalidTaken, s3_alignShiftNum, false.B)
   private val s3_alignIsPredTaken  = alignData(s3_isPredTaken, s3_alignShiftNum, false.B)
   private val s3_alignSelectBlock  = alignData(s3_selectFetchBlock, s3_alignShiftNum, false.B)
   private val s3_alignInstrEndOffset =
-    alignData(s3_instrEndOffset, s3_alignShiftNum, 0.U(log2Ceil(PredictWidth).W))
+    alignData(s3_instrEndOffset, s3_alignShiftNum, 0.U(FetchBlockInstOffsetWidth.W))
   private val s3_alignPc = VecInit.tabulate(IBufferInPortNum)(i =>
     catPC(
       s3_alignInstrPcLower(i),
@@ -660,7 +660,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   preDecoderIn.valid           := s3_valid
   preDecoderIn.bits.data       := s3_realAlignInstrData
   preDecoderIn.bits.isRvc      := s3_alignInstrIsRvc
-  preDecoderIn.bits.instrValid := s3_alignInstrValid // s3_instrValid.asTypeOf(Vec(PredictWidth, Bool()))
+  preDecoderIn.bits.instrValid := s3_alignInstrValid // s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool()))
 
   private val s3_alignPd         = preDecoderOut.pd
   private val s3_alignJumpOffset = preDecoderOut.jumpOffset
@@ -761,8 +761,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   for (i <- 0 until FetchPorts) {
     when(s4_valid && !s4_fetchBlock(i).takenCfiOffset.valid) {
       assert(
-        s4_fetchStartAddr(i) + (2 * PredictWidth).U >= s4_fetchNextStartAddr(i),
-        s"More than ${2 * PredictWidth} Bytes fetch is not allowed!"
+        s4_fetchStartAddr(i) + (2 * FetchBlockInstNum).U >= s4_fetchNextStartAddr(i),
+        s"More than ${2 * FetchBlockInstNum} Bytes fetch is not allowed!"
       )
     }
   }
@@ -1001,7 +1001,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd  := TlbCmd.exec
 
-  private val s4_mmioRange = VecInit((0 until PredictWidth).map(i => if (i == 0) true.B else false.B))
+  private val s4_mmioRange = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
   // private val s4_alignRealInstrValid  = Wire(Vec(IBufferInPortNum, Bool()))
   private val s4_ignore = s4_prevShiftSelect
 
@@ -1106,7 +1106,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // Write back to Ftq
   private val mmioFlushWb         = Wire(Valid(new PredecodeWritebackBundle))
-  private val s4_mmioMisEndOffset = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  private val s4_mmioMisEndOffset = Wire(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W)))
   s4_mmioMisEndOffset.valid := s4_reqIsMmio
   s4_mmioMisEndOffset.bits  := Mux(s4_prevLastIsHalfRvi || mmioIsRvc, 0.U, 1.U)
 
@@ -1116,7 +1116,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   mmioFlushWb.valid := (s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit && RegNext(fromUncache.fire) &&
     s4_mmioUseSnpc && !s4_ftqFlushSelf && !s4_ftqFlushByOlder)
   mmioFlushWb.bits.pc := s4_mmioPc
-  mmioFlushWb.bits.pd := 0.U.asTypeOf(Vec(PredictWidth, new PreDecodeInfo))
+  mmioFlushWb.bits.pd := 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   mmioFlushWb.bits.pd.zipWithIndex.foreach { case (instr, i) => instr.valid := s4_mmioRange(i) }
   mmioFlushWb.bits.ftqIdx         := s4_fetchBlock(0).ftqIdx
   mmioFlushWb.bits.takenCfiOffset := s4_fetchBlock(0).takenCfiOffset.bits
@@ -1182,8 +1182,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // According to the discussed version, IFU will no longer need to send predecode information to FTQ in the future.
   // Therefore, this part of the logic will not be optimized further and will be removed later.
-  val firstRawPds  = WireDefault(VecInit.fill(PredictWidth)(0.U.asTypeOf(new PreDecodeInfo)))
-  val secondRawPds = WireDefault(VecInit.fill(PredictWidth)(0.U.asTypeOf(new PreDecodeInfo)))
+  val firstRawPds  = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
+  val secondRawPds = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
   firstRawPds.zipWithIndex.map {
     case (rawPd, i) =>
       rawPd := Mux(
@@ -1241,7 +1241,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.bits.cfiEndOffset.bits  := wbAlignInstrEndOffset(wbStage2Check(i).cfiIdx.bits)
     b.bits.target             := wbStage2Check(i).target
     b.bits.jalTarget          := wbStage2Check(i).target
-    b.bits.instrRange         := wbInstrRange(i).asTypeOf(Vec(PredictWidth, Bool()))
+    b.bits.instrRange         := wbInstrRange(i).asTypeOf(Vec(FetchBlockInstNum, Bool()))
     b
   })
 
@@ -1342,7 +1342,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     PopCount(io.toIBuffer.bits.valid & io.toIBuffer.bits.enqEnable),
     io.toIBuffer.fire,
     0,
-    PredictWidth + 1,
+    FetchBlockInstNum + 1,
     1
   )
 

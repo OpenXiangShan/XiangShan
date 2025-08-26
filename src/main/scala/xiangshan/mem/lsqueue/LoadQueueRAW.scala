@@ -328,7 +328,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
   val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
-  val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
+  val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)

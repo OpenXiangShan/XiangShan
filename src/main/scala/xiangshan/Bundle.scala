@@ -111,7 +111,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val loadWaitStrict = Bool()
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
   val debug_seqNum = InstSeqNum()
 }
@@ -248,7 +248,7 @@ class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
 class Redirect(implicit p: Parameters) extends XSBundle {
   // for frontend
   val ftqIdx = new FtqPtr
-  val ftqOffset: UInt = UInt(log2Up(PredictWidth).W)
+  val ftqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
   val target: UInt = UInt(VAddrBits.W)
   val isRVC: Bool = Bool()
   val level: UInt = RedirectLevel()
@@ -268,7 +268,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
   val stFtqIdx = new FtqPtr // for load violation predict
-  val stFtqOffset: UInt = UInt(log2Up(PredictWidth).W)
+  val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
 
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
@@ -305,7 +305,7 @@ object Redirect extends HasCircularQueuePtrHelper {
 
 class Resolve(implicit p: Parameters) extends XSBundle {
   val ftqIdx: FtqPtr = new FtqPtr
-  val ftqOffset: UInt = UInt(log2Up(PredictWidth).W)
+  val ftqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
   val pc: PrunedAddr = PrunedAddr(VAddrBits)
   val target: PrunedAddr = PrunedAddr(VAddrBits)
   val taken: Bool = Bool()

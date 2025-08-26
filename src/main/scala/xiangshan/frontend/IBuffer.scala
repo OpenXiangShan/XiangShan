@@ -92,7 +92,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val predTaken        = Bool()
   val identifiedCfi    = Bool()
   val ftqPtr           = new FtqPtr
-  val instrEndOffset   = UInt(log2Ceil(PredictWidth).W)
+  val instrEndOffset   = UInt(FetchBlockInstOffsetWidth.W)
   val exceptionType    = IBufferExceptionType()
   val backendException = Bool()
   val triggered        = TriggerAction()
@@ -153,7 +153,7 @@ class IBufOutEntry(implicit p: Parameters) extends XSBundle {
   val triggered        = TriggerAction()
   val isLastInFtqEntry = Bool()
   val debug_seqNum     = InstSeqNum()
-  val instrEndOffset   = UInt(log2Ceil(PredictWidth).W)
+  val instrEndOffset   = UInt(FetchBlockInstOffsetWidth.W)
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
@@ -184,7 +184,7 @@ class IBufOutEntry(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+class IBuffer(implicit p: Parameters) extends FrontendModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
   // Max IBuffer bypass = DecodeWidth + IBufWriteBank (valid instructions from new IFU are tightly packed.)
   def NEED_BYPASS_NUM: Int = DecodeWidth + IBufWriteBank
@@ -273,7 +273,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val allowEnq     = RegInit(true.B)
   val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
 
-  allowEnq := (IBufSize - PredictWidth).U >= numValidNext // Disable when almost full
+  allowEnq := (IBufSize - FetchBlockInstNum).U >= numValidNext // Disable when almost full
 
   val enqOffset = VecInit.tabulate(IBufEnqWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData   = VecInit.tabulate(IBufEnqWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
@@ -373,7 +373,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
         val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush && !(useBypassMatch.reduce(_ || _) && useBypass)
 
         // Write port
-        // Each IBuffer entry has a PredictWidth -> 1 Mux
+        // Each IBuffer entry has a FetchBlockInstNum -> 1 Mux
         val writeEntry = Mux1H(validOH, enqBankEntrys(bank))
         ibuf(bank + idx * IBufWriteBank) := Mux(wen, writeEntry, ibuf(bank + idx * IBufWriteBank))
         // Debug Assertion

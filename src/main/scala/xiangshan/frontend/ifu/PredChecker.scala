@@ -43,7 +43,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
       val selectFetchBlock: Vec[Bool]  = Vec(IBufferInPortNum, Bool())
       val invalidTaken:     Vec[Bool]  = Vec(IBufferInPortNum, Bool())
-      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(log2Ceil(PredictWidth).W))
+      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(FetchBlockInstOffsetWidth.W))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
@@ -149,8 +149,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     fixedRange(i) && instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
   })
 
-  private val fixedFirstTakenInstrIdx  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  private val fixedSecondTakenInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  private val fixedFirstTakenInstrIdx =
+    WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W))))
+  private val fixedSecondTakenInstrIdx =
+    WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W))))
   fixedFirstTakenInstrIdx.valid := ParallelOR(fixedTwoFetchFirstTaken)
   fixedFirstTakenInstrIdx.bits  := ParallelPriorityEncoder(fixedTwoFetchFirstTaken)
 
@@ -207,12 +209,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val fixFirstMispred  = mispredIdxNext.valid && mispredIsFirstBlockNext
   private val fixSecondMispred = mispredIdxNext.valid && !mispredIsFirstBlockNext
   private val fixedFirstRawInstrRange =
-    Fill(PredictWidth, !fixFirstMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+    Fill(FetchBlockInstNum, !fixFirstMispred) |
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(FetchBlockInstOffsetWidth - 1, 0))
 
   private val fixedSecondRawInstrRange =
-    Fill(PredictWidth, !fixSecondMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+    Fill(FetchBlockInstNum, !fixSecondMispred) |
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(FetchBlockInstOffsetWidth - 1, 0))
 
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))

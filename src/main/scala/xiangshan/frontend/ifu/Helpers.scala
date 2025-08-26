@@ -58,7 +58,7 @@ trait PreDecodeHelper extends HasIfuParameters {
 trait FetchBlockHelper extends HasIfuParameters {
   def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
     val byteOffset = (pc - start).toUInt
-    (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
+    (byteOffset - instBytes.U)(FetchBlockInstOffsetWidth, instOffsetBits)
   }
 }
 

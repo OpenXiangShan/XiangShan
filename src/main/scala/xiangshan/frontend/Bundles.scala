@@ -42,7 +42,7 @@ import xiangshan.frontend.instruncache.InstrUncacheResp
 
 class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
   val reasons:    Vec[Bool] = Vec(TopDownCounters.NumStallReasons.id, Bool())
-  val stallWidth: UInt      = UInt(log2Ceil(PredictWidth).W)
+  val stallWidth: UInt      = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
@@ -143,15 +143,15 @@ class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends FrontendBundle {
-  val pd:             Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
+  val pd:             Vec[PreDecodeInfo] = Vec(FetchBlockInstNum, new PreDecodeInfo) // TODO: redefine Predecode
   val pc:             PrunedAddr         = PrunedAddr(VAddrBits)
   val ftqIdx:         FtqPtr             = new FtqPtr
-  val takenCfiOffset: UInt               = UInt(log2Ceil(PredictWidth).W)
-  val misEndOffset:   Valid[UInt]        = Valid(UInt(log2Ceil(PredictWidth).W))
-  val cfiEndOffset:   Valid[UInt]        = Valid(UInt(log2Ceil(PredictWidth).W))
+  val takenCfiOffset: UInt               = UInt(FetchBlockInstOffsetWidth.W)
+  val misEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val cfiEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val target:         PrunedAddr         = PrunedAddr(VAddrBits)
   val jalTarget:      PrunedAddr         = PrunedAddr(VAddrBits)
-  val instrRange:     Vec[Bool]          = Vec(PredictWidth, Bool())
+  val instrRange:     Vec[Bool]          = Vec(FetchBlockInstNum, Bool())
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {
@@ -265,12 +265,12 @@ class PreDecodeInfo extends Bundle { // 8 bit
 // pc = ftq.startAddr + Cat(offset, 0.U(1.W)) - Cat(borrow, 0.U(1.W))
 class FtqPcOffset(implicit p: Parameters) extends FrontendBundle {
   val borrow: Bool = Bool()
-  val offset: UInt = UInt(log2Ceil(PredictWidth).W)
+  val offset: UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
   val taken:  Bool = Bool()
-  val offset: UInt = UInt(log2Ceil(PredictWidth).W)
+  val offset: UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
