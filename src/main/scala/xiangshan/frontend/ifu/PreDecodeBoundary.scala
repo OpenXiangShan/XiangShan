@@ -71,11 +71,10 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   private val rearBoundPlus1 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
 
   private val currentIsRvc = VecInit(rawInsts.map(isRVC))
-  def genBound(
+  private def genBound(
       bound:        Vec[BoundInfo],
       start:        Int,
       end:          Int,
-      isAlt:        Boolean = false,
       preIsHalfRvi: Bool = false.B
   ): Unit = {
     // when !HasCExtension, data is stepped by 4, and every data is a valid instruction start
@@ -103,12 +102,12 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
     }
   }
 
-  genBound(bound, 0, FetchBlockInstNum / 2, false, io.req.bits.prevLastIsHalfRvi)
-  genBound(rearBound, FetchBlockInstNum / 2, FetchBlockInstNum, false, false.B)
-  genBound(rearBoundPlus1, FetchBlockInstNum / 2 + 1, FetchBlockInstNum, false, false.B)
+  genBound(bound, 0, FetchBlockInstNum / 2, io.req.bits.prevLastIsHalfRvi)
+  genBound(rearBound, FetchBlockInstNum / 2, FetchBlockInstNum, false.B)
+  genBound(rearBoundPlus1, FetchBlockInstNum / 2 + 1, FetchBlockInstNum, false.B)
 
   // for xxxPlus1, FetchBlockInstNum / 2 must be a valid end, since we assume FetchBlockInstNum / 2 + 1 is a valid start
-  // and, it must not be a valid start, otherwise, FetchBlockInstNum / 2 - 1 is a valid end and rearBound should be selected
+  // and, it must not be a valid start, otherwise, FetchBlockInstNum/2-1 is a valid end and rearBound should be selected
   rearBoundPlus1(FetchBlockInstNum / 2).isStart := false.B
   rearBoundPlus1(FetchBlockInstNum / 2).isEnd   := true.B
 
@@ -123,7 +122,7 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   // we also compute the whole block directly for differential testing, this will be optimized out in released code
   private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
 
-  genBound(boundDiff, 0, FetchBlockInstNum, false, io.req.bits.prevLastIsHalfRvi)
+  genBound(boundDiff, 0, FetchBlockInstNum, io.req.bits.prevLastIsHalfRvi)
 
   private val startMismatch = Wire(Bool())
   private val endMismatch   = Wire(Bool())
