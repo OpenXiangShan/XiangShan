@@ -333,7 +333,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   io.bpuInfo                    := DontCare
   io.toIfu.req.bits.topdownInfo := DontCare
-  io.toIfu.topdown_redirect     := DontCare
+  io.toIfu.topdownRedirect      := DontCare
   io.ControlBTBMissBubble       := DontCare
   io.TAGEMissBubble             := DontCare
   io.SCMissBubble               := DontCare

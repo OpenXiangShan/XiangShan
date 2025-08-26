@@ -446,7 +446,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  topdown_stage := io.in.bits.topdown_info
+  topdown_stage := io.in.bits.topdownInfo
   when(io.flush) {
     when(io.ControlRedirect) {
       when(io.ControlBTBMissBubble) {
