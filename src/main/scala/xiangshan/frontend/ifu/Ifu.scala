@@ -770,7 +770,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_alignExpdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
     Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
-  private val s4_alignIll = VecInit(rvcExpanders.map(_.io.ill))
+  private val s4_alignRvcException = VecInit(rvcExpanders.map { expander: RvcExpander =>
+    ExceptionType.fromRvcExpander(expander.io.ill)
+  })
+
+  private val s4_alignExceptionVecOut = VecInit(
+    (s4_alignExceptionVec zip s4_alignCrossPageExceptionVec zip s4_alignRvcException).map {
+      case ((in, cross), rvc) => in || cross || rvc
+    }
+  )
 
   private val s4_alignPdWire         = RegEnable(s3_alignPd, s3_fire)
   private val s4_alignPds            = WireInit(s4_alignPdWire)
@@ -929,7 +937,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResp) {
       when(fromUncache.fire) {
         val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
-        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
+        val exception = ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
         // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
         val needResend = !respIsRVC && s4_icacheInfo(0).pAddr(0)(2, 1) === 3.U && exception.isNone
         mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
@@ -983,7 +991,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResendResp) {
       when(fromUncache.fire) {
         mmioState     := MmioFsmState.WaitCommit
-        mmioException := ExceptionType(hasAf = fromUncache.bits.corrupt)
+        mmioException := ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
         mmioData(1)   := fromUncache.bits.data(15, 0)
       }
     }
@@ -1106,12 +1114,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := (0 until IBufferInPortNum).map {
+  io.toIBuffer.bits.isBackendException := (0 until IBufferInPortNum).map {
     case i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheInfo(0).isBackendException, false.B)
   }
-  io.toIBuffer.bits.crossPageIPFFix := s4_alignCrossPageExceptionVec.map(_.hasException)
-  io.toIBuffer.bits.illegalInstr    := s4_alignIll
-  io.toIBuffer.bits.triggered       := s4_alignTriggered
+  io.toIBuffer.bits.exceptionCrossPage := s4_alignCrossPageExceptionVec.map(_.hasException)
+  io.toIBuffer.bits.triggered          := s4_alignTriggered
 
   when(io.toIBuffer.valid && io.toIBuffer.ready) {
     val enqVec = io.toIBuffer.bits.enqEnable
@@ -1177,6 +1184,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     val (brType, isCall, isRet) = getBrInfo(inst)
 
+    val mmioRvcException = ExceptionType.fromRvcExpander(mmioRvcExpander.io.ill)
+
     io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
       mmioRvcExpander.io.ill,
       mmioRvcExpander.io.in,
@@ -1190,10 +1199,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(s4_shiftNum).isRet              := isRet
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(s4_prevLastIsHalfRvi || mmioIsRvc, 0.U, 1.U)
 
-    io.toIBuffer.bits.exceptionType(s4_shiftNum) := mmioException
+    io.toIBuffer.bits.exceptionType(s4_shiftNum) := mmioException || mmioRvcException
     // exception can happen in next page only when resend
-    io.toIBuffer.bits.crossPageIPFFix(s4_shiftNum) := mmioHasResend && mmioException.hasException
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum)    := mmioRvcExpander.io.ill
+    io.toIBuffer.bits.exceptionCrossPage(s4_shiftNum) := mmioHasResend && mmioException.hasException
 
     io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt // s4_mmioRange.asUInt
 
