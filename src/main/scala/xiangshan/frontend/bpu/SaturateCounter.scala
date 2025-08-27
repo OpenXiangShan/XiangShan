@@ -58,4 +58,18 @@ class SaturateCounter(width: Int) extends Bundle {
 
   def resetPositive(): Unit =
     value := ((1 << width) - 1).U
+
+  // for tage taken counter
+  def resetWeak(taken: Bool): Unit = {
+    require(width >= 2)
+    value := Mux(taken, (1 << (width - 1)).U, (1 << (width - 1) - 1).U) // for 3 bit ctr: Mux(taken, 100, 011)
+  }
+
+  // for tage taken counter
+  def isNotWeak: Bool = {
+    require(width >= 2)
+    val strongNotTaken = !value(width - 1) && !value(width - 2) // for 3 bit ctr: 00*
+    val strongTaken    = value(width - 1) && value(width - 2)   // for 3 bit ctr: 11*
+    strongNotTaken || strongTaken
+  }
 }

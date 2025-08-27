@@ -35,7 +35,7 @@ import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
-class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with SelectFirstTakenBranchHelper {
   class DummyBpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -146,7 +146,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
   ras.io.commit.bits.cfiPosition := commitUpdate.bits.cfiPosition
 
-  tage.io.mbtbResult := mbtb.io.result
+  // tage
+  tage.io.mbtbResult             := mbtb.io.result
+  tage.io.foldedPathHist         := phr.io.s0_foldedPhr
+  tage.io.foldedPathHistForTrain := 0.U.asTypeOf(phr.io.s0_foldedPhr) // FIXME
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -182,25 +185,58 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s1 prediction selection:
   // if ubtb or abtb find a taken branch, use the corresponding prediction
   // otherwise, use fall-through prediction
+  // TODO: maybe need compare position？
   private val s1_prediction = Wire(new Prediction)
   s1_prediction := MuxCase(
     fallThrough.io.prediction,
     Seq(
-      ubtb.io.prediction.taken -> ubtb.io.prediction,
-      abtb.io.prediction.taken -> abtb.io.prediction
+      ubtb.io.prediction.taken -> ubtb.io.prediction
+//      abtb.io.prediction.taken -> abtb.io.prediction // temporarily disable abtb, wait for s3 override fixed
     )
   )
-  private val s2_prediction   = RegEnable(s1_prediction, s1_fire)
-  private val s3_inPrediction = RegEnable(s2_prediction, s2_fire)
-  // s3 prediction: TODO
+
+  // s3 target selection:
+  // if first taken branch is return, use ras
+  // if first taken branch is indirect branch and ittage hit, use ittage
+  // if first taken branch is conditional branch, use mbtb
+  // otherwise, use fallThrough
+  private val s3_mbtbResult                 = RegEnable(mbtb.io.result, s2_fire)
+  private val s3_firstTakenBranchOH         = getFirstTakenBranchOH(s3_mbtbResult.positions, tage.io.takenMask)
+  private val s3_takenEntryIdx              = OHToUInt(s3_firstTakenBranchOH)
+  private val s3_taken                      = tage.io.takenMask.reduce(_ || _)
+  private val s3_takenPosition              = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.positions)
+  private val s3_takenAttribute             = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.attributes)
+  private val s3_mbtbTarget                 = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.targets)
+  private val s3_firstTakenBranchIsReturn   = s3_takenAttribute.isReturn
+  private val s3_firstTakenBranchIsIndirect = s3_takenAttribute.isOtherIndirect
+
+  private val s2_fallThroughTarget = RegEnable(fallThrough.io.prediction.target, s1_fire)
+  private val s3_fallThroughTarget = RegEnable(s2_fallThroughTarget, s2_fire)
+
   private val s3_prediction = Wire(new Prediction)
-  s3_prediction                  := DontCare
+  s3_prediction.taken       := s3_taken
+  s3_prediction.cfiPosition := s3_takenPosition
+  s3_prediction.attribute   := s3_takenAttribute
+  s3_prediction.target := MuxCase(
+    s3_fallThroughTarget,
+    Seq(
+//      (s3_taken && s3_firstTakenBranchIsReturn) -> ras.io.topRetAddr,
+//      (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.hit) -> ittage.io.target, // FIXME
+      s3_taken -> s3_mbtbTarget
+    )
+  )
+
+  private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
+  private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
+
+  // FIXME: temporarily disable s3 override, still has bug!
+//  s3_override := s3_valid && !(s3_prediction === s3_s1Prediction)
+
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
   ras.io.specIn.bits.isRvc       := false.B
-  ras.io.specIn.bits.attribute   := s3_inPrediction.attribute
-  ras.io.specIn.bits.cfiPosition := s3_inPrediction.cfiPosition
-  ras.io.specIn.bits.target      := s3_inPrediction.target
+  ras.io.specIn.bits.attribute   := s3_prediction.attribute
+  ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_fire && s3_override
@@ -235,12 +271,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
   private val s3_meta = Wire(new BpuMeta)
-  s3_meta.abtb   := s3_abtbMeta
-  s3_meta.mbtb   := s3_mbtbMeta
-  s3_meta.ras    := s3_rasMeta
-  s3_meta.phr    := s3_phrMeta
-  s3_meta.tage   := s3_tageMeta
-  s3_meta.ittage := DontCare // TODO: add ittage
+  s3_meta.abtb          := s3_abtbMeta
+  s3_meta.mbtb          := s3_mbtbMeta
+  s3_meta.ras           := s3_rasMeta
+  s3_meta.phr           := s3_phrMeta
+  s3_meta.tage          := s3_tageMeta
+  s3_meta.ittage        := DontCare // TODO: add ittage
+  s3_meta.takenEntryIdx := s3_takenEntryIdx
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
@@ -309,7 +346,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** check abtb output *** */
   when(abtb.io.prediction.taken) {
-    assert(abtb.io.debug_startVaddr === s1_pc)
+    assert(abtb.io.debug_startVAddr === s1_pc)
   }
 
   /* *** perf pred *** */

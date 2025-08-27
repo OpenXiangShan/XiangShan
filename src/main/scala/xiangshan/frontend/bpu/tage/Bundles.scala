@@ -18,25 +18,55 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
-  val valid:  Bool            = Bool()
-  val tag:    UInt            = UInt(TagWidth.W)
-  val ctr:    SaturateCounter = new SaturateCounter(CtrWidth)
-  val useful: SaturateCounter = new SaturateCounter(UsefulWidth)
+  val valid:     Bool            = Bool()
+  val tag:       UInt            = UInt(TagWidth.W)
+  val takenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 }
 
 class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasTageParameters {
-  val setIdx:   UInt                 = UInt(BaseTableSetIdxLen.W)
-  val ctrs:     Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val waymasks: UInt                 = UInt(FetchBlockAlignInstNum.W)
+  val setIdx:  UInt                 = UInt(BaseTableSetIdxWidth.W)
+  val ctrs:    Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
+  val wayMask: Vec[Bool]            = Vec(FetchBlockAlignInstNum, Bool())
+}
+
+class TableSramWriteReq(numSets: Int, numWays: Int)(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val setIdx: UInt      = UInt(log2Ceil(numSets / NumBanks).W)
+  val wayIdx: UInt      = UInt(log2Ceil(numWays).W)
+  val entry:  TageEntry = new TageEntry
+
+  override def tag: Option[UInt] = Some(entry.tag)
+}
+
+class TageTableResult(numWays: Int)(implicit p: Parameters) extends TageBundle {
+  val hit:              Bool            = Bool()
+  val hitWayMask:       Vec[Bool]       = Vec(numWays, Bool())
+  val takenCtr:         SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val usefulCtr:        SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  val notUsefulWayMask: Vec[Bool]       = Vec(numWays, Bool())
+}
+
+class TageTablePrediction(implicit p: Parameters) extends TageBundle {
+  val hasProvider:      Bool = Bool()
+  val providerTableIdx: UInt = UInt(log2Ceil(NumTables).W)
+  // FIXME: currently we only support a fixed way number for all tables
+  val providerWayMask:    Vec[Bool]       = Vec(3, Bool())
+  val providerTakenCtr:   SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val providerUsefulCtr:  SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  val hasHcProvider:      Bool            = Bool()
+  val hcProviderIdx:      UInt            = UInt(log2Ceil(NumTables).W)
+  val hcProviderTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  // FIXME: currently we only support a fixed way number for all tables
+  val allTableNotUsefulWayMask: Vec[Vec[Bool]] = Vec(NumTables, Vec(3, Bool()))
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
-  val valid:               Bool                 = Bool()
-  val baseTableCtrs:       Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val debug_taken:         Bool                 = Bool()
-  val debug_takenPosition: UInt                 = UInt(FetchBlockInstNum.W)
+  val baseTableCtrs:    Vec[SaturateCounter]     = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
+  val tablePredictions: Vec[TageTablePrediction] = Vec(MainBtbResultNumEntries, new TageTablePrediction)
 }

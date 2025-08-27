@@ -22,48 +22,51 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbHelper
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with BtbHelper {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val redirectValid: Bool = Input(Bool())
-    val overrideValid: Bool = Input(Bool())
-
+    val redirectValid:    Bool         = Input(Bool())
+    val overrideValid:    Bool         = Input(Bool())
     val prediction:       Prediction   = Output(new Prediction)
     val meta:             AheadBtbMeta = Output(new AheadBtbMeta)
-    val debug_startVaddr: PrunedAddr   = Output(PrunedAddr(VAddrBits))
+    val debug_startVAddr: PrunedAddr   = Output(PrunedAddr(VAddrBits))
   }
-
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
-  private val banks     = Seq.fill(NumBanks)(Module(new AheadBtbBank))
+  private val sramBanks = Seq.fill(NumBanks)(Module(new AheadBtbSramBank))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
   private val resetDone = RegInit(false.B)
-  when(banks.map(_.io.readReq.ready).reduce(_ && _)) {
+  when(sramBanks.map(_.io.readReq.ready).reduce(_ && _)) {
     resetDone := true.B
   }
   io.resetDone := resetDone
 
   private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
 
-  // TODO: write ctr bypass to read
-  // TODO: train after execution
+  // TODO: use mbtb to train abtb
 
   private val s0_fire = Wire(Bool())
   private val s1_fire = Wire(Bool())
   private val s2_fire = Wire(Bool())
+  private val s3_fire = Wire(Bool())
 
   private val s1_ready = Wire(Bool())
   private val s2_ready = Wire(Bool())
+  private val s3_ready = Wire(Bool())
+
+  private val s1_flush = Wire(Bool())
+  private val s2_flush = Wire(Bool())
+  private val s3_flush = Wire(Bool())
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
+  private val s3_valid = RegInit(false.B)
 
   private val predictReqValid = io.enable && io.stageCtrl.s0_fire
   private val redirectValid   = io.redirectValid
@@ -71,18 +74,28 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
 
   s0_fire := predictReqValid
   s1_fire := s1_valid && s2_ready && predictReqValid
-  s2_fire := s2_valid
+  s2_fire := s2_valid && s3_ready && overrideValid // only enter s3 when s2 receives an override
+  s3_fire := s3_valid
 
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
+  s3_ready := s3_fire || !s3_valid
+
+  s1_flush := redirectValid || overrideValid
+  s2_flush := redirectValid || overrideValid
+  s3_flush := redirectValid
 
   when(s0_fire)(s1_valid := true.B)
-    .elsewhen(redirectValid)(s1_valid := false.B)
+    .elsewhen(s1_flush)(s1_valid := false.B)
     .elsewhen(s1_fire)(s1_valid := false.B)
 
-  when(redirectValid)(s2_valid := false.B)
-    .elsewhen(s1_fire)(s2_valid := !redirectValid)
-    .elsewhen(s2_fire)(s2_valid := false.B)
+  when(s2_flush)(s2_valid := false.B)
+    .elsewhen(s1_fire)(s2_valid := !s2_flush)
+    .elsewhen(s2_fire || (s2_valid && !overrideValid))(s2_valid := false.B)
+
+  when(s3_flush)(s3_valid := false.B)
+    .elsewhen(s2_fire)(s3_valid := !s3_flush)
+    .elsewhen(s3_fire)(s3_valid := false.B)
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0
@@ -94,9 +107,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
 
   private val s0_setIdx   = getSetIndex(s0_previousPc)
   private val s0_bankIdx  = getBankIndex(s0_previousPc)
-  private val s0_bankMask = UIntToOH(s0_bankIdx)
+  private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
-  banks.zipWithIndex.foreach { case (b, i) =>
+  sramBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.readReq.valid       := predictReqValid && s0_bankMask(i)
     b.io.readReq.bits.setIdx := s0_setIdx
   }
@@ -108,12 +121,18 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s1_startPc = io.startVAddr
+  private val s1_tag     = getTag(s1_startPc)
 
   private val s1_setIdx   = RegEnable(s0_setIdx, s0_fire)
   private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
   private val s1_bankMask = RegEnable(s0_bankMask, s0_fire)
 
-  private val s1_entries = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  private val s1_entries = Mux1H(s1_bankMask, sramBanks.map(_.io.readResp.entries))
+
+  dontTouch(s1_tag)
+  dontTouch(s1_setIdx)
+  dontTouch(s1_bankIdx)
+  dontTouch(s1_entries)
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -124,30 +143,33 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
      - output prediction
      -------------------------------------------------------------------------------------------------------------- */
 
+  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
+  private val s2_tag     = RegEnable(s1_tag, s1_fire)
+
+  // for override
+  private val s2_newStartPc = io.startVAddr
+
   private val s2_setIdx   = RegEnable(s1_setIdx, s1_fire)
   private val s2_bankIdx  = RegEnable(s1_bankIdx, s1_fire)
   private val s2_bankMask = RegEnable(s1_bankMask, s1_fire)
-  private val s2_entries  = RegEnable(s1_entries, s1_fire)
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
 
-  //  private val s2_entriesDelay1 = RegNext(s2_entries)
+  private val s2_entries = RegEnable(s1_entries, s1_fire)
+
+  dontTouch(s2_tag)
+  dontTouch(s2_entries)
 
   private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
 
-  private val s2_tag = getTag(s2_startPc)
-  dontTouch(s2_tag)
-//  private val s2_realEntries = Mux(RegNext(io.overrideValid), s2_entriesDelay1, s2_entries)
-  private val s2_realEntries = s2_entries // TODO
-  private val s2_hitMask     = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hit         = s2_hitMask.reduce(_ || _)
-  private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
-  private val s2_taken       = s2_takenMask.reduce(_ || _)
+  private val s2_hitMask   = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
+  private val s2_hit       = s2_hitMask.reduce(_ || _)
+  private val s2_takenMask = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
+  private val s2_taken     = s2_takenMask.reduce(_ || _)
 
-  private val s2_positions               = s2_realEntries.map(_.position)
-  private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
-  private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
+  private val s2_positions              = s2_entries.map(_.position)
+  private val s2_firstTakenEntryWayMask = getFirstTakenBranchOH(s2_positions, s2_takenMask)
+  private val s2_firstTakenEntry        = Mux1H(s2_firstTakenEntryWayMask, s2_entries)
 
-  // When detect multi-hit, we need to invalidate one entry.
+  // when detect multi-hit, we need to invalidate one entry
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
 
   private val s2_takenPosition = s2_firstTakenEntry.position
@@ -159,30 +181,94 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   s2_prediction.target      := s2_target
   s2_prediction.attribute   := s2_firstTakenEntry.attribute
 
-  io.prediction := s2_prediction
-
-  // used for check abtb output
-  io.debug_startVaddr := s2_startPc
-
-  private val meta = Wire(new AheadBtbMeta)
-  meta.valid           := s2_valid
-  meta.hitMask         := s2_hitMask
-  meta.taken           := s2_taken
-  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryWayIdxOH)
-  meta.attributes      := s2_realEntries.map(_.attribute)
-  meta.positions       := s2_positions
-  meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
-  if (meta.target.isDefined) {
-    meta.target.get := s2_target
+  private val s2_meta = Wire(new AheadBtbMeta)
+  s2_meta.valid             := s2_valid && !overrideValid
+  s2_meta.hitMask           := s2_hitMask
+  s2_meta.taken             := s2_taken
+  s2_meta.takenEntryWayMask := s2_firstTakenEntryWayMask
+  s2_meta.attributes        := s2_entries.map(_.attribute)
+  s2_meta.positions         := s2_positions
+  s2_meta.targetLowerBits   := s2_firstTakenEntry.targetLowerBits
+  if (s2_meta.target.isDefined) {
+    s2_meta.target.get := s2_target
   }
 
-  io.meta := meta
-
   replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
+    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i) && !overrideValid && !redirectValid
     r.io.readSetIdx  := s2_setIdx
     r.io.readWayMask := s2_hitMask
   }
+
+  /* --------------------------------------------------------------------------------------------------------------
+     predict pipeline stage 3
+     - handle override
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val s3_entries  = RegEnable(RegEnable(s1_entries, s1_fire), s1_fire)
+  private val s3_setIdx   = RegEnable(RegEnable(s1_setIdx, s1_fire), s1_fire)
+  private val s3_bankIdx  = RegEnable(RegEnable(s1_bankIdx, s1_fire), s1_fire)
+  private val s3_bankMask = RegEnable(RegEnable(s1_bankMask, s1_fire), s1_fire)
+
+  private val s3_startPc = RegEnable(s2_newStartPc, s2_fire)
+  private val s3_tag     = getTag(s3_startPc)
+
+  dontTouch(s3_setIdx)
+  dontTouch(s3_bankIdx)
+  dontTouch(s3_tag)
+  dontTouch(s3_startPc)
+  dontTouch(s3_entries)
+
+  private val s3_ctrResult = takenCounter(s3_bankIdx)(s3_setIdx).map(_.isPositive)
+
+  private val s3_hitMask   = s3_entries.map(entry => entry.valid && entry.tag === s3_tag)
+  private val s3_hit       = s3_hitMask.reduce(_ || _)
+  private val s3_takenMask = s3_hitMask.zip(s3_ctrResult).map { case (hit, taken) => hit && taken }
+  private val s3_taken     = s3_takenMask.reduce(_ || _)
+
+  private val s3_positions              = s3_entries.map(_.position)
+  private val s3_firstTakenEntryWayMask = getFirstTakenBranchOH(s3_positions, s3_takenMask)
+  private val s3_firstTakenEntry        = Mux1H(s3_firstTakenEntryWayMask, s3_entries)
+
+  // when detect multi-hit, we need to invalidate one entry
+  private val (s3_multiHit, s3_multiHitWayIdx) = detectMultiHit(s3_hitMask, s3_positions)
+
+  private val s3_takenPosition = s3_firstTakenEntry.position
+  private val s3_target = getFullTarget(s3_startPc, s3_firstTakenEntry.targetLowerBits, s3_firstTakenEntry.targetCarry)
+
+  private val s3_prediction = Wire(new Prediction)
+  s3_prediction.taken       := s3_valid && s3_taken && !overrideValid
+  s3_prediction.cfiPosition := s3_takenPosition
+  s3_prediction.target      := s3_target
+  s3_prediction.attribute   := s3_firstTakenEntry.attribute
+
+  private val s3_meta = Wire(new AheadBtbMeta)
+  s3_meta.valid             := s3_valid
+  s3_meta.hitMask           := s3_hitMask
+  s3_meta.taken             := s3_taken
+  s3_meta.takenEntryWayMask := s3_firstTakenEntryWayMask
+  s3_meta.attributes        := s3_entries.map(_.attribute)
+  s3_meta.positions         := s3_positions
+  s3_meta.targetLowerBits   := s3_firstTakenEntry.targetLowerBits
+  if (s3_meta.target.isDefined) {
+    s3_meta.target.get := s3_target
+  }
+
+  replacers.zipWithIndex.foreach { case (r, i) =>
+    r.io.readValid   := s3_valid && s3_hit && s3_bankMask(i) && !overrideValid && !redirectValid
+    r.io.readSetIdx  := s3_setIdx
+    r.io.readWayMask := s3_hitMask
+  }
+
+  /* --------------------------------------------------------------------------------------------------------------
+     select prediction between s2 and s3
+     -------------------------------------------------------------------------------------------------------------- */
+
+  io.prediction := Mux(s3_valid, s3_prediction, s2_prediction)
+
+  io.meta := Mux(s3_valid, s3_meta, s2_meta)
+
+  // used for check abtb output
+  io.debug_startVAddr := Mux(s3_valid, s3_startPc, s2_startPc)
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -211,8 +297,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
     t1_setIdx          := getSetIndex(t1_train.startVAddr)
   }
 
-  private val t1_bankMask = UIntToOH(t1_bankIdx)
-  private val t1_setMask  = UIntToOH(t1_setIdx)
+  private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)
+  private val t1_setMask  = UIntToOH(t1_setIdx, NumSets)
 
   private val t1_meta = t1_train.meta.abtb
 
@@ -235,10 +321,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
     case ((hit, pos), attr) => hit && pos === t1_train.cfiPosition && attr.isConditional
   }
 
-  private val t1_needResetCtr = takenCounter.zip(banks).map { case (bankCtrs, bank) =>
+  private val t1_needResetCtr = takenCounter.zip(sramBanks).map { case (bankCtrs, bank) =>
     val needReset = bank.io.writeResp.valid && bank.io.writeResp.bits.needResetCtr
-    val setMask   = UIntToOH(bank.io.writeResp.bits.setIdx)
-    val wayMask   = UIntToOH(bank.io.writeResp.bits.wayIdx)
+    val setMask   = UIntToOH(bank.io.writeResp.bits.setIdx, NumSets)
+    val wayMask   = UIntToOH(bank.io.writeResp.bits.wayIdx, NumWays)
     bankCtrs.zipWithIndex.map { case (setCtrs, setIdx) =>
       setCtrs.zipWithIndex.map { case (_, wayIdx) =>
         needReset && setMask(setIdx) && wayMask(wayIdx)
@@ -286,11 +372,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   }.reduce(_ || _)
   private val t1_needWriteNewEntry = !t1_hitTakenBranch
 
+  private val t1_predAttribute = Mux1H(t1_meta.takenEntryWayMask, t1_meta.attributes)
+  private val t1_predPosition  = Mux1H(t1_meta.takenEntryWayMask, t1_meta.positions)
+
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
   private val t1_needCorrectTarget = t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition &&
+    t1_predAttribute.isIndirect && t1_train.attribute.isIndirect &&
+    t1_predPosition === t1_train.cfiPosition &&
     t1_meta.targetLowerBits =/= getTargetLowerBits(t1_train.target)
 
   // TODO: if the attribute of the taken branch is wrong, we need replace it or invalidate it
@@ -307,7 +396,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
   // TODO: the prioriority of write?
-  banks.zipWithIndex.foreach { case (b, i) =>
+  sramBanks.zipWithIndex.foreach { case (b, i) =>
     when(t1_valid && t1_needWriteNewEntry && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
@@ -318,8 +407,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := t1_meta.takenWayIdx
+      b.io.writeReq.bits.wayIdx       := t1_meta.takenEntryWayMask
       b.io.writeReq.bits.entry        := t1_writeEntry
+    }.elsewhen(s3_valid && s3_multiHit && s3_bankMask(i)) {
+      b.io.writeReq.valid             := true.B
+      b.io.writeReq.bits.needResetCtr := true.B
+      b.io.writeReq.bits.setIdx       := s3_setIdx
+      b.io.writeReq.bits.wayIdx       := s3_multiHitWayIdx
+      b.io.writeReq.bits.entry        := 0.U.asTypeOf(new AheadBtbEntry)
     }.elsewhen(s2_valid && s2_multiHit && s2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
@@ -332,7 +427,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
     }
   }
 
-  replacers.zip(banks).foreach { case (r, b) =>
+  replacers.zip(sramBanks).foreach { case (r, b) =>
     r.io.writeValid  := b.io.writeResp.valid
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
@@ -349,8 +444,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   }
 
   private val perf_targetOverflow = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition &&
+    t1_predAttribute.isIndirect && t1_train.attribute.isIndirect &&
+    t1_predPosition === t1_train.cfiPosition &&
     t1_meta.targetLowerBits =/= getTargetLowerBits(t1_train.target) &&
     !perf_targetSame
 
@@ -360,31 +455,31 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val perf_missWrong = t1_valid && !t1_meta.taken && t1_train.taken && !t1_hitTakenBranch
 
   private val perf_takenPositionWrong = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.positions(t1_meta.takenWayIdx) =/= t1_train.cfiPosition
+    t1_predPosition =/= t1_train.cfiPosition
 
   private val perf_targetWrong = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx) === t1_train.attribute &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition &&
+    t1_predAttribute === t1_train.attribute &&
+    t1_predPosition === t1_train.cfiPosition &&
     !perf_targetSame
 
   private val perf_predictNotTakenRight = t1_valid && !t1_meta.taken && !t1_train.taken
 
   private val perf_predictTakenRight = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx) === t1_train.attribute &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition &&
+    t1_predAttribute === t1_train.attribute &&
+    t1_predPosition === t1_train.cfiPosition &&
     perf_targetSame
 
   private val perf_condTakenRight = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx).isConditional && t1_train.attribute.isConditional &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition
+    t1_predAttribute.isConditional && t1_train.attribute.isConditional &&
+    t1_predPosition === t1_train.cfiPosition
 
   private val perf_directRight = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx).isDirect && t1_train.attribute.isDirect &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition
+    t1_predAttribute.isDirect && t1_train.attribute.isDirect &&
+    t1_predPosition === t1_train.cfiPosition
 
   private val perf_indirectRight = t1_valid && t1_meta.taken && t1_train.taken &&
-    t1_meta.attributes(t1_meta.takenWayIdx).isIndirect && t1_train.attribute.isIndirect &&
-    t1_meta.positions(t1_meta.takenWayIdx) === t1_train.cfiPosition &&
+    t1_predAttribute.isIndirect && t1_train.attribute.isIndirect &&
+    t1_predPosition === t1_train.cfiPosition &&
     perf_targetSame
 
   XSPerfAccumulate("predict_req_num", predictReqValid)

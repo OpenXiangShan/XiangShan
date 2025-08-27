@@ -20,8 +20,8 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
     NumEntries:           Int = 1024,
-    NumBanks:             Int = 4,
-    NumWays:              Int = 4,
+    NumBanks:             Int = 4, // to alleviate read-write conflicts in single-port SRAM
+    NumWays:              Int = 8,
     TagWidth:             Int = 24,
     TargetLowerBitsWidth: Int = 22,
     WriteBufferSize:      Int = 4,
