@@ -434,14 +434,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_fetchFinish = !s2_shouldFetch.reduce(_ || _)
 
   // also raise af if l2 corrupt is detected
-  private val s2_l2Exception = VecInit(s2_l2Corrupt.map(corrupt => ExceptionType(hasAf = corrupt)))
+  private val s2_l2Exception = ExceptionType(hasAf = s2_l2Corrupt.reduce(_ || _))
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb/pmp has the highest priority, then l2
-  // NOTE: s2_exception(itlb+pmp) is not a vec, as 2 cacheline should be identical,
-  //       but l2Exception is a vec, as each cacheline can be corrupt/denied by L2 cache separately.
-  //       so s2_exceptionOut should be a vec
-  private val s2_exceptionOut = VecInit(s2_l2Exception.map(l2 => s2_exception || l2))
+  private val s2_exceptionOut = s2_exception || s2_l2Exception
 
   /**
     ******************************************************************************
@@ -454,12 +451,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toIfu.bits.isBackendException := s2_isBackendException
   toIfu.bits.vAddr              := s2_vAddr
   toIfu.bits.pAddr              := s2_pAddr
-  (0 until PortNumber).foreach { i =>
-    val needThisLine = if (i == 0) true.B else s2_doubleline
-    toIfu.bits.exception(i) := Mux(needThisLine, s2_exceptionOut(i), ExceptionType.None)
-    toIfu.bits.pmpMmio(i)   := Mux(needThisLine, s2_pmpMmio, false.B)
-    toIfu.bits.itlbPbmt(i)  := Mux(needThisLine, s2_itlbPbmt, Pbmt.pma)
-  }
+  toIfu.bits.exception          := s2_exceptionOut
+  toIfu.bits.pmpMmio            := s2_pmpMmio
+  toIfu.bits.itlbPbmt           := s2_itlbPbmt
   // valid only for the first gpf
   toIfu.bits.gpAddr            := s2_gpAddr
   toIfu.bits.isForVSnonLeafPTE := s2_isForVSnonLeafPTE
@@ -529,11 +523,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   if (env.EnableDifftest) {
-    val discards = (0 until PortNumber).map { i =>
-      toIfu.bits.exception(i).hasException ||
-      toIfu.bits.pmpMmio(i) ||
-      Pbmt.isUncache(toIfu.bits.itlbPbmt(i))
-    }
+    val discard = toIfu.bits.exception.hasException ||
+      toIfu.bits.pmpMmio ||
+      Pbmt.isUncache(toIfu.bits.itlbPbmt)
     val blkPaddrAll = s2_pAddr.map(addr => (addr(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt)
     (0 until DataBanks).foreach { i =>
       val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
@@ -543,7 +535,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       val bankSel = getBankSel(s2_offset, s2_valid).map(_.asUInt).reduce(_ | _)
       val lineSel = getLineSel(s2_offset)
 
-      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
+      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && !discard
       diffMainPipeOut.addr := Mux(
         lineSel(i),
         blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / DataBanks)).asUInt,

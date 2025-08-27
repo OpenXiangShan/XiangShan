@@ -59,11 +59,9 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.PmpCheckBundle
 
 class Ifu(implicit p: Parameters) extends IfuModule
-    with HasICacheParameters
     with FetchBlockHelper
     with PreDecodeHelper
     with IfuHelper
@@ -332,36 +330,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   io.toICache.stall := !s3_ready
 
-  private val s2_exceptionIn = fromICache.bits.exception
-
-  // FIXME: raise af if one fetch block crosses the cacheable/un-cacheable boundary, might not correct
-  private val s2_mmioMismatchException = VecInit(Seq(
-    ExceptionType.None, // mark the exception only on the second line
-    ExceptionType(hasAf =
-      // if not double-line, skip check
-      fromICache.bits.doubleline && (
-        // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-        fromICache.bits.pmpMmio(0) =/= fromICache.bits.pmpMmio(1) ||
-          fromICache.bits.itlbPbmt(0) =/= fromICache.bits.itlbPbmt(1)
-      )
-    )
-  ))
-
-  // merge exceptions
-  private val s2_exception = VecInit((s2_exceptionIn zip s2_mmioMismatchException).map { case (in, m) => in || m })
-
   private val s2_icacheInfo = WireDefault(0.U.asTypeOf(Vec(FetchPorts, new ICacheInfo)))
-  s2_icacheInfo(0).exception          := s2_exception
-  s2_icacheInfo(0).pmpMmio            := fromICache.bits.pmpMmio(0)
-  s2_icacheInfo(0).itlbPbmt           := fromICache.bits.itlbPbmt(0)
+  s2_icacheInfo(0).exception          := fromICache.bits.exception
+  s2_icacheInfo(0).pmpMmio            := fromICache.bits.pmpMmio
+  s2_icacheInfo(0).itlbPbmt           := fromICache.bits.itlbPbmt
   s2_icacheInfo(0).isBackendException := fromICache.bits.isBackendException
   s2_icacheInfo(0).pAddr              := fromICache.bits.pAddr
   s2_icacheInfo(0).gpAddr             := fromICache.bits.gpAddr
   s2_icacheInfo(0).isForVSnonLeafPTE  := fromICache.bits.isForVSnonLeafPTE
 
   // we need only the first port, as the second is asked to be the same
-  private val s2_pmpMmio  = fromICache.bits.pmpMmio(0)
-  private val s2_itlbPbmt = fromICache.bits.itlbPbmt(0)
+  private val s2_pmpMmio  = fromICache.bits.pmpMmio
+  private val s2_itlbPbmt = fromICache.bits.itlbPbmt
 
   private val s2_rawData  = fromICache.bits.data
   private val s2_perfInfo = io.fromICache.perf
@@ -647,16 +627,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferInPortNum)(0.U(32.W)))
   private val s3_realAlignPc        = WireDefault(VecInit.fill(IBufferInPortNum)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
   private val s3_alignFoldPc        = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
-  private val s3_alignExceptionVec = VecInit((0 until IBufferInPortNum).map { i =>
-    val sameLine = !isNextLine(s3_realAlignPc(i), s3_fetchBlock(0).startVAddr)
-    MuxCase(
-      ExceptionType.None,
-      Seq(
-        sameLine                        -> s3_icacheInfo(0).exception(0),
-        (!sameLine && s3_doubleline(0)) -> s3_icacheInfo(0).exception(1)
-      )
-    )
-  })
 
   for (i <- 0 until IBufferInPortNum / 2) {
     val lowIdx     = s3_alignInstrIndex(i).value
@@ -706,17 +676,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_alignPd         = preDecoderOut.pd
   private val s3_alignJumpOffset = preDecoderOut.jumpOffset
 
-  // No longer applicable for prediction blocks crossing page boundaries; awaiting modification.
-  private val s3_alignCrossPageExceptionVec = VecInit((0 until IBufferInPortNum).map { i =>
-    val isCrossPage = isLastInLine(s3_realAlignPc(i)) && !s3_alignPd(i).isRVC &&
-      s3_doubleline(0) && s3_icacheInfo(0).exception(0).isNone
-    Mux(isCrossPage, s3_icacheInfo(0).exception(1), ExceptionType.None)
-  })
-
   XSPerfAccumulate("fetch_bubble_icache_not_resp", s3_valid && !icacheRespAllValid)
 
   private val s3_firstIsMmio = s3_valid && (s3_icacheInfo(0).pmpMmio || Pbmt.isUncache(s3_icacheInfo(0).itlbPbmt)) &&
-    s3_icacheInfo(0).exception.map(_.isNone).reduce(_ && _)
+    s3_icacheInfo(0).exception.isNone
   private val s3_secondIsMmio    = false.B
   private val s3_mmioResendVAddr = s3_firstResendVAddr
   private val s3_mmioFtqIdx      = s3_fetchBlock(0).ftqIdx
@@ -755,9 +718,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s4_mmioResendVAddr = RegEnable(s3_mmioResendVAddr, s3_fire)
   private val s4_mmioFtqIdx      = RegEnable(s3_mmioFtqIdx, s3_fire)
-
-  private val s4_alignExceptionVec          = RegEnable(s3_alignExceptionVec, s3_fire)
-  private val s4_alignCrossPageExceptionVec = RegEnable(s3_alignCrossPageExceptionVec, s3_fire)
 
   private val s4_icacheInfo = RegEnable(s3_icacheInfo, s3_fire)
 
@@ -1100,18 +1060,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
     a.offset := s4_alignInstrEndOffset(i)
   }
   io.toIBuffer.bits.foldpc := s4_alignFoldPc
-  io.toIBuffer.bits.exceptionType := VecInit((s4_alignExceptionVec zip s4_alignCrossPageExceptionVec).map {
-    case (e, ce) => e || ce // merge, cross page fix has lower priority
-  })
+  // mark the exception only on first instruction
+  // TODO: store only the first exception in IBuffer, instead of store in every entry
+  io.toIBuffer.bits.exceptionType := (0 until IBufferInPortNum).map {
+    i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheInfo(0).exception, ExceptionType.None)
+  }
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
   io.toIBuffer.bits.backendException := (0 until IBufferInPortNum).map {
-    case i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheInfo(0).isBackendException, false.B)
+    i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheInfo(0).isBackendException
   }
-  io.toIBuffer.bits.crossPageIPFFix := s4_alignCrossPageExceptionVec.map(_.hasException)
-  io.toIBuffer.bits.illegalInstr    := s4_alignIll
-  io.toIBuffer.bits.triggered       := s4_alignTriggered
+  // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
+  io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferInPortNum).map {
+    i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheInfo(0).exception.hasException && s4_prevLastIsHalfRvi
+  }
+  io.toIBuffer.bits.illegalInstr := s4_alignIll
+  io.toIBuffer.bits.triggered    := s4_alignTriggered
 
   when(io.toIBuffer.valid && io.toIBuffer.ready) {
     val enqVec = io.toIBuffer.bits.enqEnable
@@ -1135,7 +1100,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toBackend.gpaddrMem_wen := s4_toIBufferValid && Mux(
     s4_reqIsMmio,
     mmioException.isGpf,
-    s4_icacheInfo(0).exception.map(_.isGpf).reduce(_ || _)
+    s4_icacheInfo(0).exception.isGpf
   )
   io.toBackend.gpaddrMem_waddr        := s4_fetchBlock(0).ftqIdx.value
   io.toBackend.gpaddrMem_wdata.gpaddr := Mux(s4_reqIsMmio, mmioResendGpAddr.toUInt, s4_icacheInfo(0).gpAddr.toUInt)
@@ -1364,9 +1329,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   XSPerfAccumulate("hit_0_miss_1", io.toIBuffer.fire && s4_perfInfo.hit0Miss1)
   XSPerfAccumulate("miss_0_hit_1", io.toIBuffer.fire && s4_perfInfo.miss0Hit1)
   XSPerfAccumulate("miss_0_miss_1", io.toIBuffer.fire && s4_perfInfo.miss0Miss1)
-  XSPerfAccumulate("except_0", io.toIBuffer.fire && s4_perfInfo.except0)
-  XSPerfAccumulate("hit_0_except_1", io.toIBuffer.fire && s4_perfInfo.hit0Except1)
-  XSPerfAccumulate("miss_0_except_1", io.toIBuffer.fire && s4_perfInfo.miss0Except1)
+  XSPerfAccumulate("except", io.toIBuffer.fire && s4_perfInfo.except)
   XSPerfHistogram(
     "ifu2ibuffer_validCnt",
     PopCount(io.toIBuffer.bits.valid & io.toIBuffer.bits.enqEnable),

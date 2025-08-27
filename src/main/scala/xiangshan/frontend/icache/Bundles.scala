@@ -161,14 +161,14 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:         Bool               = Bool()
-  val vAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(VAddrBits))
-  val data:               UInt               = UInt(blockBits.W)
-  val pAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(PAddrBits))
-  val exception:          Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
-  val pmpMmio:            Vec[Bool]          = Vec(PortNumber, Bool())
-  val itlbPbmt:           Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
-  val isBackendException: Bool               = Bool()
+  val doubleline:         Bool            = Bool()
+  val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val data:               UInt            = UInt(blockBits.W)
+  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val exception:          ExceptionType   = new ExceptionType
+  val pmpMmio:            Bool            = Bool()
+  val itlbPbmt:           UInt            = UInt(Pbmt.width.W)
+  val isBackendException: Bool            = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpAddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpAddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpAddr,
@@ -292,9 +292,9 @@ class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** Perf ***** */
 // to Ifu
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val hits:         Vec[Bool]          = Vec(PortNumber, Bool())
-  val isDoubleLine: Bool               = Bool()
-  val exception:    Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+  val hits:         Vec[Bool]     = Vec(PortNumber, Bool())
+  val isDoubleLine: Bool          = Bool()
+  val exception:    ExceptionType = new ExceptionType
 
   // single line request, port 0 is hit/miss
   def hit0NoReq1:  Bool = hits(0) && !isDoubleLine
@@ -305,16 +305,12 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   def miss0Hit1:  Bool = !hits(0) && hits(1) && isDoubleLine
   def miss0Miss1: Bool = !hits(0) && !hits(1) && isDoubleLine
   // has exception
-  def except0:      Bool = exception(0).hasException
-  def hit0Except1:  Bool = hits(0) && exception(1).hasException && isDoubleLine
-  def miss0Except1: Bool = !hits(0) && exception(1).hasException && isDoubleLine
+  def except: Bool = exception.hasException
 
   def hit0: Bool = hits(0)
   def hit1: Bool = hits(1) && isDoubleLine
 
   def hit: Bool = hits(0) && (!isDoubleLine || hits(1))
-
-  def except: Bool = exception(0).hasException || (isDoubleLine && exception(1).hasException)
 }
 
 // to Ifu -> IBuffer -> Backend

@@ -23,7 +23,6 @@ import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.BrType
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.icache.HasICacheParameters
 
 trait PreDecodeHelper extends HasXSParameter {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
@@ -57,17 +56,11 @@ trait PreDecodeHelper extends HasXSParameter {
   }
 }
 
-trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
+trait FetchBlockHelper extends HasXSParameter with HasIfuParameters {
   def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
     val byteOffset = (pc - start).toUInt
     (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
   }
-
-  def isNextLine(pc: PrunedAddr, startAddr: PrunedAddr): Bool =
-    startAddr(blockOffBits) ^ pc(blockOffBits)
-
-  def isLastInLine(pc: PrunedAddr): Bool =
-    pc(blockOffBits - 1, 0) === "b111110".U
 }
 
 trait IfuHelper extends HasXSParameter with HasIfuParameters {
