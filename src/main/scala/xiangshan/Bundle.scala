@@ -29,7 +29,9 @@ import org.chipsalliance.cde.config.Parameters
 
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuCtrl
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ftq.FtqToCtrlIO
 
@@ -97,6 +99,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
+  val identifiedCfi = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
@@ -298,6 +301,16 @@ object Redirect extends HasCircularQueuePtrHelper {
     )).andR))
     resultOnehot
   }
+}
+
+class Resolve(implicit p: Parameters) extends XSBundle {
+  val ftqIdx: FtqPtr = new FtqPtr
+  val ftqOffset: UInt = UInt(log2Up(PredictWidth).W)
+  val pc: PrunedAddr = PrunedAddr(VAddrBits)
+  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  val taken: Bool = Bool()
+  val mispredict: Bool = Bool()
+  val attribute: BranchAttribute = new BranchAttribute
 }
 
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {

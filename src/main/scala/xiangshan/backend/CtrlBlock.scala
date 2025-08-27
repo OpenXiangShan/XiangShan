@@ -42,9 +42,12 @@ import xiangshan.backend.trace._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
+
   val redirect = Valid(new Redirect)
   val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
+
+  val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -796,7 +799,8 @@ class CtrlBlockImp(
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
-
+  // bju resolve
+  io.frontend.toFtq.resolve := io.fromBJUResolve
   // wfi
   io.frontend.wfi.wfiReq := rob.io.wfi.wfiReq
   rob.io.wfi.safeFromFrontend := io.frontend.wfi.wfiSafe
@@ -885,6 +889,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val cpuHalt = Output(Bool())
   }
   val frontend = Flipped(new FrontendToCtrlIO())
+  val fromBJUResolve = Flipped(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fromCSR = new Bundle{
     val toDecode = Input(new CSRToDecode)
     val traceCSR = Input(new TraceCSR)
