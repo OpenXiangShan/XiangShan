@@ -1,0 +1,51 @@
+name: Release XSPdb Jobs
+on:
+  pull_request:
+    branches: [master]
+    # types: [closed]
+jobs:
+  build-xspdb:
+    runs-on: bosc 
+    # if: github.event.pull_request.merged == true 
+    container: ghcr.io/openxiangshan/xspdb:build-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init Xiangshan
+        run: make init
+      - name: Setup mill
+        uses: jodersky/setup-mill@v0.3.0
+        with:
+          mill-version: 0.12.3 
+      - name: Build XSPdb 
+        run: | 
+          make pdb NOOP_HOME="$GITHUB_WORKSPACE"
+      - name: Package release assets
+        id: package 
+        run: |
+          TAG_TIME=$(date +%Y%m)
+          TAG_SHA=$(git rev-parse --short HEAD)
+          ARCHIVE_NAME="XSPdb-${TAG_TIME}-${TAG_SHA}.tar.gz"
+          ARCHIVE_PATH="build/xspdb/${ARCHIVE_NAME}"
+          # archive xspdb 
+          tar -czvf "${ARCHIVE_PATH}" \
+            -C ${{ github.workspace }}/scripts xspdb pdb-run.py \
+            -C ${{ github.workspace }}/build/xspdb pyxscore pydifftest \
+            -C /workspace Makefile
+          echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
+      - name: Test XSPdb Package
+        uses: actions/upload-artifact@v4 
+        with:
+          name: xspdb-release
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 1
+#      - name: Create GitHub Release and Upload Asset
+#        uses: softprops/action-gh-release@v2
+#        with:
+#          token: ${{ secrets.GITHUB_TOKEN }}
+#          tag_name: release-${{ github.sha }}
+#          name: Release ${{ github.sha }}
+#          body: |
+#            xspdb created upon merge to master.
+#            Commit: `${{ github.sha }}`
+#          files: ${{ steps.package.outputs.archive_path }}
+#          prerelease: false

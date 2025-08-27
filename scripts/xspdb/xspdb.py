@@ -21,7 +21,7 @@ import pkgutil
 import signal
 import time
 import pdb
-import argparse
+
 from bdb import BdbQuit
 from pyxscore import DUTSimTop, xsp
 from pydifftest import difftest as df
