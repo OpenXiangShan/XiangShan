@@ -190,7 +190,7 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
       h := that.getHistWithInfo(h.info)
     }
   }
-  // maby for redirect
+
   def update(ghv: Vec[Bool], ptr: PhrPtr, shift: Int, shiftBits: UInt): PhrAllFoldedHistories = {
     require(shiftBits.getWidth == shift)
     val res = WireInit(this)
