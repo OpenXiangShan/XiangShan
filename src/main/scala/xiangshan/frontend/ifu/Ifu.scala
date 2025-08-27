@@ -891,7 +891,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
         val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
         val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
         // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
-        val needResend = !respIsRVC && s4_icacheInfo(0).pAddr(0)(2, 1) === 3.U && exception.isNone
+        val needResend = !respIsRVC && s4_icacheInfo(0).pAddr(2, 1) === 3.U && exception.isNone
         mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
         mmioException := exception
         mmioIsRvc     := respIsRVC
@@ -973,7 +973,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   toUncache.valid := ((mmioState === MmioFsmState.SendReq) || (mmioState === MmioFsmState.ResendReq)) &&
     s4_reqIsMmio && s4_valid
 
-  toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_icacheInfo(0).pAddr(0))
+  toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_icacheInfo(0).pAddr)
   // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
   // we need to tell L2 Cache about this to make it work correctly
   toUncache.bits.memBackTypeMM := !s4_icacheInfo(0).pmpMmio

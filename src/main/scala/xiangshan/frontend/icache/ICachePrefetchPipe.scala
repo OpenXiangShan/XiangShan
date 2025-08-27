@@ -171,14 +171,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * Receive resp from Itlb
     ******************************************************************************
     */
-  // hold original pAddr from itlb
-  private val s1_pAddrRaw =
-    DataHoldBypass(PrunedAddrInit(fromItlb.bits.paddr.head), PrunedAddrInit(0.U(PAddrBits.W)), tlbValidPulse)
-  // and calculate pAddr of the second cacheline: we disallow crosspage request, so physical page index are the same
-  private val s1_pAddr = VecInit(
-    s1_pAddrRaw,
-    PrunedAddrInit(Cat(s1_pAddrRaw(PAddrBits - 1, pgIdxBits), s1_vAddr(1)(pgIdxBits - 1, 0)))
-  )
+  private val s1_pTag =
+    DataHoldBypass(get_phy_tag(fromItlb.bits.paddr.head), 0.U(tagBits.W), tlbValidPulse)
 
   private val s1_itlbExceptionRaw =
     DataHoldBypass(ExceptionType.fromTlbResp(fromItlb.bits), ExceptionType.None, tlbValidPulse)
@@ -219,13 +213,11 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * Receive resp from IMeta and check
     ******************************************************************************
     */
-  private val s1_pTags = VecInit(s1_pAddr.map(get_phy_tag))
-
   private val s1_metaPTags  = fromMeta.tags
   private val s1_metaValids = fromMeta.entryValid
 
   private val s1_sramWaymasks = VecInit((0 until PortNumber).map { port =>
-    getWaymask(s1_pTags(port), s1_metaPTags(port), s1_metaValids(port))
+    getWaymask(s1_pTag, s1_metaPTags(port), s1_metaValids(port))
   })
 
   // select ecc code
@@ -264,7 +256,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       fromMiss,
       Mux(s1_sramValid, s1_sramWaymasks(i), s1_waymasksReg(i)),
       s1_vSetIdx(i),
-      s1_pTags(i),
+      s1_pTag,
       Mux(s1_sramValid, s1_sramMetaCodes(i), s1_metaCodesReg(i))
     )
     s1_waymasks(i)  := newMask
@@ -283,7 +275,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   ) && !s1_flush && !fromMiss.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
   toWayLookup.bits.vSetIdx           := s1_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
-  toWayLookup.bits.pTag              := s1_pTags
+  toWayLookup.bits.pTag              := s1_pTag
   toWayLookup.bits.gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
   toWayLookup.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   toWayLookup.bits.metaCodes         := s1_metaCodes
@@ -296,11 +288,11 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       PopCount(waymasksVec(0)) <= 1.U && (PopCount(waymasksVec(1)) <= 1.U || !s1_doubleline),
       "Multi-hit:\nport0: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x\nport1: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x",
       PopCount(waymasksVec(0)) > 1.U,
-      s1_pTags(0),
+      s1_pTag,
       get_idx(s1_vAddr(0)),
       s1_vAddr(0).toUInt,
       PopCount(waymasksVec(1)) > 1.U && s1_doubleline,
-      s1_pTags(1),
+      s1_pTag,
       get_idx(s1_vAddr(1)),
       s1_vAddr(1).toUInt
     )
@@ -313,7 +305,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped
   toPmp.valid     := s1_valid // !ExceptionType.hasException(s1_itlbException(i)) // bad for timing
-  toPmp.bits.addr := s1_pAddr.head.toUInt
+  toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
   toPmp.bits.size := 3.U
   toPmp.bits.cmd  := TlbCmd.exec
   private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
@@ -400,7 +392,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s2_vAddr          = RegEnable(s1_vAddr, 0.U.asTypeOf(s1_vAddr), s1_realFire)
   private val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_realFire)
   private val s2_doubleline     = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_realFire)
-  private val s2_pAddr          = RegEnable(s1_pAddr, 0.U.asTypeOf(s1_pAddr), s1_realFire)
+  private val s2_pTag           = RegEnable(s1_pTag, 0.U.asTypeOf(s1_pTag), s1_realFire)
   private val s2_exception =
     RegEnable(s1_exceptionOut, 0.U.asTypeOf(s1_exceptionOut), s1_realFire) // includes itlb/pmp exception
   // disabled for timing consideration
@@ -412,7 +404,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 // private val s2_metaCodes   = RegEnable(s1_metaCodes, 0.U.asTypeOf(s1_metaCodes), s1_realFire)
 
   private val s2_vSetIdx = s2_vAddr.map(get_idx)
-  private val s2_pTags   = s2_pAddr.map(get_phy_tag)
 
   // disabled for timing consideration
 //  // do metaArray ECC check
@@ -441,7 +432,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    */
   private val s2_mshrHits = (0 until PortNumber).map(i =>
     ValidHoldBypass(
-      checkMshrHit(fromMiss, s2_vSetIdx(i), s2_pTags(i), s2_valid),
+      checkMshrHit(fromMiss, s2_vSetIdx(i), s2_pTag, s2_valid),
       s2_fire || s2_flush
     )
   )
@@ -474,7 +465,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   (0 until PortNumber).foreach { i =>
     toMissArbiter.io.in(i).valid         := s2_valid && s2_miss(i) && !s2_hasSend(i)
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddr(s2_pAddr(i))
+    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
     toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
   }
 
