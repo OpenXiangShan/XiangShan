@@ -19,6 +19,10 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import coupledL2.MemBackTypeMM
+import coupledL2.MemBackTypeMMField
+import coupledL2.MemPageTypeNC
+import coupledL2.MemPageTypeNCField
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
@@ -35,7 +39,11 @@ import xiangshan.WfiReqBundle
 import xiangshan.frontend._
 
 class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
-  val addr: UInt = UInt(PAddrBits.W)
+  val addr:          UInt = UInt(PAddrBits.W)
+  val memBackTypeMM: Bool = Bool() // !pmp.mmio, pbmt.nc/io on a main memory region
+  val memPageTypeNC: Bool = Bool() // pbmt.nc
+  // FIXME: this IO is re-organized in kunminghu-v3, this is a temp solution for v2
+  val flush: Bool = Bool()
 }
 
 class InsUncacheResp(implicit p: Parameters) extends ICacheBundle {
@@ -52,8 +60,7 @@ class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBu
   val mmio_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
   val mmio_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-  val flush: Bool         = Input(Bool())
-  val wfi:   WfiReqBundle = Flipped(new WfiReqBundle)
+  val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
 }
 
 // One miss entry deals with one mmio request
@@ -83,7 +90,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   private val needFlush = RegInit(false.B)
 
-  when(io.flush && (state =/= s_invalid) && (state =/= s_send_resp))(needFlush := true.B)
+  when(io.req.bits.flush && (state =/= s_invalid) && (state =/= s_send_resp))(needFlush := true.B)
     .elsewhen((state === s_send_resp) && needFlush)(needFlush := false.B)
 
   // --------------------------------------------
@@ -105,6 +112,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
       toAddress = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
       lgSize = log2Ceil(mmioBusBytes).U
     )._2
+    io.mmio_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := req.memBackTypeMM)
+    io.mmio_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := req.memPageTypeNC)
 
     when(io.mmio_acquire.fire) {
       state := s_refill_resp
@@ -149,10 +158,9 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 }
 
 class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
-  val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
-  val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
-  val flush: Bool                        = Input(Bool())
-  val wfi:   WfiReqBundle                = Flipped(new WfiReqBundle)
+  val req:  DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
+  val resp: DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
+  val wfi:  WfiReqBundle                = Flipped(new WfiReqBundle)
 }
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -162,7 +170,8 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICachePa
     clients = Seq(TLMasterParameters.v1(
       "InstrUncache",
       sourceId = IdRange(0, cacheParams.nMMIOs)
-    ))
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
   )
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
@@ -198,8 +207,7 @@ class InstrUncacheImp(outer: InstrUncache)
   private val entries = (0 until cacheParams.nMMIOs).map { i =>
     val entry = Module(new InstrMMIOEntry(edge))
 
-    entry.io.id    := i.U(log2Up(cacheParams.nMMIOs).W)
-    entry.io.flush := io.flush
+    entry.io.id := i.U(log2Up(cacheParams.nMMIOs).W)
 
     entry.io.wfi.wfiReq := io.wfi.wfiReq
 
