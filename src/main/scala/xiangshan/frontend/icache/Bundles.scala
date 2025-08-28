@@ -161,14 +161,14 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:         Bool               = Bool()
-  val vAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(VAddrBits))
-  val data:               UInt               = UInt(blockBits.W)
-  val pAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(PAddrBits))
-  val exception:          Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
-  val pmpMmio:            Vec[Bool]          = Vec(PortNumber, Bool())
-  val itlbPbmt:           Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
-  val isBackendException: Bool               = Bool()
+  val doubleline:         Bool            = Bool()
+  val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val data:               UInt            = UInt(blockBits.W)
+  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val exception:          ExceptionType   = new ExceptionType
+  val pmpMmio:            Bool            = Bool()
+  val itlbPbmt:           UInt            = UInt(Pbmt.width.W)
+  val isBackendException: Bool            = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpAddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpAddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpAddr,
@@ -214,12 +214,12 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:       Vec[UInt]          = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:       Vec[UInt]          = Vec(PortNumber, UInt(nWays.W))
-  val pTag:          Vec[UInt]          = Vec(PortNumber, UInt(tagBits.W))
-  val itlbException: Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
-  val itlbPbmt:      Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
-  val metaCodes:     Vec[UInt]          = Vec(PortNumber, UInt(MetaEccBits.W))
+  val vSetIdx:       Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:       Vec[UInt]     = Vec(PortNumber, UInt(nWays.W))
+  val pTag:          Vec[UInt]     = Vec(PortNumber, UInt(tagBits.W))
+  val metaCodes:     Vec[UInt]     = Vec(PortNumber, UInt(MetaEccBits.W))
+  val itlbException: ExceptionType = new ExceptionType
+  val itlbPbmt:      UInt          = UInt(Pbmt.width.W)
 }
 
 class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
@@ -233,14 +233,14 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGpfEntry
 
   // for compatibility
-  def vSetIdx:           Vec[UInt]          = entry.vSetIdx
-  def waymask:           Vec[UInt]          = entry.waymask
-  def pTag:              Vec[UInt]          = entry.pTag
-  def itlbException:     Vec[ExceptionType] = entry.itlbException
-  def itlbPbmt:          Vec[UInt]          = entry.itlbPbmt
-  def metaCodes:         Vec[UInt]          = entry.metaCodes
-  def gpAddr:            PrunedAddr         = gpf.gpAddr
-  def isForVSnonLeafPTE: Bool               = gpf.isForVSnonLeafPTE
+  def vSetIdx:           Vec[UInt]     = entry.vSetIdx
+  def waymask:           Vec[UInt]     = entry.waymask
+  def pTag:              Vec[UInt]     = entry.pTag
+  def metaCodes:         Vec[UInt]     = entry.metaCodes
+  def itlbException:     ExceptionType = entry.itlbException
+  def itlbPbmt:          UInt          = entry.itlbPbmt
+  def gpAddr:            PrunedAddr    = gpf.gpAddr
+  def isForVSnonLeafPTE: Bool          = gpf.isForVSnonLeafPTE
 }
 
 /* ***** Miss ***** */
@@ -292,9 +292,9 @@ class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** Perf ***** */
 // to Ifu
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val hits:         Vec[Bool]          = Vec(PortNumber, Bool())
-  val isDoubleLine: Bool               = Bool()
-  val exception:    Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+  val hits:         Vec[Bool]     = Vec(PortNumber, Bool())
+  val isDoubleLine: Bool          = Bool()
+  val exception:    ExceptionType = new ExceptionType
 
   // single line request, port 0 is hit/miss
   def hit0NoReq1:  Bool = hits(0) && !isDoubleLine
@@ -305,16 +305,12 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   def miss0Hit1:  Bool = !hits(0) && hits(1) && isDoubleLine
   def miss0Miss1: Bool = !hits(0) && !hits(1) && isDoubleLine
   // has exception
-  def except0:      Bool = exception(0).hasException
-  def hit0Except1:  Bool = hits(0) && exception(1).hasException && isDoubleLine
-  def miss0Except1: Bool = !hits(0) && exception(1).hasException && isDoubleLine
+  def except: Bool = exception.hasException
 
   def hit0: Bool = hits(0)
   def hit1: Bool = hits(1) && isDoubleLine
 
   def hit: Bool = hits(0) && (!isDoubleLine || hits(1))
-
-  def except: Bool = exception(0).hasException || (isDoubleLine && exception(1).hasException)
 }
 
 // to Ifu -> IBuffer -> Backend
