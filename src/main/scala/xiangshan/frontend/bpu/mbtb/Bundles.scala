@@ -53,7 +53,6 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val valid              = Bool()
   val hitMask            = Vec(NumBtbResultEntries, Bool())
   val stronglyBiasedMask = Vec(NumBtbResultEntries, Bool())
   val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
