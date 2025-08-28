@@ -26,8 +26,12 @@ SIM_LDFLAGS        = $(shell cat $(DIFFTEST_HOME)/sim_ld_flags.txt)
 
 PYTHON_DEP_FILE    = scripts/xspdb/requirements.txt
 PDB_PYTHONPATH    := $(PDB_HOME):script/xspdb
-PDB_LD_PRELOAD    := $(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1 \
-			      $(PDB_HOME)/pyxscore/libdifftest.so
+PDB_LD_PRELOAD    := $(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1 
+
+PDB_ARGS          ?=
+IMAGE_FILE        ?= 
+BATCH_ARGS        ?=
+$(if $(strip $(BATCH_ARGS)), $(eval BATCH_ARGS := --batch 1 $(BATCH_ARGS)))
 
 .PHONY: pdb pdb-run check-deps
 
@@ -37,7 +41,7 @@ $(RTL_FILELIST): sim-verilog
 
 $(DIFFTEST_HOME)/_difftest.so: $(RTL_FILELIST)
 	$(MAKE) -C ./difftest pydifftest WITH_CONSTANTIN=0 WITH_CHISELDB=0
-	ln -srf ../pydifftest/_difftest.so $(DIFFTEST_HOME)/libdifftest.so
+	cd $(DIFFTEST_HOME) && ln -sr -f _difftest.so libdifftest.so
 
 $(PDB_HOME)/picker.f: $(DIFFTEST_HOME)/_difftest.so
 	find $(realpath $(RTL_HOME)) -maxdepth 1 \( -name "*.sv" -o -name "*.v" -o -name "*.cpp" -o -name "*.so" \) -not -name "SimTop.sv" -printf "%p\n" > $(PDB_HOME)/picker.f
@@ -52,15 +56,12 @@ $(PDB_HOME)/libUTSimTop.so: $(PDB_HOME)/picker.f
 		--tdir $(PDB_HOME)/pyxscore \
 		--fs $(PDB_HOME)/picker.f \
 		-V "--no-timing;--threads;128;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src" \
-		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(PDB_HOME)/pyxscore -ldifftest -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" \
-		--autobuild=false
-	ln -s ../pydifftest/_difftest.so $(PDB_HOME)/pyxscore/libdifftest.so
-	$(MAKE) -C $(PDB_HOME)/pyxscore
+		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(PDB_HOME)/pydifftest -ldifftest -Wl,-rpath='$$ORIGIN../pydifftest' -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
 
 pdb-run: check-deps
 	LD_PRELOAD="$(PDB_LD_PRELOAD)" \
 	PYTHONPATH="$(PDB_PYTHONPATH)" \
-	python3 scripts/pdb-run.py
+  	python3 scripts/pdb-run.py $(PDB_ARGS) $(BATCH_ARGS) $(if $(IMAGE_FILE),-i $(IMAGE_FILE))
 
 check-deps:
 	@[ -f "$(PYTHON_DEP_FILE)" ] || { echo "Error: $(PYTHON_DEP_FILE) not found"; exit 1; }; \

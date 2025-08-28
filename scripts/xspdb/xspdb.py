@@ -27,7 +27,7 @@ from pyxscore import DUTSimTop, xsp
 from pydifftest import difftest as df
 from collections import OrderedDict
 from logging import DEBUG, INFO, WARNING, ERROR
-from xspdb.xscmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level
+from xspdb.xscmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level, set_xspdb_debug_level, logging_level_map
 from xspdb.xscmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
 
 class XSPdb(pdb.Pdb):
@@ -96,11 +96,83 @@ class XSPdb(pdb.Pdb):
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
 
-    def run(self):
-        try:
+    def check_is_need_trace(self):
+        if getattr(self, "__xspdb_need_fast_trace__", False) is True:
+            setattr(self, "__xspdb_need_fast_trace__" ,False)
+            info("Force set trace") 
             self.set_trace()
-            while True:
-                dut.Step(1000)
+        if self.interrupt is True:
+            if getattr(self, "__xspdb_set_traced__", None) is None:
+                self.setattr(self, "__xspdb_set_traced__", True) 
+                info("Find interrupt, set trace")
+                self.set_trace()
+        return False
+
+    def __init_pdb(self, args):
+        if args.log: 
+            self.api_log_enable_log(True)
+        if args.log_file:
+            self.api_log_set_log_file(args.log_file)
+        if args.debug_level:
+            set_xspdb_debug_level(logging_level_map[args.debug_level])
+        if args.log_level:
+            set_xspdb_log_level(logging_level_map[args.log_level])
+        if (args.image):
+            self.api_dut_bin_load(args.image)
+        if (args.mem_base_address):
+            self.df.Set_PMEM_BASE(args.mem_base_address)
+
+    def __run_batch(self, args):
+        if args.interact_at > 0:
+            def cb_on_interact(s, checker, k, clk, sig, target):
+                info(f"Interact at HW cycle = {target}")
+                setattr(self, "__xspdb_need_fast_trace__", True)
+            info(f"Set interact callback at HW cycle = {args.interact_at}")
+            self.api_xbreak("SimTop_top.SimTop.timer", "eq", args.interact_at, callback=cb_on_interact, callback_once=True)
+        if args.script:
+            if run_script(xspdb, args.script, args.batch_interval):
+                return
+        cycle_batch_size = 100
+        cycle_batch_count = args.max_cycles // cycle_batch_size
+        cycle_reach_max_time = False
+        time_start = time.time()
+        def emu_step(delta):
+            c = self.api_step_dut(delta)
+            self.check_is_need_trace()
+            return c
+        def run_cycle_deta(delta):
+            nonlocal cycle_reach_max_time
+            runc = 0
+            while delta > 0 and not self.api_dut_is_step_exit():
+                c = emu_step(delta)
+                runc += c
+                delta = delta - c
+                self.check_is_need_trace()
+                delta_time = time.time() - time_start
+                print ("step py cycle")
+                if delta_time > args.max_run_time and args.max_run_time > 0:
+                    cycle_reach_max_time = True
+                    XSPdb.info(f"Max run time {timesec_to_str(args.max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit cycle execution")
+                    break
+            return runc
+        run_cycles = 0
+        for _ in range(cycle_batch_count):
+            if not cycle_reach_max_time and not self.api_dut_is_step_exit():
+                run_cycles += run_cycle_deta(cycle_batch_size)
+            else:
+                break
+        delta = args.max_cycles - run_cycles
+        info("Finished cycles: %d (%d ignored)" % (run_cycles, 0))
+
+    def run(self, args):
+        self.__init_pdb(args)
+        try:
+            if args.batch:
+                self.__run_batch(args)
+            else:
+                self.set_trace()
+                while True:
+                    dut.Step(1000)
         except BdbQuit:
             pass
 
