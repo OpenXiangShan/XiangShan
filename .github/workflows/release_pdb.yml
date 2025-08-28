@@ -1,0 +1,55 @@
+name: Release XSPdb Jobs
+on:
+  pull_request:
+    branches: [master]
+    types: [closed]
+jobs:
+  build-xspdb:
+    runs-on: bosc 
+    if: github.event.pull_request.merged == true 
+    container: ghcr.io/openxiangshan/xspdb:build-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: set env 
+        run: |
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "PDB_HOME=$GITHUB_WORKSPACE/build/xspdb" >> $GITHUB_ENV
+          FILE_TIME=$(date +%Y%m)
+          FILE_SHA=${{ github.run_number}}
+          ARCHIVE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.gz"
+          ARCHIVE_PATH="build/xspdb/${ARCHIVE_NAME}"
+          echo "FILE_PATH=${ARCHIVE_PATH}" >> "$GITHUB_ENV"
+      - name: init Xiangshan
+        run: make init
+      - name: Setup mill
+        uses: jodersky/setup-mill@v0.3.0
+        with:
+          mill-version: 0.12.3 
+      - name: build XSPdb 
+        run: | 
+          make pdb
+      - name: Package release assets
+        id: package 
+        run: |
+          mkdir -p ${PDB_HOME}/XSPdb
+          cp -r scripts/xspdb ${PDB_HOME}/XSPdb
+          cp -r ${PDB_HOME}/pydifftest ${PDB_HOME}/XSPdb/xspdb
+          cp -r ${PDB_HOME}/pyxscore ${PDB_HOME}/XSPdb/xspdb
+          cp scripts/pdb-run.py ${PDB_HOME}/XSPdb
+          cp /workspace/Makefile ${PDB_HOME}/XSPdb
+          cd ${PDB_HOME}/XSPdb/pyxscore && ln -srf ../pydifftest libdifftest.so
+      - name: archive XSPdb
+        run: |
+          tar -czvf "${FILE_PATH}" \
+            -C ${PDB_HOME} XSPdb 
+      - name: create gitHub release 
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: release-${{ github.sha }}
+          name: Release ${{ github.sha }}
+          body: |
+            xspdb created upon merge to master.
+            Commit: `${{ github.sha }}`
+          files: ${FILE_PATH}
+          prerelease: false
