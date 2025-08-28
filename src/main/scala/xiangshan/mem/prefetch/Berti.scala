@@ -259,7 +259,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
       res.pc := pc
       res.delta := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
-      replacer.access(set, hitWay)
+      // replacer.access(set, hitWay) // FIFO policy should not access when searching
     }.otherwise{
       res.valid := false.B
       res.pc := 0.U
@@ -514,8 +514,9 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
 
       // delta match
       val matchVec = VecInit(deltaList.map(x => x.delta === _delta)).asUInt
-      val invalidVec1 = deltaList.map(x => x.coverageCnt === 0.U)
-      val invalidVec2 = deltaList.map(x => x.status === DeltaStatus.L2_PREF_REPL || x.status === DeltaStatus.NO_PREF)
+      val invalidVec1 = deltaList.map(x => x.delta === 0.S)
+      val invalidVec2 = deltaList.map(x => x.status === DeltaStatus.NO_PREF)
+      val invalidVec3 = deltaList.map(x => x.status === DeltaStatus.L2_PREF_REPL)
 
       when (matchVec.orR){
         val updateIdx = OHToUInt(matchVec)
@@ -528,6 +529,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
         stat_update_isDeltaMiss := true.B
         val (allocIdx1, canAlloc1) = PriorityEncoderWithFlag(invalidVec1)
         val (allocIdx2, canAlloc2) = PriorityEncoderWithFlag(invalidVec2)
+        val (allocIdx3, canAlloc3) = PriorityEncoderWithFlag(invalidVec3)
         // It doesn't matter if allocIdx* === bestDeltaIdx, because the status is low anyway.
         when(canAlloc1) {
           deltaList(allocIdx1).set(_delta)
@@ -537,6 +539,10 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
           deltaList(allocIdx2).set(_delta)
           stat_update_isDeltaReplace := true.B
           stat_update_evictDelta := deltaList(allocIdx2).delta
+        }.elsewhen(canAlloc3){
+          deltaList(allocIdx3).set(_delta)
+          stat_update_isDeltaReplace := true.B
+          stat_update_evictDelta := deltaList(allocIdx3).delta
         }.otherwise{
           // drop the new delta
         }
