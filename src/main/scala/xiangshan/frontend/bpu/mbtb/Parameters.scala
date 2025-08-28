@@ -43,12 +43,12 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def NumInternalBanks: Int = mbtbParameters.NumInternalBanks
   def NumAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
   // NumSets is the number of sets in one bank, a bank coresponds to a physical SRAM
-  def NumSets:             Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
-  def TagWidth:            Int = mbtbParameters.TagWidth
-  def TargetWidth:         Int = mbtbParameters.TargetWidth
-  def SetIdxLen:           Int = log2Ceil(NumSets)
-  def InternalBankIdxLen:  Int = log2Ceil(NumInternalBanks)
-  def WriteBufferSize:     Int = mbtbParameters.WriteBufferSize
+  def NumSets:            Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
+  def TagWidth:           Int = mbtbParameters.TagWidth
+  def TargetWidth:        Int = mbtbParameters.TargetWidth
+  def SetIdxLen:          Int = log2Ceil(NumSets)
+  def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)
+  def WriteBufferSize:    Int = mbtbParameters.WriteBufferSize
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - log2Ceil(NumAlignBanks)
