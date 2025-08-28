@@ -13,33 +13,36 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.mbtb
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.XSBundle
+import xiangshan.XSModule
 
-class ReplacerState(implicit p: Parameters) extends MainBtbModule {
-  class ReplacerStateIO(implicit p: Parameters) extends MainBtbBundle {
+// Independent replacer state management enables finer-grained clock gating
+class ReplacerState(val NumSets: Int, val NumWays: Int)(implicit p: Parameters) extends XSModule {
+  class ReplacerStateIO(implicit p: Parameters) extends XSBundle {
     // Read and write for the state of the prediction table
-    val predictReadSetIdx: UInt = Input(UInt(log2Ceil(NumEntries).W))
-    val predictReadState:  UInt = Output(UInt((NumWay - 1).W))
+    val predictReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
+    val predictReadState:  UInt = Output(UInt((NumWays - 1).W))
 
     val predictWriteValid:  Bool = Input(Bool())
-    val predictWriteSetIdx: UInt = Input(UInt(log2Ceil(NumEntries).W))
-    val predictWriteState:  UInt = Input(UInt((NumWay - 1).W))
+    val predictWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
+    val predictWriteState:  UInt = Input(UInt((NumWays - 1).W))
 
     // Read and write for the state of the training table
-    val trainReadSetIdx: UInt = Input(UInt(log2Ceil(NumEntries).W))
-    val trainReadState:  UInt = Output(UInt((NumWay - 1).W))
+    val trainReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
+    val trainReadState:  UInt = Output(UInt((NumWays - 1).W))
 
     val trainWriteValid:  Bool = Input(Bool())
-    val trainWriteSetIdx: UInt = Input(UInt(log2Ceil(NumEntries).W))
-    val trainWriteState:  UInt = Input(UInt((NumWay - 1).W))
+    val trainWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
+    val trainWriteState:  UInt = Input(UInt((NumWays - 1).W))
   }
 
   val io: ReplacerStateIO = IO(new ReplacerStateIO())
-  private val states = RegInit(VecInit(Seq.fill(NumSets)(0.U.asTypeOf(UInt((NumWay - 1).W)))))
+  private val states = RegInit(VecInit(Seq.fill(NumSets)(0.U.asTypeOf(UInt((NumWays - 1).W)))))
 
   io.predictReadState := states(io.predictReadSetIdx)
   io.trainReadState   := states(io.trainReadSetIdx)
