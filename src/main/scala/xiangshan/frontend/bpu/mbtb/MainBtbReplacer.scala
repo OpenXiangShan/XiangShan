@@ -19,11 +19,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.PlruStateGen
+import xiangshan.frontend.bpu.ReplacerState
 
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
-  private val statesBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new ReplacerState()))
+  private val statesBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new ReplacerState(NumEntries, NumWay)))
 
   private val predictSetIndexVec = io.predictionSetIndxVec
   private val predictStateEntries: Vec[UInt] =
