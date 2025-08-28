@@ -131,6 +131,7 @@ class LearnDeltasIO(implicit p: Parameters) extends BertiBundle {
 class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** static variable ***/
   val stat_overflow = WireInit(false.B)
+  val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
   val stat_histLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
@@ -151,6 +152,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val dissatisfy = checkDissatisfy(diffFull)
     stat_overflow := overflow
     stat_dissatisfy := dissatisfy
+    stat_satisfy := !overflow && !dissatisfy
     stat_currLineVA := lineVA1
     stat_histLineVA := lineVA2
     Mux(overflow, 0.S(DeltaWidth.W), diffFull)
@@ -341,10 +343,11 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("access_req", io.access.valid)
   XSPerfAccumulate("access_replace", io.access.valid && isReplace)
   XSPerfAccumulate("search_req", io.search.req.valid)
+  XSPerfAccumulate("search_resp_valid", io.search.resp.valid)
   XSPerfAccumulate("search_resp_find_total", searchResult.valid)
   XSPerfAccumulate("search_resp_find_overflow", searchResult.valid && stat_overflow)
   XSPerfAccumulate("search_resp_find_dissatisfy", searchResult.valid && stat_dissatisfy)
-  XSPerfAccumulate("search_resp_find_valid", io.search.resp.valid)
+  XSPerfAccumulate("search_resp_find_satisfy", searchResult.valid && stat_satisfy)
 
   class SearchLogDb extends Bundle {
     val histLineVA = UInt(HtLineVAddrWidth.W)
