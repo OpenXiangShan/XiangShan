@@ -188,7 +188,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.result.targets    := s2_targets
   io.result.attributes := s2_rawBtbEntries.map(_.attribute)
 
-  io.meta.valid              := s2_fire
   io.meta.hitMask            := s2_hitMask
   io.meta.positions          := s2_positions
   io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
