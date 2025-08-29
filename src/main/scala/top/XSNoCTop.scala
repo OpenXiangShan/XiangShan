@@ -85,9 +85,12 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val noc_reset = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
   val soc_clock = IO(Input(Clock()))
   val soc_reset = IO(Input(AsyncReset()))
+  val clint_clock = IO(Input(Clock()))
+  val clint_reset = IO(Input(AsyncReset()))
 
   val noc_reset_sync = socParams.EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(io.dft_reset) })
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
+  val clint_reset_sync = withClockAndReset(clint_clock, clint_reset) { ResetGen(io.dft_reset) }
 }
 
 trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] =>
@@ -416,7 +419,7 @@ trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockIm
 
   socParams.EnableClintAsyncBridge match {
     case Some(param) =>
-      withClockAndReset(soc_clock, soc_reset_sync) {
+      withClockAndReset(clint_clock, clint_reset_sync) {
         val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
         time_source.io.enq.valid := io_clintTime.valid
         time_source.io.enq.bits := io_clintTime.bits

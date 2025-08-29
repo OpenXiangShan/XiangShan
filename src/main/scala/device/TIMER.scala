@@ -73,7 +73,8 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
     when (io.time.valid) { time := io.time.bits }
 
 //    val nTiles = intnode.out.size
-    val nTiles = 256 // def the max hart satisfing kmhv2 spec
+    val NumsHart = 1 << p(MaxHartIdBits)
+    val nTiles = NumsHart // def the max hart satisfing kmhv2 spec
     val timecmp = Seq.fill(nTiles) { RegInit((BigInt(2).pow(timeWidth)-1).asUInt(timeWidth.W))}
     val ipi = Seq.fill(nTiles) { RegInit(0.U(1.W)) }
 
