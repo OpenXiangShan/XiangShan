@@ -207,40 +207,39 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
 }
 
 /* ***** ICacheWayLookup ***** */
-/* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
+/* WayLookupEntry is for internal storage, while WayLookupBundle is for interface
  * Notes:
- *   1. there must be a flush (caused by guest page fault) after excp_tlb_gpf === true.B,
- *      so, we need only the first excp_tlb_gpf and the corresponding gpAddr.
- *      to save area, we separate those signals from WayLookupEntry and store only once.
+ *   1. There must be a flush (caused by exception) after itlbException.hasException,
+ *      so, we need only the first exception and the corresponding gpAddr / related info.
+ *      To save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:       Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:       Vec[UInt]     = Vec(PortNumber, UInt(nWays.W))
-  val metaCodes:     Vec[UInt]     = Vec(PortNumber, UInt(MetaEccBits.W))
-  val pTag:          UInt          = UInt(tagBits.W)
-  val itlbException: ExceptionType = new ExceptionType
-  val itlbPbmt:      UInt          = UInt(Pbmt.width.W)
+  val vSetIdx:   Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:   Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val metaCodes: Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
+  val pTag:      UInt      = UInt(tagBits.W)
+  val itlbPbmt:  UInt      = UInt(Pbmt.width.W)
 }
 
-class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
-  // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val gpAddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
-  val isForVSnonLeafPTE: Bool       = Bool()
+class WayLookupExceptionEntry(implicit p: Parameters) extends ICacheBundle {
+  val itlbException:     ExceptionType = new ExceptionType
+  val gpAddr:            PrunedAddr    = PrunedAddr(PAddrBitsMax)
+  val isForVSnonLeafPTE: Bool          = Bool()
 }
 
 class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
-  val entry = new WayLookupEntry
-  val gpf   = new WayLookupGpfEntry
+  val entry          = new WayLookupEntry
+  val exceptionEntry = new WayLookupExceptionEntry
 
   // for compatibility
   def vSetIdx:           Vec[UInt]     = entry.vSetIdx
   def waymask:           Vec[UInt]     = entry.waymask
   def metaCodes:         Vec[UInt]     = entry.metaCodes
   def pTag:              UInt          = entry.pTag
-  def itlbException:     ExceptionType = entry.itlbException
   def itlbPbmt:          UInt          = entry.itlbPbmt
-  def gpAddr:            PrunedAddr    = gpf.gpAddr
-  def isForVSnonLeafPTE: Bool          = gpf.isForVSnonLeafPTE
+  def itlbException:     ExceptionType = exceptionEntry.itlbException
+  def gpAddr:            PrunedAddr    = exceptionEntry.gpAddr
+  def isForVSnonLeafPTE: Bool          = exceptionEntry.isForVSnonLeafPTE
 }
 
 /* ***** Miss ***** */
