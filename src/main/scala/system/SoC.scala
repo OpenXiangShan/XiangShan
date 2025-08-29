@@ -101,9 +101,9 @@ case class SoCParameters
   UseXSNoCDiffTop: Boolean = false,
   UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  SeperateTLBus: Boolean = false,
+  SeperateTLBus: Boolean = true,//false,
   SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
-  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
+  SeperateTLBusRanges: Seq[AddressSet] = Seq(AddressSet(0x38000000L,0xFFFF)),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
@@ -511,28 +511,34 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   //instance timer
   val timer = (LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
-  val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
+  val SepTLXbarOpt = Option.when(SeperateTLBus)(TLXbar())
   if (enableCHI) {
     if (SeperateDM) {
-      debugModule.debug.node := debugModuleXbarOpt.get
-      timer.node := debugModuleXbarOpt.get
+      debugModule.debug.node := SepTLXbarOpt.get
     } else {
       debugModule.debug.node := device_xbar.get
-      timer.node := device_xbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
     }
+    if(SeperateTLBus){
+      timer.node := SepTLXbarOpt.get
+    } else{
+      timer.node := device_xbar.get
+    }
   } else {
     if (SeperateDM) {
-      debugModule.debug.node := debugModuleXbarOpt.get
-      timer.node := debugModuleXbarOpt.get
+      debugModule.debug.node := SepTLXbarOpt.get
     } else {
       debugModule.debug.node := peripheralXbar.get
-      timer.node := peripheralXbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
       l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+    }
+    if(SeperateTLBus){
+      timer.node := SepTLXbarOpt.get
+    } else{
+      timer.node := peripheralXbar.get
     }
   }
 

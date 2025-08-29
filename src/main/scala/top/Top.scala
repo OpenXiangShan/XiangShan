@@ -175,17 +175,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
-    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+    misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")
-      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      println(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
       require(core_with_l2(i).sep_tl_opt.isDefined)
       require(SeperateTLBusRanges.size == 1)
-      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
-      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+      require(SeperateTLBusRanges.head.base <= p(DebugModuleKey).get.address.base)
+      require(SeperateTLBusRanges.head.base <= p(SoCParamsKey).TIMERRange.base)
+      SepTLXbarOpt := core_with_l2(i).sep_tl_opt.get
     }
   }
-
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
   l3cacheOpt.map(_.intnode.map(int => {
     misc.plic.intnode := IntBuffer() := int
