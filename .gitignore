@@ -365,3 +365,4 @@ stack.info*
 log
 output*
 analysis/
+*.txt
