@@ -121,7 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   fromWayLookup.ready := s0_fire
   private val s0_waymasks          = VecInit(fromWayLookup.bits.waymask.map(_.asTypeOf(Vec(nWays, Bool()))))
-  private val s0_pTags             = fromWayLookup.bits.pTag
+  private val s0_pTag              = fromWayLookup.bits.pTag
   private val s0_gpAddr            = fromWayLookup.bits.gpAddr
   private val s0_isForVSnonLeafPTE = fromWayLookup.bits.isForVSnonLeafPTE
   private val s0_itlbException     = fromWayLookup.bits.itlbException
@@ -169,7 +169,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_vAddr  = RegEnable(s0_vAddr, 0.U.asTypeOf(s0_vAddr), s0_fire)
-  private val s1_pTags  = RegEnable(s0_pTags, 0.U.asTypeOf(s0_pTags), s0_fire)
+  private val s1_pTag   = RegEnable(s0_pTag, 0.U(tagBits.W), s0_fire)
   private val s1_gpAddr = RegEnable(s0_gpAddr, 0.U.asTypeOf(s0_gpAddr), s0_fire)
   private val s1_isForVSnonLeafPTE =
     RegEnable(s0_isForVSnonLeafPTE, 0.U.asTypeOf(s0_isForVSnonLeafPTE), s0_fire)
@@ -182,11 +182,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_metaCodes          = RegEnable(s0_metaCodes, 0.U.asTypeOf(s0_metaCodes), s0_fire)
 
   private val s1_vSetIdx = VecInit(s1_vAddr.map(get_idx))
-  private val s1_pAddr   = getPAddrFromPTag(s1_vAddr, s1_pTags)
   private val s1_offset  = s1_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
 
   // do metaArray ECC check
-  private val s1_metaCorrupt = checkMetaEcc(s1_pTags, s1_metaCodes, s1_waymasks, eccEnable, s1_doubleline)
+  // NOTE: we may have meta other that pTag in the future, we do a VecInit.fill now
+  private val s1_metaCorrupt =
+    checkMetaEcc(VecInit.fill(PortNumber)(s1_pTag), s1_metaCodes, s1_waymasks, eccEnable, s1_doubleline)
 
   /**
     ******************************************************************************
@@ -207,7 +208,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
   toPmp.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
-  toPmp.bits.addr := s1_pAddr.head.toUInt
+  toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
   toPmp.bits.size := 3.U
   toPmp.bits.cmd  := TlbCmd.exec
   private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
@@ -224,7 +225,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrHits = checkMshrHitVec(
     fromMiss,
     s1_vSetIdx,
-    s1_pTags,
+    s1_pTag,
     VecInit(s1_valid, s1_valid && s1_doubleline)
   )
   private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
@@ -258,7 +259,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_valid = ValidHold(s1_fire, s2_fire, s2_flush)
 
   private val s2_vAddr  = RegEnable(s1_vAddr, 0.U.asTypeOf(s1_vAddr), s1_fire)
-  private val s2_pTags  = RegEnable(s1_pTags, 0.U.asTypeOf(s1_pTags), s1_fire)
+  private val s2_pTag   = RegEnable(s1_pTag, 0.U(tagBits.W), s1_fire)
   private val s2_gpAddr = RegEnable(s1_gpAddr, 0.U.asTypeOf(s1_gpAddr), s1_fire)
   private val s2_isForVSnonLeafPTE =
     RegEnable(s1_isForVSnonLeafPTE, 0.U.asTypeOf(s1_isForVSnonLeafPTE), s1_fire)
@@ -271,7 +272,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s2_vSetIdx = VecInit(s2_vAddr.map(get_idx))
   private val s2_offset  = s2_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
-  private val s2_pAddr   = getPAddrFromPTag(s2_vAddr, s2_pTags)
 
   private val s2_sramHits       = RegEnable(s1_sramHits, 0.U.asTypeOf(s1_sramHits), s1_fire)
   private val s2_codes          = RegEnable(s1_codes, 0.U.asTypeOf(s1_codes), s1_fire)
@@ -315,7 +315,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).foreach { i =>
     io.errors(i).valid              := (s2_metaCorrupt(i) || s2_dataCorrupt(i)) && RegNext(s1_fire)
     io.errors(i).bits.report_to_beu := (s2_metaCorrupt(i) || s2_dataCorrupt(i)) && RegNext(s1_fire)
-    io.errors(i).bits.paddr         := s2_pAddr(i).toUInt
+    io.errors(i).bits.paddr         := getPAddrFromPTag(s2_vAddr(i), s2_pTag).toUInt
     io.errors(i).bits.source        := DontCare
     io.errors(i).bits.source.tag    := s2_metaCorrupt(i)
     io.errors(i).bits.source.data   := s2_dataCorrupt(i)
@@ -350,7 +350,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_mshrHits = checkMshrHitVec(
     fromMiss,
     s2_vSetIdx,
-    s2_pTags,
+    s2_pTag,
     VecInit(s2_valid, s2_valid && s2_doubleline),
     allowCorrupt = true // we also need to update s2_hits when fromMiss.bits.corrupt
   )
@@ -424,7 +424,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   (0 until PortNumber).foreach { i =>
     toMissArbiter.io.in(i).valid         := s2_valid && s2_shouldFetch(i) && !s2_hasSend(i) && !s2_flush
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddr(s2_pAddr(i))
+    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
     toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
   }
   toMiss <> toMissArbiter.io.out
@@ -450,7 +450,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toIfu.bits.data               := s2_datas.asTypeOf(UInt(blockBits.W))
   toIfu.bits.isBackendException := s2_isBackendException
   toIfu.bits.vAddr              := s2_vAddr
-  toIfu.bits.pAddr              := s2_pAddr
+  toIfu.bits.pAddr              := getPAddrFromPTag(s2_vAddr.head, s2_pTag)
   toIfu.bits.exception          := s2_exceptionOut
   toIfu.bits.pmpMmio            := s2_pmpMmio
   toIfu.bits.itlbPbmt           := s2_itlbPbmt
@@ -471,7 +471,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     when(RegNext(s2_fire && s2_l2Corrupt(i))) {
       io.errors(i).valid              := true.B
       io.errors(i).bits.report_to_beu := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).bits.paddr         := RegNext(s2_pAddr(i).toUInt)
+      io.errors(i).bits.paddr         := RegNext(getPAddrFromPTag(s2_vAddr(i), s2_pTag).toUInt)
       io.errors(i).bits.source.tag    := false.B
       io.errors(i).bits.source.data   := false.B
       io.errors(i).bits.source.l2     := true.B
@@ -526,7 +526,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val discard = toIfu.bits.exception.hasException ||
       toIfu.bits.pmpMmio ||
       Pbmt.isUncache(toIfu.bits.itlbPbmt)
-    val blkPaddrAll = s2_pAddr.map(addr => (addr(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt)
+    val blkPaddrAll =
+      VecInit(s2_vAddr.map(va => (getPAddrFromPTag(va, s2_pTag)(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt))
     (0 until DataBanks).foreach { i =>
       val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
       diffMainPipeOut.coreid := io.hartId

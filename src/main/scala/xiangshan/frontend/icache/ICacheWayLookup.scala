@@ -85,7 +85,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
         io.update,
         entry.waymask(i),
         entry.vSetIdx(i),
-        entry.pTag(i),
+        entry.pTag,
         entry.metaCodes(i)
       )
       when(updated) {

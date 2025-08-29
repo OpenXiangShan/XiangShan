@@ -25,6 +25,7 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.IBufPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.icache.HasICacheParameters
 
 /* ***
  * Naming:
@@ -74,14 +75,14 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val fetchSize:     UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
 }
 
-class ICacheInfo(implicit p: Parameters) extends IfuBundle {
-  val exception:          ExceptionType   = new ExceptionType
-  val pmpMmio:            Bool            = Bool()
-  val itlbPbmt:           UInt            = UInt(Pbmt.width.W)
-  val isBackendException: Bool            = Bool()
-  val isForVSnonLeafPTE:  Bool            = Bool()
-  val gpAddr:             PrunedAddr      = PrunedAddr(PAddrBitsMax)
-  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
+  val exception:          ExceptionType = new ExceptionType
+  val pmpMmio:            Bool          = Bool()
+  val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
+  val isBackendException: Bool          = Bool()
+  val isForVSnonLeafPTE:  Bool          = Bool()
+  val gpAddr:             PrunedAddr    = PrunedAddr(PAddrBitsMax)
+  val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {

@@ -149,8 +149,8 @@ trait ICacheDataHelper extends HasICacheParameters {
 }
 
 trait ICacheAddrHelper extends HasICacheParameters {
-  def getBlkAddr(addr: PrunedAddr): UInt =
-    (addr >> blockOffBits).asUInt
+  def getBlkAddrFromPTag(vAddr: PrunedAddr, pTag: UInt): UInt =
+    Cat(pTag, vAddr(pgUntagBits - 1, blockOffBits))
 
   def getPTagFromBlk(blkAddr: UInt): UInt =
     (blkAddr >> (pgUntagBits - blockOffBits)).asUInt
@@ -160,9 +160,6 @@ trait ICacheAddrHelper extends HasICacheParameters {
 
   def getPAddrFromPTag(vAddr: PrunedAddr, pTag: UInt): PrunedAddr =
     PrunedAddrInit(Cat(pTag, vAddr(pgUntagBits - 1, 0)))
-
-  def getPAddrFromPTag(vAddrVec: Vec[PrunedAddr], pTagVec: Vec[UInt]): Vec[PrunedAddr] =
-    VecInit((vAddrVec zip pTagVec).map { case (vAddr, pTag) => getPAddrFromPTag(vAddr, pTag) })
 }
 
 trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper with ICacheAddrHelper {
@@ -214,11 +211,11 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
   def checkMshrHitVec(
       update:       Valid[MissRespBundle],
       vSetIdxVec:   Vec[UInt],
-      pTagVec:      Vec[UInt],
+      pTag:         UInt,
       validVec:     Vec[Bool],
       allowCorrupt: Boolean = false
   ): Vec[Bool] =
-    VecInit((vSetIdxVec zip pTagVec zip validVec).map { case ((vs, pt), v) =>
-      checkMshrHit(update, vs, pt, v, allowCorrupt)
+    VecInit((vSetIdxVec zip validVec).map { case (vs, v) =>
+      checkMshrHit(update, vs, pTag, v, allowCorrupt)
     })
 }

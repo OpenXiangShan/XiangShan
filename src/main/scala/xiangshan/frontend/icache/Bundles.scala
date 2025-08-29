@@ -164,7 +164,7 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
   val doubleline:         Bool            = Bool()
   val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
   val data:               UInt            = UInt(blockBits.W)
-  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val pAddr:              PrunedAddr      = PrunedAddr(PAddrBits)
   val exception:          ExceptionType   = new ExceptionType
   val pmpMmio:            Bool            = Bool()
   val itlbPbmt:           UInt            = UInt(Pbmt.width.W)
@@ -216,8 +216,8 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val vSetIdx:       Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
   val waymask:       Vec[UInt]     = Vec(PortNumber, UInt(nWays.W))
-  val pTag:          Vec[UInt]     = Vec(PortNumber, UInt(tagBits.W))
   val metaCodes:     Vec[UInt]     = Vec(PortNumber, UInt(MetaEccBits.W))
+  val pTag:          UInt          = UInt(tagBits.W)
   val itlbException: ExceptionType = new ExceptionType
   val itlbPbmt:      UInt          = UInt(Pbmt.width.W)
 }
@@ -235,8 +235,8 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   // for compatibility
   def vSetIdx:           Vec[UInt]     = entry.vSetIdx
   def waymask:           Vec[UInt]     = entry.waymask
-  def pTag:              Vec[UInt]     = entry.pTag
   def metaCodes:         Vec[UInt]     = entry.metaCodes
+  def pTag:              UInt          = entry.pTag
   def itlbException:     ExceptionType = entry.itlbException
   def itlbPbmt:          UInt          = entry.itlbPbmt
   def gpAddr:            PrunedAddr    = gpf.gpAddr
