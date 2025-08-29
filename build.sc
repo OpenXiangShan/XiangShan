@@ -313,9 +313,9 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     commitCountPad = -1,
     countSep = "",
     tagModifier = (tag: String) => "[Rr]elease.*".r.findFirstMatchIn(tag) match {
-      case Some(_) => "Kunminghu-Release-" + LocalDateTime.now().format(
+      case Some(_) => "KunminghuV3-Release-" + LocalDateTime.now().format(
                                  DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en")))
-      case None => "Kunminghu-dev"
+      case None => "KunminghuV3-dev"
     },
     /* add "username, buildhost, buildtime" for non-release version */
     untaggedSuffix = " (%s@%s) # %s".format(
