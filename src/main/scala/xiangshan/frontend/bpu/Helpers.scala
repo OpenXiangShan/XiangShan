@@ -151,20 +151,22 @@ trait TargetFixHelper extends HasBpuParameters {
   }
 }
 
-trait BtbHelper extends HasBpuParameters {
-  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
+trait SelectFirstTakenBranchHelper extends HasBpuParameters {
+  def getFirstTakenBranchOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
     require(positions.length == takenMask.length)
     val n = positions.length
-    val compareMatrix = (0 until n).map(i =>
-      (0 until i).map(j =>
-        positions(j) > positions(i)
+    val compareMatrix =
+      (0 until n).map(i =>
+        (0 until i).map(j =>
+          positions(j) > positions(i)
+        )
       )
-    )
+    // for the first taken branch, it's position should be the smallest among all taken branches
     (0 until n).map { i =>
       (0 until n).map { j =>
-        if (j < i) !takenMask(j) || compareMatrix(i)(j)
-        else if (j == i) takenMask(i)
-        else !takenMask(j) || !compareMatrix(j)(i)
+        if (j < i) !takenMask(j) || compareMatrix(i)(j) // j not taken or positions(j) > positions(i)
+        else if (j == i) takenMask(i)                   // i taken
+        else !takenMask(j) || !compareMatrix(j)(i)      // j not taken or positions(j) >= positions(i)
       }.reduce(_ && _)
     }
   }

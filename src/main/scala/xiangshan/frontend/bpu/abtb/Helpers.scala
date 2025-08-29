@@ -17,23 +17,24 @@ package xiangshan.frontend.bpu.abtb
 
 import chisel3._
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.SelectFirstTakenBranchHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
+trait Helpers extends HasAheadBtbParameters with TargetFixHelper with SelectFirstTakenBranchHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
+    pc(SetIdxWidth - 1 + BankIdxWidth + instOffsetBits, BankIdxWidth + instOffsetBits)
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth + instOffsetBits - 1, instOffsetBits)
+    pc(BankIdxWidth - 1 + instOffsetBits, instOffsetBits)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(TagWidth + instOffsetBits - 1, instOffsetBits)
+    pc(TagWidth - 1 + instOffsetBits, instOffsetBits)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
     pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
-    target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
+    target(TargetLowerBitsWidth - 1 + instOffsetBits, instOffsetBits)
 
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, UInt) = {
     require(hitMask.length == position.length)

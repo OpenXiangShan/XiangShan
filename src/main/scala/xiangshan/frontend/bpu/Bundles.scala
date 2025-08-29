@@ -169,6 +169,8 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val phr:    PhrPtr       = new PhrPtr
   val tage:   TageMeta     = new TageMeta
   val ittage: IttageMeta   = new IttageMeta
+  // common
+  val takenEntryIdx: UInt = UInt(log2Ceil(MainBtbResultNumEntries).W)
 }
 
 /* *** internal const & type *** */

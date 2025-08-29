@@ -51,16 +51,20 @@ trait HasBpuParameters extends HasFrontendParameters {
   def FetchBlockAlignWidth:   Int = log2Ceil(FetchBlockAlignSize)
   def FetchBlockAlignInstNum: Int = FetchBlockAlignSize / instBytes
 
+  // the number of btb entries provided by mainBTB in a single prediction
+  def MainBtbResultNumEntries: Int = bpuParameters.mbtbParameters.NumAlignBanks * bpuParameters.mbtbParameters.NumWay
+
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {
-      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
+      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.NumBanks, bpuParameters.tageParameters.TagWidth)
     }.reduce(_ ++ _) ++
       bpuParameters.ittageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth)
       }.reduce(_ ++ _)
+
   // sanity check
   // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there
   require(isPow2(FetchBlockAlignSize))
