@@ -236,11 +236,10 @@ class CtrlBlockImp(
   val newestTargetNext = RegEnable(newestTarget, newestEn)
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
-    val baseAddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    val needNewest = RegNext(baseAddr === newestPtr.value)
+    val needNewest = RegNext(raddr === newestPtr.value)
     io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := Mux(needNewest, newestTargetNext, pcMem.io.rdata(pcMemIdx).startAddr)
   }
 
