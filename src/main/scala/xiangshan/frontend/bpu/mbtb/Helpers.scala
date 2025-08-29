@@ -16,6 +16,7 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
+import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TargetFixHelper
@@ -41,4 +42,27 @@ trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHel
       TagWidth + InternalBankIdxLen + SetIdxLen + FetchBlockSizeWidth - 1,
       InternalBankIdxLen + SetIdxLen + FetchBlockSizeWidth
     )
+
+  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, Bool, UInt, Vec[Bool]) = {
+    require(hitMask.length == position.length)
+    require(hitMask.length >= 2)
+    val isMultiHit        = WireDefault(false.B)
+    val isHigherAlignBank = WireDefault(false.B)
+    val multiHitWayIdx    = WireDefault(0.U(log2Up(NumWay).W))
+    val multiHitMask      = VecInit(Seq.fill(NumWay * NumAlignBanks)(false.B))
+    for {
+      i <- 0 until NumWay * NumAlignBanks
+      j <- i + 1 until NumWay * NumAlignBanks
+    } {
+      val bothHit      = hitMask(i) && hitMask(j)
+      val samePosition = position(i) === position(j)
+      when(bothHit && samePosition) {
+        isMultiHit        := true.B
+        isHigherAlignBank := i.U >= NumWay.U
+        multiHitWayIdx    := (i % NumWay).U
+        multiHitMask(i)   := true.B
+      }
+    }
+    (isMultiHit, isHigherAlignBank, multiHitWayIdx, multiHitMask)
+  }
 }
