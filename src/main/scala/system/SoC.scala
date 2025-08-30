@@ -101,7 +101,7 @@ case class SoCParameters
   UseXSNoCDiffTop: Boolean = false,
   UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  SeperateTLBus: Boolean = true,//false,
+  SeperateTLBus: Boolean = true,
   SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
   SeperateTLBusRanges: Seq[AddressSet] = Seq(AddressSet(0x38000000L,0xFFFF)),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,

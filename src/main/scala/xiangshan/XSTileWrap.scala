@@ -44,14 +44,14 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
 
   // interrupts sync
   val SeperateTLsync = SeperateTLBus && (!EnableSeperateTLAsync)
-  val clintIntNode = Option.when(!SeperateTLsync)(IntIdentityNode()) // interrupt from CHI or (TL & async)
+  val clintIntNode = Option.when(!SeperateTLBus)(IntIdentityNode()) // interrupt from CHI or (TL & async)
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
   //instance clint timer
-  val syncClint = Option.when(SeperateTLsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8))) // TL & sync
-  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(syncClint.get.intnode)
+  val timer = Option.when(SeperateTLBus)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8))) // TL & sync
+  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(timer.get.intnode)
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
@@ -60,12 +60,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   // seperate TL bus
   println(s"SeperateTLBus = $SeperateTLBus")
   println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
-  val tlXbar = Option.when(SeperateTLsync)(TLXbar())
+  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
   tlXbar.map(_ := tile.sep_tl_opt.get) // TLXbar node in connect with tile master
-  syncClint.map(_.node := tlXbar.get) //TLXbar node out connnect with timer mmio
+  timer.map(_.node := tlXbar.get) //TLXbar node out connnect with timer mmio
   // asynchronous bridge source node
-  val tlAsyncSourceOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
-  tlAsyncSourceOpt.foreach(_.node := tile.sep_tl_opt.get)
+  val tlAsyncSourceOpt = Option.when(EnableIOSeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
+  tlAsyncSourceOpt.foreach(_.node := tlXbar.get)
   // synchronous source node
   val tlSyncSourceOpt = Option.when(EnableIOSeperateTLBus && SeperateTLsync)(TLTempNode())
   tlSyncSourceOpt.foreach(_ := tlXbar.get)
@@ -116,7 +116,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     childClock := clock
     childReset := reset_sync
 
-    syncClint.foreach { timerInst =>
+    timer.foreach { timerInst =>
       timerInst.module.io.hartId := io.hartId
       timerInst.module.io.time := tile.module.io.clintTime
     }
@@ -167,7 +167,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // Seperate DebugModule TL Async Queue Source
-    if (SeperateTLBus && EnableSeperateTLAsync) {
+    if (EnableIOSeperateTLBus && EnableSeperateTLAsync) {
       tlAsyncSourceOpt.get.module.clock := clock
       tlAsyncSourceOpt.get.module.reset := soc_reset_sync
     }
