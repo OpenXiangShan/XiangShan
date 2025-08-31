@@ -29,6 +29,7 @@ import xiangshan.frontend.WrBypass
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.SaturateCounter
 
 class IttageTable(
     val nRows:    Int,
@@ -43,23 +44,23 @@ class IttageTable(
     }
 
     class Resp extends Bundle {
-      val cnt:          UInt         = UInt(ConfidenceCntWidth.W) // TODO: maybe us SaturateCounter
-      val usefulCnt:    UInt         = UInt(UsefulCntWidth.W)     // TODO: maybe us SaturateCounter
-      val targetOffset: IttageOffset = new IttageOffset()
+      val cnt:          SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+      val usefulCnt:    SaturateCounter = new SaturateCounter(UsefulCntWidth)
+      val targetOffset: IttageOffset    = new IttageOffset()
     }
 
     class Update extends Bundle {
-      val pc:    PrunedAddr = PrunedAddr(VAddrBits)
-      val ghist: UInt       = UInt(HistoryLength.W)
+      val pc:         PrunedAddr            = PrunedAddr(VAddrBits)
+      val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
       // update tag and ctr
-      val valid:   Bool = Bool()
-      val correct: Bool = Bool()
-      val alloc:   Bool = Bool()
-      val oldCnt:  UInt = UInt(ConfidenceCntWidth.W)
+      val valid:   Bool            = Bool()
+      val correct: Bool            = Bool()
+      val alloc:   Bool            = Bool()
+      val oldCnt:  SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
       // update useful
-      val usefulCntValid: Bool = Bool()
-      val usefulCnt:      Bool = Bool() // TODO: maybe use a SaturateCounter(UsefulCntWidth) instead
-      val resetUsefulCnt: Bool = Bool()
+      val usefulCntValid: Bool            = Bool()
+      val usefulCnt:      SaturateCounter = new SaturateCounter(UsefulCntWidth)
+      val resetUsefulCnt: Bool            = Bool()
       // target
       val targetOffset:    IttageOffset = new IttageOffset
       val oldTargetOffset: IttageOffset = new IttageOffset
@@ -73,12 +74,12 @@ class IttageTable(
   val io: IttageTableIO = IO(new IttageTableIO)
 
   private class Entry extends Bundle {
-    val valid:         Bool         = Bool()
-    val tag:           UInt         = UInt(tagLen.W)
-    val confidenceCnt: UInt         = UInt(ConfidenceCntWidth.W) // TODO: maybe use SaturateCounter
-    val targetOffset:  IttageOffset = new IttageOffset()
-    val usefulCnt:  Bool = Bool() // Due to the bitMask the useful bit needs to be at the lowest bit
-    val paddingBit: UInt = UInt(1.W)
+    val valid:         Bool            = Bool()
+    val tag:           UInt            = UInt(tagLen.W)
+    val confidenceCnt: SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+    val targetOffset:  IttageOffset    = new IttageOffset()
+    val usefulCnt:     SaturateCounter = new SaturateCounter(UsefulCntWidth) // Due to the bitMask the useful bit needs to be at the lowest bit
+    val paddingBit:    UInt            = UInt(1.W)
   }
 
   private val foldedWidth = if (nRows >= TableSramSize) nRows / TableSramSize else 1
@@ -106,16 +107,6 @@ class IttageTable(
       require(tagLen == 0)
       (unhashedIdx(log2Ceil(nRows) - 1, 0), 0.U)
     }
-
-  private val computeFoldedGhist = computeFoldedHist(_: UInt, _: Int)(histLen)
-
-  // TODO: use class SaturateCounter.getIncrease
-  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
-    val oldSatTaken    = old === ((1 << len) - 1).U
-    val oldSatNotTaken = old === 0.U
-    Mux(oldSatTaken && taken, ((1 << len) - 1).U, Mux(oldSatNotTaken && !taken, 0.U, Mux(taken, old + 1.U, old - 1.U)))
-  }
-  def incCtr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, ConfidenceCntWidth, taken)
 
   // sanity check, FIXME: is this really needed?
   // The least significant bit of offset is pruned
@@ -166,11 +157,7 @@ class IttageTable(
   io.resp.bits.targetOffset := tableReadData.targetOffset
 
   // Use fetchpc to compute hash
-  private val updateFoldedHist = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-
-  updateFoldedHist.getHistWithInfo(idxFhInfo).foldedHist    := computeFoldedGhist(io.update.ghist, log2Ceil(nRows))
-  updateFoldedHist.getHistWithInfo(tagFhInfo).foldedHist    := computeFoldedGhist(io.update.ghist, tagLen)
-  updateFoldedHist.getHistWithInfo(altTagFhInfo).foldedHist := computeFoldedGhist(io.update.ghist, tagLen - 1)
+  private val updateFoldedHist = io.update.foldedHist
   private val (updateIdx, updateTag) = computeTagAndHash(getUnhashedIdx(io.update.pc), updateFoldedHist)
   private val updateWdata            = Wire(new Entry)
 
@@ -214,7 +201,7 @@ class IttageTable(
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
 
-  private val wrbypass = Module(new WrBypass(UInt(ConfidenceCntWidth.W), TableWrBypassEntries, log2Ceil(nRows)))
+  private val wrbypass = Module(new WrBypass(new SaturateCounter(ConfidenceCntWidth), TableWrBypassEntries, log2Ceil(nRows)))
 
   wrbypass.io.wen       := io.update.valid
   wrbypass.io.write_idx := updateIdx
@@ -222,13 +209,11 @@ class IttageTable(
 
   private val oldCtr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCnt)
   updateWdata.valid         := true.B
-  updateWdata.confidenceCnt := Mux(io.update.alloc, 2.U, incCtr(oldCtr, io.update.correct))
+  updateWdata.confidenceCnt.value := Mux(io.update.alloc, (1 << (ConfidenceCntWidth - 1)).U, oldCtr.getUpdate(io.update.correct))
   updateWdata.tag           := updateTag
-  updateWdata.usefulCnt     := Mux(usefulCanReset, false.B, io.update.usefulCnt)
+  updateWdata.usefulCnt     := Mux(usefulCanReset, false.B.asTypeOf(new SaturateCounter(UsefulCntWidth)), io.update.usefulCnt)
   // only when ctr is null
-  // TODO: use class SaturateCounter.isNegative
-  def ctrNull(ctr: UInt, ctrBits: Int = ConfidenceCntWidth): Bool =
-    ctr === 0.U
+  def ctrNull(ctr: SaturateCounter): Bool = ctr.isSaturateNegative
   updateWdata.targetOffset := Mux(
     io.update.alloc || ctrNull(oldCtr),
     io.update.targetOffset,
