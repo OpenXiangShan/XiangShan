@@ -33,6 +33,7 @@ import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
+import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
@@ -51,6 +52,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtb        = Module(new AheadBtb)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
+  private val ittage      = Module(new Ittage)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
 
@@ -60,6 +62,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     abtb,
     mbtb,
     tage,
+    ittage,
     ras
   )
 
@@ -75,6 +78,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
+  ittage.io.enable      := ctrl.ittageEnable
   ras.io.enable         := false.B
 
   // For some reason s0 stalled, usually FTQ Full
@@ -146,7 +150,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
   ras.io.commit.bits.cfiPosition := commitUpdate.bits.cfiPosition
 
+  // tage
   tage.io.mbtbResult := mbtb.io.result
+  
+  // ittage
+  ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
+  ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -193,6 +202,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_prediction   = RegEnable(s1_prediction, s1_fire)
   private val s3_inPrediction = RegEnable(s2_prediction, s2_fire)
   // s3 prediction: TODO
+  // TODO: compare tage and ittage prediction.position here and choose the first one
   private val s3_prediction = Wire(new Prediction)
   s3_prediction                  := DontCare
   ras.io.specIn.valid            := s3_fire
@@ -220,10 +230,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
-  private val s3_rasMeta  = ras.io.specMeta
 
   // tage meta
   private val s3_tageMeta = tage.io.meta
+
+  // ittage meta
+  private val s3_ittageMeta = ittage.io.meta
+
+  // ras meta
+  private val s3_rasMeta  = ras.io.specMeta
 
   // phr meta
   val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
@@ -240,7 +255,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.ras    := s3_rasMeta
   s3_meta.phr    := s3_phrMeta
   s3_meta.tage   := s3_tageMeta
-  s3_meta.ittage := DontCare // TODO: add ittage
+  s3_meta.ittage := s3_ittageMeta
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
