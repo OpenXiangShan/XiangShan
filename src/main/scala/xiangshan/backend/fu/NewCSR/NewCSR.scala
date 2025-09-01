@@ -147,6 +147,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isHls = Bool()
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
+        val isFromFetchHWE = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -259,6 +260,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trigger = io.fromRob.trap.bits.trigger
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
+  val trapIsFormFetchHWE = io.fromRob.trap.bits.isFromFetchHWE
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
   val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
@@ -808,6 +810,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.fetchMalTval := io.fetchMalTval
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
+        in.isFromFetchHWE := trapIsFormFetchHWE
         in.isFetchMalAddr := trapIsFetchMalAddr
         in.isFetchBkpt := trapIsFetchBkpt
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
