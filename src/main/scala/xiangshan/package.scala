@@ -840,6 +840,7 @@ package object xiangshan {
     // def singleStep          = 14
     def storePageFault      = 15
     def doubleTrap          = 16
+    def softwareCheck       = 18
     def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
@@ -863,6 +864,7 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
+    def EX_SWC    = softwareCheck
     def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
@@ -891,6 +893,7 @@ package object xiangshan {
       instrPageFault,
       instrGuestPageFault,
       instrAccessFault,
+      softwareCheck,
       illegalInstr,
       virtualInstr,
       instrAddrMisaligned,
