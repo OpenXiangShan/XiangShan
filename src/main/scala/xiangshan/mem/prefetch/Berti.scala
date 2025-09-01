@@ -276,14 +276,20 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val isReplace = Wire(Bool())
     val set = getIndex(pc)
     val way = accessPtrs(set).value
-    valids(set)(way) := true.B
-    entries(set)(way).alloc(
-      getTag(pc),
-      getTrainBaseAddr2HT(vaddr),
-      currTime
-    )
-    accessPtrs(set) := accessPtrs(set) + 1.U
-    isReplace := true.B
+    val baseVAddr = getTrainBaseAddr2HT(vaddr)
+    val matchVec = wayMap(w => valids(set)(w) && entries(set)(w).baseVAddr === baseVAddr)
+    when(matchVec.orR){
+      isReplace := false.B
+    }.otherwise {
+      isReplace := valids(set)(way)
+      valids(set)(way) := true.B
+      entries(set)(way).alloc(
+        getTag(pc),
+        baseVAddr,
+        currTime
+      )
+      accessPtrs(set) := accessPtrs(set) + 1.U
+    }
     isReplace
   }
 
