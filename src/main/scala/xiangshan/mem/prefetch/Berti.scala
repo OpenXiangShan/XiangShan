@@ -130,6 +130,7 @@ class LearnDeltasIO(implicit p: Parameters) extends BertiBundle {
 
 class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** static variable ***/
+  val stat_find_delta = WireInit(false.B)
   val stat_overflow = WireInit(false.B)
   val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
@@ -138,14 +139,14 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** built-in function */
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until HtWaySize).map(f))
   def getIndex(pc: UInt): UInt = pc(HtSetWidth + PcOffsetWidth - 1, PcOffsetWidth)
-  def getTag(pc: UInt): UInt = pc(HtPcTagWidth + HtSetWidth + PcOffsetWidth - 1, HtSetWidth + HtSetWidth + PcOffsetWidth)
+  def getTag(pc: UInt): UInt = pc(HtPcTagWidth + HtSetWidth + PcOffsetWidth - 1, HtSetWidth + PcOffsetWidth)
   def getTrainBaseAddr2HT(vaddr: UInt): UInt = {
     getTrainBaseAddr(vaddr)(HtLineVAddrWidth - 1, 0)
   }
   def checkDissatisfy(delta: SInt): Bool = {
     delta < (DELTA_THRESHOLD).S(DeltaWidth.W) && delta > (-DELTA_THRESHOLD).S(DeltaWidth.W)
   }
-  def getDelta(lineVA1: UInt, lineVA2: UInt): SInt = {
+  def getDelta(lineVA1: UInt, lineVA2: UInt): (Bool, SInt) = {
     // here should handle the overflow
     val diffFull = (lineVA1.zext - lineVA2.zext).asSInt
     val overflow = diffFull < DELTA_MIN.S(DeltaWidth.W) || diffFull > DELTA_MAX.S(DeltaWidth.W)
@@ -155,7 +156,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     stat_satisfy := !overflow && !dissatisfy
     stat_currLineVA := lineVA1
     stat_histLineVA := lineVA2
-    Mux(overflow, 0.S(DeltaWidth.W), diffFull)
+    (stat_satisfy, diffFull)
   }
 
   /*** built-in class */
@@ -256,10 +257,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
 
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
-      res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
+      val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
+      stat_find_delta := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
+      res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp) && pair._1
       res.pc := pc
-      res.delta := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
-      // replacer.access(set, hitWay) // FIFO policy should not access when searching
+      res.delta := pair._2
+      replacer.access(set, hitWay)
     }.otherwise{
       res.valid := false.B
       res.pc := 0.U
@@ -289,9 +292,11 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val set = getIndex(pc)
     val tag = getTag(pc)
     val way = learnPtrs(set).value
+    val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
+    stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
     res.pc := pc
-    res.valid := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
-    res.delta := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
+    res.valid := stat_find_delta && pair._1
+    res.delta := pair._2
     learnPtrs(set) := learnPtrs(set) + 1.U
     res
   }
@@ -309,9 +314,10 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
         // method2: order of visit from newest to oldest; BUT the wiring complexity is very high
         // FIXME lyq: to check physically for the wiring complexity
         val way = accessPtrs(set).value - (i.U + 1.U)
+        val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
 
-        res.validVec(i) := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
-        res.deltaVec(i) := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
+        res.validVec(i) := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp) && pair._1
+        res.deltaVec(i) := pair._2
       }
     }.otherwise{
       res := DontCare
