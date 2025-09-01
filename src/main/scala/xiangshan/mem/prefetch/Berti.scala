@@ -30,10 +30,10 @@ import xiangshan.mem.L1PrefetchReq
 case class BertiParams
 (
   name: String = "berti",
-  ht_set_cnt: Int = 8,
-  ht_way_cnt: Int = 16,
-  dt_way_cnt: Int = 16,
-  dt_delta_size: Int = 16,
+  ht_set_cnt: Int = 64, //8,
+  ht_way_cnt: Int = 6, // 16,
+  dt_way_cnt: Int = 64, // 16,
+  dt_delta_size: Int = 4, // 16,
   use_byte_addr: Boolean = false,
 ) extends PrefetcherParams{
   override def TRAIN_FILTER_SIZE = 6
@@ -399,14 +399,13 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   val stat_update_evictDelta = WireInit(0.S(DeltaWidth.W)) // TODO lyq: have no idea how to output this
   val stat_prefetch_isEntryHit = WireInit(false.B)
   /*** built-in function */
-  def thresholdOfMax: Int = (1 << DtCntWidth) - 1
-  def thresholdOfHalf: Int = (1 << (DtCntWidth - 1)) - 1
-  def thresholdOfReset: Int = thresholdOfMax
-  def thresholdOfUpdate: Int = thresholdOfHalf
-  def thresholdOfL1PF: Int = ((1 << DtCntWidth) * 0.65).toInt
-  def thresholdOfL2PF: Int = ((1 << DtCntWidth) * 0.5).toInt
-  def thresholdOfL2PFR: Int = ((1 << DtCntWidth) * 0.35).toInt
-  def thresholdOfReplace: Int = ((1 << DtCntWidth) * 0.5).toInt
+  // def thresholdOfMax: Int = (1 << DtCntWidth) - 1
+  // def thresholdOfHalf: Int = (1 << (DtCntWidth - 1)) - 1
+  def thresholdOfReset: Int = 16 // thresholdOfMax
+  def thresholdOfUpdate: Int = 6 // thresholdOfHalf
+  def thresholdOfL1PF: Int = 4 // ((1 << DtCntWidth) * 0.65).toInt
+  def thresholdOfL2PF: Int = 2 // ((1 << DtCntWidth) * 0.5).toInt
+  def thresholdOfL2PFR: Int = 1 // ((1 << DtCntWidth) * 0.35).toInt
   def getPcTag(pc: UInt): UInt = {
     val pcNoOffset = pc >> PcOffsetWidth
     val res = (pcNoOffset >> 1) ^ (pcNoOffset >> 4)
