@@ -27,7 +27,7 @@ object TIMERConsts
   def ints = 2
 }
 
-case class TIMERParams(IsSelfTest: Boolean = false,baseAddress: BigInt = 0x02000000, intStages: Int = 0)
+case class TIMERParams(IsSelfTest: Boolean = false, baseAddress: BigInt = 0x02000000, intStages: Int = 0)
 {
   def address = AddressSet(baseAddress, TIMERConsts.size-1)
 }

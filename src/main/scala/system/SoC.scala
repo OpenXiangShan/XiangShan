@@ -509,7 +509,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { pll_node := peripheralXbar.get }
 
   //instance timer
-  val timer = (LazyModule(new TIMER(TIMERParams(IsSelfTest = true,soc.TIMERRange.base), 8)))
+  val timer = LazyModule(new TIMER(TIMERParams(IsSelfTest = true, soc.TIMERRange.base), 8))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   val SepTLXbarOpt = Option.when(SeperateTLBus)(TLXbar())
   if (enableCHI) {
