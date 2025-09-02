@@ -156,7 +156,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
   // pass ftqPrefetch
   private val ftqPrefetch = WireInit(0.U.asTypeOf(new PrefetchReqBundle))
-  ftqPrefetch.fromFtqICacheInfo(io.fromFtq.prefetchReq.bits.req)
+  ftqPrefetch.fromFtqPrefetch(io.fromFtq.prefetchReq.bits)
   // software prefetch has higher priority
   prefetcher.io.req.valid                 := softPrefetchValid || io.fromFtq.prefetchReq.valid
   prefetcher.io.req.bits                  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
