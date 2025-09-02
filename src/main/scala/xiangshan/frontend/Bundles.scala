@@ -59,6 +59,7 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val redirectFromIFU: Bool               = Output(Bool())
 }
 
+// TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
 
   // fast path: Timing critical
@@ -78,31 +79,32 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
       p" offset: ${ftqOffset.bits}\n"
 }
 
-class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+class FtqPrefetchRequest(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
+  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
+  val ftqIdx:             FtqPtr        = new FtqPtr
+  val backendException:   ExceptionType = new ExceptionType
+
+  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U // FIXME: this is incorrect when we support >32B fetch
+}
+
+class FtqFetchRequest(implicit p: Parameters) extends XSBundle with HasICacheParameters {
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val ftqIdx:             FtqPtr     = new FtqPtr
+  val cfiOffset:          UInt       = UInt(CfiPositionWidth.W)
+  val isBackendException: Bool       = Bool()
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
-}
-
-class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
-  val req:              FtqICacheInfo = new FtqICacheInfo
-  val backendException: ExceptionType = new ExceptionType
-}
-
-class FtqToFetchBundle(implicit p: Parameters) extends XSBundle {
-  val req:                FtqICacheInfo = new FtqICacheInfo
-  val isBackendException: Bool          = Bool()
+  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U // FIXME: this is incorrect when we support >32B fetch
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
   // NOTE: req.bits must be prepared in T cycle
   // while req.valid is set true in T + 1 cycle
-  val fetchReq:      DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
-  val prefetchReq:   DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
-  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
-  val redirectFlush: Bool                             = Output(Bool())
+  val fetchReq:      DecoupledIO[FtqFetchRequest]    = DecoupledIO(new FtqFetchRequest)
+  val prefetchReq:   DecoupledIO[FtqPrefetchRequest] = DecoupledIO(new FtqPrefetchRequest)
+  val flushFromBpu:  BpuFlushInfo                    = new BpuFlushInfo
+  val redirectFlush: Bool                            = Output(Bool())
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {

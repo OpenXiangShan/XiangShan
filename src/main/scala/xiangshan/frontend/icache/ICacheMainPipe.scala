@@ -29,7 +29,7 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FtqToFetchBundle
+import xiangshan.frontend.FtqFetchRequest
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
@@ -51,8 +51,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
     /* *** outside interface *** */
     // Ftq
-    val req:   DecoupledIO[FtqToFetchBundle] = Flipped(DecoupledIO(new FtqToFetchBundle))
-    val flush: Bool                          = Input(Bool())
+    val req:   DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
+    val flush: Bool                         = Input(Bool())
     // Pmp
     val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
@@ -104,16 +104,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   /** s0 control */
-  private val fromFtqReq = fromFtq.bits.req
+  private val fromFtqReq = fromFtq.bits
   private val s0_valid   = fromFtq.valid
 
   private val s0_vAddr        = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
   private val s0_vSetIdx      = VecInit(s0_vAddr.map(get_idx))
   private val s0_blkOffset    = fromFtqReq.startVAddr(blockOffBits - 1, 0)
-  private val s0_blkEndOffset = s0_blkOffset +& (FetchBlockSize - 2).U // TODO: get this from Ftq
+  private val s0_blkEndOffset = s0_blkOffset +& Cat(fromFtqReq.cfiOffset, 0.U(instOffsetBits.W))
   private val s0_doubleline   = s0_valid && fromFtqReq.crossCacheline
 
-  private val s0_isBackendException = fromFtq.bits.isBackendException
+  private val s0_isBackendException = fromFtqReq.isBackendException
 
   /**
     ******************************************************************************

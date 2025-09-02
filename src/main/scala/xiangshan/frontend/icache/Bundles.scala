@@ -25,7 +25,7 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FtqICacheInfo
+import xiangshan.frontend.FtqPrefetchRequest
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
 
@@ -191,11 +191,12 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
 
   def crossCacheline: Bool = startAddr(blockOffBits - 1) === 1.U
 
-  def fromFtqICacheInfo(info: FtqICacheInfo): PrefetchReqBundle = {
-    this.startAddr      := info.startVAddr
-    this.nextlineStart  := info.nextCachelineVAddr
-    this.ftqIdx         := info.ftqIdx
-    this.isSoftPrefetch := false.B
+  def fromFtqPrefetch(req: FtqPrefetchRequest): PrefetchReqBundle = {
+    this.startAddr        := req.startVAddr
+    this.nextlineStart    := req.nextCachelineVAddr
+    this.ftqIdx           := req.ftqIdx
+    this.backendException := req.backendException
+    this.isSoftPrefetch   := false.B
     this
   }
 
