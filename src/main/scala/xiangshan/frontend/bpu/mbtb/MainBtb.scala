@@ -171,7 +171,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val s2_alignBankIdx       = getAlignBankIndex(s2_startVAddr)
   private val s2_thisReplacerSetIdx = getReplacerSetIndex(s2_startVAddr)
-  private val s2_nextReplacerSetIdx = s2_thisReplacerSetIdx + 1.U
+  private val s2_nextReplacerSetIdx = s2_thisReplacerSetIdx + 2.U
   private val s2_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     Mux(bankIdx.U < s2_alignBankIdx, s2_nextReplacerSetIdx, s2_thisReplacerSetIdx)
   )
