@@ -27,7 +27,7 @@ object TIMERConsts
   def ints = 2
 }
 
-case class TIMERParams(baseAddress: BigInt = 0x02000000, intStages: Int = 0)
+case class TIMERParams(IsSelfTest: Boolean = false,baseAddress: BigInt = 0x02000000, intStages: Int = 0)
 {
   def address = AddressSet(baseAddress, TIMERConsts.size-1)
 }
@@ -80,9 +80,15 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
 
     //only get interrupt from the current hart
     val (intnode_out, _) = intnode.out.unzip
+ 
     intnode_out.zipWithIndex.foreach { case (int, i) =>
-      int(0) := ShiftRegister(ipi(io.hartId)(0), params.intStages) // msip
-      int(1) := ShiftRegister(time.asUInt >= timecmp(io.hartId).asUInt, params.intStages) // mtip
+      if(params.IsSelfTest) {
+        int(0) := ShiftRegister(ipi(i)(0), params.intStages) // msip
+        int(1) := ShiftRegister(time.asUInt >= timecmp(i).asUInt, params.intStages) // mtip
+      }else{
+        int(0) := ShiftRegister(ipi(io.hartId)(0), params.intStages) // msip
+        int(1) := ShiftRegister(time.asUInt >= timecmp(io.hartId).asUInt, params.intStages) // mtip
+      }
     }
 
    // io.time.valid := RegNext(io.rtcTick)

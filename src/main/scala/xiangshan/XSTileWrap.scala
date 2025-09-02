@@ -50,7 +50,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
   //instance clint timer
-  val timer = Option.when(SeperateTLBus)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8))) // TL & sync
+  val timer = Option.when(SeperateTLBus)(LazyModule(new TIMER(TIMERParams(IsSelfTest=false,soc.TIMERRange.base), 8))) // TL & sync
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(timer.get.intnode)
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode

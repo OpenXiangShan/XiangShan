@@ -325,7 +325,7 @@ case class L2CacheConfig
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
         hasMbist = site(DFTOptionsKey).EnableMbist,
-        hasSramCtl = site(DFTOptionsKey).EnableSramCtl,
+        hasSramCtl = site(DFTOptionsKey).EnableSramCtl
       )),
       L2NBanks = banks
     ))
