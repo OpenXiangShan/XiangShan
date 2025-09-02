@@ -233,6 +233,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   def plic = wrapper.asInstanceOf[L].plic
   def nmi = wrapper.asInstanceOf[L].nmi
   def debug = wrapper.asInstanceOf[L].debug
+
   val tileio = IO(new Bundle {
     val hartId = Input(UInt(p(MaxHartIdBits).W))
     val riscv_halt = Output(Bool())
@@ -254,6 +255,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
   core_with_l2.module.io.hartId := tileio.hartId
   core_with_l2.module.io.nodeID.get := tileio.nodeID
+  
   /* dft */
   core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
   core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
@@ -405,18 +407,17 @@ trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockIm
                                                             with HasXSTileImp[L] =>
     val io_clintTime  = IO(Input(ValidIO(UInt(64.W))))
 
-  socParams.EnableClintAsyncBridge match {
-    case Some(param) =>
-      withClockAndReset(clint_clock, clint_reset_sync) {
-        val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
-        time_source.io.enq.valid := io_clintTime.valid
-        time_source.io.enq.bits := io_clintTime.bits
-        core_with_l2.module.io.clintTime <> time_source.io.async
-      }
-    case None =>
-      core_with_l2.module.io.clintTime <> io_clintTime
-  }
-
+    socParams.EnableClintAsyncBridge match {
+      case Some(param) =>
+        withClockAndReset(clint_clock, clint_reset_sync) {
+          val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
+          time_source.io.enq.valid := io_clintTime.valid
+          time_source.io.enq.bits := io_clintTime.bits
+          core_with_l2.module.io.clintTime <> time_source.io.async
+        }
+      case None =>
+        core_with_l2.module.io.clintTime <> io_clintTime
+    }
 }
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc

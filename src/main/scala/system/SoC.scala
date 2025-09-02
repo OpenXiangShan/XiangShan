@@ -103,7 +103,7 @@ case class SoCParameters
   IMSICUseTL: Boolean = false,
   SeperateTLBus: Boolean = false,
   SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
-  SeperateTLBusRanges: Seq[AddressSet] = Seq(AddressSet(0x38000000L,0xFFFF)),
+  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
