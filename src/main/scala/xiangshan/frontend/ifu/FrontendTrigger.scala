@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -62,7 +62,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
 
   private val debugMode            = io.frontendTrigger.debugMode
   private val triggerCanRaiseBpExp = io.frontendTrigger.triggerCanRaiseBpExp
-  // val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
+  // val triggerHitVec = Wire(Vec(FetchBlockInstNum, Vec(TriggerNum, Bool())))
   private val triggerHitVec = (0 until TriggerNum).map { j =>
     TriggerCmpConsecutive(
       VecInit(io.pc.map(_.toUInt)),
@@ -84,7 +84,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
     io.triggered(i) := triggerAction
     XSDebug(
       triggerCanFireVec.asUInt.orR,
-      p"Debug Mode: Predecode Inst No. ${i} has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
+      p"Debug Mode: Predecode Inst No. $i has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
     )
   }
 }

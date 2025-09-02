@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -19,9 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
-import utility.ParallelPosteriorityEncoder
 import utility.ParallelPriorityEncoder
-import utility.XSError
 import xiangshan.ValidUndirectioned
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
@@ -45,7 +43,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
       val selectFetchBlock: Vec[Bool]  = Vec(IBufferInPortNum, Bool())
       val invalidTaken:     Vec[Bool]  = Vec(IBufferInPortNum, Bool())
-      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(log2Ceil(PredictWidth).W))
+      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(FetchBlockInstOffsetWidth.W))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
@@ -117,7 +115,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val needRemask = ParallelOR(remaskFault)
   // Note: remaskIdx must be 5-bit wide (2^5=32) to cover all shift positions (0-31)
   private val fixedRange =
-    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | Fill(32, 1.U(1.W)) >> ~remaskIdx)
+    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | (Fill(32, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt)
   assert(remaskIdx.getWidth == 5, s"remaskIdx width mismatch!") // Temporary code.
   // Adjust this if one IBuffer input entry is later removed
   // require(
@@ -128,14 +126,14 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferInPortNum, Bool()))
 
-  val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
+  private val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
       pd.isRet || pd.isJal || pd.isJalr ||
         (isPredTaken(i) && !selectFetchBlock(i) && !pd.notCFI)
     ) && !ignore(i)
   })
 
-  val fixedTwoFetchSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
+  private val fixedTwoFetchSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
       pd.isRet || pd.isJal || pd.isJalr ||
         (isPredTaken(i) && selectFetchBlock(i) && !pd.notCFI)
@@ -151,8 +149,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     fixedRange(i) && instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
   })
 
-  private val fixedFirstTakenInstrIdx  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  private val fixedSecondTakenInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  private val fixedFirstTakenInstrIdx =
+    WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W))))
+  private val fixedSecondTakenInstrIdx =
+    WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W))))
   fixedFirstTakenInstrIdx.valid := ParallelOR(fixedTwoFetchFirstTaken)
   fixedFirstTakenInstrIdx.bits  := ParallelPriorityEncoder(fixedTwoFetchFirstTaken)
 
@@ -209,12 +209,18 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val fixFirstMispred  = mispredIdxNext.valid && mispredIsFirstBlockNext
   private val fixSecondMispred = mispredIdxNext.valid && !mispredIsFirstBlockNext
   private val fixedFirstRawInstrRange =
-    Fill(PredictWidth, !fixFirstMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+    Fill(FetchBlockInstNum, !fixFirstMispred) |
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
+        FetchBlockInstOffsetWidth - 1,
+        0
+      )).asUInt).asUInt
 
   private val fixedSecondRawInstrRange =
-    Fill(PredictWidth, !fixSecondMispred) |
-      (Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrEndOffsetNext(log2Ceil(PredictWidth) - 1, 0))
+    Fill(FetchBlockInstNum, !fixSecondMispred) |
+      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
+        FetchBlockInstOffsetWidth - 1,
+        0
+      )).asUInt).asUInt
 
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
@@ -268,5 +274,4 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     instrEndOffsetNext(firstTakenIdxNext),
     Mux(fixFirstMispred, instrEndOffsetNext(mispredIdxNext.bits), instrEndOffsetNext(firstTakenIdxNext))
   )
-  // private val firstTargetFault  = fixedFirstTakenInstrIdxNext.valid && jumpTargetsNext(mispredIdxNext.bits) =/= firstPredTargetNext
 }

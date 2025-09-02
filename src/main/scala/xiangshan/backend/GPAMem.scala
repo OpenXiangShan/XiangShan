@@ -20,9 +20,9 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
 
   private val mem = Module (new SyncDataModuleTemplate(new GPAMemEntry, FtqSize, numRead = 1, numWrite = 1, hasRen = true))
 
-  mem.io.wen.head := io.fromIFU.gpaddrMem_wen
-  mem.io.waddr.head := io.fromIFU.gpaddrMem_waddr
-  mem.io.wdata.head := io.fromIFU.gpaddrMem_wdata
+  mem.io.wen.head := io.fromIFU.gpAddrMem.wen
+  mem.io.waddr.head := io.fromIFU.gpAddrMem.waddr
+  mem.io.wdata.head := io.fromIFU.gpAddrMem.wdata
 
   mem.io.ren.get.head := io.exceptionReadAddr.valid
   mem.io.raddr.head := io.exceptionReadAddr.bits.ftqPtr.value
@@ -51,7 +51,7 @@ class GPAMemIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
 
   val exceptionReadAddr = Input(ValidIO(new Bundle {
     val ftqPtr = new FtqPtr()
-    val ftqOffset = UInt(log2Up(PredictWidth).W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   }))
   val exceptionReadData = Output(new GPAMemEntry)
 }

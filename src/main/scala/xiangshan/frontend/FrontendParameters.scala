@@ -21,13 +21,16 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
     FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchPorts:     Int = 2,  // 2-fetch
 
     bpuParameters:    BpuParameters = BpuParameters(),
     ftqParameters:    FtqParameters = FtqParameters(),
-    icacheParameters: ICacheParameters = ICacheParameters()
+    icacheParameters: ICacheParameters = ICacheParameters(),
+    ifuParameters:    IfuParameters = IfuParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
@@ -57,7 +60,10 @@ case class FrontendParameters(
 trait HasFrontendParameters extends HasXSParameter {
   def frontendParameters: FrontendParameters = coreParams.frontendParameters
 
+  def FetchPorts: Int = frontendParameters.FetchPorts
+
   def FetchBlockSize:    Int = frontendParameters.FetchBlockSize
   def FetchBlockInstNum: Int = FetchBlockSize / instBytes
-  def CfiPositionWidth:  Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
+//  def FetchBlockInstOffsetWidth = log2Ceil(FetchBlockInstNum) inherited from HasXSParameter
+  def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 }

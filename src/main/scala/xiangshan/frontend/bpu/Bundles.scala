@@ -149,7 +149,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        BpuMeta         = new BpuMeta
-  val mispred:     UInt            = UInt(PredictWidth.W)
+  val mispred:     UInt            = UInt(FetchBlockInstNum.W)
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)

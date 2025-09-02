@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -18,23 +18,20 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.XSDebug
 import utility.XSError
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
 
 class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class PreDecodeBoundIO(implicit p: Parameters) extends IfuBundle {
     class PreDecodeBoundReq(implicit p: Parameters) extends IfuBundle {
-      val instrRange:        Vec[Bool] = Vec(PredictWidth, Bool())
+      val instrRange:        Vec[Bool] = Vec(FetchBlockInstNum, Bool())
       val cacheData:         UInt      = UInt(512.W)
       val prevLastIsHalfRvi: Bool      = Bool()
-      val firstEndPos:       UInt      = UInt(log2Ceil(PredictWidth).W)
-      val endPos:            UInt      = UInt(log2Ceil(PredictWidth).W)
+      val firstEndPos:       UInt      = UInt(FetchBlockInstOffsetWidth.W)
+      val endPos:            UInt      = UInt(FetchBlockInstOffsetWidth.W)
     }
     class PreDecodeBoundResp(implicit p: Parameters) extends IfuBundle {
-      val instrValid:         Vec[Bool] = Vec(PredictWidth, Bool())
-      val isRvc:              Vec[Bool] = Vec(PredictWidth, Bool())
+      val instrValid:         Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+      val isRvc:              Vec[Bool] = Vec(FetchBlockInstNum, Bool())
       val isFirstLastHalfRvi: Bool      = Bool()
       val isLastHalfRvi:      Bool      = Bool()
     }
@@ -51,34 +48,33 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
 
   private val data = io.req.bits.cacheData.asTypeOf(Vec(32, UInt(16.W)))
   private val rawInsts =
-    VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
+    VecInit((0 until FetchBlockInstNum).map(i => Cat(data(i + 1), data(i))))
 
   // if the former fetch block's last 2 Bytes is a valid end, we need delimitation from data(0)
-  //   we compute the first half directly -> bound(0, PredictWidth/2-1) is correct
-  private val bound = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  //   we compute the first half directly -> bound(0, FetchBlockInstNum/2-1) is correct
+  private val bound = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
   //   and compute two cases of the second half in parallel, we can choose later and reduce latency
-  //     - case 1: data(PredictWidth/2-1) is a valid end, so data(PredictWidth/2) is a valid start
-  //               -> readBound(PredictWidth/2, PredictWidth-1) is correct
-  //     - case 2: data(PredictWidth/2) is a valid end, so data(PredictWidth/2+1) is a valid start
-  //               -> readBoundPlus1(PredictWidth/2, PredictWidth-1) is correct
+  //     - case 1: data(FetchBlockInstNum/2-1) is a valid end, so data(FetchBlockInstNum/2) is a valid start
+  //               -> readBound(FetchBlockInstNum/2, FetchBlockInstNum-1) is correct
+  //     - case 2: data(FetchBlockInstNum/2) is a valid end, so data(FetchBlockInstNum/2+1) is a valid start
+  //               -> readBoundPlus1(FetchBlockInstNum/2, FetchBlockInstNum-1) is correct
   //
-  //     compute directly: 0 -> 1 -> ... -> 32 => bound(0, PredictWidth-1)
+  //     compute directly: 0 -> 1 -> ... -> 32 => bound(0, FetchBlockInstNum-1)
   //
-  //     ours:        first half 0  -> 1  -> ... -> 16 ->  |  => bound(0, PredictWidth/2-1)
+  //     ours:        first half 0  -> 1  -> ... -> 16 ->  |  => bound(0, FetchBlockInstNum/2-1)
   //                                                       v
-  //           second half case1 17 -> 18 -> ... -> 32 -> Mux => bound(PredictWidth/2, PredictWidth-1)
+  //           second half case1 17 -> 18 -> ... -> 32 -> Mux => bound(FetchBlockInstNum/2, FetchBlockInstNum-1)
   //           second half case2 17 -> 18 -> ... -> 32 --/
   //
-  //   NOTE: we use (PredictWidth/2, PredictWidth-1) only, but we still use Vec[PredictWidth] to simplify the code
-  private val rearBound      = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
-  private val rearBoundPlus1 = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  //   NOTE: we use (FetchBlockInstNum/2, FetchBlockInstNum-1) only, but we still use Vec[FetchBlockInstNum] to simplify
+  private val rearBound      = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
+  private val rearBoundPlus1 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
 
   private val currentIsRvc = VecInit(rawInsts.map(isRVC))
-  def genBound(
+  private def genBound(
       bound:        Vec[BoundInfo],
       start:        Int,
       end:          Int,
-      isAlt:        Boolean = false,
       preIsHalfRvi: Bool = false.B
   ): Unit = {
     // when !HasCExtension, data is stepped by 4, and every data is a valid instruction start
@@ -106,27 +102,27 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
     }
   }
 
-  genBound(bound, 0, PredictWidth / 2, false, io.req.bits.prevLastIsHalfRvi)
-  genBound(rearBound, PredictWidth / 2, PredictWidth, false, false.B)
-  genBound(rearBoundPlus1, PredictWidth / 2 + 1, PredictWidth, false, false.B)
+  genBound(bound, 0, FetchBlockInstNum / 2, io.req.bits.prevLastIsHalfRvi)
+  genBound(rearBound, FetchBlockInstNum / 2, FetchBlockInstNum, false.B)
+  genBound(rearBoundPlus1, FetchBlockInstNum / 2 + 1, FetchBlockInstNum, false.B)
 
-  // for xxxPlus1, PredictWidth / 2 must be a valid end, since we assume PredictWidth / 2 + 1 is a valid start
-  // and, it must not be a valid start, otherwise, PredictWidth / 2 - 1 is a valid end and rearBound should be selected
-  rearBoundPlus1(PredictWidth / 2).isStart := false.B
-  rearBoundPlus1(PredictWidth / 2).isEnd   := true.B
+  // for xxxPlus1, FetchBlockInstNum / 2 must be a valid end, since we assume FetchBlockInstNum / 2 + 1 is a valid start
+  // and, it must not be a valid start, otherwise, FetchBlockInstNum/2-1 is a valid end and rearBound should be selected
+  rearBoundPlus1(FetchBlockInstNum / 2).isStart := false.B
+  rearBoundPlus1(FetchBlockInstNum / 2).isEnd   := true.B
 
-  // if PredictWidth / 2 - 1 is a valid end, PredictWidth / 2 is a valid start, then rearBound is correct
+  // if FetchBlockInstNum / 2 - 1 is a valid end, FetchBlockInstNum / 2 is a valid start, then rearBound is correct
   // otherwise, rearBoundPlus1 is correct
-  private val rearBoundCorrect = bound(PredictWidth / 2 - 1).isEnd
+  private val rearBoundCorrect = bound(FetchBlockInstNum / 2 - 1).isEnd
 
-  for (i <- PredictWidth / 2 until PredictWidth) {
+  for (i <- FetchBlockInstNum / 2 until FetchBlockInstNum) {
     bound(i) := Mux(rearBoundCorrect, rearBound(i), rearBoundPlus1(i))
   }
 
   // we also compute the whole block directly for differential testing, this will be optimized out in released code
-  private val boundDiff = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(new BoundInfo))))
 
-  genBound(boundDiff, 0, PredictWidth, false, io.req.bits.prevLastIsHalfRvi)
+  genBound(boundDiff, 0, FetchBlockInstNum, io.req.bits.prevLastIsHalfRvi)
 
   private val startMismatch = Wire(Bool())
   private val endMismatch   = Wire(Bool())
@@ -137,7 +133,7 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   XSError(io.req.valid && startMismatch, p"start mismatch\n")
   XSError(io.req.valid && endMismatch, p"end mismatch\n")
 
-  for (i <- 0 until PredictWidth) {
+  for (i <- 0 until FetchBlockInstNum) {
     io.resp.bits.instrValid(i) := bound(i).isStart && io.req.bits.instrRange(i)
   }
   io.resp.valid := io.req.valid

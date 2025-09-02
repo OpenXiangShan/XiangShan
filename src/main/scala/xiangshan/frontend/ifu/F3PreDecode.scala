@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -21,8 +21,8 @@ import xiangshan.frontend.PreDecodeInfo
 
 class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class F3PreDecodeIO(implicit p: Parameters) extends IfuBundle {
-    val instr: Vec[UInt]          = Input(Vec(PredictWidth, UInt(32.W)))
-    val pd:    Vec[PreDecodeInfo] = Output(Vec(PredictWidth, new PreDecodeInfo))
+    val instr: Vec[UInt]          = Input(Vec(FetchBlockInstNum, UInt(32.W)))
+    val pd:    Vec[PreDecodeInfo] = Output(Vec(FetchBlockInstNum, new PreDecodeInfo))
   }
   val io: F3PreDecodeIO = IO(new F3PreDecodeIO)
 
