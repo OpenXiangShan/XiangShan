@@ -868,6 +868,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       entries(enq_ptr).n := io.in.bits.bitmapCheck.get.ptes(io.in.bits.req_info.vpn(sectortlbwidth - 1, 0)).asTypeOf(new PteBundle().cloneType).n
       entries(enq_ptr).ptes := io.in.bits.bitmapCheck.get.ptes
       entries(enq_ptr).cfs := io.in.bits.bitmapCheck.get.cfs
+      entries(enq_ptr).first_s2xlate_fault := false.B
       mem_resp_hit(enq_ptr) := false.B
     }
   }
