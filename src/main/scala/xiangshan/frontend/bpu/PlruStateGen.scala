@@ -69,7 +69,7 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   def getNextState(state: UInt, touchWays: Seq[Valid[UInt]]): UInt =
     touchWays.foldLeft(state)((prev, touchWay) => Mux(touchWay.valid, getNextState(prev, touchWay.bits), prev))
 
-  /** @param state stateReg bits for this sub-tree
+  /** @param state stateOut bits for this sub-tree
     * @param touchWay touched way encoded value bits for this sub-tree
     * @param treeNways number of ways in this sub-tree
     */
@@ -138,7 +138,7 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
     getNextState(state, touchWaySized, n_ways)
   }
 
-  /** @param state stateReg bits for this sub-tree
+  /** @param state stateOut bits for this sub-tree
     * @param treeNways number of ways in this sub-tree
     */
   def getReplaceWay(state: UInt, treeNways: Int): UInt = {
@@ -187,22 +187,24 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
 
   def getReplaceWay(state: UInt): UInt = getReplaceWay(state, n_ways)
 
-  def way: UInt = getReplaceWay(stateRead)
+  // def way: UInt = getReplaceWay(stateRead)
+
+  def way(state: UInt): UInt = getReplaceWay(state)
 
   def nBits: Int = n_ways - 1
 
   def stateRead: UInt = if (nBits == 0) 0.U else io.stateIn
 
-  io.replaceWay := getReplaceWay(stateRead, n_ways)
+  io.replaceWay := getReplaceWay(stateRead)
 
-  protected val stateReg = if (nBits == 0) Wire(UInt(0.W)) else WireInit(0.U(nBits.W))
+  protected val stateOut = if (nBits == 0) Wire(UInt(0.W)) else WireInit(0.U(nBits.W))
 
   def access(touchWay: UInt): Unit =
-    stateReg := getNextState(stateRead, touchWay)
+    stateOut := getNextState(stateRead, touchWay)
 
   def access(touchWays: Seq[Valid[UInt]]): Unit = {
     when(touchWays.map(_.valid).orR) {
-      stateReg := getNextState(stateRead, touchWays)
+      stateOut := getNextState(stateRead, touchWays)
     }
     for (i <- 1 until touchWays.size) {
       cover(PopCount(touchWays.map(_.valid)) === i.U, s"PLRU_UpdateCount$i", s"PLRU Update $i simultaneous")
@@ -210,5 +212,5 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   }
   access(io.touchWays.toSeq)
 
-  io.nextState := stateReg
+  io.nextState := stateOut
 }

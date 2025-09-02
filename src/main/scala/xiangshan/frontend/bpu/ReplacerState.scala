@@ -22,7 +22,8 @@ import xiangshan.XSBundle
 import xiangshan.XSModule
 
 // Independent replacer state management enables finer-grained clock gating
-class ReplacerState(val NumSets: Int, val NumWays: Int)(implicit p: Parameters) extends XSModule {
+class ReplacerState(val NumSets: Int, val NumWays: Int, val hasReplacer: Boolean = false)(implicit p: Parameters)
+    extends XSModule {
   class ReplacerStateIO(implicit p: Parameters) extends XSBundle {
     // Read and write for the state of the prediction table
     val predictReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
@@ -39,18 +40,34 @@ class ReplacerState(val NumSets: Int, val NumWays: Int)(implicit p: Parameters) 
     val trainWriteValid:  Bool = Input(Bool())
     val trainWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
     val trainWriteState:  UInt = Input(UInt((NumWays - 1).W))
+
+    val replacerSetIdx: Option[UInt] = Option.when(hasReplacer) {
+      Input(UInt(log2Ceil(NumSets).W))
+    }
+    val replacerState: Option[UInt] = Option.when(hasReplacer) {
+      Output(UInt((NumWays - 1).W))
+    }
   }
 
   val io: ReplacerStateIO = IO(new ReplacerStateIO())
   private val states = RegInit(VecInit(Seq.fill(NumSets)(0.U.asTypeOf(UInt((NumWays - 1).W)))))
+  private val readWriteConflict =
+    io.predictWriteValid && io.trainWriteValid && (io.predictWriteSetIdx === io.trainWriteSetIdx)
 
+  when(readWriteConflict) {
+    states(io.trainWriteSetIdx) := io.trainWriteState
+  }.otherwise {
+    when(io.predictWriteValid) {
+      states(io.predictWriteSetIdx) := io.predictWriteState
+    }
+    when(io.trainWriteValid) {
+      states(io.trainReadSetIdx) := io.trainWriteState
+    }
+  }
   io.predictReadState := states(io.predictReadSetIdx)
   io.trainReadState   := states(io.trainReadSetIdx)
 
-  when(io.predictWriteValid) {
-    states(io.predictWriteSetIdx) := io.predictWriteState
-  }
-  when(io.trainWriteValid) {
-    states(io.trainReadSetIdx) := io.trainWriteState
+  if (hasReplacer) {
+    io.replacerState.get := states(io.replacerSetIdx.getOrElse(0.U))
   }
 }
