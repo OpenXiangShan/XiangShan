@@ -225,6 +225,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.fixedFirst.cfiIdx.valid := fixedFirstTakenInstrIdxNext.valid
   io.resp.stage2Out.fixedFirst.cfiIdx.bits  := fixedFirstTakenInstrIdxNext.bits
   io.resp.stage2Out.fixedFirst.instrRange   := fixedFirstRawInstrRange
+  io.resp.stage2Out.fixedFirst.invalidTaken := fixFirstMispred && invalidTakenNext(mispredIdxNext.bits)
 
   io.resp.stage2Out.fixedSecond.target       := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
   io.resp.stage2Out.fixedSecond.misIdx.valid := fixSecondMispred
@@ -232,6 +233,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.fixedSecond.cfiIdx.valid := fixedSecondTakenInstrIdxNext.valid
   io.resp.stage2Out.fixedSecond.cfiIdx.bits  := fixedSecondTakenInstrIdxNext.bits
   io.resp.stage2Out.fixedSecond.instrRange   := fixedSecondRawInstrRange
+  // FIXME: second fetch block invalid taken
+  io.resp.stage2Out.fixedSecond.invalidTaken := false.B
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
@@ -246,27 +249,4 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   io.resp.stage2Out.perfFaultType(0) := Mux(fixFirstMispred, faultType, PreDecodeFaultType.NoFault)
   io.resp.stage2Out.perfFaultType(1) := Mux(fixSecondMispred, faultType, PreDecodeFaultType.NoFault)
-
-  // Temporary address check for one-fetch case with dirty data,
-  // used to prevent backend errors due to unhandled conditions
-  private val firstTargetFault =
-    jumpTargetsNext(firstTakenIdxNext) =/= firstPredTargetNext &&
-      firstPredTakenNext &&
-      fixedRangeNext(firstTakenIdxNext) &&
-      !fixFirstMispred &&
-      (pdsNext(firstTakenIdxNext).isBr || pdsNext(firstTakenIdxNext).isJal)
-
-  io.resp.stage2Out.fixedFirst.target := Mux(
-    firstTargetFault,
-    jumpTargetsNext(firstTakenIdxNext),
-    Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
-  )
-
-  io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred || firstTargetFault
-  io.resp.stage2Out.fixedFirst.misIdx.bits := Mux(
-    firstTargetFault,
-    instrEndOffsetNext(firstTakenIdxNext),
-    Mux(fixFirstMispred, instrEndOffsetNext(mispredIdxNext.bits), instrEndOffsetNext(firstTakenIdxNext))
-  )
-  // private val firstTargetFault  = fixedFirstTakenInstrIdxNext.valid && jumpTargetsNext(mispredIdxNext.bits) =/= firstPredTargetNext
 }

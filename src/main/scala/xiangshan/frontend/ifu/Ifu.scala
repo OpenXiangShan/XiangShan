@@ -356,10 +356,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_firstFetchEndIsHalf = preDecodeBounder.io.resp.bits.isFirstLastHalfRvi
   private val s2_fetchEndIsHalf      = preDecodeBounder.io.resp.bits.isLastHalfRvi
-  when(s2_fire && !s2_flush) {
-    s2_prevLastIsHalfRvi := s2_fetchEndIsHalf
-  }.elsewhen(s2_flush) {
+
+  private val wbStage2Check = Wire(Vec(FetchPorts, new FinalPredCheckResult))
+
+  // When invalidTaken is true, we can not flush s2_prevLastIsHalfRvi because the fetch block after it is fall-through.
+  when(backendRedirect) {
     s2_prevLastIsHalfRvi := false.B
+  }.elsewhen(wbRedirect.valid) {
+    s2_prevLastIsHalfRvi := wbRedirect.isHalfInstr
+  }.elsewhen(mmioRedirect.valid) {
+    s2_prevLastIsHalfRvi := false.B
+  }.elsewhen(s2_fire) {
+    s2_prevLastIsHalfRvi := s2_fetchEndIsHalf
   }
 
 // rawInstrValid(i) and instrCountBeforeCurrent(i) also handle instructions
@@ -507,12 +515,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_instrCount       = RegEnable(PopCount(s2_realRawInstrValid), s2_fire)
   private val s3_instrValid       = RegEnable(UIntToMask(PopCount(s2_realRawInstrValid), PredictWidth), s2_fire)
 
-  private val s3_rawIndex          = RegEnable(instrCountBeforeCurrent, s2_fire)
-  private val s3_rawInstrValid     = RegEnable(s2_realRawInstrValid, s2_fire)
-  private val s3_prevLastIsHalfRvi = RegEnable(s2_prevLastIsHalfRvi, s2_fire)
-  private val s3_prevLastHalfData  = RegInit(0.U(16.W))
-  private val s3_prevLastHalfPc    = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val s3_perfInfo          = RegEnable(s2_perfInfo, s2_fire)
+  private val s3_rawIndex           = RegEnable(instrCountBeforeCurrent, s2_fire)
+  private val s3_rawInstrValid      = RegEnable(s2_realRawInstrValid, s2_fire)
+  private val s3_prevLastIsHalfRvi  = RegEnable(s2_prevLastIsHalfRvi, s2_fire)
+  private val s3_prevLastHalfData   = RegInit(0.U(16.W))
+  private val s3_prevLastHalfPc     = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val s3_perfInfo           = RegEnable(s2_perfInfo, s2_fire)
+  private val s3_currentLastHalfRvi = RegEnable(s2_fetchEndIsHalf, s2_fire)
 
   private val s3_rawFirstDataDup  = RegEnable(s2_rawFirstDataDupWire, s2_fire)
   private val s3_rawSecondDataDup = RegEnable(s2_rawSecondDataDupWire, s2_fire)
@@ -570,7 +579,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s3_invalidTaken = WireDefault(VecInit.fill(PredictWidth)(false.B))
   s3_invalidTaken(s3_fetchBlock(0).predTakenIdx.bits) := s3_fetchBlock(0).invalidTaken && s3_firstValid
-  s3_invalidTaken(s3_fetchBlock(1).predTakenIdx.bits) := s3_fetchBlock(1).invalidTaken && s3_secondValid
 
   private val s3_alignShiftNum = s3_prevIBufEnqPtr.value(1, 0)
   // Maybe it's better to move the calculation of enqBlockStartPos to the previous pipeline stage
@@ -623,12 +631,19 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s3_realAlignPc(i)        := Mux(s3_alignBlockStartPos(i), adjustedBlockHeadPc, s3_alignPc(i))
   }
 
-  when(s3_fire && !s3_flush) {
-    s3_prevLastHalfData := s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0)
-    s3_prevLastHalfPc   := s3_alignPc(s3_instrCount + s3_alignShiftNum)
-  }.elsewhen(s4_flush) {
+  // backendRedirect has the highest priority
+  when(backendRedirect) {
     s3_prevLastHalfData := 0.U
     s3_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+  }.elsewhen(wbRedirect.valid) {
+    s3_prevLastHalfData := wbRedirect.halfData
+    s3_prevLastHalfPc   := wbRedirect.halfPc
+  }.elsewhen(mmioRedirect.valid) {
+    s3_prevLastHalfData := 0.U
+    s3_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+  }.elsewhen(s3_fire) {
+    s3_prevLastHalfData := s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0)
+    s3_prevLastHalfPc   := s3_alignPc(s3_instrCount + s3_alignShiftNum)
   }
 
   when(backendRedirect) {
@@ -673,14 +688,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * ***************************************************************************** */
 
   // assign later
-  private val s4_valid           = WireInit(false.B)
-  private val s4_firstValid      = ValidHold(s3_fire && !s3_flush && s3_firstValid, s4_fire, s4_flush)
-  private val s4_secondValid     = ValidHold(s3_fire && !s3_flush && s3_secondValid, s4_fire, s4_flush)
-  private val s4_fetchBlock      = RegEnable(s3_fetchBlock, s3_fire)
-  private val s4_doubleline      = RegEnable(s3_doubleline, s3_fire)
-  private val s4_prevIBufEnqPtr  = RegEnable(s3_prevIBufEnqPtr, s3_fire)
-  private val s4_rawIndex        = RegEnable(s3_rawIndex, s3_fire)
-  private val s4_prevShiftSelect = RegEnable(s3_prevShiftSelect, s3_fire)
+  private val s4_valid               = WireInit(false.B)
+  private val s4_firstValid          = ValidHold(s3_fire && !s3_flush && s3_firstValid, s4_fire, s4_flush)
+  private val s4_secondValid         = ValidHold(s3_fire && !s3_flush && s3_secondValid, s4_fire, s4_flush)
+  private val s4_fetchBlock          = RegEnable(s3_fetchBlock, s3_fire)
+  private val s4_doubleline          = RegEnable(s3_doubleline, s3_fire)
+  private val s4_prevIBufEnqPtr      = RegEnable(s3_prevIBufEnqPtr, s3_fire)
+  private val s4_rawIndex            = RegEnable(s3_rawIndex, s3_fire)
+  private val s4_prevShiftSelect     = RegEnable(s3_prevShiftSelect, s3_fire)
+  private val s4_prevLastRvi         = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
+  private val s4_currentLastHalfData = RegEnable(s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0), s3_fire)
+  private val s4_currentLastHalfRvi  = RegEnable(s3_currentLastHalfRvi, s3_fire)
   s4_fire := io.toIBuffer.fire
 
   private val s4_alignInvalidTaken = RegEnable(s3_alignInvalidTaken, s3_fire)
@@ -1150,6 +1168,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   mmioRedirect.instrCount     := 1.U
   mmioRedirect.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  mmioRedirect.isHalfInstr    := false.B
+  mmioRedirect.halfPc         := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+  mmioRedirect.halfData       := 0.U
   XSPerfAccumulate("fetch_bubble_ibuffer_not_ready", io.toIBuffer.valid && !io.toIBuffer.ready)
 
   /* *****************************************************************************
@@ -1191,11 +1212,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbFirstRawPds         = RegEnable(firstRawPds, wbEnable)
   private val wbSecondRawPds        = RegEnable(secondRawPds, wbEnable)
 
-  wbRedirect.instrCount     := wbInstrCount
-  wbRedirect.prevIBufEnqPtr := wbPrevIBufEnqPtr
+  private val wbCurrentLastHalfData = RegEnable(s4_currentLastHalfData, wbEnable)
+  // private val wbPrevLastHalfPc      = RegEnable(s4_prevLastHalfPc, wbEnable)
+  private val wbCurrentLastRvi = RegEnable(s4_currentLastHalfRvi, wbEnable)
 
   s4_wbNotFlush := wbFetchBlock(0).ftqIdx === s4_fetchBlock(0).ftqIdx && s4_valid && wbValid
-  private val wbStage2Check = Wire(Vec(FetchPorts, new FinalPredCheckResult))
+
   wbStage2Check(0) := checkerOutStage2.fixedFirst
   wbStage2Check(1) := checkerOutStage2.fixedSecond
 
@@ -1233,6 +1255,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   wbRedirect.valid := (checkFlushWb(0).bits.misEndOffset.valid && checkFlushWb(0).valid) ||
     (checkFlushWb(1).bits.misEndOffset.valid && checkFlushWb(1).valid)
+  wbRedirect.isHalfInstr    := wbCurrentLastRvi && wbStage2Check(0).invalidTaken
+  wbRedirect.instrCount     := wbInstrCount
+  wbRedirect.prevIBufEnqPtr := wbPrevIBufEnqPtr
+  wbRedirect.halfPc := catPC(
+    wbAlignInstrPcLower(wbStage2Check(0).misIdx.bits),
+    wbFetchBlock(0).pcHigh,
+    wbFetchBlock(0).pcHighPlus1
+  )
+  wbRedirect.halfData := wbCurrentLastHalfData
 
   /* write back flush type */
   private val checkFaultType    = checkerOutStage2.perfFaultType
