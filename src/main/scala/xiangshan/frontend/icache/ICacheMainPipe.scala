@@ -107,11 +107,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val fromFtqReq = fromFtq.bits
   private val s0_valid   = fromFtq.valid
 
-  private val s0_vAddr        = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
-  private val s0_vSetIdx      = VecInit(s0_vAddr.map(get_idx))
-  private val s0_blkOffset    = fromFtqReq.startVAddr(blockOffBits - 1, 0)
-  private val s0_blkEndOffset = s0_blkOffset +& Cat(fromFtqReq.cfiOffset, 0.U(instOffsetBits.W))
-  private val s0_doubleline   = s0_valid && fromFtqReq.crossCacheline
+  private val s0_vAddr     = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
+  private val s0_vSetIdx   = VecInit(s0_vAddr.map(get_idx))
+  private val s0_blkOffset = fromFtqReq.startVAddr(blockOffBits - 1, 0)
+
+  private val s0_blkEndOffsetTmp = s0_blkOffset +& Cat(fromFtqReq.takenCfiOffset, 0.U(instOffsetBits.W))
+  private val s0_blkEndOffset    = s0_blkEndOffsetTmp(blockOffBits - 1, 0)
+  private val s0_doubleline      = s0_valid && s0_blkEndOffsetTmp(blockOffBits)
 
   private val s0_isBackendException = fromFtqReq.isBackendException
 
@@ -295,7 +297,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s2_datas,
     s2_codes,
     eccEnable,
-    getBankSel(s2_offset, s2_blkEndOffset),
+    getBankSel(s2_offset, s2_blkEndOffset, s2_doubleline),
     VecInit(s2_dataIsFromMshr.map(!_)),
     s2_sramHits
   )
@@ -540,7 +542,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.index  := (3 + i).U
 
       val bankSel =
-        getBankSel(s2_offset, s2_blkEndOffset).map(_.asUInt).reduce(_ | _)
+        getBankSel(s2_offset, s2_blkEndOffset, s2_doubleline).map(_.asUInt).reduce(_ | _)
       val lineSel = getLineSel(s2_offset)
 
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && !discard

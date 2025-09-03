@@ -128,7 +128,7 @@ class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
   class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle {
     val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
     val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
-    val blkEndOffset: UInt           = UInt((log2Ceil(blockBytes) + 1).W) // we need to keep carry bit
+    val blkEndOffset: UInt           = UInt(log2Ceil(blockBytes).W)
   }
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))

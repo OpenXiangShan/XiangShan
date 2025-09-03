@@ -60,7 +60,7 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
-class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
   // fast path: Timing critical
   val valid:              Bool       = Bool()
@@ -71,7 +71,7 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
   val ftqIdx    = new FtqPtr
   val ftqOffset = Valid(UInt(CfiPositionWidth.W))
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.ftqOffset.bits)
 
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
@@ -79,23 +79,24 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
       p" offset: ${ftqOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+class FtqPrefetchRequest(implicit p: Parameters) extends XSBundle with ICacheCacheLineHelper {
   val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
   val ftqIdx:             FtqPtr        = new FtqPtr
+  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
   val backendException:   ExceptionType = new ExceptionType
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U // FIXME: this is incorrect when we support >32B fetch
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
 }
 
-class FtqFetchRequest(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+class FtqFetchRequest(implicit p: Parameters) extends XSBundle with ICacheCacheLineHelper {
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val ftqIdx:             FtqPtr     = new FtqPtr
-  val cfiOffset:          UInt       = UInt(CfiPositionWidth.W)
+  val takenCfiOffset:     UInt       = UInt(CfiPositionWidth.W)
   val isBackendException: Bool       = Bool()
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U // FIXME: this is incorrect when we support >32B fetch
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {

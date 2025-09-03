@@ -50,7 +50,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.req.bits.poison).asUInt)
 
-  private val bankSel  = getBankSel(io.read.req.bits.blkOffset, io.read.req.bits.blkEndOffset)
+  private val bankSel =
+    getBankSel(io.read.req.bits.blkOffset, io.read.req.bits.blkEndOffset, io.read.req.bits.isDoubleLine)
   private val lineSel  = getLineSel(io.read.req.bits.blkOffset)
   private val waymasks = io.read.req.bits.waymask
   private val masks    = Wire(Vec(nWays, Vec(DataBanks, Bool())))
