@@ -167,6 +167,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DispatchUpdateUop))))
 
   // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
+  // update isrvc to dispatch: branch need last isrvc, rob need first isrvc as rob should attach interrupt to first uop
   for (i <- 0 until RenameWidth) {
     fromRenameUpdate(i).valid := fromRename(i).valid
     // srcLoadDependency and srcState
@@ -175,6 +176,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
+    fromRenameUpdate(i).bits.preDecodeInfo.isRVC := fromRename(i).bits.lastIsRVC
   }
 
   val renameWidth = io.fromRename.size
