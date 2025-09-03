@@ -579,7 +579,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
         curPtr := true.B
       }
     } .otherwise {
-      when(isMisalignReg && !notCross16ByteReg && state === s_pm) {
+      when(isMisalignWire && !notCross16ByteReg && state === s_pm) {
         curPtr := !curPtr
       } .elsewhen(isMisalignReg && !notCross16ByteReg && state === s_pm && stateNext === s_send_data) {
         curPtr := false.B
