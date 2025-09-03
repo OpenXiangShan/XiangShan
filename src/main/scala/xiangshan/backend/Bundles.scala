@@ -231,7 +231,8 @@ object Bundles {
     val singleStep = Bool() // debug module
     val numLsElem = NumLsElem()
     val hasException = Bool()
-    val ftqLastOffset = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
+    val ftqLastOffset = UInt(log2Up(PredictWidth).W) // store ftqoffset before change in rename
+    val lastIsRVC = Bool() // store isrvc before change in rename
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
     val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
     val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
