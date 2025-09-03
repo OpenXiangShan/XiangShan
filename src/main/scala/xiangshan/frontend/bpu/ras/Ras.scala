@@ -43,9 +43,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val commit:   Valid[RasCommitInfo]   = Flipped(Valid(new RasCommitInfo))
     val redirect: Valid[RasRedirectInfo] = Flipped(Valid(new RasRedirectInfo))
 
-    val rasOverride: Bool            = Output(Bool())
-    val topRetAddr:  PrunedAddr      = Output(PrunedAddr(VAddrBits))
-    val specMeta:    RasInternalMeta = Output(new RasInternalMeta)
+    val topRetAddr: PrunedAddr      = Output(PrunedAddr(VAddrBits))
+    val specMeta:   RasInternalMeta = Output(new RasInternalMeta)
   }
 
   val io: RasIO = IO(new RasIO)
@@ -77,9 +76,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   specMeta.tosw := stack.meta.tosw
   specMeta.nos  := stack.meta.nos
 
-  io.rasOverride := io.specIn.valid && (io.specIn.bits.target =/= stack.spec.popAddr) && specPop && io.enable
-  io.specMeta    := specMeta
-  io.topRetAddr  := stack.spec.popAddr
+  io.specMeta   := specMeta
+  io.topRetAddr := stack.spec.popAddr
 
   private val redirect = RegNextWithEnable(io.redirect)
   // when we mispredict a call, we must redo a push operation

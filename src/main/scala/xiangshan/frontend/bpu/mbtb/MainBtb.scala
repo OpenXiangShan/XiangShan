@@ -92,7 +92,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx) & Fill(NumInternalBanks, s0_fire)
   private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
-  private val s0_setIdxVec: Vec[UInt] =
+  private val s0_setIdxVec =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_nextSetIdx, s0_thisSetIdx))
   require(s0_thisSetIdx.getWidth == SetIdxLen, s"Set index width mismatch: ${s0_thisSetIdx.getWidth} != $SetIdxLen")
   XSError(
@@ -127,7 +127,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
   private val s1_tag              = getTag(s1_startVAddr)
   private val s1_alignBankIdx     = getAlignBankIndex(s1_startVAddr)
-  private val s1_posHighestBits: Vec[UInt] =
+  private val s1_posHighestBits =
     VecInit(for {
       bankIdx <- 0 until NumAlignBanks
       _       <- 0 until NumWay
@@ -146,7 +146,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   /* predict stage 2
    *
-   * do tag compare and postion compare
+   * do tag compare and position compare
    * calculate target
    * map results into a per-slot vec
    * resolve multi-hit
@@ -159,7 +159,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s2_positions = s2_rawBtbEntries zip s2_posHighesBits map { case (entry, h) =>
     Cat(h, entry.position) // Add higher bits before using
   }
-  private val s2_hitMask: Vec[Bool] =
+  private val s2_hitMask =
     VecInit(s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag))
   private val s2_targets =
     s2_rawBtbEntries.map(e =>
@@ -184,14 +184,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     )
 
   io.result.hitMask    := s2_hitMask
-  io.result.positions  := s2_rawBtbEntries.map(_.position)
+  io.result.positions  := s2_positions
   io.result.targets    := s2_targets
   io.result.attributes := s2_rawBtbEntries.map(_.attribute)
 
-  io.meta.valid              := s2_fire
   io.meta.hitMask            := s2_hitMask
   io.meta.positions          := s2_positions
   io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
+  io.meta.attributes         := s2_rawBtbEntries.map(_.attribute)
 
   /* training stage 1 */
   private val t1_train_valid      = RegEnable(io.train.valid, io.enable)
@@ -204,14 +204,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_LFSR             = random.LFSR(16, true.B)
-  private val t1_setIdxVec: Vec[UInt] =
+  private val t1_setIdxVec =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < t1_alignBankIdx, t1_nextSetIdx, t1_thisSetIdx))
 
   // Only write into sram when branch is not already in BTB
   // FIXME: take branch attribute and target into account
-  private val t1_updateHit = t1_train_valid &&
-    (t1_meta.hitMask zip t1_meta.positions map {
-      case (hit, pos) => hit && pos === t1_train.cfiPosition
+  private val t1_updateHit =
+    (t1_meta.hitMask zip t1_meta.positions zip t1_meta.attributes map {
+      case ((hit, pos), attr) =>
+        hit && t1_taken && pos === t1_train.cfiPosition && attr === t1_train.attribute
     }).reduce(_ || _)
   private val t1_writeValid = t1_train_valid && !t1_updateHit && t1_taken
 
@@ -256,7 +257,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   XSPerfAccumulate("mbtb_pred_has_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("mbtb_update_new_entry", t1_writeValid)
-  XSPerfAccumulate("mbtb_update_hit", t1_updateHit)
+  XSPerfAccumulate("mbtb_update_hit", t1_train_valid && t1_updateHit)
   XSPerfHistogram("mbtb_multihit_count", PopCount(debug_s2_multihits), s2_fire, 0, NumWay * NumAlignBanks)
 
 }
