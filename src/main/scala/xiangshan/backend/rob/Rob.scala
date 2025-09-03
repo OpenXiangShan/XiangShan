@@ -716,17 +716,43 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   require(RenameWidth <= CommitWidth)
 
   // wiring to csr
-  val (wflags, dirtyFs) = (0 until CommitWidth).map(i => {
+  val wflags = (0 until CommitWidth).map(i => {
     val v = io.commits.commitValid(i)
     val info = io.commits.info(i)
-    (v & info.wflags, v & info.dirtyFs)
-  }).unzip
+    v & info.wflags
+  })
   val fflags = Wire(Valid(UInt(5.W)))
   fflags.valid := io.commits.isCommit && VecInit(wflags).asUInt.orR
   fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_ | _)
-  val dirty_fs = io.commits.isCommit && VecInit(dirtyFs).asUInt.orR
+
+  val dirtyFs = Wire(Valid(Bool()))
+  val updateDirtyFs = RegInit(false.B)
+  val oldestRobidxupdateDirtyFs = RegInit(0.U.asTypeOf(new RobPtr()))
+
+  dirtyFs.valid := io.commits.isCommit && dirtyFs.bits && updateDirtyFs
+  dirtyFs.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
+    case (valid, idx) => valid & (idx === oldestRobidxupdateDirtyFs)
+  }.reduce(_ | _)
+
+  val enqUpdateDirtyFsSeq = io.enq.req.map(req => req.valid && (req.bits.fpWen || req.bits.wfflags)).zip(canEnqueue).map(x => x._1 && x._2)
+
+  val enqUpdateDirtyFs = enqUpdateDirtyFsSeq.reduce(_ | _)
+
+  val oldestRobidxEnqUpdateDirtyFs = PriorityMuxDefault(enqUpdateDirtyFsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
+
+  when(!updateDirtyFs || dirtyFs.valid) {
+    updateDirtyFs := enqUpdateDirtyFs
+  }
+
+  when((!updateDirtyFs || dirtyFs.valid) && enqUpdateDirtyFs) {
+    oldestRobidxupdateDirtyFs := oldestRobidxEnqUpdateDirtyFs
+  }.elsewhen(updateDirtyFs && enqUpdateDirtyFs && isBefore(oldestRobidxEnqUpdateDirtyFs, oldestRobidxupdateDirtyFs)) {
+    oldestRobidxupdateDirtyFs := oldestRobidxEnqUpdateDirtyFs
+  }
+
+  val dirty_fs = dirtyFs.valid
 
   val dirtyVs = Wire(Valid(Bool()))
   val updateDirtyVs = RegInit(false.B)
