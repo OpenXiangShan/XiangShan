@@ -128,7 +128,7 @@ class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
   class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle {
     val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
     val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
-    val blkEndOffset: UInt           = UInt((log2Ceil(blockBytes) + 1).W) // we need to keep carry bit
+    val blkEndOffset: UInt           = UInt(log2Ceil(blockBytes).W)
   }
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
@@ -185,15 +185,15 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startAddr:        PrunedAddr    = PrunedAddr(VAddrBits)
   val nextlineStart:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val crossCacheline:   Bool          = Bool()
   val ftqIdx:           FtqPtr        = new FtqPtr
-  val isSoftPrefetch:   Bool          = Bool()
   val backendException: ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = startAddr(blockOffBits - 1) === 1.U
+  val isSoftPrefetch:   Bool          = Bool()
 
   def fromFtqPrefetch(req: FtqPrefetchRequest): PrefetchReqBundle = {
     this.startAddr        := req.startVAddr
     this.nextlineStart    := req.nextCachelineVAddr
+    this.crossCacheline   := req.crossCacheline
     this.ftqIdx           := req.ftqIdx
     this.backendException := req.backendException
     this.isSoftPrefetch   := false.B
@@ -201,10 +201,12 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   }
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    this.startAddr      := req.vaddr
-    this.nextlineStart  := req.vaddr + (1 << blockOffBits).U
-    this.ftqIdx         := DontCare
-    this.isSoftPrefetch := true.B
+    this.startAddr        := req.vaddr
+    this.nextlineStart    := DontCare
+    this.crossCacheline   := false.B // prefetch only one line for a prefetch.i instruction
+    this.ftqIdx           := DontCare
+    this.backendException := ExceptionType.None
+    this.isSoftPrefetch   := true.B
     this
   }
 }

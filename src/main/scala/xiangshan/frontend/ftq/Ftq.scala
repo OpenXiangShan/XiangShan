@@ -211,6 +211,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.prefetchReq.bits.nextCachelineVAddr :=
     io.toICache.prefetchReq.bits.startVAddr + (CacheLineSize / 8).U
   io.toICache.prefetchReq.bits.ftqIdx := pfPtr(0)
+  // we don't have takenCfiOffset after redirect
+  io.toICache.prefetchReq.bits.takenCfiOffset := Mux(
+    redirectNext.valid,
+    (FetchBlockInstNum - 1).U, // assume maximum fetch block size
+    entryQueue(pfPtr(0).value).takenCfiOffset.bits
+  )
   io.toICache.prefetchReq.bits.backendException := Mux(
     backendExceptionPtr === pfPtr(0),
     backendException,
@@ -222,11 +228,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
   io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
   io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
-  io.toICache.fetchReq.bits.cfiOffset := Mux(
-    entryQueue(ifuPtr(0).value).takenCfiOffset.valid,
-    entryQueue(ifuPtr(0).value).takenCfiOffset.bits,
-    (FetchBlockInstNum - 1).U
-  )
+  io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid

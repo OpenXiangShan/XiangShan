@@ -129,17 +129,20 @@ trait ICacheDataHelper extends HasICacheParameters {
     VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)))
   }
 
-  def getBankSel(blkOffset: UInt, blkEndOffset: UInt): Vec[Vec[Bool]] = {
+  def getBankSel(blkOffset: UInt, blkEndOffset: UInt, crossLine: Bool): Vec[Vec[Bool]] = {
     val bankIdxLow  = getBankIdx(blkOffset)
     val bankIdxHigh = getBankIdx(blkEndOffset)
-    val bankSel     = VecInit((0 until DataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
-    bankSel.asTypeOf(UInt((DataBanks * 2).W)).asTypeOf(Vec(2, Vec(DataBanks, Bool())))
+    VecInit(
+      // first line: if in same line, select [low, high], else select [low, end]
+      VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && (crossLine || i.U <= bankIdxHigh))),
+      // second line: if in same line, select nothing, else select [start, high]
+      VecInit((0 until DataBanks).map(i => (i.U <= bankIdxHigh) && crossLine))
+    )
   }
 
   def getLineSel(blkOffset: UInt): Vec[Bool] = {
-    val bankIdxLow = (blkOffset >> log2Ceil(blockBytes / DataBanks)).asUInt
-    val lineSel    = VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
-    lineSel
+    val bankIdxLow = getBankIdx(blkOffset)
+    VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
   }
 }
 
@@ -213,4 +216,14 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
     VecInit((vSetIdxVec zip validVec).map { case (vs, v) =>
       checkMshrHit(update, vs, pTag, v, allowCorrupt)
     })
+}
+
+trait ICacheCacheLineHelper extends HasICacheParameters {
+  def isCrossLine(startVAddr: PrunedAddr, takenCfiOffset: UInt): Bool = {
+    require(FetchBlockSize <= blockBytes, "Cannot fetch more than one cache line in a fetch block")
+    val startBlockOffset = startVAddr(blockOffBits - 1, instOffsetBits)
+    val endBlockOffset   = startBlockOffset +& takenCfiOffset
+    // if overflow, must be cross line
+    endBlockOffset(blockOffBits - instOffsetBits)
+  }
 }
