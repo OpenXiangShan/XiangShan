@@ -49,7 +49,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
-  val brhRealTarget = io.in.bits.ctrl.predictInfo.get.target
+  val brhRealTarget = addModule.io.target
   val isMisPred = dataModule.io.mispredict || (brhRealTarget =/= brhPredictTarget)
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
