@@ -59,6 +59,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
+  private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
   private val s1_pc = RegEnable(s0_pc, s0_fire)
   private val s2_pc = RegEnable(s1_pc, s1_fire)
@@ -253,12 +254,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // TODO: for low power: use mbtb and remove this
   // io.predictionValid := RegEnable(s2_predictionValid, s2_fire)
-  io.prediction.hit    := s3_provided
+  io.prediction.hit    := s3_fire && s3_provided
   io.prediction.target := s3_ittageTarget
   when(io.prediction.hit) {
     assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  }.otherwise {
-    assert(io.prediction.target === 0.U.asTypeOf(PrunedAddr(VAddrBits)))
   }
 
   s2_provided          := provided
