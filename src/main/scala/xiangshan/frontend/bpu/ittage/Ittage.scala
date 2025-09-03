@@ -37,9 +37,9 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuTrain
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
 class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParameters with Helpers {
   class IttageIO extends BasePredictorIO {
@@ -47,8 +47,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     val s1_foldedPhr:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
 
-    val prediction: IttagePrediction      = Output(new IttagePrediction)
-    val meta:       IttageMeta            = Output(new IttageMeta)
+    val prediction: IttagePrediction = Output(new IttagePrediction)
+    val meta:       IttageMeta       = Output(new IttageMeta)
   }
 
   val io: IttageIO = IO(new IttageIO)
@@ -78,7 +78,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // TODO: for low power: use ubtb&abtb and remove this
   // private val s1_uftbHit         = io.fromFtb.s1_uftbHit
   // private val s1_uftbHasIndirect = io.fromFtb.s1_uftbHasIndirect
-  private val s1_isIndirect      = true.B //(!s1_uftbHit && !io.fromFtb.s1_ftbCloseReq) || s1_uftbHasIndirect
+  private val s1_isIndirect = true.B // (!s1_uftbHit && !io.fromFtb.s1_ftbCloseReq) || s1_uftbHasIndirect
 
   // Keep the table responses to process in s2
 
@@ -180,7 +180,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // Predict
   tables.foreach { t =>
-    t.io.req.valid           := s1_fire && s1_isIndirect  // TODO: s1_isIndirect for low power
+    t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
     t.io.req.bits.pc         := s1_pc
     t.io.req.bits.foldedHist := io.s1_foldedPhr
   }

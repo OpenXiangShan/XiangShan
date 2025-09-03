@@ -33,7 +33,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val s3_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val phrs:           Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
     val phrPtr:         PhrPtr                = Output(new PhrPtr)
-    val train:          PhrUpdate             = Input(new PhrUpdate) // redirect from backend
+    val train:          PhrUpdate             = Input(new PhrUpdate)       // redirect from backend
     val commit:         Valid[BpuTrain]       = Input(Valid(new BpuTrain)) // update from commit
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }

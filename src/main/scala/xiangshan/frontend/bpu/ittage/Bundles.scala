@@ -27,12 +27,10 @@ class IttageOffset(implicit p: Parameters) extends IttageBundle {
   val usePcRegion: Bool       = Bool()
 }
 
-
 class IttagePrediction(implicit p: Parameters) extends IttageBundle {
   val hit:    Bool       = Bool()
   val target: PrunedAddr = PrunedAddr(VAddrBits)
 }
-
 
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
   val provider:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
@@ -41,9 +39,9 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   val providerUsefulCnt: SaturateCounter = new SaturateCounter(UsefulCntWidth)
   val providerCnt:       SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
   val altProviderCnt:    SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
-  val allocate:          Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  val providerTarget:    PrunedAddr  = PrunedAddr(VAddrBits)
-  val altProviderTarget: PrunedAddr  = PrunedAddr(VAddrBits)
+  val allocate:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
+  val providerTarget:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val altProviderTarget: PrunedAddr      = PrunedAddr(VAddrBits)
 
   val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 

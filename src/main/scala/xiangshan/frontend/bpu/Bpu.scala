@@ -26,6 +26,7 @@ import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
@@ -33,7 +34,6 @@ import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.bpu.tage.Tage
-import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
@@ -152,7 +152,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // tage
   tage.io.mbtbResult := mbtb.io.result
-  
+
   // ittage
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
@@ -238,7 +238,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_ittageMeta = ittage.io.meta
 
   // ras meta
-  private val s3_rasMeta  = ras.io.specMeta
+  private val s3_rasMeta = ras.io.specMeta
 
   // phr meta
   val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)

@@ -28,8 +28,8 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.WrBypass
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
 class IttageTable(
     val nRows:    Int,
@@ -78,8 +78,9 @@ class IttageTable(
     val tag:           UInt            = UInt(tagLen.W)
     val confidenceCnt: SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
     val targetOffset:  IttageOffset    = new IttageOffset()
-    val usefulCnt:     SaturateCounter = new SaturateCounter(UsefulCntWidth) // Due to the bitMask the useful bit needs to be at the lowest bit
-    val paddingBit:    UInt            = UInt(1.W)
+    val usefulCnt: SaturateCounter =
+      new SaturateCounter(UsefulCntWidth) // Due to the bitMask the useful bit needs to be at the lowest bit
+    val paddingBit: UInt = UInt(1.W)
   }
 
   private val foldedWidth = if (nRows >= TableSramSize) nRows / TableSramSize else 1
@@ -157,7 +158,7 @@ class IttageTable(
   io.resp.bits.targetOffset := tableReadData.targetOffset
 
   // Use fetchpc to compute hash
-  private val updateFoldedHist = io.update.foldedHist
+  private val updateFoldedHist       = io.update.foldedHist
   private val (updateIdx, updateTag) = computeTagAndHash(getUnhashedIdx(io.update.pc), updateFoldedHist)
   private val updateWdata            = Wire(new Entry)
 
@@ -201,17 +202,26 @@ class IttageTable(
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
 
-  private val wrbypass = Module(new WrBypass(new SaturateCounter(ConfidenceCntWidth), TableWrBypassEntries, log2Ceil(nRows)))
+  private val wrbypass =
+    Module(new WrBypass(new SaturateCounter(ConfidenceCntWidth), TableWrBypassEntries, log2Ceil(nRows)))
 
   wrbypass.io.wen       := io.update.valid
   wrbypass.io.write_idx := updateIdx
   wrbypass.io.write_data.foreach(_ := updateWdata.confidenceCnt)
 
   private val oldCtr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCnt)
-  updateWdata.valid         := true.B
-  updateWdata.confidenceCnt.value := Mux(io.update.alloc, (1 << (ConfidenceCntWidth - 1)).U, oldCtr.getUpdate(io.update.correct))
-  updateWdata.tag           := updateTag
-  updateWdata.usefulCnt     := Mux(usefulCanReset, false.B.asTypeOf(new SaturateCounter(UsefulCntWidth)), io.update.usefulCnt)
+  updateWdata.valid := true.B
+  updateWdata.confidenceCnt.value := Mux(
+    io.update.alloc,
+    (1 << (ConfidenceCntWidth - 1)).U,
+    oldCtr.getUpdate(io.update.correct)
+  )
+  updateWdata.tag := updateTag
+  updateWdata.usefulCnt := Mux(
+    usefulCanReset,
+    false.B.asTypeOf(new SaturateCounter(UsefulCntWidth)),
+    io.update.usefulCnt
+  )
   // only when ctr is null
   def ctrNull(ctr: SaturateCounter): Bool = ctr.isSaturateNegative
   updateWdata.targetOffset := Mux(
