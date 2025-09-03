@@ -28,10 +28,7 @@ import xiangshan.frontend.bpu.ReplacerState
 class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
-  private val states           = Module(new ReplacerState(NumSets, NumWays, hasReplacer = true))
-  private val predReplacerGen  = Module(new PlruStateGen(NumWays, accessSize = NumWays))
-  private val writeReplacerGen = Module(new PlruStateGen(NumWays))
-
+  // use ReplacementPolicy class caclulate next state replace way
   private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
 
   private val readWriteConflict = io.readValid && io.writeValid && (io.readSetIdx === io.writeSetIdx)
@@ -52,7 +49,13 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
     }
   }
 
-  private val writeTouch = Wire(Valid(UInt(WayIdxWidth.W)))
+  // use PlruStateGen caclulate next state and replace way
+  private val states           = Module(new ReplacerState(NumSets, NumWays, hasExtraReadPort = true))
+  private val predReplacerGen  = Module(new PlruStateGen(NumWays, accessSize = NumWays))
+  private val writeReplacerGen = Module(new PlruStateGen(NumWays))
+  private val writeTouch       = Wire(Valid(UInt(WayIdxWidth.W)))
+  private val touchWays        = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
+
   writeTouch.valid              := io.writeValid
   writeTouch.bits               := io.writeWayIdx
   states.io.trainReadSetIdx     := io.writeSetIdx
@@ -62,7 +65,6 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   writeReplacerGen.io.stateIn   := states.io.trainReadState
   writeReplacerGen.io.touchWays := Seq(writeTouch)
 
-  private val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
   touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
     t.valid := r
     t.bits  := i.U
@@ -74,8 +76,8 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   predReplacerGen.io.stateIn   := states.io.predictReadState
   predReplacerGen.io.touchWays := touchWays
 
-  states.io.replacerSetIdx.foreach(_ := io.replaceSetIdx)
-  private val replacerState = states.io.replacerState.getOrElse(0.U)
+  states.io.readSetIdx.foreach(_ := io.replaceSetIdx)
+  private val replacerState = states.io.readState.getOrElse(0.U)
 
   private val genReplaceWay = writeReplacerGen.way(replacerState)
   private val replacerWay   = replacer.way(io.replaceSetIdx)

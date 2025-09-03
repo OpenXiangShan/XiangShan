@@ -22,8 +22,9 @@ import xiangshan.XSBundle
 import xiangshan.XSModule
 
 // Independent replacer state management enables finer-grained clock gating
-class ReplacerState(val NumSets: Int, val NumWays: Int, val hasReplacer: Boolean = false)(implicit p: Parameters)
-    extends XSModule {
+class ReplacerState(val NumSets: Int, val NumWays: Int, val hasExtraReadPort: Boolean = false)(implicit
+    p: Parameters
+) extends BpuModule {
   class ReplacerStateIO(implicit p: Parameters) extends XSBundle {
     // Read and write for the state of the prediction table
     val predictReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
@@ -41,10 +42,11 @@ class ReplacerState(val NumSets: Int, val NumWays: Int, val hasReplacer: Boolean
     val trainWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
     val trainWriteState:  UInt = Input(UInt((NumWays - 1).W))
 
-    val replacerSetIdx: Option[UInt] = Option.when(hasReplacer) {
+    // Optional additional state read port provision
+    val readSetIdx: Option[UInt] = Option.when(hasExtraReadPort) {
       Input(UInt(log2Ceil(NumSets).W))
     }
-    val replacerState: Option[UInt] = Option.when(hasReplacer) {
+    val readState: Option[UInt] = Option.when(hasExtraReadPort) {
       Output(UInt((NumWays - 1).W))
     }
   }
@@ -67,7 +69,7 @@ class ReplacerState(val NumSets: Int, val NumWays: Int, val hasReplacer: Boolean
   io.predictReadState := states(io.predictReadSetIdx)
   io.trainReadState   := states(io.trainReadSetIdx)
 
-  if (hasReplacer) {
-    io.replacerState.get := states(io.replacerSetIdx.getOrElse(0.U))
+  if (hasExtraReadPort) {
+    io.readState.get := states(io.readSetIdx.getOrElse(0.U))
   }
 }

@@ -69,7 +69,7 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   def getNextState(state: UInt, touchWays: Seq[Valid[UInt]]): UInt =
     touchWays.foldLeft(state)((prev, touchWay) => Mux(touchWay.valid, getNextState(prev, touchWay.bits), prev))
 
-  /** @param state stateOut bits for this sub-tree
+  /** @param state stateIn bits for this sub-tree
     * @param touchWay touched way encoded value bits for this sub-tree
     * @param treeNways number of ways in this sub-tree
     */
@@ -186,8 +186,6 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   }
 
   def getReplaceWay(state: UInt): UInt = getReplaceWay(state, n_ways)
-
-  // def way: UInt = getReplaceWay(stateRead)
 
   def way(state: UInt): UInt = getReplaceWay(state)
 
