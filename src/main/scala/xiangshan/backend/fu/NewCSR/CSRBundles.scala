@@ -161,7 +161,7 @@ object CSRBundles {
   class RobCommitCSR(implicit p: Parameters) extends Bundle {
     // need contain 8x8
     val instNum = ValidIO(UInt(7.W))
-    val fflags  = ValidIO(Fflags())
+    val fflags  = Vec(5, Valid(Bool()))
     val fsDirty = Bool()
     val vxsat   = ValidIO(Vxsat())
     val vsDirty = Bool()

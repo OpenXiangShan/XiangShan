@@ -716,16 +716,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   require(RenameWidth <= CommitWidth)
 
   // wiring to csr
-  val wflags = (0 until CommitWidth).map(i => {
-    val v = io.commits.commitValid(i)
-    val info = io.commits.info(i)
-    v & info.wflags
-  })
-  val fflags = Wire(Valid(UInt(5.W)))
-  fflags.valid := io.commits.isCommit && VecInit(wflags).asUInt.orR
-  fflags.bits := wflags.zip(fflagsDataRead).map({
-    case (w, f) => Mux(w, f, 0.U)
-  }).reduce(_ | _)
 
   val dirtyFs = Wire(Valid(Bool()))
   val updateDirtyFs = RegInit(false.B)
@@ -864,6 +854,54 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     oldestRobidxUpdateVxsat := oldestWbUpdateVxsat.robIdx
   }
 
+  // fflags
+  val fflagsWidth = 5
+  val fflags = Wire(Vec(fflagsWidth, Valid(Bool())))
+  val updateFflags = RegInit(VecInit(Seq.fill(fflagsWidth)(false.B)))
+  val oldestRobidxUpdateFflags = RegInit(VecInit(Seq.fill(fflagsWidth)(0.U.asTypeOf(new RobPtr))))
+
+  class WbFflags extends Bundle{
+    val set = Bool()
+    val robIdx = new RobPtr
+  }
+
+  for (i <- 0 until fflagsWidth) {
+
+    fflags(i).valid := io.commits.isCommit && fflags(i).bits && updateFflags(i)
+    fflags(i).bits := io.commits.commitValid.zip(io.commits.robIdx).map {
+      case (valid, idx) => valid & (idx === oldestRobidxUpdateFflags(i))
+    }.reduce(_ | _)
+
+    val wbUpdateFflags = fflagsWBs.map(wb => wb.valid && wb.bits.wflags.get && wb.bits.fflags.get(i)).reduce(_ | _)
+
+    val wbUpdateFflagsSeq = fflagsWBs.map(wb =>
+      {
+        val s = Wire(new WbFflags)
+        s.set := wb.valid && wb.bits.wflags.get && wb.bits.fflags.get(i)
+        s.robIdx := wb.bits.robIdx
+        s
+      }
+    )
+    val oldestWbUpdateFflags = wbUpdateFflagsSeq.reduce{
+      (wb1, wb2) => Mux(
+        wb1.set && wb2.set,
+        Mux(isBefore(wb1.robIdx, wb2.robIdx), wb1, wb2),
+        Mux(wb1.set, wb1, wb2)
+      )
+    }
+
+    when(!updateFflags(i) || fflags(i).valid) {
+      updateFflags(i) := wbUpdateFflags
+    }
+
+    when((!updateFflags(i) || fflags(i).valid) && wbUpdateFflags){
+      oldestRobidxUpdateFflags(i) := oldestWbUpdateFflags.robIdx
+    }.elsewhen(updateFflags(i) && wbUpdateFflags && isBefore(oldestWbUpdateFflags.robIdx, oldestRobidxUpdateFflags(i))){
+      oldestRobidxUpdateFflags(i) := oldestWbUpdateFflags.robIdx
+    }
+  }
+
+
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
@@ -945,7 +983,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // sync fflags/dirty_fs/vxsat to csr
-  io.csr.fflags   := RegNextWithEnable(fflags)
+  for(i <- 0 until fflagsWidth) {
+    io.csr.fflags(i) := RegNextWithEnable(fflags(i))
+  }
   io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
   io.csr.dirty_vs := GatedValidRegNext(dirty_vs)
   io.csr.vxsat    := RegNextWithEnable(vxsat)

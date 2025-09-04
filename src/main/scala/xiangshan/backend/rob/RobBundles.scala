@@ -225,7 +225,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val wfiEvent   = Input(Bool())
   val criticalErrorState = Input(Bool())
 
-  val fflags     = Output(Valid(UInt(5.W)))
+  val fflags     = Output(Vec(5, Valid(Bool())))
   val vxsat      = Output(Valid(Bool()))
   val vstart     = Output(Valid(UInt(XLEN.W)))
   val dirty_fs   = Output(Bool())
