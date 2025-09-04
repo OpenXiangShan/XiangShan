@@ -28,4 +28,5 @@ class InstrUncacheReq(implicit p: Parameters) extends InstrUncacheBundle {
 class InstrUncacheResp(implicit p: Parameters) extends InstrUncacheBundle {
   val data:    UInt = UInt(32.W) // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo
   val corrupt: Bool = Bool()
+  val denied:  Bool = Bool()
 }
