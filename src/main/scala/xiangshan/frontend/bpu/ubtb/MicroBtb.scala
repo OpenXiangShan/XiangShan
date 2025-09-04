@@ -158,7 +158,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
-    when(notUseful && t1_actualTaken) { // only train taken branches to ubtb
+    when(notUseful) {
       t1_updatedEntry.valid := true.B
       t1_updatedEntry.tag   := t1_tag
       t1_updatedEntry.usefulCnt.resetPositive() // usefulCnt inits at strong positive, in/decrease by policy
@@ -241,7 +241,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // select the entry: if hit, use the hit entry, otherwise use the victim from replacer (first not useful, or Plru)
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
-  when(t1_valid) {
+  when(t1_valid && (t1_hit || t1_actualTaken)) { // update entry if hit, or alloc entry only for taken branches
     entries(t1_updateIdx) := t1_updatedEntry
   }
 
