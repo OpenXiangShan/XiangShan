@@ -28,27 +28,6 @@ import xiangshan.frontend.bpu.ReplacerState
 class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
-  // use ReplacementPolicy class caclulate next state replace way
-  private val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
-
-  private val readWriteConflict = io.readValid && io.writeValid && (io.readSetIdx === io.writeSetIdx)
-  when(readWriteConflict) {
-    replacer.access(io.writeSetIdx, io.writeWayIdx)
-  }.otherwise {
-    when(io.writeValid) {
-      replacer.access(io.writeSetIdx, io.writeWayIdx)
-    }
-    when(io.readValid) {
-      val touchSets = Seq.fill(NumWays)(io.readSetIdx)
-      val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
-      touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
-        t.valid := r
-        t.bits  := i.U
-      }
-      replacer.access(touchSets, touchWays)
-    }
-  }
-
   // use PlruStateGen caclulate next state and replace way
   private val states           = Module(new ReplacerState(NumSets, NumWays, hasExtraReadPort = true))
   private val predReplacerGen  = Module(new PlruStateGen(NumWays, accessSize = NumWays))
@@ -80,17 +59,40 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   private val replacerState = states.io.readState.getOrElse(0.U)
 
   private val genReplaceWay = writeReplacerGen.way(replacerState)
-  private val replacerWay   = replacer.way(io.replaceSetIdx)
-  private val replacerDiff  = genReplaceWay === replacerWay
-  dontTouch(genReplaceWay)
-  dontTouch(replacerWay)
-  dontTouch(replacerDiff)
-  when(io.writeValid) {
-    assert(
-      replacerDiff,
-      "writeReplacerGen's replaceWay doesn't match replacer!"
-    )
+
+  if (EnableCommitGHistDiff) {
+    // use ReplacementPolicy class caclulate next state replace way
+    val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
+
+    val readWriteConflict = io.readValid && io.writeValid && (io.readSetIdx === io.writeSetIdx)
+    when(readWriteConflict) {
+      replacer.access(io.writeSetIdx, io.writeWayIdx)
+    }.otherwise {
+      when(io.writeValid) {
+        replacer.access(io.writeSetIdx, io.writeWayIdx)
+      }
+      when(io.readValid) {
+        val touchSets = Seq.fill(NumWays)(io.readSetIdx)
+        val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
+        touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
+          t.valid := r
+          t.bits  := i.U
+        }
+        replacer.access(touchSets, touchWays)
+      }
+    }
+    val replacerWay  = replacer.way(io.replaceSetIdx)
+    val replacerDiff = genReplaceWay === replacerWay
+    dontTouch(genReplaceWay)
+    dontTouch(replacerWay)
+    dontTouch(replacerDiff)
+    when(io.writeValid) {
+      assert(
+        replacerDiff,
+        "writeReplacerGen's replaceWay doesn't match replacer!"
+      )
+    }
   }
-  // io.victimWayIdx := writeReplacerGen.io.replaceWay
-  io.victimWayIdx := replacer.way(io.replaceSetIdx)
+
+  io.victimWayIdx := genReplaceWay
 }
