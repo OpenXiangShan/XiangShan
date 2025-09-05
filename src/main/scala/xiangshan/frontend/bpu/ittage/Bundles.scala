@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.SaturateCounter
 
 class IttageOffset(implicit p: Parameters) extends IttageBundle {
   val offset:      PrunedAddr = PrunedAddr(TargetOffsetWidth)
@@ -26,16 +27,21 @@ class IttageOffset(implicit p: Parameters) extends IttageBundle {
   val usePcRegion: Bool       = Bool()
 }
 
+class IttagePrediction(implicit p: Parameters) extends IttageBundle {
+  val hit:    Bool       = Bool()
+  val target: PrunedAddr = PrunedAddr(VAddrBits)
+}
+
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
-  val provider:          Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  val altProvider:       Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  val altDiffers:        Bool        = Bool()
-  val providerUsefulCnt: Bool        = Bool()
-  val providerCnt:       UInt        = UInt(ConfidenceCntWidth.W)
-  val altProviderCnt:    UInt        = UInt(ConfidenceCntWidth.W)
-  val allocate:          Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  val providerTarget:    PrunedAddr  = PrunedAddr(VAddrBits)
-  val altProviderTarget: PrunedAddr  = PrunedAddr(VAddrBits)
+  val provider:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
+  val altProvider:       Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
+  val altDiffers:        Bool            = Bool()
+  val providerUsefulCnt: SaturateCounter = new SaturateCounter(UsefulCntWidth)
+  val providerCnt:       SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+  val altProviderCnt:    SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+  val allocate:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
+  val providerTarget:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val altProviderTarget: PrunedAddr      = PrunedAddr(VAddrBits)
 
   val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 
