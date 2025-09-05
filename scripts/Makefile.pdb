@@ -31,6 +31,9 @@ PDB_LD_PRELOAD    := $(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1
 PDB_ARGS          ?=
 IMAGE_FILE        ?= 
 BATCH_ARGS        ?=
+RUN_ARGS           =  $(if $(IMAGE_FILE),-i $(IMAGE_FILE)) $(if $(BATCH_ARGS), --batch 1 $(BATCH_ARGS))
+
+
 $(if $(strip $(BATCH_ARGS)), $(eval BATCH_ARGS := --batch 1 $(BATCH_ARGS)))
 
 .PHONY: pdb pdb-run check-deps
@@ -55,13 +58,16 @@ $(PDB_HOME)/libUTSimTop.so: $(PDB_HOME)/picker.f
 		--lang python \
 		--tdir $(PDB_HOME)/pyxscore \
 		--fs $(PDB_HOME)/picker.f \
-		-V "--no-timing;--threads;128;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src" \
+		-V "--output-split;20000;--no-timing;--threads;128;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src" \
 		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(PDB_HOME)/pydifftest -ldifftest -Wl,-rpath='$$ORIGIN../pydifftest' -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
 
 pdb-run: check-deps
 	LD_PRELOAD="$(PDB_LD_PRELOAD)" \
 	PYTHONPATH="$(PDB_PYTHONPATH)" \
-  	python3 scripts/pdb-run.py $(PDB_ARGS) $(BATCH_ARGS) $(if $(IMAGE_FILE),-i $(IMAGE_FILE))
+  	python3 scripts/pdb-run.py $(PDB_ARGS) $(RUN_ARGS)
+
+pdb-test: 
+  make pdb-run IMAGE_FILE=ready-to-run/copy_and_run.bin BATCH_ARGS="-l --debug-level info -c 10000"
 
 check-deps:
 	@[ -f "$(PYTHON_DEP_FILE)" ] || { echo "Error: $(PYTHON_DEP_FILE) not found"; exit 1; }; \
@@ -71,3 +77,11 @@ check-deps:
 			{ echo "Error: Dependency requirement not satisfied, Please run 'pip install -r $(PYTHON_DEP_FILE)'"; exit 1; }; \
 	done
 
+package-pdb: 
+	cp -r scripts/xspdb ${PDB_HOME}/XSPdb
+	cp -r ${PDB_HOME}/pydifftest ${PDB_HOME}/XSPdb/xspdb
+	cp -r ${PDB_HOME}/pyxscore ${PDB_HOME}/XSPdb/xspdb
+	cp scripts/pdb-run.py ${PDB_HOME}/XSPdb
+	cp /workspace/Makefile ${PDB_HOME}/XSPdb
+	cd ${PDB_HOME}/XSPdb/xspdb/pyxscore && ln -srf ../pydifftest/_difftest.so libdifftest.so
+	tar -cjf $(PDB_HOME)/XSPdb.tar.bz2 -C $(PDB_HOME) XSPdb
