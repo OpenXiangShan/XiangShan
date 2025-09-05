@@ -196,7 +196,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* training stage 1 */
   private val t1_train_valid      = RegEnable(io.train.valid, io.enable)
   private val t1_train            = RegEnable(io.train.bits, io.train.valid)
-  private val t1_taken            = t1_train.taken
+  private val t1_taken            = t1_train.branches(0).bits.taken
   private val t1_internalBankIdx  = getInternalBankIndex(t1_train.startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx)
   private val t1_thisSetIdx       = getSetIndex(t1_train.startVAddr)
@@ -211,22 +211,23 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // FIXME: take branch attribute and target into account
   private val t1_updateHit = t1_train_valid &&
     (t1_meta.hitMask zip t1_meta.positions map {
-      case (hit, pos) => hit && pos === t1_train.cfiPosition
+      case (hit, pos) => hit && pos === t1_train.branches(0).bits.cfiPosition
     }).reduce(_ || _)
   private val t1_writeValid = t1_train_valid && !t1_updateHit && t1_taken
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
   t1_writeEntry.valid           := true.B   // FIXME: invalidate
   t1_writeEntry.tag             := getTag(t1_train.startVAddr)
-  t1_writeEntry.position        := t1_train.cfiPosition
-  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.target)
-  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_train.target)
-  t1_writeEntry.attribute       := t1_train.attribute
+  t1_writeEntry.position        := t1_train.branches(0).bits.cfiPosition
+  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_train.branches(0).bits.target)
+  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_train.branches(0).bits.target)
+  t1_writeEntry.attribute       := t1_train.branches(0).bits.attribute
   t1_writeEntry.stronglyBiased  := false.B  // FIXME
   t1_writeEntry.replaceCnt      := DontCare // FIXME:
   private val t1_writeWayMask = UIntToOH(t1_LFSR(log2Ceil(NumWay) - 1, 0))
   private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
-    bankIdx.U === (t1_train.cfiPosition.asBools.last + t1_alignBankIdx) // FIXME: not working for NumAlignBanks > 2
+    // FIXME: not working for NumAlignBanks > 2
+    bankIdx.U === (t1_train.branches(0).bits.cfiPosition.asBools.last + t1_alignBankIdx)
   )
 
   // Write to SRAM

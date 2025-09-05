@@ -140,11 +140,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // ras
   ras.io.commit.valid            := commitUpdate.valid
-  ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
+  ras.io.commit.bits.attribute   := commitUpdate.bits.branches(0).bits.attribute
   ras.io.commit.bits.startPc     := commitUpdate.bits.startVAddr.toUInt
   ras.io.commit.bits.isRvc       := false.B // commitUpdate.bits.isRvc
   ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
-  ras.io.commit.bits.cfiPosition := commitUpdate.bits.cfiPosition
+  ras.io.commit.bits.cfiPosition := commitUpdate.bits.branches(0).bits.cfiPosition
 
   tage.io.mbtbResult := mbtb.io.result
 
@@ -321,8 +321,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.prediction.bits.ftqOffset.valid,
-      io.toFtq.prediction.bits.ftqOffset.bits,
+      io.toFtq.prediction.bits.takenCfiOffset.valid,
+      io.toFtq.prediction.bits.takenCfiOffset.bits,
       FetchBlockInstNum.U
     ),
     io.toFtq.prediction.fire,
