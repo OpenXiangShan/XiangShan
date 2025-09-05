@@ -18,25 +18,55 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
-  val valid:  Bool            = Bool()
-  val tag:    UInt            = UInt(TagWidth.W)
-  val ctr:    SaturateCounter = new SaturateCounter(CtrWidth)
-  val useful: SaturateCounter = new SaturateCounter(UsefulWidth)
+  val valid:     Bool            = Bool()
+  val tag:       UInt            = UInt(TagWidth.W)
+  val takenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 }
 
-class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasTageParameters {
-  val setIdx:   UInt                 = UInt(BaseTableSetIdxLen.W)
-  val ctrs:     Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val waymasks: UInt                 = UInt(FetchBlockAlignInstNum.W)
+class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val setIdx:    UInt                 = UInt(BaseTableSetIdxWidth.W)
+  val wayMask:   UInt                 = UInt(FetchBlockAlignInstNum.W)
+  val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
 }
 
-class TageMeta(implicit p: Parameters) extends TageBundle {
-  val valid:               Bool                 = Bool()
-  val baseTableCtrs:       Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val debug_taken:         Bool                 = Bool()
-  val debug_takenPosition: UInt                 = UInt(FetchBlockInstNum.W)
+class TableSramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val needResetUsefulCtr: Bool           = Bool()
+  val setIdx:             UInt           = UInt(log2Ceil(numSets / NumBanks).W)
+  val wayMask:            UInt           = UInt(NumWays.W)
+  val data:               Vec[TageEntry] = Vec(NumWays, new TageEntry)
+}
+
+class TableResult(implicit p: Parameters) extends TageBundle {
+  val hasProvider:      Bool            = Bool()
+  val providerTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
+}
+
+class TableData(implicit p: Parameters) extends TageBundle {
+  val hitWayMask: Vec[Bool] = Vec(NumWays, Bool())
+  val takenCtr:   Vec[UInt] = Vec(NumWays, UInt(TakenCtrWidth.W))
+  val usefulCtr:  Vec[UInt] = Vec(NumWays, UInt(UsefulCtrWidth.W))
+}
+
+// TODO: temp, remove it
+class BranchInfo(implicit p: Parameters) extends TageBundle {
+  val taken:      Bool            = Bool()
+  val target:     PrunedAddr      = PrunedAddr(VAddrBits)
+  val position:   UInt            = UInt(CfiPositionWidth.W)
+  val attribute:  BranchAttribute = new BranchAttribute
+  val mispredict: Bool            = Bool()
+}
+
+// TODO: temp, remove it
+class ResolveTrain(implicit p: Parameters) extends TageBundle {
+  val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
+  val branches:   Vec[Valid[BranchInfo]] = Vec(NumResolveBranches, Valid(new BranchInfo))
 }

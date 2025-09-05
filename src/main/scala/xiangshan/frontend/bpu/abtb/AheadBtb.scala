@@ -22,14 +22,13 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbHelper
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with BtbHelper {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
     val redirectValid: Bool = Input(Bool())
     val overrideValid: Bool = Input(Bool())
@@ -143,9 +142,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
   private val s2_taken       = s2_takenMask.reduce(_ || _)
 
-  private val s2_positions               = s2_realEntries.map(_.position)
-  private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
-  private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
+  private val s2_positions                = s2_realEntries.map(_.position)
+  private val s2_firstTakenEntryWayMaskOH = getFirstTakenBranchOH(s2_positions, s2_takenMask)
+  private val s2_firstTakenEntry          = Mux1H(s2_firstTakenEntryWayMaskOH, s2_realEntries)
 
   // When detect multi-hit, we need to invalidate one entry.
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
@@ -168,7 +167,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   meta.valid           := s2_valid
   meta.hitMask         := s2_hitMask
   meta.taken           := s2_taken
-  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryWayIdxOH)
+  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryWayMaskOH)
   meta.attributes      := s2_realEntries.map(_.attribute)
   meta.positions       := s2_positions
   meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits

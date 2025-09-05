@@ -53,15 +53,15 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val valid              = Bool()
-  val hitMask            = Vec(NumAlignBanks * NumWay, Bool())
-  val stronglyBiasedMask = Vec(NumAlignBanks * NumWay, Bool())
-  val positions          = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val hitMask            = Vec(MainBtbResultNumEntries, Bool())
+  val stronglyBiasedMask = Vec(MainBtbResultNumEntries, Bool())
+  val positions          = Vec(MainBtbResultNumEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val attributes         = Vec(MainBtbResultNumEntries, new BranchAttribute)
 }
 
 class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
-  val hitMask    = Vec(NumAlignBanks * NumWay, Bool())
-  val positions  = Vec(NumAlignBanks * NumWay, UInt(CfiPositionWidth.W)) // FIXME: use correct one
-  val targets    = Vec(NumAlignBanks * NumWay, PrunedAddr(VAddrBits))
-  val attributes = Vec(NumAlignBanks * NumWay, new BranchAttribute)
+  val hitMask    = Vec(MainBtbResultNumEntries, Bool())
+  val positions  = Vec(MainBtbResultNumEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val targets    = Vec(MainBtbResultNumEntries, PrunedAddr(VAddrBits))
+  val attributes = Vec(MainBtbResultNumEntries, new BranchAttribute)
 }
