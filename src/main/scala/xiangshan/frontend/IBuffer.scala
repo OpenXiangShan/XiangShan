@@ -158,7 +158,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
-  if (env.TraceRTLMode) {
+  if (env.TraceRTLMode && !env.TraceRTLSYNTHESIS) {
     val traceDriveCollector = Module(new TraceDriveCollector())
     (traceDriveCollector.io.in zip io.out).foreach{ case (t, o) =>
       t.specifyField(

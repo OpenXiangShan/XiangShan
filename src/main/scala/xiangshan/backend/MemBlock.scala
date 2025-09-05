@@ -1927,39 +1927,41 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
 
   // ChiselMap but divided by spec path(wrong or arch)
-  def getAddr(x: DecoupledIO[MemExuInput]): UInt = {
-    if (env.TraceRTLMode) x.bits.uop.traceInfo.memoryAddrVA
-    else (x.bits.src(0) + SignExt(x.bits.uop.imm(11, 0), VAddrBits))
-  }
-  def getPC(x: DecoupledIO[MemExuInput]): UInt = x.bits.simDebugPC
+  if (p(PerfCounterOptionsKey).enablePerfPrint) {
+    def getAddr(x: DecoupledIO[MemExuInput]): UInt = {
+      if (env.TraceRTLMode) x.bits.uop.traceInfo.memoryAddrVA
+      else (x.bits.src(0) + SignExt(x.bits.uop.imm(11, 0), VAddrBits))
+    }
+    def getPC(x: DecoupledIO[MemExuInput]): UInt = x.bits.simDebugPC
 
-  genSpecPathChiselMap("MemLoadInstr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
-    getPC, x => FuType.isLoad(x.bits.uop.fuType))
-  genSpecPathChiselMap("MemStoreInstr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
-    getPC, x => FuType.isStore(x.bits.uop.fuType))
-  genSpecPathChiselMap("MemLoadVAddr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
-    getAddr, x => FuType.isLoad(x.bits.uop.fuType))
-  genSpecPathChiselMap("MemStoreVAddr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
-    getAddr, x => FuType.isStore(x.bits.uop.fuType))
+    genSpecPathChiselMap("MemLoadInstr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
+      getPC, x => FuType.isLoad(x.bits.uop.fuType))
+    genSpecPathChiselMap("MemStoreInstr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
+      getPC, x => FuType.isStore(x.bits.uop.fuType))
+    genSpecPathChiselMap("MemLoadVAddr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
+      getAddr, x => FuType.isLoad(x.bits.uop.fuType))
+    genSpecPathChiselMap("MemStoreVAddr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
+      getAddr, x => FuType.isStore(x.bits.uop.fuType))
 
-  def genSpecPathChiselMap(name: String, uops: Seq[DecoupledIO[MemExuInput]], keyF: DecoupledIO[MemExuInput] => UInt, typeF: DecoupledIO[MemExuInput] => Bool) = {
-    val issueUopsValid = uops.map(x => x.fire && typeF(x))
-    val issueUopsKey = uops.map(keyF)
-    val issueUopsRobIdx = uops.map(_.bits.uop.robIdx)
-    val issueUopsValue = WireInit(VecInit(Seq.fill(uops.length)(1.U)))
-    val redirectRobIdx = Wire(Valid(new RobPtr))
-    val commitRobIdx = Wire(Valid(new RobPtr))
-    redirectRobIdx.valid := io.redirect.valid
-    redirectRobIdx.bits := io.redirect.bits.robIdx
-    commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
-    commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtrNext
-    ChiselMapWithSpecDivide(
-      name, "MemoryBlock", RobSize,
-      VecInit(issueUopsKey), issueUopsValue,
-      VecInit(issueUopsValid), VecInit(issueUopsRobIdx),
-      redirectRobIdx, commitRobIdx,
-      clock, reset, basicDB = true
-    )
+    def genSpecPathChiselMap(name: String, uops: Seq[DecoupledIO[MemExuInput]], keyF: DecoupledIO[MemExuInput] => UInt, typeF: DecoupledIO[MemExuInput] => Bool) = {
+      val issueUopsValid = uops.map(x => x.fire && typeF(x))
+      val issueUopsKey = uops.map(keyF)
+      val issueUopsRobIdx = uops.map(_.bits.uop.robIdx)
+      val issueUopsValue = WireInit(VecInit(Seq.fill(uops.length)(1.U)))
+      val redirectRobIdx = Wire(Valid(new RobPtr))
+      val commitRobIdx = Wire(Valid(new RobPtr))
+      redirectRobIdx.valid := io.redirect.valid
+      redirectRobIdx.bits := io.redirect.bits.robIdx
+      commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
+      commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtrNext
+      ChiselMapWithSpecDivide(
+        name, "MemoryBlock", RobSize,
+        VecInit(issueUopsKey), issueUopsValue,
+        VecInit(issueUopsValid), VecInit(issueUopsRobIdx),
+        redirectRobIdx, commitRobIdx,
+        clock, reset, basicDB = true
+      )
+    }
   }
 
   val pfevent = Module(new PFEvent)

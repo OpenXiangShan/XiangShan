@@ -22,6 +22,7 @@ import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError}
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
 import utility.ParallelPriorityMux
+import chisel3.experimental.Trace
 
 class TracePredInfoBundle extends Bundle {
   val fixTarget = UInt(64.W)
@@ -71,6 +72,59 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
 
 class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[TraceBufferPtr](Size)
 
+class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
+  with TraceParams
+  with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle {
+    val enable = Input(Bool())
+    val insts = Output(Vec(TraceFetchWidth, new TraceInstrInnerBundle()))
+    val redirect_valid = Input(Bool())
+    val redirect_instID = Input(UInt(64.W))
+    val workingState = Input(Bool())
+  })
+
+  if (env.TraceRTLSYNTHESIS) {
+    val file_reader = Module(new TraceRTL_FileReader())
+    file_reader.clock := clock
+    file_reader.reset := reset
+    file_reader.enable := io.enable
+    file_reader.redirect_valid := io.redirect_valid
+    file_reader.redirect_instID := io.redirect_instID
+    file_reader.workingState := io.workingState
+
+    io.insts.zipWithIndex.foreach { case (inst, i) =>
+      inst.InstID := file_reader.index + i.U
+      inst.pcVA := file_reader.instr_pc_va(i)
+      inst.pcPA := file_reader.instr_pc_pa(i)
+      inst.memoryAddrVA := file_reader.memory_addr_va(i);
+      inst.memoryAddrPA := file_reader.memory_addr_pa(i);
+      inst.target := file_reader.target(i);
+      inst.inst := file_reader.instr(i);
+      inst.memorySize := file_reader.memory_size(i);
+      inst.memoryType := file_reader.memory_type(i);
+      inst.branchTaken := file_reader.branch_taken(i);
+      inst.branchType := file_reader.branch_type(i);
+      inst.exception := file_reader.exception(i);
+    }
+  } else {
+    val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
+    val traceRedirecter = Module(new TraceRedirectHelper)
+
+    traceRedirecter.clock := clock
+    traceRedirecter.reset := reset
+    traceRedirecter.enable := io.redirect_valid
+    traceRedirecter.InstID := io.redirect_instID
+
+    traceReaderHelper.clock := clock
+    traceReaderHelper.reset := reset
+    traceReaderHelper.enable := io.enable
+
+    io.insts := traceReaderHelper.insts
+  }
+
+}
+
+
 class TraceReader(implicit p: Parameters) extends TraceModule
   with TraceParams
   with HasCircularQueuePtrHelper {
@@ -82,21 +136,21 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   } else {
     val redirect = WireInit(io.redirect)
     val traceBuffer = RegInit(0.U.asTypeOf(Vec(TraceBufferSize, new TraceInstrBundle())))
-    val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
-    val traceRedirecter = Module(new TraceRedirectHelper)
+    val trace_reader_helper = Module(new TraceReaderHelperWrapper())
+    // val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
+    // val traceRedirecter = Module(new TraceRedirectHelper)
     val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
     val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
     val enqPtrVec = Wire(Vec(TraceFetchWidth, new TraceBufferPtr(TraceBufferSize)))
 
     val workingState = RegInit(false.B)
     val startCount = RegInit(0.U(4.W))
-    when (!workingState && (startCount < 10.U)) {
+    when (startCount < 10.U) {
       startCount := startCount + 1.U
     }
     when (startCount === 5.U) {
       workingState := true.B
     }
-
 
     val readTraceEnable = !isFull(enqPtr, deqPtr) &&
       (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U) &&
@@ -112,19 +166,25 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
     when (readTraceEnableForBuffer) {
       (0 until TraceFetchWidth).foreach { case i =>
-        traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(traceReaderHelper.insts(i))
+        traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(trace_reader_helper.io.insts(i))
       }
     }
 
-    traceRedirecter.clock := clock
-    traceRedirecter.reset := reset
-    traceRedirecter.enable := redirect.valid
-    traceRedirecter.InstID := redirect.bits.traceInfo.InstID +
+    trace_reader_helper.io.enable := readTraceEnableForHelper
+    trace_reader_helper.io.redirect_valid := redirect.valid && workingState
+    trace_reader_helper.io.redirect_instID := redirect.bits.traceInfo.InstID +
       Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
+    trace_reader_helper.io.workingState := workingState
 
-    traceReaderHelper.clock := clock
-    traceReaderHelper.reset := reset
-    traceReaderHelper.enable := readTraceEnableForHelper
+    // traceRedirecter.clock := clock
+    // traceRedirecter.reset := reset
+    // traceRedirecter.enable := redirect.valid
+    // traceRedirecter.InstID := redirect.bits.traceInfo.InstID +
+    //   Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
+
+    // traceReaderHelper.clock := clock
+    // traceReaderHelper.reset := reset
+    // traceReaderHelper.enable := readTraceEnableForHelper
 
     io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
       val ptr = (deqPtr + i.U).value
@@ -174,7 +234,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     }
     when (redirect.valid) {
       debugRedirectDelayCounter := RedirectDelayNum.U
-      debugRedirectInstID := traceRedirecter.InstID
+      debugRedirectInstID := trace_reader_helper.io.redirect_instID
       debugRedirectTarget := redirect.bits.cfiUpdate.target
     }
 

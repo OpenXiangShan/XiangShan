@@ -18,7 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.ParallelPosteriorityMux
+import utility.{ParallelPosteriorityMux, XSError}
 import xiangshan.frontend.tracertl.ChiselRecordForField._
 import xiangshan.frontend.{FetchRequestBundle, PreDecodeResp, PredCheckerResp, BranchPredictionRedirect}
 
@@ -88,10 +88,12 @@ if (env.TraceRTLMode) {
   val preDecoder = Module(new TracePreDecoder)
   val predChecker = Module(new TracePredictChecker)
   val traceChecker = Module(new TraceChecker)
-  val traceAligner = Module(new TraceAlignToIFUCut)
+  // val traceAlignerOld = Module(new TraceAlignToIFUCut)
+  val traceAligner = Module(new TraceAlignParallel)
   // This wrong path aligner is used to to generate the wrong path trace insts
   // wrong path instr comes from "arch" path
-  val traceAlignerWrongPath = Module(new TraceAlignWrongPath)
+  // FIXME: add param to control FPGA-WrongPathEmu
+  // val traceAlignerWrongPath = Module(new TraceAlignWrongPath)
   val traceFakeICacheWrapper = Module(new TraceFakeICacheWrapper)
 
   val traceWrongPathEmu = RegInit(false.B)
@@ -111,10 +113,10 @@ if (env.TraceRTLMode) {
       !fastSimInst &&
       convergenceCheck
       ) {
-      traceWrongPathEmu := true.B
+      // traceWrongPathEmu := true.B
     }
     when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
-      traceWrongPathEmu := false.B
+      // traceWrongPathEmu := false.B
     }
   }
 
@@ -205,10 +207,10 @@ if (env.TraceRTLMode) {
     // _.icacheData := traceFakeICache.io.resp,
     _.icacheData := traceFakeICacheWrapper.io.icacheDataOut,
   )
-  traceAlignerWrongPath.io.specifyField(
-    _.debug_valid := io.fromIFU.valid,
-    _.traceInsts := traceReader.io.traceInsts,
-  )
+  // traceAlignerWrongPath.io.specifyField(
+  //   _.debug_valid := io.fromIFU.valid,
+  //   _.traceInsts := traceReader.io.traceInsts,
+  // )
   preDecoder.io.specifyField(
     _.traceInsts := traceInstIFUCut,
     _.pdValid := traceAligner.io.pdValid,
@@ -239,10 +241,29 @@ if (env.TraceRTLMode) {
     _.block := traceDriver.io.out.block,
     _.traceWrongPathEmu := traceWrongPathEmu,
   )
-  when (io.traceWrongPathEmu) {
-    io.traceAlignInsts := traceAlignerWrongPath.io.cutInsts
-  }
+  // when (io.traceWrongPathEmu) {
+  //   io.traceAlignInsts := traceAlignerWrongPath.io.cutInsts
+  // }
 
+  // check old traceAligner and new
+  // traceAlignerOld.io.specifyField(
+  //   _.debug_valid := io.fromIFU.valid,
+  //   _.traceInsts := traceReader.io.traceInsts,
+  //   _.predStartAddr := io.fromIFU.predInfo.startAddr,
+  //   _.instRange := io.fromIFU.predInfo.instRange,
+  //   _.lastHalfValid := concede2Bytes,
+  //   _.icacheData := traceFakeICache.io.resp,
+  // )
+
+  // // XSError(traceAligner.io.traceRange.asUInt =/= traceAlignerOld.io.traceRange.asUInt,
+  // XSError((traceAligner.io.traceRange.asUInt & traceAlignerOld.io.traceRange.asUInt) =/= traceAlignerOld.io.traceRange.asUInt,
+  //   "TraceAlignParallel and TraceAlignToIFUCut should have the same traceRange")
+  // XSError(traceAligner.io.pdValid.asUInt =/= traceAlignerOld.io.pdValid.asUInt,
+  //   "TraceAlignParallel and TraceAlignToIFUCut should have the same pdValid")
+  // XSError(traceAligner.io.traceForceJump =/= traceAlignerOld.io.traceForceJump,
+  //   "TraceAlignParallel and TraceAlignToIFUCut should have the same traceForceJump")
+  // XSError(traceAligner.io.traceRangeTaken2B =/= (traceAlignerOld.io.traceRangeTaken2B || traceAlignerOld.io.instRangeTaken2B),
+  //   "TraceAlignParallel and TraceAlignToIFUCut should have the same traceRangeTaken2B")
 } else {
   io <> DontCare
 }

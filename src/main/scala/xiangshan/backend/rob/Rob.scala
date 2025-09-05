@@ -1359,86 +1359,88 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate(s"redirect_use_snapshot", io.redirect.valid && io.snpt.useSnpt)
 
   // dynamic control flow graph
-  val dcfgKey = Wire(Vec(CommitWidth, new DCFGKeyOuterBundle))
-  val dcfgValue = Wire(Vec(CommitWidth, new DCFGValueOuterBundle))
-  val dcfgValid = Wire(Vec(CommitWidth, Bool()))
-  val dcfg = Module(new XSPerfDCFG(width = CommitWidth))
-  dcfg.io.key := dcfgKey
-  dcfg.io.value := dcfgValue
-  dcfg.io.commit_valid := dcfgValid
-  // XSPerfDCFG("dcfg", dcfgKey, dcfgValue, dcfgValid, clock, reset)
+  if (p(PerfCounterOptionsKey).enablePerfPrint) {
+    val dcfgKey = Wire(Vec(CommitWidth, new DCFGKeyOuterBundle))
+    val dcfgValue = Wire(Vec(CommitWidth, new DCFGValueOuterBundle))
+    val dcfgValid = Wire(Vec(CommitWidth, Bool()))
+    val dcfg = Module(new XSPerfDCFG(width = CommitWidth))
+    dcfg.io.key := dcfgKey
+    dcfg.io.value := dcfgValue
+    dcfg.io.commit_valid := dcfgValid
+    // XSPerfDCFG("dcfg", dcfgKey, dcfgValue, dcfgValid, clock, reset)
 
-  (0 until CommitWidth).foreach { i =>
-    dcfgKey(i).branchPC := io.commits.info(i).debug_pc.get
-    // FIXME: when merge new backend, the nFused should be updated
-    dcfgValue(i).nFused := 1.U + Mux(CommitType.isFused(io.commits.info(i).commitType), 1.U, 0.U)
-    dcfgValue(i).isBranch := io.commits.info(i).commitType === CommitType.BRANCH
-    dcfgValid(i) := io.commits.commitValid(i) && io.commits.isCommit
+    (0 until CommitWidth).foreach { i =>
+      dcfgKey(i).branchPC := io.commits.info(i).debug_pc.get
+      // FIXME: when merge new backend, the nFused should be updated
+      dcfgValue(i).nFused := 1.U + Mux(CommitType.isFused(io.commits.info(i).commitType), 1.U, 0.U)
+      dcfgValue(i).isBranch := io.commits.info(i).commitType === CommitType.BRANCH
+      dcfgValid(i) := io.commits.commitValid(i) && io.commits.isCommit
+    }
+
+    // PC-ChiselMap
+    class PCChiselMapBundle extends Bundle {
+      val pc = UInt(VAddrBits.W)
+    }
+    val pcMap = ChiselMap.createTable("PC", Vec(CommitWidth, new PCChiselMapBundle), basicDB = true)
+    val pcVec = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
+    pcVec.zipWithIndex.map{ case (x, i) =>
+      x.valid := io.commits.commitValid(i) && io.commits.isCommit
+      x.bits.pc := io.commits.info(i).debug_pc.get
+    }
+    pcMap.log(pcVec, 1.U, "PC", clock, reset)
+
+    // PC-Head, ChiselMap
+    val pcRobHeadMap = ChiselMap.createTable("PCRobHead", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcHead = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+    pcHead(0).valid := io.commits.commitValid(0) && io.commits.isCommit
+    pcHead(0).bits.pc := io.commits.info(0).debug_pc.get
+    pcRobHeadMap.log(pcHead, 1.U, "PCRoBHead", clock, reset)
+
+    // PC-Head, ChiselMap
+    val pcRobUopBlockMap = ChiselMap.createTable("PCRobUopBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcUopBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+    val headEntry_tmp = robEntries(deqPtr.value)
+    pcUopBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isUopWritebacked
+    pcUopBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
+    pcRobUopBlockMap.log(pcUopBlock, 1.U, "PCRoBUopBlock", clock, reset)
+
+    val pcRobBlockMap = ChiselMap.createTable("PCRobBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+    pcBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isWritebacked
+    pcBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
+    pcRobBlockMap.log(pcBlock, 1.U, "PCRoBBlock", clock, reset)
+
+    // PC-timer chiselmap
+    // ROB merge will make this counter im-precise
+    class InstrLatencyBundle extends Bundle {
+      val times = UInt(64.W)
+      val dispatch = UInt(64.W)
+      val rsEnq = UInt(64.W)
+      val rsSelect = UInt(64.W)
+      val rsIssue = UInt(64.W)
+      val exection = UInt(64.W)
+      val rsPlusFu = UInt(64.W)
+      val commit = UInt(64.W)
+    }
+    val pcLatencyMap = ChiselMap.createTableBase("PCLatency", Vec(CommitWidth, new PCChiselMapBundle), Vec(CommitWidth, new InstrLatencyBundle), basicDB = true)
+    val pcLatencyKey = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
+    val pcLatencyValue = Wire(Vec(CommitWidth, new InstrLatencyBundle))
+    (0 until CommitWidth).foreach { i =>
+      pcLatencyKey(i).valid := io.commits.commitValid(i) && io.commits.isCommit
+      pcLatencyKey(i).bits.pc := io.commits.info(i).debug_pc.get
+      pcLatencyValue(i).specifyField(
+        _.times := 1.U,
+        _.dispatch := dispatchLatency(i),
+        _.rsEnq := enqRsLatency(i),
+        _.rsSelect := selectLatency(i),
+        _.rsIssue := issueLatency(i),
+        _.exection := executeLatency(i),
+        _.rsPlusFu := rsFuLatency(i),
+        _.commit := commitLatency(i),
+      )
+    }
+    pcLatencyMap.log(pcLatencyKey, pcLatencyValue, "PCBackendLatency", clock, reset)
   }
-
-  // PC-ChiselMap
-  class PCChiselMapBundle extends Bundle {
-    val pc = UInt(VAddrBits.W)
-  }
-  val pcMap = ChiselMap.createTable("PC", Vec(CommitWidth, new PCChiselMapBundle), basicDB = true)
-  val pcVec = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
-  pcVec.zipWithIndex.map{ case (x, i) =>
-    x.valid := io.commits.commitValid(i) && io.commits.isCommit
-    x.bits.pc := io.commits.info(i).debug_pc.get
-  }
-  pcMap.log(pcVec, 1.U, "PC", clock, reset)
-
-  // PC-Head, ChiselMap
-  val pcRobHeadMap = ChiselMap.createTable("PCRobHead", Vec(1, new PCChiselMapBundle), basicDB = true)
-  val pcHead = Wire(Vec(1, Valid(new PCChiselMapBundle)))
-  pcHead(0).valid := io.commits.commitValid(0) && io.commits.isCommit
-  pcHead(0).bits.pc := io.commits.info(0).debug_pc.get
-  pcRobHeadMap.log(pcHead, 1.U, "PCRoBHead", clock, reset)
-
-  // PC-Head, ChiselMap
-  val pcRobUopBlockMap = ChiselMap.createTable("PCRobUopBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
-  val pcUopBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
-  val headEntry_tmp = robEntries(deqPtr.value)
-  pcUopBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isUopWritebacked
-  pcUopBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
-  pcRobUopBlockMap.log(pcUopBlock, 1.U, "PCRoBUopBlock", clock, reset)
-
-  val pcRobBlockMap = ChiselMap.createTable("PCRobBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
-  val pcBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
-  pcBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isWritebacked
-  pcBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
-  pcRobBlockMap.log(pcBlock, 1.U, "PCRoBBlock", clock, reset)
-
-  // PC-timer chiselmap
-  // ROB merge will make this counter im-precise
-  class InstrLatencyBundle extends Bundle {
-    val times = UInt(64.W)
-    val dispatch = UInt(64.W)
-    val rsEnq = UInt(64.W)
-    val rsSelect = UInt(64.W)
-    val rsIssue = UInt(64.W)
-    val exection = UInt(64.W)
-    val rsPlusFu = UInt(64.W)
-    val commit = UInt(64.W)
-  }
-  val pcLatencyMap = ChiselMap.createTableBase("PCLatency", Vec(CommitWidth, new PCChiselMapBundle), Vec(CommitWidth, new InstrLatencyBundle), basicDB = true)
-  val pcLatencyKey = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
-  val pcLatencyValue = Wire(Vec(CommitWidth, new InstrLatencyBundle))
-  (0 until CommitWidth).foreach { i =>
-    pcLatencyKey(i).valid := io.commits.commitValid(i) && io.commits.isCommit
-    pcLatencyKey(i).bits.pc := io.commits.info(i).debug_pc.get
-    pcLatencyValue(i).specifyField(
-      _.times := 1.U,
-      _.dispatch := dispatchLatency(i),
-      _.rsEnq := enqRsLatency(i),
-      _.rsSelect := selectLatency(i),
-      _.rsIssue := issueLatency(i),
-      _.exection := executeLatency(i),
-      _.rsPlusFu := rsFuLatency(i),
-      _.commit := commitLatency(i),
-    )
-  }
-  pcLatencyMap.log(pcLatencyKey, pcLatencyValue, "PCBackendLatency", clock, reset)
 
   // top-down info
   io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
@@ -1497,7 +1499,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
 
   // TraceRTL Collect Commit Trace to check the correctness of the pipeline
-  if (env.TraceRTLMode) {
+  if (env.TraceRTLMode && !env.TraceRTLSYNTHESIS) {
     when (io.enq.canAccept) {
       val hasNonWPEnq = Cat(io.enq.req.map{ case r =>
         r.valid && !r.bits.traceInfo.isWrongPath

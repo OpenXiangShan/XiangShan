@@ -1441,7 +1441,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
-  s3_out.bits.data            := s3_in.data
+  s3_out.bits.data            := TraceRTLDontCareValue(s3_in.data)
   s3_out.bits.debug.isMMIO    := s3_in.mmio
   s3_out.bits.debug.isPerfCnt := false.B
   s3_out.bits.debug.paddr     := s3_in.paddr
@@ -1603,7 +1603,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.lsq.uncache.ready := !s3_valid
   val s3_outexception = TraceRTLDontCareValue(ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive)
   io.ldout.bits        := s3_ld_wb_meta
-  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache)
+  io.ldout.bits.data   := TraceRTLDontCareValue(Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache))
   io.ldout.valid       := (s3_mmio.valid ||
                           (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)

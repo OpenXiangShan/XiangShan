@@ -75,6 +75,31 @@ object TraceInstrInnerBundle {
   }
 }
 
+class TraceRTL_FileReader()
+  extends ExtModule {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val enable = IO(Input(Bool()))
+
+  val index = IO(Output(UInt(64.W)))
+  val instr_pc_va = IO(Output(Vec(16, UInt(64.W))))
+  val instr_pc_pa = IO(Output(Vec(16, UInt(64.W))))
+  val memory_addr_va = IO(Output(Vec(16, UInt(64.W))))
+  val memory_addr_pa = IO(Output(Vec(16, UInt(64.W))))
+  val target = IO(Output(Vec(16, UInt(64.W))))
+  val instr = IO(Output(Vec(16, UInt(32.W))))
+  val memory_type = IO(Output(Vec(16, UInt(4.W))))
+  val memory_size = IO(Output(Vec(16, UInt(4.W))))
+  val branch_type = IO(Output(Vec(16, UInt(8.W))))
+  val branch_taken = IO(Output(Vec(16, UInt(8.W))))
+  val exception = IO(Output(Vec(16, UInt(8.W))))
+
+  val redirect_instID = IO(Input(UInt(64.W)))
+  val redirect_valid = IO(Input(Bool()))
+
+  val workingState = IO(Input(Bool()))
+}
+
 class TraceReaderHelper(width: Int)(implicit p: Parameters)
   extends ExtModule
   with HasExtModuleInline {
@@ -163,7 +188,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte exception,
        |  output byte fast_simulaiton,
        |  output longint InstID,
-       |  input  byte idx,
+       |  input  byte idx
        |);
        |""".stripMargin
     }
@@ -491,15 +516,22 @@ class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
     val resp = Valid(new TraceFakeICacheRespBundle)
   })
 
-  val helper = Module(new TraceICacheHelper)
-  helper.clock := clock
-  helper.reset := reset
-  helper.enable := io.req.valid
-  helper.addr := io.req.bits.addr
-  io.resp.valid := helper.legal_addr(0) && RegNext(io.req.valid)
-  io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
-  io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
-  io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+  if (env.TraceRTLSYNTHESIS) {
+    io.resp.valid := RegNext(io.req.valid)
+    io.resp.bits.data(0) := 0.U // TODO: Fixme
+    io.resp.bits.data(1) := 0.U
+    io.resp.bits.addr := RegEnable(0.U, io.req.valid)
+  } else {
+    val helper = Module(new TraceICacheHelper)
+    helper.clock := clock
+    helper.reset := reset
+    helper.enable := io.req.valid
+    helper.addr := io.req.bits.addr
+    io.resp.valid := helper.legal_addr(0) && RegNext(io.req.valid)
+    io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
+    io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
+    io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+  }
 }
 
 // Fake MMU, input is vaddr, output is paddr and hit

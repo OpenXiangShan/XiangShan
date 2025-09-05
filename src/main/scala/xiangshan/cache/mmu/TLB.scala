@@ -205,7 +205,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
   io.ptw.resp.ready := true.B
 
-  if (env.TraceRTLMode) {
+  if (env.TraceRTLMode && !env.TraceRTLSYNTHESIS) {
     (0 until Width).foreach { case idx: Int =>
       val ats = Module(new TraceFakeMMU())
       ats.io.valid := req(idx).valid
