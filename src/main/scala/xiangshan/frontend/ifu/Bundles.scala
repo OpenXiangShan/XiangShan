@@ -61,18 +61,19 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParam
 }
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
-  val ftqIdx:        FtqPtr                   = new FtqPtr
-  val doubline:      Bool                     = Bool()
-  val predTakenIdx:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val ftqEndOffset:  ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val invalidTaken:  Bool                     = Bool()
-  val startVAddr:    PrunedAddr               = PrunedAddr(VAddrBits)
-  val target:        PrunedAddr               = PrunedAddr(VAddrBits)
-  val instrRange:    UInt                     = UInt(PredictWidth.W)
-  val rawInstrValid: UInt                     = UInt(PredictWidth.W)
-  val pcHigh:        UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val pcHighPlus1:   UInt                     = UInt((VAddrBits - PcCutPoint).W)
-  val fetchSize:     UInt                     = UInt(log2Ceil(PredictWidth + 1).W)
+  val ftqIdx:         FtqPtr      = new FtqPtr
+  val doubleline:     Bool        = Bool()
+  val predTakenIdx:   Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+  val takenCfiOffset: Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+  val invalidTaken:   Bool        = Bool()
+  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val target:         PrunedAddr  = PrunedAddr(VAddrBits)
+  val instrRange:     UInt        = UInt(PredictWidth.W)
+  val rawInstrValid:  UInt        = UInt(PredictWidth.W)
+  val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val fetchSize:      UInt        = UInt(log2Ceil(PredictWidth + 1).W)
+  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
 
 class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
@@ -86,10 +87,11 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
-  val target     = PrunedAddr(VAddrBits)
-  val misIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val cfiIdx     = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val instrRange = UInt(PredictWidth.W)
+  val target       = PrunedAddr(VAddrBits)
+  val misIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val cfiIdx       = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val instrRange   = UInt(PredictWidth.W)
+  val invalidTaken = Bool()
 }
 
 /* ***** DB ***** */
@@ -116,4 +118,8 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val valid:          Bool    = Bool()
   val instrCount:     UInt    = UInt(log2Ceil(PredictWidth + 1).W)
   val prevIBufEnqPtr: IBufPtr = new IBufPtr
+  // A fallthrough does not always correspond to a half RVI instruction.
+  val isHalfInstr: Bool       = Bool()
+  val halfPc:      PrunedAddr = PrunedAddr(VAddrBits)
+  val halfData:    UInt       = UInt(16.W)
 }

@@ -73,7 +73,10 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   private val rearBound      = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
   private val rearBoundPlus1 = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
 
-  private val currentIsRvc = VecInit(rawInsts.map(isRVC))
+  private val currentIsRvc     = VecInit(rawInsts.map(isRVC))
+  private val realCurrentIsRvc = Wire(Vec(PredictWidth, Bool()))
+  realCurrentIsRvc    := currentIsRvc
+  realCurrentIsRvc(0) := Mux(io.req.bits.prevLastIsHalfRvi, false.B, currentIsRvc(0))
   def genBound(
       bound:        Vec[BoundInfo],
       start:        Int,
@@ -98,10 +101,10 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
     for (i <- start until end) {
       if (i == 0) {
         bound(0).isStart := checkThisIsStart(true.B)
-        bound(0).isEnd   := Mux(preIsHalfRvi, true.B, checkThisIsEnd(bound(0).isStart, currentIsRvc(0)))
+        bound(0).isEnd   := Mux(preIsHalfRvi, true.B, checkThisIsEnd(bound(0).isStart, realCurrentIsRvc(0)))
       } else {
         bound(i).isStart := checkThisIsStart(if (i == start) true.B else bound(i - 1).isEnd)
-        bound(i).isEnd   := checkThisIsEnd(bound(i).isStart, currentIsRvc(i))
+        bound(i).isEnd   := checkThisIsEnd(bound(i).isStart, realCurrentIsRvc(i))
       }
     }
   }
@@ -141,12 +144,11 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
     io.resp.bits.instrValid(i) := bound(i).isStart && io.req.bits.instrRange(i)
   }
   io.resp.valid := io.req.valid
-  io.resp.bits.isRvc := VecInit(io.resp.bits.instrValid.zip(currentIsRvc).map { case (valid, rvc) =>
+  io.resp.bits.isRvc := VecInit(io.resp.bits.instrValid.zip(realCurrentIsRvc).map { case (valid, rvc) =>
     valid & rvc
   })
-  io.resp.bits.isRvc(0) := Mux(io.req.bits.prevLastIsHalfRvi, false.B, io.resp.bits.instrValid(0) && currentIsRvc(0))
   io.resp.bits.isFirstLastHalfRvi := io.resp.bits.instrValid(io.req.bits.firstEndPos) &&
-    !currentIsRvc(io.req.bits.firstEndPos)
+    !realCurrentIsRvc(io.req.bits.firstEndPos) && !((io.req.bits.firstEndPos === 0.U) && io.req.bits.prevLastIsHalfRvi)
   io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPos) &&
-    !currentIsRvc(io.req.bits.endPos)
+    !realCurrentIsRvc(io.req.bits.endPos) && !((io.req.bits.endPos === 0.U) && io.req.bits.prevLastIsHalfRvi)
 }

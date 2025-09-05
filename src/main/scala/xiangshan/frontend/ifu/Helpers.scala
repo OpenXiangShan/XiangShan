@@ -110,6 +110,5 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
         ShiftType.ShiftRight3 -> (if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3))
       ))
     })
-
   }
 }

@@ -258,6 +258,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
+  ctrlBlock.io.fromBJUResolve := intExuBlock.io.toFrontendBJUResolve.get
   ctrlBlock.io.fromCSR.toDecode := intExuBlock.io.csrToDecode.get
   ctrlBlock.io.fromCSR.traceCSR := intExuBlock.io.csrio.get.traceCSR
   ctrlBlock.io.fromCSR.instrAddrTransType := RegNext(intExuBlock.io.csrio.get.instrAddrTransType)

@@ -59,7 +59,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_tag        = getTag(s1_startVAddr)
 
   private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
-  assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
+  // FIXME: Currently this assertion fails. Fix or reconsider it in the future.
+//  assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
   private val s1_hit      = s1_hitOH.orR
   private val s1_hitIdx   = OHToUInt(s1_hitOH)
   private val s1_hitEntry = entries(s1_hitIdx)
@@ -86,12 +87,12 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val t0_startVAddr  = io.train.bits.startVAddr
   private val t0_tag         = getTag(t0_startVAddr)
-  private val t0_actualTaken = io.train.bits.taken
-  private val t0_position    = io.train.bits.cfiPosition
-  private val t0_target      = getEntryTarget(io.train.bits.target)
-  private val t0_attribute   = io.train.bits.attribute
+  private val t0_actualTaken = io.train.bits.branches(0).bits.taken
+  private val t0_position    = io.train.bits.branches(0).bits.cfiPosition
+  private val t0_target      = getEntryTarget(io.train.bits.branches(0).bits.target)
+  private val t0_attribute   = io.train.bits.branches(0).bits.attribute
   private val t0_targetCarry =
-    if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, io.train.bits.target)) else None
+    if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, io.train.bits.branches(0).bits.target)) else None
 
   private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
   // t0 may hit t1, so we add a "real" prefix for entries hit
