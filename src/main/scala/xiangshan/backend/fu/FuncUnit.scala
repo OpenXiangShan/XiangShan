@@ -14,7 +14,7 @@ import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLDontCare, TraceRTLDontCareValue}
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -106,6 +106,8 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
 
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)
+    // TraceRTLDontCare(io.in.bits.data)
+    io.in.bits.data.src := DontCare
   }
 
   // should only be used in non-piped fu
@@ -198,7 +200,7 @@ trait HasPipelineReg { this: FuncUnit =>
       case(( ctrl,data), perf) => {
         val out = Wire(new FuncUnitInput(cfg))
         out.ctrl := ctrl
-        out.data := data
+        out.data := TraceRTLDontCareValue(data)
         out.perfDebugInfo := perf
         out
       }

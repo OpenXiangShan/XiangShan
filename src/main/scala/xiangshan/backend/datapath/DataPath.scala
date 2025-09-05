@@ -334,6 +334,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   intRfWdata := io.fromIntWb.map(x => RegEnable(x.data, x.wen)).toSeq
   intRfWen := RegNext(VecInit(io.fromIntWb.map(_.wen).toSeq))
+  if (env.TraceRTLMode) {
+    intRfWdata := DontCare
+  }
 
   for (portIdx <- intRfRaddr.indices) {
     if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -345,6 +348,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   fpRfWaddr := io.fromFpWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   fpRfWdata := io.fromFpWb.map(x => RegEnable(x.data, x.wen)).toSeq
   fpRfWen := RegNext(VecInit(io.fromFpWb.map(_.wen).toSeq))
+  if (env.TraceRTLMode) {
+    fpRfWdata := DontCare
+  }
 
   for (portIdx <- fpRfRaddr.indices) {
     if (fpRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -356,6 +362,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   vfRfWaddr := io.fromVfWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   vfRfWdata := io.fromVfWb.map(x => RegEnable(x.data, x.wen)).toSeq
   vfRfWen.foreach(_.zip(io.fromVfWb.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource } )
+  if (env.TraceRTLMode) {
+    vfRfWdata := DontCare
+  }
 
   for (portIdx <- vfRfRaddr.indices) {
     if (vfRFReadArbiter.io.out.isDefinedAt(portIdx))

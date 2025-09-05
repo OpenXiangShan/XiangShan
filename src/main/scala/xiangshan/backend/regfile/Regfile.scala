@@ -71,7 +71,7 @@ class Regfile
   width: Int,
   bankNum: Int = 1,
   isVlRegfile: Boolean = false,
-) extends Module {
+)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
@@ -80,6 +80,7 @@ class Regfile
   override def desiredName = name
   println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
 
+if (!env.TraceRTLMode) {
   val mem_0 = if (isVlRegfile) RegInit(0.U(len.W)) else Reg(UInt(len.W))
   val mem = Reg(Vec(numPregs, UInt(len.W)))
   val memForRead = Wire(Vec(numPregs, UInt(len.W)))
@@ -131,6 +132,11 @@ class Regfile
   for (rport <- io.debug_rports) {
     rport.data := memForRead(rport.addr)
   }
+
+} else {
+  io <> DontCare
+}
+
 }
 
 object Regfile {
