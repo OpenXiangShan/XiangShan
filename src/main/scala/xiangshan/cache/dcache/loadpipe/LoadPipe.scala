@@ -503,7 +503,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val useless_prefetch = s2_miss_req_fire && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
 
-  val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && isFromL1Prefetch(s2_hit_prefetch) && s2_req.isFirstIssue
+  val prefetch_hit = Wire(Bool()) // assigned in s3 for filtering
 
   io.prefetch_info.naive.total_prefetch := total_prefetch
   io.prefetch_info.naive.late_hit_prefetch := late_hit_prefetch
@@ -592,6 +592,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
   io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  prefetch_hit := s3_clear_pf_flag_en && !io.counter_filter_query.resp
 
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
   XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)
