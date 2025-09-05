@@ -53,9 +53,9 @@ class CounterFilterQueryBundle(implicit p: Parameters) extends DCacheBundle {
 }
 
 // no Set Blocking in LoadPipe, so when counting useful prefetch counter, duplicate result occurs
-// s0    s1     s2     s3
-// r                   w
-// if 3 load insts is accessing the same cache line(set0, way0) in s0, s1, s2
+// s0    s1     s2     s3     s4(in PrefetchArray, write next cycle of wreq)
+// r                   wreq   w
+// if 3 load insts is accessing the same cache line(set0, way0) in s0, s1, s2, s3
 // they think they all prefetch hit, increment useful prefetch counter 3 times
 // so when load arrives at s3, save it's set&way to an FIFO, all loads will search this FIFO to avoid this case
 class CounterFilter()(implicit p: Parameters) extends DCacheModule {
@@ -120,7 +120,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
       x := x + allocNum
     }
   }
-  last3CycleAlloc := RegNext(RegNext(allocNum))
+  last3CycleAlloc := RegNext(RegNext(RegNext(allocNum)))
 
   // deq
   for(i <- (0 until deqLen)) {
@@ -295,7 +295,7 @@ class FDPrefetcherMonitor()(implicit p: Parameters) extends XSModule {
   )
 
   XSPerfAccumulate("io_refill", io.refill)
-  XSPerfAccumulate("total_prefetch_en", io.accuracy.total_prefetch)
+  XSPerfAccumulate("total_prefetch_new_data_en", io.accuracy.total_prefetch)
   XSPerfAccumulate("useful_prefetch_en", PopCount(io.accuracy.useful_prefetch) + io.timely.late_prefetch)
   XSPerfAccumulate("late_prefetch_en", io.timely.late_prefetch)
   XSPerfAccumulate("demand_miss_en", PopCount(io.pollution.demand_miss))
