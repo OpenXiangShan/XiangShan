@@ -87,6 +87,8 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
     }
   }
 
+  def getPCHash(pc: UInt): UInt = (pc >> 1) ^ (pc >> 4)
+
   def getTrainBaseAddr(vaddr: UInt): UInt = {
     if (useByteAddr) {
       vaddr
@@ -138,8 +140,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   /*** built-in function */
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until HtWaySize).map(f))
-  def getIndex(pc: UInt): UInt = pc(HtSetWidth + PcOffsetWidth - 1, PcOffsetWidth)
-  def getTag(pc: UInt): UInt = pc(HtPcTagWidth + HtSetWidth + PcOffsetWidth - 1, HtSetWidth + PcOffsetWidth)
+  def getIndex(pc: UInt): UInt = getPCHash(pc)(HtSetWidth-1, 0)
+  def getTag(pc: UInt): UInt = getPCHash(pc)(HtPcTagWidth + HtSetWidth - 1, HtSetWidth)
   def getTrainBaseAddr2HT(vaddr: UInt): UInt = {
     getTrainBaseAddr(vaddr)(HtLineVAddrWidth - 1, 0)
   }
@@ -413,8 +415,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   def thresholdOfL2PF: Int = 2 // ((1 << DtCntWidth) * 0.5).toInt
   def thresholdOfL2PFR: Int = 1 // ((1 << DtCntWidth) * 0.35).toInt
   def getPcTag(pc: UInt): UInt = {
-    val pcNoOffset = pc >> PcOffsetWidth
-    val res = (pcNoOffset >> 1) ^ (pcNoOffset >> 4)
+    val res = getPCHash(pc)
     res(DtPcTagWidth - 1, 0)
   }
   def getStatus(conf: UInt): DeltaStatus.Type = {
