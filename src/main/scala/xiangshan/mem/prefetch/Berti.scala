@@ -196,6 +196,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** data structure */
   val entries = Reg(Vec(HtSetSize, Vec(HtWaySize, new Entry)))
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
+  val decrModes = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
   // LRU: replace record
   val replacer = ReplacementPolicy.fromString("setplru", HtWaySize, HtSetSize)
   // FIFO: for FIFO replace policy
@@ -284,6 +285,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       isReplace := false.B
     }.otherwise {
       isReplace := valids(set)(way)
+      val lastWay = (accessPtrs(set)-1.U).value
+      decrModes(set) := baseVAddr < entries(set)(lastWay).baseVAddr
       valids(set)(way) := true.B
       entries(set)(way).alloc(
         getTag(pc),
@@ -304,7 +307,11 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
     res.pc := pc
     res.valid := stat_find_delta && pair._1
-    res.delta := pair._2
+    when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){ // 实际符号和delta不符，说明出现乱序导致refill晚于历史记录
+      res.delta := -pair._2
+    }.otherwise{
+      res.delta := pair._2
+    }
     learnPtrs(set) := learnPtrs(set) + 1.U
     res
   }
