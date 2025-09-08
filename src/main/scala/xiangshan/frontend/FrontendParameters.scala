@@ -25,7 +25,7 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
-    FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchBlockSize: Int = 64, // bytes
     FetchPorts:     Int = 2,  // 2-fetch
 
     bpuParameters:     BpuParameters = BpuParameters(),
