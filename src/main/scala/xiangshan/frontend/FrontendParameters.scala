@@ -20,6 +20,7 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.ftq.FtqParameters
+import xiangshan.frontend.ibuffer.IBufferParameters
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ifu.IfuParameters
 
@@ -27,10 +28,11 @@ case class FrontendParameters(
     FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
     FetchPorts:     Int = 2,  // 2-fetch
 
-    bpuParameters:    BpuParameters = BpuParameters(),
-    ftqParameters:    FtqParameters = FtqParameters(),
-    icacheParameters: ICacheParameters = ICacheParameters(),
-    ifuParameters:    IfuParameters = IfuParameters()
+    bpuParameters:     BpuParameters = BpuParameters(),
+    ftqParameters:     FtqParameters = FtqParameters(),
+    icacheParameters:  ICacheParameters = ICacheParameters(),
+    ifuParameters:     IfuParameters = IfuParameters(),
+    ibufferParameters: IBufferParameters = IBufferParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
@@ -66,4 +68,11 @@ trait HasFrontendParameters extends HasXSParameter {
   def FetchBlockInstNum: Int = FetchBlockSize / instBytes
 //  def FetchBlockInstOffsetWidth = log2Ceil(FetchBlockInstNum) inherited from HasXSParameter
   def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
+
+  // shared by Ifu and IBuffer
+  // NOTE: we can enqueue FetchBlockInstNum instructions from Ifu,
+  //       and we do pre-align in Ifu which generates NumWriteBank-1 bubbles at front,
+  //       so the enqueue port width should be the sum of them
+  // FIXME: maybe ...-1?
+  def IBufferEnqueueWidth: Int = FetchBlockInstNum + frontendParameters.ibufferParameters.NumWriteBank
 }

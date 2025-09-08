@@ -85,12 +85,8 @@ case class XSCoreParameters
   EnableSv48: Boolean = true,
   EnableCommitGHistDiff: Boolean = true,
   CacheLineSize: Int = 512,
-  IBufSize: Int = 48,
-  IBufNBank: Int = 8, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 8,
   RenameWidth: Int = 8,
-  IBufWriteBank: Int = 4, 
-  IBufReadBank: Int = 8,
   CommitWidth: Int = 8,
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
@@ -603,11 +599,6 @@ trait HasXSParameter {
   def CacheLineHalfWord = CacheLineSize / 16
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
   def FetchBlockInstOffsetWidth: Int = log2Ceil(coreParams.frontendParameters.FetchBlockSize / instBytes)
-  def IBufSize = coreParams.IBufSize
-  def IBufEnqWidth = coreParams.IBufWriteBank + coreParams.frontendParameters.FetchBlockSize / instBytes
-  def IBufWriteBank = coreParams.IBufWriteBank
-  def IBufReadBank = coreParams.IBufReadBank
-  def IBufNRank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams
   def DecodeWidth = coreParams.DecodeWidth
   def RenameWidth = coreParams.RenameWidth

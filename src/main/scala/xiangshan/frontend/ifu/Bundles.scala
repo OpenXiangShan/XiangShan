@@ -21,9 +21,9 @@ import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.IBufPtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 
 /* ***
@@ -88,8 +88,8 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
   val target:       PrunedAddr  = PrunedAddr(VAddrBits)
-  val misIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-  val cfiIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+  val misIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
+  val cfiIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
   val instrRange:   UInt        = UInt(FetchBlockInstNum.W)
   val invalidTaken: Bool        = Bool()
 }

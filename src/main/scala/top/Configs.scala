@@ -36,6 +36,7 @@ import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
+import xiangshan.frontend.ibuffer.IBufferParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
@@ -100,8 +101,6 @@ class MinimalConfig(n: Int = 1) extends Config(
         // ==============================
         RobSize = 48,
         RabSize = 96,
-        IBufSize = 24,
-        IBufNBank = 8,
         frontendParameters = FrontendParameters(
           bpuParameters = BpuParameters(
             // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
@@ -141,6 +140,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           ),
           icacheParameters = ICacheParameters( // default 64B blockBytes, 4way, 256set (64KB ICache)
             nSets = 64, // override to 64set in MinimalConfig (16KB ICache)
+          ),
+          ibufferParameters = IBufferParameters(
+            Size = 24,
           ),
         ),
         StoreBufferSize = 4,

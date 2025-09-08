@@ -98,10 +98,10 @@ trait IfuHelper extends HasIfuParameters {
 
   def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, default: T): Vec[T] = {
     require(shiftNum.getWidth == 2)
-    val dataVec = VecInit((0 until IBufEnqWidth).map(i =>
+    val dataVec = VecInit((0 until IBufferEnqueueWidth).map(i =>
       if (i < indataVec.length) indataVec(i) else 0.U.asTypeOf(default)
     ))
-    VecInit((0 until IBufEnqWidth).map { i =>
+    VecInit((0 until IBufferEnqueueWidth).map { i =>
       MuxLookup(shiftNum, 0.U.asTypeOf(default))(Seq(
         ShiftType.NoShift     -> dataVec(i),
         ShiftType.ShiftRight1 -> (if (i == 0) 0.U.asTypeOf(default) else dataVec(i - 1)),
