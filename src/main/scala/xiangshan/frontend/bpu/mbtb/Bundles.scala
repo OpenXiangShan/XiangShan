@@ -56,6 +56,7 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val hitMask            = Vec(NumBtbResultEntries, Bool())
   val stronglyBiasedMask = Vec(NumBtbResultEntries, Bool())
   val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val attributes         = Vec(MainBtbResultNumEntries, new BranchAttribute)
 }
 
 class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {

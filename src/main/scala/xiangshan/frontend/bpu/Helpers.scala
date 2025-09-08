@@ -151,26 +151,31 @@ trait TargetFixHelper extends HasBpuParameters {
   }
 }
 
-trait BtbHelper extends HasBpuParameters {
-  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
-    require(positions.length == takenMask.length)
-    val n = positions.length
-    val compareMatrix = (0 until n).map(i =>
-      (0 until i).map(j =>
-        positions(j) > positions(i)
+trait CommonHelper {
+
+  /**
+   * Return the one-hot mask of the position of the minimal value.
+   */
+  def getMinimalValueOH(value: Seq[UInt], valid: Seq[Bool]): Seq[Bool] = {
+    require(value.length == valid.length)
+    val n = value.length
+    val compareMatrix =
+      (0 until n).map(i =>
+        (0 until i).map(j =>
+          value(i) < value(j)
+        )
       )
-    )
     (0 until n).map { i =>
       (0 until n).map { j =>
-        if (j < i) !takenMask(j) || compareMatrix(i)(j)
-        else if (j == i) takenMask(i)
-        else !takenMask(j) || !compareMatrix(j)(i)
+        if (j < i) !valid(j) || compareMatrix(i)(j) // value(i) < value(j)
+        else if (j == i) valid(i)
+        else !valid(j) || !compareMatrix(j)(i) // value(i) <= value(j)
       }.reduce(_ && _)
     }
   }
 }
 
-trait PhrHelper extends HasBpuParameters {
+trait PhrHelper {
   def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt =
     if (histLen > 0) {
       val nChunks    = (histLen + compLen - 1) / compLen
