@@ -452,9 +452,10 @@ jobs:
       - name: init
         run: make init
       - name: mill
-        uses: jodersky/setup-mill@v0.3.0
-        with:
-          mill-version: 0.12.3
+        run: |
+          mkdir -p ~/.local/bin
+          sh -c "curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
+          export PATH=~/.local/bin:$PATH
       - name: swapfile
         run: |
           sudo fallocate -l 10G /swapfile
@@ -572,6 +573,6 @@ jobs:
           java-version: '11'
       - run: |
           mkdir -p ~/.local/bin
-          sh -c "curl -L https://github.com/com-lihaoyi/mill/releases/download/0.11.7/0.11.7 > ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
+          sh -c "curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
           export PATH=~/.local/bin:$PATH
       - run: make check-format
