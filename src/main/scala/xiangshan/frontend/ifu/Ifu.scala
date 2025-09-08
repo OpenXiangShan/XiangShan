@@ -101,12 +101,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   val io: IfuIO = IO(new IfuIO)
 
   // submodule
-  private val preDecoder       = Module(new PreDecode)
-  private val preDecodeBounder = Module(new PreDecodeBoundary)
-  private val predChecker      = Module(new PredChecker)
-  private val frontendTrigger  = Module(new FrontendTrigger)
-  private val rvcExpanders     = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
-  private val mmioRvcExpander  = Module(new RvcExpander)
+
+  private val preDecoder      = Module(new PreDecode)
+  private val instrBoundary   = Module(new InstrBoundary)
+  private val predChecker     = Module(new PredChecker)
+  private val frontendTrigger = Module(new FrontendTrigger)
+  private val rvcExpanders    = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
+  private val mmioRvcExpander = Module(new RvcExpander)
 
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
@@ -344,16 +345,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_rawData  = fromICache.bits.data
   private val s2_perfInfo = io.fromICache.perf
-  preDecodeBounder.io.req.valid                  := fromICache.valid
-  preDecodeBounder.io.req.bits.instrRange        := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
-  preDecodeBounder.io.req.bits.firstEndPos       := s2_firstEndPos
-  preDecodeBounder.io.req.bits.endPos            := s2_totalEndPos
-  preDecodeBounder.io.req.bits.prevLastIsHalfRvi := s2_prevLastIsHalfRvi
-  preDecodeBounder.io.req.bits.cacheData :=
-    (Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqFetch(0).startVAddr(5, 0), 0.U(3.W))).asUInt
 
-  private val s2_firstFetchEndIsHalf = preDecodeBounder.io.resp.bits.isFirstLastHalfRvi
-  private val s2_fetchEndIsHalf      = preDecodeBounder.io.resp.bits.isLastHalfRvi
+  instrBoundary.io.req.instrRange            := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
+  instrBoundary.io.req.firstFetchBlockEndPos := s2_firstEndPos
+  instrBoundary.io.req.endPos                := s2_totalEndPos
+  instrBoundary.io.req.firstInstrIsHalfRvi   := s2_prevLastIsHalfRvi
+  instrBoundary.io.req.cacheData := (Cat(s2_rawData, s2_rawData) >> Cat(s2_ftqFetch(0).startVAddr(5, 0), 0.U(3.W))).asUInt
+
+  private val s2_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
+  private val s2_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
 
   private val wbStage2Check = Wire(Vec(FetchPorts, new FinalPredCheckResult))
 
@@ -371,8 +371,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 // rawInstrValid(i) and instrCountBeforeCurrent(i) also handle instructions
 // spanning across prediction blocks. This design aligns with the logic
 // used for s3_prevLastHalfData calculation.
-  private val rawInstrValid = preDecodeBounder.io.resp.bits.instrValid
-  private val rawIsRvc      = preDecodeBounder.io.resp.bits.isRvc
+  private val rawInstrBoundary = instrBoundary.io.resp.instrValid
+  private val rawIsRvc         = instrBoundary.io.resp.isRvc
 
   /* *****************************************************************************
    * instrCountBeforeCurrent(i), not include rawInstrValid(i)
@@ -380,9 +380,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val instrCountBeforeCurrent =
     WireDefault(VecInit.fill(FetchBlockInstNum + 1)(0.U(log2Ceil(FetchBlockInstNum + 1).W)))
   for (i <- 0 until FetchBlockInstNum) {
-    instrCountBeforeCurrent(i) := PopCount(rawInstrValid.take(i))
+    instrCountBeforeCurrent(i) := PopCount(rawInstrBoundary.take(i))
   }
-  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(rawInstrValid)
+  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(rawInstrBoundary)
 
   private val instrIndexEntry = Wire(Vec(FetchBlockInstNum, new InstrIndexEntry))
   private val fetchBlockSelect =
@@ -421,7 +421,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       val instrRange = idx until Math.min(2 * idx + 2, FetchBlockInstNum)
 
       val validOH = instrRange.map {
-        i => rawInstrValid(i) & (instrCountBeforeCurrent(i) === idx.U)
+        i => rawInstrBoundary(i) & (instrCountBeforeCurrent(i) === idx.U)
       }
 
       val index         = instrRange.map(twoFetchBlockIndex(_))
@@ -445,7 +445,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_fetchTakenIdx = VecInit((0 until FetchPorts).map { i =>
     val b = Wire(new Valid(UInt(FetchBlockInstOffsetWidth.W)))
     b.valid := s2_takenCfiOffset(i).valid
-    b.bits  := PopCount(rawInstrValid.asUInt & s2_instrRange(i)) - 1.U
+    b.bits  := PopCount(rawInstrBoundary.asUInt & s2_instrRange(i)) - 1.U
     b
   })
   s2_fetchTakenIdx(0).valid := s2_takenCfiOffset(0).valid && s2_firstValid
@@ -457,7 +457,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.doubleline   := s2_doubleline(i)
     b.predTakenIdx := s2_fetchTakenIdx(i)
     b.invalidTaken :=
-      rawInstrValid(s2_takenCfiOffset(i).bits) && !rawIsRvc(s2_takenCfiOffset(i).bits) && s2_takenCfiOffset(i).valid
+      rawInstrBoundary(s2_takenCfiOffset(i).bits) && !rawIsRvc(s2_takenCfiOffset(i).bits) && s2_takenCfiOffset(i).valid
     b.takenCfiOffset.valid := s2_takenCfiOffset(i).valid
     b.takenCfiOffset.bits  := s2_takenCfiOffset(i).bits
     b.instrRange           := s2_instrRange(i)
@@ -466,7 +466,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.startVAddr           := s2_ftqFetch(i).startVAddr
     b.target               := s2_ftqFetch(i).nextStartVAddr
     b.fetchSize            := s2_fetchSize(i)
-    b.rawInstrValid        := rawInstrValid.asUInt & s2_instrRange(i)
+    b.rawInstrValid        := rawInstrBoundary.asUInt & s2_instrRange(i)
     b.identifiedCfi        := s2_ftqFetch(i).identifiedCfi
     b
   })
@@ -479,9 +479,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // After completing the adjustment of a half prediction block, the instruction
   // valid signals at the end and beginning need to be updated.
-  s2_fetchBlock(0).rawInstrValid := (rawInstrValid.asUInt & s2_instrRange(0)) &
+  s2_fetchBlock(0).rawInstrValid := (rawInstrBoundary.asUInt & s2_instrRange(0)) &
     Mux(s2_firstFetchEndIsHalf, s2_firstMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
-  s2_fetchBlock(1).rawInstrValid := (rawInstrValid.asUInt >> s2_fetchSize(0)).asUInt & s2_instrRange(1) &
+  s2_fetchBlock(1).rawInstrValid := (rawInstrBoundary.asUInt >> s2_fetchSize(0)).asUInt & s2_instrRange(1) &
     Mux(s2_fetchEndIsHalf, s2_secondMaskEndPos, Fill(FetchBlockInstNum, 1.U(1.W)))
   private val s2_rawFirstData         = s2_rawData
   private val s2_rawSecondData        = 0.U((ICacheLineBytes * 8).W)
@@ -489,7 +489,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_rawSecondDataDupWire = VecInit(Seq.fill(FetchPorts)(s2_rawSecondData))
   private val s2_firstEndIdx          = s2_fetchTakenIdx(0).bits
   private val s2_realRawInstrValid =
-    Mux(s2_fetchEndIsHalf, rawInstrValid.asUInt & s2_totalMaskEndPos, rawInstrValid.asUInt)
+    Mux(s2_fetchEndIsHalf, rawInstrBoundary.asUInt & s2_totalMaskEndPos, rawInstrBoundary.asUInt)
   // Special case for MMIO:
   // If two fetches occur and the first is non-MMIO while the second is MMIO,
   // delay the second fetch by one cycle to split into a one-fetch.
