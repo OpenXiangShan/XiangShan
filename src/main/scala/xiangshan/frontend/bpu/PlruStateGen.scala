@@ -13,17 +13,18 @@
 //
 // See the Mulan PSL v2 for more details.
 
-// See LICENSE.Berkeley for license details.
-// See LICENSE.SiFive for license details.
+// The design of this file is based on the implementation of PseudoLRU in rock-chip at:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/util/Replacement.scala
+// See LICENSE.Berkeley for license details at:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.Berkeley
+// See LICENSE.SiFive for license details at:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.SiFive
 
 package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SeqBoolBitwiseOps
 import freechips.rocketchip.util.UIntToAugmentedUInt
-import freechips.rocketchip.util.property.cover
-import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode.U
 
 class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   // Pseudo-LRU tree algorithm: https://en.wikipedia.org/wiki/Pseudo-LRU#Tree-PLRU
@@ -200,14 +201,10 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   def access(touchWay: UInt): Unit =
     stateOut := getNextState(stateRead, touchWay)
 
-  def access(touchWays: Seq[Valid[UInt]]): Unit = {
-    when(touchWays.map(_.valid).orR) {
+  def access(touchWays: Seq[Valid[UInt]]): Unit =
+    when(touchWays.map(_.valid).reduce(_ || _)) {
       stateOut := getNextState(stateRead, touchWays)
     }
-    for (i <- 1 until touchWays.size) {
-      cover(PopCount(touchWays.map(_.valid)) === i.U, s"PLRU_UpdateCount$i", s"PLRU Update $i simultaneous")
-    }
-  }
   access(io.touchWays.toSeq)
 
   io.nextState := stateOut
