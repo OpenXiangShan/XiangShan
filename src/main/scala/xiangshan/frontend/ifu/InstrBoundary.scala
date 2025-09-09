@@ -23,6 +23,7 @@ import utility.XSError
 class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class InstrBoundaryIO(implicit p: Parameters) extends IfuBundle {
     class InstrBoundaryReq(implicit p: Parameters) extends IfuBundle {
+      val valid:      Bool      = Bool()
       val instrRange: Vec[Bool] = Vec(FetchBlockInstNum, Bool())
       // FIXME: magic number 512
       val cacheData:             UInt = UInt(512.W)
@@ -32,6 +33,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
     }
     class InstrBoundaryResp(implicit p: Parameters) extends IfuBundle {
       val instrValid:                        Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+      val instrEndVec:                       Vec[Bool] = Vec(FetchBlockInstNum, Bool())
       val isRvc:                             Vec[Bool] = Vec(FetchBlockInstNum, Bool())
       val firstFetchBlockLastInstrIsHalfRvi: Bool      = Bool()
       val lastInstrIsHalfRvi:                Bool      = Bool()
@@ -83,8 +85,11 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
     )
   }
 
-  io.resp.instrValid := boundary.zip(isRvc).zip(io.req.instrRange).map { case ((boundary, isRvc), range) =>
-    (!boundary || isRvc) && range
+  io.resp.instrValid := boundary.zip(io.req.instrRange).map { case (boundary, range) =>
+    boundary && range
+  }
+  io.resp.instrEndVec := boundary.zip(isRvc).zip(io.req.instrRange).map { case ((boundary, isRvc), range) =>
+    (!boundary || (boundary && isRvc)) && range
   }
   io.resp.isRvc := boundary.zip(isRvc).zip(io.req.instrRange).map { case ((boundary, isRvc), range) =>
     boundary && isRvc && range
@@ -96,5 +101,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
   // For differential test only. Will be optimized out in release
   private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
   generateBoundary(boundDiff, 0, FetchBlockInstNum, io.req.firstInstrIsHalfRvi)
-  boundary.zip(boundDiff).foreach { case (a, b) => XSError(a =/= b, p"boundary different: $a vs $b\n") }
+  boundary.zip(boundDiff).foreach {
+    case (a, b) => XSError(io.req.valid && (a =/= b), p"boundary different: $a vs $b\n")
+  }
 }
