@@ -24,7 +24,7 @@ import xiangshan.frontend.bpu.ReplacerState
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
-  private val statesBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new ReplacerState(NumEntries, NumWay)))
+  private val statesBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new ReplacerState(NumSets, NumWay)))
 
   private val predictSetIndexVec = io.predictionSetIndxVec
   private val predictStateEntries: Vec[UInt] =
