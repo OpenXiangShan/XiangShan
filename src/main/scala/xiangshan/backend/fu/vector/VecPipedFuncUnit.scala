@@ -38,6 +38,12 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   // swap vs1 and vs2, used by vrsub, etc
   protected val isReverse = vecCtrl.isReverse
 
+  protected val sew8  = vecCtrl.sew8
+  protected val sew16 = vecCtrl.sew16
+  protected val sew32 = vecCtrl.sew32
+  protected val sew64 = vecCtrl.sew64
+  protected val maskVecGen = vecCtrl.maskVecGen
+
   protected val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
   protected val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
 

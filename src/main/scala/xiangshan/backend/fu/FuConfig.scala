@@ -166,6 +166,8 @@ case class FuConfig (
     Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
+  def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
+
   def needUncertainWakeup: Boolean = {
     FuConfig.needUncertainWakeupFuConfigs.contains(this)
   }
@@ -547,7 +549,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new NewVIAluFix(cfg)(p).suggestName("VialuFix")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),

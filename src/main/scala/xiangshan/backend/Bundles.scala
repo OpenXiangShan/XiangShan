@@ -686,6 +686,12 @@ object Bundles {
 
     val isVleff = Bool() // vleff
 
+    val maskVecGen = UInt((V0Data().dataWidth / 8).W)
+    val sew8  = Bool()
+    val sew16 = Bool()
+    val sew32 = Bool()
+    val sew64 = Bool()
+
     def vtype: VType = {
       val res = Wire(VType())
       res.illegal := this.vill
@@ -725,6 +731,15 @@ object Bundles {
   class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
     val scalaNeedFrm = Bool()
     val vectorNeedFrm = Bool()
+  }
+
+  class VIAluCtrlSignals(implicit p: Parameters) extends XSBundle {
+    val widenVs2 = Bool()
+    val widen = Bool()
+    val isVf2 = Bool()
+    val isVf4 = Bool()
+    val isVf8 = Bool()
+    val isAddCarry = Bool()
   }
 
   // DynInst --[IssueQueue]--> DataPath
@@ -853,6 +868,7 @@ object Bundles {
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
+    val vialuCtrl     = if (params.needVIaluCtrl) Some(new VIAluCtrlSignals)          else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val preDecode     = if (params.hasPredecode || params.aluNeedPc)  Some(new PreDecodeInfo)             else None
@@ -934,6 +950,7 @@ object Bundles {
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+      this.vialuCtrl     .foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
     }
   }
 

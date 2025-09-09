@@ -6,7 +6,7 @@ import chisel3.util._
 import utility._
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.Bundles.VPUCtrlSignals
+import xiangshan.backend.Bundles.{VIAluCtrlSignals, VPUCtrlSignals}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
@@ -37,6 +37,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   })
   val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val vialuCtrl   = OptionWrapper(cfg.needVIaluCtrl, new VIAluCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
