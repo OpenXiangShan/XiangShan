@@ -266,6 +266,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
   require(t1_writeWayMask.getWidth == NumWay, s"Write way mask width mismatch: ${t1_writeWayMask.getWidth} != $NumWay")
 
+  private val multiWriteConflict = s2_multihit && s2_fire && t1_writeValid &&
+    (s2_multiWriteAlignBankMask zip t1_writeAlignBankMask map { case (a, b) => a && b }).reduce(_ || _) &&
+    (s2_internalBankMask.asBools zip t1_internalBankMask.asBools map { case (a, b) => a && b }).reduce(_ || _)
+
   // Write to SRAM
   writeBuffers zip t1_setIdxVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
     case (((alignmentBank, setIdx), alignBankEnable), multiAlignBankEnable) =>
@@ -275,19 +279,16 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
             case ((port, wayEnable), multiWayEnable) =>
               val multiWriteEnable = s2_multihit && s2_fire && multiAlignBankEnable && multiBankEnable && multiWayEnable
               val writeEnable      = t1_writeValid && wayEnable && alignBankEnable && bankEnable
-              port.valid := writeEnable || multiWriteEnable
+              port.valid := writeEnable || (multiWriteEnable && !multiWriteConflict)
               port.bits.setIdx := Mux(
                 writeEnable,
                 setIdx,
-                Mux(multiWriteEnable, s2_multiSetIdx, 0.U)
+                Mux(multiWriteEnable && !multiWriteConflict, s2_multiSetIdx, 0.U)
               ) // pull to 0 when not firing to reduce power
               port.bits.entry := Mux(writeEnable, t1_writeEntry, 0.U.asTypeOf(new MainBtbEntry))
           }
       }
   }
-  private val multiWriteConflict = s2_multihit && s2_fire && t1_writeValid &&
-    (s2_multiWriteAlignBankMask zip t1_writeAlignBankMask map { case (a, b) => a && b }).reduce(_ || _) &&
-    (s2_internalBankMask.asBools zip t1_internalBankMask.asBools map { case (a, b) => a && b }).reduce(_ || _)
 
   dontTouch(t1_writeValid)
   dontTouch(t1_writeAlignBankMask)
