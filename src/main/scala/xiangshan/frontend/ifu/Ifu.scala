@@ -101,12 +101,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   val io: IfuIO = IO(new IfuIO)
 
   // submodule
-  private val preDecoder       = Module(new PreDecode)
-  private val preDecodeBounder = Module(new PreDecodeBoundary)
-  private val predChecker      = Module(new PredChecker)
-  private val frontendTrigger  = Module(new FrontendTrigger)
-  private val rvcExpanders     = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
-  private val mmioRvcExpander  = Module(new RvcExpander)
+
+  private val preDecoder      = Module(new PreDecode)
+  private val instrBoundary   = Module(new InstrBoundary)
+  private val predChecker     = Module(new PredChecker)
+  private val frontendTrigger = Module(new FrontendTrigger)
+  private val rvcExpanders    = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
+  private val mmioRvcExpander = Module(new RvcExpander)
 
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
@@ -343,18 +344,19 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_rawData  = fromICache.bits.data
   private val s2_perfInfo = io.fromICache.perf
-  instrDelimiter.io.req.valid                 := s2_valid && fromICache.valid
-  instrDelimiter.io.req.instrRange            := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
-  instrDelimiter.io.req.firstFetchBlockEndPos := s2_firstEndPos
-  instrDelimiter.io.req.endPos                := s2_totalEndPos
-  instrDelimiter.io.req.firstInstrIsHalfRvi   := s2_prevLastIsHalfRvi
-  instrDelimiter.io.req.cacheData := (Cat(s2_rawData, s2_rawData) >> Cat(
+
+  instrBoundary.io.req.valid                 := s2_valid && fromICache.valid
+  instrBoundary.io.req.instrRange            := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
+  instrBoundary.io.req.firstFetchBlockEndPos := s2_firstEndPos
+  instrBoundary.io.req.endPos                := s2_totalEndPos
+  instrBoundary.io.req.firstInstrIsHalfRvi   := s2_prevLastIsHalfRvi
+  instrBoundary.io.req.cacheData := (Cat(s2_rawData, s2_rawData) >> Cat(
     s2_ftqFetch(0).startVAddr(5, 0),
     0.U(3.W)
   )).asUInt
 
-  private val s2_firstFetchEndIsHalf = instrDelimiter.io.resp.firstFetchBlockLastInstrIsHalfRvi
-  private val s2_fetchEndIsHalf      = instrDelimiter.io.resp.lastInstrIsHalfRvi
+  private val s2_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
+  private val s2_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
 
   private val wbStage2Check = Wire(Vec(FetchPorts, new FinalPredCheckResult))
 
@@ -373,11 +375,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
 // spanning across prediction blocks. This design aligns with the logic
 // used for s3_prevLastHalfData calculation.
   private val dealInstrValid = Wire(Vec(FetchBlockInstNum, Bool()))
-  dealInstrValid    := instrDelimiter.io.resp.instrValid
-  dealInstrValid(0) := instrDelimiter.io.resp.instrValid(0) | s2_prevLastIsHalfRvi
+  dealInstrValid    := instrBoundary.io.resp.instrValid
+  dealInstrValid(0) := instrBoundary.io.resp.instrValid(0) | s2_prevLastIsHalfRvi
 
-  private val rawInstrEndVec = instrDelimiter.io.resp.instrEndVec
-  private val rawIsRvc       = instrDelimiter.io.resp.isRvc
+  private val rawInstrEndVec = instrBoundary.io.resp.instrEndVec
+  private val rawIsRvc       = instrBoundary.io.resp.isRvc
 
   /* *****************************************************************************
    * instrCountBeforeCurrent(i), not include rawInstrValid(i)
