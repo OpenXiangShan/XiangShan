@@ -60,7 +60,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpOpisAuipc(func) && (io.in.bits.ctrl.identifiedCfi.get || isMisPred)
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := (pc + io.in.bits.ctrl.ftqOffset.get)(VAddrBits-1, 0)
+  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pc)
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(jumpDataModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := true.B
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
