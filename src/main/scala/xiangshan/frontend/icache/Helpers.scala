@@ -120,31 +120,29 @@ trait ICacheMetaHelper extends HasICacheParameters {
 }
 
 trait ICacheDataHelper extends HasICacheParameters {
-  def bankOffBits: Int = log2Ceil(blockBytes / DataBanks)
-
-  def getBankIdxLow(blkOffset: UInt): UInt =
-    (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
-
-  def getBankIdxHigh(blkOffset: UInt): UInt =
-    ((Cat(0.U(1.W), blkOffset) + 32.U) >> bankOffBits).asUInt
+  def getBankIdx(blkOffset: UInt): UInt =
+    (blkOffset >> rowOffBits).asUInt
 
   def getBankValid(portValid: Vec[Bool], blkOffset: UInt): Vec[Bool] = {
     require(portValid.length == PortNumber)
-    val bankIdxLow = getBankIdxLow(blkOffset)
+    val bankIdxLow = getBankIdx(blkOffset)
     VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)))
   }
 
-  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[Vec[Bool]] = {
-    val bankIdxLow  = getBankIdxLow(blkOffset)
-    val bankIdxHigh = getBankIdxHigh(blkOffset)
-    val bankSel     = VecInit((0 until DataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
-    bankSel.asTypeOf(UInt((DataBanks * 2).W)).asTypeOf(Vec(2, Vec(DataBanks, Bool())))
+  def getBankSel(blkOffset: UInt, blkEndOffset: UInt, crossLine: Bool): Vec[Vec[Bool]] = {
+    val bankIdxLow  = getBankIdx(blkOffset)
+    val bankIdxHigh = getBankIdx(blkEndOffset)
+    VecInit(
+      // first line: if in same line, select [low, high], else select [low, end]
+      VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && (crossLine || i.U <= bankIdxHigh))),
+      // second line: if in same line, select nothing, else select [start, high]
+      VecInit((0 until DataBanks).map(i => (i.U <= bankIdxHigh) && crossLine))
+    )
   }
 
   def getLineSel(blkOffset: UInt): Vec[Bool] = {
-    val bankIdxLow = (blkOffset >> log2Ceil(blockBytes / DataBanks)).asUInt
-    val lineSel    = VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
-    lineSel
+    val bankIdxLow = getBankIdx(blkOffset)
+    VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
   }
 }
 
@@ -218,4 +216,14 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
     VecInit((vSetIdxVec zip validVec).map { case (vs, v) =>
       checkMshrHit(update, vs, pTag, v, allowCorrupt)
     })
+}
+
+trait ICacheCacheLineHelper extends HasICacheParameters {
+  def isCrossLine(startVAddr: PrunedAddr, takenCfiOffset: UInt): Bool = {
+    require(FetchBlockSize <= blockBytes, "Cannot fetch more than one cache line in a fetch block")
+    val startBlockOffset = startVAddr(blockOffBits - 1, instOffsetBits)
+    val endBlockOffset   = startBlockOffset +& takenCfiOffset
+    // if overflow, must be cross line
+    endBlockOffset(blockOffBits - instOffsetBits)
+  }
 }

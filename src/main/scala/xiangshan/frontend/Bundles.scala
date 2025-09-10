@@ -33,7 +33,7 @@ import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
-import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheRespBundle
 import xiangshan.frontend.icache.ICacheTopdownInfo
@@ -60,7 +60,8 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val redirectFromIFU: Bool               = Output(Bool())
 }
 
-class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+// TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
+class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
   // fast path: Timing critical
   val valid:              Bool       = Bool()
@@ -72,7 +73,7 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset.bits)
 
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
@@ -80,31 +81,33 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with Has
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqICacheInfo(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
+  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
+  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
+  val ftqIdx:             FtqPtr        = new FtqPtr
+  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
+  val backendException:   ExceptionType = new ExceptionType
+
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
+}
+
+class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
   val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
   val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   val ftqIdx:             FtqPtr     = new FtqPtr
+  val takenCfiOffset:     UInt       = UInt(CfiPositionWidth.W)
+  val isBackendException: Bool       = Bool()
 
-  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
-}
-
-class FtqToPrefetchBundle(implicit p: Parameters) extends FrontendBundle {
-  val req:              FtqICacheInfo = new FtqICacheInfo
-  val backendException: ExceptionType = new ExceptionType
-}
-
-class FtqToFetchBundle(implicit p: Parameters) extends FrontendBundle {
-  val req:                FtqICacheInfo = new FtqICacheInfo
-  val isBackendException: Bool          = Bool()
+  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
   // NOTE: req.bits must be prepared in T cycle
   // while req.valid is set true in T + 1 cycle
-  val fetchReq:      DecoupledIO[FtqToFetchBundle]    = Decoupled(new FtqToFetchBundle)
-  val prefetchReq:   DecoupledIO[FtqToPrefetchBundle] = Decoupled(new FtqToPrefetchBundle)
-  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
-  val redirectFlush: Bool                             = Output(Bool())
+  val fetchReq:      DecoupledIO[FtqFetchRequest]    = Decoupled(new FtqFetchRequest)
+  val prefetchReq:   DecoupledIO[FtqPrefetchRequest] = Decoupled(new FtqPrefetchRequest)
+  val flushFromBpu:  BpuFlushInfo                    = new BpuFlushInfo
+  val redirectFlush: Bool                            = Output(Bool())
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {

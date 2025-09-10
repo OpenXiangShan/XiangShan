@@ -166,8 +166,6 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
     io.metaRead.req.valid             := iState === InjectFsmState.ReadMetaReq
     io.metaRead.req.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
     io.metaRead.req.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(iVSetIdx))
-    io.metaRead.req.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
-    io.metaRead.req.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
 
     io.metaWrite.req.valid := iState === InjectFsmState.WriteMeta
     io.metaWrite.req.bits.generate(

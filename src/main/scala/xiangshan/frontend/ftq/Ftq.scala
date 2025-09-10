@@ -203,14 +203,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // FIXME: backend redirect delay should be more than ITLB csr delay
   io.toICache.prefetchReq.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
-  io.toICache.prefetchReq.bits.req.startVAddr := Mux(
+  io.toICache.prefetchReq.bits.startVAddr := Mux(
     redirectNext.valid,
     PrunedAddrInit(redirectNext.bits.target),
     entryQueue(pfPtr(0).value).startVAddr
   )
-  io.toICache.prefetchReq.bits.req.nextCachelineVAddr :=
-    io.toICache.prefetchReq.bits.req.startVAddr + (CacheLineSize / 8).U
-  io.toICache.prefetchReq.bits.req.ftqIdx := pfPtr(0)
+  io.toICache.prefetchReq.bits.nextCachelineVAddr :=
+    io.toICache.prefetchReq.bits.startVAddr + (CacheLineSize / 8).U
+  io.toICache.prefetchReq.bits.ftqIdx := pfPtr(0)
+  // we don't have takenCfiOffset after redirect
+  io.toICache.prefetchReq.bits.takenCfiOffset := Mux(
+    redirectNext.valid,
+    (FetchBlockInstNum - 1).U, // assume maximum fetch block size
+    entryQueue(pfPtr(0).value).takenCfiOffset.bits
+  )
   io.toICache.prefetchReq.bits.backendException := Mux(
     backendExceptionPtr === pfPtr(0),
     backendException,
@@ -218,11 +224,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   // TODO: consider BPU bypass
-  io.toICache.fetchReq.valid                       := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toICache.fetchReq.bits.req.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
-  io.toICache.fetchReq.bits.req.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
-  io.toICache.fetchReq.bits.req.ftqIdx             := ifuPtr(0)
-  io.toICache.fetchReq.bits.isBackendException     := backendException.hasException && backendExceptionPtr === ifuPtr(0)
+  io.toICache.fetchReq.valid                   := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
+  io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
+  io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
+  io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
+  io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid
   io.toIfu.req.bits.fetch(0).valid      := bpuPtr(0) > ifuPtr(0) && !redirect.valid
