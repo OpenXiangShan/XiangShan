@@ -25,9 +25,10 @@ import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.WfiReqBundle
+import xiangshan.frontend.ifu.PreDecodeHelper
 
 // One miss entry deals with one mmio request
-class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule {
+class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule with PreDecodeHelper {
   class InstrUncacheEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheBundle {
     val id: UInt = Input(UInt(log2Up(nMmioEntry).W))
     // client requests
@@ -66,11 +67,20 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   private val reqReg      = RegEnable(io.req.bits, 0.U.asTypeOf(io.req.bits), io.req.fire)
   private val alignedAddr = reqReg.addr(reqReg.addr.getWidth - 1, log2Ceil(MmioBusBytes))
 
+  // we need 4B of 2B-aligned data from mmio bus, but mmio bus is (MmioBusBytes)B-aligned (by default 8B-aligned),
+  // so, if addr(2, 1) is 2'b11, this 4B will cross the bus boundary, we should resend request to get latter 2B of data.
+  private val crossBusBoundary = reqReg.addr(log2Ceil(MmioBusBytes) - 1, 1).andR
+  // though, if this 4B data crosses the page boundary, we cannot resend request, as physical page may not continuous.
+  private val crossPageBoundary = reqReg.addr(PageOffsetWidth - 1, 1).andR
+  private val resending         = RegInit(false.B)
+  private val resendAddr        = alignedAddr + 1.U
+
   // send tilelink request
-  io.mmioAcquire.valid := state === State.RefillReq && !io.wfi.wfiReq // if there is a pending wfi request, we should not send new requests to L2
+  // if there is a pending wfi request, we should not send new requests to L2
+  io.mmioAcquire.valid := state === State.RefillReq && !io.wfi.wfiReq
   io.mmioAcquire.bits := edge.Get(
     fromSource = io.id,
-    toAddress = Cat(alignedAddr, 0.U(log2Ceil(MmioBusBytes).W)),
+    toAddress = Cat(Mux(resending, resendAddr, alignedAddr), 0.U(log2Ceil(MmioBusBytes).W)),
     lgSize = log2Ceil(MmioBusBytes).U
   )._2
   io.mmioAcquire.bits.user.lift(MemBackTypeMM).foreach(_ := reqReg.memBackTypeMM)
@@ -82,21 +92,14 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := state =/= State.RefillResp
 
-  private val respDataReg    = RegEnable(io.mmioGrant.bits.data, 0.U(MmioBusWidth.W), io.mmioGrant.fire)
-  private val respCorruptReg = RegEnable(io.mmioGrant.bits.corrupt, false.B, io.mmioGrant.fire)
+  private val respDataReg    = RegInit(VecInit.fill(2)(0.U(16.W))) // FIXME: 2 * rvc, how to avoid magic number?
+  private val respCorruptReg = RegInit(false.B)
 
   // send response to InstrUncache
-  io.resp.valid := state === State.SendResp && !needFlush
-  io.resp.bits.data := Mux1H(
-    UIntToOH(reqReg.addr(2, 1)),
-    Seq(
-      respDataReg(31, 0),
-      respDataReg(47, 16),
-      respDataReg(63, 32),
-      Cat(0.U(16.W), respDataReg(63, 48))
-    )
-  )
-  io.resp.bits.corrupt := respCorruptReg
+  io.resp.valid           := state === State.SendResp && !needFlush
+  io.resp.bits.data       := respDataReg.asUInt
+  io.resp.bits.corrupt    := respCorruptReg
+  io.resp.bits.incomplete := crossPageBoundary
 
   // state transfer
   switch(state) {
@@ -118,7 +121,34 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
         // which means we can assert refillDone when io.mmioGrant.fire
         val (_, _, refillDone, _) = edge.addr_inc(io.mmioGrant)
         assert(refillDone)
-        state := State.SendResp
+
+        val shiftedBusData = Mux1H(
+          UIntToOH(reqReg.addr(2, 1)),
+          Seq(
+            io.mmioGrant.bits.data(31, 0),
+            io.mmioGrant.bits.data(47, 16),
+            io.mmioGrant.bits.data(63, 32),
+            Cat(0.U(16.W), io.mmioGrant.bits.data(63, 48))
+          )
+        )
+
+        // if is corrupted, we need to raise an exception anyway, so no need to resend request
+        val respCorrupt = io.mmioGrant.bits.corrupt
+        // if response is rvc, we need only 2B, so no need to resend request
+        val respIsRvc = isRVC(shiftedBusData)
+        // also, if we are already resending, we should not resend again
+        val needResend = crossBusBoundary && !crossPageBoundary && !respCorrupt && !respIsRvc && !resending
+
+        state := Mux(needResend, State.RefillReq, State.SendResp)
+        resending := needResend
+
+        when(resending) {
+          respDataReg(1)     := io.mmioGrant.bits.data(15, 0)
+        }.otherwise{
+          respDataReg(0)     := shiftedBusData(15, 0)
+          respDataReg(1)     := shiftedBusData(31, 16)
+        }
+        respCorruptReg := io.mmioGrant.bits.corrupt
       }
     }
 
