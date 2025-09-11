@@ -100,7 +100,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val csrFsIsOff: Bool = Input(Bool())
   }
   val io: IfuIO = IO(new IfuIO)
-
+  io.itlb.req.valid   := false.B
+  io.itlb.req.bits    := DontCare
+  io.itlb.req_kill    := false.B
+  io.itlb.resp.ready  := true.B
+  io.pmp.req.valid    := false.B
+  io.pmp.req.bits     := DontCare
   // submodule
 
   private val preDecoder      = Module(new PreDecode)
@@ -108,9 +113,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val predChecker     = Module(new PredChecker)
   private val frontendTrigger = Module(new FrontendTrigger)
   private val rvcExpanders    = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
-  private val mmioRvcExpander = Module(new RvcExpander)
   private val perfAnalyzer    = Module(new IfuPerfAnalysis)
   private val instrCompactor  = Module(new InstrCompact)
+  private val uncacheUnit     = Module(new IfuUncacheUnit)
+  private val uncacheRvcExpander = Module(new RvcExpander)
 
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
@@ -141,13 +147,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   )
 
   private val backendRedirect          = WireInit(false.B)
-  private val wbRedirect, mmioRedirect = WireInit(0.U.asTypeOf(new IfuRedirectInternal))
+  private val wbRedirect, uncacheRedirect = WireInit(0.U.asTypeOf(new IfuRedirectInternal))
 
   private val s4_wbNotFlush = WireInit(false.B)
 
   backendRedirect := fromFtq.redirect.valid
   s4_flush        := backendRedirect || (wbRedirect.valid && !s4_wbNotFlush)
-  s3_flush        := backendRedirect || mmioRedirect.valid || wbRedirect.valid
+  s3_flush        := backendRedirect || uncacheRedirect.valid || wbRedirect.valid
   s2_flush        := s3_flush
   s1_flush        := s2_flush || s1_flushFromBpu(0)
   s0_flush        := s1_flush || s0_flushFromBpu(0)
@@ -245,7 +251,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_prevLastIsHalfRvi := false.B
   }.elsewhen(wbRedirect.valid) {
     s2_prevLastIsHalfRvi := wbRedirect.isHalfInstr
-  }.elsewhen(mmioRedirect.valid) {
+  }.elsewhen(uncacheRedirect.valid) {
     s2_prevLastIsHalfRvi := false.B
   }.elsewhen(s2_fire) {
     s2_prevLastIsHalfRvi := s2_fetchEndIsHalf
@@ -324,7 +330,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_valid          = ValidHold(s2_fire && !s2_flush, s3_fire, s3_flush)
   private val s3_firstValid     = ValidHold(s2_fire && !s2_flush && s2_firstValid, s3_fire, s3_flush)
   private val s3_secondValid    = ValidHold(s2_fire && !s2_flush && s2_secondValid, s3_fire, s3_flush)
-  private val s3_fetchBlock     = RegEnable(s2_fetchBlock, s2_fire)
+  private val s3_fetchBlock     = RegEnable(s2_realFetchBlock, s2_fire)
   private val s3_prevIBufEnqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
 
   private val s3_prevShiftSelect = UIntToMask(s3_prevIBufEnqPtr.value(1, 0), IfuAlignWidth)
@@ -401,6 +407,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // — at least from a timing perspective. But it would require modifying IBufferPrevPtr.
   private val s3_alignBlockStartPos = WireDefault(VecInit.fill(IBufferEnqueueWidth)(false.B))
   s3_alignBlockStartPos(s3_alignShiftNum) := true.B
+  private val s3_alignCompactInfo = alignInstrCompact(s3_instrCompactInfo, s3_alignShiftNum)
+  private val s3_alignInstrData   = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
   private val s3_alignInstrValid =
     alignData(s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool())), s3_alignShiftNum, false.B)
   private val s3_alignInvalidTaken = alignData(s3_invalidTaken, s3_alignShiftNum, false.B)
@@ -413,8 +421,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
   )
   private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
-  private val s3_realAlignPc        = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
-  private val s3_alignFoldPc        = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
+  private val s3_realAlignPc = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
+  private val s3_alignFoldPc = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
 
   for (i <- 0 until IBufferEnqueueWidth / 2) {
     val lowIdx     = s3_alignCompactInfo.instrIndex(i).value
@@ -444,7 +452,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(wbRedirect.valid) {
     s3_prevLastHalfData := wbRedirect.halfData
     s3_prevLastHalfPc   := wbRedirect.halfPc
-  }.elsewhen(mmioRedirect.valid) {
+  }.elsewhen(uncacheRedirect.valid) {
     s3_prevLastHalfData := 0.U
     s3_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
   }.elsewhen(s3_fire) {
@@ -456,8 +464,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s3_prevIBufEnqPtr := 0.U.asTypeOf(new IBufPtr)
   }.elsewhen(wbRedirect.valid) {
     s3_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
-  }.elsewhen(mmioRedirect.valid) {
-    s3_prevIBufEnqPtr := mmioRedirect.prevIBufEnqPtr + mmioRedirect.instrCount
+  }.elsewhen(uncacheRedirect.valid) {
+    s3_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s3_fire) {
     s3_prevIBufEnqPtr := s3_prevIBufEnqPtr + s3_instrCount
   }
@@ -471,16 +479,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_alignPd         = preDecoderOut.pd
   private val s3_alignJumpOffset = preDecoderOut.jumpOffset
 
-  XSPerfAccumulate("fetch_bubble_icache_not_resp", s3_valid && !icacheRespAllValid)
-
-  private val s3_firstIsMmio = s3_valid && (s3_icacheMeta(0).pmpMmio || Pbmt.isUncache(s3_icacheMeta(0).itlbPbmt)) &&
+  private val s3_firstIsUncache = s3_valid && (s3_icacheMeta(0).pmpMmio || Pbmt.isUncache(s3_icacheMeta(0).itlbPbmt)) &&
     s3_icacheMeta(0).exception.isNone
-  private val s3_secondIsMmio    = false.B
-  private val s3_mmioResendVAddr = s3_firstResendVAddr
-  private val s3_mmioFtqIdx      = s3_fetchBlock(0).ftqIdx
-
-  assert(!s3_secondIsMmio, "MMIO and non-MMIO instructions cannot be processed in the same cycle")
-
   /* *****************************************************************************
    * IFU Stage 4
    * - handle MMIO instruction
@@ -511,13 +511,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_alignIsPredTaken  = RegEnable(s3_alignIsPredTaken, s3_fire)
   private val s4_alignInstrData    = RegEnable(s3_realAlignInstrData, s3_fire)
   private val s4_alignInstrValid   = RegEnable(s3_alignInstrValid, s3_fire)
-  private val s4_firstIsMmio       = RegEnable(s3_firstIsMmio, s3_fire)
-
-  private val s4_mmioResendVAddr = RegEnable(s3_mmioResendVAddr, s3_fire)
-  private val s4_mmioFtqIdx      = RegEnable(s3_mmioFtqIdx, s3_fire)
-
-  private val s4_icacheMeta       = RegEnable(s3_icacheMeta, s3_fire)
-  private val s4_alignCompactInfo = RegEnable(s3_alignCompactInfo, s3_fire)
+  private val s4_icacheMeta        = RegEnable(s3_icacheMeta, s3_fire)
+  private val s4_alignCompactInfo  = RegEnable(s3_alignCompactInfo, s3_fire)
+  private val isFirstInstr         = RegInit(true.B)
+  when(isFirstInstr && io.toIBuffer.fire) {
+    isFirstInstr  := false.B
+  }
 
   rvcExpanders.zipWithIndex.foreach { case (expander, i) =>
     expander.io.in      := s4_alignInstrData(i)
@@ -546,13 +545,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
     }
   )
 
-  private val s4_alignFoldPc        = RegEnable(s3_alignFoldPc, s3_fire)
-  private val s4_rawInstrEndVec     = RegEnable(s3_rawInstrEndVec, s3_fire)
-  private val s4_prevLastIsHalfRvi  = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
-  private val s4_mmioLowerPc        = RegEnable(s3_alignCompactInfo.instrPcLower(s3_alignShiftNum), s3_fire)
-  private val s4_alignBlockStartPos = RegEnable(s3_alignBlockStartPos, s3_fire)
-  private val s4_mmioPc             = catPC(s4_mmioLowerPc, s4_fetchBlock(0).pcHigh, s4_fetchBlock(0).pcHighPlus1)
-
   // Exapnd 1 bit to prevent overflow when assert
   private val s4_fetchStartAddr = VecInit.tabulate(FetchPorts)(i =>
     PrunedAddrInit(Cat(0.U(1.W), s4_fetchBlock(i).startVAddr.toUInt))
@@ -569,243 +561,66 @@ class Ifu(implicit p: Parameters) extends IfuModule
     }
   }
 
-  /* *** mmio *** */
-  private def nMmioFsmState = 11
-  private object MmioFsmState extends EnumUInt(nMmioFsmState) {
-    def Idle:           UInt = 0.U(width.W)
-    def WaitLastCommit: UInt = 1.U(width.W)
-    def SendReq:        UInt = 2.U(width.W)
-    def WaitResp:       UInt = 3.U(width.W)
-    def SendTlb:        UInt = 4.U(width.W)
-    def TlbResp:        UInt = 5.U(width.W)
-    def SendPmp:        UInt = 6.U(width.W)
-    def ResendReq:      UInt = 7.U(width.W)
-    def WaitResendResp: UInt = 8.U(width.W)
-    def WaitCommit:     UInt = 9.U(width.W)
-    def Commited:       UInt = 10.U(width.W)
+  private val s4_alignFoldPc        = RegEnable(s3_alignFoldPc, s3_fire)
+  private val s4_rawInstrEndVec     = RegEnable(s3_rawInstrEndVec, s3_fire)
+  private val s4_prevLastIsHalfRvi  = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
+  private val s4_uncacheLowerPc     = RegEnable(s3_alignCompactInfo.instrPcLower(s3_alignShiftNum), s3_fire)
+  private val s4_alignBlockStartPos = RegEnable(s3_alignBlockStartPos, s3_fire)
+  private val s4_uncachePc          = catPC(s4_uncacheLowerPc, s4_fetchBlock(0).pcHigh, s4_fetchBlock(0).pcHighPlus1)
+  private val s4_reqIsUncache       = RegEnable(s3_firstIsUncache, s3_fire)
+  private val s4_uncacheCanGo       = uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage
+  private val s4_uncacheCrossPageMask = s4_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
+  private val s4_toIBufferValid = s4_valid && (!s4_reqIsUncache || (s4_uncacheCanGo && s4_reqIsUncache)) && !s4_flush
+  private val s4_shiftNum = s4_prevIBufEnqPtr.value(1, 0)
+  private val s4_ignore   = s4_prevShiftSelect // possibly redundant, may remove later.
+
+  /* ** unache state handle ** */
+  private val uncacheBusy    = RegInit(false.B)
+  private val prevUncacheCrossPage = RegInit(false.B)
+  private val prevUncacheData      = RegInit(0.U(16.W))
+  when(uncacheUnit.io.req.fire) {
+    uncacheBusy := true.B
+  }.elsewhen(uncacheUnit.io.resp.valid) {
+    uncacheBusy := false.B
   }
 
-  private val mmioState = RegInit(MmioFsmState.Idle)
+  uncacheUnit.io.req.valid       := s4_valid && s4_reqIsUncache && !uncacheBusy
+  uncacheUnit.io.req.bits.ftqIdx := s4_fetchBlock(0).ftqIdx
+  uncacheUnit.io.req.bits.pbmt   := s4_icacheMeta(0).itlbPbmt
+  uncacheUnit.io.req.bits.isMmio := s4_icacheMeta(0).pmpMmio
+  uncacheUnit.io.req.bits.paddr  := s4_icacheMeta(0).pAddr
+  // Non-cross-page uncached fetch always starts at the instruction head.
+  uncacheUnit.io.req.bits.isInstrHead := !prevUncacheCrossPage
+  uncacheUnit.io.flush  := s4_flush
+  uncacheUnit.io.isFirstInstr := isFirstInstr
+  io.toFtq.mmioCommitRead    <> uncacheUnit.io.mmioCommitRead
+  io.toUncache               <> uncacheUnit.io.toUncache
+  uncacheUnit.io.fromUncache <> io.fromUncache
 
-  private val mmioData       = RegInit(VecInit(Seq.fill(2)(0.U(16.W))))
-  private val mmioException  = RegInit(ExceptionType.None)
-  private val mmioIsRvc      = RegInit(false.B)
-  private val mmioHasResend  = RegInit(false.B)
-  private val mmioResendAddr = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
-  // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  private val mmioResendGpAddr            = RegInit(PrunedAddrInit(0.U(PAddrBitsMax.W)))
-  private val mmioResendIsForVSnonLeafPTE = RegInit(false.B)
+  private val uncacheData       = uncacheUnit.io.resp.bits.uncacheData
+  private val uncacheException  = uncacheUnit.io.resp.bits.exception
+  private val uncacheCrossPage  = uncacheUnit.io.resp.bits.crossPage
 
-  private def mmioReset(): Unit = {
-    mmioState := MmioFsmState.Idle
-    mmioData.foreach(_ := 0.U)
-    mmioException               := ExceptionType.None
-    mmioIsRvc                   := false.B
-    mmioHasResend               := false.B
-    mmioResendAddr              := PrunedAddrInit(0.U(PAddrBits.W))
-    mmioResendGpAddr            := PrunedAddrInit(0.U(PAddrBitsMax.W))
-    mmioResendIsForVSnonLeafPTE := false.B
+  when(uncacheUnit.io.resp.valid) {
+    prevUncacheCrossPage := uncacheCrossPage
+    prevUncacheData      := uncacheData
   }
 
-  // last instruction finish
-  private val isFirstInstr = RegInit(true.B)
-  private val s4_reqIsMmio = s4_firstIsMmio && s4_valid
-
-  /* Determine whether the MMIO instruction is executable based on the previous prediction block */
-  io.toFtq.mmioCommitRead.mmioFtqPtr := RegNext(s4_mmioFtqIdx - 1.U)
-  private val mmioCommit =
-    VecInit(io.robCommits.map(commit => commit.valid && commit.bits.ftqIdx === s4_mmioFtqIdx)).asUInt.orR
-  private val s4_mmioReqCommit      = s4_reqIsMmio && mmioState === MmioFsmState.Commited
-  private val s4_mmioWaitCommit     = s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit
-  private val s4_mmioWaitCommitNext = RegNext(s4_mmioWaitCommit)
-  private val s4_mmioCanGo          = s4_mmioWaitCommit && !s4_mmioWaitCommitNext
-
-  private val fromFtqRedirectReg = Wire(fromFtq.redirect.cloneType)
-  fromFtqRedirectReg.bits := RegEnable(
-    fromFtq.redirect.bits,
-    0.U.asTypeOf(fromFtq.redirect.bits),
-    fromFtq.redirect.valid
-  )
-  fromFtqRedirectReg.valid := RegNext(fromFtq.redirect.valid, init = false.B)
-  private val mmioF4Flush     = RegNext(s4_flush, init = false.B)
-  private val s4_ftqFlushSelf = fromFtqRedirectReg.valid && RedirectLevel.flushItself(fromFtqRedirectReg.bits.level)
-  private val s4_ftqFlushByOlder =
-    fromFtqRedirectReg.valid && isBefore(fromFtqRedirectReg.bits.ftqIdx, s4_mmioFtqIdx)
-
-  private val s4_needNotFlush = s4_reqIsMmio && fromFtqRedirectReg.valid && !s4_ftqFlushSelf && !s4_ftqFlushByOlder
-
-  /* We want to defer instruction fetching when encountering MMIO instructions
-   * to ensure that the MMIO region is not negatively impacted. (no speculative fetch in MMIO region)
-   * This is the exception when the first instruction is an MMIO instruction.
-   */
-  when(isFirstInstr && s4_fire) {
-    isFirstInstr := false.B
-  }
+  private val s4_uncacheData = Mux(prevUncacheCrossPage, Cat(uncacheData(15, 0), prevUncacheData), uncacheData)
+  private val uncacheIsRvc   = s4_uncacheData(1,0) =/= "b11".U
+  uncacheRvcExpander.io.in      := Mux(s4_reqIsUncache, s4_uncacheData, 0.U)
+  uncacheRvcExpander.io.fsIsOff := io.csrFsIsOff
 
   s4_valid := ValidHold(
     // infire: s3 -> s4 fire
     s3_fire && !s3_flush,
-    // outfire: if req is mmio, wait for commit, else wait for IBuffer
-    Mux(s4_reqIsMmio, s4_mmioReqCommit, io.toIBuffer.fire),
-    // flush: if req is mmio, check whether mmio Fsm allow flush, else flush directly
-    Mux(s4_reqIsMmio, mmioF4Flush && !s4_needNotFlush, s4_flush)
+    // outfire:
+    io.toIBuffer.fire || s4_uncacheCrossPageMask,
+    // On flush, waiting for uncache response is handled by the channel itself.
+    s4_flush
   )
-  dontTouch(s4_valid)
 
-  private val (redirectFtqIdx, redirectFtqOffset) =
-    (fromFtqRedirectReg.bits.ftqIdx, fromFtqRedirectReg.bits.ftqOffset)
-  private val redirectMmioReq = fromFtqRedirectReg.valid && redirectFtqIdx === s4_mmioFtqIdx
-
-  private val s4_mmioUseSnpc = ValidHold(RegNext(s3_fire && !s3_flush) && s4_reqIsMmio, redirectMmioReq)
-
-  s4_ready := (io.toIBuffer.ready && (s4_mmioReqCommit || !s4_reqIsMmio)) || !s4_valid
-
-  // mmio state machine
-  switch(mmioState) {
-    is(MmioFsmState.Idle) {
-      when(s4_reqIsMmio) {
-        // in idempotent spaces, we can send request directly (i.e. can do speculative fetch)
-        mmioState := Mux(s4_icacheMeta(0).itlbPbmt === Pbmt.nc, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
-      }
-    }
-
-    is(MmioFsmState.WaitLastCommit) {
-      when(isFirstInstr) {
-        mmioState := MmioFsmState.SendReq
-      }.otherwise {
-        mmioState := Mux(io.toFtq.mmioCommitRead.mmioLastCommit, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
-      }
-    }
-
-    is(MmioFsmState.SendReq) {
-      mmioState := Mux(toUncache.fire, MmioFsmState.WaitResp, MmioFsmState.SendReq)
-    }
-
-    is(MmioFsmState.WaitResp) {
-      when(fromUncache.fire) {
-        val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
-        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
-        // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
-        val needResend = !respIsRVC && s4_icacheMeta(0).pAddr(2, 1) === 3.U && exception.isNone
-        mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
-        mmioException := exception
-        mmioIsRvc     := respIsRVC
-        mmioHasResend := needResend
-        mmioData(0)   := fromUncache.bits.data(15, 0)
-        mmioData(1)   := fromUncache.bits.data(31, 16)
-      }
-    }
-
-    is(MmioFsmState.SendTlb) {
-      mmioState := Mux(io.itlb.req.fire, MmioFsmState.TlbResp, MmioFsmState.SendTlb)
-    }
-
-    is(MmioFsmState.TlbResp) {
-      when(io.itlb.resp.fire) {
-        // we are using a blocked tlb, so resp.fire must have !resp.bits.miss
-        assert(!io.itlb.resp.bits.miss, "blocked mode iTLB miss when resp.fire")
-        val itlbException = ExceptionType.fromTlbResp(io.itlb.resp.bits)
-        // if itlb re-check respond pbmt mismatch with previous check, must be access fault
-        val pbmtMismatchException = ExceptionType(hasAf = io.itlb.resp.bits.pbmt(0) =/= s4_icacheMeta(0).itlbPbmt)
-        // merge, itlbException has higher priority
-        val exception = itlbException || pbmtMismatchException
-        // if tlb has exception, abort checking pmp, just send instr & exception to iBuffer and wait for commit
-        mmioState := Mux(exception.hasException, MmioFsmState.WaitCommit, MmioFsmState.SendPmp)
-        // also save itlb response
-        mmioException               := exception
-        mmioResendAddr              := io.itlb.resp.bits.paddr(0)
-        mmioResendGpAddr            := io.itlb.resp.bits.gpaddr(0)(PAddrBitsMax - 1, 0)
-        mmioResendIsForVSnonLeafPTE := io.itlb.resp.bits.isForVSnonLeafPTE(0)
-      }
-    }
-
-    is(MmioFsmState.SendPmp) {
-      val pmpException = ExceptionType.fromPmpResp(io.pmp.resp)
-      // if pmp re-check respond mismatch with previous check, must be access fault
-      val mmioMismatchException = ExceptionType(hasAf = io.pmp.resp.mmio =/= s4_icacheMeta(0).pmpMmio)
-      // merge, pmpException has higher priority
-      val exception = pmpException || mmioMismatchException
-      // if pmp has exception, abort sending request, just send instr & exception to iBuffer and wait for commit
-      mmioState := Mux(exception.hasException, MmioFsmState.WaitCommit, MmioFsmState.ResendReq)
-      // also save pmp response
-      mmioException := exception
-    }
-
-    is(MmioFsmState.ResendReq) {
-      mmioState := Mux(toUncache.fire, MmioFsmState.WaitResendResp, MmioFsmState.ResendReq)
-    }
-
-    is(MmioFsmState.WaitResendResp) {
-      when(fromUncache.fire) {
-        mmioState     := MmioFsmState.WaitCommit
-        mmioException := ExceptionType(hasAf = fromUncache.bits.corrupt)
-        mmioData(1)   := fromUncache.bits.data(15, 0)
-      }
-    }
-
-    is(MmioFsmState.WaitCommit) {
-      // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
-      // but we do not skip MmioFsmState.WaitCommit state, as other signals (e.g. s3_mmioCanGo relies on this)
-      mmioState := Mux(
-        mmioCommit || s4_icacheMeta(0).itlbPbmt === Pbmt.nc,
-        MmioFsmState.Commited,
-        MmioFsmState.WaitCommit
-      )
-    }
-
-    // normal mmio instruction
-    is(MmioFsmState.Commited) {
-      mmioReset() // includes mmioState := MmioFsmState.Idle
-    }
-  }
-
-  // Exception or flush by older branch prediction
-  // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend redirect
-  when(s4_ftqFlushSelf || s4_ftqFlushByOlder) {
-    mmioReset()
-  }
-
-  toUncache.valid := ((mmioState === MmioFsmState.SendReq) || (mmioState === MmioFsmState.ResendReq)) &&
-    s4_reqIsMmio && s4_valid
-
-  toUncache.bits.addr := Mux(mmioState === MmioFsmState.ResendReq, mmioResendAddr, s4_icacheMeta(0).pAddr)
-  // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
-  // we need to tell L2 Cache about this to make it work correctly
-  toUncache.bits.memBackTypeMM := !s4_icacheMeta(0).pmpMmio
-  toUncache.bits.memPageTypeNC := s4_icacheMeta(0).itlbPbmt === Pbmt.nc
-
-  fromUncache.ready := true.B
-
-  // send itlb request in MmioFsmState.SendTlb state
-  io.itlb.req.valid                   := (mmioState === MmioFsmState.SendTlb) && s4_reqIsMmio
-  io.itlb.req.bits.size               := 3.U
-  io.itlb.req.bits.vaddr              := s4_mmioResendVAddr.toUInt
-  io.itlb.req.bits.debug.pc           := s4_mmioResendVAddr.toUInt
-  io.itlb.req.bits.cmd                := TlbCmd.exec
-  io.itlb.req.bits.isPrefetch         := false.B
-  io.itlb.req.bits.kill               := false.B // IFU use itlb for mmio, doesn't need sync, set it to false
-  io.itlb.req.bits.no_translate       := false.B
-  io.itlb.req.bits.fullva             := 0.U
-  io.itlb.req.bits.checkfullva        := false.B
-  io.itlb.req.bits.hyperinst          := DontCare
-  io.itlb.req.bits.hlvx               := DontCare
-  io.itlb.req.bits.memidx             := DontCare
-  io.itlb.req.bits.debug.robIdx       := DontCare
-  io.itlb.req.bits.debug.isFirstIssue := DontCare
-  io.itlb.req.bits.pmp_addr           := DontCare
-  // what's the difference between req_kill and req.bits.kill?
-  io.itlb.req_kill := false.B
-  // wait for itlb response in MmioFsmState.TlbResp state
-  io.itlb.resp.ready := (mmioState === MmioFsmState.TlbResp) && s4_reqIsMmio
-
-  io.pmp.req.valid     := (mmioState === MmioFsmState.SendPmp) && s4_reqIsMmio
-  io.pmp.req.bits.addr := mmioResendAddr.toUInt
-  io.pmp.req.bits.size := 3.U
-  io.pmp.req.bits.cmd  := TlbCmd.exec
-
-  private val s4_mmioRange = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
-  // private val s4_alignRealInstrValid  = Wire(Vec(IBufferEnqueueWidth, Bool()))
-  private val s4_ignore = s4_prevShiftSelect
+  s4_ready := (io.toIBuffer.ready && (s4_uncacheCanGo || !s4_reqIsUncache)) || !s4_valid
 
   /* ** prediction result check ** */
   checkerIn.valid                := s4_valid
@@ -819,7 +634,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   checkerIn.bits.firstPredTakenIdx.valid := s4_fetchBlock(0).predTakenIdx.valid
   checkerIn.bits.firstPredTakenIdx.bits :=
-    Cat(0.U(1.W), s4_fetchBlock(0).predTakenIdx.bits) + s4_prevIBufEnqPtr.value(1, 0)
+    Cat(0.U(1.W), s4_fetchBlock(0).predTakenIdx.bits) + s4_prevIBufEnqPtr.value(1, 0) // Timing
   checkerIn.bits.secondPredTakenIdx.valid := s4_fetchBlock(1).predTakenIdx.valid
   checkerIn.bits.secondPredTakenIdx.bits :=
     Cat(0.U(1.W), s4_fetchBlock(1).predTakenIdx.bits) + s4_prevIBufEnqPtr.value(1, 0)
@@ -830,16 +645,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   checkerIn.bits.instrEndOffset   := s4_alignCompactInfo.instrEndOffset
 
   /* ** frontend Trigger  ** */
-  frontendTrigger.io.pds             := s4_alignPds
-  frontendTrigger.io.pc              := s4_alignPc
-  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W))) // s4_noBubbleInstrData
+  frontendTrigger.io.pds    := s4_alignPds
+  frontendTrigger.io.pc     := s4_alignPc
+  frontendTrigger.io.data   := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W))) // s4_alignInstrData
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
   private val s4_alignTriggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
-  private val s4_toIBufferValid = s4_valid && (!s4_reqIsMmio || s4_mmioCanGo) && !s4_flush
-
-  private val ignoreRange = Cat(Fill(IBufferEnqueueWidth - IfuAlignWidth, 1.U(1.W)), ~s4_ignore)
+  private val ignoreRange = Cat(Fill(IBufferEnqueueWidth - IfuAlignWidth, 1.U(1.W)), ~s4_ignore) // maybe remove
   io.toIBuffer.valid          := s4_toIBufferValid
   io.toIBuffer.bits.instrs    := s4_alignExpdInstr
   io.toIBuffer.bits.valid     := s4_alignInstrValid.asUInt & ignoreRange
@@ -863,7 +676,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
-    a.taken  := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsMmio
+    a.taken  := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsUncache
     a.offset := s4_alignCompactInfo.instrEndOffset(i)
   }
   io.toIBuffer.bits.foldpc := s4_alignFoldPc
@@ -898,91 +711,73 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   /** to backend */
-  // s4_gpAddr is valid iff gpf is detected
-  io.toBackend.gpAddrMem.wen := s4_toIBufferValid && Mux(
-    s4_reqIsMmio,
-    mmioException.isGpf,
-    s4_icacheMeta(0).exception.isGpf
-  )
-  io.toBackend.gpAddrMem.waddr        := s4_fetchBlock(0).ftqIdx.value
-  io.toBackend.gpAddrMem.wdata.gpaddr := Mux(s4_reqIsMmio, mmioResendGpAddr.toUInt, s4_icacheMeta(0).gpAddr.toUInt)
-  io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := Mux(
-    s4_reqIsMmio,
-    mmioResendIsForVSnonLeafPTE,
-    s4_icacheMeta(0).isForVSnonLeafPTE
-  )
+  // s4_gpAddr is valid iff gpf is detected.
+  // Uncache doesn’t request iTLB; it only returns bus exceptions.
+  io.toBackend.gpAddrMem.wen := s4_toIBufferValid && s4_icacheMeta(0).exception.isGpf
+  io.toBackend.gpAddrMem.waddr  := s4_fetchBlock(0).ftqIdx.value
+  io.toBackend.gpAddrMem.wdata.gpaddr := s4_icacheMeta(0).gpAddr.toUInt
+  io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := s4_icacheMeta(0).isForVSnonLeafPTE
 
   // Write back to Ftq
-  private val mmioFlushWb         = Wire(Valid(new FrontendRedirect))
-  private val s4_mmioMisEndOffset = Wire(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W)))
-  s4_mmioMisEndOffset.valid := s4_reqIsMmio
-  s4_mmioMisEndOffset.bits  := Mux(s4_prevLastIsHalfRvi || mmioIsRvc, 0.U, 1.U)
+  private val s4_uncacheRange = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
+  private val uncacheFlushWb  = Wire(Valid(new PredecodeWritebackBundle))
+  private val uncachePd       = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
+  private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
+  uncacheMisEndOffset.valid   := s4_reqIsUncache
+  uncacheMisEndOffset.bits    := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
   // When backend redirect, mmioState reset after 1 cycle.
   // In this case, mask .valid to avoid overriding backend redirect
-  private val mmioTarget = Mux(mmioIsRvc, s4_fetchBlock(0).startVAddr + 2.U, s4_fetchBlock(0).startVAddr + 4.U)
-  mmioFlushWb.valid := (s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit && RegNext(fromUncache.fire) &&
-    s4_mmioUseSnpc && !s4_ftqFlushSelf && !s4_ftqFlushByOlder)
-  mmioFlushWb.bits.ftqIdx    := s4_fetchBlock(0).ftqIdx
-  mmioFlushWb.bits.pc        := s4_fetchBlock(0).startVAddr.toUInt
-  mmioFlushWb.bits.taken     := false.B
-  mmioFlushWb.bits.ftqOffset := s4_mmioMisEndOffset.bits
-  mmioFlushWb.bits.isRVC     := mmioIsRvc
-  mmioFlushWb.bits.attribute := BranchAttribute.None
-  mmioFlushWb.bits.target    := mmioTarget.toUInt
+  uncacheFlushWb.valid       := s4_reqIsUncache && s4_uncacheCanGo && !backendRedirect
+  uncacheFlushWb.bits.ftqIdx := s4_fetchBlock(0).ftqIdx
+  uncacheFlushWb.bits.pc     := s4_fetchBlock(0).startVAddr.toUInt
+  uncacheFlushWb.bits.taken  := false.B
+  uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
+  uncacheFlushWb.bits.isRVC     := uncacheIsRvc
+  uncacheFlushWb.bits.attribute := BranchAttribute.None
+  uncacheFlushWb.bits.target    :=
+    Mux(uncacheIsRvc | prevUncacheCrossPage, s4_fetchBlock(0).startVAddr + 2.U, s4_fetchBlock(0).startVAddr + 4.U)
 
-  mmioRvcExpander.io.in      := Mux(s4_reqIsMmio, Cat(mmioData(1), mmioData(0)), 0.U)
-  mmioRvcExpander.io.fsIsOff := io.csrFsIsOff
-
-  private val s4_shiftNum = s4_prevIBufEnqPtr.value(1, 0)
-  /* mmio pre-decode & send to IBuffer */
-  when(s4_reqIsMmio) {
-    val inst = Cat(mmioData(1), mmioData(0))
-
+  when(s4_reqIsUncache) {
+    val inst = s4_uncacheData
     val (brType, isCall, isRet) = getBrInfo(inst)
-
     io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
-      mmioRvcExpander.io.ill,
-      mmioRvcExpander.io.in,
-      mmioRvcExpander.io.out.bits
+      uncacheRvcExpander.io.ill,
+      uncacheRvcExpander.io.in,
+      uncacheRvcExpander.io.out.bits
     )
 
-    io.toIBuffer.bits.pd(s4_shiftNum).valid              := true.B
-    io.toIBuffer.bits.pd(s4_shiftNum).isRVC              := mmioIsRvc
-    io.toIBuffer.bits.pd(s4_shiftNum).brType             := brType
-    io.toIBuffer.bits.pd(s4_shiftNum).isCall             := isCall
-    io.toIBuffer.bits.pd(s4_shiftNum).isRet              := isRet
-    io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(s4_prevLastIsHalfRvi || mmioIsRvc, 0.U, 1.U)
+    io.toIBuffer.bits.pd(s4_shiftNum).valid             := true.B
+    io.toIBuffer.bits.pd(s4_shiftNum).isRVC             := uncacheIsRvc
+    io.toIBuffer.bits.pd(s4_shiftNum).brType            := brType
+    io.toIBuffer.bits.pd(s4_shiftNum).isCall            := isCall
+    io.toIBuffer.bits.pd(s4_shiftNum).isRet             := isRet
+    io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset  := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
-    io.toIBuffer.bits.exceptionType(s4_shiftNum) := mmioException
-    // exception can happen in next page only when resend
-    io.toIBuffer.bits.crossPageIPFFix(s4_shiftNum) := mmioHasResend && mmioException.hasException
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum)    := mmioRvcExpander.io.ill
+    io.toIBuffer.bits.exceptionType(s4_shiftNum)    := uncacheException
+    // execption can happen in next page only when cross page.
+    io.toIBuffer.bits.crossPageIPFFix(s4_shiftNum)  := prevUncacheCrossPage && uncacheException.hasException
+    io.toIBuffer.bits.illegalInstr(s4_shiftNum)     := uncacheRvcExpander.io.ill
+    io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt
 
-    io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt // s4_mmioRange.asUInt
-
-    mmioFlushWb.bits.isRVC     := mmioIsRvc
-    mmioFlushWb.bits.attribute := BranchAttribute(brType, Cat(isCall, isRet))
+    uncacheFlushWb.bits.isRVC     := uncacheIsRvc
+    uncacheFlushWb.bits.attribute := BranchAttribute(brType, Cat(isCall, isRet))
   }
 
-  mmioRedirect.valid := s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit &&
-    RegNext(fromUncache.fire) && s4_mmioUseSnpc
-
-  mmioRedirect.instrCount     := 1.U
-  mmioRedirect.prevIBufEnqPtr := s4_prevIBufEnqPtr
-  mmioRedirect.isHalfInstr    := false.B
-  mmioRedirect.halfPc         := 0.U.asTypeOf(PrunedAddr(VAddrBits))
-  mmioRedirect.halfData       := 0.U
-  XSPerfAccumulate("fetch_bubble_ibuffer_not_ready", io.toIBuffer.valid && !io.toIBuffer.ready)
-
+  uncacheRedirect.valid := s4_reqIsUncache && s4_uncacheCanGo
+  uncacheRedirect.instrCount     := 1.U
+  uncacheRedirect.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  uncacheRedirect.isHalfInstr    := false.B
+  uncacheRedirect.halfPc         := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+  uncacheRedirect.halfData       := 0.U
   /* *****************************************************************************
    * IFU Write-back Stage
    * - write back preDecode information to Ftq to update
    * - redirect if found fault prediction
    * - redirect if false hit last half(last PC is not start + 32 Bytes, but in the middle of an notCFI RVI instruction)
    * ***************************************************************************** */
-  private val wbEnable              = RegNext(s3_fire && !s3_flush) && !s4_reqIsMmio && !s4_flush
+  private val wbEnable              = RegNext(s3_fire && !s3_flush) && !s4_reqIsUncache && !s4_flush
   private val wbValid               = RegNext(wbEnable, init = false.B)
   private val wbFirstValid          = RegEnable(s4_firstValid, wbEnable)
   private val wbSecondValid         = RegEnable(s4_secondValid, wbEnable)
@@ -1024,7 +819,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   checkFlushWb(0).valid := wbValid && wbFirstValid && wbStage2Check(0).misIdx.valid
   checkFlushWb(1).valid := wbValid && wbSecondValid && wbStage2Check(1).misIdx.valid
 
-  toFtq.wbRedirect(0) := Mux(wbValid, checkFlushWb(0), mmioFlushWb)
+  toFtq.wbRedirect(0) := Mux(wbValid, checkFlushWb(0), uncacheFlushWb)
   toFtq.wbRedirect(1) := checkFlushWb(1)
 
   wbRedirect.valid          := checkFlushWb(0).valid || checkFlushWb(1).valid

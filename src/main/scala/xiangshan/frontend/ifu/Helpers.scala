@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import utility.SignExt
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
+import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.BrType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.PrunedAddr
@@ -177,7 +178,7 @@ trait IfuHelper extends HasIfuParameters with FetchBlockHelper {
   }
 
   def alignInstrCompact(indata: InstrCompactBundle, shiftNum: UInt): InstrCompactBundle = {
-    val out = Wire(new InstrCompactBundle(IBufEnqWidth))
+    val out = Wire(new InstrCompactBundle(IBufferEnqueueWidth))
     out.instrIndex     := alignData(indata.instrIndex, shiftNum, 0.U.asTypeOf(new InstrIndexEntry))
     out.instrIsRvc     := alignData(indata.instrIsRvc, shiftNum, false.B)
     out.selectBlock    := alignData(indata.selectBlock, shiftNum, false.B)
