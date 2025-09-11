@@ -28,29 +28,29 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
       // Input data is offset-adjusted for IBuffer enqueue.
-      val instrJumpOffset: Vec[PrunedAddr]    = Vec(IBufferInPortNum, PrunedAddr(VAddrBits))
-      val instrValid:      Vec[Bool]          = Vec(IBufferInPortNum, Bool())
-      val instrPds:        Vec[PreDecodeInfo] = Vec(IBufferInPortNum, new PreDecodeInfo)
-      val instrPc:         Vec[PrunedAddr]    = Vec(IBufferInPortNum, PrunedAddr(VAddrBits))
-      val isPredTaken:     Vec[Bool]          = Vec(IBufferInPortNum, Bool())
-      val ignore:          Vec[Bool]          = Vec(IBufWriteBank, Bool())
-      val shiftNum:        UInt               = UInt(log2Ceil(IBufWriteBank).W)
+      val instrJumpOffset: Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val instrValid:      Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+      val instrPds:        Vec[PreDecodeInfo] = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
+      val instrPc:         Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val isPredTaken:     Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+      val ignore:          Vec[Bool]          = Vec(IfuAlignWidth, Bool())
+      val shiftNum:        UInt               = UInt(log2Ceil(IfuAlignWidth).W)
 
-      val firstPredTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
-      val secondPredTakenIdx: Valid[UInt] = Valid(UInt(log2Ceil(IBufferInPortNum).W))
+      val firstPredTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
+      val secondPredTakenIdx: Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
 
       val firstTarget:      PrunedAddr = PrunedAddr(VAddrBits)
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
-      val selectFetchBlock: Vec[Bool]  = Vec(IBufferInPortNum, Bool())
-      val invalidTaken:     Vec[Bool]  = Vec(IBufferInPortNum, Bool())
-      val instrEndOffset:   Vec[UInt]  = Vec(IBufferInPortNum, UInt(FetchBlockInstOffsetWidth.W))
+      val selectFetchBlock: Vec[Bool]  = Vec(IBufferEnqueueWidth, Bool())
+      val invalidTaken:     Vec[Bool]  = Vec(IBufferEnqueueWidth, Bool())
+      val instrEndOffset:   Vec[UInt]  = Vec(IBufferEnqueueWidth, UInt(FetchBlockInstOffsetWidth.W))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
       // to Ibuffer write port  (stage 1) ---- Output data is offset-adjusted for IBuffer enqueue.
       class S1Out(implicit p: Parameters) extends IfuBundle {
-        val fixedTwoFetchRange: Vec[Bool] = Vec(IBufferInPortNum, Bool())
-        val fixedTwoFetchTaken: Vec[Bool] = Vec(IBufferInPortNum, Bool())
+        val fixedTwoFetchRange: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
+        val fixedTwoFetchTaken: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
       }
       // to Ftq write back port (stage 2) ---- Output data with offset removed for FTQ write-back
       class S2Out(implicit p: Parameters) extends IfuBundle {
@@ -80,8 +80,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val isPredTaken      = io.req.bits.isPredTaken
 
   // Entries made invalid by offset are marked with 'ignore'
-  private val ignore = VecInit((0 until IBufferInPortNum).map { i =>
-    if (i < IBufWriteBank) io.req.bits.ignore(i)
+  private val ignore = VecInit((0 until IBufferEnqueueWidth).map { i =>
+    if (i < IfuAlignWidth) io.req.bits.ignore(i)
     else false.B
   })
 
@@ -90,7 +90,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val shiftNum              = io.req.bits.shiftNum
   private val (pds, pc, jumpOffset) = (io.req.bits.instrPds, io.req.bits.instrPc, io.req.bits.instrJumpOffset)
 
-  private val jalFaultVec, jalrFaultVec, retFaultVec, notCfiTaken = Wire(Vec(IBufferInPortNum, Bool()))
+  private val jalFaultVec, jalrFaultVec, retFaultVec, notCfiTaken = Wire(Vec(IBufferEnqueueWidth, Bool()))
 
   /** Remask faults can occur alongside other faults, whereas other faults are mutually exclusive.
     * Therefore, for non-remask faults, a fixed fault mask must be used to ensure that only one fault
@@ -110,21 +110,23 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     pd.isRet && instrValid(i) && !isPredTaken(i) && !ignore(i)
   })
   private val remaskFault =
-    VecInit((0 until IBufferInPortNum).map(i => jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i)))
+    VecInit((0 until IBufferEnqueueWidth).map(i =>
+      jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i)
+    ))
   private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
   private val needRemask = ParallelOR(remaskFault)
   // Note: remaskIdx must be 5-bit wide (2^5=32) to cover all shift positions (0-31)
   private val fixedRange =
-    instrValid.asUInt & (Fill(IBufferInPortNum, !needRemask) | (Fill(32, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt)
+    instrValid.asUInt & (Fill(IBufferEnqueueWidth, !needRemask) | (Fill(32, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt)
   assert(remaskIdx.getWidth == 5, s"remaskIdx width mismatch!") // Temporary code.
   // Adjust this if one IBuffer input entry is later removed
   // require(
-  //   isPow2(IBufferInPortNum),
-  //   "If IBufferInPortNum does not satisfy the power of 2," +
-  //     "expression: Fill(IBufferInPortNum, 1.U(1.W)) >> ~remaskIdx is not right !!"
+  //   isPow2(IBufferEnqueueWidth),
+  //   "If IBufferEnqueueWidth does not satisfy the power of 2," +
+  //     "expression: Fill(IBufferEnqueueWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
   // )
 
-  io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferInPortNum, Bool()))
+  io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
 
   private val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
@@ -159,8 +161,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   fixedSecondTakenInstrIdx.valid := ParallelOR(fixedTwoFetchSecondTaken)
   fixedSecondTakenInstrIdx.bits  := ParallelPriorityEncoder(fixedTwoFetchSecondTaken)
 
-  private val mispredInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(IBufferInPortNum).W))))
-  private val stage1Fault = VecInit.tabulate(IBufferInPortNum)(i =>
+  private val mispredInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(IBufferEnqueueWidth).W))))
+  private val stage1Fault = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || notCfiTaken(i) || invalidTaken(i)
   )
   mispredInstrIdx.valid := ParallelOR(stage1Fault)
@@ -170,7 +172,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     (pc(i) + jumpOffset(i)).asTypeOf(PrunedAddr(VAddrBits))
   })
   private val seqTargets =
-    VecInit((0 until IBufferInPortNum).map(i => pc(i) + Mux(pds(i).isRVC || invalidTaken(i), 2.U, 4.U)))
+    VecInit((0 until IBufferEnqueueWidth).map(i => pc(i) + Mux(pds(i).isRVC || invalidTaken(i), 2.U, 4.U)))
 
   private val mispredIsJump =
     instrValid(mispredInstrIdx.bits) &&

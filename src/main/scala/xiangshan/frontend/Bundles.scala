@@ -33,6 +33,7 @@ import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheRespBundle
@@ -277,27 +278,27 @@ class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
-  val instrs:         Vec[UInt]           = Vec(IBufEnqWidth, UInt(32.W))
-  val valid:          UInt                = UInt(IBufEnqWidth.W)
-  val enqEnable:      UInt                = UInt(IBufEnqWidth.W)
-  val pd:             Vec[PreDecodeInfo]  = Vec(IBufEnqWidth, new PreDecodeInfo)
-  val foldpc:         Vec[UInt]           = Vec(IBufEnqWidth, UInt(MemPredPCWidth.W))
-  val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufEnqWidth, new InstrEndOffset)
-  // val ftqPcOffset:      Vec[Valid[FtqPcOffset]] = Vec(IBufEnqWidth, Valid(new FtqPcOffset))
-  val backendException: Vec[Bool]          = Vec(IBufEnqWidth, Bool())
-  val exceptionType:    Vec[ExceptionType] = Vec(IBufEnqWidth, new ExceptionType)
-  val crossPageIPFFix:  Vec[Bool]          = Vec(IBufEnqWidth, Bool())
-  val illegalInstr:     Vec[Bool]          = Vec(IBufEnqWidth, Bool())
-  val triggered:        Vec[UInt]          = Vec(IBufEnqWidth, TriggerAction())
-  val isLastInFtqEntry: Vec[Bool]          = Vec(IBufEnqWidth, Bool())
+  val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
+  val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
+  val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
+  val pd:             Vec[PreDecodeInfo]  = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
+  val foldpc:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
+  val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufferEnqueueWidth, new InstrEndOffset)
+  // val ftqPcOffset:      Vec[Valid[FtqPcOffset]] = Vec(IBufferEnqueueWidth, Valid(new FtqPcOffset))
+  val backendException: Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+  val exceptionType:    Vec[ExceptionType] = Vec(IBufferEnqueueWidth, new ExceptionType)
+  val crossPageIPFFix:  Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+  val illegalInstr:     Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+  val triggered:        Vec[UInt]          = Vec(IBufferEnqueueWidth, TriggerAction())
+  val isLastInFtqEntry: Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
 
-  val pc:             Vec[PrunedAddr]       = Vec(IBufEnqWidth, PrunedAddr(VAddrBits))
+  val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
-  val debug_seqNum:   Vec[UInt]             = Vec(IBufEnqWidth, InstSeqNum())
+  val debug_seqNum:   Vec[UInt]             = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         FtqPtr                = new FtqPtr
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 
-  val identifiedCfi: Vec[Bool] = Vec(IBufEnqWidth, Bool())
+  val identifiedCfi: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 }
 
 class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {

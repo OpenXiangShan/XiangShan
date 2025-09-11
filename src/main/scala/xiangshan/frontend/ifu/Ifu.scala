@@ -44,7 +44,6 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToIfuIO
-import xiangshan.frontend.IBufPtr
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.IfuToFtqIO
@@ -55,6 +54,7 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
 
 class Ifu(implicit p: Parameters) extends IfuModule
@@ -105,7 +105,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val preDecodeBounder = Module(new PreDecodeBoundary)
   private val predChecker      = Module(new PredChecker)
   private val frontendTrigger  = Module(new FrontendTrigger)
-  private val rvcExpanders     = Seq.fill(IBufferInPortNum)(Module(new RvcExpander))
+  private val rvcExpanders     = Seq.fill(IBufferEnqueueWidth)(Module(new RvcExpander))
   private val mmioRvcExpander  = Module(new RvcExpander)
 
   // alias
@@ -581,11 +581,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_alignShiftNum = s3_prevIBufEnqPtr.value(1, 0)
   // Maybe it's better to move the calculation of enqBlockStartPos to the previous pipeline stage
   // — at least from a timing perspective. But it would require modifying IBufferPrevPtr.
-  private val s3_alignBlockStartPos = WireDefault(VecInit.fill(IBufferInPortNum)(false.B))
+  private val s3_alignBlockStartPos = WireDefault(VecInit.fill(IBufferEnqueueWidth)(false.B))
   s3_alignBlockStartPos(s3_alignShiftNum) := true.B
   private val s3_alignInstrPcLower =
     alignData(s3_instrPcLowerResult, s3_alignShiftNum, 0.U((PcCutPoint + 1).W))
-  private val s3_alignInstrData = WireDefault(VecInit.fill(IBufferInPortNum)(0.U(32.W)))
+  private val s3_alignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
   private val s3_alignInstrIndex =
     alignData(s3_instrIndex, s3_alignShiftNum, 0.U.asTypeOf(new InstrIndexEntry))
   private val s3_alignInstrIsRvc = alignData(s3_instrIsRvc, s3_alignShiftNum, false.B)
@@ -596,29 +596,29 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_alignSelectBlock  = alignData(s3_selectFetchBlock, s3_alignShiftNum, false.B)
   private val s3_alignInstrEndOffset =
     alignData(s3_instrEndOffset, s3_alignShiftNum, 0.U(FetchBlockInstOffsetWidth.W))
-  private val s3_alignPc = VecInit.tabulate(IBufferInPortNum)(i =>
+  private val s3_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     catPC(
       s3_alignInstrPcLower(i),
       Mux(s3_alignSelectBlock(i), s3_fetchBlock(1).pcHigh, s3_fetchBlock(0).pcHigh),
       Mux(s3_alignSelectBlock(i), s3_fetchBlock(1).pcHighPlus1, s3_fetchBlock(0).pcHighPlus1)
     )
   )
-  private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferInPortNum)(0.U(32.W)))
-  private val s3_realAlignPc        = WireDefault(VecInit.fill(IBufferInPortNum)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
-  private val s3_alignFoldPc        = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
+  private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
+  private val s3_realAlignPc = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
+  private val s3_alignFoldPc = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
   private val s3_alignIdentifiedCfi = alignData(s3_identifiedCfi, s3_alignShiftNum, false.B)
 
-  for (i <- 0 until IBufferInPortNum / 2) {
+  for (i <- 0 until IBufferEnqueueWidth / 2) {
     val lowIdx     = s3_alignInstrIndex(i).value
-    val highIdx    = s3_alignInstrIndex(i + IBufferInPortNum / 2).value
-    val j          = i + IBufferInPortNum / 2
+    val highIdx    = s3_alignInstrIndex(i + IBufferEnqueueWidth / 2).value
+    val j          = i + IBufferEnqueueWidth / 2
     val lowSelect  = s3_alignSelectBlock(i)
     val highSelect = s3_alignSelectBlock(j)
     s3_alignInstrData(i) := Mux(!lowSelect, s3_firstLowICacheData(lowIdx), s3_secondLowICacheData(lowIdx))
     s3_alignInstrData(j) := Mux(!highSelect, s3_firstHighICacheData(highIdx), s3_secondHighICacheData(highIdx))
   }
 
-  for (i <- 0 until IBufferInPortNum) {
+  for (i <- 0 until IBufferEnqueueWidth) {
     // Handling of cross-predict-block instructions in the one-fetch case.
     // This part should only be modified after the backend changes are completed.
     val adjustedBlockHeadInst =
@@ -730,7 +730,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_rawPcLowerResult    = RegEnable(s3_rawPcLowerResult, s3_fire)
   private val s4_alignIdentifiedCfi  = RegEnable(s3_alignIdentifiedCfi, s3_fire)
 
-  private val s4_alignPc = VecInit.tabulate(IBufferInPortNum)(i =>
+  private val s4_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     if (i < IfuAlignWidth) {
       RegEnable(s3_realAlignPc(i), s3_fire)
     } else {
@@ -1000,13 +1000,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.pmp.req.bits.cmd  := TlbCmd.exec
 
   private val s4_mmioRange = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
-  // private val s4_alignRealInstrValid  = Wire(Vec(IBufferInPortNum, Bool()))
+  // private val s4_alignRealInstrValid  = Wire(Vec(IBufferEnqueueWidth, Bool()))
   private val s4_ignore = s4_prevShiftSelect
 
   /* ** prediction result check ** */
   checkerIn.valid                := s4_valid
   checkerIn.bits.instrJumpOffset := s4_alignJumpOffset
-  checkerIn.bits.instrValid      := s4_alignInstrValid.asTypeOf(Vec(IBufferInPortNum, Bool()))
+  checkerIn.bits.instrValid      := s4_alignInstrValid.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
   checkerIn.bits.instrPds        := s4_alignPds
   checkerIn.bits.instrPc         := s4_alignPc
   checkerIn.bits.isPredTaken     := s4_alignIsPredTaken
@@ -1028,14 +1028,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** frontend Trigger  ** */
   frontendTrigger.io.pds             := s4_alignPds
   frontendTrigger.io.pc              := s4_alignPc
-  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferInPortNum + 1, UInt(16.W))) // s4_noBubbleInstrData
+  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W))) // s4_noBubbleInstrData
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
   private val s4_alignTriggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
   private val s4_toIBufferValid = s4_valid && (!s4_reqIsMmio || s4_mmioCanGo) && !s4_flush
 
-  private val ignoreRange = Cat(Fill(IBufferInPortNum - IfuAlignWidth, 1.U(1.W)), ~s4_ignore)
+  private val ignoreRange = Cat(Fill(IBufferEnqueueWidth - IfuAlignWidth, 1.U(1.W)), ~s4_ignore)
   io.toIBuffer.valid          := s4_toIBufferValid
   io.toIBuffer.bits.instrs    := s4_alignExpdInstr
   io.toIBuffer.bits.valid     := s4_alignInstrValid.asUInt & ignoreRange
@@ -1053,17 +1053,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.foldpc := s4_alignFoldPc
   // mark the exception only on first instruction
   // TODO: store only the first exception in IBuffer, instead of store in every entry
-  io.toIBuffer.bits.exceptionType := (0 until IBufferInPortNum).map {
+  io.toIBuffer.bits.exceptionType := (0 until IBufferEnqueueWidth).map {
     i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheInfo(0).exception, ExceptionType.None)
   }
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := (0 until IBufferInPortNum).map {
+  io.toIBuffer.bits.backendException := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheInfo(0).isBackendException
   }
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
-  io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferInPortNum).map {
+  io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheInfo(0).exception.hasException && s4_prevLastIsHalfRvi
   }
   io.toIBuffer.bits.illegalInstr  := s4_alignIll
@@ -1072,7 +1072,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   when(io.toIBuffer.valid && io.toIBuffer.ready) {
     val enqVec = io.toIBuffer.bits.enqEnable
-    val allocateSeqNum = VecInit((0 until IBufferInPortNum).map { i =>
+    val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
       val idx  = PopCount(enqVec.take(i + 1))
       val pc   = s4_alignPc(i).toUInt
       val code = io.toIBuffer.bits.instrs(i)

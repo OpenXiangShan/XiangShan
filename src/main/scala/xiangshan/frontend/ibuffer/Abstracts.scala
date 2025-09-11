@@ -13,21 +13,12 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.ifu
+package xiangshan.frontend.ibuffer
 
-import xiangshan.frontend.HasFrontendParameters
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.FrontendBundle
+import xiangshan.frontend.FrontendModule
 
-case class IfuParameters(
-    PcCutPoint: Option[Int] = None // default cut at lower VAddrBits/4
-) {}
+abstract class IBufferBundle(implicit p: Parameters) extends FrontendBundle with HasIBufferParameters
 
-trait HasIfuParameters extends HasFrontendParameters {
-  def ifuParameters: IfuParameters = frontendParameters.ifuParameters
-
-  def ICacheLineBytes: Int = frontendParameters.icacheParameters.blockBytes
-  // equal lower_result overflow bit
-  def PcCutPoint:    Int = ifuParameters.PcCutPoint.getOrElse((VAddrBits / 4) - 1)
-  def IfuAlignWidth: Int = frontendParameters.ibufferParameters.NumWriteBank
-
-  require(PcCutPoint > 0 && PcCutPoint < VAddrBits, s"PcCutPoint($PcCutPoint) must be in range (0, $VAddrBits)")
-}
+abstract class IBufferModule(implicit p: Parameters) extends FrontendModule with HasIBufferParameters

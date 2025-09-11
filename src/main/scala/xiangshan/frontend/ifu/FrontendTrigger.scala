@@ -31,20 +31,21 @@ import xiangshan.frontend.PrunedAddr
 class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
   class FrontendTriggerIO(implicit p: Parameters) extends IfuBundle {
     val frontendTrigger: FrontendTdataDistributeIO = Input(new FrontendTdataDistributeIO)
-    val triggered:       Vec[UInt]                 = Output(Vec(IBufferInPortNum, TriggerAction()))
+    val triggered:       Vec[UInt]                 = Output(Vec(IBufferEnqueueWidth, TriggerAction()))
 
-    val pds: Vec[PreDecodeInfo] = Input(Vec(IBufferInPortNum, new PreDecodeInfo))
-    val pc:  Vec[PrunedAddr]    = Input(Vec(IBufferInPortNum, PrunedAddr(VAddrBits)))
+    val pds: Vec[PreDecodeInfo] = Input(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
+    val pc:  Vec[PrunedAddr]    = Input(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
     val data: Vec[UInt] =
-      if (HasCExtension) Input(Vec(IBufferInPortNum + 1, UInt(16.W))) else Input(Vec(IBufferInPortNum, UInt(32.W)))
+      if (HasCExtension) Input(Vec(IBufferEnqueueWidth + 1, UInt(16.W)))
+      else Input(Vec(IBufferEnqueueWidth, UInt(32.W)))
   }
   val io: FrontendTriggerIO = IO(new FrontendTriggerIO)
 
   // Currently, FrontendTrigger supports pc match only, data/pds is reserved for future use
   private val data = io.data
   private val rawInsts =
-    if (HasCExtension) VecInit((0 until IBufferInPortNum).map(i => Cat(data(i + 1), data(i))))
-    else VecInit((0 until IBufferInPortNum).map(i => data(i)))
+    if (HasCExtension) VecInit((0 until IBufferEnqueueWidth).map(i => Cat(data(i + 1), data(i))))
+    else VecInit((0 until IBufferEnqueueWidth).map(i => data(i)))
 
   private val tdataVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   when(io.frontendTrigger.tUpdate.valid) {
@@ -72,7 +73,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
     ).map(hit => hit && !tdataVec(j).select && !debugMode)
   }.transpose
 
-  for (i <- 0 until IBufferInPortNum) {
+  for (i <- 0 until IBufferEnqueueWidth) {
     val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
     TriggerCheckCanFire(TriggerNum, triggerCanFireVec, VecInit(triggerHitVec(i)), triggerTimingVec, triggerChainVec)
 
