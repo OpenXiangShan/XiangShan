@@ -73,10 +73,11 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
   val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
+  val nextCachelineVAddr: PrunedAddr  = PrunedAddr(VAddrBits)
 }
 
 // HasICacheParameters is for PortNumber
-class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
+class ICacheMeta(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
@@ -122,4 +123,13 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val isHalfInstr: Bool       = Bool()
   val halfPc:      PrunedAddr = PrunedAddr(VAddrBits)
   val halfData:    UInt       = UInt(16.W)
+}
+
+class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
+  val instrIndex:     Vec[InstrIndexEntry] = Vec(width, new InstrIndexEntry)
+  val instrIsRvc:     Vec[Bool]            = Vec(width, Bool())
+  val selectBlock:    Vec[Bool]            = Vec(width, Bool())
+  val instrPcLower:   Vec[UInt]            = Vec(width, UInt((PcCutPoint + 1).W))
+  val instrEndOffset: Vec[UInt]            = Vec(width, UInt(log2Ceil(FetchBlockInstNum).W))
+  val identifiedCfi:  Vec[Bool]            = Vec(width, Bool())
 }
