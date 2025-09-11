@@ -30,7 +30,8 @@ import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
+import xiangshan.ExceptionNO._
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, StoreUnitToLFST}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.exu.MemExeUnit
@@ -119,7 +120,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   // used by VLSU issue queue, the vector store would wait all store before it, and the vector load would wait all load
   val sqDeqPtr = Output(new SqPtr)
   val lqDeqPtr = Output(new LqPtr)
-  val stIn = Vec(StAddrCnt, ValidIO(new MemExuInput))
+  val updateLFST = Vec(StAddrCnt, ValidIO(new StoreUnitToLFST))
   val stIssuePtr = Output(new SqPtr())
 
   val memoryViolation = ValidIO(new Redirect)
@@ -1027,8 +1028,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     hybridUnits(i).io.stu_io.lsq_replenish <> lsq.io.sta.storeAddrInRe.takeRight(HyuCnt)(i)
 
     lsq.io.sta.storeMaskIn.takeRight(HyuCnt)(i) <> hybridUnits(i).io.stu_io.st_mask_out
-    io.mem_to_ooo.stIn.takeRight(HyuCnt)(i).valid := hybridUnits(i).io.stu_io.issue.valid
-    io.mem_to_ooo.stIn.takeRight(HyuCnt)(i).bits := hybridUnits(i).io.stu_io.issue.bits
+    io.mem_to_ooo.updateLFST.takeRight(HyuCnt)(i) := hybridUnits(i).io.stu_io.updateLFST
 
     // ------------------------------------
     //  Vector Store Port
@@ -1151,10 +1151,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
-    // io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
-    // io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
-    io.mem_to_ooo.stIn(i).valid := stu.io.issue.valid
-    io.mem_to_ooo.stIn(i).bits := stu.io.issue.bits
+    io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST
 
     stu.io.stout.ready := true.B
 

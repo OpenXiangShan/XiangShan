@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, StoreUnitToLFST}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
@@ -122,7 +122,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val stu_io = new Bundle() {
       val dcache          = new DCacheStoreIO
       val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
-      val issue           = Valid(new MemExuInput)
+      val updateLFST      = Valid(new StoreUnitToLFST)
       val lsq             = ValidIO(new LsPipelineBundle)
       val lsq_replenish   = Output(new LsPipelineBundle())
       val stld_nuke_query = Valid(new StoreNukeQueryBundle)
@@ -796,8 +796,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stu_io.st_mask_out.bits.mask   := s1_out.mask
   io.stu_io.st_mask_out.bits.sqIdx  := s1_out.uop.sqIdx
 
-  io.stu_io.issue.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf && !s1_isvec
-  io.stu_io.issue.bits        := RegEnable(io.lsin.bits, io.lsin.fire)
+  io.stu_io.updateLFST.valid := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf && !s1_isvec
+  io.stu_io.updateLFST.bits.robIdx := RegEnable(io.lsin.bits.uop.robIdx, io.lsin.fire)
+  io.stu_io.updateLFST.bits.ssid := RegEnable(io.lsin.bits.uop.ssid, io.lsin.fire)
+  io.stu_io.updateLFST.bits.storeSetHit := RegEnable(io.lsin.bits.uop.storeSetHit, io.lsin.fire)
 
   // st-ld violation dectect request
   io.stu_io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf

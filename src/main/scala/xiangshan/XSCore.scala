@@ -138,13 +138,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
 
-  require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
-  backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
-    sink.valid := source.valid
-    sink.bits.robIdx := source.bits.uop.robIdx
-    sink.bits.ssid := source.bits.uop.ssid
-    sink.bits.storeSetHit := source.bits.uop.storeSetHit
-    // The other signals have not been used
+  require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.updateLFST.length)
+  backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.updateLFST).foreach { case (sink, source) =>
+    sink := source
   }
   backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
