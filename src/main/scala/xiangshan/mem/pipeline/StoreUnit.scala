@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort, UopIdx}
+import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
@@ -42,7 +42,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val redirect        = Flipped(ValidIO(new Redirect))
     val csrCtrl         = Flipped(new CustomCSRCtrlIO)
     val stin            = Flipped(Decoupled(new MemExuInput))
-    val issue           = Valid(new MemExuInput)
+    val updateLFST      = Valid(new StoreUnitToLFST)
     // misalignBuffer issue path
     val misalign_stin   = Flipped(Decoupled(new LsPipelineBundle))
     val misalign_stout  = Valid(new SqWriteBundle)
@@ -330,9 +330,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                                           Mux(s1_in.is128bit, StLdNukeMatchType.QuadWord, StLdNukeMatchType.Normal)
                                         )
 
-  // issue
-  io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
-  io.issue.bits  := RegEnable(s0_stin, s0_valid)
+  io.updateLFST.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
+  io.updateLFST.bits.robIdx := RegEnable(s0_stin.uop.robIdx, s0_valid)
+  io.updateLFST.bits.ssid := RegEnable(s0_stin.uop.ssid, s0_valid)
+  io.updateLFST.bits.storeSetHit := RegEnable(s0_stin.uop.storeSetHit, s0_valid)
 
   // trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))
