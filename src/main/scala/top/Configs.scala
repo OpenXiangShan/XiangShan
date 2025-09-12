@@ -102,6 +102,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RobSize = 48,
         RabSize = 96,
         frontendParameters = FrontendParameters(
+          FetchBlockSize = 32, // in bytes
           bpuParameters = BpuParameters(
             // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
             mbtbParameters = MainBtbParameters(

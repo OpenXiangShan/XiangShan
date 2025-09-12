@@ -24,7 +24,7 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
   class PreDecodeBoundIO(implicit p: Parameters) extends IfuBundle {
     class PreDecodeBoundReq(implicit p: Parameters) extends IfuBundle {
       val instrRange:        Vec[Bool] = Vec(FetchBlockInstNum, Bool())
-      val cacheData:         UInt      = UInt(512.W)
+      val cacheData:         UInt      = UInt((FetchBlockSize * 8).W)
       val prevLastIsHalfRvi: Bool      = Bool()
       val firstEndPos:       UInt      = UInt(FetchBlockInstOffsetWidth.W)
       val endPos:            UInt      = UInt(FetchBlockInstOffsetWidth.W)
@@ -46,9 +46,10 @@ class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecode
     val isEnd:   Bool = Bool()
   }
 
-  private val data = io.req.bits.cacheData.asTypeOf(Vec(32, UInt(16.W)))
-  private val rawInsts =
-    VecInit((0 until FetchBlockInstNum).map(i => Cat(data(i + 1), data(i))))
+  private val data = io.req.bits.cacheData.asTypeOf(Vec(FetchBlockInstNum, UInt((instBytes * 8).W)))
+  private val rawInsts = VecInit((0 until FetchBlockInstNum).map(i =>
+    if (i == FetchBlockInstNum - 1) data(i) else Cat(data(i + 1), data(i))
+  ))
 
   // if the former fetch block's last 2 Bytes is a valid end, we need delimitation from data(0)
   //   we compute the first half directly -> bound(0, FetchBlockInstNum/2-1) is correct
