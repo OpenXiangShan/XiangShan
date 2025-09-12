@@ -1,61 +1,67 @@
-name: Performance Regression
+name: Performance Regression Template (Unified)
+
 on:
-  schedule:
-    #run at 4:00 UTC (12:00 UTC+8) on Friday
-    - cron: '0 4 * * 5'
-    #run at 4:00 UTC (12:00 UTC+8) Every two weeks
-    # - cron: '0 4 13,27 * *'
   #run it manually when the workflow is in the default branch
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      test_branch:
+        description: 'Branch to run the workflow on'
+        required: true
+        type: string
       test_commit:
         description: 'Commit SHA to run the workflow on'
         required: false
+        type: string
         default: ''
-  #only for test push
-  # push:
-  #   branches: [ ci-perf-yml ]
-
+      benchmark_type:
+        required: true
+        type: string
+        description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
 
 jobs:
   run:
     runs-on: perf
-    continue-on-error: true
-    #At most 3 days to finish
-    timeout-minutes: 4320
+    continue-on-error: false
+    #At most 2 days to finish
+    timeout-minutes: 2880
     name: Checkpoints
     steps:
-      - name: Set test commit
-        id: set_test_commit
+      - name: Set benchmark configuration
         run: |
-          if [ "${{ github.event.inputs.test_commit }}" = "" ]; then
-            echo "Using latest commit."
-            echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using specified commit: ${{ github.event.inputs.test_commit }}"
-            echo "commit_sha=${{ github.event.inputs.test_commit }}" >> $GITHUB_OUTPUT
-          fi
+          case "${{ inputs.benchmark_type }}" in
+            "spec06-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              ;;
+            "spec06-0.8c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              ;;
+            "spec06-1.0c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c"
+              exit 1
+              ;;
+          esac
 
-      - name: Determine if this is the biweekly run
-        id: determine_run
+      - name: Set test branch or commit
+        id: set_test
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run_biweekly=true" >> $GITHUB_OUTPUT
-          elif [ $(( 10#$(date +'%V') % 2 )) -eq 1 ]; then
-            echo "run_biweekly=true" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.test_commit }}" = "" ]; then
+            echo "Using specified branch: ${{ inputs.test_branch }}"
+            echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
           else
-            echo "run_biweekly=false" >> $GITHUB_OUTPUT
+            echo "Using specified commit: ${{ inputs.test_commit }}"
+            echo "commit_sha=${{ inputs.test_commit }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout code at specific commit
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         uses: actions/checkout@v2
         with:
-          ref: ${{ steps.set_test_commit.outputs.commit_sha }}
+          ref: ${{ steps.set_test.outputs.commit_sha }}
           submodules: 'recursive'
 
       - name: Set env
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
@@ -67,15 +73,12 @@ jobs:
           echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
           echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
-          echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
 
       - name: Clean Up
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
       - name: Build EMU with DRAMsim3
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           if [ -e "$SPEC_DIR/emu" ]; then
             mkdir -p $NOOP_HOME/build
@@ -91,7 +94,6 @@ jobs:
           fi
 
       - name: Run SPEC CPU2006 checkpoints
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
@@ -101,7 +103,6 @@ jobs:
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
 
       - name: Report SPEC CPU2006 score
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
@@ -115,7 +116,6 @@ jobs:
           # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
       - name: Summary result
-        if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -141,7 +141,6 @@ jobs:
           fi
 
       # - name: Upload result
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
       #   uses: actions/upload-artifact@v4
       #   with:
       #     name: result

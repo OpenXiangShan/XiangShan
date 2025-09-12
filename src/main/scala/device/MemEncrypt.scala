@@ -33,7 +33,7 @@ case object MemcEdgeOutKey extends Field[AXI4EdgeParameters]
 
 trait Memconsts {
   val p: Parameters
-  val cvm = p(CVMParamskey)
+  val cvm = p(CVMParamsKey)
   val soc = p(SoCParamsKey)
   val PAddrBits= soc.PAddrBits
   val KeyIDBits= cvm.KeyIDBits

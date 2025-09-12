@@ -226,7 +226,7 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    val newArgs = DifftestModule.parseArgs(args)
+    val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
         here(DebugOptionsKey).EnableDebug,
@@ -240,6 +240,6 @@ object ArgParser {
         0
       )
     })
-    (config, firrtlOpts, firtoolOpts)
+    (config, firrtlOpts, firtoolOpts ++ firtoolOptions.map(_.option))
   }
 }

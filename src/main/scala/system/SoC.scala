@@ -38,7 +38,7 @@ import coupledL2.tl2chi.CHIIssue
 import openLLC.OpenLLCParam
 
 case object SoCParamsKey extends Field[SoCParameters]
-case object CVMParamskey extends Field[CVMParameters]
+case object CVMParamsKey extends Field[CVMParameters]
 
 case class CVMParameters
 (
@@ -133,7 +133,7 @@ trait HasSoCParameter {
   implicit val p: Parameters
 
   val soc = p(SoCParamsKey)
-  val cvm = p(CVMParamskey)
+  val cvm = p(CVMParamsKey)
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
@@ -183,14 +183,14 @@ trait HasSoCParameter {
   val EnablePowerDown = soc.EnablePowerDown
 
   def HasMEMencryption = cvm.HasMEMencryption
-  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)),
+  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
     "HasMEMencryption most set with KeyIDBits > 0")
 }
 
 trait HasPeripheralRanges {
   implicit val p: Parameters
 
-  private def cvm = p(CVMParamskey)
+  private def cvm = p(CVMParamsKey)
   private def soc = p(SoCParamsKey)
   private def dm = p(DebugModuleKey)
   private def pmParams = p(PMParameKey)

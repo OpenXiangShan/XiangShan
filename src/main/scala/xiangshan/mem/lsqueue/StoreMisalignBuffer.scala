@@ -118,7 +118,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     })
     val sqControl       = new StoreMaBufToSqControlIO
 
-    val toVecStoreMergeBuffer = Vec(VecStorePipelineWidth, new StoreMaBufToVecStoreMergeBufferIO)
     val toVecSplit = Output(new MisBuffertoVecSplitIO) // robIdx in misalignedBuffer
   })
 
@@ -195,13 +194,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.enq.zipWithIndex.map{
     case (reqPort, index) => reqPort.req.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
-  }
-
-  io.toVecStoreMergeBuffer.zipWithIndex.map{
-    case (toStMB, index) => {
-      toStMB.flush   := req_valid && cross4KBPageBoundary && cross4KBPageEnq && UIntToOH(req.portIndex)(index)
-      toStMB.mbIndex := req.mbIndex
-    }
   }
 
   io.toVecSplit.empty  := !req_valid
@@ -303,7 +295,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           globalException := false.B
           globalUncache := false.B
           isCrossPage := false.B
-          needFlushPipe := false.B
 
           globalMMIO := false.B
           globalNC   := false.B
@@ -320,7 +311,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           globalException := false.B
           globalUncache := false.B
           isCrossPage := false.B
-          needFlushPipe := false.B
 
           globalMMIO := false.B
           globalNC   := false.B
@@ -344,7 +334,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         globalException := false.B
         globalUncache := false.B
         isCrossPage := false.B
-        needFlushPipe := false.B
 
         globalMMIO := false.B
         globalNC   := false.B
@@ -612,7 +601,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
-  io.writeBack.bits.uop.flushPipe := needFlushPipe
+  io.writeBack.bits.uop.flushPipe := false.B
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := DontCare
   io.writeBack.bits.isFromLoadUnit := DontCare
@@ -654,18 +643,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   when (flush || s2_needRevoke) {
     bufferState := s_idle
-    req_valid := Mux(
-      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect && !s2_needRevoke,
-      req_valid, // when s2_needRevoke is true, previous request is valid, so req_valid = true
-      false.B
-    )
+    req_valid := false.B
     curPtr := 0.U
     unSentStores := 0.U
     unWriteStores := 0.U
     globalException := false.B
     globalUncache := false.B
     isCrossPage := false.B
-    needFlushPipe := false.B
 
     globalMMIO := false.B
     globalNC   := false.B

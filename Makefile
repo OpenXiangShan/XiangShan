@@ -21,6 +21,9 @@ RTL_DIR = $(BUILD_DIR)/rtl
 # import docker support
 include scripts/Makefile.docker
 
+# import pdb support
+include scripts/Makefile.pdb
+
 # if XSTopPrefix is specified in yaml, use it.
 ifneq ($(YAML_CONFIG),)
 HAS_PREFIX_FROM_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG))
@@ -85,7 +88,7 @@ MFC_ARGS += --split-verilog --dump-fir
 endif
 
 ifneq ($(FIRTOOL),)
-MFC_ARGS += --firtool-binary-path $(FIRTOOL)
+MFC_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
 endif
 
 # prefix of XSTop or XSNoCTop
@@ -196,6 +199,13 @@ else ifeq ($(PLDM),1)
 override SIM_ARGS += $(PLDM_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
+endif
+
+# Coverage support
+ifneq ($(FIRRTL_COVER),)
+comma := ,
+splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
+override SIM_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
 endif
 
 # use RELEASE_ARGS for TopMain by default
