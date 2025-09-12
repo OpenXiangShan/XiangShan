@@ -119,6 +119,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_ready, s2_ready, s3_ready, s4_ready           = WireInit(false.B)
   private val s0_fire, s1_fire, s2_fire, s3_fire, s4_fire      = WireInit(false.B)
   private val s0_flush, s1_flush, s2_flush, s3_flush, s4_flush = WireInit(false.B)
+  private val s0_flushFromBpu, s1_flushFromBpu                 = Wire(Vec(FetchPorts, Bool()))
 
   // Top-down
   private def numOfStage = 3
@@ -200,9 +201,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   s0_fire := fromFtq.req.fire
 
-  private val s0_flushFromBpu = VecInit.tabulate(FetchPorts)(i =>
-    fromFtq.flushFromBpu.shouldFlushByStage2(s0_ftqFetch(i).ftqIdx) ||
-      fromFtq.flushFromBpu.shouldFlushByStage3(s0_ftqFetch(i).ftqIdx)
+  s0_flushFromBpu := s0_ftqFetch.map(fetch =>
+    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
   )
 
   private val backendRedirect          = WireInit(false.B)
@@ -214,8 +214,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s4_flush        := backendRedirect || (wbRedirect.valid && !s4_wbNotFlush)
   s3_flush        := backendRedirect || mmioRedirect.valid || wbRedirect.valid
   s2_flush        := s3_flush
-  s1_flush        := s2_flush
-  s0_flush        := s1_flush || s0_flushFromBpu(0)
+  s1_flush        := s2_flush || s1_flushFromBpu.reduce(_ || _)
+  s0_flush        := s1_flush || s0_flushFromBpu.reduce(_ || _)
 
   fromFtq.req.ready := s1_ready && io.fromICache.fetchReady
 
@@ -232,7 +232,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", !fromFtq.req.valid && fromFtq.req.ready)
   XSPerfAccumulate("fetch_flush_backend_redirect", backendRedirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", wbRedirect.valid)
-  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", s0_flushFromBpu(0) | s0_flushFromBpu(1))
+  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", s0_flushFromBpu.reduce(_ || _))
 
   /* *****************************************************************************
    * IFU Stage 1
@@ -245,11 +245,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_ftqFetch   = RegEnable(s0_ftqFetch, s0_fire)
   private val s1_doubleline = RegEnable(s0_doubleline, s0_fire)
 
+  s1_flushFromBpu := s1_ftqFetch.map(fetch =>
+    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
+  )
+
   s1_fire  := s1_valid && s2_ready
   s1_ready := s1_fire || !s1_valid
-
-  assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_ftqFetch(0).ftqIdx) && s1_firstValid))
-  assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_ftqFetch(1).ftqIdx) && s1_secondValid))
 
   private val s1_takenCfiOffset = VecInit.tabulate(FetchPorts)(i => s1_ftqFetch(i).takenCfiOffset)
   private val s1_fetchSize = VecInit.tabulate(FetchPorts) { i =>

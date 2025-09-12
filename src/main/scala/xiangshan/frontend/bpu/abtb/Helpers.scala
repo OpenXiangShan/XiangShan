@@ -17,9 +17,10 @@ package xiangshan.frontend.bpu.abtb
 
 import chisel3._
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.CommonHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
+trait Helpers extends HasAheadBtbParameters with TargetFixHelper with CommonHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
 
