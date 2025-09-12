@@ -1,0 +1,233 @@
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package build
+
+import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
+import $ivy.`org.chipsalliance::chisel:6.6.0`
+import $ivy.`org.chipsalliance::firtool-resolver:1.3.0`
+import de.tobiasroeser.mill.vcs.version.VcsVersion
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import mill._
+import mill.scalalib._
+import mill.scalalib.scalafmt.ScalafmtModule
+import os.Path
+
+val defaultScalaVersion = "2.13.15"
+
+val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
+
+trait ChiselModule extends SbtModule with ScalafmtModule {
+  def scalaVersion: T[String] = defaultScalaVersion
+
+  def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.6.0", ivy"edu.berkeley.cs::chiseltest:6.0.0")
+
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:6.6.0")
+
+  def resolveFirtoolDeps = T {
+    firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
+      case Right(bin) => bin.path.getAbsolutePath
+      case Left(err)  => err
+    }
+  }
+}
+
+object `rocket-chip` extends ChiselModule {
+  object macros extends ScalaModule {
+    def scalaVersion: T[String] = defaultScalaVersion
+
+    def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
+  }
+
+  object hardfloat extends ChiselModule {
+    def millSourcePath: Path = pwd / "rocket-chip" / "hardfloat" / "hardfloat"
+  }
+
+  object cde extends ScalaModule {
+    def scalaVersion: T[String] = defaultScalaVersion
+
+    def millSourcePath: Path = pwd / "rocket-chip" / "cde" / "cde"
+  }
+
+  def mainClass = Some("freechips.rocketchip.diplomacy.Main")
+
+  def moduleDeps = Seq(macros, hardfloat, cde)
+
+  def ivyDeps: T[Agg[Dep]] =
+    super.ivyDeps() ++ Agg(ivy"com.lihaoyi::mainargs:0.7.0", ivy"org.json4s::json4s-jackson:4.0.7")
+}
+
+object utility extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`)
+
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"com.lihaoyi::sourcecode:0.4.2")
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"org.scalatest::scalatest:3.2.7")
+  }
+}
+
+object yunsuan extends ChiselModule {}
+
+object huancun extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`, utility)
+}
+
+object coupledL2 extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`, utility, huancun)
+}
+
+object openNCB extends ChiselModule {
+  def millSourcePath = pwd / "openLLC" / "openNCB"
+
+  def moduleDeps = Seq(`rocket-chip`)
+}
+
+object openLLC extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`, utility, coupledL2, openNCB)
+}
+
+object difftest extends ChiselModule {
+  object test extends SbtTests with TestModule.ScalaTest {
+    override def sources: T[Seq[PathRef]] = Task.Sources {
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
+    }
+  }
+}
+
+object fudian extends ChiselModule {}
+
+object ChiselAIA extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`, utility)
+}
+
+object macros extends ScalaModule {
+  def scalaVersion: T[String] = defaultScalaVersion
+
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
+}
+
+object xiangshan extends ChiselModule {
+  def millSourcePath = pwd
+
+  def moduleDeps = Seq(
+    `rocket-chip`,
+    difftest,
+    huancun,
+    coupledL2,
+    openLLC,
+    yunsuan,
+    fudian,
+    utility,
+    ChiselAIA,
+    macros
+  )
+
+  val resourcesPath: String = pwd.toString() + "/src/main/resources"
+  val envPath:       String = sys.env("PATH") + ":" + resourcesPath
+
+  def forkEnv = Map("PATH" -> envPath)
+
+  def forkArgs = Seq(
+    s"-Xmx${sys.props.getOrElse("jvm-xmx", "40G")}",
+    s"-Xss${sys.props.getOrElse("jvm-xss", "256m")}"
+  )
+
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"io.circe::circe-yaml:1.15.0",
+    ivy"io.circe::circe-generic-extras:0.14.4"
+  )
+
+  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+
+  private def publishVersion: T[String] = VcsVersion.vcsState().format(
+    revHashDigits = 8,
+    dirtyHashDigits = 0,
+    commitCountPad = -1,
+    countSep = "",
+    tagModifier = (tag: String) =>
+      "[Rr]elease.*".r.findFirstMatchIn(tag) match {
+        case Some(_) => "KunminghuV3-Release-" + LocalDateTime.now().format(
+            DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en"))
+          )
+        case None => "KunminghuV3-dev"
+      },
+    /* add "username, build-host, build-time" for non-release version */
+    untaggedSuffix = " (%s@%s) # %s".format(
+      System.getProperty("user.name"),
+      java.net.InetAddress.getLocalHost.getHostName,
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))
+    )
+  )
+
+  // gitStatus changes frequently and unpredictably. Use `Task.Input` here.
+  private def gitStatus: T[String] = Task.Input {
+    val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
+    val gitRevParseProcess = gitRevParseBuilder.start()
+    val shaReader          = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
+    val sha                = shaReader.readLine()
+
+    val gitStatusBuilder = new ProcessBuilder("git", "status", "-uno", "--porcelain")
+    val gitStatusProcess = gitStatusBuilder.start()
+    val gitStatusReader  = new BufferedReader(new InputStreamReader(gitStatusProcess.getInputStream))
+    val status           = gitStatusReader.readLine()
+    val gitDirty         = if (status == null) 0 else 1
+
+    val str =
+      s"""|SHA=$sha
+          |dirty=$gitDirty
+          |""".stripMargin
+    str
+  }
+
+  private def packDifftestResources(destDir: os.Path): Unit = {
+    // package difftest source as resources, only git tracked files were collected
+    val difftest_srcs = os.proc("git", "ls-files").call(cwd = pwd / "difftest").out
+      .text().split("\n").filter(_.nonEmpty).toSeq
+      .map(os.RelPath(_))
+    difftest_srcs.foreach(f => os.copy(pwd / "difftest" / f, destDir / "difftest-src" / f, createFolders = true))
+
+    // package ready-to-run binary as resources
+    val ready_to_run = Seq("riscv64-nemu-interpreter-dual-so", "riscv64-nemu-interpreter-so", "riscv64-spike-so")
+    ready_to_run.foreach(f => os.copy(pwd / "ready-to-run" / f, destDir / "ready-to-run" / f, createFolders = true))
+  }
+
+  override def resources: T[Seq[PathRef]] = Task.Sources {
+    os.write(T.dest / "publishVersion", publishVersion())
+    os.write(T.dest / "gitStatus", gitStatus())
+    os.write(T.dest / "gitModules", os.proc("git", "submodule", "status").call().out.text())
+    packDifftestResources(T.dest)
+    super.resources() ++ Seq(PathRef(T.dest))
+  }
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    def moduleDeps: Seq[JavaModule] = super.moduleDeps ++ Seq(xiangshan, difftest.test)
+
+    def forkArgs: T[Seq[String]] = super.forkArgs
+
+    def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Seq("-deprecation", "-feature")
+
+    val resourcesPath: String = pwd.toString() + "/src/main/resources"
+    val envPath:       String = sys.env("PATH") + ":" + resourcesPath
+
+    def forkEnv = Map("PATH" -> envPath)
+  }
+}
