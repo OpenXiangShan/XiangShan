@@ -34,30 +34,21 @@ import utility.XSPerfAccumulate
 import xiangshan.XSModule
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
-class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters with Helpers {
+class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParameters with Helpers {
   class IttageIO extends BasePredictorIO {
-    // TODO: use mbtb and remove this
-    class FtbToIttageBundle(implicit p: Parameters) extends IttageBundle {
-      val s1_uftbHit:         Bool = Bool()
-      val s1_uftbHasIndirect: Bool = Bool()
-      val s1_ftbCloseReq:     Bool = Bool()
-      val s2_isJalr:          Bool = Bool()
-    }
+    // prediction bundles
+    val s1_foldedPhr:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val trainFoldedPhr: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
 
-    val fromFtb: FtbToIttageBundle = Input(new FtbToIttageBundle) // TODO: use mbtb and remove this
-
-    val ghist:         UInt                  = Input(UInt(PhrHistoryLength.W))
-    val foldedHist:    PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s1_foldedHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-
-    val predictionValid: Bool       = Output(Bool())
-    val s3_jalrTarget:   PrunedAddr = Output(PrunedAddr(VAddrBits))
-    val s3_meta:         IttageMeta = Output(new IttageMeta)
-    val s1_ready:        Bool       = Output(Bool())
+    val prediction: IttagePrediction = Output(new IttagePrediction)
+    val meta:       IttageMeta       = Output(new IttageMeta)
   }
 
   val io: IttageIO = IO(new IttageIO)
@@ -65,9 +56,10 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   io.resetDone := true.B // FIXME: sram read ready
 
   private val s0_pc   = io.startVAddr
-  private val s0_fire = io.stageCtrl.s0_fire
-  private val s1_fire = io.stageCtrl.s1_fire
-  private val s2_fire = io.stageCtrl.s2_fire
+  private val s0_fire = io.stageCtrl.s0_fire && io.enable
+  private val s1_fire = io.stageCtrl.s1_fire && io.enable
+  private val s2_fire = io.stageCtrl.s2_fire && io.enable
+  private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
   private val s1_pc = RegEnable(s0_pc, s0_fire)
   private val s2_pc = RegEnable(s1_pc, s1_fire)
@@ -79,14 +71,15 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   }
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
-  private val tickCnt    = RegInit(0.U(TickWidth.W))
+  private val tickCnt    = RegInit(0.U.asTypeOf(new SaturateCounter(TickWidth)))
 
   private val rTable = Module(new RegionWays)
 
   // uftb miss or hasIndirect
-  private val s1_uftbHit         = io.fromFtb.s1_uftbHit
-  private val s1_uftbHasIndirect = io.fromFtb.s1_uftbHasIndirect
-  private val s1_isIndirect      = (!s1_uftbHit && !io.fromFtb.s1_ftbCloseReq) || s1_uftbHasIndirect
+  // TODO: for low power: use ubtb&abtb and remove this
+  // private val s1_uftbHit         = io.fromFtb.s1_uftbHit
+  // private val s1_uftbHasIndirect = io.fromFtb.s1_uftbHasIndirect
+  private val s1_isIndirect = true.B // (!s1_uftbHit && !io.fromFtb.s1_ftbCloseReq) || s1_uftbHasIndirect
 
   // Keep the table responses to process in s2
 
@@ -99,9 +92,9 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   private val s2_provider          = Wire(UInt(log2Ceil(NumTables).W))
   private val s2_altProvided       = Wire(Bool())
   private val s2_altProvider       = Wire(UInt(log2Ceil(NumTables).W))
-  private val s2_providerUsefulCnt = Wire(Bool())
-  private val s2_providerCnt       = Wire(UInt(ConfidenceCntWidth.W))
-  private val s2_altProviderCnt    = Wire(UInt(ConfidenceCntWidth.W))
+  private val s2_providerUsefulCnt = Wire(new SaturateCounter(UsefulCntWidth))
+  private val s2_providerCnt       = Wire(new SaturateCounter(ConfidenceCntWidth))
+  private val s2_altProviderCnt    = Wire(new SaturateCounter(ConfidenceCntWidth))
 
   private val s3_ittageTarget      = RegEnable(s2_ittageTarget, s2_fire)
   private val s3_providerTarget    = RegEnable(s2_providerTarget, s2_fire)
@@ -115,7 +108,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   private val s3_altProviderCnt    = RegEnable(s2_altProviderCnt, s2_fire)
 
   private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
-  io.s3_meta := ittageMeta
+  io.meta := ittageMeta
 
   private val t1_train = Wire(new BpuTrain)
   t1_train := RegEnable(io.train.bits, io.train.valid)
@@ -149,7 +142,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   )
   t1_meta.altProviderTarget := RegEnable(
     t0_meta.altProviderTarget,
-    io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt === 0.U
+    io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
   )
   t1_train.branches(0).bits.target := RegEnable(
     io.train.bits.branches(0).bits.target,
@@ -159,8 +152,6 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     io.train.bits.branches(0).bits.cfiPosition,
     io.train.valid && io.train.bits.branches(0).bits.taken
   )
-  // TODO: add hist to class BpuTrain and use phr
-//  t1_train.ghist := RegEnable(io.t1_train.bits.ghist, io.t1_train.valid)
 
 //  val updateValid = t1_train.is_jalr && !t1_train.is_ret && RegNext(io.t1_train.valid, init = false.B) && t1_train.ftb_entry.jmpValid &&
 //    t1_train.jmp_taken && t1_train.ftqOffset.valid &&
@@ -175,8 +166,8 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   private val updateResetUsefulCnt  = WireInit(false.B)
   private val updateCorrect         = Wire(Vec(NumTables, Bool()))
   private val updateAlloc           = Wire(Vec(NumTables, Bool()))
-  private val updateOldCnt          = Wire(Vec(NumTables, UInt(ConfidenceCntWidth.W)))
-  private val updateUsefulCnt       = Wire(Vec(NumTables, Bool()))
+  private val updateOldCnt          = Wire(Vec(NumTables, new SaturateCounter(ConfidenceCntWidth)))
+  private val updateUsefulCnt       = Wire(Vec(NumTables, new SaturateCounter(UsefulCntWidth)))
   private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
   private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
   updateCorrect         := DontCare
@@ -191,18 +182,18 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
 
   // Predict
   tables.foreach { t =>
-    t.io.req.valid           := s1_fire && s1_isIndirect
+    t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
     t.io.req.bits.pc         := s1_pc
-    t.io.req.bits.foldedHist := io.s1_foldedHist
+    t.io.req.bits.foldedHist := io.s1_foldedPhr
   }
 
   // access tag tables and output meta info
   class IttageTableInfo extends Bundle {
-    val cnt:          UInt         = UInt(ConfidenceCntWidth.W) // TODO: maybe us SaturateCounter
-    val usefulCnt:    UInt         = UInt(UsefulCntWidth.W)     // TODO: maybe us SaturateCounter
-    val targetOffset: IttageOffset = new IttageOffset
-    val tableIdx:     UInt         = UInt(log2Ceil(NumTables).W)
-    val maskTarget:   Vec[UInt]    = Vec(NumTables, UInt(VAddrBits.W))
+    val cnt:          SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+    val usefulCnt:    SaturateCounter = new SaturateCounter(UsefulCntWidth)
+    val targetOffset: IttageOffset    = new IttageOffset
+    val tableIdx:     UInt            = UInt(log2Ceil(NumTables).W)
+    val maskTarget:   Vec[UInt]       = Vec(NumTables, UInt(VAddrBits.W))
   }
 
   private val inputRes = VecInit(s2_resps.zipWithIndex.map {
@@ -223,7 +214,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
 
   private val providerInfo    = selectedInfo.first
   private val altProviderInfo = selectedInfo.second
-  private val providerNull    = providerInfo.cnt === 0.U
+  private val providerNull    = providerInfo.cnt.isSaturateNegative
 
   private val regionReadTargetOffset = VecInit(s2_resps.map(r => r.bits.targetOffset))
 
@@ -257,11 +248,18 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     )
   )
 
-  private val s2_predictionValid = io.fromFtb.s2_isJalr &&
-    (provided && !(providerNull && altProvided)) || (providerNull && altProvided)
+  // TODO: for low power: use mbtb and remove this
+  // private val s2_predictionValid = io.fromFtb.s2_isJalr &&
+  //   (provided && !(providerNull && altProvided)) || (providerNull && altProvided)
+  // private val s2_predictionValid = (provided && !(providerNull && altProvided)) || (providerNull && altProvided)
 
-  io.predictionValid := RegEnable(s2_predictionValid, s2_fire)
-  io.s3_jalrTarget   := s3_ittageTarget
+  // TODO: for low power: use mbtb and remove this
+  // io.predictionValid := RegEnable(s2_predictionValid, s2_fire)
+  io.prediction.hit    := s3_fire && s3_provided
+  io.prediction.target := s3_ittageTarget
+  when(io.prediction.hit) {
+    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  }
 
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
@@ -289,7 +287,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
-  private val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && !r.bits.usefulCnt)).asUInt &
+  private val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && r.bits.usefulCnt.isSaturateNegative)).asUInt &
     (~(LowerMask(UIntToOH(s2_provider), NumTables) & Fill(NumTables, s2_provided.asUInt))).asUInt
   private val s2_allocLFSR   = random.LFSR(width = 15)(NumTables - 1, 0)
   private val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
@@ -328,7 +326,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
 
   private val provider    = t1_meta.provider.bits
   private val altProvider = t1_meta.altProvider.bits
-  private val usedAltPred = t1_meta.altProvider.valid && t1_meta.providerCnt === 0.U
+  private val usedAltPred = t1_meta.altProvider.valid && t1_meta.providerCnt.isSaturateNegative
   when(updateValid) {
     when(t1_meta.provider.valid) {
       when(usedAltPred && updateMisPred) { // t1_train altpred if used as pred
@@ -347,7 +345,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
       updateUsefulCnt(provider) := Mux(
         !t1_meta.altDiffers,
         t1_meta.providerUsefulCnt,
-        t1_meta.providerTarget === updateRealTarget
+        (t1_meta.providerTarget === updateRealTarget).asTypeOf(new SaturateCounter(UsefulCntWidth))
       )
       updateCorrect(provider)         := t1_meta.providerTarget === updateRealTarget
       updateOldCnt(provider)          := t1_meta.providerCnt
@@ -368,23 +366,17 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
   // if mispredicted and not the case that
   // provider offered correct target but used altpred due to unconfident
   private val providerCorrect = t1_meta.provider.valid && t1_meta.providerTarget === updateRealTarget
-  private val providerUnconf  = t1_meta.providerCnt === 0.U
+  private val providerUnconf  = t1_meta.providerCnt.isSaturateNegative
   private val allocate        = t1_meta.allocate
-  // TODO: use class SaturateCounter.getIncrease and remove this
-  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
-    val oldSatTaken    = old === ((1 << len) - 1).U
-    val oldSatNotTaken = old === 0.U
-    Mux(oldSatTaken && taken, ((1 << len) - 1).U, Mux(oldSatNotTaken && !taken, 0.U, Mux(taken, old + 1.U, old - 1.U)))
-  }
 
   when(updateValid && updateMisPred && !(providerCorrect && providerUnconf)) {
-    tickCnt := satUpdate(tickCnt, TickWidth, !allocate.valid)
+    tickCnt.update(!allocate.valid)
     when(allocate.valid) {
       updateMask(allocate.bits)          := true.B
       updateCorrect(allocate.bits)       := DontCare // useless for alloc
       updateAlloc(allocate.bits)         := true.B
       updateUsefulCntMask(allocate.bits) := true.B
-      updateUsefulCnt(allocate.bits)     := false.B
+      updateUsefulCnt(allocate.bits)     := false.B.asTypeOf(new SaturateCounter(UsefulCntWidth))
       updateTargetOffset(allocate.bits)  := updateRealTargetOffset
     }
   }
@@ -394,8 +386,8 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     p"allocate new table entry, pred cycle ${t1_meta.debug_predCycle.getOrElse(0.U)}\n"
   )
 
-  when(tickCnt === ((1 << TickWidth) - 1).U) {
-    tickCnt              := 0.U
+  when(tickCnt.isSaturatePositive) {
+    tickCnt.resetZero()
     updateResetUsefulCnt := true.B
   }
 
@@ -411,18 +403,15 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     tables(i).io.update.usefulCntValid := RegEnable(updateUsefulCntMask(i), false.B, updateMask(i))
     tables(i).io.update.usefulCnt      := RegEnable(updateUsefulCnt(i), updateMask(i))
     tables(i).io.update.pc             := RegEnable(updatePc, updateMask(i))
-    // TODO: use phr
-//    tables(i).io.update.ghist  := RegEnable(t1_train.ghist, updateMask(i))
+    tables(i).io.update.foldedHist     := RegEnable(io.trainFoldedPhr, updateMask(i))
   }
-
-  // all should be ready for req
-  io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _)
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetUsefulCnt)
   XSPerfAccumulate("ittage_used", s1_fire && s1_isIndirect)
   XSPerfAccumulate("ittage_closed_due_to_uftb_info", s1_fire && !s1_isIndirect)
   XSPerfAccumulate("ittage_allocate", updateAlloc.reduce(_ || _))
+  XSPerfAccumulate("ittage_hit", io.prediction.hit)
 
   private def predPerf(name: String, cond: Bool): Unit =
     XSPerfAccumulate(s"${name}_at_pred", cond && s2_fire)
@@ -435,9 +424,7 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
     commitPerf(s"ittage_${name}", commitCond)
   }
 
-  // TODO: use class SaturateCounter.isNegative
-  def ctrNull(ctr: UInt, ctrBits: Int = ConfidenceCntWidth): Bool =
-    ctr === 0.U
+  def ctrNull(ctr: SaturateCounter): Bool = ctr.isSaturateNegative
 
   private val predUseProvider     = s2_provided && !ctrNull(s2_providerCnt)
   private val predUseAltPred      = s2_provided && ctrNull(s2_providerCnt)
@@ -500,8 +487,8 @@ class Ittage(implicit p: Parameters) extends XSModule with HasIttageParameters w
         "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U,
         VecInit(s2_respsRegs(i).valid).asUInt,
-        s2_respsRegs(i).bits.cnt,
-        s2_respsRegs(i).bits.usefulCnt,
+        s2_respsRegs(i).bits.cnt.value,
+        s2_respsRegs(i).bits.usefulCnt.value,
         s2_respsRegs(i).bits.targetOffset.offset.toUInt
       )
     }
