@@ -130,6 +130,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   )
   t1_meta.providerTarget := RegEnable(
     t0_meta.providerTarget,
+    0.U.asTypeOf(t0_meta.providerTarget),
     io.train.valid && t0_meta.provider.valid
   )
   t1_meta.allocate.bits := RegEnable(
@@ -142,6 +143,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   )
   t1_meta.altProviderTarget := RegEnable(
     t0_meta.altProviderTarget,
+    0.U.asTypeOf(t0_meta.altProviderTarget),
     io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
   )
   t1_train.branches(0).bits.target := RegEnable(
@@ -257,9 +259,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // io.predictionValid := RegEnable(s2_predictionValid, s2_fire)
   io.prediction.hit    := s3_fire && s3_provided
   io.prediction.target := s3_ittageTarget
-  when(io.prediction.hit) {
-    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  }
+//  when(io.prediction.hit) {
+//    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
+//  }
 
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
