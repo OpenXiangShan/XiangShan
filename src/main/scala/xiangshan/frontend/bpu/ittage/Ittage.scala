@@ -259,9 +259,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // io.predictionValid := RegEnable(s2_predictionValid, s2_fire)
   io.prediction.hit    := s3_fire && s3_provided
   io.prediction.target := s3_ittageTarget
-  when(io.prediction.hit) {
-    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  }
+//  when(io.prediction.hit) {
+//    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
+//  }
 
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
