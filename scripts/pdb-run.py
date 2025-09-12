@@ -16,8 +16,12 @@
 
 
 from xspdb import XSPdb, DUTSimTop
+from xspdb.cli_parser import args_parser
 
 if __name__ == "__main__":
-    dut = DUTSimTop();
-    XSPdb(dut).run();
+    
+    args = args_parser()
+
+    dut = DUTSimTop()
+    XSPdb(dut).run(args)
 
