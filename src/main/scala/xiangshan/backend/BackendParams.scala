@@ -41,7 +41,7 @@ case class BackendParams(
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
 
-  def robCompressEn: Boolean = true
+  def robCompressEn: Boolean = false
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
