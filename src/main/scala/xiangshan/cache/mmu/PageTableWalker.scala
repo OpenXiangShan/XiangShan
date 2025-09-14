@@ -804,11 +804,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val last_hptw_vsStagePf = last_hptw_req_pte.isPf(0.U, io.csr.hPBMTE) || !last_hptw_req_pte.isLeaf()
   val last_hptw_gStagePf = last_hptw_req_pte.isStage1Gpf(io.csr.hgatp.mode) && !last_hptw_vsStagePf
 
+  // (noS2xlate || onlyStage1 || allStage) but exception; do not need bitmap check
+  val mem_resp_enableS2xlate = entries(io.mem.resp.bits.id).req_info.s2xlate =/= noS2xlate
+  val mem_resp_s1Pbmte = Mux(mem_resp_enableS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
+  val mem_resp_Pf = last_hptw_req_pte.isPf(0.U, mem_resp_s1Pbmte) || !last_hptw_req_pte.isLeaf()
+  val mem_resp_gStagePf = entries(io.mem.resp.bits.id).req_info.s2xlate === allStage && last_hptw_req_pte.isStage1Gpf(io.csr.hgatp.mode) && !mem_resp_Pf
+
   // noS2xlate || onlyStage1 || allStage but exception; do not need Stage2 translate
   val noStage2 = ((entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate) || (entries(io.mem.resp.bits.id).req_info.s2xlate === onlyStage1)) ||
     (entries(io.mem.resp.bits.id).req_info.s2xlate === allStage && (last_hptw_vsStagePf || last_hptw_gStagePf))
-  val to_mem_out = dup_wait_resp && noStage2 && (!bitmap_enable || last_hptw_vsStagePf || last_hptw_gStagePf)
-  val to_bitmap_req = (if (HasBitmapCheck) true.B else false.B) && dup_wait_resp && noStage2 && bitmap_enable && !(last_hptw_vsStagePf || last_hptw_gStagePf)
+  val to_mem_out = dup_wait_resp && noStage2 && (!bitmap_enable || mem_resp_Pf || mem_resp_gStagePf)
+  val to_bitmap_req = (if (HasBitmapCheck) true.B else false.B) && dup_wait_resp && noStage2 && bitmap_enable && !(mem_resp_Pf || mem_resp_gStagePf)
   val to_cache = if (HasBitmapCheck) Cat(dup_vec_bitmap).orR || Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
                  else Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
   val to_hptw_req = io.in.bits.req_info.s2xlate === allStage
@@ -935,7 +941,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         val gStagePf = ptes(index).isStage1Gpf(io.csr.hgatp.mode) && !vsStagePf
         state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(vsStagePf || gStagePf),
                         state_last_hptw_req,
-                        Mux(bitmap_enable && !(vsStagePf || gStagePf), state_bitmap_check, state_mem_out))
+                        Mux(bitmap_enable && !(vsStagePf || (entries(i).req_info.s2xlate === allStage && gStagePf)), state_bitmap_check, state_mem_out))
         mem_resp_hit(i) := true.B
         entries(i).ppn := Mux(ptes(index).n === 0.U, ptes(index).getPPN(), Cat(ptes(index).getPPN()(ptePPNLen - 1, pteNapotBits), entries(i).req_info.vpn(pteNapotBits - 1, 0))) // for last stage 2 translation
         // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
