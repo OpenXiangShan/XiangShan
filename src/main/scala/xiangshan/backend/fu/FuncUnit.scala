@@ -34,7 +34,6 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })
-  val identifiedCfi = OptionWrapper(cfg.isBrh || cfg.isJmp, Bool())
   val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }

@@ -89,7 +89,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt          = UInt(MemPredPCWidth.W)
   val pd:               PreDecodeInfo = new PreDecodeInfo
   val predTaken:        Bool          = Bool()
-  val identifiedCfi:    Bool          = Bool()
   val ftqPtr:           FtqPtr        = new FtqPtr
   val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
   val exceptionType:    UInt          = IBufferExceptionType()
@@ -105,7 +104,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     foldpc         := fetch.foldpc(i)
     pd             := fetch.pd(i)
     predTaken      := fetch.instrEndOffset(i).taken
-    identifiedCfi  := fetch.identifiedCfi(i)
     ftqPtr         := fetch.ftqPtr
     instrEndOffset := fetch.instrEndOffset(i).offset
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
@@ -127,7 +125,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.foldpc           := foldpc
     result.pd               := pd
     result.predTaken        := predTaken
-    result.identifiedCfi    := identifiedCfi
     result.ftqPtr           := ftqPtr
     result.exceptionType    := exceptionType
     result.backendException := backendException
@@ -148,7 +145,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt          = UInt(MemPredPCWidth.W)
   val pd:               PreDecodeInfo = new PreDecodeInfo
   val predTaken:        Bool          = Bool()
-  val identifiedCfi:    Bool          = Bool()
   val ftqPtr:           FtqPtr        = new FtqPtr
   val exceptionType:    UInt          = IBufferExceptionType()
   val backendException: Bool          = Bool()
@@ -172,7 +168,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.trigger                                       := triggered
     cf.pd                                            := pd
     cf.pred_taken                                    := predTaken
-    cf.identifiedCfi                                 := identifiedCfi
     cf.crossPageIPFFix                               := IBufferExceptionType.isCrossPage(exceptionType)
     cf.storeSetHit                                   := DontCare
     cf.waitForRobIdx                                 := DontCare

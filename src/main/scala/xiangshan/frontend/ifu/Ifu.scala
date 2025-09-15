@@ -311,7 +311,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_instrPcLowerResult = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U((PcCutPoint + 1).W)))
   private val s2_instrIsRvc         = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
   private val s2_instrEndOffset     = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U(FetchBlockInstOffsetWidth.W)))
-  private val s2_identifiedCfi      = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
 
   s2_fire  := s2_valid && s3_ready && icacheRespAllValid
   s2_ready := s2_fire || !s2_valid
@@ -429,7 +428,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
       val isRvc         = instrRange.map(rawIsRvc(_))
       val instrOffset   = instrRange.map(i => Mux(rawIsRvc(i), i.U, (i + 1).U))
       // FIXME: This is wrong when 2-taken is enabled
-      val identifiedCfi = instrRange.map(s2_ftqFetch(0).identifiedCfi(_))
 
       instrIndex.valid           := validOH.reduce(_ || _)
       instrIndex.value           := Mux1H(validOH, index)
@@ -437,7 +435,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s2_instrPcLowerResult(idx) := Mux1H(validOH, pcLowerResult)
       s2_instrIsRvc(idx)         := Mux1H(validOH, isRvc)
       s2_instrEndOffset(idx)     := Mux1H(validOH, instrOffset)
-      s2_identifiedCfi(idx)      := Mux1H(validOH, identifiedCfi)
   }
   s2_instrEndOffset(0) := Mux(s2_prevLastIsHalfRvi, 0.U, Mux(rawIsRvc(0), 0.U, 1.U))
 
@@ -466,7 +463,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.target               := s2_ftqFetch(i).nextStartVAddr
     b.fetchSize            := s2_fetchSize(i)
     b.rawInstrValid        := rawInstrValid.asUInt & s2_instrRange(i)
-    b.identifiedCfi        := s2_ftqFetch(i).identifiedCfi
     b
   })
   s2_fetchBlock(0).takenCfiOffset.valid := s2_takenCfiOffset(0).valid && s2_firstValid
@@ -531,8 +527,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s3_instrPcLowerResult = RegEnable(s2_instrPcLowerResult, s2_fire)
   private val s3_rawPcLowerResult   = RegEnable(s2_rawPcLowerResult, s2_fire)
-
-  private val s3_identifiedCfi = RegEnable(s2_identifiedCfi, s2_fire)
 
   /* NOTE: the following `Cat(_data, _data)` *is* intentional.
    * Explanation:
@@ -606,7 +600,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
   private val s3_realAlignPc = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
   private val s3_alignFoldPc = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
-  private val s3_alignIdentifiedCfi = alignData(s3_identifiedCfi, s3_alignShiftNum, false.B)
 
   for (i <- 0 until IBufferEnqueueWidth / 2) {
     val lowIdx     = s3_alignInstrIndex(i).value
@@ -728,7 +721,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_alignInstrPcLower   = RegEnable(s3_alignInstrPcLower, s3_fire)
   private val s4_alignInstrEndOffset = RegEnable(s3_alignInstrEndOffset, s3_fire)
   private val s4_rawPcLowerResult    = RegEnable(s3_rawPcLowerResult, s3_fire)
-  private val s4_alignIdentifiedCfi  = RegEnable(s3_alignIdentifiedCfi, s3_fire)
 
   private val s4_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     if (i < IfuAlignWidth) {
@@ -1066,9 +1058,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheInfo(0).exception.hasException && s4_prevLastIsHalfRvi
   }
-  io.toIBuffer.bits.illegalInstr  := s4_alignIll
-  io.toIBuffer.bits.triggered     := s4_alignTriggered
-  io.toIBuffer.bits.identifiedCfi := s4_alignIdentifiedCfi
+  io.toIBuffer.bits.illegalInstr := s4_alignIll
+  io.toIBuffer.bits.triggered    := s4_alignTriggered
 
   when(io.toIBuffer.valid && io.toIBuffer.ready) {
     val enqVec = io.toIBuffer.bits.enqEnable

@@ -72,7 +72,6 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
-  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
 
 // HasICacheParameters is for PortNumber
