@@ -122,11 +122,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   stageCtrl.s2_fire := s2_fire
   stageCtrl.s3_fire := s3_fire
 
+  private val t0_compareMatrix = CompareMatrix(VecInit(train.bits.branches.map(_.bits.cfiPosition)))
+  private val t0_firstMispredict = t0_compareMatrix.getLeastElement(
+    (b: Valid[BranchInfo]) => b.valid && b.bits.mispredict,
+    train.bits.branches
+  )
+
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
-    p.io.startVAddr := s0_pc
-    p.io.stageCtrl  := stageCtrl
-    p.io.train      := train
+    p.io.startVAddr                 := s0_pc
+    p.io.stageCtrl                  := stageCtrl
+    p.io.train.valid                := train.valid
+    p.io.train.bits.meta            := train.bits.meta
+    p.io.train.bits.startVAddr      := train.bits.startVAddr
+    p.io.train.bits.branches        := train.bits.branches
+    p.io.train.bits.firstMispredict := t0_firstMispredict
   }
 
   /* *** predictor specific inputs *** */

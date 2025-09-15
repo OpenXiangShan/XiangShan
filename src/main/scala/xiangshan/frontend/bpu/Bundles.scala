@@ -231,3 +231,9 @@ class Prediction(implicit p: Parameters) extends BpuBundle {
       this.target === other.target &&
       this.attribute === other.attribute
 }
+
+// Bpu top -> sub predictors
+class Train(implicit p: Parameters) extends BpuTrain {
+  // selected from BpuTrain.branches in Bpu top
+  val firstMispredict: Valid[BranchInfo] = Valid(new BranchInfo)
+}
