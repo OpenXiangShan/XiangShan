@@ -68,7 +68,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
     val query = Flipped(Vec(LoadPipelineWidth, new CounterFilterQueryBundle()))
   })
 
-  val LduStages = 4
+  val LduStages = 4 + 1 // +1 is for prefetch wirte in next cycle of s3
   val SIZE = (LduStages) * LduCnt
   class Ptr(implicit p: Parameters) extends CircularQueuePtr[Ptr]( p => SIZE ){}
   object Ptr {
