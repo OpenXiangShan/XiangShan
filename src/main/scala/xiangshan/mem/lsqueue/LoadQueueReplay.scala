@@ -181,6 +181,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     // from load unit s3
     val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
+    val doNotReplay = Input(Vec(LoadPipelineWidth, Bool()))
 
     // from sta s1
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -275,7 +276,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
    */
   val canEnqueue = io.enq.map(_.valid)
   val cancelEnq = io.enq.map(enq => enq.bits.uop.robIdx.needFlush(io.redirect))
-  val needReplay = io.enq.map(enq => enq.bits.rep_info.need_rep)
+  val needReplay = VecInit((0 until LoadPipelineWidth).map(w => !io.doNotReplay(w)))
   val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.exceptionVec, LduCfg).asUInt.orR && !enq.bits.tlbMiss)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
