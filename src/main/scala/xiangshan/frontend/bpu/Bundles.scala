@@ -162,6 +162,13 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
     Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
 
+class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+  val rasMeta:   RasMeta         = new RasMeta
+  val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute: BranchAttribute = new BranchAttribute
+  // TODO: and maybe more
+}
+
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
   val phrHistPtr: PhrPtr          = new PhrPtr
