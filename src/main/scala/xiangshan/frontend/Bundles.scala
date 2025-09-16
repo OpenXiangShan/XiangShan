@@ -33,6 +33,7 @@ import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -147,15 +148,16 @@ class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends FrontendBundle {
-  val pd:             Vec[PreDecodeInfo] = Vec(FetchBlockInstNum, new PreDecodeInfo) // TODO: redefine Predecode
-  val pc:             PrunedAddr         = PrunedAddr(VAddrBits)
-  val ftqIdx:         FtqPtr             = new FtqPtr
-  val takenCfiOffset: UInt               = UInt(FetchBlockInstOffsetWidth.W)
-  val misEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val cfiEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val target:         PrunedAddr         = PrunedAddr(VAddrBits)
-  val jalTarget:      PrunedAddr         = PrunedAddr(VAddrBits)
-  val instrRange:     Vec[Bool]          = Vec(FetchBlockInstNum, Bool())
+  val pc:             PrunedAddr      = PrunedAddr(VAddrBits)
+  val ftqIdx:         FtqPtr          = new FtqPtr
+  val takenCfiOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W)
+  val misEndOffset:   Valid[UInt]     = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val cfiEndOffset:   Valid[UInt]     = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val isRVC:          Bool            = Bool()
+  val attribute:      BranchAttribute = new BranchAttribute
+  val target:         PrunedAddr      = PrunedAddr(VAddrBits)
+  val jalTarget:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val instrRange:     Vec[Bool]       = Vec(FetchBlockInstNum, Bool())
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {

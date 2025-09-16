@@ -54,6 +54,7 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
 
@@ -1113,9 +1114,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // In this case, mask .valid to avoid overriding backend redirect
   mmioFlushWb.valid := (s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit && RegNext(fromUncache.fire) &&
     s4_mmioUseSnpc && !s4_ftqFlushSelf && !s4_ftqFlushByOlder)
-  mmioFlushWb.bits.pc := s4_mmioPc
-  mmioFlushWb.bits.pd := 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
-  mmioFlushWb.bits.pd.zipWithIndex.foreach { case (instr, i) => instr.valid := s4_mmioRange(i) }
+  mmioFlushWb.bits.pc             := s4_mmioPc
+  mmioFlushWb.bits.isRVC          := mmioIsRvc
+  mmioFlushWb.bits.attribute      := 0.U.asTypeOf(new BranchAttribute)
   mmioFlushWb.bits.ftqIdx         := s4_fetchBlock(0).ftqIdx
   mmioFlushWb.bits.takenCfiOffset := s4_fetchBlock(0).takenCfiOffset.bits
   mmioFlushWb.bits.misEndOffset   := s4_mmioMisEndOffset
@@ -1154,11 +1155,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt // s4_mmioRange.asUInt
 
-    mmioFlushWb.bits.pd(s4_shiftNum).valid  := true.B
-    mmioFlushWb.bits.pd(s4_shiftNum).isRVC  := mmioIsRvc
-    mmioFlushWb.bits.pd(s4_shiftNum).brType := brType
-    mmioFlushWb.bits.pd(s4_shiftNum).isCall := isCall
-    mmioFlushWb.bits.pd(s4_shiftNum).isRet  := isRet
+    mmioFlushWb.bits.isRVC                := mmioIsRvc
+    mmioFlushWb.bits.attribute.branchType := brType
+    mmioFlushWb.bits.attribute.rasAction  := Cat(isCall, isRet)
   }
 
   mmioRedirect.valid := s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit &&
@@ -1180,9 +1179,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // According to the discussed version, IFU will no longer need to send predecode information to FTQ in the future.
   // Therefore, this part of the logic will not be optimized further and will be removed later.
-  private val firstRawPds  = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
-  private val secondRawPds = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U.asTypeOf(new PreDecodeInfo)))
-  firstRawPds.zipWithIndex.foreach {
+  private val s4_rawPds = Wire(Vec(
+    FetchPorts,
+    Vec(FetchBlockInstNum, new PreDecodeInfo())
+  ))
+  s4_rawPds(0).zipWithIndex.foreach {
     case (rawPd, i) =>
       rawPd := Mux(
         s4_rawInstrValid(i),
@@ -1190,7 +1191,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
         0.U.asTypeOf(new PreDecodeInfo)
       )
   }
-  secondRawPds.zipWithIndex.foreach {
+  s4_rawPds(1).zipWithIndex.foreach {
     case (rawPd, i) =>
       rawPd := Mux(
         s4_rawInstrValid(i.U + s4_fetchBlock(0).fetchSize),
@@ -1207,8 +1208,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbPrevIBufEnqPtr      = RegEnable(s4_prevIBufEnqPtr, wbEnable)
   private val wbInstrCount          = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
   private val wbAlignInstrEndOffset = RegEnable(s4_alignInstrEndOffset, wbEnable)
-  private val wbFirstRawPds         = RegEnable(firstRawPds, wbEnable)
-  private val wbSecondRawPds        = RegEnable(secondRawPds, wbEnable)
+  private val wbRawPds              = RegEnable(s4_rawPds, wbEnable)
 
   private val wbCurrentLastHalfData = RegEnable(s4_currentLastHalfData, wbEnable)
   // private val wbPrevLastHalfPc      = RegEnable(s4_prevLastHalfPc, wbEnable)
@@ -1228,8 +1228,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val checkFlushWb = VecInit((0 until FetchPorts).map { i =>
     val b       = Wire(Valid(new PredecodeWritebackBundle))
     val missIdx = wbStage2Check(i).misIdx.bits
-    b.valid               := wbValid && wbFirstValid // Primarily used as a placeholder; the value will be overwritten.
-    b.bits.pd             := wbFirstRawPds           // Primarily used as a placeholder; the value will be overwritten.
+    val pd      = wbRawPds(i)(missIdx)
+    b.valid      := wbValid && wbFirstValid // Primarily used as a placeholder; the value will be overwritten.
+    b.bits.isRVC := pd.isRVC
+    b.bits.attribute.branchType := pd.brType // 0.U.asTypeOf(new BranchAttribute)
+    b.bits.attribute.rasAction  := Cat(pd.isCall, pd.isRet)
     b.bits.pc             := catPC(wbAlignInstrPcLower(missIdx), wbFetchBlock(i).pcHigh, wbFetchBlock(i).pcHighPlus1)
     b.bits.ftqIdx         := wbFetchBlock(i).ftqIdx
     b.bits.takenCfiOffset := wbFetchBlock(i).takenCfiOffset.bits
@@ -1243,10 +1246,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b
   })
 
-  checkFlushWb(0).valid   := wbValid && wbFirstValid
-  checkFlushWb(1).valid   := wbValid && wbSecondValid
-  checkFlushWb(0).bits.pd := wbFirstRawPds
-  checkFlushWb(1).bits.pd := wbSecondRawPds
+  checkFlushWb(0).valid := wbValid && wbFirstValid
+  checkFlushWb(1).valid := wbValid && wbSecondValid
 
   toFtq.pdWb(0) := Mux(wbValid, checkFlushWb(0), mmioFlushWb)
   toFtq.pdWb(1) := checkFlushWb(1)

@@ -286,7 +286,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.target          := redirect.bits.target
   io.toBpu.redirect.bits.isRvc           := redirect.bits.isRVC
   io.toBpu.redirect.bits.taken           := redirect.bits.taken
-  io.toBpu.redirect.bits.attribute       := DontCare
+  io.toBpu.redirect.bits.attribute       := redirect.bits.attribute
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 

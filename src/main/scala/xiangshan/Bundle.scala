@@ -257,6 +257,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val backendIGPF: Bool = Bool() // instruction guest page fault
   val backendIPF: Bool = Bool() // instruction page fault
   val backendIAF: Bool = Bool() // instruction access fault
+  val attribute: BranchAttribute = new BranchAttribute
 
   def hasBackendFault: Bool = backendIGPF || backendIPF || backendIAF
 
