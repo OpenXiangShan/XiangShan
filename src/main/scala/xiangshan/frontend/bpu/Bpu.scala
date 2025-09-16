@@ -66,7 +66,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
 
   /* *** aliases *** */
   private val train        = io.fromFtq.train
-  private val commitUpdate = io.fromFtq.train
+  private val commitUpdate = io.fromFtq.commit
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
@@ -184,11 +184,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
   ras.io.commit.valid            := commitUpdate.valid
-  ras.io.commit.bits.attribute   := commitUpdate.bits.branches(0).bits.attribute
-  ras.io.commit.bits.startPc     := commitUpdate.bits.startVAddr.toUInt
-  ras.io.commit.bits.isRvc       := false.B // commitUpdate.bits.isRvc
-  ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
-  ras.io.commit.bits.cfiPosition := commitUpdate.bits.branches(0).bits.cfiPosition
+  ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
+  ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
+  ras.io.commit.bits.pushAddr    := commitUpdate.bits.pushAddr
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
   ras.io.specIn.bits.isRvc       := false.B
