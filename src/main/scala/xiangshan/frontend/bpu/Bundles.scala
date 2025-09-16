@@ -67,7 +67,7 @@ object BranchAttribute {
     // indirect branches: jr, jalr
     def Indirect: UInt = 3.U(width.W)
   }
-  private object RasAction extends EnumUInt(4) {
+  object RasAction extends EnumUInt(4) {
     def popBit:  Int = 0
     def pushBit: Int = 1
     // no action
