@@ -94,6 +94,8 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val ldld_nuke_query = new LoadNukeQueryIO
   // lq -> ldu for misalign
   val lqDeqPtr = Input(new LqPtr)
+  // ldu -> lrq
+  val doNotReplay = Output(Bool())
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -1602,13 +1604,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s3_misalign_rep_cause := VecInit(s3_mab_sel_rep_cause.asBools)
 
+  val s3_doNotReplay  = Wire(Bool())
+
   when (s3_exception || s3_hw_err || s3_rep_frm_fetch || s3_frm_mabuf) {
     s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
+    s3_doNotReplay := true.B
   } .otherwise {
     s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
+    s3_doNotReplay := !s3_lrq_rep_info.need_rep
 
   }
   io.lsq.ldin.bits.rep_info.cause := s3_replayqueue_rep_cause
+  io.lsq.doNotReplay := s3_doNotReplay
 
 
   // Int load, if hit, will be writebacked at s3
