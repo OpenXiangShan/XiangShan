@@ -50,7 +50,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   }
   io.resetDone := resetDone
 
-  private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
+  private val takenCounter = RegInit(
+    VecInit.fill(NumBanks)(
+      VecInit.fill(NumSets)(
+        VecInit.fill(NumWays)(0.U.asTypeOf(new SaturateCounter(TakenCounterWidth)))
+      )
+    )
+  )
 
   // TODO: write ctr bypass to read
   // TODO: train after execution
@@ -164,7 +170,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   // used for check abtb output
   io.debug_startVaddr := s2_startPc
 
-  private val meta = Wire(new AheadBtbMeta)
+  private val meta = WireInit(0.U.asTypeOf(new AheadBtbMeta))
   meta.valid           := s2_valid
   meta.hitMask         := s2_hitMask
   meta.taken           := s2_taken
