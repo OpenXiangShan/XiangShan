@@ -111,7 +111,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
       entries(allocPtr.value) := req
     }
 
-    assert(!needAlloc(i) || canAlloc(i), s"port${i} can not accept CounterFilter enq request, check if SIZE >= (Ldu stages - 2) * LduCnt")
+    assert(!needAlloc(i) || canAlloc(i), s"port${i} can not accept CounterFilter enq request, check if SIZE >= (Ldu stages + 1) * LduCnt")
   }
   val allocNum = PopCount(canAlloc)
 
