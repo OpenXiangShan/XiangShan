@@ -2,12 +2,14 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.util._
 import utility.{SignExt, ZeroExt}
 import xiangshan.RedirectLevel
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.JumpOpType
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BranchAttribute
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   private val jumpDataModule = Module(new JumpDataModule)
@@ -52,6 +54,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
+  redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready
@@ -65,6 +68,9 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.bits.taken := true.B
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
-  io.toFrontendBJUResolve.get.bits.attribute.rasAction :=  0.U
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction :=  Mux1H(
+    Seq(io.in.bits.ctrl.preDecode.get.isCall, io.in.bits.ctrl.preDecode.get.isRet),
+    Seq(BranchAttribute.RasAction.Push, BranchAttribute.RasAction.Pop)
+  )
   connect0LatencyCtrlSingal
 }
