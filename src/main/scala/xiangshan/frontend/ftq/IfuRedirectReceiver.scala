@@ -23,7 +23,8 @@ import xiangshan.frontend.PredecodeWritebackBundle
 
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
-      pdWb: Valid[PredecodeWritebackBundle]
+      pdWb:        Valid[PredecodeWritebackBundle],
+      specTopAddr: UInt
   ): Valid[Redirect] = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
@@ -31,9 +32,12 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
     redirect.bits.ftqOffset := pdWb.bits.takenCfiOffset
     redirect.bits.level     := RedirectLevel.flushAfter
+    redirect.bits.isRVC     := pdWb.bits.isRVC
+    redirect.bits.attribute := pdWb.bits.attribute
     redirect.bits.pc        := pdWb.bits.pc.toUInt
-    redirect.bits.target    := pdWb.bits.target.toUInt
-    redirect.bits.taken     := pdWb.bits.cfiEndOffset.valid
+    // redirect.bits.target    := Mux(pdWb.bits.attribute.isReturn, specTopAddr, pdWb.bits.target.toUInt)
+    redirect.bits.target := pdWb.bits.target.toUInt
+    redirect.bits.taken  := pdWb.bits.cfiEndOffset.valid
     redirect
   }
 }

@@ -24,6 +24,7 @@ import utility.ParallelPriorityEncoder
 import xiangshan.ValidUndirectioned
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 
 class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
@@ -182,6 +183,11 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       mispredInstrIdx.valid &&
       (pds(mispredInstrIdx.bits).isJal || pds(mispredInstrIdx.bits).isBr)
 
+  private val firstFinalIdx   = Mux(mispredInstrIdx.valid, mispredInstrIdx.bits, firstTakenIdx)
+  private val firstFinalIsRVC = pds(firstFinalIdx).isRVC
+  private val firstAttribute  = WireDefault(0.U.asTypeOf(new BranchAttribute))
+  firstAttribute.branchType := pds(firstFinalIdx).brType
+  firstAttribute.rasAction  := Cat(pds(firstFinalIdx).isCall, pds(firstFinalIdx).isRet)
   /* *****************************************************************************
    * PredChecker Stage 2
    * ***************************************************************************** */
@@ -201,9 +207,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val jumpTargetsNext = RegEnable(jumpTargets, io.req.valid)
   private val seqTargetsNext  = RegEnable(seqTargets, io.req.valid)
 
-  private val firstPredTakenNext = RegEnable(firstPredTaken, io.req.valid)
-  private val pdsNext            = RegEnable(pds, io.req.valid)
-  private val fixedRangeNext     = RegEnable(fixedRange, io.req.valid)
+  private val firstPredTakenNext  = RegEnable(firstPredTaken, io.req.valid)
+  private val firstFinalIsRVCNext = RegEnable(firstFinalIsRVC, io.req.valid)
+  private val firstAttributeNext  = RegEnable(firstAttribute, io.req.valid)
+  private val fixedRangeNext      = RegEnable(fixedRange, io.req.valid)
   // --------- These registers are only for performance debugging purposes ---------------------/
   private val jalFaultVecNext  = RegEnable(jalFaultVec, io.req.valid)
   private val jalrFaultVecNext = RegEnable(jalrFaultVec, io.req.valid)
@@ -230,6 +237,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val mispredTarget =
     Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
 
+  // TODO: Need to rethink this interface
   io.resp.stage2Out.fixedFirst.target       := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
   io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred
   io.resp.stage2Out.fixedFirst.misIdx.bits  := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
@@ -237,6 +245,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.fixedFirst.cfiIdx.bits  := fixedFirstTakenInstrIdxNext.bits
   io.resp.stage2Out.fixedFirst.instrRange   := fixedFirstRawInstrRange
   io.resp.stage2Out.fixedFirst.invalidTaken := fixFirstMispred && invalidTakenNext(mispredIdxNext.bits)
+  io.resp.stage2Out.fixedFirst.isRVC        := firstFinalIsRVCNext
+  io.resp.stage2Out.fixedFirst.attribute    := firstAttributeNext
 
   io.resp.stage2Out.fixedSecond.target       := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
   io.resp.stage2Out.fixedSecond.misIdx.valid := fixSecondMispred
@@ -246,6 +256,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.fixedSecond.instrRange   := fixedSecondRawInstrRange
   // FIXME: second fetch block invalid taken
   io.resp.stage2Out.fixedSecond.invalidTaken := false.B
+  io.resp.stage2Out.fixedSecond.isRVC        := false.B
+  io.resp.stage2Out.fixedSecond.attribute    := DontCare
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,

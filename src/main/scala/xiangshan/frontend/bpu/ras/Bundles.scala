@@ -108,11 +108,9 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
 }
 
 class RasCommitInfo(implicit p: Parameters) extends RasBundle {
-  val attribute:   BranchAttribute = new BranchAttribute
-  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val startPc:     UInt            = UInt(VAddrBits.W)
-  val isRvc:       Bool            = Bool()
-  val meta:        RasMeta         = new RasMeta
+  val attribute: BranchAttribute = new BranchAttribute
+  val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val meta:      RasMeta         = new RasMeta
 }
 
 class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
