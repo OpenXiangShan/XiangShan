@@ -23,25 +23,26 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
+import xiangshan.backend.Bundles.{ExuInput, MemExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{Pbmt, TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DCacheStoreIO, DcacheStoreRequestIO, HasDCacheParameters, MemoryOpConstants, StorePrefetchReq}
 
-class StoreUnit(implicit p: Parameters) extends XSModule
+class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasVLSUParameters
   {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
     val csrCtrl         = Flipped(new CustomCSRCtrlIO)
-    val stin            = Flipped(Decoupled(new MemExuInput))
+    val stin            = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
     val updateLFST      = Valid(new StoreUnitToLFST)
     // misalignBuffer issue path
     val misalign_stin   = Flipped(Decoupled(new LsPipelineBundle))
@@ -78,7 +79,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val s0_s1_s2_valid = Output(Bool())
   })
 
-  PerfCCT.updateInstPos(io.stin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
+  PerfCCT.updateInstPos(io.stin.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
@@ -104,7 +105,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     io.misalign_stin.bits.uop,
     Mux(
       s0_use_flow_rs,
-      s0_stin.uop,
+      s0_stin.toDynInst(),
       s0_vecstin.uop
     )
   )
@@ -136,7 +137,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
 
   // generate addr
-  val s0_saddr = s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), VAddrBits)
+  val s0_saddr = s0_stin.src(0) + SignExt(s0_stin.imm(11,0), VAddrBits)
   val s0_fullva = Wire(UInt(XLEN.W))
 
   val s0_vaddr = Mux(
@@ -153,8 +154,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     )
   )
 
-  val s0_isCbo = s0_use_flow_rs && LSUOpType.isCboAll(s0_stin.uop.fuOpType)
-  val s0_isCbo_noZero = s0_use_flow_rs && LSUOpType.isCbo(s0_stin.uop.fuOpType)
+  val s0_isCbo = s0_use_flow_rs && LSUOpType.isCboAll(s0_stin.fuOpType)
+  val s0_isCbo_noZero = s0_use_flow_rs && LSUOpType.isCbo(s0_stin.fuOpType)
   // only simulation
   val cbo_assert_flag = LSUOpType.isCboAll(s0_out.uop.fuOpType)
   XSError(!s0_use_flow_rs && cbo_assert_flag && s0_valid, "cbo instruction selection error.")
@@ -185,7 +186,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   s0_fullva := Mux(
     s0_use_flow_rs,
-    s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), XLEN),
+    s0_stin.src(0) + SignExt(s0_stin.imm(11,0), XLEN),
     Mux(
       s0_use_flow_vec,
       s0_vecstin.vaddr,
@@ -243,7 +244,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.vaddr        := s0_vaddr
   s0_out.fullva       := s0_fullva
   // Now data use its own io
-  s0_out.data         := s0_stin.src(1)
+  s0_out.data         := DontCare
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
@@ -331,9 +332,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                                         )
 
   io.updateLFST.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
-  io.updateLFST.bits.robIdx := RegEnable(s0_stin.uop.robIdx, s0_valid)
-  io.updateLFST.bits.ssid := RegEnable(s0_stin.uop.ssid, s0_valid)
-  io.updateLFST.bits.storeSetHit := RegEnable(s0_stin.uop.storeSetHit, s0_valid)
+  io.updateLFST.bits.robIdx := RegEnable(s0_stin.robIdx, s0_valid)
+  io.updateLFST.bits.ssid := RegEnable(s0_stin.ssid.getOrElse(0.U), s0_valid)
+  io.updateLFST.bits.storeSetHit := RegEnable(s0_stin.storeSetHit.getOrElse(false.B), s0_valid)
 
   // trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))

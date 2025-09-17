@@ -482,17 +482,6 @@ object Bundles {
       })
     }
 
-    def clearExceptions(
-      exceptionBits: Seq[Int] = Seq(),
-      flushPipe    : Boolean = false,
-      replayInst   : Boolean = false
-    ): DynInst = {
-      this.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
-      if (!flushPipe) { this.flushPipe := false.B }
-      if (!replayInst) { this.replayInst := false.B }
-      this
-    }
-
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
 
     def connectRenameOutUop(source: RenameOutUop): Unit = {
@@ -935,6 +924,38 @@ object Bundles {
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+    }
+
+    def toDynInst(): DynInst = {
+      val uop = Wire(new DynInst)
+      uop := 0.U.asTypeOf(uop)
+      uop.fuType         := this.fuType
+      uop.fuOpType       := this.fuOpType
+      uop.imm            := this.imm
+      uop.robIdx         := this.robIdx
+      uop.pdest          := this.pdest
+      uop.rfWen          := this.rfWen.getOrElse(false.B)
+      uop.fpWen          := this.fpWen.getOrElse(false.B)
+      uop.vecWen         := this.vecWen.getOrElse(false.B)
+      uop.v0Wen          := this.v0Wen.getOrElse(false.B)
+      uop.vlWen          := this.vlWen.getOrElse(false.B)
+      uop.flushPipe      := this.flushPipe.getOrElse(false.B)
+      uop.pc             := this.pc.getOrElse(0.U) + (this.ftqOffset.getOrElse(0.U) << instOffsetBits)
+      uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
+      uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
+      uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)
+      uop.loadWaitStrict := this.loadWaitStrict.getOrElse(false.B)
+      uop.ssid           := this.ssid.getOrElse(0.U(SSIDWidth.W))
+      uop.lqIdx          := this.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+      uop.sqIdx          := this.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+      uop.ftqPtr         := this.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
+      uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
+      uop.debugInfo      := this.perfDebugInfo
+      uop.debug_seqNum   := this.debug_seqNum
+      uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      uop.preDecodeInfo  := this.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
+      uop.numLsElem      := this.numLsElem.getOrElse(0.U)
+      uop
     }
   }
 

@@ -31,7 +31,6 @@ import utility.sram.{SramBroadcastBundle, SramHelper}
 import utils._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, StoreUnitToLFST}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.exu.MemExeUnit
@@ -48,7 +47,8 @@ import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
-  // number of memory units
+  val memSchedParams = backendParams.memSchdParams
+
   val LduCnt  = backendParams.LduCnt
   val StaCnt  = backendParams.StaCnt
   val StdCnt  = backendParams.StdCnt
@@ -101,13 +101,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val storePc = Vec(StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
   val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 
-  val issueLda = MixedVec(Seq.fill(LduCnt)(Flipped(DecoupledIO(new MemExuInput))))
-  val issueSta = MixedVec(Seq.fill(StaCnt)(Flipped(DecoupledIO(new MemExuInput))))
-  val issueStd = MixedVec(Seq.fill(StdCnt)(Flipped(DecoupledIO(new MemExuInput))))
-  val issueHya = MixedVec(Seq.fill(HyuCnt)(Flipped(DecoupledIO(new MemExuInput))))
-  val issueVldu = MixedVec(Seq.fill(VlduCnt)(Flipped(DecoupledIO(new MemExuInput(isVector=true)))))
-
-  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueVldu
+  val issue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(memSchedParams.get.genExuInputCopySrcBundle)
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
@@ -358,6 +352,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val dft_reset_bcknd = Option.when(hasMbist)(Output(new DFTResetSignals()))
   })
 
+  val issueMem: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.issue.flatten
+  val issueLda = issueMem.filter(_.bits.params.hasLoadFu)
+  val issueSta = issueMem.filter(_.bits.params.hasStoreAddrFu)
+  val issueStd = issueMem.filter(_.bits.params.hasStdFu)
+  val issueHya = issueMem.filter(_.bits.params.hasHyldaFu)
+  val issueVldu = issueMem.filter(_.bits.params.hasVLoadFu)
+
+  val memExeUnitParams = backendParams.memSchdParams.get.issueBlockParams.map(_.allExuParams).flatten
+  val ldaParams = memExeUnitParams.filter(_.hasLoadFu)
+  val staParams = memExeUnitParams.filter(_.hasStoreAddrFu)
+  val stdParams = memExeUnitParams.filter(_.hasStdFu)
+  val hyaParams = memExeUnitParams.filter(_.hasHyldaFu)
+  val vlduParams = memExeUnitParams.filter(_.hasVLoadFu)
+  val vstuParams = memExeUnitParams.filter(_.hasVStoreFu)
+  val mouParam = memExeUnitParams.filter(_.hasMouFu).head
+  val vsegParam = memExeUnitParams.filter(_.hasVSegFu).head
+
   io.mem_to_ooo.writeBack.zipWithIndex.foreach{ case (wb, i) =>
     PerfCCT.updateInstPos(wb.bits.uop.debug_seqNum, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset)
   }
@@ -392,20 +403,22 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.uncacheError.ecc_error.valid := false.B
   }
 
-  val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
-  val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.intSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
-  val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
+  val loadUnits = Seq.tabulate(LduCnt)(i => Module(new LoadUnit(ldaParams(i))))
+  val storeUnits = Seq.tabulate(StaCnt)(i => Module(new StoreUnit(staParams(i))))
+  val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new MemExeUnit(stdParams(i))))
+  val hybridUnits = Seq.tabulate(HyuCnt)(i => Module(new HybridUnit(hyaParams(i))))
+  val atomicsUnit = Module(new AtomicsUnit(mouParam))
+
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
 
   // The number of vector load/store units is decoupled with the number of load/store units
-  val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
-  val vsSplit = Seq.fill(VstuCnt)(Module(new VSSplitImp))
+  val vlSplit = Seq.tabulate(VlduCnt)(i => Module(new VLSplitImp(vlduParams(i))))
+  val vsSplit = Seq.tabulate(VstuCnt)(i => Module(new VSSplitImp(vstuParams(i))))
   val vlMergeBuffer = Module(new VLMergeBufferImp)
   val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
-  val vSegmentUnit  = Module(new VSegmentUnit)
-  val vfofBuffer    = Module(new VfofBuffer)
+  val vSegmentUnit  = Module(new VSegmentUnit(vsegParam))
+  val vfofBuffer    = Module(new VfofBuffer(vlduParams.head)) // ?
 
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer)
@@ -414,8 +427,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
-  val atomicsUnit = Module(new AtomicsUnit)
-
 
   val ldaExeWbReqs = Wire(Vec(LduCnt, Decoupled(new MemExuOutput)))
   // atomicsUnit will overwrite the source from ldu if it is about to writeback
@@ -651,7 +662,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
   prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
-  prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
+  prefetcher.io.fromOOO.s1_loadPc := issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
   prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_loadFireHint := loadUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
@@ -807,7 +818,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     loadUnits(i).io.misalign_allow_spec := misalign_allow_spec
 
     // get input form dispatch
-    loadUnits(i).io.ldin <> io.ooo_to_mem.issueLda(i)
+    loadUnits(i).io.ldin <> issueLda(i)
     loadUnits(i).io.feedback_slow <> io.mem_to_ooo.ldaIqFeedback(i).feedbackSlow
     io.mem_to_ooo.ldaIqFeedback(i).feedbackFast := DontCare
     loadUnits(i).io.correctMissTrain := correctMissTrain
@@ -957,7 +968,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     hybridUnits(i).io.redirect <> redirect
 
     // get input from dispatch
-    hybridUnits(i).io.lsin <> io.ooo_to_mem.issueHya(i)
+    hybridUnits(i).io.lsin <> issueHya(i)
     hybridUnits(i).io.feedback_slow <> io.mem_to_ooo.hyuIqFeedback(i).feedbackSlow
     hybridUnits(i).io.feedback_fast <> io.mem_to_ooo.hyuIqFeedback(i).feedbackFast
     hybridUnits(i).io.correctMissTrain := correctMissTrain
@@ -1070,9 +1081,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // StoreUnit
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect
-    stdExeUnits(i).io.in.valid := io.ooo_to_mem.issueStd(i).valid
-    io.ooo_to_mem.issueStd(i).ready := stdExeUnits(i).io.in.ready
-    stdExeUnits(i).io.in.bits := io.ooo_to_mem.issueStd(i).bits
+    stdExeUnits(i).io.in <> issueStd(i)
   }
 
   for (i <- 0 until StaCnt) {
@@ -1082,7 +1091,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.csrCtrl       <> csrCtrl
     stu.io.dcache        <> dcache.io.lsu.sta(i)
     stu.io.feedback_slow <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
-    stu.io.stin         <> io.ooo_to_mem.issueSta(i)
+    stu.io.stin         <> issueSta(i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
     // dtlb
@@ -1365,14 +1374,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // vector
   val vLoadCanAccept  = (0 until VlduCnt).map(i =>
-    vlSplit(i).io.in.ready && VlduType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType)
+    vlSplit(i).io.in.ready && VlduType.isVecLd(issueVldu(i).bits.fuOpType)
   )
   val vStoreCanAccept = (0 until VstuCnt).map(i =>
-    vsSplit(i).io.in.ready && VstuType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType)
+    vsSplit(i).io.in.ready && VstuType.isVecSt(issueVldu(i).bits.fuOpType)
   )
-  val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
-  val isFixVlUop    = io.ooo_to_mem.issueVldu.map{x =>
-    x.bits.uop.vpu.isVleff && x.bits.uop.vpu.lastUop && x.valid
+  val isSegment     = issueVldu.head.valid && isVsegls(issueVldu.head.bits.fuType)
+  val isFixVlUop    = issueVldu.map{ x =>
+    x.valid && x.bits.vpu.get.isVleff && x.bits.vpu.get.lastUop
   }
 
   // init port
@@ -1398,8 +1407,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
-    vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
+    vsSplit(i).io.in <> issueVldu(i)
+    vsSplit(i).io.in.valid := issueVldu(i).valid &&
                               vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     NewPipelineConnect(
@@ -1417,8 +1426,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
-    vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
+    vlSplit(i).io.in <> issueVldu(i)
+    vlSplit(i).io.in.valid := issueVldu(i).valid &&
                               vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.threshold.get.valid := vlMergeBuffer.io.toSplit.get.threshold
@@ -1430,8 +1439,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )
 
     //Subsequent instrction will be blocked
-    vfofBuffer.io.in(i).valid := io.ooo_to_mem.issueVldu(i).valid
-    vfofBuffer.io.in(i).bits  := io.ooo_to_mem.issueVldu(i).bits
+    vfofBuffer.io.in(i).valid := issueVldu(i).valid
+    vfofBuffer.io.in(i).bits  := issueVldu(i).bits
   }
   (0 until LduCnt).foreach{i=>
     loadUnits(i).io.vecldout.ready         := vlMergeBuffer.io.fromPipeline(i).ready
@@ -1467,7 +1476,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   (0 until VlduCnt).foreach{i=>
-    io.ooo_to_mem.issueVldu(i).ready := vLoadCanAccept(i) || vStoreCanAccept(i)
+    issueVldu(i).ready := vLoadCanAccept(i) || vStoreCanAccept(i)
   }
 
   vlMergeBuffer.io.redirect <> redirect
@@ -1561,19 +1570,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val state = RegInit(s_normal)
 
   val st_atomics = Seq.tabulate(StaCnt)(i =>
-    io.ooo_to_mem.issueSta(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueSta(i).bits.uop.fuType))
+    issueSta(i).valid && FuType.storeIsAMO((issueSta(i).bits.fuType))
   ) ++ Seq.tabulate(HyuCnt)(i =>
-    io.ooo_to_mem.issueHya(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueHya(i).bits.uop.fuType))
+    issueHya(i).valid && FuType.storeIsAMO((issueHya(i).bits.fuType))
   )
 
   for (i <- 0 until StaCnt) when(st_atomics(i)) {
-    io.ooo_to_mem.issueSta(i).ready := atomicsUnit.io.in.ready
+    issueSta(i).ready := atomicsUnit.io.in.ready
     storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
   }
   for (i <- 0 until HyuCnt) when(st_atomics(StaCnt + i)) {
-    io.ooo_to_mem.issueHya(i).ready := atomicsUnit.io.in.ready
+    issueHya(i).ready := atomicsUnit.io.in.ready
     hybridUnits(i).io.lsin.valid := false.B
 
     state := s_atomics(StaCnt + i)
@@ -1584,9 +1593,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   atomicsUnit.io.in.valid := st_atomics.reduce(_ || _)
-  atomicsUnit.io.in.bits  := Mux1H(Seq.tabulate(StaCnt)(i =>
-    st_atomics(i) -> io.ooo_to_mem.issueSta(i).bits) ++
-    Seq.tabulate(HyuCnt)(i => st_atomics(StaCnt+i) -> io.ooo_to_mem.issueHya(i).bits))
+  atomicsUnit.io.in.bits := Mux1H(st_atomics, (issueSta ++ issueHya).map(_.bits))
   atomicsUnit.io.storeDataIn.zipWithIndex.foreach { case (stdin, i) =>
     stdin.valid := st_data_atomics(i)
     stdin.bits := stData(i).bits
@@ -1825,9 +1832,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
 
   // vector segmentUnit
-  vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
+  // TODO: DONT use `head` find segment
+  vSegmentUnit.io.in.bits <> issueVldu.head.bits
   vSegmentUnit.io.csrCtrl <> csrCtrl
-  vSegmentUnit.io.in.valid := isSegment && io.ooo_to_mem.issueVldu.head.valid// is segment instruction
+  vSegmentUnit.io.in.valid := isSegment && issueVldu.head.valid // is segment instruction
   vSegmentUnit.io.dtlb.resp.bits <> dtlb_reqs.take(LduCnt).head.resp.bits
   vSegmentUnit.io.dtlb.resp.valid <> dtlb_reqs.take(LduCnt).head.resp.valid
   vSegmentUnit.io.pmpResp <> pmp_check.head.resp
@@ -1921,10 +1929,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.topDownInfo.toBackend.l2TopMiss.l2Miss := RegNext(io.topDownInfo.fromL2Top.l2Miss)
   io.topDownInfo.toBackend.l2TopMiss.l3Miss := RegNext(io.topDownInfo.fromL2Top.l3Miss)
 
-  val hyLdDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
-  val hyStDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
-  val ldDeqCount = PopCount(io.ooo_to_mem.issueLda.map(_.valid)) +& hyLdDeqCount
-  val stDeqCount = PopCount(io.ooo_to_mem.issueSta.take(StaCnt).map(_.valid)) +& hyStDeqCount
+  val hyLdDeqCount = PopCount(issueHya.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
+  val hyStDeqCount = PopCount(issueHya.map(x => x.valid && FuType.isStore(x.bits.fuType)))
+  val ldDeqCount = PopCount(issueLda.map(_.valid)) +& hyLdDeqCount
+  val stDeqCount = PopCount(issueSta.take(StaCnt).map(_.valid)) +& hyStDeqCount
   val iqDeqCount = ldDeqCount +& stDeqCount
   XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
   XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LdExuCnt + 1)

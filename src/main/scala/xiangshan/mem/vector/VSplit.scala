@@ -29,10 +29,14 @@ import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.exu.ExeUnitParams
 
 
-class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
-  val io = IO(new VSplitPipelineIO(isVStore))
+class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
+  val io = IO(new VSplitPipelineIO(param, isVStore))
+
+  implicit val vsplitParam: ExeUnitParams = param
+
   // will be override later
   def us_whole_reg(fuOpType: UInt): Bool = false.B
   def us_mask(fuOpType: UInt): Bool = false.B
@@ -48,7 +52,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     * decode and generate AlignedType, uop mask, preIsSplit
     * ----------------------------------------------------------
     */
-  val s0_uop = io.in.bits.uop
+  val s0_uop = io.in.bits.toDynInst()
   val s0_vtype = s0_uop.vpu.vtype
   val s0_sew = s0_vtype.vsew
   val s0_eew = s0_uop.vpu.veew
@@ -63,7 +67,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
-  val s0_kill          = io.in.bits.uop.robIdx.needFlush(io.redirect)
+  val s0_kill          = io.in.bits.robIdx.needFlush(io.redirect)
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new VLSBundle(isVStore))
@@ -72,7 +76,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val isMaskReg = isUnitStride(s0_mop) && us_mask(s0_fuOpType)
   val isSegment = s0_nf =/= 0.U && !us_whole_reg(s0_fuOpType)
   val instType = Cat(isSegment, s0_mop)
-  val uopIdx = io.in.bits.uop.vpu.vuopIdx
+  val uopIdx = io.in.bits.vpu.get.vuopIdx
   val uopIdxInField = GenUopIdxInField(instType, s0_emul, s0_lmul, uopIdx)
   val vdIdxInField = GenVdIdxInField(instType, s0_emul, s0_lmul, uopIdxInField)
   val lmulLog2 = Mux(s0_lmul.asSInt >= 0.S, 0.U, s0_lmul)
@@ -93,20 +97,20 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     (s0_nf +& 1.U) << emulLog2Pos
   )
 
-  val vvl = io.in.bits.src_vl.asTypeOf(VConfig()).vl
+  val vvl = io.in.bits.src(vlIndice).asTypeOf(Vl())
   val evl = Mux(isUsWholeReg,
-                GenUSWholeRegVL(io.in.bits.uop.vpu.nf +& 1.U, s0_eew),
+                GenUSWholeRegVL(io.in.bits.vpu.get.nf +& 1.U, s0_eew),
                 Mux(isMaskReg,
                     GenUSMaskRegVL(vvl),
                     vvl))
-  val vvstart = io.in.bits.uop.vpu.vstart
+  val vvstart = io.in.bits.vpu.get.vstart
   val alignedType = Mux(isIndexed(instType), s0_sew(1, 0), s0_eew)
   val broadenAligendType = Mux(s0_preIsSplit, Cat("b0".U, alignedType), "b100".U) // if is unit-stride, use 128-bits memory access
   val flowsLog2 = GenRealFlowLog2(instType, s0_emul, s0_lmul, s0_eew, s0_sew)
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
-  val flowNum = io.in.bits.flowNum.get
+  val flowNum = io.in.bits.numLsElem.get
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
   val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
@@ -124,7 +128,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   //      uopIdxInField = 0 and vdIdxInField = 0, flowMask = 0x0000, toMergeBuffMask = 0x0000
   val isSpecialIndexed = isIndexed(instType) && s0_emul.asSInt > s0_lmul.asSInt
 
-  val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
+  val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src(v0Indice)), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
   val flowMask = ((srcMask &
@@ -141,21 +145,21 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   // connect
   s0_out := DontCare
   s0_out match {case x =>
-    x.uop := io.in.bits.uop
+    x.uop := io.in.bits.toDynInst()
     x.uop.imm := 0.U
     x.uop.vpu.vl := evl
     x.uop.uopIdx := uopIdx
     x.uop.numUops := numUops
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
-    x.rawNf := io.in.bits.uop.vpu.nf
+    x.rawNf := io.in.bits.vpu.get.nf
     x.flowMask := flowMask
     x.indexedSrcMask := indexedSrcMask // Only vector indexed instructions uses it
     x.indexedSplitOffset := indexedSplitOffset
     x.byteMask := GenUopByteMask(flowMask, Cat("b0".U, alignedType))(VLENB - 1, 0)
     x.fof := isUnitStride(s0_mop) && us_fof(s0_fuOpType)
-    x.baseAddr := io.in.bits.src_rs1
-    x.stride := io.in.bits.src_stride
+    x.baseAddr := io.in.bits.src(rs1Indice)
+    x.stride := io.in.bits.src(strideIndice)
     x.flowNum := flowNum
     x.nfields := s0_nfield
     x.vm := s0_vm
@@ -167,7 +171,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.lmul := s0_lmul
     x.vlmax := Mux(isUsWholeReg, evl, vlmax)
     x.instType := instType
-    x.data := io.in.bits.src_vs3
+    x.data := io.in.bits.src(vs3Indice)
     x.vdIdxInField := vdIdxInField
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
@@ -504,24 +508,25 @@ class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = f
   io.out.bits.uop.fuType := FuType.vldu.U
 }
 
-class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
+class VSSplitPipelineImp(val param: ExeUnitParams)(implicit p: Parameters)
+  extends VSplitPipeline(param, isVStore = true) {
   override def us_whole_reg(fuOpType: UInt): Bool = fuOpType === VstuType.vsr
   override def us_mask(fuOpType: UInt): Bool      = fuOpType === VstuType.vsm
   override def us_fof(fuOpType: UInt): Bool       = false.B // dont have vector fof store
 }
 
-class VLSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = false){
-
+class VLSplitPipelineImp(val param: ExeUnitParams)(implicit p: Parameters)
+  extends VSplitPipeline(param, isVStore = false) {
   override def us_whole_reg(fuOpType: UInt): Bool = fuOpType === VlduType.vlr
   override def us_mask(fuOpType: UInt): Bool      = fuOpType === VlduType.vlm
   override def us_fof(fuOpType: UInt): Bool       = fuOpType === VlduType.vleff
 }
 
-class VLSplitImp(implicit p: Parameters) extends VLSUModule{
-  val io = IO(new VSplitIO(isVStore=false))
-  val splitPipeline = Module(new VLSplitPipelineImp())
+class VLSplitImp(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUModule{
+  val io = IO(new VSplitIO(param, isVStore = false))
+  val splitPipeline = Module(new VLSplitPipelineImp(param))
   val splitBuffer = Module(new VLSplitBufferImp())
-  val mergeBufferNack = io.threshold.get.valid && io.threshold.get.bits =/= io.in.bits.uop.lqIdx
+  val mergeBufferNack = io.threshold.get.valid && io.threshold.get.bits =/= io.in.bits.lqIdx.get
   // Split Pipeline
   splitPipeline.io.in <> io.in
   io.in.ready := splitPipeline.io.in.ready && !mergeBufferNack
@@ -540,9 +545,9 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   io.out <> splitBuffer.io.out
 }
 
-class VSSplitImp(implicit p: Parameters) extends VLSUModule{
-  val io = IO(new VSplitIO(isVStore=true))
-  val splitPipeline = Module(new VSSplitPipelineImp())
+class VSSplitImp(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUModule{
+  val io = IO(new VSplitIO(param, isVStore = true))
+  val splitPipeline = Module(new VSSplitPipelineImp(param))
   val splitBuffer = Module(new VSSplitBufferImp())
   // Split Pipeline
   splitPipeline.io.in <> io.in

@@ -26,6 +26,8 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.VEew
+import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.datapath.DataConfig.{VecData, V0Data, VlData}
 
 /**
   * Common used parameters or functions in vlsu
@@ -92,6 +94,13 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   def isNotIndexed(instType: UInt) = instType(0) === "b0".U
   def isSegment(instType: UInt) = instType(2) === "b1".U
   def is128Bit(alignedType: UInt) = alignedType(2) === "b1".U
+
+  def vlIndice(implicit param: ExeUnitParams): Int = param.getRfReadSrcIdx(VlData()).head
+  def v0Indice(implicit param: ExeUnitParams): Int = param.getRfReadSrcIdx(V0Data()).head
+  def vecDataIndices(implicit param: ExeUnitParams): Seq[Int] = param.getRfReadSrcIdx(VecData())
+  def rs1Indice(implicit param: ExeUnitParams): Int = vecDataIndices apply 0
+  def strideIndice(implicit param: ExeUnitParams): Int = vecDataIndices apply 1
+  def vs3Indice(implicit param: ExeUnitParams): Int = vecDataIndices apply 2
 
   def mergeDataWithMask(oldData: UInt, newData: UInt, mask: UInt): Vec[UInt] = {
     require(oldData.getWidth == newData.getWidth)

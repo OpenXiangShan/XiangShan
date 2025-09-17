@@ -27,6 +27,7 @@ import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
@@ -227,9 +228,9 @@ class storeMisaignIO(implicit p: Parameters) extends Bundle{
   val storeMisalignBufferUopIdx = Input(UopIdx())
 }
 
-class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
+class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
+  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
@@ -237,9 +238,9 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val threshold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
 }
 
-class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
+class VSplitPipelineIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Flipped(Decoupled(new MemExuInput(isVector = true)))
+  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
 }
@@ -264,8 +265,8 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 //  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
 }
 
-class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
-  val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
+class VSegmentUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
+  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
   val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
@@ -281,9 +282,9 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val fromCsrTrigger      = Input(new CsrTriggerBundle)
 }
 
-class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
+class VfofDataBuffIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
+  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))))
   val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new FeedbackToLsqIO)))
 
   val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))

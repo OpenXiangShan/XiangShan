@@ -38,7 +38,6 @@ import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.mem.prefetch._
-
 import scala.math.{max, pow}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]

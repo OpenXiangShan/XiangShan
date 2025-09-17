@@ -25,16 +25,17 @@ import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 
-class AtomicsUnit(implicit p: Parameters) extends XSModule
+class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
   with MemoryOpConstants
   with HasDCacheParameters
   with SdtrigExt{
@@ -43,7 +44,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val hartId        = Input(UInt(hartIdLen.W))
-    val in            = Flipped(Decoupled(new MemExuInput))
+    val in            = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
     val storeDataIn   = Flipped(Vec(StdCnt, Valid(new MemExuOutput)))
     val out           = Decoupled(new MemExuOutput)
     val dcache        = new AtomicWordIO
@@ -60,7 +61,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
-  PerfCCT.updateInstPos(io.in.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
+  PerfCCT.updateInstPos(io.in.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
@@ -82,7 +83,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
 
-  val uop = Reg(io.in.bits.uop.cloneType)
+  val uop = Reg(new DynInst)
   val isLr = LSUOpType.isLr(uop.fuOpType)
   val isSc = LSUOpType.isSc(uop.fuOpType)
   val isAMOCAS = LSUOpType.isAMOCAS(uop.fuOpType)
@@ -131,7 +132,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
   // therefore the MSBs are reused to identify uopIdx
   val stdUopIdxs = io.storeDataIn.map(_.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth)
-  val staUopIdx = io.in.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth
+  val staUopIdx = io.in.bits.fuOpType >> LSUOpType.AMOFuOpWidth
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -148,15 +149,15 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
   when (state === s_invalid) {
     when (io.in.fire) {
-      uop := io.in.bits.uop
-      rs1 := io.in.bits.src_rs1
+      uop := io.in.bits.toDynInst()
+      rs1 := io.in.bits.src(0)
       state := s_tlb_and_flush_sbuffer_req
       have_sent_first_tlb_req := false.B
     }
   }
 
   when (io.in.fire) {
-    val pdest = io.in.bits.uop.pdest
+    val pdest = io.in.bits.pdest
     when (staUopIdx === 0.U) {
       pdest1Valid := true.B
       pdest1 := pdest
@@ -473,9 +474,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   // since we will continue polling tlb all by ourself
   io.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
-  io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.uop.robIdx, io.in.valid)
-  io.feedbackSlow.bits.sqIdx   := RegEnable(io.in.bits.uop.sqIdx, io.in.valid)
-  io.feedbackSlow.bits.lqIdx   := RegEnable(io.in.bits.uop.lqIdx, io.in.valid)
+  io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.robIdx, io.in.valid)
+  io.feedbackSlow.bits.sqIdx   := RegEnable(io.in.bits.sqIdx.get, io.in.valid)
+  io.feedbackSlow.bits.lqIdx   := RegEnable(io.in.bits.lqIdx.get, io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
   io.feedbackSlow.bits.sourceType := DontCare
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare

@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, MemExuOutput, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
@@ -32,6 +32,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
@@ -109,7 +110,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
   val addrHit     = Output(Bool())
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule
+class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
   with HasDCacheParameters
@@ -123,7 +124,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
 
     // int issue path
-    val ldin          = Flipped(Decoupled(new MemExuInput))
+    val ldin          = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
     val ldout         = Decoupled(new MemExuOutput)
 
     // vec issue path
@@ -191,7 +192,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   })
 
 
-  PerfCCT.updateInstPos(io.ldin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
+  PerfCCT.updateInstPos(io.ldin.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
@@ -278,7 +279,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // src 8: int read / software prefetch first issue from RS (io.in)
   // src 9: hardware prefetch from prefetchor (low confidence) (io.prefetch)
   // priority: high to low
-  val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.uop.lqIdx) ||
+  val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
                                io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
   private val SRC_NUM = 10
   private val Seq(
@@ -576,11 +577,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
-  def fromIntIssueSource(src: MemExuInput): FlowSource = {
+  def fromIntIssueSource(src: ExuInput): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    val addr           = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
-    out.mask          := genVWmask(addr, src.uop.fuOpType(1,0))
-    out.uop           := src.uop
+    val addr           = src.src(0) + SignExt(src.imm(11, 0), VAddrBits)
+    out.mask          := genVWmask(addr, src.fuOpType(1,0))
+    out.uop           := src.toDynInst()
     out.has_rob_entry := true.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
     out.mshrid        := 0.U
@@ -588,10 +589,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.isFirstIssue  := true.B
     out.fast_rep      := false.B
     out.ld_rep        := false.B
-    out.prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
-    out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
-    out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
-    out.prf_i         := src.uop.fuOpType === LSUOpType.prefetch_i
+    out.prf           := LSUOpType.isPrefetch(src.fuOpType)
+    out.prf_rd        := src.fuOpType === LSUOpType.prefetch_r
+    out.prf_wr        := src.fuOpType === LSUOpType.prefetch_w
+    out.prf_i         := src.fuOpType === LSUOpType.prefetch_i
     out.sched_idx     := 0.U
     out.vecActive     := true.B // true for scala load
     out
@@ -637,7 +638,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
   // fast replay and hardware prefetch don't need to query tlb
-  val int_issue_vaddr = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
+  val int_issue_vaddr = io.ldin.bits.src(0) + SignExt(io.ldin.bits.imm(11, 0), VAddrBits)
   val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr(VAddrBits - 1, 0), int_issue_vaddr)
   s0_tlb_vaddr := Mux(
     s0_src_valid_vec(mab_idx),
@@ -687,7 +688,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       io.vecldin.bits.vaddr,
       Mux(
         s0_src_select_vec(int_iss_idx),
-        io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), XLEN),
+        io.ldin.bits.src(0) + SignExt(io.ldin.bits.imm(11, 0), XLEN),
         s0_dcache_vaddr
       )
     )
@@ -701,7 +702,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       LSUOpType.isHlv(io.replay.bits.uop.fuOpType),
       Mux(
         s0_src_valid_vec(int_iss_idx),
-        LSUOpType.isHlv(io.ldin.bits.uop.fuOpType),
+        LSUOpType.isHlv(io.ldin.bits.fuOpType),
         false.B
       )
     )
@@ -714,7 +715,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       LSUOpType.isHlvx(io.replay.bits.uop.fuOpType),
       Mux(
         s0_src_valid_vec(int_iss_idx),
-        LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType),
+        LSUOpType.isHlvx(io.ldin.bits.fuOpType),
         false.B
       )
     )
@@ -820,7 +821,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.lsq.uncache.bits.uop,
     io.lsq.nc_ldin.bits.uop,
     io.replay.bits.uop,
-    io.ldin.bits.uop,
+    io.ldin.bits.toDynInst(),
   )
   val s0_wakeup_uop = ParallelPriorityMux(s0_wakeup_selector, s0_wakeup_format)
   io.wakeup.valid := s0_fire && !s0_sel_src.isvec && !s0_sel_src.frm_mabuf && (
