@@ -327,9 +327,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   staEnqs.zip(staFromDispatch).map { case (sink, source) =>
     sink.valid := source.valid && !source.bits.isDropAmocasSta
   }
-  (stdEnqs).zip(staEnqs).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>
+  (stdEnqs).zip(staFromDispatch).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>
     stdIQEnq.valid := staIQEnq.valid
-    stdIQEnq.bits := staIQEnq.bits
+    connectSamePort(stdIQEnq.bits, staIQEnq.bits)
     // Store data reuses store addr src(1) in dispatch2iq
     // [dispatch2iq] --src*------src*(0)--> [staIQ|hyaIQ]
     //                       \

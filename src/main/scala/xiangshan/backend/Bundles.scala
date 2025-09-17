@@ -258,9 +258,9 @@ object Bundles {
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
     val pred_taken = Bool()
-    val identifiedCfi = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val identifiedCfi = Bool()
     // from decode
     val srcType = Vec(numSrc, SrcType())
     val fuType = FuType()
