@@ -534,6 +534,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
     bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
     bypassNetwork.io.fromExus.connectExuOutput(_.int)(exuBlock.io.out)
+    bypassNetwork.io.fromExus.connectExuOutput(_.fp)(io.formFpExuBlockOut.get)
+    // no use
+    io.formFpExuBlockOut.get.flatten.map(_.ready := true.B)
     val intLoadWB = bypassNetwork.io.fromExus.int.flatten.filter(_.bits.params.hasLoadExu)
     intLoadWB.zip(io.fromMemExuOutput.take(intLoadWB.size)).foreach { case (sink, source) =>
       sink.valid := source.valid
@@ -670,6 +673,10 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       }
     }
     io.exuOut.flatten.zip((exuBlock.io.out).flatten).map { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits
+    }
+    io.fpExuBlockOut.get.flatten.zip(exuBlock.io.out.flatten).map{ case(sink, source) =>
       sink.valid := source.valid
       sink.bits := source.bits
     }
@@ -938,5 +945,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val vfSchdBusyTable = MixedVec(backendParams.vfSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
   val wbFuBusyTableWriteOut = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
+  val fpExuBlockOut = Option.when(params.isFpSchd)(params.genExuOutputDecoupledBundle)
+  val formFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(backendParams.fpSchdParams.get.genExuOutputDecoupledBundle))
 }
 
