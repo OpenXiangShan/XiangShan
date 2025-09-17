@@ -344,12 +344,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.io.vlWriteBackInfoIn.vlFromVfIsVlmax := vlFromVfIsVlmax
   vecRegion.io.lqDeqPtr.get := io.mem.lqDeqPtr
   vecRegion.io.sqDeqPtr.get := io.mem.sqDeqPtr
+  // for wbDatapath wirte regfile
   intRegion.io.fromFpExu.get := fpRegion.io.exuOut
   intRegion.io.fromVecExu.get := vecRegion.io.exuOut
   fpRegion.io.fromIntExu.get := intRegion.io.exuOut
   fpRegion.io.fromVecExu.get := vecRegion.io.exuOut
   vecRegion.io.fromIntExu.get := intRegion.io.exuOut
   vecRegion.io.fromFpExu.get := fpRegion.io.exuOut
+  // for fast wakeup data
+  intRegion.io.formFpExuBlockOut.get <> fpRegion.io.fpExuBlockOut.get
   intRegion.io.intSchdBusyTable := intRegion.io.wbFuBusyTableWriteOut
   intRegion.io.fpSchdBusyTable := fpRegion.io.wbFuBusyTableWriteOut
   intRegion.io.vfSchdBusyTable := vecRegion.io.wbFuBusyTableWriteOut
