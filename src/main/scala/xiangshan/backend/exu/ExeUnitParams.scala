@@ -303,9 +303,13 @@ case class ExeUnitParams(
 
   def hasVecLsFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vldu, FuType.vstu))).reduce(_ || _)
 
+  def hasVSegFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vsegldu, FuType.vsegstu))).reduce(_ || _)
+
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
+
+  def hasMouFu = fuConfigs.map(_.name == "mou").reduce(_ || _)
 
   def hasStoreFu = hasStoreAddrFu || hasStdFu
 

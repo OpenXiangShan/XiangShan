@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput, StoreUnitToLFST}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, MemExuOutput, StoreUnitToLFST}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
@@ -31,13 +31,14 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbHintReq, TlbReq, TlbRequestIO, TlbResp}
 
-class HybridUnit(implicit p: Parameters) extends XSModule
+class HybridUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
   with HasDCacheParameters
@@ -51,7 +52,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
 
     // flow in
-    val lsin          = Flipped(Decoupled(new MemExuInput))
+    val lsin          = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
 
     // flow out
     val ldout = DecoupledIO(new MemExuOutput)
@@ -158,7 +159,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
-  PerfCCT.updateInstPos(io.lsin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.lsin.valid, clock, reset)
+  PerfCCT.updateInstPos(io.lsin.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.lsin.valid, clock, reset)
 
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   val s1_ready, s2_ready, s3_ready, sx_can_go = WireInit(false.B)
@@ -203,7 +204,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // src7: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // priority: high to low
   val s0_ld_flow             = FuType.isLoad(s0_uop.fuType) || FuType.isVLoad(s0_uop.fuType)
-  val s0_rep_stall           = io.lsin.valid && isAfter(io.ldu_io.replay.bits.uop.robIdx, io.lsin.bits.uop.robIdx)
+  val s0_rep_stall           = io.lsin.valid && isAfter(io.ldu_io.replay.bits.uop.robIdx, io.lsin.bits.robIdx)
   private val SRC_NUM = 8
   private val Seq(
     super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
@@ -372,10 +373,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := 0.U
   }
 
-  def fromIntIssueSource(src: MemExuInput) = {
-    s0_vaddr         := src.src(0) + SignExt(src.uop.imm(11, 0), VAddrBits)
-    s0_mask          := genVWmask(s0_vaddr, src.uop.fuOpType(1,0))
-    s0_uop           := src.uop
+  def fromIntIssueSource(src: ExuInput) = {
+    s0_vaddr         := src.src(0) + SignExt(src.imm(11, 0), VAddrBits)
+    s0_mask          := genVWmask(s0_vaddr, src.fuOpType(1,0))
+    s0_uop           := src.toDynInst()
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
@@ -384,9 +385,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_fast_rep      := false.B
     s0_ld_rep        := false.B
     s0_l2l_fwd       := false.B
-    s0_prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
-    s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
-    s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
+    s0_prf           := LSUOpType.isPrefetch(src.fuOpType)
+    s0_prf_rd        := src.fuOpType === LSUOpType.prefetch_r
+    s0_prf_wr        := src.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := 0.U
   }
 
@@ -501,7 +502,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // 2) there is no fast replayed load
   // 3) there is no high confidence prefetch request
   io.lsin.ready := (s0_can_go &&
-                    Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready,
+                    Mux(FuType.isLoad(io.lsin.bits.fuType), io.ldu_io.dcache.req.ready,
                     (if (StorePrefetchL1Enabled) io.stu_io.dcache.req.ready else true.B)) && s0_src_ready_vec(int_iss_idx))
   io.vec_stu_io.in.ready := s0_can_go && io.ldu_io.dcache.req.ready && s0_src_ready_vec(vec_iss_idx)
 
@@ -726,12 +727,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                              "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
                           ))
     // Case 2: this load-load uop is cancelled
-    s1_ptr_chasing_canceled := !io.lsin.valid || FuType.isStore(io.lsin.bits.uop.fuType)
+    s1_ptr_chasing_canceled := !io.lsin.valid || FuType.isStore(io.lsin.bits.fuType)
 
     when (s1_try_ptr_chasing) {
       s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
 
-      s1_in.uop           := io.lsin.bits.uop
+      s1_in.uop           := io.lsin.bits.toDynInst()
       s1_in.isFirstIssue  := io.lsin.bits.isFirstIssue
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -757,7 +758,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsq.forward.sqIdxMask := s1_sqIdx_mask
   if (EnableLoadToLoadForward) {
     when (s1_try_ptr_chasing) {
-      io.ldu_io.lsq.forward.sqIdxMask := UIntToMask(io.lsin.bits.uop.sqIdx.value, StoreQueueSize)
+      io.ldu_io.lsq.forward.sqIdxMask := UIntToMask(io.lsin.bits.sqIdx.get.value, StoreQueueSize)
     }
   }
 
@@ -797,9 +798,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stu_io.st_mask_out.bits.sqIdx  := s1_out.uop.sqIdx
 
   io.stu_io.updateLFST.valid := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf && !s1_isvec
-  io.stu_io.updateLFST.bits.robIdx := RegEnable(io.lsin.bits.uop.robIdx, io.lsin.fire)
-  io.stu_io.updateLFST.bits.ssid := RegEnable(io.lsin.bits.uop.ssid, io.lsin.fire)
-  io.stu_io.updateLFST.bits.storeSetHit := RegEnable(io.lsin.bits.uop.storeSetHit, io.lsin.fire)
+  io.stu_io.updateLFST.bits.robIdx := RegEnable(io.lsin.bits.robIdx, io.lsin.fire)
+  io.stu_io.updateLFST.bits.ssid := RegEnable(io.lsin.bits.ssid.get, io.lsin.fire)
+  io.stu_io.updateLFST.bits.storeSetHit := RegEnable(io.lsin.bits.storeSetHit.get, io.lsin.fire)
 
   // st-ld violation dectect request
   io.stu_io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf

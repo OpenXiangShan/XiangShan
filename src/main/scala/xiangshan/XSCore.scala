@@ -200,15 +200,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
-  memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
-  memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
-  memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
-  memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
-  backend.io.mem.issueHysta.foreach(_.ready := false.B) // this fake port should not be used
-  memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
+  // memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
+  // memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
+  // memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
+  // memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
+  // backend.io.mem.issueHysta.foreach(_.ready := false.B) // this fake port should not be used
+  // memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
+  memBlock.io.ooo_to_mem.issue <> backend.io.mem.issue
 
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.ooo_to_mem.issueUops.map(_.bits.uop.clearExceptions())
+  memBlock.io.ooo_to_mem.issue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
