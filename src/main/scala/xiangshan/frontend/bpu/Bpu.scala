@@ -73,7 +73,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := ctrl.abtbEnable
+  abtb.io.enable        := false.B
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
   ittage.io.enable      := ctrl.ittageEnable
@@ -94,10 +94,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s1_flush = Wire(Bool())
   private val s2_flush = Wire(Bool())
   private val s3_flush = Wire(Bool())
+  private val s4_flush = Wire(Bool()) // for abtb fast train
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
+  private val s4_valid = RegInit(false.B) // for abtb fast train
 
   private val s3_override = WireDefault(false.B)
 
@@ -116,6 +118,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s1_pc = RegEnable(s0_pc, s0_fire)
   private val s2_pc = RegEnable(s1_pc, s1_fire)
   private val s3_pc = RegEnable(s2_pc, s2_fire)
+  private val s4_pc = RegEnable(s3_pc, s3_fire) // for abtb fast train
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -164,8 +167,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid := redirect.valid
-  abtb.io.overrideValid := s3_override
+  abtb.io.redirectValid       := redirect.valid
+  abtb.io.overrideValid       := s3_override
+  abtb.io.t0_previousPc.valid := s4_valid // for fast train
+  abtb.io.t0_previousPc.bits  := s4_pc    // for fast train
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -198,6 +203,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
+  s4_flush := redirect.valid
   s3_flush := redirect.valid
   s2_flush := s3_flush || s3_override
   s1_flush := s2_flush
@@ -222,6 +228,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   when(s3_flush)(s3_valid := false.B)
     .elsewhen(s2_fire)(s3_valid := !s2_flush)
     .elsewhen(s3_fire)(s3_valid := false.B)
+
+  when(s4_flush)(s4_valid := false.B)
+    .elsewhen(s3_fire)(s4_valid := !s3_flush)
 
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
