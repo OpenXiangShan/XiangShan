@@ -117,8 +117,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val backendExceptionPtr = RegInit(FtqPtr(false.B, 0.U))
   when(backendRedirect.valid) {
     val exception = ExceptionType.fromBackend(backendRedirect.bits)
+    backendException := exception
     when(exception.hasException) {
-      backendException    := exception
       backendExceptionPtr := ifuWbPtr(0)
     }
   }.elsewhen(ifuWbPtr(0) =/= backendExceptionPtr) {
