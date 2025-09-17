@@ -17,6 +17,7 @@ package xiangshan.frontend.ifu
 
 import chisel3._
 import chisel3.util._
+import math.pow
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
 import utility.ParallelPriorityEncoder
@@ -115,10 +116,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     ))
   private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
   private val needRemask = ParallelOR(remaskFault)
-  // Note: remaskIdx must be 5-bit wide (2^5=32) to cover all shift positions (0-31)
+  // NOTE: we need a minimal pow2 that greater than IBufferEnqueueWidth, so we do a log2Up then pow(2)
   private val fixedRange =
-    instrValid.asUInt & (Fill(IBufferEnqueueWidth, !needRemask) | (Fill(32, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt)
-  assert(remaskIdx.getWidth == 5, s"remaskIdx width mismatch!") // Temporary code.
+    instrValid.asUInt & (
+      Fill(IBufferEnqueueWidth, !needRemask) |
+        (Fill(pow(2, log2Up(IBufferEnqueueWidth)).toInt, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt
+    )
   // Adjust this if one IBuffer input entry is later removed
   // require(
   //   isPow2(IBufferEnqueueWidth),
