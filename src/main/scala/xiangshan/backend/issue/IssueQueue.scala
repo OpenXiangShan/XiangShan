@@ -18,22 +18,6 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 import utility.PerfCCT
 
-class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  override def shouldBeInlined: Boolean = false
-
-  implicit val iqParams: IssueBlockParams = params
-  lazy val module: IssueQueueImp = iqParams.schdType match {
-    case IntScheduler() => new IssueQueueIntImp(this)
-    case FpScheduler() => new IssueQueueFpImp(this)
-    case VfScheduler() => new IssueQueueVfImp(this)
-    case MemScheduler() =>
-      if (iqParams.StdCnt == 0 && !iqParams.isVecMemIQ) new IssueQueueMemAddrImp(this)
-      else if (iqParams.isVecMemIQ) new IssueQueueVecMemImp(this)
-      else new IssueQueueIntImp(this)
-    case _ => null
-  }
-}
-
 class IssueQueueStatusBundle(numEnq: Int, numEntries: Int) extends Bundle {
   val empty = Output(Bool())
   val full = Output(Bool())
@@ -82,9 +66,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
-class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, val params: IssueBlockParams)
-  extends LazyModuleImp(wrapper)
-  with HasXSParameter {
+class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XSModule with HasXSParameter {
 
   override def desiredName: String = s"${params.getIQName}"
 
@@ -99,7 +81,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   require(params.numEnq <= 2, "IssueQueue has not supported more than 2 enq ports")
   require(params.numSimp == 0 || params.numSimp >= params.numEnq, "numSimp should be 0 or at least not less than numEnq")
   require(params.numComp == 0 || params.numComp >= params.numEnq, "numComp should be 0 or at least not less than numEnq")
-
+  val param: IssueBlockParams = params
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
   val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
@@ -396,7 +378,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       entriesIO.wakeUpFromWB(i) := io.wakeupFromWB(i)
       entriesIO.wakeUpFromWBDelayed(i) := io.wakeupFromWBDelayed(i)
     }
-    if (params.inVfSchd || params.isVecMemIQ){
+    if (params.inVfSchd){
       entriesIO.wakeUpFromWB                                    := io.wakeupFromWB
       entriesIO.wakeUpFromWBDelayed                             := io.wakeupFromWBDelayed
     }
@@ -1124,8 +1106,7 @@ class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
 
 class IssueQueueIntIO()(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO
 
-class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
-  extends IssueQueueImp(wrapper)
+class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extends IssueQueueImp
 {
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueIntIO).suggestName("io")
@@ -1147,8 +1128,7 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
   }}
 }
 
-class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
-  extends IssueQueueImp(wrapper)
+class IssueQueueVfImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
 {
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
@@ -1158,8 +1138,7 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   }}
 }
 
-class IssueQueueFpImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
-  extends IssueQueueImp(wrapper)
+class IssueQueueFpImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
 {
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
@@ -1191,11 +1170,11 @@ class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends 
   val memIO = Some(new IssueQueueMemBundle)
 }
 
-class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
-  extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
+class IssueQueueMemAddrImp(implicit p: Parameters, params: IssueBlockParams)
+  extends IssueQueueImp with HasCircularQueuePtrHelper {
 
   require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
-    s"StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
+    s"IQName: ${params.getIQName}, StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
   println(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
 
   io.suggestName("none")
@@ -1266,8 +1245,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   }
 }
 
-class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
-  extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
+class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
+  extends IssueQueueImp with HasCircularQueuePtrHelper {
 
   require((params.VlduCnt + params.VstuCnt) > 0, "IssueQueueVecMemImp can only be instance of VecMem IQ")
   println(s"[IssueQueueVecMemImp] VlduCnt: ${params.VlduCnt}, VstuCnt: ${params.VstuCnt}")
