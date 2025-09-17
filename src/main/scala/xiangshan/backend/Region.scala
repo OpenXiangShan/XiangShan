@@ -156,6 +156,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     iq.io.og1Cancel := og1Cancel
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp := fromDataPathResp(i)(j).og0resp
+      if (params.isIntSchd) {
+        og0Resp.valid := fromDataPathResp(i)(j).og0resp.valid || io.toIntIQResp.get(i)(j).og0resp.valid
+      }
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp := fromDataPathResp(i)(j).og1resp
@@ -522,8 +525,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     io.csrToDecode.get <> exuBlock.io.csrToDecode.get
 
     dataPath.io.ldCancel := io.ldCancel
-    dataPath.io.fromIntIQ.zip(issueQueues).map{ case (sink, source) =>
-      sink <> source.io.deqDelay
+    dataPath.io.fromIntIQ.zip(issueQueues).zip(io.intIQOut.get).map{ case ((sink, source), iqOut) =>
+      sink.zipWithIndex.map{ case (s, i) =>
+        s.valid := source.io.deqDelay(i).valid
+        iqOut(i).valid := source.io.deqDelay(i).valid
+        s.bits := source.io.deqDelay(i).bits
+        iqOut(i).bits := source.io.deqDelay(i).bits
+        source.io.deqDelay(i).ready := s.ready && iqOut(i).ready
+      }
     }
     dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
     dataPath.io.fromPcTargetMem <> io.fromPcTargetMem.get
@@ -638,6 +647,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromFpIQ.zip(issueQueues).map { case (sink, source) =>
       sink <> source.io.deqDelay
     }
+    // for read fp regfile and resp
+    dataPath.io.fromIntIQ.zip(io.fromIntIQ.get).map { case (sink, source) =>
+      sink <> source
+    }
+    io.fpToIntIQResp.get := dataPath.io.toIntIQ
     dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
     dataPath.io.diffFpRat.foreach(_ := io.diffFpRat.get)
@@ -849,6 +863,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   io.og0Cancel := dataPath.io.og0Cancel
   io.diffVl.foreach(_ := dataPath.io.diffVl.get)
   io.fromLduOutput.foreach(_.map(_.ready := true.B))
+  io.fpRfRdataOut.foreach(_ := dataPath.io.fpRfRdataOut.get)
+  dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
 }
 
 class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {
@@ -947,5 +963,13 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fpExuBlockOut = Option.when(params.isFpSchd)(params.genExuOutputDecoupledBundle)
   val formFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(backendParams.fpSchdParams.get.genExuOutputDecoupledBundle))
+  // to read fp regfile
+  val intIQOut  = Option.when(params.isIntSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
+  val fromIntIQ = Option.when(params.isFpSchd)(Flipped(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle))))
+  val toIntIQResp = Option.when(params.isIntSchd)(Flipped(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genOGRespBundle))))
+  val fpToIntIQResp = Option.when(params.isFpSchd)(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genOGRespBundle)))
+  // fp regfile read data
+  val fpRfRdataIn = Option.when(params.isIntSchd)(Input(Vec(backendParams.numPregRd(FpData()), UInt(backendParams.fpSchdParams.get.rfDataWidth.W))))
+  val fpRfRdataOut = Option.when(params.isFpSchd)(Output(Vec(backendParams.numPregRd(FpData()), UInt(backendParams.fpSchdParams.get.rfDataWidth.W))))
 }
 

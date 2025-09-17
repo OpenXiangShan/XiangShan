@@ -362,6 +362,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.io.intSchdBusyTable := intRegion.io.wbFuBusyTableWriteOut
   vecRegion.io.fpSchdBusyTable := fpRegion.io.wbFuBusyTableWriteOut
   vecRegion.io.vfSchdBusyTable := vecRegion.io.wbFuBusyTableWriteOut
+  // for intIQ read fp regfile
+  intRegion.io.toIntIQResp.get <> fpRegion.io.fpToIntIQResp.get
+  fpRegion.io.fromIntIQ.get <> intRegion.io.intIQOut.get
+  intRegion.io.fpRfRdataIn.get := fpRegion.io.fpRfRdataOut.get
 
   intRegion.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
   fpRegion.io.diffFpRat.foreach(_ := ctrlBlock.io.diff_fp_rat.get)
