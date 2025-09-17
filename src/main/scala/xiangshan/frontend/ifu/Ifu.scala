@@ -713,6 +713,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_prevLastRvi         = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
   private val s4_currentLastHalfData = RegEnable(s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0), s3_fire)
   private val s4_currentLastHalfRvi  = RegEnable(s3_currentLastHalfRvi, s3_fire)
+  private val s4_instrCount          = RegEnable(s3_instrCount, s3_fire)
   s4_fire := io.toIBuffer.fire
 
   private val s4_alignInvalidTaken = RegEnable(s3_alignInvalidTaken, s3_fire)
@@ -1059,8 +1060,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.pd        := s4_alignPds
   io.toIBuffer.bits.ftqPtr    := s4_fetchBlock(0).ftqIdx
   io.toIBuffer.bits.pc        := s4_alignPc
-  io.toIBuffer.bits.prevInstrCount := Mux(s3_fire, s3_instrCount, 0.U)
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  io.toIBuffer.bits.prevInstrCount := PriorityMux(Seq(
+    s3_fire -> s3_instrCount,
+    (s4_valid && !s4_ready) -> s4_instrCount,  // if s4 stall, prevInstrCount equals to instrCount
+    true.B   -> 0.U
+  ))
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
