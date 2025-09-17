@@ -466,10 +466,17 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
 
   println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
   require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
-
-  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) => 
-    r.ren := req.ren
-    r.addr := req.addr
+  if (param.isIntSchd){
+    regCache.io.readPorts.zip(regCacheReadReq).foreach { case (r, req) =>
+      r.ren := req.ren
+      r.addr := req.addr
+    }
+  }
+  else {
+    regCache.io.readPorts.map{ case x =>
+      x.ren := false.B
+      x.addr := 0.U
+    }
   }
 
   val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -527,14 +534,17 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           .foreach { case (sink, cfg) => sink := intRfRdata(cfg.find(_.isInstanceOf[IntRD]).get.port) }
       }
   }
-
+  val fpRfRdataFinal = if (param.isIntSchd) io.fpRfRdataIn.get else fpRfRdata
+  if (param.isFpSchd) {
+    io.fpRfRdataOut.get := fpRfRdata
+  }
   println(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
   s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
         iuRdata.zip(iuCfg)
           .filter { case (_, cfg) => cfg.count(_.isInstanceOf[FpRD]) > 0 }
-          .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.find(_.isInstanceOf[FpRD]).get.port) }
+          .foreach { case (sink, cfg) => sink := fpRfRdataFinal(cfg.find(_.isInstanceOf[FpRD]).get.port) }
       }
   }
 
@@ -893,7 +903,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   generatePerfEvent()
 }
 
-class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
+class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlockParams) extends XSBundle {
   // params
   private val intSchdParams = params.schdParams(IntScheduler())
   private val fpSchdParams = params.schdParams(FpScheduler())
@@ -922,6 +932,10 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
   val toVecExcpMod = Output(new VprfToExcpMod(maxMergeNumPerCycle * 2))
+
+  val fpRfRdataIn = Option.when(param.isIntSchd)(Input(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
+
+  val fpRfRdataOut = Option.when(param.isFpSchd)(Output(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
 
   val og0Cancel = Output(ExuVec())
 
