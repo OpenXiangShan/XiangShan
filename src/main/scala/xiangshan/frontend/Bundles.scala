@@ -230,6 +230,14 @@ object ExceptionType {
   def apply(hasAf: Bool): ExceptionType =
     apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf)
 
+  // raise pf/gpf/af according to backend redirect request (tlb pre-check)
+  def fromBackend(redirect: Redirect): ExceptionType =
+    apply(
+      hasPf = redirect.backendIPF,
+      hasGpf = redirect.backendIGPF,
+      hasAf = redirect.backendIAF
+    )
+
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): ExceptionType = {
     require(useDup >= 0 && useDup < resp.excp.length)
