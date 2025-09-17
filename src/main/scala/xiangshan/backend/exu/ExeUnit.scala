@@ -52,17 +52,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
-class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
-  override def shouldBeInlined: Boolean = false
-
-  lazy val module = new ExeUnitImp(this)(p, exuParams)
-}
-
-class ExeUnitImp(
-  override val wrapper: ExeUnit
-)(implicit
-  p: Parameters, exuParams: ExeUnitParams
-) extends LazyModuleImp(wrapper) with HasXSParameter with HasCriticalErrors {
+class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {
   private val fuCfgs = exuParams.fuConfigs
 
   val io = IO(new ExeUnitIO(exuParams))
