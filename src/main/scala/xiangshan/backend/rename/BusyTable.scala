@@ -49,7 +49,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpFp = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpVec = Flipped(backendParams.vfSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpMem = Flipped(backendParams.memSchdParams.get.genIQWakeUpOutValidBundle)
     // cancelFromDatapath
     val og0Cancel = Input(ExuVec())
     // cancelFromMem
@@ -84,7 +83,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   }
   if (!needLoadCancel) println(s"[BusyTable]: WbConfig ${pregWB} busyTable don't need loadCancel")
   val loadCancel = if (needLoadCancel) io.ldCancel else 0.U.asTypeOf(io.ldCancel)
-  val allWakeUp = io.wakeUpInt ++ io.wakeUpFp ++ io.wakeUpVec ++ io.wakeUpMem
+  val allWakeUp = io.wakeUpInt ++ io.wakeUpFp ++ io.wakeUpVec
   val wakeUpIn = pregWB match {
     case IntWB(_, _) => allWakeUp.filter{x => x.bits.params.writeIntRf && (x.bits.params.hasLoadExu || x.bits.params.hasAluFu)}
     case FpWB(_, _) => allWakeUp.filter{x => x.bits.params.writeFpRf && !x.bits.params.isIntExeUnit}

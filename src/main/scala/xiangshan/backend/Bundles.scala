@@ -309,6 +309,66 @@ object Bundles {
     // dispatch ctrl for debug module
     val singleStep = Bool()
   }
+  class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
+    // TODO change these bundles to option bundles depend on issueBlockParam
+    def numSrc = backendParams.numSrc
+    // from frontend
+    val preDecodeInfo = new PreDecodeInfo
+    val pred_taken = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val identifiedCfi = Bool()
+    // from decode
+    val srcType = Vec(numSrc, SrcType())
+    val fuType = FuType()
+    val fuOpType = FuOpType()
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
+    val selImm = SelImm()
+    val imm = UInt(32.W)
+    val fpu = new FPUCtrlSignals
+    val vpu = new VPUCtrlSignals
+    val wfflags = Bool()
+    val uopIdx = UopIdx()
+    val lastUop = Bool()
+    // from rename
+    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val robIdx = new RobPtr
+    val numLsElem = NumLsElem()
+    // for mdp
+    val storeSetHit = Bool()
+    val waitForRobIdx = new RobPtr
+    val loadWaitBit = Bool()
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val srcState = Vec(numSrc, SrcState())
+    val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
+    val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val lqIdx = new LqPtr
+    val sqIdx = new SqPtr
+    // cas ctrl
+    val isDropAmocasSta = Bool()
+    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+  }
+  class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val wflags = OptionWrapper(params.writeFflags, Bool())
+    val fflags = OptionWrapper(params.writeFflags, UInt(5.W))
+    val vxsat = OptionWrapper(params.writeVxsat, Bool())
+    val exceptionVec = OptionWrapper(params.exceptionOut.nonEmpty, ExceptionVec())
+    val flushPipe = OptionWrapper(params.flushPipe, Bool())
+    val replay = OptionWrapper(params.replayInst, Bool())
+    val trigger = OptionWrapper(params.trigger, TriggerAction())
+    // debug bundle
+    val debug = new DebugBundle
+    val debugInfo = new PerfDebugInfo
+    val debug_seqNum = InstSeqNum()
+  }
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
@@ -955,6 +1015,7 @@ object Bundles {
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
+      println(s"[fromExuOutput]: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)

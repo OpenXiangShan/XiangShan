@@ -61,6 +61,17 @@ class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) exte
   def writeVl : Boolean = rfWriteDataCfg.isInstanceOf[VlData]
 }
 
+class RfWritePortBundle(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {
+  val wen = Bool()
+  val pdest = UInt(addrWidth.W)
+  val data = UInt(rfWriteDataCfg.dataWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+  val v0Wen = Bool()
+  val vlWen = Bool()
+}
+
 class Regfile
 (
   name: String,

@@ -25,7 +25,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchdBlockParams, SchedulerType, VfScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
@@ -339,6 +339,27 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("ALU5", Seq(AluCfg, MulCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntRD(5, 0)), Seq(IntRD(8, 0))), true, 2)
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(3, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
+      ), numEntries = 20, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(4, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
+      ), numEntries = 20, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(8, 0), FpWB(5, 0)), Seq(Seq(IntRD(11, 0))), true, 2),
+      ), numEntries = 20, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(0, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(1, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(2, 1), FpRD(9, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(3, 1), FpRD(10, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
     ),
       numPregs = intPreg.numEntries,
       numDeqOutside = 0,
@@ -377,51 +398,17 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX1", Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg), Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0)), Seq(VlRD(1, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
-    ),
-      numPregs = vfPreg.numEntries,
-      numDeqOutside = 0,
-      schdType = schdType,
-      rfDataWidth = vfPreg.dataCfg.dataWidth,
-    )
-  }
-
-  val memSchdParams = {
-    implicit val schdType: SchedulerType = MemScheduler()
-    val rfDataWidth = 64
-
-    SchdBlockParams(Seq(
-      IssueBlockParams(Seq(
-        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(0, 1)))),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(1, 1)))),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(3, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(4, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(8, 0), FpWB(5, 0)), Seq(Seq(IntRD(11, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(2, 0), V0WB(2, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(3, 0), V0WB(3, 0), VlWB(port = 3, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(2, 1), FpRD(9, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(3, 1), FpRD(10, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
     ),
-      numPregs = intPreg.numEntries max vfPreg.numEntries,
+      numPregs = vfPreg.numEntries,
       numDeqOutside = 0,
       schdType = schdType,
-      rfDataWidth = rfDataWidth,
+      rfDataWidth = vfPreg.dataCfg.dataWidth,
     )
   }
 
@@ -457,7 +444,6 @@ case class XSCoreParameters
       IntScheduler() -> intSchdParams,
       FpScheduler() -> fpSchdParams,
       VfScheduler() -> vfSchdParams,
-      MemScheduler() -> memSchdParams,
     ),
     Seq(
       intPreg,
@@ -669,7 +655,7 @@ trait HasXSParameter {
   def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   def VlsQueueSize = coreParams.VlsQueueSize
 
-  def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
+  def MemIQSizeMax = backendParams.intSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
   def NumRedirect = backendParams.numRedirect
@@ -773,7 +759,6 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
-  def printCriticalError = false
   def maxCommitStuck = pow(2, 21).toInt
 
   // Vector load exception

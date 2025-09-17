@@ -8,16 +8,16 @@ import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles.{EntryDeqRespBundle, RespType}
-import xiangshan.backend.issue.{MemScheduler, VfScheduler}
+import xiangshan.backend.issue._
 import xiangshan.mem.{SqPtr, LqPtr}
 
 
 class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Og2ForVectorIO(params))
 
-  private val fromOg1             = io.fromOg1VfArith ++ io.fromOg1VecMem
-  private val toExu               = io.toVfArithExu ++ io.toVecMemExu
-  private val toIQOg2Resp         = io.toVfIQOg2Resp ++ io.toMemIQOg2Resp
+  private val fromOg1             = io.fromOg1VfArith
+  private val toExu               = io.toVfArithExu
+  private val toIQOg2Resp         = io.toVfIQOg2Resp
 
   private val s1_validVec2        = fromOg1.map(_.map(_.valid))
   private val s1_dataVec2         = fromOg1.map(_.map(_.bits))
@@ -76,18 +76,14 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
 
 class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
   private val vfSchdParams = params.schdParams(VfScheduler())
-  private val memSchdParams = params.schdParams(MemScheduler())
 
   val flush: ValidIO[Redirect]                                    = Flipped(ValidIO(new Redirect))
   val ldCancel                                                    = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
   val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[ExuInput]]]   = Flipped(vfSchdParams.genExuInputBundle)
-  val fromOg1VecMem: MixedVec[MixedVec[DecoupledIO[ExuInput]]]    = Flipped(MixedVec(memSchdParams.issueBlockParams.filter(_.needOg2Resp).map(_.genExuInputDecoupledBundle)))
   val fromOg1ImmInfo: Vec[ImmInfo]                                = Input(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 
   val toVfArithExu                                                = MixedVec(vfSchdParams.genExuInputBundle)
-  val toVecMemExu                                                 = MixedVec(memSchdParams.issueBlockParams.filter(_.needOg2Resp).map(_.genExuInputDecoupledBundle))
   val toVfIQOg2Resp                                               = MixedVec(vfSchdParams.issueBlockParams.map(_.genOG2RespBundle))
-  val toMemIQOg2Resp                                              = MixedVec(memSchdParams.issueBlockParams.filter(_.needOg2Resp).map(_.genOG2RespBundle))
   val toBypassNetworkImmInfo: Vec[ImmInfo]                        = Output(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 }
