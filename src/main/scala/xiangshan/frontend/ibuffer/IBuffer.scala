@@ -128,7 +128,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // TODO: Use ParallelAdder to calculate the sum of Seq(Size.U, -numValid, -numEnq, numDeq)
   private val numInvalidNext = Size.U - numValidNext
-  private val allowEnq     = RegInit(true.B)
+  private val allowEnq       = RegInit(true.B)
 
   /* prevInstrCount is equal to next cycle's numFromFetch, ‘prev’ means ifu.s3 stage,
    * so compare it with next cycle's number of invalid entries (i.e. numInvalidNext),

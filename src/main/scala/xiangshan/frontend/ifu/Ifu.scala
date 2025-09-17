@@ -1062,9 +1062,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.pc        := s4_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
   io.toIBuffer.bits.prevInstrCount := PriorityMux(Seq(
-    s3_fire -> s3_instrCount,
-    (s4_valid && !s4_ready) -> s4_instrCount,  // if s4 stall, prevInstrCount equals to instrCount
-    true.B   -> 0.U
+    s3_fire                 -> s3_instrCount,
+    (s4_valid && !s4_ready) -> s4_instrCount, // if s4 stall, prevInstrCount equals to instrCount
+    true.B                  -> 0.U
   ))
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
