@@ -46,14 +46,6 @@ class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {
   val wayIdx:       UInt = UInt(WayIdxWidth.W)
 }
 
-class BankIO(implicit p: Parameters) extends AheadBtbBundle {
-  val readReq:  DecoupledIO[BankReadReq] = Flipped(Decoupled(new BankReadReq))
-  val readResp: BankReadResp             = Output(new BankReadResp)
-
-  val writeReq:  Valid[BankWriteReq]  = Flipped(Valid(new BankWriteReq))
-  val writeResp: Valid[BankWriteResp] = Valid(new BankWriteResp)
-}
-
 class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val readValid:   Bool      = Input(Bool())
   val readSetIdx:  UInt      = Input(UInt(SetIdxWidth.W))

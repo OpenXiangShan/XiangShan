@@ -19,16 +19,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.Redirect
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
-import xiangshan.frontend.bpu.tage.TageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -174,8 +171,9 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val mbtb:   MainBtbMeta  = new MainBtbMeta
   val ras:    RasMeta      = new RasMeta
   val phr:    PhrPtr       = new PhrPtr
-  val tage:   TageMeta     = new TageMeta
   val ittage: IttageMeta   = new IttageMeta
+  // used for performance counter
+  val perf_s3Prediction: Prediction = new Prediction
 }
 
 /* *** internal const & type *** */
@@ -226,4 +224,10 @@ class Prediction(implicit p: Parameters) extends BpuBundle {
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
   // TODO: what else do we need?
+
+  def isIdentical(other: Prediction): Bool =
+    this.taken === other.taken &&
+      this.cfiPosition === other.cfiPosition &&
+      this.target === other.target &&
+      this.attribute === other.attribute
 }

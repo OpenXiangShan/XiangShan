@@ -19,9 +19,10 @@ import chisel3._
 import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.CommonHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHelper {
+trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHelper with CommonHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 

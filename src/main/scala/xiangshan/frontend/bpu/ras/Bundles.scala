@@ -105,7 +105,6 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val startPc:     UInt            = UInt(VAddrBits.W)
   val isRvc:       Bool            = Bool()
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
 }
 
 class RasCommitInfo(implicit p: Parameters) extends RasBundle {

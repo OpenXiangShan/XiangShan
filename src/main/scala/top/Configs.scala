@@ -110,11 +110,10 @@ class MinimalConfig(n: Int = 1) extends Config(
             ),
             tageParameters = TageParameters(
               TableInfos = Seq(
-                new TageTableInfo(512, 4, 3),
-                new TageTableInfo(512, 9, 3),
-                new TageTableInfo(1024, 19, 3)
+                new TageTableInfo(512, 4),
+                new TageTableInfo(512, 9),
+                new TageTableInfo(512, 17)
               ),
-              TagWidth = 6
             ),
             // FIXME: these are from V2 SC, we don't have equivalent parameters now
             scParameters = ScParameters(
