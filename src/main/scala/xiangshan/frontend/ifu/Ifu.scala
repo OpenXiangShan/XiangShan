@@ -1103,21 +1103,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.triggered     := s4_alignTriggered
   io.toIBuffer.bits.identifiedCfi := s4_alignIdentifiedCfi
 
-  when(io.toIBuffer.valid && io.toIBuffer.ready) {
-    val enqVec = io.toIBuffer.bits.enqEnable
-    val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
-      val idx  = PopCount(enqVec.take(i + 1))
-      val pc   = s4_alignPc(i).toUInt
-      val code = io.toIBuffer.bits.instrs(i)
-      PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
-    })
-    io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
-      a := allocateSeqNum(i)
-    }
-  }.otherwise {
-    io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
-      a := 0.U
-    }
+  val enqVec = io.toIBuffer.bits.enqEnable
+  val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
+    val idx  = PopCount(enqVec.take(i + 1))
+    val pc   = s4_alignPc(i).toUInt
+    val code = io.toIBuffer.bits.instrs(i)
+    PerfCCT.createInstMetaAtFetch(idx, pc, code, s4_fire & enqVec(i), clock, reset)
+  })
+  io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
+    seqNum := Mux(s4_fire, allocateSeqNum(i), 0.U)
   }
 
   /** to backend */
