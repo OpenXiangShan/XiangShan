@@ -47,7 +47,36 @@ jobs:
 
   build-xspdb:
     runs-on: bosc
-    container: ghcr.io/openxiangshan/xspdb:build-latest
+    outputs:
+      file-name: ${{ env.FILE_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: set env
+        run: |
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
+          echo "PATH=/nfs/tools/picker/bin:$PATH" >> $GITHUB_ENV
+          FILE_TIME=$(date +%Y%m)
+          FILE_SHA=$(git rev-parse --short HEAD)
+          FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
+          echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
+      - name: submodule init
+        run: make init
+      - name: build XSPdb 
+        run: |
+          make pdb
+          make package-pdb
+          mv ${{ env.PDB_HOME}}/XSPdb.tar.bz2 "${{ env.PDB_HOME }}/${{ env.FILE_NAME }}"
+      - name: upload build directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-xspdb
+          path: build/xspdb/
+
+  test-xspdb:
+    runs-on: bosc
+    needs: build-xspdb
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - name: set env
@@ -55,47 +84,38 @@ jobs:
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
       - name: submodule init
         run: make init
-      - name: setup mill
-        uses: jodersky/setup-mill@v0.3.0
+      - name: download build directory
+        uses: actions/download-artifact@v4
         with:
-          mill-version: 0.12.3
-      - name: build and test XSPdb 
-        run: |
-          make pdb
-          make pdb-test
-      - name: upload XiangShan binary
-        uses: actions/cache@v3
-        with:
-          key: build-xspdb
+          name: build-xspdb
           path: build/xspdb/
-          restore-keys: |
-            build-xspdb
+      - name: test run pdb
+        run: |
+          make pdb-run
 
   release-xspdb:
     runs-on: bosc
-    if: github.event.pull_request.merged == true
-    container: ghcr.io/openxiangshan/xspdb:build-latest
+    needs: build-xspdb
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
-      - name: set env
-        run: |
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
-          FILE_TIME=$(date +%Y%m)
-          FILE_SHA=$(git rev-parse --short HEAD)
-          echo "FILE_NAME=XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2" >> $GITHUB_ENV
-      - name: download XiangShan binary
-        uses: actions/cache@v3
+      - name: download compressed XSPdb package
+        uses: actions/download-artifact@v4
         with:
-          key: build-xspdb
-          path: build/xspdb 
-      - name: archive XSPdb
+          name: build-xspdb
+          path: build/xspdb/
+      - name: test and release XSPdb
         run: |
-          mkdir -p ${{ env.PDB_HOME }}/XSPdb 
-          make package-pdb
-          mv ${{ env.PDB_HOME}}/XSPdb.tar.bz2 "${{ env.PDB_HOME }}/${{ env.FILE_NAME }}"
-      - name: upload xspdb
+          cd build/xspdb
+          tar -xjf "${{ needs.build-xspdb.outputs.file-name }}"
+          cd XSPdb
+          make pdb-run
+      - name: upload final release
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.FILE_NAME }}
-          path: build/xspdb/${{ env.FILE_NAME }}
+          name: ${{ needs.build-xspdb.outputs.file-name }}-release
+          path: build/xspdb/${{ needs.build-xspdb.outputs.file-name }}
+      - name: cleanup build artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: build-xspdb
