@@ -58,14 +58,7 @@ trait PreDecodeHelper extends HasIfuParameters {
   }
 }
 
-trait FetchBlockHelper extends HasIfuParameters {
-  def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
-    val byteOffset = (pc - start).toUInt
-    (byteOffset - instBytes.U)(FetchBlockInstOffsetWidth, instOffsetBits)
-  }
-}
-
-trait IfuHelper extends HasIfuParameters with FetchBlockHelper {
+trait IfuHelper extends HasIfuParameters {
   private object ShiftType {
     val NoShift     = 0.U(2.W)
     val ShiftRight1 = 1.U(2.W)
@@ -73,56 +66,17 @@ trait IfuHelper extends HasIfuParameters with FetchBlockHelper {
     val ShiftRight3 = 3.U(2.W)
   }
 
-  def genFetchBlockInfo(ftqFetch: Vec[FetchRequestBundle]): Vec[FetchBlockInfo] = {
-    val fetchBlock = WireDefault(VecInit.fill(FetchPorts)(0.U.asTypeOf(new FetchBlockInfo)))
-    for (i <- 0 until FetchPorts) {
-      val cfiOffset = ftqFetch(i).takenCfiOffset.bits
-      val taken     = ftqFetch(i).takenCfiOffset.valid
-      val jumpRange = Fill(FetchBlockInstNum, !taken) | Fill(FetchBlockInstNum, 1.U(1.W)) >> ~cfiOffset
-      val ftrRange = Fill(FetchBlockInstNum, taken) |
-        Fill(FetchBlockInstNum, 1.U(1.W)) >> ~getBasicBlockIdx(ftqFetch(i).nextStartVAddr, ftqFetch(i).startVAddr)
-      val instrRange = jumpRange & ftrRange
-      val fetchSize = Mux(
-        taken,
-        cfiOffset + 1.U(log2Ceil(FetchBlockInstNum + 1).W),
-        (ftqFetch(i).nextStartVAddr - ftqFetch(i).startVAddr)(log2Ceil(FetchBlockInstNum + 1) + 1, 1)
+  def iCacheMatchAssert(fromICache: Valid[ICacheRespBundle], fetchBlock: Vec[FetchBlockInfo]): Unit =
+    when(fromICache.valid) {
+      assert(
+        fromICache.bits.vAddr(0) === fetchBlock(0).startVAddr &&
+          fromICache.bits.doubleline === fetchBlock(0).doubleline,
+        "On ICache resp.valid, VAddr must match IFU fetchBlock.VAddr"
       )
-      fetchBlock(i).ftqIdx             := ftqFetch(i).ftqIdx
-      fetchBlock(i).doubleline         := ftqFetch(i).crossCacheline
-      fetchBlock(i).takenCfiOffset     := ftqFetch(i).takenCfiOffset
-      fetchBlock(i).instrRange         := instrRange
-      fetchBlock(i).startVAddr         := ftqFetch(i).startVAddr
-      fetchBlock(i).target             := ftqFetch(i).nextStartVAddr
-      fetchBlock(i).pcHigh             := ftqFetch(i).startVAddr(VAddrBits - 1, PcCutPoint)
-      fetchBlock(i).pcHighPlus1        := ftqFetch(i).startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
-      fetchBlock(i).fetchSize          := fetchSize
-      fetchBlock(i).identifiedCfi      := ftqFetch(i).identifiedCfi
-      fetchBlock(i).nextCachelineVAddr := ftqFetch(i).nextCachelineVAddr
     }
-    fetchBlock
-  }
 
-  def isICacheMatch(fromICache: ICacheRespBundle, fetchBlock: Vec[FetchBlockInfo]): Bool =
-    fromICache.vAddr(0) === fetchBlock(0).startVAddr &&
-      (fromICache.doubleline && fromICache.vAddr(1) === fetchBlock(0).nextCachelineVAddr ||
-        !fetchBlock(0).doubleline)
-
-  def genICacheMeta(fromICache: ICacheRespBundle): ICacheMeta = {
-    val cacheMeta = WireDefault(0.U.asTypeOf(new ICacheMeta))
-    cacheMeta.exception          := fromICache.exception
-    cacheMeta.pmpMmio            := fromICache.pmpMmio
-    cacheMeta.itlbPbmt           := fromICache.itlbPbmt
-    cacheMeta.isBackendException := fromICache.isBackendException
-    cacheMeta.pAddr              := fromICache.pAddr
-    cacheMeta.gpAddr             := fromICache.gpAddr
-    cacheMeta.isForVSnonLeafPTE  := fromICache.isForVSnonLeafPTE
-    cacheMeta
-  }
-
-  def mergeInstrRange(needMerge: Bool, firstRange: UInt, secondRange: UInt, firstSize: UInt): UInt = {
-    val totalRange = Mux(needMerge, (secondRange << firstSize) | firstRange, firstRange)
-    totalRange
-  }
+  def mergeInstrRange(needMerge: Bool, firstRange: UInt, secondRange: UInt, firstSize: UInt): UInt =
+    Mux(needMerge, (secondRange << firstSize) | firstRange, firstRange)
 
   def genPredMask(
       firstFlag:  Bool,
