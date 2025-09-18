@@ -68,7 +68,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
     val query = Flipped(Vec(LoadPipelineWidth, new CounterFilterQueryBundle()))
   })
 
-  val LduStages = 4
+  val LduStages = 4 + 1 // +1 is for prefetch wirte in next cycle of s3
   val SIZE = (LduStages) * LduCnt
   class Ptr(implicit p: Parameters) extends CircularQueuePtr[Ptr]( p => SIZE ){}
   object Ptr {
@@ -111,7 +111,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
       entries(allocPtr.value) := req
     }
 
-    assert(!needAlloc(i) || canAlloc(i), s"port${i} can not accept CounterFilter enq request, check if SIZE >= (Ldu stages - 2) * LduCnt")
+    assert(!needAlloc(i) || canAlloc(i), s"port${i} can not accept CounterFilter enq request, check if SIZE >= (Ldu stages + 1) * LduCnt")
   }
   val allocNum = PopCount(canAlloc)
 
