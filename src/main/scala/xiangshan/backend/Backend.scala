@@ -366,6 +366,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intRegion.io.toIntIQResp.get <> fpRegion.io.fpToIntIQResp.get
   fpRegion.io.fromIntIQ.get <> intRegion.io.intIQOut.get
   intRegion.io.fpRfRdataIn.get := fpRegion.io.fpRfRdataOut.get
+  // for fpIQ write int regfile arbiter
+  fpRegion.io.toFpIQResp.get <> intRegion.io.intToFpIQResp.get
+  intRegion.io.fromFpIQ.get <> fpRegion.io.fpIQOut.get
 
   intRegion.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
   fpRegion.io.diffFpRat.foreach(_ := ctrlBlock.io.diff_fp_rat.get)

@@ -159,6 +159,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       if (params.isIntSchd) {
         og0Resp.valid := fromDataPathResp(i)(j).og0resp.valid || io.toIntIQResp.get(i)(j).og0resp.valid
       }
+      if (params.isFpSchd) {
+        og0Resp.valid := fromDataPathResp(i)(j).og0resp.valid || io.toFpIQResp.get(i)(j).og0resp.valid
+      }
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp := fromDataPathResp(i)(j).og1resp
@@ -534,6 +537,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         source.io.deqDelay(i).ready := s.ready && iqOut(i).ready
       }
     }
+    // for write int regfile and resp
+    dataPath.io.fromFpIQ.zip(io.fromFpIQ.get).map { case (sink, source) =>
+      sink <> source
+    }
+    io.intToFpIQResp.get := dataPath.io.toFpIQ
     dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
     dataPath.io.fromPcTargetMem <> io.fromPcTargetMem.get
     dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
@@ -644,8 +652,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits := source.bits
     }
     dataPath.io.ldCancel := io.ldCancel
-    dataPath.io.fromFpIQ.zip(issueQueues).map { case (sink, source) =>
-      sink <> source.io.deqDelay
+    dataPath.io.fromFpIQ.zip(issueQueues).zip(io.fpIQOut.get).map { case ((sink, source), iqOut) =>
+      sink.zipWithIndex.map { case (s, i) =>
+        s.valid := source.io.deqDelay(i).valid
+        iqOut(i).valid := source.io.deqDelay(i).valid
+        s.bits := source.io.deqDelay(i).bits
+        iqOut(i).bits := source.io.deqDelay(i).bits
+        source.io.deqDelay(i).ready := s.ready && iqOut(i).ready
+      }
     }
     // for read fp regfile and resp
     dataPath.io.fromIntIQ.zip(io.fromIntIQ.get).map { case (sink, source) =>
@@ -868,6 +882,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
 }
 
 class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {
+  val intSchdParam = backendParams.intSchdParams.get
+  val fpSchdParam = backendParams.fpSchdParams.get
+  val vecSchdParam = backendParams.vfSchdParams.get
   // uops from dispatch, two level vec, not flatten
   val fromDispatch = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Flipped(Vec(x.numEnq, DecoupledIO(new RegionInUop(x))))))
   val hartId = Input(UInt(8.W))
@@ -893,8 +910,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
     val vlFromVfIsVlmax = Input(Bool())
   })
   val wakeUpToDispatch = params.genIQWakeUpOutValidBundle
-  val wakeUpFromFp = Option.when(params.isIntSchd)(Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle))
-  val wakeUpFromInt = Option.when(params.isFpSchd)(Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle))
+  val wakeUpFromFp = Option.when(params.isIntSchd)(Flipped(fpSchdParam.genIQWakeUpOutValidBundle))
+  val wakeUpFromInt = Option.when(params.isFpSchd)(Flipped(intSchdParam.genIQWakeUpOutValidBundle))
   val wakeupFromI2F = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
@@ -917,7 +934,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
     val writeback: MixedVec[ValidIO[ExuOutput]] = MixedVec(params.genExuOutputValidBundle.flatten)
   }
   val fromMemExuOutput = Flipped(Vec(params.issueBlockParams.filter(_.isMemBlockIQ).size, DecoupledIO(new MemExuOutput(params.isVfSchd))))
-  val fromLduOutput = Option.when(params.isFpSchd)(Flipped(Vec(backendParams.intSchdParams.get.issueBlockParams.filter(_.isLdAddrIQ).size, DecoupledIO(new MemExuOutput(params.isVfSchd)))))
+  val fromLduOutput = Option.when(params.isFpSchd)(Flipped(Vec(intSchdParam.issueBlockParams.filter(_.isLdAddrIQ).size, DecoupledIO(new MemExuOutput(params.isVfSchd)))))
   val lqDeqPtr = Option.when(params.isVfSchd)(Input(new LqPtr))
   val sqDeqPtr = Option.when(params.isVfSchd)(Input(new SqPtr))
   val allIssueParams = params.issueBlockParams.filter(_.StdCnt == 0)
@@ -953,23 +970,28 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val vstart = Option.when(params.isVfSchd)(Input(Vstart()))
   val toVecExcpMod = Option.when(params.isVfSchd)(Output(new VprfToExcpMod(maxMergeNumPerCycle * 2)))
   val exuOut = params.genExuOutputValidBundle
-  val fromIntExu = Option.when(!params.isIntSchd)(Flipped(backendParams.intSchdParams.get.genExuOutputValidBundle))
-  val fromFpExu = Option.when(!params.isFpSchd)(Flipped(backendParams.fpSchdParams.get.genExuOutputValidBundle))
-  val fromVecExu = Option.when(!params.isVfSchd)(Flipped(backendParams.vfSchdParams.get.genExuOutputValidBundle))
-  val intSchdBusyTable = MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
-  val fpSchdBusyTable = MixedVec(backendParams.fpSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
-  val vfSchdBusyTable = MixedVec(backendParams.vfSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
+  val fromIntExu = Option.when(!params.isIntSchd)(Flipped(intSchdParam.genExuOutputValidBundle))
+  val fromFpExu = Option.when(!params.isFpSchd)(Flipped(fpSchdParam.genExuOutputValidBundle))
+  val fromVecExu = Option.when(!params.isVfSchd)(Flipped(vecSchdParam.genExuOutputValidBundle))
+  val intSchdBusyTable = MixedVec(intSchdParam.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
+  val fpSchdBusyTable = MixedVec(fpSchdParam.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
+  val vfSchdBusyTable = MixedVec(vecSchdParam.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
   val wbFuBusyTableWriteOut = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fpExuBlockOut = Option.when(params.isFpSchd)(params.genExuOutputDecoupledBundle)
-  val formFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(backendParams.fpSchdParams.get.genExuOutputDecoupledBundle))
+  val formFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(fpSchdParam.genExuOutputDecoupledBundle))
   // to read fp regfile
   val intIQOut  = Option.when(params.isIntSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
-  val fromIntIQ = Option.when(params.isFpSchd)(Flipped(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle))))
-  val toIntIQResp = Option.when(params.isIntSchd)(Flipped(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genOGRespBundle))))
-  val fpToIntIQResp = Option.when(params.isFpSchd)(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genOGRespBundle)))
+  val fromIntIQ = Option.when(params.isFpSchd)(Flipped(MixedVec(intSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
+  val toIntIQResp = Option.when(params.isIntSchd)(Flipped(MixedVec(intSchdParam.issueBlockParams.map(_.genOGRespBundle))))
+  val fpToIntIQResp = Option.when(params.isFpSchd)(MixedVec(intSchdParam.issueBlockParams.map(_.genOGRespBundle)))
   // fp regfile read data
   val fpRfRdataIn = Option.when(params.isIntSchd)(Input(Vec(backendParams.numPregRd(FpData()), UInt(backendParams.fpSchdParams.get.rfDataWidth.W))))
   val fpRfRdataOut = Option.when(params.isFpSchd)(Output(Vec(backendParams.numPregRd(FpData()), UInt(backendParams.fpSchdParams.get.rfDataWidth.W))))
+  // to write int regfile
+  val fpIQOut = Option.when(params.isFpSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
+  val fromFpIQ = Option.when(params.isIntSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
+  val toFpIQResp = Option.when(params.isFpSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genOGRespBundle))))
+  val intToFpIQResp = Option.when(params.isIntSchd)(MixedVec(fpSchdParam.issueBlockParams.map(_.genOGRespBundle)))
 }
 
