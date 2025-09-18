@@ -82,7 +82,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - check if hits t1 stage
    * - calculate hit flags
    */
-  private val t0_branchInfo = io.train.bits.firstMispredict
+  private val t0_branchInfo = io.train.bits.mispredictBranch
 
   private val t0_valid = io.train.valid && t0_branchInfo.valid && io.enable
 
