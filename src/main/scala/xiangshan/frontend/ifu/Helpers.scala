@@ -116,6 +116,7 @@ trait IfuHelper extends HasIfuParameters with FetchBlockHelper {
     cacheMeta.pAddr              := fromICache.pAddr
     cacheMeta.gpAddr             := fromICache.gpAddr
     cacheMeta.isForVSnonLeafPTE  := fromICache.isForVSnonLeafPTE
+    cacheMeta.isUncache          := fromICache.pmpMmio | Pbmt.isUncache(fromICache.itlbPbmt)
     cacheMeta
   }
 
