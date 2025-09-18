@@ -54,10 +54,9 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class ToIBufferPerfInfo(implicit p: Parameters) extends IfuBundle {
-      val ibufferValid: Bool      = Bool()
-      val ibufferReady: Bool      = Bool()
-      val enqEnable:    UInt      = UInt(IBufEnqWidth.W)
-      val startVAddr:   Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
+      val ibufferFire: Bool      = Bool()
+      val enqEnable:   UInt      = UInt(IBufferEnqueueWidth.W)
+      val startVAddr:  Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
     }
 
     class IfuPerfInfo(implicit p: Parameters) extends IfuBundle {
@@ -66,19 +65,15 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val toIBufferInfo:  ToIBufferPerfInfo = new ToIBufferPerfInfo
     }
 
-    class IfuPrefCtrl(implicit p: Parameters) extends IfuBundle {
-      val ftqReqValid:     Bool      = Bool()
-      val ftqReqReady:     Bool      = Bool()
-      val backendRedirect: Bool      = Bool()
-      val ifuWbRedirect:   Bool      = Bool()
-      val ifuS0Flush:      Vec[Bool] = Vec(FetchPorts, Bool())
-      val ifuS3Valid:      Bool      = Bool()
-      val ifuS2Fire:       Bool      = Bool()
-      val ifuS3Fire:       Bool      = Bool()
-      val icacheRespValid: Bool      = Bool()
+    class IfuPerfCtrl(implicit p: Parameters) extends IfuBundle {
+      val fromFtqBubble:    Bool = Bool()
+      val backendRedirect:  Bool = Bool()
+      val ifuWbRedirect:    Bool = Bool()
+      val fromBpuFlush:     Bool = Bool()
+      val fromICacheBubble: Bool = Bool()
     }
 
-    val ifuPerfCtrl: IfuPrefCtrl   = Input(new IfuPrefCtrl)
+    val ifuPerfCtrl: IfuPerfCtrl   = Input(new IfuPerfCtrl)
     val topdownIn:   IfuTopdownIn  = Input(new IfuTopdownIn)
     val topdownOut:  IfuTopdownOut = Output(new IfuTopdownOut)
     val perfInfo:    IfuPerfInfo   = Input(new IfuPerfInfo)
@@ -132,12 +127,11 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   io.topdownOut.topdown := topdownStages(numOfStage - 1)
 
   /** <PERF> f0 fetch bubble */
-  XSPerfAccumulate("fetch_bubble_ftq_not_valid", !io.ifuPerfCtrl.ftqReqValid && io.ifuPerfCtrl.ftqReqReady)
+  XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)
   XSPerfAccumulate("fetch_flush_wb_redirect", io.ifuPerfCtrl.backendRedirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", io.ifuPerfCtrl.ifuWbRedirect)
-  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", io.ifuPerfCtrl.ifuS0Flush(0) | io.ifuPerfCtrl.ifuS0Flush(1))
-  XSPerfAccumulate("fetch_bubble_icache_not_resp", io.ifuPerfCtrl.ifuS3Valid && !io.ifuPerfCtrl.icacheRespValid)
-  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", io.ifuPerfCtrl.ifuS0Flush(0) | io.ifuPerfCtrl.ifuS0Flush(1))
+  XSPerfAccumulate("fetch_flush_from_bpu", io.ifuPerfCtrl.fromBpuFlush)
+  XSPerfAccumulate("fetch_bubble_icache_not_resp", io.ifuPerfCtrl.fromICacheBubble)
 
   /* write back flush type */
   private val checkFaultType    = checkPerfInfo.perfFaultType
@@ -179,7 +173,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   }
 
   /* *** Perf *** */
-  private val ibufferFire = toIBufferInfo.ibufferValid && toIBufferInfo.ibufferReady
+  private val ibufferFire = toIBufferInfo.ibufferFire
   XSPerfAccumulate("frontendFlush", io.ifuPerfCtrl.ifuWbRedirect)
   XSPerfAccumulate("ifu_req", ibufferFire)
   XSPerfAccumulate("ifu_miss", ibufferFire && !s4_icachePerfInfo.hit)
