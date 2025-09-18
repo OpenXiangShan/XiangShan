@@ -56,7 +56,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     class ToIBufferPerfInfo(implicit p: Parameters) extends IfuBundle {
       val ibufferValid: Bool      = Bool()
       val ibufferReady: Bool      = Bool()
-      val enqEnable:    UInt      = UInt(IBufEnqWidth.W)
+      val enqEnable:    UInt      = UInt(IBufferEnqueueWidth.W)
       val startVAddr:   Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
     }
 

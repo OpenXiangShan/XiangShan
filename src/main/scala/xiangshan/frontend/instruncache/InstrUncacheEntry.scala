@@ -139,14 +139,14 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
         // also, if we are already resending, we should not resend again
         val needResend = crossBusBoundary && !crossPageBoundary && !respCorrupt && !respIsRvc && !resending
 
-        state := Mux(needResend, State.RefillReq, State.SendResp)
+        state     := Mux(needResend, State.RefillReq, State.SendResp)
         resending := needResend
 
         when(resending) {
-          respDataReg(1)     := io.mmioGrant.bits.data(15, 0)
-        }.otherwise{
-          respDataReg(0)     := shiftedBusData(15, 0)
-          respDataReg(1)     := shiftedBusData(31, 16)
+          respDataReg(1) := io.mmioGrant.bits.data(15, 0)
+        }.otherwise {
+          respDataReg(0) := shiftedBusData(15, 0)
+          respDataReg(1) := shiftedBusData(31, 16)
         }
         respCorruptReg := io.mmioGrant.bits.corrupt
       }

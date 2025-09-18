@@ -60,25 +60,26 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
 }
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
-  val ftqIdx:         FtqPtr      = new FtqPtr
-  val doubleline:     Bool        = Bool()
-  val predTakenIdx:   Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val invalidTaken:   Bool        = Bool()
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
-  val target:         PrunedAddr  = PrunedAddr(VAddrBits)
-  val instrRange:     UInt        = UInt(FetchBlockInstNum.W)
-  val rawInstrEndVec: UInt        = UInt(FetchBlockInstNum.W)
-  val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
-  val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
-  val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
-  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
+  val ftqIdx:             FtqPtr      = new FtqPtr
+  val doubleline:         Bool        = Bool()
+  val predTakenIdx:       Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val takenCfiOffset:     Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val invalidTaken:       Bool        = Bool()
+  val startVAddr:         PrunedAddr  = PrunedAddr(VAddrBits)
+  val target:             PrunedAddr  = PrunedAddr(VAddrBits)
+  val instrRange:         UInt        = UInt(FetchBlockInstNum.W)
+  val rawInstrEndVec:     UInt        = UInt(FetchBlockInstNum.W)
+  val pcHigh:             UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val pcHighPlus1:        UInt        = UInt((VAddrBits - PcCutPoint).W)
+  val fetchSize:          UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+  val identifiedCfi:      Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
   val nextCachelineVAddr: PrunedAddr  = PrunedAddr(VAddrBits)
 }
 
 // HasICacheParameters is for PortNumber
 class ICacheMeta(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
   val exception:          ExceptionType = new ExceptionType
+  val isUncache:          Bool          = Bool()
   val pmpMmio:            Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
   val isBackendException: Bool          = Bool()

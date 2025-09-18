@@ -16,30 +16,30 @@
 package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.frontend.MmioCommitRead
+import xiangshan.cache.mmu.Pbmt
+import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
-import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.MmioCommitRead
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.ExceptionType
-import xiangshan.cache.mmu.Pbmt
-import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.ftq.FtqPtr
 
 class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   class IfuUncacheIO extends IfuBundle {
     class IfuUncacheReq(implicit p: Parameters) extends IfuBundle {
-      val ftqIdx:   FtqPtr    = new FtqPtr
-      val pbmt:     UInt      = UInt(Pbmt.width.W)
-      val isMmio:   Bool      = Bool()
-      val paddr:    PrunedAddr  = PrunedAddr(PAddrBits)
-      val isInstrHead:  Bool    = Bool()
+      val ftqIdx:      FtqPtr     = new FtqPtr
+      val pbmt:        UInt       = UInt(Pbmt.width.W)
+      val isMmio:      Bool       = Bool()
+      val paddr:       PrunedAddr = PrunedAddr(PAddrBits)
+      val isInstrHead: Bool       = Bool()
     }
     class IfuUncacheResp(implicit p: Parameters) extends IfuBundle {
-      val uncacheData: UInt           = UInt(32.W)
-      val exception:   ExceptionType  = new ExceptionType
-      val crossPage:   Bool           = Bool()
+      val uncacheData: UInt          = UInt(32.W)
+      val exception:   ExceptionType = new ExceptionType
+      val crossPage:   Bool          = Bool()
     }
     val req            = Flipped(DecoupledIO(new IfuUncacheReq))
     val resp           = Output(ValidIO(new IfuUncacheResp))
@@ -47,12 +47,12 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
     val flush          = Input(Bool())
     val mmioCommitRead = new MmioCommitRead
     // Uncache: mmio request / response
-    val toUncache      = new IfuToInstrUncacheIO
-    val fromUncache    = Flipped(new InstrUncacheToIfuIO)
+    val toUncache   = new IfuToInstrUncacheIO
+    val fromUncache = Flipped(new InstrUncacheToIfuIO)
   }
   val io: IfuUncacheIO = IO(new IfuUncacheIO)
-  private val toUncache   = io.toUncache.req
-  private val fromUncache = io.fromUncache.resp
+  private val toUncache    = io.toUncache.req
+  private val fromUncache  = io.fromUncache.resp
   private val isFirstInstr = io.isFirstInstr
   /* *** uncache *** */
   private def nUncacheFsmState = 11
@@ -84,7 +84,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   private val itlbPbmt         = RegInit(0.U(Pbmt.width.W))
 
   private def uncacheReset(): Unit = {
-    uncacheState := UncacheFsmState.Idle
+    uncacheState     := UncacheFsmState.Idle
     uncacheData      := 0.U
     uncacheException := ExceptionType.None
     uncacheCrossPage := false.B
@@ -96,7 +96,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   }
 
   // last instruction finish
-  private val reqIsMmio    = io.req.valid && io.req.bits.isMmio
+  private val reqIsMmio = io.req.valid && io.req.bits.isMmio
 
   switch(uncacheState) {
     is(UncacheFsmState.Idle) {
@@ -122,19 +122,19 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
     }
 
     is(UncacheFsmState.SendReq) {
-      uncacheState  := Mux(toUncache.fire, UncacheFsmState.WaitResp, UncacheFsmState.SendReq)
+      uncacheState := Mux(toUncache.fire, UncacheFsmState.WaitResp, UncacheFsmState.SendReq)
     }
 
     is(UncacheFsmState.WaitResp) {
       when(fromUncache.fire) {
-        val exception   = ExceptionType(hasAf = fromUncache.bits.corrupt)
-        val crossPage   = fromUncache.bits.incomplete
-        uncacheState      := UncacheFsmState.Idle
-        uncacheException  := exception
-        uncacheCrossPage  := crossPage
-        uncacheData       := fromUncache.bits.data
-        uncacheFinish     := true.B
-        uncacheReady      := true.B
+        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
+        val crossPage = fromUncache.bits.incomplete
+        uncacheState     := UncacheFsmState.Idle
+        uncacheException := exception
+        uncacheCrossPage := crossPage
+        uncacheData      := fromUncache.bits.data
+        uncacheFinish    := true.B
+        uncacheReady     := true.B
       }
     }
   }
@@ -150,16 +150,16 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
 
   fromUncache.ready := true.B
 
-  io.req.ready              := uncacheReady
-  io.resp.valid             := uncacheFinish
-  io.resp.bits.exception    := uncacheException
-  io.resp.bits.uncacheData  := uncacheData
-  io.resp.bits.crossPage    := uncacheCrossPage
+  io.req.ready             := uncacheReady
+  io.resp.valid            := uncacheFinish
+  io.resp.bits.exception   := uncacheException
+  io.resp.bits.uncacheData := uncacheData
+  io.resp.bits.crossPage   := uncacheCrossPage
 
   // When a single MMIO instruction spans pages,
   // should the second send for confirming the oldest instruction be blocked?
-  io.mmioCommitRead.valid       := uncacheValid && isMmio
-  io.mmioCommitRead.mmioFtqPtr  := RegEnable(io.req.bits.ftqIdx - 1.U, io.req.valid)
+  io.mmioCommitRead.valid      := uncacheValid && isMmio
+  io.mmioCommitRead.mmioFtqPtr := RegEnable(io.req.bits.ftqIdx - 1.U, io.req.valid)
   when(io.flush) {
     uncacheReset()
   }
