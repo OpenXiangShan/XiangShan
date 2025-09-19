@@ -80,7 +80,6 @@ jobs:
     runs-on: bosc
     needs: build-xspdb
     if: github.event_name == 'pull_request'
-    container: ghcr.io/openxiangshan/xspdb:build-latest
     steps:
       - uses: actions/checkout@v4
       - name: set env
@@ -101,7 +100,6 @@ jobs:
     runs-on: bosc
     needs: build-xspdb
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    container: ghcr.io/openxiangshan/xspdb:build-latest
     steps:
       - uses: actions/checkout@v4
       - name: download compressed XSPdb package
