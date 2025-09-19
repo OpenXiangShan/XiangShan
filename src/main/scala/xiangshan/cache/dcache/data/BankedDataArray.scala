@@ -792,6 +792,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val bank_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val bank_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
+  val read_bank_error = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
 
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
@@ -866,11 +867,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
           val ecc_data = bank_result(div_index)(bank_index)(way_index).asECCData()
           val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
           bank_result(div_index)(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
-          read_bank_error_delayed(div_index)(bank_index)(way_index) := bank_result(div_index)(bank_index)(way_index).error_delayed
+          read_bank_error(div_index)(bank_index)(way_index) := dcacheParameters.dataCode.decode(ecc_data).error
         } else {
           bank_result(div_index)(bank_index)(way_index).error_delayed := false.B
-          read_bank_error_delayed(div_index)(bank_index)(way_index) := false.B
+          read_bank_error(div_index)(bank_index)(way_index) := false.B
         }
+        read_bank_error_delayed(div_index)(bank_index)(way_index) := RegEnable(read_bank_error(div_index)(bank_index)(way_index), RegNext(read_enable))
         bank_result_delayed(div_index)(bank_index)(way_index) := RegEnable(bank_result(div_index)(bank_index)(way_index), RegNext(read_enable))
       }
     }
@@ -989,6 +991,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   if (backendParams.debugEn){
     load_req_with_bank_conflict.map(dontTouch(_))
     dontTouch(bank_result)
+    dontTouch(read_bank_error)
     dontTouch(read_bank_error_delayed)
   }
 }
