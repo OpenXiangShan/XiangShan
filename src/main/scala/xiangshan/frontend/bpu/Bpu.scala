@@ -128,9 +128,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   stageCtrl.s3_fire := s3_fire
 
   private val t0_compareMatrix = CompareMatrix(VecInit(train.bits.branches.map(_.bits.cfiPosition)))
-  private val t0_firstMispredict = t0_compareMatrix.getLeastElement(
-    (b: Valid[BranchInfo]) => b.valid && b.bits.mispredict,
-    train.bits.branches
+  // mark all branches after the first mispredict as invalid
+  // i.e. we have (valid, position, mispredict) for each branch:
+  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
+  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
+  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
+    VecInit(train.bits.branches.map(b => b.valid && b.bits.mispredict))
   )
 
   predictors.foreach { p =>
@@ -152,14 +155,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       p.io.train.bits.branches.head.bits.cfiPosition := s3_prediction.cfiPosition
       p.io.train.bits.branches.head.bits.attribute   := s3_prediction.attribute
       p.io.train.bits.branches.head.bits.mispredict  := s3_override
-      p.io.train.bits.firstMispredict                := p.io.train.bits.branches.head
     } else {
       // train: from Ftq + selected (first mispredict)
-      p.io.train.valid                := train.valid
-      p.io.train.bits.meta            := train.bits.meta
-      p.io.train.bits.startVAddr      := train.bits.startVAddr
-      p.io.train.bits.branches        := train.bits.branches
-      p.io.train.bits.firstMispredict := t0_firstMispredict
+      p.io.train.valid           := train.valid
+      p.io.train.bits.meta       := train.bits.meta
+      p.io.train.bits.startVAddr := train.bits.startVAddr
+      p.io.train.bits.branches.zipWithIndex.foreach { case (b, i) =>
+        b.valid := train.bits.branches(i).valid && t0_firstMispredictMask(i)
+        b.bits  := train.bits.branches(i).bits
+      }
     }
   }
 

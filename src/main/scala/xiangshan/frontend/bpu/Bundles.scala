@@ -154,6 +154,12 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:       BpuMeta                = new BpuMeta
   val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
   val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+
+  // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
+  // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
+  // NOTE: do not use this on Bpu.io.fromFtq.train, it does not ensure the above assertion
+  def mispredictBranch: Valid[BranchInfo] =
+    Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
@@ -230,10 +236,4 @@ class Prediction(implicit p: Parameters) extends BpuBundle {
       this.cfiPosition === other.cfiPosition &&
       this.target === other.target &&
       this.attribute === other.attribute
-}
-
-// Bpu top -> sub predictors
-class Train(implicit p: Parameters) extends BpuTrain {
-  // selected from BpuTrain.branches in Bpu top
-  val firstMispredict: Valid[BranchInfo] = Valid(new BranchInfo)
 }

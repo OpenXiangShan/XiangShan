@@ -23,6 +23,32 @@ class CompareMatrix(n: Int) extends Bundle {
 
   def apply(i: Int): Vec[Bool] = m(i)
 
+  /** Get the mask vector indicating which elements have no smaller valid elements
+   * NOTE: the masked element may not be valid itself
+   * @param valid: a vector indicating which index is valid
+   * @return a mask vector indicating which elements have no smaller valid elements
+   *
+   * @example {{{
+   *   val position = VecInit(Seq(3.U, 1.U, 2.U, 4.U))
+   *   val valid    = VecInit(Seq(true.B, false.B, true.B, false.B))
+   *   val compareMatrix  = CompareMatrix(position)
+   *   // now, the least(by default smallest) valid element is 2.U (index 2)
+   *   // so every element smaller than 2.U (i.e. 1.U) has no smaller valid elements
+   *   // we call them "lower elements"
+   *   // this naming may be bad
+   *   val lowerElementMask = compareMatrix.getLowerElementMask(valid)
+   *   // lowerElementMask = VecInit(Seq(false.B, true.B, true.B, false.B))
+   * }}}
+   */
+  def getLowerElementMask(valid: Vec[Bool]): Vec[Bool] = {
+    require(valid.length == n, "valid length must be equal to matrix size")
+    VecInit((0 until n).map { i =>
+      // i is lower element if for every j != i, either j is invalid, or order(i, j) (i.e. compareMatrix(i)(j) == true)
+      // (every valid j must have !order(i, j))
+      (0 until n).map(j => (i == j).B || !valid(j) || m(i)(j)).reduce(_ && _)
+    })
+  }
+
   /** Get the one-hot vector indicating the least element among all valid elements
    * @param valid: a vector indicating which index is valid
    * @return a one-hot vector indicating the least element among all valid elements
@@ -33,31 +59,19 @@ class CompareMatrix(n: Int) extends Bundle {
    *   // by default order = "<", so the "least" element is the smallest
    *   val compareMatrix  = CompareMatrix(position)
    *   val leastElementOH = compareMatrix.getLeastElementOH(valid)
-   *   // leastElementOH = VecInit(Seq(false.B, false.B, true.B, false.B)) // 2.U is the least(smallest) valid
+   *   // leastElementOH = VecInit(Seq(false.B, false.B, true.B, false.B)) // 2.U is the least(smallest) valid element
    *   val leastElementIdx = OHToUInt(leastElementOH)
    *   // leastElementIdx = 2.U
    *   val leastElementPosition = Mux1H(leastElementOH, position)
    *   // leastElementPosition = 2.U
    * }}}
-   *
-   * @example {{{
-   *   val position = VecInit(Seq(3.U, 1.U, 2.U, 4.U))
-   *   val valid    = VecInit(Seq(true.B, false.B, true.B, false.B))
-   *   // we specify order = ">", so the "least" element is the greatest
-   *   val compareMatrix  = CompareMatrix(position, order = (a: UInt, b: UInt) => a > b)
-   *   val leastElementOH = compareMatrix.getLeastElementOH(valid)
-   *   // leastElementOH = VecInit(Seq(true.B, false.B, false.B, false.B)) // 3.U is the least(greatest) valid
-   *   val leastElementIdx = OHToUInt(leastElementOH)
-   *   // leastElementIdx = 0.U
-   *   val leastElementPosition = Mux1H(leastElementOH, position)
-   *   // leastElementPosition = 3.U
-   * }}}
    */
   def getLeastElementOH(valid: Vec[Bool]): Vec[Bool] = {
     require(valid.length == n, "valid length must be equal to matrix size")
     VecInit((0 until n).map { i =>
-      // i must be valid
-      // and, for every j != i, j must not be valid, or order(i, j) (i.e. compareMatrix(i)(j) == true)
+      // i must be valid itself to be the least element
+      // and, for every j != i, either j is invalid, or order(i, j) (i.e. compareMatrix(i)(j) == true)
+      // (every valid j must have !order(i, j))
       valid(i) && (0 until n).map(j => (i == j).B || !valid(j) || m(i)(j)).reduce(_ && _)
     })
   }
