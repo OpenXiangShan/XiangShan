@@ -27,7 +27,6 @@ import xiangshan.frontend.bpu.BranchInfo
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
