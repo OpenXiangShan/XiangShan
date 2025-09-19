@@ -70,24 +70,23 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
   // use a write buffer to store the write requests when read and write are both valid
   private val writeBuffers =
     Seq.fill(NumBanks)(
-      Module(new WriteBuffer(
+      Module(new Queue(
         new TableSramWriteReq(numSets),
         WriteBufferSize,
-        numPorts = 1,
         pipe = true,
-        hasTag = false
+        flow = true
       ))
     )
 
   // Connect write buffers to SRAMs
   entrySram.zip(writeBuffers).zip(allocFailCtrSram).foreach {
     case ((bank, buffer), allocFailCtr) =>
-      val valid                    = buffer.io.read.head.valid && !bank.head.io.r.req.valid
-      val setIdx                   = buffer.io.read.head.bits.setIdx
-      val updateReq                = buffer.io.read.head.bits.updateReq
-      val allocateReq              = buffer.io.read.head.bits.allocateReq
-      val needResetUsefulCtr       = buffer.io.read.head.bits.needResetUsefulCtr
-      val needIncreaseAllocFailCtr = buffer.io.read.head.bits.needIncreaseAllocFailCtr
+      val valid                    = buffer.io.deq.valid && !bank.head.io.r.req.valid
+      val setIdx                   = buffer.io.deq.bits.setIdx
+      val updateReq                = buffer.io.deq.bits.updateReq
+      val allocateReq              = buffer.io.deq.bits.allocateReq
+      val needResetUsefulCtr       = buffer.io.deq.bits.needResetUsefulCtr
+      val needIncreaseAllocFailCtr = buffer.io.deq.bits.needIncreaseAllocFailCtr
       bank.zipWithIndex.foreach {
         case (way, wayIdx) =>
           val needAllocate = allocateReq.valid && allocateReq.bits.wayMask(wayIdx)
@@ -122,16 +121,16 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
             )
           way.io.w.apply(valid, entry, setIdx, 1.U(1.W), bitMask.asUInt)
       }
-      buffer.io.read.head.ready := bank.head.io.w.req.ready && !bank.head.io.r.req.valid
+      buffer.io.deq.ready := bank.head.io.w.req.ready && !bank.head.io.r.req.valid
 
       allocFailCtr.io.w.req.valid :=
-        buffer.io.read.head.valid && !bank.head.io.r.req.valid && (needResetUsefulCtr || needIncreaseAllocFailCtr)
+        buffer.io.deq.valid && !bank.head.io.r.req.valid && (needResetUsefulCtr || needIncreaseAllocFailCtr)
       allocFailCtr.io.w.req.bits.setIdx := setIdx
       allocFailCtr.io.w.req.bits.waymask.foreach(_ := 1.U(1.W))
       allocFailCtr.io.w.req.bits.data.head.value := Mux(
         needResetUsefulCtr,
         0.U,
-        buffer.io.read.head.bits.oldAllocFailCtr.getIncrease
+        buffer.io.deq.bits.oldAllocFailCtr.getIncrease
       )
   }
 
@@ -158,12 +157,12 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
 
   writeBuffers.zipWithIndex.foreach {
     case (buffer, bankIdx) =>
-      buffer.io.write.head.valid            := (io.updateReq.valid || io.allocateReq.valid) && io.writeBankMask(bankIdx)
-      buffer.io.write.head.bits.setIdx      := io.writeSetIdx
-      buffer.io.write.head.bits.updateReq   := io.updateReq
-      buffer.io.write.head.bits.allocateReq := io.allocateReq
-      buffer.io.write.head.bits.needResetUsefulCtr       := io.needResetUsefulCtr
-      buffer.io.write.head.bits.needIncreaseAllocFailCtr := io.needIncreaseAllocFailCtr
-      buffer.io.write.head.bits.oldAllocFailCtr          := io.oldAllocFailCtr
+      buffer.io.enq.valid                   := (io.updateReq.valid || io.allocateReq.valid) && io.writeBankMask(bankIdx)
+      buffer.io.enq.bits.setIdx             := io.writeSetIdx
+      buffer.io.enq.bits.updateReq          := io.updateReq
+      buffer.io.enq.bits.allocateReq        := io.allocateReq
+      buffer.io.enq.bits.needResetUsefulCtr := io.needResetUsefulCtr
+      buffer.io.enq.bits.needIncreaseAllocFailCtr := io.needIncreaseAllocFailCtr
+      buffer.io.enq.bits.oldAllocFailCtr          := io.oldAllocFailCtr
   }
 }
