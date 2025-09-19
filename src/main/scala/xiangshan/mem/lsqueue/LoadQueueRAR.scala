@@ -153,14 +153,27 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     // the previous owner of that lqptr has to be committed
     assert(!(alloc.valid && io.doAlloc) || !allocated(alloc.bits.lqIdx.value) || !deallocating(idx))
     val canceled = alloc.bits.robIdx.needFlush(io.redirect)
-    (io.doAlloc && alloc.valid && !canceled, alloc.bits)
+    val lower = alloc.bits.lqIdx
+    val upper = alloc.bits.lqIdx + alloc.bits.numLsElem
+    (
+      io.doAlloc && alloc.valid && !canceled,
+      alloc.bits,
+      (lower.flag =/= upper.flag, lower, upper),
+    )
   }
 
   // Allocation
   for (i <- 0 until LoadQueueRARSize) {
-    allocated(i) := allocated(i) && !deallocating(i) || ParallelOR(allocations.map({ case (a, uop) => a && uop.lqIdx.value === i.U }))
-    pending(i) := pending(i) || ParallelOR(allocations.map({ case (a, uop) => a && uop.lqIdx.value === i.U }))
-    uop(i) := MuxCase(uop(i), allocations.map({ case (a, uop) => (a && uop.lqIdx.value === i.U, uop) }))
+    val allocationHit = allocations.map({ case (doAlloc, _, (wrapped, lower, upper)) => (
+      doAlloc && Mux(
+        wrapped,
+        lower.value <= i.U || i.U < upper.value,
+        lower.value <= i.U && i.U < upper.value,
+      )
+    )})
+    allocated(i) := allocated(i) && !deallocating(i) || ParallelOR(allocationHit)
+    pending(i) := pending(i) || ParallelOR(allocationHit)
+    uop(i) := MuxCase(uop(i), allocationHit.zip(allocations.map({ case (_, uop, _) => uop })))
   }
 
   // Allocate logic
