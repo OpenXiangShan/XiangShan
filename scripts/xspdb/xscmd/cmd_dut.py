@@ -27,6 +27,57 @@ class CmdDut:
         self.xdut_signal_breaks = {}
         self.api_dut_reset()
 
+    def api_xbreak(self, signal_name, condition, value, callback=None, callback_once=False):
+        """Set a breakpoint on a signal
+
+        Args:
+            signal_name (string): Name of the signal
+            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch
+            value (int/string): Value for the breakpoint
+            callback (function): Callback function to be called when the breakpoint is hit, args:
+                cb(self, checker, k, clk, sig.value, target.value)
+            callback_once (bool): Whether to call the callback function only once and remove the breakpoint
+        """
+        checker = self.xdut_signal_breaks.get("checker")
+        checker_key = "xdut_signal_break"
+        if not checker:
+            checker = self.xsp.ComUseCondCheck(self.dut.xclock)
+            self.dut.xclock.RemoveStepRisCbByDesc(checker_key)
+            self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), checker_key)
+            self.xdut_signal_breaks["checker"] = checker
+        xbreak_key = "xbreak-%s-%s-%s"%(signal_name, condition, value)
+        if xbreak_key in checker.ListCondition():
+            error(f"signal {xbreak_key} already set")
+            return
+        sig = self.dut.GetInternalSignal(signal_name)
+        if not sig:
+            error(f"first signal {signal_name} not found")
+            return
+        if isinstance(value, str):
+            val = self.dut.GetInternalSignal(value)
+            if not val:
+                error(f"second signal {value} not found")
+                return
+        else:
+            val = self.xsp.XData(sig.W(), self.xsp.XData.InOut)
+            val.value = value
+        condition_map = {
+            "eq": self.xsp.ComUseCondCmp_EQ,
+            "ne": self.xsp.ComUseCondCmp_NE,
+            "gt": self.xsp.ComUseCondCmp_GT,
+            "lt": self.xsp.ComUseCondCmp_LT,
+            "ge": self.xsp.ComUseCondCmp_GE,
+            "le": self.xsp.ComUseCondCmp_LE,
+            "ch": self.xsp.ComUseCondCmp_NE,
+        }
+        cmp = condition_map.get(condition.lower(), None)
+        if cmp is None:
+            error(f"condition '{condition}' not supported")
+            return
+        checker.SetCondition(xbreak_key, sig, val, cmp)
+        self.xdut_signal_breaks[xbreak_key] = {"sig": sig, "val": val, "cmp": condition.lower(), "cb": callback, "cb_once": callback_once}
+        return xbreak_key
+
     def api_xbreak_list(self):
         """List all breakpoints"""
         ret = []
