@@ -13,28 +13,20 @@ import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.XSModule
 
-class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  override def shouldBeInlined: Boolean = false
-
-  val exus: Seq[ExeUnit] = params.issueBlockParams.flatMap(_.exuBlockParams.map(x => LazyModule(x.genExuModule)))
-
-  lazy val module = new ExuBlockImp(this)(p, params)
-}
-
-class ExuBlockImp(
-  override val wrapper: ExuBlock
-)(implicit
-  p: Parameters,
-  params: SchdBlockParams
-) extends LazyModuleImp(wrapper) with HasCriticalErrors {
+class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasCriticalErrors {
   val io = IO(new ExuBlockIO)
 
-  private val exus = wrapper.exus.map(_.module)
-
+  private val exus = params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx =>
+    Module(xx.genExuModule).suggestName("exu" + xx.name + "_" + xx.fuConfigs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _))
+  ))
+  params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx => println(s"[ExuBlock] ${xx.name}")))
   private val ins: collection.IndexedSeq[DecoupledIO[ExuInput]] = io.in.flatten
   private val outs: collection.IndexedSeq[DecoupledIO[ExuOutput]] = io.out.flatten
-
+  println(s"[ExuBlock] ins.size = ${ins.size}")
+  println(s"[ExuBlock] exus.size = ${exus.size}")
+  println(s"[ExuBlock] outs.size = ${outs.size}")
   (ins zip exus zip outs).foreach { case ((input, exu), output) =>
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
@@ -53,23 +45,23 @@ class ExuBlockImp(
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
 //      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
 //    }
-    XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
+    XSPerfAccumulate(s"${(exu.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
   if (params.isIntSchd) {
-    val bjuExus = exus.filter(_.wrapper.exuParams.hasBrhFu).map(_.wrapper.module)
+    val bjuExus = exus.filter(_.exuParams.hasBrhFu)
     assert(bjuExus.size == io.toFrontendBJUResolve.get.size, "bju num is different")
     val fromBJUResolve = bjuExus.map(_.io.toFrontendBJUResolve.get)
     io.toFrontendBJUResolve.get := fromBJUResolve
   }
   io.I2FWakeupOut.foreach{ x =>
-    val exuI2FIn = exus.filter(x => x.wrapper.exuParams.fuConfigs.contains(I2fCfg)).head.io.in
+    val exuI2FIn = exus.filter(x => x.exuParams.fuConfigs.contains(I2fCfg)).head.io.in
     x := 0.U.asTypeOf(x)
     x.valid := exuI2FIn.valid && exuI2FIn.bits.fpWen.get
     x.bits.fpWen := exuI2FIn.bits.fpWen.get
     x.bits.pdest := exuI2FIn.bits.pdest
   }
   io.F2IWakeupOut.foreach { x =>
-    val exuF2IIn = exus.filter(x => x.wrapper.exuParams.fuConfigs.contains(FcmpCfg)).head.io.in
+    val exuF2IIn = exus.filter(x => x.exuParams.fuConfigs.contains(FcmpCfg)).head.io.in
     x := 0.U.asTypeOf(x)
     x.valid := exuF2IIn.valid && exuF2IIn.bits.rfWen.get
     x.bits.rfWen := exuF2IIn.bits.rfWen.get
@@ -82,37 +74,40 @@ class ExuBlockImp(
   }
   val fpDataIdx = 2
   io.I2FDataOut.foreach { x =>
-    val i2fFuOut = exus.filter(exu => exu.wrapper.exuParams.hasi2fFu).head.io.out
+    val i2fFuOut = exus.filter(exu => exu.exuParams.hasi2fFu).head.io.out
     x.valid := i2fFuOut.valid && i2fFuOut.bits.fpWen.get
     x.bits := i2fFuOut.bits.data(fpDataIdx)
   }
   val intDataIdx = 1
   io.F2IDataOut.foreach { x =>
-    val f2iFuOut = exus.filter(exu => exu.wrapper.exuParams.hasf2iFu).head.io.out
+    val f2iFuOut = exus.filter(exu => exu.exuParams.hasf2iFu).head.io.out
     x.valid := f2iFuOut.valid && f2iFuOut.bits.intWen.get
     x.bits := f2iFuOut.bits.data(intDataIdx)
   }
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
   }
-  val aluFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
+  val aluFireSeq = exus.filter(_.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
   for (i <- 0 until (aluFireSeq.size + 1)){
     XSPerfAccumulate(s"alu_fire_${i}_cnt", PopCount(aluFireSeq) === i.U)
   }
-  val brhFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(BrhCfg)).map(_.io.in.fire)
+  val brhFireSeq = exus.filter(_.exuParams.fuConfigs.contains(BrhCfg)).map(_.io.in.fire)
   for (i <- 0 until (brhFireSeq.size + 1)) {
     XSPerfAccumulate(s"brh_fire_${i}_cnt", PopCount(brhFireSeq) === i.U)
   }
-  val criticalErrors = exus.filter(_.wrapper.exuParams.needCriticalErrors).flatMap(exu => exu.getCriticalErrors)
+  val criticalErrors = exus.filter(_.exuParams.needCriticalErrors).flatMap(exu => exu.getCriticalErrors)
+  for (((name, error), _) <- criticalErrors.zipWithIndex) {
+    XSError(error, s"critical error: $name \n")
+  }
   generateCriticalErrors()
 }
 
 class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   // in(i)(j): issueblock(i), exu(j)
-  val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputCopySrcBundle)
+  val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputCopySrcBundleNoMemBlock)
   // out(i)(j): issueblock(i), exu(j).
-  val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
+  val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundleNoMemBlock
   val uncertainWakeupOut = Option.when(params.issueBlockParams.map(_.needUncertainWakeupFromExu).reduce(_ ||_))(params.genExuWakeUpOutValidBundle)
   val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
   val I2FDataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))

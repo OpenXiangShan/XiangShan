@@ -37,7 +37,7 @@ import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.PrunedAddr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, VfScheduler}
 import xiangshan.backend.trace._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -156,7 +156,7 @@ class CtrlBlockImp(
   val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
-  val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
+  val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbData.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
@@ -747,7 +747,6 @@ class CtrlBlockImp(
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
   dispatch.io.wakeUpAll.wakeUpVec := io.toDispatch.wakeUpVec
-  dispatch.io.wakeUpAll.wakeUpMem := io.toDispatch.wakeUpMem
   dispatch.io.IQValidNumVec := io.toDispatch.IQValidNumVec
   dispatch.io.ldCancel := io.toDispatch.ldCancel
   dispatch.io.og0Cancel := io.toDispatch.og0Cancel
@@ -761,13 +760,18 @@ class CtrlBlockImp(
   dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
 
-  val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops, io.toIssueBlock.memUops).flatten
+  val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
+  println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
+  println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
+  println(s"[CtrlBlock] io.toIssueBlock.fpUops.size = ${io.toIssueBlock.fpUops.size}")
+  println(s"[CtrlBlock] io.toIssueBlock.vfUops.size = ${io.toIssueBlock.vfUops.size}")
+  println(s"[CtrlBlock] dispatch.io.toIssueQueues.size = ${dispatch.io.toIssueQueues.size}")
   toIssueBlockUops.zip(dispatch.io.toIssueQueues).map{ case (iq, dispatch) => {
     iq.valid := dispatch.valid
     iq.bits := dispatch.bits
     dispatch.ready := iq.ready
   }}
-  io.toIssueBlock.flush   <> s2_s4_redirect
+  io.toIssueBlock.flush <> s2_s4_redirect
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
@@ -897,14 +901,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
-    val intUopsNum = backendParams.intSchdParams.get.issueBlockParams.map(_.numEnq).sum
+    val intUopsNum = backendParams.intSchdParams.get.issueBlockParams.filter(_.StdCnt == 0).map(_.numEnq).sum
     val fpUopsNum = backendParams.fpSchdParams.get.issueBlockParams.map(_.numEnq).sum
     val vfUopsNum = backendParams.vfSchdParams.get.issueBlockParams.map(_.numEnq).sum
-    val memUopsNum = backendParams.memSchdParams.get.issueBlockParams.filter(x => x.StdCnt == 0).map(_.numEnq).sum
     val intUops = Vec(intUopsNum, DecoupledIO(new DispatchOutUop))
     val fpUops = Vec(fpUopsNum, DecoupledIO(new DispatchOutUop))
     val vfUops = Vec(vfUopsNum, DecoupledIO(new DispatchOutUop))
-    val memUops = Vec(memUopsNum, DecoupledIO(new DispatchOutUop))
   }
   val fromMemToDispatch = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
@@ -924,7 +926,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpFp  = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpVec = Flipped(backendParams.vfSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpMem = Flipped(backendParams.memSchdParams.get.genIQWakeUpOutValidBundle)
     val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
     val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
     val exuNum = allExuParams.size
