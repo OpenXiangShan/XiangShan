@@ -796,6 +796,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enq.bits.uop :<= deqBeforeDly(i).bits.common
           wakeUpQueue.io.enq.bits.uop.pdestCopy.foreach(_ := 0.U)
           wakeUpQueue.io.enq.bits.lat := getDeqLat(i, deqBeforeDly(i).bits.common.fuType)
+          // int i2f wakeup fstore from fpRegion, so there is not need fpWen
+          if (params.inIntSchd) {
+            wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
+          }
+          else if (params.inFpSchd) {
+            wakeUpQueue.io.enq.bits.uop.rfWen.foreach(_ := false.B)
+          }
         }
         wakeUpQueue.io.enqAppend.valid := false.B
         wakeUpQueue.io.enqAppend.bits := 0.U.asTypeOf(wakeUpQueue.io.enqAppend.bits)
