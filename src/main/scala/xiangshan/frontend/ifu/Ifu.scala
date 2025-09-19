@@ -119,7 +119,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_ready, s2_ready, s3_ready, s4_ready           = WireInit(false.B)
   private val s0_fire, s1_fire, s2_fire, s3_fire, s4_fire      = WireInit(false.B)
   private val s0_flush, s1_flush, s2_flush, s3_flush, s4_flush = WireInit(false.B)
-  private val s0_flushFromBpu, s1_flushFromBpu                 = Wire(Vec(FetchPorts, Bool()))
+  private val s0_flushFromBpuS3, s1_flushFromBpuS3             = Wire(Vec(FetchPorts, Bool()))
 
   // Top-down
   private def numOfStage = 3
@@ -201,7 +201,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   s0_fire := fromFtq.req.fire
 
-  s0_flushFromBpu := s0_ftqFetch.map(fetch =>
+  s0_flushFromBpuS3 := s0_ftqFetch.map(fetch =>
     fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
   )
 
@@ -214,8 +214,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s4_flush        := backendRedirect || (wbRedirect.valid && !s4_wbNotFlush)
   s3_flush        := backendRedirect || mmioRedirect.valid || wbRedirect.valid
   s2_flush        := s3_flush
-  s1_flush        := s2_flush || s1_flushFromBpu.reduce(_ || _)
-  s0_flush        := s1_flush || s0_flushFromBpu.reduce(_ || _)
+  s1_flush        := s2_flush || s1_flushFromBpuS3(0)
+  s0_flush        := s1_flush || s0_flushFromBpuS3(0)
 
   fromFtq.req.ready := s1_ready && io.fromICache.fetchReady
 
@@ -232,7 +232,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", !fromFtq.req.valid && fromFtq.req.ready)
   XSPerfAccumulate("fetch_flush_backend_redirect", backendRedirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", wbRedirect.valid)
-  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", s0_flushFromBpu.reduce(_ || _))
+  XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", s0_flushFromBpuS3.reduce(_ || _))
 
   /* *****************************************************************************
    * IFU Stage 1
@@ -241,11 +241,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_valid      = ValidHold(s0_fire && !s0_flush, s1_fire, s1_flush)
   private val s1_firstValid = ValidHold(s0_fire && !s0_flush && s0_ftqFetch(0).valid, s1_fire, s1_flush)
   private val s1_secondValid =
-    ValidHold(s0_fire && !s0_flush && s0_ftqFetch(1).valid && !s0_flushFromBpu(1), s1_fire, s1_flush)
+    ValidHold(s0_fire && !s0_flush && s0_ftqFetch(1).valid && !s0_flushFromBpuS3(1), s1_fire, s1_flush)
   private val s1_ftqFetch   = RegEnable(s0_ftqFetch, s0_fire)
   private val s1_doubleline = RegEnable(s0_doubleline, s0_fire)
 
-  s1_flushFromBpu := s1_ftqFetch.map(fetch =>
+  s1_flushFromBpuS3 := s1_ftqFetch.map(fetch =>
     fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
   )
 
