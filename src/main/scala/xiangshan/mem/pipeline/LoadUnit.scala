@@ -479,7 +479,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
-    out.isnc          := src.nc
     out.data          := src.data
     out
   }
