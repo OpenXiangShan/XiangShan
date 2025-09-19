@@ -51,6 +51,7 @@ import xiangshan.frontend.ibuffer.IBuffer
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
 import xiangshan.frontend.instruncache.InstrUncache
+import xiangshan.frontend.simfrontend.SimFrontendInlinedImp
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -68,17 +69,7 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   }
 }
 
-class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  override def shouldBeInlined: Boolean = true
-
-  val instrUncache = LazyModule(new InstrUncache())
-  val icache       = LazyModule(new ICache())
-
-  lazy val module = new FrontendInlinedImp(this)
-}
-
-class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
-    with HasXSParameter
+abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModuleImp(outer) with HasXSParameter
     with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId       = Input(UInt(hartIdLen.W))
@@ -105,6 +96,19 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val dft       = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
   })
+}
+
+class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = true
+
+  val instrUncache = LazyModule(new InstrUncache())
+  val icache       = LazyModule(new ICache())
+
+  lazy val module: FrontendInlinedImpBase =
+    if (env.EnableSimFrontend) new SimFrontendInlinedImp(this) else new FrontendInlinedImp(this)
+}
+
+class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) {
 
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module

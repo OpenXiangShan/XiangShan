@@ -78,6 +78,7 @@ class XSArgs(object):
         self.is_spike = "Spike" if args.spike else None
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
+        self.simfrontend = 1 if args.simfrontend else None
         self.config = args.config
         self.yaml_config = args.yaml_config
         self.emu_optimize = args.emu_optimize
@@ -96,6 +97,7 @@ class XSArgs(object):
         self.disable_diff = args.no_diff
         self.disable_db = args.no_db
         self.gcpt_restore_bin = args.gcpt_restore_bin
+        self.instr_trace = args.instr_trace
         self.pgo = args.pgo
         self.pgo_max_cycle = args.pgo_max_cycle
         self.pgo_emu_args = args.pgo_emu_args
@@ -145,6 +147,7 @@ class XSArgs(object):
             (self.pgo_emu_args,  "PGO_EMU_ARGS"),
             (self.llvm_profdata, "LLVM_PROFDATA"),
             (self.issue,         "ISSUE"),
+            (self.simfrontend,   "ENABLE_SIMFRONTEND"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
@@ -263,6 +266,10 @@ class XiangShan(object):
         self.show()
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
+        instr_trace = self.__get_ci_workloads_instr_trace(self.args.instr_trace)
+        instr_trace_valid = len(instr_trace) != 0
+        if instr_trace_valid:
+            print("workload instr trace: ", instr_trace)
         numa_args = ""
         if self.args.numa:
             numa_info = get_free_cores(self.args.threads)
@@ -270,8 +277,9 @@ class XiangShan(object):
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
+        instr_trace_args = f"--instr-trace {instr_trace}" if instr_trace_valid else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
-        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args} {gcpt_restore_args}')
+        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args} {gcpt_restore_args} {instr_trace_args}')
         return return_code
 
     def run_simv(self, workload):
@@ -566,6 +574,16 @@ class XiangShan(object):
         all_gcpt = load_all_gcpt(all_cpt_dir)
         return [random.choice(all_gcpt)]
 
+    def __get_ci_workloads_instr_trace(self, name):
+        workloads = {
+            "xalancbmk": "xalancbmk_266100000000_5000000I.trace",
+            "milc": "milc_103620000000_5000000I.trace",
+            "astar": "astar_122060000000_5000000I.trace",
+        }
+        if name in workloads:
+            return os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])
+        return ""
+
     def run_ci(self, test):
         all_tests = {
             "cputest": self.__get_ci_cputest,
@@ -684,6 +702,7 @@ if __name__ == "__main__":
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
     parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
     parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
+    parser.add_argument('--simfrontend', action='store_true', help='enable the simfrontend')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
@@ -692,6 +711,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
+    parser.add_argument('--instr-trace', type=str, default="", help="run the test with the trace of the simfrontend")
     # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
