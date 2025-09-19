@@ -183,8 +183,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_bankConflict =
     io.train.valid && t0_hasConditionalBranch && io.enable && s0_fire && t0_bankMask =/= s0_bankMask
 
-  private val t0_fire     = io.train.valid && t0_hasConditionalBranch && io.enable && !t0_bankConflict
-  private val t0_branches = io.train.bits.branches
+  private val t0_valid            = io.train.valid && t0_hasConditionalBranch && io.enable && !t0_bankConflict
+  private val t0_branches         = io.train.bits.branches
+  private val t0_mispredictBranch = io.train.bits.firstMispredict
 
   private val t0_foldedHistForIdx = histInfoForIdx.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
   private val t0_foldedHistForTag = histInfoForTag.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
@@ -196,12 +197,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       getSetIndex(t0_startVAddr, hist, tableInfo.NumSets)
   }
 
-  baseTable.io.train.valid := t0_fire
+  baseTable.io.train.valid := t0_valid
   baseTable.io.train.bits  := io.train.bits
 
   tables.zipWithIndex.foreach {
     case (table, tableIdx) =>
-      table.io.readReq.valid         := t0_fire
+      table.io.readReq.valid         := t0_valid
       table.io.readReq.bits.setIdx   := t0_setIdx(tableIdx)
       table.io.readReq.bits.bankMask := t0_bankMask
   }
@@ -212,15 +213,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute temp tag
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_fire       = RegNext(t0_fire) && io.enable
-  private val t1_startVAddr = RegEnable(t0_startVAddr, t0_fire)
-  private val t1_branches   = RegEnable(t0_branches, t0_fire)
+  private val t1_valid            = RegNext(t0_valid) && io.enable
+  private val t1_startVAddr       = RegEnable(t0_startVAddr, t0_valid)
+  private val t1_branches         = RegEnable(t0_branches, t0_valid)
+  private val t1_mispredictBranch = RegEnable(t0_mispredictBranch, t0_valid)
 
-  private val t1_setIdx   = t0_setIdx.map(RegEnable(_, t0_fire))
-  private val t1_bankMask = RegEnable(t0_bankMask, t0_fire)
+  private val t1_setIdx   = t0_setIdx.map(RegEnable(_, t0_valid))
+  private val t1_bankMask = RegEnable(t0_bankMask, t0_valid)
 
-  private val t1_foldedHistForTag        = t0_foldedHistForTag.map(RegEnable(_, t0_fire))
-  private val t1_anotherFoldedHistForTag = t0_anotherFoldedHistForTag.map(RegEnable(_, t0_fire))
+  private val t1_foldedHistForTag        = t0_foldedHistForTag.map(RegEnable(_, t0_valid))
+  private val t1_anotherFoldedHistForTag = t0_anotherFoldedHistForTag.map(RegEnable(_, t0_valid))
 
   private val t1_allTableEntries = tables.map(_.io.readResp.entries)
   private val t1_allocFailCtr    = tables.map(_.io.readResp.allocFailCtr)
@@ -229,34 +231,22 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     getTag(t1_startVAddr, t1_foldedHistForTag(tableIdx), t1_anotherFoldedHistForTag(tableIdx))
   }
 
-  private val t1_mispredictBranchMask = t1_branches.map {
-    branch => branch.valid && branch.bits.mispredict && branch.bits.attribute.isConditional
-  }
-
-  private val t1_firstMispredictBranchOH =
-    getMinimalValueOH(t1_branches.map(_.bits.cfiPosition), t1_mispredictBranchMask)
-
-  private val t1_hasMispredictBranch = t1_mispredictBranchMask.reduce(_ || _)
-  private val t1_mispredictBranch    = Mux1H(t1_firstMispredictBranchOH, t1_branches)
-
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 2
      - update branches' takenCtr and usefulCtr
      - allocate a new entry when mispredict
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t2_fire     = RegNext(t1_fire) && io.enable
-  private val t2_branches = RegEnable(t1_branches, t1_fire)
+  private val t2_valid            = RegNext(t1_valid) && io.enable
+  private val t2_branches         = RegEnable(t1_branches, t1_valid)
+  private val t2_mispredictBranch = RegEnable(t1_mispredictBranch, t1_valid)
 
-  private val t2_setIdx   = t1_setIdx.map(RegEnable(_, t1_fire))
-  private val t2_bankMask = RegEnable(t1_bankMask, t1_fire)
+  private val t2_setIdx   = t1_setIdx.map(RegEnable(_, t1_valid))
+  private val t2_bankMask = RegEnable(t1_bankMask, t1_valid)
 
-  private val t2_allTableEntries = t1_allTableEntries.map(RegEnable(_, t1_fire))
-  private val t2_allocFailCtr    = t1_allocFailCtr.map(RegEnable(_, t1_fire))
-  private val t2_tempTag         = t1_tempTag.map(RegEnable(_, t1_fire))
-
-  private val t2_hasMispredictBranch = RegEnable(t1_hasMispredictBranch, t1_fire)
-  private val t2_mispredictBranch    = RegEnable(t1_mispredictBranch, t1_fire)
+  private val t2_allTableEntries = t1_allTableEntries.map(RegEnable(_, t1_valid))
+  private val t2_allocFailCtr    = t1_allocFailCtr.map(RegEnable(_, t1_valid))
+  private val t2_tempTag         = t1_tempTag.map(RegEnable(_, t1_valid))
 
   private val t2_newTakenCtr  = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(TakenCtrWidth))))
   private val t2_newUsefulCtr = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(UsefulCtrWidth))))
@@ -317,7 +307,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_allocateWayMask     = Mux1H(t2_allocateTableMaskOH, t2_allTableNotUsefulWayMask)
   private val t2_allocateWayMaskOH   = PriorityEncoderOH(t2_allocateWayMask)
 
-  private val t2_needAllocate = t2_hasMispredictBranch && t2_canAllocateTableMask.orR
+  private val t2_needAllocate = t2_mispredictBranch.valid && t2_canAllocateTableMask.orR
 
   private val t2_allocFailTableMask =
     Mux(
@@ -340,19 +330,19 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       table.io.writeSetIdx   := t2_setIdx(tableIdx)
       table.io.writeBankMask := t2_bankMask
 
-      table.io.updateReq.valid             := t2_fire && t2_updateMask(tableIdx).reduce(_ || _)
+      table.io.updateReq.valid             := t2_valid && t2_updateMask(tableIdx).reduce(_ || _)
       table.io.updateReq.bits.wayMask      := t2_updateMask(tableIdx).asUInt
       table.io.updateReq.bits.newTakenCtr  := t2_newTakenCtr(tableIdx)
       table.io.updateReq.bits.newUsefulCtr := t2_newUsefulCtr(tableIdx)
 
-      table.io.allocateReq.valid        := t2_fire && t2_needAllocate && t2_allocateTableMaskOH(tableIdx)
+      table.io.allocateReq.valid        := t2_valid && t2_needAllocate && t2_allocateTableMaskOH(tableIdx)
       table.io.allocateReq.bits.wayMask := t2_allocateWayMaskOH
       table.io.allocateReq.bits.tag     := t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition
       table.io.allocateReq.bits.takenCtr.value :=
         Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U)
 
-      table.io.needResetUsefulCtr       := t2_fire && t2_needAllocate && t2_needResetUsefulCtr(tableIdx)
-      table.io.needIncreaseAllocFailCtr := t2_fire && t2_needAllocate && t2_needIncreaseAllocFailCtr(tableIdx)
+      table.io.needResetUsefulCtr       := t2_valid && t2_needAllocate && t2_needResetUsefulCtr(tableIdx)
+      table.io.needIncreaseAllocFailCtr := t2_valid && t2_needAllocate && t2_needIncreaseAllocFailCtr(tableIdx)
       table.io.oldAllocFailCtr          := t2_allocFailCtr(tableIdx)
   }
 
@@ -360,7 +350,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  XSPerfAccumulate("total_train", t0_fire)
+  XSPerfAccumulate("total_train", t0_valid)
   XSPerfAccumulate("read_conflict", t0_bankConflict)
   // TODO: add more
 }
