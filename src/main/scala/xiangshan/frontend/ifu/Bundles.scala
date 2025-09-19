@@ -68,7 +68,7 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
   val instrRange:     UInt        = UInt(FetchBlockInstNum.W)
-  val rawInstrValid:  UInt        = UInt(FetchBlockInstNum.W)
+  val rawInstrEndVec: UInt        = UInt(FetchBlockInstNum.W)
   val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
