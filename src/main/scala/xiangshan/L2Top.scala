@@ -112,7 +112,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform,
-        hasMbist = hasMbist
+        hasMbist = hasMbist,
+        EnablePrivateClint = SeperateTLBus
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
