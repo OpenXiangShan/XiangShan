@@ -159,6 +159,7 @@ class PredecodeWritebackBundle(implicit p: Parameters) extends FrontendBundle {
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {
+  val valid:          Bool   = Output(Bool())
   val mmioFtqPtr:     FtqPtr = Output(new FtqPtr)
   val mmioLastCommit: Bool   = Input(Bool())
 }
