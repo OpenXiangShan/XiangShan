@@ -73,7 +73,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := false.B
+  abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
   ittage.io.enable      := ctrl.ittageEnable
