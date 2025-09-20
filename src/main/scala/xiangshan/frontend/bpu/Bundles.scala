@@ -64,7 +64,7 @@ object BranchAttribute {
     // indirect branches: jr, jalr
     def Indirect: UInt = 3.U(width.W)
   }
-  private object RasAction extends EnumUInt(4) {
+  object RasAction extends EnumUInt(4) {
     def popBit:  Int = 0
     def pushBit: Int = 1
     // no action
@@ -154,6 +154,13 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:       BpuMeta                = new BpuMeta
   val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
   val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+}
+
+class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+  val rasMeta:   RasMeta         = new RasMeta
+  val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute: BranchAttribute = new BranchAttribute
+  // TODO: and maybe more
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
