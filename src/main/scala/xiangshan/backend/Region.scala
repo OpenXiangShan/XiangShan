@@ -156,12 +156,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     iq.io.og1Cancel := og1Cancel
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp := fromDataPathResp(i)(j).og0resp
-      if (params.isIntSchd) {
-        og0Resp.valid := fromDataPathResp(i)(j).og0resp.valid || io.toIntIQResp.get(i)(j).og0resp.valid
-      }
-      if (params.isFpSchd) {
-        og0Resp.valid := fromDataPathResp(i)(j).og0resp.valid || io.toFpIQResp.get(i)(j).og0resp.valid
-      }
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp := fromDataPathResp(i)(j).og1resp
@@ -983,7 +977,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // to read fp regfile
   val intIQOut  = Option.when(params.isIntSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromIntIQ = Option.when(params.isFpSchd)(Flipped(MixedVec(intSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
-  val toIntIQResp = Option.when(params.isIntSchd)(Flipped(MixedVec(intSchdParam.issueBlockParams.map(_.genOGRespBundle))))
   val fpToIntIQResp = Option.when(params.isFpSchd)(MixedVec(intSchdParam.issueBlockParams.map(_.genOGRespBundle)))
   // fp regfile read data
   val fpRfRdataIn = Option.when(params.isIntSchd)(Input(Vec(backendParams.numPregRd(FpData()), UInt(backendParams.fpSchdParams.get.rfDataWidth.W))))
@@ -991,7 +984,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // to write int regfile
   val fpIQOut = Option.when(params.isFpSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromFpIQ = Option.when(params.isIntSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
-  val toFpIQResp = Option.when(params.isFpSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genOGRespBundle))))
   val intToFpIQResp = Option.when(params.isIntSchd)(MixedVec(fpSchdParam.issueBlockParams.map(_.genOGRespBundle)))
 }
 
