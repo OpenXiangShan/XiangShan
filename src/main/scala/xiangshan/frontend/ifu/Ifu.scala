@@ -237,6 +237,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /* *****************************************************************************
    * IFU Stage 1
+   * - icache response data (latched for pipeline stop)
    * - calculate pc/half_pc/cut_ptr for every instruction
    * ***************************************************************************** */
   private val s1_valid      = ValidHold(s0_fire && !s0_flush, s1_fire, s1_flush)
@@ -250,7 +251,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
     fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
   )
 
-  s1_fire  := s1_valid && s2_ready
+  private val icacheRespAllValid = WireInit(false.B)
+
+  s1_fire  := s1_valid && s2_ready && icacheRespAllValid
   s1_ready := s1_fire || !s1_valid
 
   private val s1_takenCfiOffset = VecInit.tabulate(FetchPorts)(i => s1_ftqFetch(i).takenCfiOffset)
@@ -284,16 +287,40 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_secondEndPos = s1_fetchSize(1) - 1.U
   private val s1_toatalInstrRange =
     Mux(!s1_secondValid, s1_instrRange(0), (s1_instrRange(1) << s1_fetchSize(0)).asUInt | s1_instrRange(0))
+
+  // TODO: addr compare may be timing critical
+  // FIXME: I don't think this is necessary, Ftq will ensure each time fromICache.valid, the order of vAddr is the same
+  // maybe we can use a assert instead
+  private val s1_iCacheAllRespWire =
+    fromICache.valid &&
+      fromICache.bits.vAddr(0) === s1_ftqFetch(0).startVAddr &&
+      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s1_ftqFetch(0).nextCachelineVAddr ||
+        !s1_doubleline(0))
+  private val s1_iCacheAllRespReg = ValidHold(s1_valid && s1_iCacheAllRespWire && !s2_ready, s1_fire, s1_flush)
+
+  icacheRespAllValid := s1_iCacheAllRespReg || s1_iCacheAllRespWire
+
+  io.toICache.stall := !s2_ready
+
+  private val s1_icacheInfo = WireDefault(0.U.asTypeOf(Vec(FetchPorts, new ICacheInfo)))
+  s1_icacheInfo(0).exception          := fromICache.bits.exception
+  s1_icacheInfo(0).pmpMmio            := fromICache.bits.pmpMmio
+  s1_icacheInfo(0).itlbPbmt           := fromICache.bits.itlbPbmt
+  s1_icacheInfo(0).isBackendException := fromICache.bits.isBackendException
+  s1_icacheInfo(0).pAddr              := fromICache.bits.pAddr
+  s1_icacheInfo(0).gpAddr             := fromICache.bits.gpAddr
+  s1_icacheInfo(0).isForVSnonLeafPTE  := fromICache.bits.isForVSnonLeafPTE
+
+  private val s1_rawData  = fromICache.bits.data
+  private val s1_perfInfo = io.fromICache.perf
+
   /* *****************************************************************************
    * IFU Stage 2
-   * - icache response data (latched for pipeline stop)
    * - generate exception bits for every instruction (page fault/access fault/mmio)
    * - generate predicted instruction range (1 means this instruction is in this fetch packet)
    * - cut data from cachelines to packet instruction code
    * - instruction preDecode and RVC expand
    * ***************************************************************************** */
-  private val icacheRespAllValid = WireInit(false.B)
-
   private val s2_valid             = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
   private val s2_firstValid        = ValidHold(s1_fire && !s1_flush && s1_firstValid, s2_fire, s2_flush)
   private val s2_secondValid       = ValidHold(s1_fire && !s1_flush && s1_secondValid, s2_fire, s2_flush)
@@ -315,38 +342,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_instrEndOffset     = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U(FetchBlockInstOffsetWidth.W)))
   private val s2_identifiedCfi      = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
 
-  s2_fire  := s2_valid && s3_ready && icacheRespAllValid
+  s2_fire  := s2_valid && s3_ready
   s2_ready := s2_fire || !s2_valid
 
-  // TODO: addr compare may be timing critical
-  private val s2_iCacheAllRespWire =
-    fromICache.valid &&
-      fromICache.bits.vAddr(0) === s2_ftqFetch(0).startVAddr &&
-      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s2_ftqFetch(0).nextCachelineVAddr ||
-        !s2_doubleline(0))
-  private val s2_iCacheAllRespReg = ValidHold(s2_valid && s2_iCacheAllRespWire && !s3_ready, s2_fire, s2_flush)
+  private val s2_icacheInfo = RegEnable(s1_icacheInfo, s1_fire)
+  private val s2_rawData    = RegEnable(s1_rawData, s1_fire)
+  private val s2_perfInfo   = RegEnable(s1_perfInfo, s1_fire)
 
-  icacheRespAllValid := s2_iCacheAllRespReg || s2_iCacheAllRespWire
-
-  io.toICache.stall := !s3_ready
-
-  private val s2_icacheInfo = WireDefault(0.U.asTypeOf(Vec(FetchPorts, new ICacheInfo)))
-  s2_icacheInfo(0).exception          := fromICache.bits.exception
-  s2_icacheInfo(0).pmpMmio            := fromICache.bits.pmpMmio
-  s2_icacheInfo(0).itlbPbmt           := fromICache.bits.itlbPbmt
-  s2_icacheInfo(0).isBackendException := fromICache.bits.isBackendException
-  s2_icacheInfo(0).pAddr              := fromICache.bits.pAddr
-  s2_icacheInfo(0).gpAddr             := fromICache.bits.gpAddr
-  s2_icacheInfo(0).isForVSnonLeafPTE  := fromICache.bits.isForVSnonLeafPTE
-
-  // we need only the first port, as the second is asked to be the same
-  private val s2_pmpMmio  = fromICache.bits.pmpMmio
-  private val s2_itlbPbmt = fromICache.bits.itlbPbmt
-
-  private val s2_rawData  = fromICache.bits.data
-  private val s2_perfInfo = io.fromICache.perf
-
-  instrBoundary.io.req.valid                 := s2_valid && fromICache.valid
+  instrBoundary.io.req.valid                 := s2_valid
   instrBoundary.io.req.instrRange            := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
   instrBoundary.io.req.firstFetchBlockEndPos := s2_firstEndPos
   instrBoundary.io.req.endPos                := s2_totalEndPos
