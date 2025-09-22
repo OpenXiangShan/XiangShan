@@ -253,6 +253,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t2_newTakenCtr  = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(TakenCtrWidth))))
   private val t2_newUsefulCtr = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(UsefulCtrWidth))))
+  private val t2_hitTag       = Wire(Vec(NumTables, Vec(NumWays, UInt(TagWidth.W))))
 
   // Seq[NumTables][NumWays]
   private val t2_updateMask = t2_allTableEntries.zipWithIndex.map {
@@ -269,11 +270,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
               val hit          = entry.valid && branch.valid && entry.tag === tag && attribute.isConditional
               val newTakenCtr  = entry.takenCtr.getUpdate(taken)
               val newUsefulCtr = entry.usefulCtr.getUpdate(!mispredict)
-              (hit, newTakenCtr, newUsefulCtr)
+              (hit, newTakenCtr, newUsefulCtr, tag)
           }
           val hitBranchMask = result.map(_._1)
           t2_newTakenCtr(tableIdx)(wayIdx).value  := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._2))
           t2_newUsefulCtr(tableIdx)(wayIdx).value := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._3))
+          t2_hitTag(tableIdx)(wayIdx)             := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._4))
           hitBranchMask.reduce(_ || _)
       }
       hitWayMask
@@ -333,16 +335,35 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       table.io.writeSetIdx   := t2_setIdx(tableIdx)
       table.io.writeBankMask := t2_bankMask
 
-      table.io.updateReq.valid             := t2_valid && t2_updateMask(tableIdx).reduce(_ || _)
-      table.io.updateReq.bits.wayMask      := t2_updateMask(tableIdx).asUInt
-      table.io.updateReq.bits.newTakenCtr  := t2_newTakenCtr(tableIdx)
-      table.io.updateReq.bits.newUsefulCtr := t2_newUsefulCtr(tableIdx)
+      table.io.updateReq.valid := t2_valid && (t2_updateMask(tableIdx).reduce(_ || _)
+        || (t2_needAllocate && t2_allocateTableMaskOH(tableIdx)))
 
-      table.io.allocateReq.valid        := t2_valid && t2_needAllocate && t2_allocateTableMaskOH(tableIdx)
-      table.io.allocateReq.bits.wayMask := t2_allocateWayMaskOH
-      table.io.allocateReq.bits.tag     := t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition
-      table.io.allocateReq.bits.takenCtr.value :=
-        Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U)
+      val writeEntries = Wire(Vec(NumWays, new TageEntry))
+      val writeWayMask = Wire(Vec(NumWays, Bool()))
+      writeEntries.zip(t2_updateMask(tableIdx)).zip(t2_allocateWayMaskOH.asBools).zip(
+        writeWayMask
+      ).zipWithIndex.foreach {
+        case ((((entry, update), allocate), writeWayEnable), i) =>
+          entry.valid := update || allocate
+          entry.tag := Mux(
+            allocate,
+            t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition,
+            t2_hitTag(tableIdx)(i)
+          )
+          entry.takenCtr.value := Mux(
+            allocate,
+            Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U),
+            t2_newTakenCtr(tableIdx)(i).value
+          )
+          entry.usefulCtr.value := Mux(
+            allocate,
+            Mux(t2_needResetUsefulCtr(tableIdx), 0.U, UsefulCtrInitValue.U),
+            t2_newUsefulCtr(tableIdx)(i).value
+          )
+          writeWayEnable := update || allocate
+      }
+      table.io.updateReq.bits.wayMask := writeWayMask.asUInt
+      table.io.updateReq.bits.entries := writeEntries
 
       table.io.needResetUsefulCtr       := t2_valid && t2_needAllocate && t2_needResetUsefulCtr(tableIdx)
       table.io.needIncreaseAllocFailCtr := t2_valid && t2_needAllocate && t2_needIncreaseAllocFailCtr(tableIdx)
