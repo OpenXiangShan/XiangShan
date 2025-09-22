@@ -422,14 +422,23 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   // -----
   val addr_search = io.req.bits.tag
   val hitVecT = bitmapcache.map(_.hit(addr_search))
+  val hitIdxT = PriorityEncoder(hitVecT)
 
   // -----
   // -S1--
   // -----
+  val refillindex = bitmapReplace.way
+  dontTouch(refillindex)
+  val replacedata = RegEnable(bitmapcache(refillindex).data, io.refill.valid)
+  val replaceVec = RegNext(UIntToOH(refillindex))
+  val replaceval = RegNext(io.refill.valid)
+
   val index = RegEnable(addr_search(log2Up(XLEN)-1,0), io.req.fire)
   val order = RegEnable(io.req.bits.order, io.req.fire)
   val hitVec = RegEnable(VecInit(hitVecT), io.req.fire)
-  val CacheData = RegEnable(ParallelPriorityMux(hitVecT zip bitmapcache.map(_.data)), io.req.fire)
+  val hitIdx = RegEnable(hitIdxT, io.req.fire)
+  val CacheDatas = VecInit((0 until bitmapCachesize).map(i => {Mux(replaceVec(i).asBool && replaceval, replacedata, bitmapcache(i).data)}))
+  val CacheData = CacheDatas(hitIdx)
   val cfs = Wire(Vec(tlbcontiguous, Bool()))
 
   val cfsdata = CacheData.asTypeOf(Vec(XLEN/8, UInt(8.W)))(index(log2Up(XLEN)-1, log2Up(8)))
@@ -467,8 +476,6 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   val rf_data = io.refill.bits.data
   val rf_vd = io.refill.valid
   when (!flush && rf_vd) {
-    val refillindex = bitmapReplace.way
-    dontTouch(refillindex)
     bitmapcache(refillindex).refill(rf_addr,rf_data,true.B)
     bitmapReplace.access(refillindex)
   }
