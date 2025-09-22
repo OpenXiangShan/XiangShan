@@ -57,7 +57,7 @@ class TableAllocateReq(implicit p: Parameters) extends TageBundle {
   val takenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
 }
 
-class TableSramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
+class TableSramWriteReq(numSets: Int)(implicit p: Parameters) extends TageBundle
     with HasTageParameters {
   val setIdx:                   UInt                    = UInt(log2Ceil(numSets / NumBanks).W)
   val updateReq:                Valid[TableUpdateReq]   = Valid(new TableUpdateReq)
