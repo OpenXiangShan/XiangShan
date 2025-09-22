@@ -248,6 +248,10 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   def isForVSnonLeafPTE: Bool          = gpf.isForVSnonLeafPTE
 }
 
+class WayLookupWriteBundle(implicit p: Parameters) extends WayLookupBundle {
+  val ftqIdx: FtqPtr = new FtqPtr
+}
+
 /* ***** Miss ***** */
 // ICacheMainPipe / ICachePrefetchPipe -> MissUnit
 class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
