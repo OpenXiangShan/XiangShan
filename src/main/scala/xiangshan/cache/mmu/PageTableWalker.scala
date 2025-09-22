@@ -881,9 +881,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush) && state(hptw_resp_ptr_reg) === state_addr_check
 
   val ptes = io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, new PteBundle()))
-  val gpaddr = MakeGPAddr(entries(hptw_resp_ptr_reg).ppn, getVpnn(entries(hptw_resp_ptr_reg).req_info.vpn, 0))
-  val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
-  val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
+  val gpaddr = MakeGPAddr(entries(io.hptw.resp.bits.id).ppn, getVpnn(entries(io.hptw.resp.bits.id).req_info.vpn, 0))
+  val hptw_resp = io.hptw.resp.bits.h_resp
+  val hpaddr = RegEnable(Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr)), io.hptw.resp.fire)
   val addr = RegEnable(MakeAddr(io.in.bits.ppn(ppnLen - 1, 0), getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire)
 
   when (hyper_arb1.io.out.fire) {
