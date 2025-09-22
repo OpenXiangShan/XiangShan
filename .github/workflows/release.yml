@@ -55,13 +55,24 @@ jobs:
         run: |
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
-          echo "PATH=/nfs/tools/picker/bin:$PATH" >> $GITHUB_ENV
+          # Check if picker exists before adding to PATH
+          if [ -d "/nfs/tools/picker/bin" ]; then
+            echo "PATH=/nfs/tools/picker/bin:$PATH" >> $GITHUB_ENV
+          else
+            echo "⚠️ Picker directory not found at /nfs/tools/picker/bin"
+          fi
           FILE_TIME=$(date +%Y%m)
           FILE_SHA=$(git rev-parse --short HEAD)
           FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
           echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
       - name: submodule init
         run: make init
+      - name: check picker availability
+        run: |
+          echo "Checking picker command..."
+          which picker || echo "❌ picker command not found in PATH"
+          echo "Current PATH: $PATH"
+          ls -la /nfs/tools/picker/bin/ || echo "❌ Cannot list /nfs/tools/picker/bin/"
       - name: build XSPdb 
         run: |
           make pdb
