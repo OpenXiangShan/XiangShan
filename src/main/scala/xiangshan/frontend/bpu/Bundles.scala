@@ -153,7 +153,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:       BpuMeta                = new BpuMeta
   val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+  val branches:   Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)

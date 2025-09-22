@@ -25,14 +25,14 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
-    FetchBlockSize: Int = 64, // bytes
-    FetchPorts:     Int = 2,  // 2-fetch
-
-    bpuParameters:     BpuParameters = BpuParameters(),
-    ftqParameters:     FtqParameters = FtqParameters(),
-    icacheParameters:  ICacheParameters = ICacheParameters(),
-    ifuParameters:     IfuParameters = IfuParameters(),
-    ibufferParameters: IBufferParameters = IBufferParameters()
+    FetchBlockSize:           Int = 64, // bytes
+    FetchPorts:               Int = 2,  // 2-fetch
+    ResolveEntryBranchNumber: Int = 8,
+    bpuParameters:            BpuParameters = BpuParameters(),
+    ftqParameters:            FtqParameters = FtqParameters(),
+    icacheParameters:         ICacheParameters = ICacheParameters(),
+    ifuParameters:            IfuParameters = IfuParameters(),
+    ibufferParameters:        IBufferParameters = IBufferParameters()
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
@@ -75,4 +75,6 @@ trait HasFrontendParameters extends HasXSParameter {
   //       so the enqueue port width should be the sum of them
   // FIXME: maybe ...-1?
   def IBufferEnqueueWidth: Int = FetchBlockInstNum + frontendParameters.ibufferParameters.NumWriteBank
+
+  def ResolveEntryBranchNumber: Int = frontendParameters.ResolveEntryBranchNumber
 }
