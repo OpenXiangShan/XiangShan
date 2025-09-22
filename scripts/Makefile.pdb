@@ -61,7 +61,7 @@ $(PDB_HOME)/libUTSimTop.so: $(PDB_HOME)/picker.f
 pdb-run: check-deps
 	LD_PRELOAD="$(PDB_LD_PRELOAD)" \
 	PYTHONPATH="$(PDB_PYTHONPATH)" \
-  	python3 scripts/pdb-run.py $(PDB_ARGS) $(RUN_ARGS)
+	python3 scripts/pdb-run.py $(PDB_ARGS) $(RUN_ARGS)
 
 check-deps:
 	@[ -f "$(PYTHON_DEP_FILE)" ] || { echo "Error: $(PYTHON_DEP_FILE) not found"; exit 1; }; \
@@ -73,10 +73,14 @@ check-deps:
 
 package-pdb: 
 	$(eval PACKAGE_TMP_DIR := $(shell mktemp -d))
+	mkdir -p $(PACKAGE_TMP_DIR)/XSPdb
 	cp -r scripts/xspdb $(PACKAGE_TMP_DIR)/XSPdb
 	cp -r ${PDB_HOME}/pydifftest $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp -r ${PDB_HOME}/pyxscore $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp scripts/pdb-run.py $(PACKAGE_TMP_DIR)/XSPdb
+	if [ -f "/nfs/share/unitychip/xspdb/Makefile" ]; then \
+		cp /nfs/share/unitychip/xspdb/Makefile $(PACKAGE_TMP_DIR)/XSPdb; \
+	fi
 	cd $(PACKAGE_TMP_DIR)/XSPdb/xspdb/pyxscore && ln -srf ../pydifftest/_difftest.so libdifftest.so
 	tar -cjf $(PDB_HOME)/XSPdb.tar.bz2 -C $(PACKAGE_TMP_DIR) XSPdb
 	rm -rf $(PACKAGE_TMP_DIR)

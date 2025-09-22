@@ -46,76 +46,41 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
 
   build-xspdb:
-    runs-on: bosc
-    outputs:
-      file-name: ${{ env.FILE_NAME }}
+    runs-on: [self-hosted, xspdb]
     steps:
       - uses: actions/checkout@v4
       - name: set env
         run: |
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
-          echo "PATH=/nfs/tools/picker/bin:$PATH" >> $GITHUB_ENV
           FILE_TIME=$(date +%Y%m)
           FILE_SHA=$(git rev-parse --short HEAD)
           FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
           echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
       - name: submodule init
         run: make init
+      - name: check picker availability
+        run: |
+          echo "Checking picker command..."
+          picker --check || echo "picker not exist"
       - name: build XSPdb 
         run: |
+          source /nfs/share/unitychip/activate
           make pdb
           make package-pdb
           mv ${{ env.PDB_HOME}}/XSPdb.tar.bz2 "${{ env.PDB_HOME }}/${{ env.FILE_NAME }}"
-      - name: upload build directory
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-xspdb
-          path: build/xspdb/
-
-  test-xspdb:
-    runs-on: bosc
-    needs: build-xspdb
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - name: set env
+      - name: test run pdb (PR only)
+        if: github.event_name == 'pull_request'
         run: |
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-      - name: submodule init
-        run: make init
-      - name: download build directory
-        uses: actions/download-artifact@v4
-        with:
-          name: build-xspdb
-          path: build/xspdb/
-      - name: test run pdb
-        run: |
-          make pdb-run
-
-  release-xspdb:
-    runs-on: bosc
-    needs: build-xspdb
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    steps:
-      - uses: actions/checkout@v4
-      - name: download compressed XSPdb package
-        uses: actions/download-artifact@v4
-        with:
-          name: build-xspdb
-          path: build/xspdb/
-      - name: test and release XSPdb
-        run: |
+          source /nfs/share/unitychip/activate
           cd build/xspdb
-          tar -xjf "${{ needs.build-xspdb.outputs.file-name }}"
+          tar -xjf "${FILE_NAME}"
           cd XSPdb
           make pdb-run
-      - name: upload final release
+      - name: upload compressed XSPdb package (pr merge only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ needs.build-xspdb.outputs.file-name }}-release
-          path: build/xspdb/${{ needs.build-xspdb.outputs.file-name }}
-      - name: cleanup build artifacts
-        uses: geekyeggo/delete-artifact@v5
-        with:
-          name: build-xspdb
+          name: ${{ env.FILE_NAME }}
+          path: build/xspdb/${{ env.FILE_NAME }}
+
