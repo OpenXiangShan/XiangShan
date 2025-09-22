@@ -267,14 +267,16 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
 
   class MemTriggerIO extends BaseTriggerIO{
     val isCbo = OptionWrapper(memType == MemType.STORE, Input(Bool()))
+    val isPrf = OptionWrapper(memType == MemType.LOAD,  Input(Bool()))
   }
 
   override lazy val io = IO(new MemTriggerIO)
 
   override def getTriggerHitVec(): Vec[Bool] = {
     val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+    val isPrf = io.isPrf.getOrElse(false.B)
     for (i <- 0 until TriggerNum) {
-      triggerHitVec(i) := !tdataVec(i).select && !debugMode && TriggerCmp(
+      triggerHitVec(i) := !tdataVec(i).select && !debugMode && !isPrf && TriggerCmp(
       vaddr,
       tdataVec(i).tdata2,
       tdataVec(i).matchType,
