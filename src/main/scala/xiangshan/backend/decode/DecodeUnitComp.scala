@@ -216,6 +216,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).rfWen := false.B
       csBundle(0).waitForward := true.B
       csBundle(0).blockBackward := false.B
+      csBundle(0).flushPipe := false.B
 
       csBundle(1).uopIdx := 1.U
       csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_w)
@@ -232,6 +233,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).rfWen := false.B
       csBundle(0).waitForward := true.B
       csBundle(0).blockBackward := false.B
+      csBundle(0).flushPipe := false.B
 
       csBundle(1).uopIdx := 1.U
       csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_d)
@@ -248,6 +250,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).rfWen := false.B
       csBundle(0).waitForward := true.B
       csBundle(0).blockBackward := false.B
+      csBundle(0).flushPipe := false.B
 
       csBundle(1).uopIdx := 1.U
       csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_q)
@@ -2030,7 +2033,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   // when vstart is not zero, the last uop will modify vstart to zero
   // therefore, blockback and flush pipe
-  fixedDecodedInst(numOfWB - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
+  fixedDecodedInst(numOfWB - 1.U).flushPipe := latchedInst.flushPipe
   val uopsSeq = (0 until RenameWidth).map(i => VecInit(fixedDecodedInst.zipWithIndex.filter(_._2 % RenameWidth == i).map(_._1)))
 
   /** Generate output insts and valid signals */
