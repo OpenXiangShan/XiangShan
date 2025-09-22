@@ -109,14 +109,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mbmc = io.csr.mbmc
   val bitmap_enable = (if (HasBitmapCheck) true.B else false.B) && mbmc.BME === 1.U && mbmc.CMODE === 0.U
 
-  val satp = Wire(new TlbSatpBundle())
-  when (io.req.fire) {
-    satp := Mux(io.req.bits.req_info.s2xlate =/= noS2xlate, io.csr.vsatp, io.csr.satp)
-  } .otherwise {
-    satp := Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
-  }
+  // when req.fire, should use current_satp
+  val current_satp = Mux(io.req.bits.req_info.s2xlate =/= noS2xlate, io.csr.vsatp, io.csr.satp)
+  val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val s1Pbmte = Mux(req_s2xlate =/= noS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
 
+  val current_mode = current_satp.mode
   val mode = satp.mode
   val hgatp = io.csr.hgatp
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed
@@ -341,28 +339,28 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     val req = io.req.bits
     val gvpn_wire = Wire(UInt(ptePPNLen.W))
     if (EnableSv48) {
-      when (mode === Sv48) {
+      when (current_mode === Sv48) {
         level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
         af_level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
         gpf_level := Mux(req.l2Hit, 2.U, Mux(req.l3Hit.get, 3.U, 0.U))
-        ppn := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, satp.ppn)
+        ppn := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, current_satp.ppn)
         l3Hit := req.l3Hit.get
-        gvpn_wire := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, satp.ppn)
+        gvpn_wire := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, current_satp.ppn)
       } .otherwise {
         level := Mux(req.l2Hit, 1.U, 2.U)
         af_level := Mux(req.l2Hit, 1.U, 2.U)
         gpf_level := Mux(req.l2Hit, 2.U, 0.U)
-        ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
+        ppn := Mux(req.l2Hit, io.req.bits.ppn, current_satp.ppn)
         l3Hit := false.B
-        gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
+        gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, current_satp.ppn)
       }
     } else {
       level := Mux(req.l2Hit, 1.U, 2.U)
       af_level := Mux(req.l2Hit, 1.U, 2.U)
       gpf_level := Mux(req.l2Hit, 2.U, 0.U)
-      ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
+      ppn := Mux(req.l2Hit, io.req.bits.ppn, current_satp.ppn)
       l3Hit := false.B
-      gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
+      gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, current_satp.ppn)
     }
     vpn := io.req.bits.req_info.vpn
     l2Hit := req.l2Hit
