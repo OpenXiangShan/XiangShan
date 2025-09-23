@@ -36,7 +36,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val mbtbResult:             MainBtbResult         = Input(new MainBtbResult)
     val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val takenMask:              Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
+    val condTakenMask:          Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val readBankIdx:            UInt                  = Output(UInt(log2Ceil(NumBanks).W)) // to resolveQueue
   }
   val io: TageIO = IO(new TageIO)
@@ -124,13 +124,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_mbtbPositions  = io.mbtbResult.positions
   private val s2_mbtbAttributes = io.mbtbResult.attributes
 
-  private val s2_tableResult = s2_mbtbHitMask.zip(s2_mbtbPositions).zip(s2_mbtbAttributes).map {
-    case ((mbtbHit, position), attribute) => // for each btb entry
+  private val s2_mbtbHitCondMask = s2_mbtbHitMask.zip(s2_mbtbAttributes).map {
+    case (hit, attribute) => hit && attribute.isConditional
+  }
+
+  private val s2_tableResult = s2_mbtbHitCondMask.zip(s2_mbtbPositions).map {
+    case (mbtbHit, position) => // for each btb entry
       val result = s2_allTableEntries.zipWithIndex.map {
         case (entries, tableIdx) => // for each table
           val tag        = s2_tempTag(tableIdx) ^ position // use position to distinguish different branches
           val hitWayMask = entries.map(entry => entry.valid && entry.tag === tag)
-          val hit        = mbtbHit && attribute.isConditional && hitWayMask.reduce(_ || _)
+          val hit        = mbtbHit && hitWayMask.reduce(_ || _)
           val takenCtr   = Mux1H(PriorityEncoderOH(hitWayMask), entries.map(_.takenCtr))
           (hit, takenCtr)
       }
@@ -140,22 +144,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       (hasProvider, pred)
   }
 
-  private val s2_takenMask = s2_mbtbHitMask.zip(s2_mbtbPositions).zip(s2_mbtbAttributes).zip(s2_tableResult).map {
-    case (((hit, position), attribute), result) =>
+  private val s2_condTakenMask = s2_mbtbHitCondMask.zip(s2_mbtbPositions).zip(s2_tableResult).map {
+    case ((hit, position), result) =>
       val hasProvider = result._1
       val pred        = result._2
       val altPred     = s2_baseTableCtrs(position).isPositive
-      MuxCase(
-        false.B,
-        Seq(
-          (hit && attribute.isConditional && hasProvider)       -> pred,
-          (hit && attribute.isConditional && !hasProvider)      -> altPred,
-          (hit && (attribute.isDirect || attribute.isIndirect)) -> true.B
-        )
-      )
+      hit && Mux(hasProvider, pred, altPred)
   }
 
-  io.takenMask := s2_takenMask
+  io.condTakenMask := s2_condTakenMask
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0

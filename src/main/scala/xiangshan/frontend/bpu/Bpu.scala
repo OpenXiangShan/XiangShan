@@ -252,9 +252,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       )
     )
 
-  private val s2_taken              = tage.io.takenMask.reduce(_ || _)
-  private val s2_mbtbResult         = mbtb.io.result
-  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, tage.io.takenMask)
+  private val s2_mbtbResult    = mbtb.io.result
+  private val s2_condTakenMask = tage.io.condTakenMask
+  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map {
+    case (hit, attribute) => hit && (attribute.isDirect || attribute.isIndirect)
+  })
+  private val s2_takenMask          = s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b }
+  private val s2_taken              = s2_takenMask.reduce(_ || _)
+  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, s2_takenMask)
 
   private val s3_taken                      = RegEnable(s2_taken, s2_fire)
   private val s3_mbtbResult                 = RegEnable(s2_mbtbResult, s2_fire)
