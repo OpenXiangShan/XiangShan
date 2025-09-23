@@ -48,7 +48,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     // fast wakeup
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpFp = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpVec = Flipped(backendParams.vfSchdParams.get.genIQWakeUpOutValidBundle)
+    val wakeUpVec = Flipped(backendParams.vecSchdParams.get.genIQWakeUpOutValidBundle)
     // cancelFromDatapath
     val og0Cancel = Input(ExuVec())
     // cancelFromMem

@@ -185,7 +185,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val intRegion = Module(new Region(params.intSchdParams.get))
   private val fpRegion = Module(new Region(params.fpSchdParams.get))
-  private val vecRegion = Module(new Region(params.vfSchdParams.get))
+  private val vecRegion = Module(new Region(params.vecSchdParams.get))
   private val vecExcpMod = Module(new VecExcpDataMergeModule)
 
 
