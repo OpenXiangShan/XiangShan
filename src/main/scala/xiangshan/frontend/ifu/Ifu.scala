@@ -1061,11 +1061,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.ftqPtr    := s4_fetchBlock(0).ftqIdx
   io.toIBuffer.bits.pc        := s4_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
-  io.toIBuffer.bits.prevInstrCount := PriorityMux(Seq(
-    s3_fire                 -> s3_instrCount,
-    (s4_valid && !s4_ready) -> s4_instrCount, // if s4 stall, prevInstrCount equals to instrCount
-    true.B                  -> 0.U
-  ))
+
+  /* in s4, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s3;
+   * when s3 fire (s4_valid && s4_ready), use s3_instrCount;
+   * else when s4 stall (s4_valid && !s4_ready). use s4_instrCount because prevInstrCount equals to current instrCount;
+   * otherwise, we don't care about prevInstrCount because next cycle's toIBuffer.valid won't set.
+   */
+  io.toIBuffer.bits.prevInstrCount := Mux(
+    s3_fire,
+    Mux(s3_firstIsMmio, 1.U, s3_instrCount), // FIXME: consider the second fetch block
+    Mux(s4_firstIsMmio, 1.U, s4_instrCount)
+  )
+
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
