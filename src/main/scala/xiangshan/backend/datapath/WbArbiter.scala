@@ -94,7 +94,7 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
 
   val fromFpExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.fpSchdParams.get.genExuOutputDecoupledBundle)
 
-  val fromVfExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.vfSchdParams.get.genExuOutputDecoupledBundle)
+  val fromVfExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.vecSchdParams.get.genExuOutputDecoupledBundle)
 
   val fromCSR = Input(new Bundle {
     val vstart = Vstart()

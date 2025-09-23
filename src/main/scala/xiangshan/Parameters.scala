@@ -25,7 +25,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchdBlockParams, SchedulerType, VfScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchdBlockParams, SchedulerType, VecScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
@@ -389,8 +389,8 @@ case class XSCoreParameters
     )
   }
 
-  val vfSchdParams = {
-    implicit val schdType: SchedulerType = VfScheduler()
+  val vecSchdParams = {
+    implicit val schdType: SchedulerType = VecScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX0", Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), VlWB(port = vfSchdVlWbPort, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0)), Seq(VlRD(0, 0)))),
@@ -443,7 +443,7 @@ case class XSCoreParameters
     Map(
       IntScheduler() -> intSchdParams,
       FpScheduler() -> fpSchdParams,
-      VfScheduler() -> vfSchdParams,
+      VecScheduler() -> vecSchdParams,
     ),
     Seq(
       intPreg,
