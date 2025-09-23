@@ -192,8 +192,6 @@ case class IssueBlockParams(
 
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
 
-  def VfpuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vfpu)).sum
-
   def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
 
   def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
