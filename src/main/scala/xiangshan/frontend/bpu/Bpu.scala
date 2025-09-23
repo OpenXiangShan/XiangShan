@@ -302,7 +302,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
   private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
 
-//  s3_override := s3_valid && !s3_prediction.isIdentical(s3_s1Prediction)
+  s3_override := s3_valid && !s3_prediction.isIdentical(s3_s1Prediction)
 
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_override
