@@ -155,12 +155,12 @@ class WbFuBusyTableIO(implicit p: Parameters, params: BackendParams) extends XSB
   val in = new Bundle {
     val intSchdBusyTable = MixedVec(params.intSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
     val fpSchdBusyTable = MixedVec(params.fpSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
-    val vfSchdBusyTable = MixedVec(params.vfSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
+    val vfSchdBusyTable = MixedVec(params.vecSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
   }
   val out = new Bundle {
     val intRespRead = MixedVec(params.intSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
     val fpRespRead = MixedVec(params.fpSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
-    val vfRespRead = MixedVec(params.vfSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
+    val vfRespRead = MixedVec(params.vecSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
     val wbConflictRead = MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => Output(x.genWbConflictBundle())))))
   }
 }

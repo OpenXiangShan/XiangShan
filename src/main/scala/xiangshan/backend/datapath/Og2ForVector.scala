@@ -75,15 +75,15 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
 }
 
 class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
-  private val vfSchdParams = params.schdParams(VfScheduler())
+  private val vecSchdParams = params.schdParams(VecScheduler())
 
   val flush: ValidIO[Redirect]                                    = Flipped(ValidIO(new Redirect))
   val ldCancel                                                    = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
-  val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[ExuInput]]]   = Flipped(vfSchdParams.genExuInputBundle)
+  val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[ExuInput]]]   = Flipped(vecSchdParams.genExuInputBundle)
   val fromOg1ImmInfo: Vec[ImmInfo]                                = Input(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 
-  val toVfArithExu                                                = MixedVec(vfSchdParams.genExuInputBundle)
-  val toVfIQOg2Resp                                               = MixedVec(vfSchdParams.issueBlockParams.map(_.genOG2RespBundle))
+  val toVfArithExu                                                = MixedVec(vecSchdParams.genExuInputBundle)
+  val toVfIQOg2Resp                                               = MixedVec(vecSchdParams.issueBlockParams.map(_.genOG2RespBundle))
   val toBypassNetworkImmInfo: Vec[ImmInfo]                        = Output(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 }

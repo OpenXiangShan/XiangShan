@@ -68,9 +68,9 @@ case class BackendParams(
   }
   def intSchdParams = schdParams.get(IntScheduler())
   def fpSchdParams = schdParams.get(FpScheduler())
-  def vfSchdParams = schdParams.get(VfScheduler())
+  def vecSchdParams = schdParams.get(VecScheduler())
   def allSchdParams: Seq[SchdBlockParams] =
-    (Seq(intSchdParams) :+ fpSchdParams :+ vfSchdParams)
+    (Seq(intSchdParams) :+ fpSchdParams :+ vecSchdParams)
     .filter(_.nonEmpty)
     .map(_.get)
   def allIssueParams: Seq[IssueBlockParams] =

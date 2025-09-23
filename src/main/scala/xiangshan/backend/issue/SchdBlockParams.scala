@@ -22,7 +22,9 @@ case class SchdBlockParams(
 
   def isFpSchd: Boolean = schdType == FpScheduler()
 
-  def isVfSchd: Boolean = schdType == VfScheduler()
+  def isVecSchd: Boolean = schdType == VecScheduler()
+
+  def getName: String = if (isIntSchd) "Int" else if (isFpSchd) "Fp" else "Vec"
 
   def JmpCnt: Int = issueBlockParams.map(_.JmpCnt).sum
 
@@ -90,7 +92,7 @@ case class SchdBlockParams(
 
   def numNoDataWB: Int = issueBlockParams.map(_.numNoDataWB).sum
 
-  def needOg2Resp: Boolean = isVfSchd
+  def needOg2Resp: Boolean = isVecSchd
 
   def needSrcFrm: Boolean = issueBlockParams.map(_.needSrcFrm).reduce(_ || _)
 
@@ -214,15 +216,15 @@ case class SchdBlockParams(
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VfScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {
-      case VfScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VfScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
@@ -251,7 +253,7 @@ case class SchdBlockParams(
   def genWriteBackBundle(implicit p: Parameters) =  schdType match {
     case IntScheduler() => backendParam.genIntWriteBackBundle
     case FpScheduler() => backendParam.genFpWriteBackBundle
-    case VfScheduler() => backendParam.genVfWriteBackBundle
+    case VecScheduler() => backendParam.genVfWriteBackBundle
 
   }
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)

@@ -160,7 +160,7 @@ object EnqEntry {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
       case FpScheduler()  => new EnqEntry(isComp)
-      case VfScheduler() =>
+      case VecScheduler() =>
         if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
         else new EnqEntry(isComp)
       case _ => null
