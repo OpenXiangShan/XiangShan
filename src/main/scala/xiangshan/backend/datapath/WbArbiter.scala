@@ -125,21 +125,23 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
 
   // split
   val fromExuPre = collection.mutable.Seq() ++ (io.fromIntExu ++ io.fromFpExu ++ io.fromVfExu).flatten
-  val fromExuVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
-  val vldMgu: Seq[VldMergeUnit] = fromExuVld.map(x => Module(new VldMergeUnit(x.bits.params)))
-  vldMgu.zip(fromExuVld).foreach{ case (mgu, exu) =>
-    mgu.io.flush := io.flush
-    mgu.io.writeback <> exu
-    // Since xs will flush pipe, when vstart is not 0 and execute vector mem inst, the value of vstart in CSR is the
-    // first element of this vector instruction. When exception occurs, the vstart in writeback bundle is the new one,
-    // So this vstart should never be used as the beginning of vector mem operation.
-    mgu.io.writeback.bits.vls.get.vpu.vstart := io.fromCSR.vstart
-  }
   val wbReplaceVld = fromExuPre
-  val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
-  println("vldIdx: " + vldIdx)
-  vldIdx.zip(vldMgu).foreach{ case (id, wb) =>
-    wbReplaceVld.update(id, wb.io.writebackAfterMerge)
+  if (schdParams.isVecSchd) {
+    val fromExuVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
+    val vldMgu: Seq[VldMergeUnit] = fromExuVld.map(x => Module(new VldMergeUnit(x.bits.params)))
+    vldMgu.zip(fromExuVld).foreach { case (mgu, exu) =>
+      mgu.io.flush := io.flush
+      mgu.io.writeback <> exu
+      // Since xs will flush pipe, when vstart is not 0 and execute vector mem inst, the value of vstart in CSR is the
+      // first element of this vector instruction. When exception occurs, the vstart in writeback bundle is the new one,
+      // So this vstart should never be used as the beginning of vector mem operation.
+      mgu.io.writeback.bits.vls.get.vpu.vstart := io.fromCSR.vstart
+    }
+    val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
+    println("vldIdx: " + vldIdx)
+    vldIdx.zip(vldMgu).foreach { case (id, wb) =>
+      wbReplaceVld.update(id, wb.io.writebackAfterMerge)
+    }
   }
   val fromExu = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld.toSeq)))
 
@@ -393,16 +395,6 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
     sink.valid := source.valid
     sink.bits := source.bits
     source.ready := true.B
-  }
-
-  // debug
-  if(backendParams.debugEn) {
-    dontTouch(io.fromFpExu)
-//    dontTouch(intArbiterInputsWire)
-//    dontTouch(fpArbiterInputsWire)
-//    dontTouch(vfArbiterInputsWire)
-//    dontTouch(v0ArbiterInputsWire)
-//    dontTouch(vlArbiterInputsWire)
   }
 
   // difftest
