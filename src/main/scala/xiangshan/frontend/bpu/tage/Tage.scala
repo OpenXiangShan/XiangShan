@@ -308,11 +308,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     )
 
   // FIXME: currently only allocate one table, maybe a dynamic number of allocation
-  private val t2_allocateTableMaskOH = PriorityEncoderOH(t2_canAllocateTableMask)
+  private val t2_needAllocate        = t2_hasMispredictBranch && t2_canAllocateTableMask.orR
+  private val t2_allocateTableMaskOH = PriorityEncoderOH(t2_canAllocateTableMask) & Fill(NumTables, t2_needAllocate)
   private val t2_allocateWayMask     = Mux1H(t2_allocateTableMaskOH, t2_allTableNotUsefulWayMask)
-  private val t2_allocateWayMaskOH   = PriorityEncoderOH(t2_allocateWayMask)
-
-  private val t2_needAllocate = t2_hasMispredictBranch && t2_canAllocateTableMask.orR
+  private val t2_allocateWayMaskOH   = PriorityEncoderOH(t2_allocateWayMask) & Fill(NumWays, t2_needAllocate)
 
   private val t2_allocFailTableMask =
     Mux(
@@ -336,32 +335,32 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       table.io.writeBankMask := t2_bankMask
 
       table.io.updateReq.valid := t2_valid && (t2_updateMask(tableIdx).reduce(_ || _)
-        || (t2_needAllocate && t2_allocateTableMaskOH(tableIdx)))
+        || t2_allocateTableMaskOH(tableIdx))
 
-      val writeEntries = Wire(Vec(NumWays, new TageEntry))
-      val writeWayMask = Wire(Vec(NumWays, Bool()))
-      writeEntries.zip(t2_updateMask(tableIdx)).zip(t2_allocateWayMaskOH.asBools).zip(
-        writeWayMask
-      ).zipWithIndex.foreach {
-        case ((((entry, update), allocate), writeWayEnable), i) =>
-          entry.valid := update || allocate
-          entry.tag := Mux(
-            allocate,
-            t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition,
-            t2_hitTag(tableIdx)(i)
-          )
-          entry.takenCtr.value := Mux(
-            allocate,
-            Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U),
-            t2_newTakenCtr(tableIdx)(i).value
-          )
-          entry.usefulCtr.value := Mux(
-            allocate,
-            Mux(t2_needResetUsefulCtr(tableIdx), 0.U, UsefulCtrInitValue.U),
-            t2_newUsefulCtr(tableIdx)(i).value
-          )
-          writeWayEnable := update || allocate
-      }
+      val writeEntries    = Wire(Vec(NumWays, new TageEntry))
+      val writeWayMask    = Wire(Vec(NumWays, Bool()))
+      val allocateWayMask = t2_allocateWayMaskOH & Fill(NumWays, t2_allocateTableMaskOH(tableIdx))
+      writeEntries.zip(t2_updateMask(tableIdx)).zip(allocateWayMask.asBools)
+        .zip(writeWayMask).zipWithIndex.foreach {
+          case ((((entry, update), allocate), writeWayEnable), wayIdx) =>
+            entry.valid := update || allocate
+            entry.tag := Mux(
+              allocate,
+              t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition,
+              t2_hitTag(tableIdx)(wayIdx)
+            )
+            entry.takenCtr.value := Mux(
+              allocate,
+              Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U),
+              t2_newTakenCtr(tableIdx)(wayIdx).value
+            )
+            entry.usefulCtr.value := Mux(
+              allocate,
+              Mux(t2_needResetUsefulCtr(tableIdx), 0.U, UsefulCtrInitValue.U),
+              t2_newUsefulCtr(tableIdx)(wayIdx).value
+            )
+            writeWayEnable := update || allocate
+        }
       table.io.updateReq.bits.wayMask := writeWayMask.asUInt
       table.io.updateReq.bits.entries := writeEntries
 
