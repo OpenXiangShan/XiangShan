@@ -640,14 +640,13 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
           res.bits.triggerPC := train.bits.pc
           res.bits.triggerVA := train.bits.vaddr
           res.bits.prefetchVA := getPrefetchVAddr(train.bits.vaddr, deltaInfo.delta)
-          res.bits.prefetchTarget := PrefetchTarget.L1.id.U
-          // when(deltaInfo.status === DeltaStatus.L1_PREF) {
-          //   res.bits.prefetchTarget := PrefetchTarget.L1.id.U
-          // }.elsewhen(deltaInfo.status === DeltaStatus.L2_PREF || deltaInfo.status === DeltaStatus.L2_PREF_REPL){
-          //   res.bits.prefetchTarget := PrefetchTarget.L2.id.U
-          // }.otherwise{
-          //   res.bits.prefetchTarget := PrefetchTarget.L3.id.U
-          // }
+          when(deltaInfo.status === DeltaStatus.L1_PREF) {
+            res.bits.prefetchTarget := PrefetchTarget.L1.id.U
+          }.elsewhen(deltaInfo.status === DeltaStatus.L2_PREF || deltaInfo.status === DeltaStatus.L2_PREF_REPL){
+            res.bits.prefetchTarget := PrefetchTarget.L2.id.U
+          }.otherwise{
+            res.bits.prefetchTarget := PrefetchTarget.L3.id.U
+          }
         }
       }
     }
