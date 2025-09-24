@@ -227,8 +227,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
   private val s2_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
 
-  private val wbStage2Check = Wire(Vec(FetchPorts, new FinalPredCheckResult))
-
   // When invalidTaken is true, we can not flush s2_prevLastIsHalfRvi because the fetch block after it is fall-through.
   when(backendRedirect) {
     s2_prevLastIsHalfRvi := false.B
@@ -463,6 +461,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s3_reqIsUncache = s3_valid && s3_icacheMeta(0).isUncache &&
     s3_icacheMeta(0).exception.isNone
+  private val s3_alignFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
+  s3_alignFetchBlock                      := s3_fetchBlock
+  s3_alignFetchBlock(0).predTakenIdx.bits := s3_fetchBlock(0).predTakenIdx.bits + s3_prevIBufEnqPtr.value(1, 0)
+  s3_alignFetchBlock(1).predTakenIdx.bits := s3_fetchBlock(1).predTakenIdx.bits + s3_prevIBufEnqPtr.value(1, 0)
+
   /* *****************************************************************************
    * IFU Stage 4
    * - handle MMIO instruction
@@ -479,13 +482,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_valid               = WireInit(false.B)
   private val s4_firstValid          = ValidHold(s3_fire && !s3_flush && s3_firstValid, s4_fire, s4_flush)
   private val s4_secondValid         = ValidHold(s3_fire && !s3_flush && s3_secondValid, s4_fire, s4_flush)
-  private val s4_fetchBlock          = RegEnable(s3_fetchBlock, s3_fire)
+  private val s4_alignFetchBlock     = RegEnable(s3_alignFetchBlock, s3_fire)
   private val s4_prevIBufEnqPtr      = RegEnable(s3_prevIBufEnqPtr, s3_fire)
   private val s4_rawIndex            = RegEnable(s3_rawIndex, s3_fire)
   private val s4_prevShiftSelect     = RegEnable(s3_prevShiftSelect, s3_fire)
   private val s4_prevLastRvi         = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
   private val s4_currentLastHalfData = RegEnable(s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0), s3_fire)
   private val s4_currentLastHalfRvi  = RegEnable(s3_currentLastHalfRvi, s3_fire)
+  private val s4_currentLastHalfPC   = RegEnable(s3_realAlignPc(s3_instrCount + s3_alignShiftNum), s3_fire)
   private val s4_instrCount          = RegEnable(s3_instrCount, s3_fire)
   s4_fire := io.toIBuffer.fire
 
@@ -521,21 +525,21 @@ class Ifu(implicit p: Parameters) extends IfuModule
     } else {
       catPC(
         s4_alignCompactInfo.instrPcLower(i),
-        Mux(s4_alignCompactInfo.selectBlock(i), s4_fetchBlock(1).pcHigh, s4_fetchBlock(0).pcHigh),
-        Mux(s4_alignCompactInfo.selectBlock(i), s4_fetchBlock(1).pcHighPlus1, s4_fetchBlock(0).pcHighPlus1)
+        Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).pcHigh, s4_alignFetchBlock(0).pcHigh),
+        Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).pcHighPlus1, s4_alignFetchBlock(0).pcHighPlus1)
       )
     }
   )
 
   // Exapnd 1 bit to prevent overflow when assert
   private val s4_fetchStartAddr = VecInit.tabulate(FetchPorts)(i =>
-    PrunedAddrInit(Cat(0.U(1.W), s4_fetchBlock(i).startVAddr.toUInt))
+    PrunedAddrInit(Cat(0.U(1.W), s4_alignFetchBlock(i).startVAddr.toUInt))
   )
   private val s4_fetchNextStartAddr = VecInit.tabulate(FetchPorts)(i =>
-    PrunedAddrInit(Cat(0.U(1.W), s4_fetchBlock(i).target.toUInt))
+    PrunedAddrInit(Cat(0.U(1.W), s4_alignFetchBlock(i).target.toUInt))
   )
   for (i <- 0 until FetchPorts) {
-    when(s4_valid && !s4_fetchBlock(i).takenCfiOffset.valid) {
+    when(s4_valid && !s4_alignFetchBlock(i).takenCfiOffset.valid) {
       assert(
         s4_fetchStartAddr(i) + (2 * FetchBlockInstNum).U >= s4_fetchNextStartAddr(i),
         s"More than ${2 * FetchBlockInstNum} Bytes fetch is not allowed!"
@@ -543,12 +547,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     }
   }
 
-  private val s4_alignFoldPc          = RegEnable(s3_alignFoldPc, s3_fire)
-  private val s4_rawInstrEndVec       = RegEnable(s3_rawInstrEndVec, s3_fire)
-  private val s4_prevLastIsHalfRvi    = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
-  private val s4_uncacheLowerPc       = RegEnable(s3_alignCompactInfo.instrPcLower(s3_alignShiftNum), s3_fire)
-  private val s4_alignBlockStartPos   = RegEnable(s3_alignBlockStartPos, s3_fire)
-  private val s4_uncachePc            = catPC(s4_uncacheLowerPc, s4_fetchBlock(0).pcHigh, s4_fetchBlock(0).pcHighPlus1)
+  private val s4_alignFoldPc        = RegEnable(s3_alignFoldPc, s3_fire)
+  private val s4_rawInstrEndVec     = RegEnable(s3_rawInstrEndVec, s3_fire)
+  private val s4_prevLastIsHalfRvi  = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
+  private val s4_uncacheLowerPc     = RegEnable(s3_alignCompactInfo.instrPcLower(s3_alignShiftNum), s3_fire)
+  private val s4_alignBlockStartPos = RegEnable(s3_alignBlockStartPos, s3_fire)
+  private val s4_uncachePc = catPC(s4_uncacheLowerPc, s4_alignFetchBlock(0).pcHigh, s4_alignFetchBlock(0).pcHighPlus1)
   private val s4_reqIsUncache         = RegEnable(s3_reqIsUncache, s3_fire)
   private val s4_uncacheCanGo         = uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage
   private val s4_uncacheCrossPageMask = s4_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
@@ -572,7 +576,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheUnit.io.req.fire) {
     uncacheBusy           := true.B
     uncachePc             := Mux(prevUncacheCrossPage, uncachePc, s4_alignPc(s4_shiftNum))
-    uncacheCrossPageCheck := (s4_fetchBlock(0).startVAddr + 2.U) === s4_fetchBlock(0).target
+    uncacheCrossPageCheck := (s4_alignFetchBlock(0).startVAddr + 2.U) === s4_alignFetchBlock(0).target
   }.elsewhen(uncacheUnit.io.resp.valid) {
     uncacheBusy := false.B
     // uncachePc := uncachePc
@@ -580,7 +584,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   uncacheUnit.io.req.valid       := s4_valid && s4_reqIsUncache && !uncacheBusy
-  uncacheUnit.io.req.bits.ftqIdx := s4_fetchBlock(0).ftqIdx
+  uncacheUnit.io.req.bits.ftqIdx := s4_alignFetchBlock(0).ftqIdx
   uncacheUnit.io.req.bits.pbmt   := s4_icacheMeta(0).itlbPbmt
   uncacheUnit.io.req.bits.isMmio := s4_icacheMeta(0).pmpMmio
   uncacheUnit.io.req.bits.paddr  := s4_icacheMeta(0).pAddr
@@ -618,26 +622,21 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s4_ready := (io.toIBuffer.ready && (s4_uncacheCanGo || !s4_reqIsUncache)) || !s4_valid
 
   /* ** prediction result check ** */
-  checkerIn.valid                := s4_valid
-  checkerIn.bits.instrJumpOffset := s4_alignJumpOffset
-  checkerIn.bits.instrValid      := s4_alignInstrValid.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
-  checkerIn.bits.instrPds        := s4_alignPds
-  checkerIn.bits.instrPc         := s4_alignPc
-  checkerIn.bits.isPredTaken     := s4_alignIsPredTaken
-  checkerIn.bits.ignore          := s4_ignore.asBools
-  checkerIn.bits.shiftNum        := s4_prevIBufEnqPtr.value(1, 0)
-
-  checkerIn.bits.firstPredTakenIdx.valid := s4_fetchBlock(0).predTakenIdx.valid
-  checkerIn.bits.firstPredTakenIdx.bits :=
-    Cat(0.U(1.W), s4_fetchBlock(0).predTakenIdx.bits) + s4_prevIBufEnqPtr.value(1, 0) // Timing
-  checkerIn.bits.secondPredTakenIdx.valid := s4_fetchBlock(1).predTakenIdx.valid
-  checkerIn.bits.secondPredTakenIdx.bits :=
-    Cat(0.U(1.W), s4_fetchBlock(1).predTakenIdx.bits) + s4_prevIBufEnqPtr.value(1, 0)
-  checkerIn.bits.firstTarget      := s4_fetchBlock(0).target
-  checkerIn.bits.secondTarget     := s4_fetchBlock(1).target
-  checkerIn.bits.selectFetchBlock := s4_alignCompactInfo.selectBlock
-  checkerIn.bits.invalidTaken     := s4_alignInvalidTaken
-  checkerIn.bits.instrEndOffset   := s4_alignCompactInfo.instrEndOffset
+  checkerIn.valid                   := s4_valid
+  checkerIn.bits.instrJumpOffset    := s4_alignJumpOffset
+  checkerIn.bits.instrValid         := s4_alignInstrValid.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
+  checkerIn.bits.instrPds           := s4_alignPds
+  checkerIn.bits.instrPc            := s4_alignPc
+  checkerIn.bits.isPredTaken        := s4_alignIsPredTaken
+  checkerIn.bits.ignore             := s4_ignore.asBools
+  checkerIn.bits.shiftNum           := s4_prevIBufEnqPtr.value(1, 0)
+  checkerIn.bits.firstPredTakenIdx  := s4_alignFetchBlock(0).predTakenIdx
+  checkerIn.bits.secondPredTakenIdx := s4_alignFetchBlock(1).predTakenIdx
+  checkerIn.bits.firstTarget        := s4_alignFetchBlock(0).target
+  checkerIn.bits.secondTarget       := s4_alignFetchBlock(1).target
+  checkerIn.bits.selectFetchBlock   := s4_alignCompactInfo.selectBlock
+  checkerIn.bits.invalidTaken       := s4_alignInvalidTaken
+  checkerIn.bits.instrEndOffset     := s4_alignCompactInfo.instrEndOffset
 
   /* ** frontend Trigger  ** */
   frontendTrigger.io.pds             := s4_alignPds
@@ -653,7 +652,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.valid     := s4_alignInstrValid.asUInt & ignoreRange
   io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedTwoFetchRange.asUInt & s4_alignInstrValid.asUInt & ignoreRange
   io.toIBuffer.bits.pd        := s4_alignPds
-  io.toIBuffer.bits.ftqPtr    := s4_fetchBlock(0).ftqIdx
+  io.toIBuffer.bits.ftqPtr    := s4_alignFetchBlock(0).ftqIdx
   io.toIBuffer.bits.pc        := s4_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
 
@@ -709,7 +708,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // s4_gpAddr is valid iff gpf is detected.
   // Uncache doesn’t request iTLB; it only returns bus exceptions.
   io.toBackend.gpAddrMem.wen                     := s4_toIBufferValid && s4_icacheMeta(0).exception.isGpf
-  io.toBackend.gpAddrMem.waddr                   := s4_fetchBlock(0).ftqIdx.value
+  io.toBackend.gpAddrMem.waddr                   := s4_alignFetchBlock(0).ftqIdx.value
   io.toBackend.gpAddrMem.wdata.gpaddr            := s4_icacheMeta(0).gpAddr.toUInt
   io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := s4_icacheMeta(0).isForVSnonLeafPTE
 
@@ -727,12 +726,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncacheTarget =
     Mux(
       uncacheIsRvc || prevUncacheCrossPage || uncacheCheckFault,
-      s4_fetchBlock(0).startVAddr + 2.U,
-      s4_fetchBlock(0).startVAddr + 4.U
+      s4_alignFetchBlock(0).startVAddr + 2.U,
+      s4_alignFetchBlock(0).startVAddr + 4.U
     )
   uncacheFlushWb.valid          := s4_reqIsUncache && !backendRedirect && (s4_uncacheCanGo || uncacheCheckFault)
-  uncacheFlushWb.bits.ftqIdx    := s4_fetchBlock(0).ftqIdx
-  uncacheFlushWb.bits.pc        := s4_fetchBlock(0).startVAddr.toUInt
+  uncacheFlushWb.bits.ftqIdx    := s4_alignFetchBlock(0).ftqIdx
+  uncacheFlushWb.bits.pc        := s4_alignFetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
   uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
@@ -782,7 +781,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbValid               = RegNext(wbEnable, init = false.B)
   private val wbFirstValid          = RegEnable(s4_firstValid, wbEnable)
   private val wbSecondValid         = RegEnable(s4_secondValid, wbEnable)
-  private val wbFetchBlock          = RegEnable(s4_fetchBlock, wbEnable)
+  private val wbAlignFetchBlock     = RegEnable(s4_alignFetchBlock, wbEnable)
   private val wbPrevIBufEnqPtr      = RegEnable(s4_prevIBufEnqPtr, wbEnable)
   private val wbInstrCount          = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
   private val wbAlignCompactInfo    = RegEnable(s4_alignCompactInfo, wbEnable)
@@ -790,49 +789,36 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbAlignInstrEndOffset = wbAlignCompactInfo.instrEndOffset
 
   private val wbCurrentLastHalfData = RegEnable(s4_currentLastHalfData, wbEnable)
-  // private val wbPrevLastHalfPc      = RegEnable(s4_prevLastHalfPc, wbEnable)
-  private val wbCurrentLastRvi = RegEnable(s4_currentLastHalfRvi, wbEnable)
+  private val wbCurrentLastHalfPc   = RegEnable(s4_currentLastHalfPC, wbEnable)
+  private val wbCurrentLastRvi      = RegEnable(s4_currentLastHalfRvi, wbEnable)
 
-  s4_wbNotFlush := wbFetchBlock(0).ftqIdx === s4_fetchBlock(0).ftqIdx && s4_valid && wbValid
+  s4_wbNotFlush := wbAlignFetchBlock(0).ftqIdx === s4_alignFetchBlock(0).ftqIdx && s4_valid && wbValid
 
-  wbStage2Check(0) := checkerOutStage2.fixedFirst
-  wbStage2Check(1) := checkerOutStage2.fixedSecond
-
-  private val wbInstrRange = wbStage2Check.zipWithIndex.map { case (check, i) =>
-    check.instrRange & RegEnable(s4_fetchBlock(i).instrRange, wbEnable)
+  private val checkerRedirect = checkerOutStage2.checkerRedirect
+  private val checkFlushWb = {
+    val b         = Wire(Valid(new FrontendRedirect))
+    val missIdx   = checkerRedirect.bits.misIdx.bits
+    val ftqIdx    = VecInit(wbAlignFetchBlock.map(_.ftqIdx))
+    val startAddr = VecInit(wbAlignFetchBlock.map(_.startVAddr.toUInt))
+    b.valid          := wbValid && checkerRedirect.valid
+    b.bits.ftqIdx    := Mux(checkerRedirect.bits.selectBlock, ftqIdx(1), ftqIdx(0))
+    b.bits.pc        := Mux(checkerRedirect.bits.selectBlock, startAddr(1), startAddr(0))
+    b.bits.taken     := checkerRedirect.bits.taken
+    b.bits.ftqOffset := checkerRedirect.bits.endOffset
+    b.bits.isRVC     := checkerRedirect.bits.isRVC
+    b.bits.attribute := checkerRedirect.bits.attribute
+    b.bits.target    := checkerRedirect.bits.target.toUInt
+    b
   }
 
-  private val checkFlushWb = VecInit((0 until FetchPorts).map { i =>
-    val b       = Wire(Valid(new FrontendRedirect))
-    val missIdx = wbStage2Check(i).misIdx.bits
-    // TODO: Logic is redundant, to be cleaned up later.
-    b.valid          := wbValid && wbFirstValid && wbStage2Check(i).misIdx.valid
-    b.bits.ftqIdx    := wbFetchBlock(i).ftqIdx
-    b.bits.pc        := wbFetchBlock(i).startVAddr.toUInt
-    b.bits.taken     := wbStage2Check(i).cfiIdx.valid
-    b.bits.ftqOffset := wbAlignInstrEndOffset(wbStage2Check(i).misIdx.bits)
-    b.bits.isRVC     := wbStage2Check(i).isRVC
-    b.bits.attribute := wbStage2Check(i).attribute
-    b.bits.target    := wbStage2Check(i).target.toUInt
-    b
-  })
+  toFtq.wbRedirect := Mux(wbValid, checkFlushWb, uncacheFlushWb)
 
-  checkFlushWb(0).valid := wbValid && wbFirstValid && wbStage2Check(0).misIdx.valid
-  checkFlushWb(1).valid := wbValid && wbSecondValid && wbStage2Check(1).misIdx.valid
-
-  toFtq.wbRedirect(0) := Mux(wbValid, checkFlushWb(0), uncacheFlushWb)
-  toFtq.wbRedirect(1) := checkFlushWb(1)
-
-  wbRedirect.valid          := checkFlushWb(0).valid || checkFlushWb(1).valid
-  wbRedirect.isHalfInstr    := wbCurrentLastRvi && wbStage2Check(0).invalidTaken
+  wbRedirect.valid          := checkFlushWb.valid
+  wbRedirect.isHalfInstr    := wbCurrentLastRvi && checkerRedirect.bits.invalidTaken
   wbRedirect.instrCount     := wbInstrCount
   wbRedirect.prevIBufEnqPtr := wbPrevIBufEnqPtr
-  wbRedirect.halfPc := catPC(
-    wbAlignInstrPcLower(wbStage2Check(0).misIdx.bits),
-    wbFetchBlock(0).pcHigh,
-    wbFetchBlock(0).pcHighPlus1
-  )
-  wbRedirect.halfData := wbCurrentLastHalfData
+  wbRedirect.halfPc         := checkerRedirect.bits.mispredPc
+  wbRedirect.halfData       := wbCurrentLastHalfData
 
   private val s2_icachePerfInfo = RegEnable(io.fromICache.perf, s1_fire)
   private val s3_icachePerfInfo = RegEnable(s2_icachePerfInfo, s2_fire)
@@ -869,20 +855,19 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(1)         := wbValid && wbSecondValid
   perfAnalyzer.io.perfInfo.checkPerfInfo.perfFaultType(0) := checkerOutStage2.perfFaultType(0)
   perfAnalyzer.io.perfInfo.checkPerfInfo.perfFaultType(1) := checkerOutStage2.perfFaultType(1)
-  perfAnalyzer.io.perfInfo.checkPerfInfo.startVAddr(0)    := wbFetchBlock(0).startVAddr.toUInt
-  perfAnalyzer.io.perfInfo.checkPerfInfo.startVAddr(1)    := wbFetchBlock(1).startVAddr.toUInt
-  perfAnalyzer.io.perfInfo.checkPerfInfo.target(0)        := wbFetchBlock(0).target.toUInt
-  perfAnalyzer.io.perfInfo.checkPerfInfo.target(1)        := wbFetchBlock(1).target.toUInt
-  perfAnalyzer.io.perfInfo.checkPerfInfo.taken(0)         := wbStage2Check(0).cfiIdx.valid
-  perfAnalyzer.io.perfInfo.checkPerfInfo.taken(1)         := wbStage2Check(1).cfiIdx.valid
-  perfAnalyzer.io.perfInfo.checkPerfInfo.misPred(0)       := wbStage2Check(0).misIdx.valid
-  perfAnalyzer.io.perfInfo.checkPerfInfo.misPred(1)       := wbStage2Check(1).misIdx.valid
-  perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset(0)  := checkFlushWb(0).bits.ftqOffset
-  perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset(1)  := checkFlushWb(1).bits.ftqOffset
+  perfAnalyzer.io.perfInfo.checkPerfInfo.startVAddr(0)    := wbAlignFetchBlock(0).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.checkPerfInfo.startVAddr(1)    := wbAlignFetchBlock(1).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.checkPerfInfo.target(0)        := wbAlignFetchBlock(0).target.toUInt
+  perfAnalyzer.io.perfInfo.checkPerfInfo.target(1)        := wbAlignFetchBlock(1).target.toUInt
+  perfAnalyzer.io.perfInfo.checkPerfInfo.taken(0)         := wbAlignFetchBlock(0).takenCfiOffset.valid
+  perfAnalyzer.io.perfInfo.checkPerfInfo.taken(1)         := wbAlignFetchBlock(1).takenCfiOffset.valid
+  perfAnalyzer.io.perfInfo.checkPerfInfo.misPred          := checkerRedirect.valid
+  perfAnalyzer.io.perfInfo.checkPerfInfo.selectBlock      := checkerRedirect.bits.selectBlock
+  perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset     := checkerRedirect.bits.endOffset
 
   perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := io.toIBuffer.fire
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
-  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s4_fetchBlock(0).startVAddr.toUInt
-  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s4_fetchBlock(1).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s4_alignFetchBlock(0).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s4_alignFetchBlock(1).startVAddr.toUInt
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 }

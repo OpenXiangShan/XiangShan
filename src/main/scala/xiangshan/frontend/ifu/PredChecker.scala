@@ -56,9 +56,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       }
       // to Ftq write back port (stage 2) ---- Output data with offset removed for FTQ write-back
       class S2Out(implicit p: Parameters) extends IfuBundle {
-        val fixedFirst:    FinalPredCheckResult = new FinalPredCheckResult
-        val fixedSecond:   FinalPredCheckResult = new FinalPredCheckResult
-        val perfFaultType: Vec[UInt]            = Vec(FetchPorts, PreDecodeFaultType())
+        val checkerRedirect: Valid[PredCheckRedirect] = Valid(new PredCheckRedirect)
+        val perfFaultType:   Vec[UInt]                = Vec(FetchPorts, PreDecodeFaultType())
       }
       val stage1Out: S1Out = new S1Out
       val stage2Out: S2Out = new S2Out
@@ -111,9 +110,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   retFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
     pd.isRet && instrValid(i) && !isPredTaken(i) && !ignore(i)
   })
+  notCfiTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
+  })
   private val remaskFault =
     VecInit((0 until IBufferEnqueueWidth).map(i =>
-      jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i)
+      jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i) || notCfiTaken(i)
     ))
   private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
   private val needRemask = ParallelOR(remaskFault)
@@ -150,11 +152,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       firstTaken || secondTaken
   })
 
-  /** second check: faulse prediction fault and target fault */
-  notCfiTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    fixedRange(i) && instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
-  })
-
   private val fixedFirstTakenInstrIdx =
     WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(FetchBlockInstOffsetWidth.W))))
   private val fixedSecondTakenInstrIdx =
@@ -165,12 +162,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   fixedSecondTakenInstrIdx.valid := ParallelOR(fixedTwoFetchSecondTaken)
   fixedSecondTakenInstrIdx.bits  := ParallelPriorityEncoder(fixedTwoFetchSecondTaken)
 
-  private val mispredInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(IBufferEnqueueWidth).W))))
+  private val mispredIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(IBufferEnqueueWidth).W))))
   private val stage1Fault = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || notCfiTaken(i) || invalidTaken(i)
   )
-  mispredInstrIdx.valid := ParallelOR(stage1Fault)
-  mispredInstrIdx.bits  := ParallelPriorityEncoder(stage1Fault)
+  mispredIdx.valid := ParallelOR(stage1Fault)
+  mispredIdx.bits  := ParallelPriorityEncoder(stage1Fault)
 
   private val jumpTargets = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     (pc(i) + jumpOffset(i)).asTypeOf(PrunedAddr(VAddrBits))
@@ -178,86 +175,57 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val seqTargets =
     VecInit((0 until IBufferEnqueueWidth).map(i => pc(i) + Mux(pds(i).isRVC || invalidTaken(i), 2.U, 4.U)))
 
-  private val mispredIsJump =
-    instrValid(mispredInstrIdx.bits) &&
-      mispredInstrIdx.valid &&
-      (pds(mispredInstrIdx.bits).isJal || pds(mispredInstrIdx.bits).isBr)
+  private val fixedIsJump =
+    instrValid(mispredIdx.bits) &&
+      mispredIdx.valid &&
+      (pds(mispredIdx.bits).isJal || pds(mispredIdx.bits).isBr)
 
-  private val firstFinalIdx   = Mux(mispredInstrIdx.valid, mispredInstrIdx.bits, firstTakenIdx)
-  private val firstFinalIsRVC = pds(firstFinalIdx).isRVC
-  private val firstAttribute  = WireDefault(0.U.asTypeOf(new BranchAttribute))
-  firstAttribute.branchType := pds(firstFinalIdx).brType
-  firstAttribute.rasAction  := Cat(pds(firstFinalIdx).isCall, pds(firstFinalIdx).isRet)
-  /* *****************************************************************************
-   * PredChecker Stage 2
-   * ***************************************************************************** */
-  private val mispredIdxNext            = RegEnable(mispredInstrIdx, io.req.valid)
-  private val mispredIsFirstBlockNext   = RegEnable(!selectFetchBlock(mispredInstrIdx.bits), io.req.valid)
-  private val mispredInstrEndOffsetNext = RegEnable(instrEndOffset(mispredInstrIdx.bits), io.req.valid)
-  private val mispredIsJumpNext         = RegEnable(mispredIsJump, io.req.valid)
+  private val finalIsRVC        = pds(mispredIdx.bits).isRVC
+  private val finalInvalidTaken = invalidTaken(mispredIdx.bits)
+  private val finalSelectBlock  = selectFetchBlock(mispredIdx.bits)
+  private val finalPc           = pc(mispredIdx.bits)
+  private val finalAttribute    = WireDefault(BranchAttribute.None)
+  finalAttribute.branchType := pds(mispredIdx.bits).brType
+  finalAttribute.rasAction  := Cat(pds(mispredIdx.bits).isCall, pds(mispredIdx.bits).isRet)
 
-  private val fixedFirstTakenInstrIdxNext  = RegEnable(fixedFirstTakenInstrIdx, io.req.valid)
-  private val fixedSecondTakenInstrIdxNext = RegEnable(fixedSecondTakenInstrIdx, io.req.valid)
-  private val instrEndOffsetNext           = RegEnable(instrEndOffset, io.req.valid)
-  private val firstTakenIdxNext            = RegEnable(firstTakenIdx, io.req.valid)
-  private val secondTakenIdxNext           = RegEnable(secondTakenIdx, io.req.valid)
-  private val firstPredTargetNext          = RegEnable(firstPredTarget, io.req.valid)
-  private val secondPredTargetNext         = RegEnable(secondPredTarget, io.req.valid)
+  // The actual end of the prediction block is the instruction before invalidTaken.
+  private val endOffset = instrEndOffset(mispredIdx.bits)
 
-  private val jumpTargetsNext = RegEnable(jumpTargets, io.req.valid)
-  private val seqTargetsNext  = RegEnable(seqTargets, io.req.valid)
+  private val mispredIdxNext       = RegEnable(mispredIdx, io.req.valid)
+  private val finalIsRVCNext       = RegEnable(finalIsRVC, io.req.valid)
+  private val finalAttributeNext   = RegEnable(finalAttribute, io.req.valid)
+  private val invalidTakenNext     = RegEnable(finalInvalidTaken, io.req.valid)
+  private val finalSelectBlockNext = RegEnable(finalSelectBlock, io.req.valid)
+  private val finalFirstTakenNext  = RegEnable(fixedFirstTakenInstrIdx.valid, io.req.valid)
+  private val finalSecondTakenNext = RegEnable(fixedSecondTakenInstrIdx.valid, io.req.valid)
+  private val jumpTargetsNext      = RegEnable(jumpTargets, io.req.valid)
+  private val seqTargetsNext       = RegEnable(seqTargets, io.req.valid)
+  private val fixedIsJumpNext      = RegEnable(fixedIsJump, io.req.valid)
+  private val endOffsetNext        = RegEnable(endOffset, io.req.valid)
+  private val finalPcNext          = RegEnable(finalPc, io.req.valid)
+  private val wbValid              = RegNext(io.req.valid, init = false.B)
 
-  private val firstPredTakenNext  = RegEnable(firstPredTaken, io.req.valid)
-  private val firstFinalIsRVCNext = RegEnable(firstFinalIsRVC, io.req.valid)
-  private val firstAttributeNext  = RegEnable(firstAttribute, io.req.valid)
-  private val fixedRangeNext      = RegEnable(fixedRange, io.req.valid)
+  // invalidTaken has no matching valid instruction in the block.
+  private val fixedTaken = !invalidTakenNext && Mux(finalSelectBlockNext, finalFirstTakenNext, finalSecondTakenNext)
+  private val fixedTarget =
+    Mux(fixedIsJumpNext && !invalidTakenNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
+  io.resp.stage2Out.checkerRedirect.valid             := mispredIdxNext.valid && wbValid
+  io.resp.stage2Out.checkerRedirect.bits.target       := fixedTarget
+  io.resp.stage2Out.checkerRedirect.bits.misIdx       := mispredIdxNext
+  io.resp.stage2Out.checkerRedirect.bits.taken        := fixedTaken
+  io.resp.stage2Out.checkerRedirect.bits.isRVC        := finalIsRVCNext
+  io.resp.stage2Out.checkerRedirect.bits.attribute    := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
+  io.resp.stage2Out.checkerRedirect.bits.selectBlock  := finalSelectBlockNext
+  io.resp.stage2Out.checkerRedirect.bits.invalidTaken := invalidTakenNext
+  io.resp.stage2Out.checkerRedirect.bits.mispredPc    := finalPcNext
+  // FIXME: Not a reliable block-end marker; special cases may have only half a branch predicted.(invalidTaken)
+  io.resp.stage2Out.checkerRedirect.bits.endOffset := endOffsetNext
+
   // --------- These registers are only for performance debugging purposes ---------------------/
   private val jalFaultVecNext  = RegEnable(jalFaultVec, io.req.valid)
   private val jalrFaultVecNext = RegEnable(jalrFaultVec, io.req.valid)
   private val retFaultVecNext  = RegEnable(retFaultVec, io.req.valid)
   private val notCFITakenNext  = RegEnable(notCfiTaken, io.req.valid)
-  private val invalidTakenNext = RegEnable(invalidTaken, io.req.valid)
-
-  private val fixFirstMispred  = mispredIdxNext.valid && mispredIsFirstBlockNext
-  private val fixSecondMispred = mispredIdxNext.valid && !mispredIsFirstBlockNext
-  private val fixedFirstRawInstrRange =
-    Fill(FetchBlockInstNum, !fixFirstMispred) |
-      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
-        FetchBlockInstOffsetWidth - 1,
-        0
-      )).asUInt).asUInt
-
-  private val fixedSecondRawInstrRange =
-    Fill(FetchBlockInstNum, !fixSecondMispred) |
-      (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~mispredInstrEndOffsetNext(
-        FetchBlockInstOffsetWidth - 1,
-        0
-      )).asUInt).asUInt
-
-  private val mispredTarget =
-    Mux(mispredIsJumpNext, jumpTargetsNext(mispredIdxNext.bits), seqTargetsNext(mispredIdxNext.bits))
-
-  // TODO: Need to rethink this interface
-  io.resp.stage2Out.fixedFirst.target       := Mux(fixFirstMispred, mispredTarget, firstPredTargetNext)
-  io.resp.stage2Out.fixedFirst.misIdx.valid := fixFirstMispred
-  io.resp.stage2Out.fixedFirst.misIdx.bits  := Mux(fixFirstMispred, mispredIdxNext.bits, firstTakenIdxNext)
-  io.resp.stage2Out.fixedFirst.cfiIdx.valid := fixedFirstTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedFirst.cfiIdx.bits  := fixedFirstTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedFirst.instrRange   := fixedFirstRawInstrRange
-  io.resp.stage2Out.fixedFirst.invalidTaken := fixFirstMispred && invalidTakenNext(mispredIdxNext.bits)
-  io.resp.stage2Out.fixedFirst.isRVC        := firstFinalIsRVCNext
-  io.resp.stage2Out.fixedFirst.attribute    := firstAttributeNext
-
-  io.resp.stage2Out.fixedSecond.target       := Mux(fixSecondMispred, mispredTarget, secondPredTargetNext)
-  io.resp.stage2Out.fixedSecond.misIdx.valid := fixSecondMispred
-  io.resp.stage2Out.fixedSecond.misIdx.bits  := Mux(fixSecondMispred, mispredIdxNext.bits, secondTakenIdxNext)
-  io.resp.stage2Out.fixedSecond.cfiIdx.valid := fixedSecondTakenInstrIdxNext.valid
-  io.resp.stage2Out.fixedSecond.cfiIdx.bits  := fixedSecondTakenInstrIdxNext.bits
-  io.resp.stage2Out.fixedSecond.instrRange   := fixedSecondRawInstrRange
-  // FIXME: second fetch block invalid taken
-  io.resp.stage2Out.fixedSecond.invalidTaken := false.B
-  io.resp.stage2Out.fixedSecond.isRVC        := false.B
-  io.resp.stage2Out.fixedSecond.attribute    := DontCare
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
@@ -270,6 +238,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     )
   )
 
-  io.resp.stage2Out.perfFaultType(0) := Mux(fixFirstMispred, faultType, PreDecodeFaultType.NoFault)
-  io.resp.stage2Out.perfFaultType(1) := Mux(fixSecondMispred, faultType, PreDecodeFaultType.NoFault)
+  io.resp.stage2Out.perfFaultType(0) := Mux(!finalSelectBlockNext, faultType, PreDecodeFaultType.NoFault)
+  io.resp.stage2Out.perfFaultType(1) := Mux(finalSelectBlockNext, faultType, PreDecodeFaultType.NoFault)
 }

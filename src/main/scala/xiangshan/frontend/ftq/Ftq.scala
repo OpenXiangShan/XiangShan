@@ -104,8 +104,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // resolveQueue stores branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
 
-  private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect(0).bits.ftqIdx.value).topRetAddr.toUInt
-  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect(0), specTopAddr)
+  private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect.bits.ftqIdx.value).topRetAddr.toUInt
+  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
