@@ -121,11 +121,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  val l1_pf_arb = Module(new RRArbiterInit(new L1PrefetchReq, prefetcherNum))
+  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
-  val l2_pf_arb = Module(new RRArbiterInit(new L2PrefetchReq, prefetcherNum))
+  val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
-  val l3_pf_arb = Module(new RRArbiterInit(new L3PrefetchReq, prefetcherNum))
+  val l3_pf_arb = Module(new Arbiter(new L3PrefetchReq, prefetcherNum))
 
   // init
   io.tlb_req.foreach{ x =>
