@@ -45,37 +45,37 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
   class RobEntryBundle(implicit p: Parameters) extends XSBundle {
 
-    // data begin
-    val vls = Bool()
+    val valid = Bool()
+
+    val uopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
+
+    val ftqIdx = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val crossFtqCommit = UInt(2.W) // 59 bit
+
     // some instructions are not allowed to trigger interrupts
     // They have side effects on the states of the processor before they write back
     val interrupt_safe = Bool()
+    val needFlush = Bool()
+
+    val commitType = CommitType()
+
+    val vls = Bool()
+    val isVset = Bool()
+    val isHls = Bool()
+    val mmio = Bool()
+    val isRVC = Bool()
+
+    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+
+    // debug_begin
     val fpWen = Bool()
     val rfWen = Bool()
     val wflags = Bool()
     val dirtyVs = Bool()
-    val commitType = CommitType()
-    val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isRVC = Bool()
-    val isVset = Bool()
-    val isHls = Bool()
-    // data end
-    
-    // trace
-    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
-    // status begin
-    val valid = Bool()
     val fflags = UInt(5.W)
-    val mmio = Bool()
     val vxsat = Bool()
-    val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
-    val uopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val needFlush = Bool()
-    val crossFtqCommit = UInt(2.W) // 59 bit
-    // status end
-
-    // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
     val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
