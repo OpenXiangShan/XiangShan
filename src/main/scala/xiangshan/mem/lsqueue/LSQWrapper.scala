@@ -277,7 +277,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   val pendingstate = RegInit(s_idle)
   val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.toUncacheBuffer.req.valid) || (
     loadQueue.io.uncache.req.valid && storeQueue.io.toUncacheBuffer.req.valid &&
-    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.toUncacheBuffer.req.bits.robIdx
+    loadQueue.io.uncache.req.bits.robIdx.isBeforeSlot(storeQueue.io.toUncacheBuffer.req.bits.robIdx)
   )
 
   switch(pendingstate){

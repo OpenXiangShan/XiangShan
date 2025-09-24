@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan.TopDownCounters._
 import xiangshan._
-import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
+import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO, RobPtr}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
@@ -166,8 +166,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
   val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DispatchUpdateUop))))
 
-  // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
-  // update isrvc to dispatch: branch need last isrvc, rob need first isrvc as rob should attach interrupt to first uop
+  // Keep each compressed slot's own FTQ pointer; the ROB reconstructs commit metadata
+  // from hasLastInFtqEntry and RVC. Branch execution still uses the latter slot's isRVC.
   for (i <- 0 until RenameWidth) {
     fromRenameUpdate(i).valid := fromRename(i).valid
     // v0 don't need srcLoadDependency, srcState unpdated with allSrcState
@@ -176,8 +176,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     fromRenameUpdate(i).bits.srcStateVl := 0.U // dontCare this
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
-    fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
-    fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
+    fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqOffset
+    fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr
     fromRenameUpdate(i).bits.isRVC := fromRename(i).bits.lastIsRVC
     fromRenameUpdate(i).bits.rasAction :=
       Itype.isPush(fromRename(i).bits.traceBlockInPipe.itype) ## Itype.isPop(fromRename(i).bits.traceBlockInPipe.itype)
@@ -387,9 +387,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
 
-  val robidxStepHold  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
-  val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
-  val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxStepHold = WireInit(RobPtr(false.B, 0.U))
+  val robidxStepReg = RegInit(RobPtr(false.B, 0.U))
+  val robidxCanCommitStepping = WireInit(RobPtr(false.B, 0.U))
   robidxStepReg := robidxCanCommitStepping
 
   when(!io.singleStep) {

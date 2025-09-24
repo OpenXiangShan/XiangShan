@@ -924,7 +924,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val (a_v, a_uop) = (a._1, a._2)
     val (b_v, b_uop) = (b._1, b._2)
 
-    val res = Mux(a_v && b_v, Mux(isAfter(a_uop.uop.robIdx, b_uop.uop.robIdx), b_uop, a_uop),
+    val res = Mux(a_v && b_v, Mux(a_uop.uop.robIdx.isAfterSlot(b_uop.uop.robIdx), b_uop, a_uop),
                   Mux(a_v, a_uop,
                       Mux(b_v, b_uop,
                                 a_uop)))

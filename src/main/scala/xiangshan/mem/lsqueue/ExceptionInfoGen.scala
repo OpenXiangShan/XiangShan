@@ -62,7 +62,7 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
     val exceptionInfo = new ExceptionOut // don't have valid
   })
   private def isOlder(left: MemExceptionInfo, right: MemExceptionInfo): Bool = {
-    isBefore(left.robIdx, right.robIdx) || (left.robIdx === right.robIdx && left.uopIdx < right.uopIdx)
+    left.robIdx.isBeforeSlot(right.robIdx) || (left.robIdx.isSameSlot(right.robIdx) && left.uopIdx < right.uopIdx)
   }
 
   private def GenExceptionVa(
@@ -182,7 +182,7 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
 
   when(currentValid) {
     when(outValid) {
-      when(currentExcp.robIdx > oldestBits.robIdx || oldestBits.robIdx === currentExcp.robIdx && currentExcp.uopIdx > oldestBits.uopIdx) {
+      when(currentExcp.robIdx.isAfterSlot(oldestBits.robIdx) || oldestBits.robIdx.isSameSlot(currentExcp.robIdx) && currentExcp.uopIdx > oldestBits.uopIdx) {
         currentExcp := oldestBits
       }
     }
