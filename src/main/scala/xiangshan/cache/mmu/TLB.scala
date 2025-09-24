@@ -556,8 +556,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     new_coming_valid := req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx)
     val new_coming = GatedValidRegNext(new_coming_valid)
     val miss_wire = new_coming && missVec(idx)
-    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
-    val miss_req_v = ValidHoldBypass(miss_wire || (miss_v && flush_mmu && !mmu_flush_pipe),
+    val miss_v = ValidHoldBypass(miss_wire,
+      // update miss_v synchronously when receiving a resp from ptw
+      io.ptw.resp.fire && hit && req_out_v(idx) && portTranslateEnable(idx), flush_pipe(idx))
+    val miss_req_v = ValidHoldBypass(miss_wire,
       io.ptw.req(idx).fire || resp(idx).fire, flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
