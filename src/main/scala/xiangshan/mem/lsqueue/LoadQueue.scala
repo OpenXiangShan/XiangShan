@@ -165,7 +165,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
-        val doNotReplay = Vec(LoadPipelineWidth, Input(Bool())) // from load_s3
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
@@ -203,8 +202,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
-    // // to replayQueue
-    // val doNotReplay = Input(Vec(LoadPipelineWidth, Bool()))
+
     val lqDeqPtr = Output(new LqPtr)
 
     val rarValidCount = Output(UInt())
@@ -336,7 +334,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
-  loadQueueReplay.io.doNotReplay := io.ldu.doNotReplay
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
