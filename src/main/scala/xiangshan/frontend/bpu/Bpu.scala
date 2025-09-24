@@ -171,10 +171,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid       := redirect.valid
-  abtb.io.overrideValid       := s3_override
-  abtb.io.t0_previousPc.valid := s4_valid // for fast train
-  abtb.io.t0_previousPc.bits  := s4_pc    // for fast train
+  abtb.io.redirectValid                  := redirect.valid
+  abtb.io.previousVAddr.valid            := s4_valid // for fast train
+  abtb.io.previousVAddr.bits             := s4_pc    // for fast train
+  abtb.io.fastPredictReq.valid           := s3_override
+  abtb.io.fastPredictReq.bits.startVAddr := s3_prediction.target
+  abtb.io.fastPredictReq.bits.entries    := s3_meta.abtb.entries
+  abtb.io.fastPredictReq.bits.ctrResult  := s3_meta.abtb.ctrResult
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -245,8 +248,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        ubtb.io.prediction.taken -> ubtb.io.prediction
-//      abtb.io.prediction.taken -> abtb.io.prediction
+        ubtb.io.prediction.taken -> ubtb.io.prediction,
+        abtb.io.prediction.taken -> abtb.io.prediction
       )
     )
 

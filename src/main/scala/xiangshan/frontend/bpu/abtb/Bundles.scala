@@ -59,19 +59,6 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val victimWayIdx:  UInt = Output(UInt(WayIdxWidth.W))
 }
 
-class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
-  val valid: Bool = Bool()
-//  val previousPc:    PrunedAddr           = PrunedAddr(VAddrBits) // TODO: update after execution will need it
-  val hitMask:         Vec[Bool]            = Vec(NumWays, Bool())
-  val taken:           Bool                 = Bool()
-  val takenWayIdx:     UInt                 = UInt(WayIdxWidth.W)
-  val attributes:      Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute) // TODO: do not need store RasAction
-  val positions:       Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
-  val targetLowerBits: UInt                 = UInt(TargetLowerBitsWidth.W)
-  // The following signals are used for simulation only.
-  val target: Option[PrunedAddr] = if (!env.FPGAPlatform) Some(PrunedAddr(VAddrBits)) else None
-}
-
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val valid:           Bool            = Bool()
   val tag:             UInt            = UInt(TagWidth.W)
@@ -80,4 +67,19 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
   // target fix, see comment in Parameters.scala
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
+}
+
+class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
+  val valid:     Bool               = Bool()
+  val hitMask:   Vec[Bool]          = Vec(NumWays, Bool())
+  val taken:     Bool               = Bool()
+  val takenMask: Vec[Bool]          = Vec(NumWays, Bool())
+  val entries:   Vec[AheadBtbEntry] = Vec(NumWays, new AheadBtbEntry)
+  val ctrResult: Vec[Bool]          = Vec(NumWays, Bool())
+}
+
+class AheadBtbFastPredictReq(implicit p: Parameters) extends AheadBtbBundle {
+  val startVAddr: PrunedAddr         = PrunedAddr(VAddrBits)
+  val entries:    Vec[AheadBtbEntry] = Vec(NumWays, new AheadBtbEntry)
+  val ctrResult:  Vec[Bool]          = Vec(NumWays, Bool())
 }
