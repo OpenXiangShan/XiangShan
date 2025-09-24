@@ -37,6 +37,170 @@ import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan._
 import xiangshan.backend.fu.FuType
 
+object CompressType {
+  def NORMAL = "b00".U // Complex/Simple/Simplesss
+  def SC     = "b01".U // Simplesss + Complex
+  def CS     = "b10".U // Complex + Simplesss
+  def CC     = "b11".U // Complex + Complex
+
+  def apply() = UInt(2.W)
+
+  def isNORMAL(compressType: UInt): Bool = compressType === NORMAL
+  def isCC(compressType: UInt): Bool = compressType === CC
+  def isCS(compressType: UInt): Bool = compressType === CS
+  def isSC(compressType: UInt): Bool = compressType === SC
+  def isNotNORMAL(compressType: UInt): Bool = compressType =/= NORMAL
+
+  def isLoadStore(commitType: UInt): Bool = commitType(1)
+  def lsInstIsStore(commitType: UInt): Bool = commitType(0)
+  def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
+  def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1)
+}
+
+object NoCompressSource {
+  def compressed        = "b00".U
+  def noEnoughInstr     = "b01".U
+  def flushedHalf       = "b10".U
+  def cannotCompress    = "b11".U
+
+  def apply() = UInt(2.W)
+}
+
+class NewCompressUnit(implicit p: Parameters) extends XSModule{
+  val io = IO(new Bundle {
+    val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))
+    val out = new Bundle {
+      val needRobFlags = Vec(RenameWidth, Output(Bool()))
+      val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
+      val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val hasLastInFtqEntry = Vec(RenameWidth, Output(UInt(2.W)))
+      val compressType = Vec(RenameWidth, CompressType())
+      val isFormer = Vec(RenameWidth, Output(Bool()))
+      val needFlush = Vec(RenameWidth, Output(UInt(2.W)))
+      val interrupt_safe = Vec(RenameWidth, Output(Bool()))
+      val RVC = Vec(RenameWidth, Output(UInt(2.W)))
+      val complexHasDest = Vec(RenameWidth, Output(UInt(1.W)))
+      val hasStore = Vec(RenameWidth, Output(Bool()))
+      val noCompressSource = Vec(RenameWidth, NoCompressSource())
+    }
+  })
+
+  val needFlush = io.in.map { x =>
+    x.valid && (x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger) || x.bits.flushPipe)
+  }
+
+  val allow_interrupts = io.in.map{ x =>
+    !CommitType.isLoadStore(x.bits.commitType) && !FuType.isFence(x.bits.fuType) && !FuType.isCsr(x.bits.fuType) && !FuType.isVset(x.bits.fuType) && !FuType.isAMO(x.bits.fuType)
+  }
+
+  val cannotCompress = VecInit(io.in.map{ x =>
+    // The current VTypeBuffer tracks one commit token per vector-state uop,
+    // while a compressed ROB entry exposes only one entry-level needVTB bit.
+    // Keep vset and vector-memory instructions in independent entries so no
+    // VTypeBuffer token can be hidden in the latter slot.
+    x.valid && (x.bits.waitForward || x.bits.blockBackward ||
+      FuType.isVset(x.bits.fuType) || FuType.isVArithMem(x.bits.fuType))
+  }).asUInt.orR
+
+  when(cannotCompress || needFlush.reduce(_ || _)) {
+    for (i <- 0 until RenameWidth) {
+      io.out.needRobFlags(i)        := io.in(i).valid
+      io.out.instrSizes(i)          := 1.U
+      io.out.masks(i)               := 0x1.U << i
+      io.out.hasLastInFtqEntry(i)   := Cat(0.U(1.W), io.in(i).bits.isLastInFtqEntry)
+      io.out.compressType(i)        := CompressType.NORMAL
+      io.out.isFormer(i)            := true.B
+      io.out.needFlush(i)           := Cat(0.U(1.W), needFlush(i))
+      io.out.interrupt_safe(i)      := allow_interrupts(i)
+      io.out.RVC(i)               := Cat(0.U(1.W), io.in(i).bits.isRVC)
+      io.out.complexHasDest(i)      := io.in(i).bits.rfWen || io.in(i).bits.fpWen
+      io.out.hasStore(i)            := FuType.isStore(io.in(i).bits.fuType)
+      io.out.noCompressSource(i)    := NoCompressSource.cannotCompress
+    }
+  }.otherwise{
+    for (i <- 0 until RenameWidth/2) {
+      when(io.in(2*i).valid && io.in(2*i+1).valid) {
+        io.out.needRobFlags(2*i)   := false.B
+        io.out.needRobFlags(2*i+1) := true.B  // needRobFlags is true for the lastUop
+        io.out.instrSizes(2*i)     := 2.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0x3.U << (2*i)
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := Cat(io.in(2*i+1).bits.isLastInFtqEntry, io.in(2*i).bits.isLastInFtqEntry)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.CC
+        io.out.compressType(2*i+1)      := CompressType.CC
+        io.out.isFormer(2*i)            := true.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := Cat(needFlush(2*i+1), needFlush(2*i))
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := allow_interrupts(2*i) && allow_interrupts(2*i+1)
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.RVC(2*i)               := Cat(io.in(2*i+1).bits.isRVC, io.in(2*i).bits.isRVC)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
+        io.out.complexHasDest(2*i)      := io.in(2*i).bits.rfWen || io.in(2*i).bits.fpWen
+        io.out.complexHasDest(2*i+1)    := 0.U
+        io.out.hasStore(2*i)            := FuType.isStore(io.in(2*i).bits.fuType) || FuType.isStore(io.in(2*i+1).bits.fuType)
+        io.out.hasStore(2*i+1)          := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.compressed
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
+      }.elsewhen(io.in(2*i).valid) {
+        io.out.needRobFlags(2*i)   := true.B
+        io.out.needRobFlags(2*i+1) := false.B
+        io.out.instrSizes(2*i)     := 1.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0x1.U << (2*i)
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := Cat(0.U(1.W), io.in(2*i).bits.isLastInFtqEntry)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.NORMAL
+        io.out.compressType(2*i+1)      := CompressType.NORMAL
+        io.out.isFormer(2*i)            := true.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := Cat(0.U(1.W), needFlush(2*i))
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := allow_interrupts(2*i)
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.RVC(2*i)               := Cat(0.U(1.W), io.in(2*i).bits.isRVC)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
+        io.out.complexHasDest(2*i)      := 0.U
+        io.out.complexHasDest(2*i+1)    := 0.U
+        io.out.hasStore(2*i)          := FuType.isStore(io.in(2*i).bits.fuType)
+        io.out.hasStore(2*i+1)        := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.noEnoughInstr
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
+      }.otherwise {
+        io.out.needRobFlags(2*i)   := false.B
+        io.out.needRobFlags(2*i+1) := false.B
+        io.out.instrSizes(2*i)     := 0.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0.U
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := 0.U(2.W)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.NORMAL
+        io.out.compressType(2*i+1)      := CompressType.NORMAL
+        io.out.isFormer(2*i)            := false.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := 0.U(2.W)
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := true.B
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.RVC(2*i)               := 0.U(2.W)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
+        io.out.complexHasDest(2*i)      := 0.U
+        io.out.complexHasDest(2*i+1)    := 0.U
+        io.out.hasStore(2*i)            := false.B
+        io.out.hasStore(2*i+1)          := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.compressed
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
+      }
+    }
+  }
+
+
+}
+
 class CompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))

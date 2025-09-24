@@ -233,7 +233,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   enqPtrVec := enqPtrVecNext
 
-  val headIsRetired = isBefore(dataEntries(deqPtrHead.value).robIdx, robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
+  val headIsRetired = dataEntries(deqPtrHead.value).robIdx.isBeforeSlot(robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
   //redirect logic
   switch(state) {
     is(WalkState.idle) {
