@@ -146,6 +146,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     })
   ).flatten)
 
+  private val s1_alignBankCrossPageMask = (0 until NumAlignBanks).map { i =>
+    val currentAlignStartVAddr = getAlignedAddr(s1_startVAddr + (i * FetchBlockAlignSize).U)
+    isCrossPage(s1_startVAddr, currentAlignStartVAddr)
+  }
+  private val s1_rotatedAlignBankCrossPageMask = vecRotateRight(VecInit(s1_alignBankCrossPageMask), s1_alignBankIdx)
+  private val s1_crossPageMask                 = VecInit(s1_rotatedAlignBankCrossPageMask.flatMap(Seq.fill(NumWay)(_)))
+
   require(s1_alignBankIdx.getWidth == log2Ceil(NumAlignBanks))
 
   /* predict stage 2
@@ -162,13 +169,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s2_rawBtbEntries    = RegEnable(s1_rawBtbEntries, s1_fire)
   private val s2_tag              = RegEnable(s1_tag, s1_fire)
   private val s2_posHighesBits    = RegEnable(s1_posHighestBits, s1_fire)
+  private val s2_crossPageMask    = RegEnable(s1_crossPageMask, s1_fire)
   private val s2_positions = s2_rawBtbEntries zip s2_posHighesBits map { case (entry, h) =>
     Cat(h, entry.position) // Add higher bits before using
   }
   private val s2_rawHitMask = s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hitMask = s2_rawHitMask.zip(s2_positions).map {
-    case (hit, position) =>
-      hit && position > s2_startVAddr(FetchBlockSizeWidth - 1, 1)
+  private val s2_hitMask = s2_rawHitMask.zip(s2_positions).zip(s2_crossPageMask).map {
+    case ((hit, position), isCrossPage) =>
+      hit && position > s2_startVAddr(FetchBlockSizeWidth - 1, 1) && !isCrossPage
   }
   private val s2_targets =
     s2_rawBtbEntries.map(e =>
