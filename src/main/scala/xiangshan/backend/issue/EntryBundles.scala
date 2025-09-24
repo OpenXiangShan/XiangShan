@@ -19,6 +19,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class Status(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //basic status
     val robIdx                = new RobPtr
+    val chanelIdx             = UInt(log2Up(RenameWidth).W)
     val fuType                = IQFuType()
     //src status
     val srcStatus             = Vec(params.numRegSrc, new SrcStatus)
@@ -161,6 +162,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcReady              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
+    val chanelIdx             = Output(UInt(log2Up(RenameWidth).W))
     val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
     // for enq.ready
     val validRegNext          = Output(Bool())
@@ -337,6 +339,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           else true.B)
     val respIssueFail                                  = commonIn.issueResp.failed && sqIdxHit
     entryUpdate.status.robIdx                         := status.robIdx
+    entryUpdate.status.chanelIdx                      := status.chanelIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
       val srcLoadCancel = common.srcLoadCancelVec(srcIdx)
@@ -453,6 +456,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
+    commonOut.chanelIdx                               := status.chanelIdx
     commonOut.isFirstIssue                            := status.firstIssue
     commonOut.entry.valid                             := validReg
     commonOut.entry.bits.status                       := entryReg.status

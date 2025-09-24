@@ -136,10 +136,14 @@ class TrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasStoreT
   val deqPtr = WireInit(deqPtrExt.value)
 
   val ldReorderOpt = io.ldTrainOpt.map { ldTrain =>
-    HwSort(VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
+    HwSort(
+      VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) })
+    )((a, b) => a.isBeforeSlot(b))
   }
   val stReorderOpt = io.stTrainOpt.map { stTrain =>
-    HwSort(VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
+    HwSort(
+      VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) })
+    )((a, b) => a.isBeforeSlot(b))
   }
   val ldReorderBufferedOpt = ldReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))
   val stReorderBufferedOpt = stReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))

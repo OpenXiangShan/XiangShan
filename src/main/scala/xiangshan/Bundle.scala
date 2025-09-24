@@ -221,6 +221,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val robIdx = new RobPtr
   val interrupt: Bool = Bool()
   val isMisPred: Bool = Bool()
+  val isFromLoad: Bool = Bool()
 
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
@@ -263,7 +264,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
 object Redirect extends HasCircularQueuePtrHelper {
 
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => xs(j).bits.robIdx.isAfterSlot(xs(i).bits.robIdx)))
     val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
       (if (j < i) !xs(j).valid || compareVec(i)(j)
       else if (j == i) xs(i).valid
@@ -279,7 +280,7 @@ object Redirect extends HasCircularQueuePtrHelper {
     }.elsewhen(!in1.valid && in2.valid) {
       out := in2
     }.elsewhen(in1.valid && in2.valid) {
-      out := Mux(in1.bits.robIdx.isAfter(in1.bits.robIdx, in2.bits.robIdx), in2, in1)
+      out := Mux(in1.bits.robIdx.isAfterSlot(in2.bits.robIdx), in2, in1)
     }.otherwise(
       out := in1
     )

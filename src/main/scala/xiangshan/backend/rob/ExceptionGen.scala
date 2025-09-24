@@ -58,7 +58,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
           res(i).bits := bits(i)
         }
         val oldest = Mux(
-          !valid(1) || (valid(0) && (isAfter(bits(1).robIdx, bits(0).robIdx) || ((bits(1).robIdx === bits(0).robIdx) && bits(1).vuopIdx > bits(0).vuopIdx))),
+          !valid(1) || (valid(0) && (bits(1).robIdx.isAfterSlot(bits(0).robIdx) || (bits(1).robIdx.isSameSlot(bits(0).robIdx) && bits(1).vuopIdx > bits(0).vuopIdx))),
           res(0),
           res(1)
         )
@@ -133,11 +133,11 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
       currentValid := Mux(s1_flush, false.B, s1_out_valid)
     }
     when (s1_out_valid && !s1_flush) {
-      when (isAfter(current.robIdx, s1_out_bits.robIdx)) {
+      when (current.robIdx.isAfterSlot(s1_out_bits.robIdx)) {
         current := s1_out_bits
         // s1 is older than current and caused by wb, set current.isEnqExcp to false
         current.isEnqExcp := false.B
-      }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
+      }.elsewhen (current.robIdx.isSameSlot(s1_out_bits.robIdx)) {
         current.exceptionVec := ExceptSparseVec.mux2(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
         current.hasException := Mux(isVecUpdate, s1_out_bits.hasException, current.hasException)
         current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.orR

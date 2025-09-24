@@ -486,7 +486,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     val enableMdp = Constantin.createRecord("EnableMdp", true)
     sink.bits.pc.foreach(_ := source.bits.data.pc.get + (source.bits.ctrl.ftqOffset.get << instOffsetBits))
     sink.bits.loadWaitBit.foreach(_ := Mux(enableMdp, source.bits.loadWaitBit.get, false.B))
-    sink.bits.waitForRobIdx.foreach(_ := Mux(enableMdp, source.bits.waitForRobIdx.get, 0.U.asTypeOf(new RobPtr)))
+    sink.bits.waitForRobIdx.foreach(_ := Mux(enableMdp, source.bits.waitForRobIdx.get, RobPtr(false.B, 0.U)))
     sink.bits.storeSetHit.foreach(_ := Mux(enableMdp, source.bits.storeSetHit.get, false.B))
     sink.bits.loadWaitStrict.foreach(_ := Mux(enableMdp, source.bits.loadWaitStrict.get, false.B))
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))
@@ -494,7 +494,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
-  io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  io.mem.isStoreException := ctrlBlock.io.robio.exception.bits.isStore
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
 
   val issueSta = issue.flatten.filter(_.bits.params.hasStoreAddrFu)
@@ -515,7 +515,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   })
 
   ctrlBlock.io.robio.robHeadLsIssue := issue.flatten.map(deq =>
-    deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
+    deq.fire && deq.bits.robIdx.isSameEntry(ctrlBlock.io.robio.robDeqPtr)
   ).reduce(_ || _)
   ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
     fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
