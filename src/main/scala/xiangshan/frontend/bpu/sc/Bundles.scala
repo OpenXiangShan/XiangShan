@@ -27,14 +27,9 @@ class ScEntry(implicit p: Parameters) extends ScBundle {
   val ctrs: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
 }
 
-class ScWeightEntry(implicit p: Parameters) extends ScBundle {
-  val valid: Bool                  = Bool()
-  val ctrs:  SignedSaturateCounter = new SignedSaturateCounter(weightCtrWidth)
-}
-
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val ctr: SaturateCounter = new SaturateCounter(thresholdCtrWidth)
-  val thres = UInt(8.W)
+  val thres = UInt(thresholdThresWidth.W)
   def satPos(ctr: UInt = this.ctr.value): Bool = ctr === ((1.U << thresholdCtrWidth) - 1.U)
   def satNeg(ctr: UInt = this.ctr.value): Bool = ctr === 0.U
   def neutralVal: UInt = (1 << (thresholdCtrWidth - 1)).U
@@ -64,23 +59,17 @@ object ScThreshold {
   }
 }
 
-class ScPrediction(implicit p: Parameters) extends ScBundle {
-  val taken:  Bool       = Bool()
-  val usSc:   Bool       = Bool()
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
-}
-
 class PathTableSramWriteReq(val numSets: Int)(implicit p: Parameters) extends WriteReqBundle with HasScParameters {
-  val setIdx: UInt    = UInt(log2Ceil(numSets / NumWays).W)
-  val wayIdx: UInt    = UInt(log2Ceil(NumWays).W)
-  val entry:  ScEntry = new ScEntry()
+  val setIdx:    UInt         = UInt(log2Ceil(numSets).W)
+  val wayIdxVec: Vec[UInt]    = Vec(backendParams.BrhCnt, UInt(log2Ceil(NumWays).W))
+  val entryVec:  Vec[ScEntry] = Vec(backendParams.BrhCnt, new ScEntry())
 }
 
 class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle {
-  val valid:  Bool    = Bool()
-  val setIdx: UInt    = UInt(log2Ceil(numSets / NumWays).W)
-  val wayIdx: UInt    = UInt(log2Ceil(NumWays).W)
-  val entry:  ScEntry = new ScEntry()
+  val valid:     Bool         = Bool()
+  val setIdx:    UInt         = UInt(log2Ceil(numSets / NumBanks).W)
+  val wayIdxVec: Vec[UInt]    = Vec(backendParams.BrhCnt, UInt(log2Ceil(NumWays).W))
+  val entryVec:  Vec[ScEntry] = Vec(backendParams.BrhCnt, new ScEntry())
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {

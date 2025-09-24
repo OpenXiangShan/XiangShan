@@ -30,26 +30,30 @@ case class ScParameters(
       new ScTableInfo(1024, 10),
       new ScTableInfo(1024, 16)
     ),
-    ctrWidth:          Int = 6,
-    weightCtrWidth:    Int = 6,
-    thresholdCtrWidth: Int = 8,
-    NumTables:         Int = 2,
-    WriteBufferSize:   Int = 4,
-    TagWidth:          Int = 12
+    ctrWidth:            Int = 6,
+    weightCtrWidth:      Int = 6,
+    thresholdCtrWidth:   Int = 6,
+    thresholdThresWidth: Int = 8,
+    NumTables:           Int = 2,
+    NumBanks:            Int = 2,
+    WriteBufferSize:     Int = 4,
+    TagWidth:            Int = 12
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
-  def scParameters:      ScParameters     = bpuParameters.scParameters
-  def ctrWidth:          Int              = scParameters.ctrWidth
-  def weightCtrWidth:    Int              = scParameters.weightCtrWidth
-  def thresholdCtrWidth: Int              = scParameters.thresholdCtrWidth
-  def TableInfos:        Seq[ScTableInfo] = scParameters.TableInfos
-  def PathTableInfos:    Seq[ScTableInfo] = scParameters.PathTableInfos
-  def PathTableSize:     Int              = PathTableInfos.length
-  def NumTables:         Int              = PathTableInfos.length
-  def NumWays:           Int              = NumBtbResultEntries
-  def WriteBufferSize:   Int              = scParameters.WriteBufferSize
-  def TagWidth:          Int              = scParameters.TagWidth
+  def scParameters:        ScParameters     = bpuParameters.scParameters
+  def ctrWidth:            Int              = scParameters.ctrWidth
+  def weightCtrWidth:      Int              = scParameters.weightCtrWidth
+  def thresholdCtrWidth:   Int              = scParameters.thresholdCtrWidth
+  def thresholdThresWidth: Int              = scParameters.thresholdThresWidth
+  def TableInfos:          Seq[ScTableInfo] = scParameters.TableInfos
+  def PathTableInfos:      Seq[ScTableInfo] = scParameters.PathTableInfos
+  def PathTableSize:       Int              = PathTableInfos.length
+  def NumTables:           Int              = PathTableInfos.length
+  def NumWays:             Int              = NumBtbResultEntries
+  def NumBanks:            Int              = scParameters.NumBanks
+  def WriteBufferSize:     Int              = scParameters.WriteBufferSize
+  def TagWidth:            Int              = scParameters.TagWidth
   // TODO
 
   // sc cannot be fast-trained, this is required by abstract class BasePredictor

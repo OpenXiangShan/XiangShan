@@ -79,7 +79,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
-  sc.io.enable          := ctrl.scEnable
+  sc.io.enable          := false.B
   ittage.io.enable      := ctrl.ittageEnable
   ras.io.enable         := false.B
 

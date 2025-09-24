@@ -27,9 +27,6 @@ trait Helpers extends HasScParameters {
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
 
-  def getTag(pc: PrunedAddr): UInt =
-    pc(TagWidth + FetchBlockSizeWidth - 1, FetchBlockSizeWidth)
-
   // get pc ^ foldedHist for index
   def getIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
