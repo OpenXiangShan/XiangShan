@@ -216,8 +216,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s4_flush        := backendRedirect || (wbRedirect.valid && !s4_wbNotFlush)
   s3_flush        := backendRedirect || mmioRedirect.valid || wbRedirect.valid
   s2_flush        := s3_flush
-  s1_flush        := s2_flush || s1_flushFromBpu.reduce(_ || _)
-  s0_flush        := s1_flush || s0_flushFromBpu.reduce(_ || _)
+  s1_flush        := s2_flush || s1_flushFromBpu(0)
+  s0_flush        := s1_flush || s0_flushFromBpu(0)
 
   fromFtq.req.ready := s1_ready && io.fromICache.fetchReady
 
