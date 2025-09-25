@@ -24,7 +24,6 @@ class TrapHandleModule extends Module {
   private val hvien = io.in.hvien.asUInt
 
   private val hasTrap = trapInfo.valid
-  private val hasNMI = hasTrap && trapInfo.bits.nmi
   private val hasIR = hasTrap && trapInfo.bits.isInterrupt
   private val hasEX = hasTrap && !trapInfo.bits.isInterrupt
 
@@ -57,8 +56,8 @@ class TrapHandleModule extends Module {
 
   // nmi handle in MMode only and default handler is mtvec
   private val  mHasIR = hasIR
-  private val hsHasIR = hasIR && irToHS & !hasNMI
-  private val vsHasIR = hasIR && irToVS & !hasNMI
+  private val hsHasIR = hasIR && irToHS
+  private val vsHasIR = hasIR && irToVS
 
   private val  mHasEX =  mEXVec.orR
   private val hsHasEX = hsEXVec.orR
@@ -118,7 +117,6 @@ class TrapHandleIO extends Bundle {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
-      val nmi = Bool()
       val intrVec = UInt(8.W)
       val isInterrupt = Bool()
       val singleStep = Bool()
