@@ -34,6 +34,8 @@ class SaturateCounter(width: Int) extends Bundle {
     Mux(positive, value + 1.U, value - 1.U)
   )
 
+  def getNeutral: UInt = (1 << (width - 1)).U
+
   def getIncrease: UInt = Mux(isSaturatePositive, value, value + 1.U)
 
   def getDecrease: UInt = Mux(isSaturateNegative, value, value - 1.U)

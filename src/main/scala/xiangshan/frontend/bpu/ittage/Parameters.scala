@@ -35,7 +35,7 @@ case class IttageParameters(
     TickWidth:          Int = 8,
     /* *** IttageTable *** */
     TableSramSize:        Int = 128,
-    TableWrBypassEntries: Int = 4,
+    TableWriteBufferSize: Int = 4,
     /* *** Region *** */
     RegionNums:     Int = 16,
     RegionPorts:    Int = 2,
@@ -60,7 +60,7 @@ trait HasIttageParameters extends HasBpuParameters {
 
   /* *** IttageTable *** */
   def TableSramSize:        Int = ittageParameters.TableSramSize
-  def TableWrBypassEntries: Int = ittageParameters.TableWrBypassEntries
+  def TableWriteBufferSize: Int = ittageParameters.TableWriteBufferSize
 
   /* *** Region *** */
   def RegionNums:     Int    = ittageParameters.RegionNums
