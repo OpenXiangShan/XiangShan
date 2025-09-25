@@ -143,7 +143,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s0_fire := fromFtq.req.fire
 
   s0_flushFromBpu := s0_ftqFetch.map(fetch =>
-    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
+    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx, fetch.valid)
   )
 
   private val backendRedirect             = WireInit(false.B)
@@ -176,17 +176,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val firstRange    = s1_fetchBlock(0).instrRange
   private val secondRange   = s1_fetchBlock(1).instrRange
 
-  s1_flushFromBpu := s1_fetchBlock.map(fetch =>
-    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
-  )
+  // FIXME: this firstValid/secondValid needs re-consider, maybe use a s1_valid vec
+  s1_flushFromBpu := VecInit(Seq(
+    fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(0).ftqIdx, s1_firstValid),
+    fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(1).ftqIdx, s1_secondValid)
+  ))
 
   private val icacheRespAllValid = WireInit(false.B)
 
   s1_fire  := s1_valid && s2_ready && icacheRespAllValid
   s1_ready := s1_fire || !s1_valid
-
-  assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(0).ftqIdx) && s1_firstValid))
-  assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(1).ftqIdx) && s1_secondValid))
 
   private val s1_totalEndPos = Mux(s1_firstValid && s1_secondValid, firstSize + secondSize - 1.U, firstSize - 1.U)
 
