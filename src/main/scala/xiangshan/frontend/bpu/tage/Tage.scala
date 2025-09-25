@@ -164,9 +164,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     branch.valid && branch.bits.attribute.isConditional
   }.reduce(_ || _)
 
-  private val t0_trainValid = io.train.valid && t0_hasConditionalBranch
-  private val t0_startVAddr = io.train.bits.startVAddr
-  private val t0_branches   = io.train.bits.branches
+  private val t0_trainValid       = io.train.valid && t0_hasConditionalBranch
+  private val t0_startVAddr       = io.train.bits.startVAddr
+  private val t0_branches         = io.train.bits.branches
+  private val t0_mispredictBranch = io.train.bits.mispredictBranch
 
   private val t0_bankIdx  = getBankIndex(t0_startVAddr)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
@@ -202,9 +203,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute temp tag
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_valid      = RegNext(t0_valid) && io.enable
-  private val t1_startVAddr = RegEnable(t0_startVAddr, t0_valid)
-  private val t1_branches   = RegEnable(t0_branches, t0_valid)
+  private val t1_valid            = RegNext(t0_valid) && io.enable
+  private val t1_startVAddr       = RegEnable(t0_startVAddr, t0_valid)
+  private val t1_branches         = RegEnable(t0_branches, t0_valid)
+  private val t1_mispredictBranch = RegEnable(t0_mispredictBranch, t0_valid)
 
   private val t1_setIdx   = t0_setIdx.map(RegEnable(_, t0_valid))
   private val t1_bankMask = RegEnable(t0_bankMask, t0_valid)
@@ -219,15 +221,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     getTag(t1_startVAddr, t1_foldedHistForTag(tableIdx), t1_anotherFoldedHistForTag(tableIdx))
   }
 
-  private val t1_mispredictBranchMask = t1_branches.map {
-    branch => branch.valid && branch.bits.mispredict && branch.bits.attribute.isConditional
-  }
-
-  private val t1_firstMispredictBranchOH =
-    getMinimalValueOH(t1_branches.map(_.bits.cfiPosition), t1_mispredictBranchMask)
-
-  private val t1_hasMispredictBranch = t1_mispredictBranchMask.reduce(_ || _)
-  private val t1_mispredictBranch    = Mux1H(t1_firstMispredictBranchOH, t1_branches)
+  private val t1_hasMispredictBranch = t1_mispredictBranch.valid && t1_mispredictBranch.bits.attribute.isConditional
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 2
