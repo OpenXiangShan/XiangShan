@@ -717,6 +717,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_prevLastRvi         = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
   private val s4_currentLastHalfData = RegEnable(s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0), s3_fire)
   private val s4_currentLastHalfRvi  = RegEnable(s3_currentLastHalfRvi, s3_fire)
+  private val s4_instrCount          = RegEnable(s3_instrCount, s3_fire)
   s4_fire := io.toIBuffer.fire
 
   private val s4_alignInvalidTaken = RegEnable(s3_alignInvalidTaken, s3_fire)
@@ -1064,6 +1065,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.ftqPtr    := s4_fetchBlock(0).ftqIdx
   io.toIBuffer.bits.pc        := s4_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
+
+  /* in s4, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s3;
+   * when s3 fire (s4_valid && s4_ready), use s3_instrCount;
+   * else when s4 stall (s4_valid && !s4_ready). use s4_instrCount because prevInstrCount equals to current instrCount;
+   * otherwise, we don't care about prevInstrCount because next cycle's toIBuffer.valid won't set.
+   */
+  io.toIBuffer.bits.prevInstrCount := Mux(
+    s3_fire,
+    Mux(s3_firstIsMmio, 1.U, s3_instrCount), // FIXME: consider the second fetch block
+    Mux(s4_firstIsMmio, 1.U, s4_instrCount)
+  )
+
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
