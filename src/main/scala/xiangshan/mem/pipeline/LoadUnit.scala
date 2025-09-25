@@ -1468,7 +1468,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   s3_misalign_rep_cause := VecInit(s3_mab_sel_rep_cause.asBools)
 
-  when (s3_exception || s3_hw_err || s3_rep_frm_fetch || s3_frm_mabuf) {
+  when (s3_rep_frm_fetch || s3_frm_mabuf) {
     s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
   } .otherwise {
     s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
