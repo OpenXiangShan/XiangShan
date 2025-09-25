@@ -74,7 +74,9 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     val redirect         = Input(Bool())
     val redirectFtqFlag  = Input(UInt(1.W))
     val redirectFtqValue = Input(UInt(6.W))
+    val redirectType     = Input(UInt(32.W))
     val redirectPc       = Input(UInt(64.W))
+    val redirectTarget   = Input(UInt(64.W))
   })
 
   val verilogLines = Seq(
@@ -93,7 +95,9 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     "  input int redirect_valid,",
     "  input int redirect_ftq_flag,",
     "  input int redirect_ftq_value,",
-    "  input longint traget_pc,",
+    "  input int redirect_type,",
+    "  input longint redirect_pc,",
+    "  input longint redirect_target,",
     ");",
     "",
     "import \"DPI-C\" function void SimFrontGetFtqToBackEnd (",
@@ -149,7 +153,9 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     "  input         io_redirect,",
     "  input         io_redirectFtqFlag,",
     "  input  [5:0]  io_redirectFtqValue,",
-    "  input  [63:0] io_redirectPc",
+    "  input  [31:0] io_redirectType,",
+    "  input  [63:0] io_redirectPc,",
+    "  input  [63:0] io_redirectTarget",
     ");",
     "",
     "",
@@ -157,7 +163,7 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     "  if (!reset) begin",
     "    SimFrontUpdatePtr(io_updatePtrCount);",
     "",
-    "    SimFrontRedirect(io_redirect, io_redirectFtqFlag, io_redirectFtqValue, io_redirectPc);",
+    "    SimFrontRedirect(io_redirect, io_redirectFtqFlag, io_redirectFtqValue, io_redirectType, io_redirectPc, io_redirectTarget);",
     "",
     "    SimFrontFetch(0, io_out_0_pc, io_out_0_instr, io_out_0_preDecode);",
     "    SimFrontFetch(1, io_out_1_pc, io_out_1_instr, io_out_1_preDecode);",
@@ -199,10 +205,27 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   fetchHelper.io.updatePtrCount := readyCount
 
+  // For now, there is only one type, but for the sake of scalability, let's write it this way.
+  object RedirectType {
+    def isMisPred     = 1.U
+    def isFalseBranch = 2.U
+
+    def genRedirectType(redirect: Redirect): UInt = {
+      val this_pc = redirect.pc +& redirect.getPcOffset()
+      Mux(
+        redirect.isMisPred,
+        Mux(this_pc + Mux(redirect.isRVC, 2.U, 4.U) === redirect.target, isFalseBranch, isMisPred),
+        0.U
+      )
+    }
+  }
+
   fetchHelper.io.redirect         := io.backend.toFtq.redirect.valid
   fetchHelper.io.redirectFtqFlag  := io.backend.toFtq.redirect.bits.ftqIdx.flag
   fetchHelper.io.redirectFtqValue := io.backend.toFtq.redirect.bits.ftqIdx.value
-  fetchHelper.io.redirectPc       := io.backend.toFtq.redirect.bits.target
+  fetchHelper.io.redirectType     := RedirectType.genRedirectType(io.backend.toFtq.redirect.bits)
+  fetchHelper.io.redirectPc       := io.backend.toFtq.redirect.bits.pc + io.backend.toFtq.redirect.bits.getPcOffset()
+  fetchHelper.io.redirectTarget   := io.backend.toFtq.redirect.bits.target
 
   fetchHelper.io.robCommitValid    := robCommitValid
   fetchHelper.io.robCommitFtqFlag  := robCommitBits.ftqIdx.flag
@@ -243,6 +266,9 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   io.backend.fromFtq.newest_entry_en        := fetchHelper.io.out_newestPreDecode(6)
   io.backend.fromFtq.newest_entry_ptr.value := fetchHelper.io.out_newestPreDecode(5, 0)
   io.backend.fromFtq.newest_entry_target    := fetchHelper.io.out_newestPc
+
+  XSPerfAccumulate("all_redirect", io.backend.toFtq.redirect.valid)
+  XSPerfAccumulate("mispred_redirect", io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.isMisPred)
 
   override val perfEvents: Seq[(String, UInt)] = Seq(
     ("empty_perf_event_0", 0.U(1.W)),
