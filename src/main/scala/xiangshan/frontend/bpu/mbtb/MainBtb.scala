@@ -226,10 +226,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
   io.meta.attributes         := s2_rawBtbEntries.map(_.attribute)
 
+  /* training stage 0 */
+  private val t0_valid = io.train.valid && io.enable
+  private val t0_train = io.train.bits
+
   /* training stage 1 */
-  private val t1_train_valid = RegEnable(io.train.valid, io.enable)
-  private val t1_train       = RegEnable(io.train.bits, io.train.valid)
-  private val t1_branches    = t1_train.branches
+  private val t1_valid = RegNext(t0_valid) && io.enable
+  private val t1_train = RegEnable(t0_train, t0_valid)
 
   private val t1_internalBankIdx  = getInternalBankIndex(t1_train.startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx)
@@ -237,50 +240,30 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_nextSetIdx       = t1_thisSetIdx + 1.U
   private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
   private val t1_meta             = t1_train.meta.mbtb
-  private val t1_LFSR             = random.LFSR(16, true.B)
   private val t1_setIdxVec =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < t1_alignBankIdx, t1_nextSetIdx, t1_thisSetIdx))
 
-  private val t1_branchHitMask = t1_branches.map { branch =>
-    t1_meta.hitMask.zip(t1_meta.positions).zip(t1_meta.attributes).map {
-      case ((hit, position), attribute) =>
-        hit && position === branch.bits.cfiPosition && attribute === branch.bits.attribute
-    }.reduce(_ || _)
-  }
+  private val t1_mispredictBranch = io.train.bits.mispredictBranch
 
-  private val t1_updateHit = t1_branchHitMask.zip(t1_branches).map {
-    case (hit, branch) =>
-      hit && branch.valid
-  }.reduce(_ || _)
+  private val t1_hitMispredictBranch = t1_meta.hitMask.zip(t1_meta.positions).zip(t1_meta.attributes).map {
+    case ((hit, position), attribute) =>
+      hit && position === t1_mispredictBranch.bits.cfiPosition && attribute === t1_mispredictBranch.bits.attribute
+  }.reduce(_ || _) && t1_mispredictBranch.valid
 
-  // TODO: currently we only write a new entry, maybe can write multiple entries in one cycle
-  private val t1_notHitMispredictBranchMask = t1_branchHitMask.zip(t1_branches).map {
-    case (hit, branch) =>
-      !hit && branch.valid && branch.bits.mispredict
-  }
-
-  private val t1_hasNotHitMispredictBranch = t1_notHitMispredictBranchMask.reduce(_ || _)
-
-  private val t1_firstNotHitMispredictBranchOH =
-    getMinimalValueOH(t1_branches.map(_.bits.cfiPosition), t1_notHitMispredictBranchMask)
-
-  private val t1_notHitMispredictBranch = Mux1H(t1_firstNotHitMispredictBranchOH, t1_branches)
-
-  // TODO: consider indirect target
-  private val t1_writeValid = t1_train_valid && t1_hasNotHitMispredictBranch
+  private val t1_writeValid = t1_valid && !t1_hitMispredictBranch
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
   t1_writeEntry.valid           := true.B   // FIXME: invalidate
   t1_writeEntry.tag             := getTag(t1_train.startVAddr)
-  t1_writeEntry.position        := t1_notHitMispredictBranch.bits.cfiPosition
-  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_notHitMispredictBranch.bits.target)
-  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_notHitMispredictBranch.bits.target)
-  t1_writeEntry.attribute       := t1_notHitMispredictBranch.bits.attribute
+  t1_writeEntry.position        := t1_mispredictBranch.bits.cfiPosition
+  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_mispredictBranch.bits.target)
+  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_mispredictBranch.bits.target)
+  t1_writeEntry.attribute       := t1_mispredictBranch.bits.attribute
   t1_writeEntry.stronglyBiased  := false.B  // FIXME
   t1_writeEntry.replaceCnt      := DontCare // FIXME:
   private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     // FIXME: not working for NumAlignBanks > 2
-    bankIdx.U === (t1_notHitMispredictBranch.bits.cfiPosition.asBools.last + t1_alignBankIdx)
+    bankIdx.U === (t1_mispredictBranch.bits.cfiPosition.asBools.last + t1_alignBankIdx)
   )
   private val t1_thisReplacerSetIdx = getReplacerSetIndex(t1_train.startVAddr)
   private val t1_nextReplacerSetIdx = t1_thisReplacerSetIdx + 2.U
@@ -330,11 +313,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   /* ** statistics ** */
 
-  XSPerfAccumulate("total_train", t1_train_valid)
+  XSPerfAccumulate("total_train", t1_valid)
   XSPerfAccumulate("mbtb_pred_has_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("mbtb_update_new_entry", t1_writeValid)
-  XSPerfAccumulate("mbtb_update_hit", t1_train_valid && t1_updateHit)
+  XSPerfAccumulate("mbtb_update_has_mispredict", t1_valid && t1_mispredictBranch.valid)
+  XSPerfAccumulate("mbtb_update_hit_mispredict", t1_valid && t1_hitMispredictBranch)
   XSPerfAccumulate("mbtb_multihit_write_conflict", multiWriteConflict)
   XSPerfHistogram("mbtb_multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay * NumAlignBanks)
 }
