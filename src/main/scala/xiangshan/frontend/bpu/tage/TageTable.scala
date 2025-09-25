@@ -24,16 +24,15 @@ import xiangshan.frontend.bpu.WriteBuffer
 
 class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule with Helpers {
   class TageTableIO extends TageBundle {
-    val readReq:                  Valid[TableReadReq]     = Flipped(Valid(new TableReadReq(numSets)))
-    val readResp:                 TableReadResp           = Output(new TableReadResp)
-    val writeSetIdx:              UInt                    = Input(UInt(log2Ceil(numSets / NumBanks).W))
-    val writeBankMask:            UInt                    = Input(UInt(NumBanks.W))
-    val updateReq:                Valid[TableUpdateReq]   = Flipped(Valid(new TableUpdateReq))
-    val allocateReq:              Valid[TableAllocateReq] = Flipped(Valid(new TableAllocateReq))
-    val needResetUsefulCtr:       Bool                    = Input(Bool())
-    val needIncreaseAllocFailCtr: Bool                    = Input(Bool())
-    val oldAllocFailCtr:          SaturateCounter         = Input(new SaturateCounter(AllocFailCtrWidth))
-    val resetDone:                Bool                    = Output(Bool())
+    val readReq:                  Valid[TableReadReq]          = Flipped(Valid(new TableReadReq(numSets)))
+    val readResp:                 TableReadResp                = Output(new TableReadResp)
+    val writeSetIdx:              UInt                         = Input(UInt(log2Ceil(numSets / NumBanks).W))
+    val writeBankMask:            UInt                         = Input(UInt(NumBanks.W))
+    val updateReq:                Valid[TableUpadteEntriesReq] = Flipped(Valid(new TableUpadteEntriesReq))
+    val needResetUsefulCtr:       Bool                         = Input(Bool())
+    val needIncreaseAllocFailCtr: Bool                         = Input(Bool())
+    val oldAllocFailCtr:          SaturateCounter              = Input(new SaturateCounter(AllocFailCtrWidth))
+    val resetDone:                Bool                         = Output(Bool())
   }
   val io: TageTableIO = IO(new TageTableIO)
 
@@ -45,7 +44,6 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         way = 1,
         singlePort = true,
         shouldReset = true,
-        useBitmask = true,
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl
@@ -67,73 +65,28 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
       ))
     )
 
-  // use a write buffer to store the write requests when read and write are both valid
-  private val writeBuffers =
-    Seq.fill(NumBanks)(
-      Module(new Queue(
-        new TableSramWriteReq(numSets),
+  // use a write buffer to store a entrySram write request
+  // TODO: add writeBuffer multi port simultaneous writing
+  private val entryWriteBuffers =
+    Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
+      Module(new WriteBuffer(
+        new EntrySramWriteReq(numSets),
         WriteBufferSize,
-        pipe = true,
-        flow = true
+        numPorts = 1,
+        pipe = true
+      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
+    }
+  private val allocFailCtrWriteBuffers =
+    Seq.fill(NumBanks)(
+      Module(new WriteBuffer(
+        new AllocFailCtrSramWriteReq(numSets),
+        WriteBufferSize,
+        numPorts = 1,
+        pipe = true
       ))
     )
 
-  // Connect write buffers to SRAMs
-  entrySram.zip(writeBuffers).zip(allocFailCtrSram).foreach {
-    case ((bank, buffer), allocFailCtr) =>
-      val valid                    = buffer.io.deq.valid && !bank.head.io.r.req.valid
-      val setIdx                   = buffer.io.deq.bits.setIdx
-      val updateReq                = buffer.io.deq.bits.updateReq
-      val allocateReq              = buffer.io.deq.bits.allocateReq
-      val needResetUsefulCtr       = buffer.io.deq.bits.needResetUsefulCtr
-      val needIncreaseAllocFailCtr = buffer.io.deq.bits.needIncreaseAllocFailCtr
-      bank.zipWithIndex.foreach {
-        case (way, wayIdx) =>
-          val needAllocate = allocateReq.valid && allocateReq.bits.wayMask(wayIdx)
-          val entry        = Wire(new TageEntry)
-          entry.valid := true.B
-          entry.tag   := allocateReq.bits.tag
-          entry.takenCtr.value :=
-            Mux(
-              needAllocate,
-              allocateReq.bits.takenCtr.value,
-              updateReq.bits.newTakenCtr(wayIdx).value
-            )
-          entry.usefulCtr.value :=
-            Mux(
-              needAllocate,
-              UsefulCtrInitValue.U,
-              Mux(
-                needResetUsefulCtr,
-                0.U,
-                updateReq.bits.newUsefulCtr(wayIdx).value
-              )
-            )
-          val bitMask =
-            Mux(
-              needAllocate,
-              Fill(TageEntryWidth, 1.U(1.W)),
-              Mux(
-                needResetUsefulCtr,
-                (1 << UsefulCtrWidth - 1).U(TageEntryWidth.W),
-                (1 << (TakenCtrWidth + UsefulCtrWidth) - 1).U(TageEntryWidth.W)
-              )
-            )
-          way.io.w.apply(valid, entry, setIdx, 1.U(1.W), bitMask.asUInt)
-      }
-      buffer.io.deq.ready := bank.head.io.w.req.ready && !bank.head.io.r.req.valid
-
-      allocFailCtr.io.w.req.valid :=
-        buffer.io.deq.valid && !bank.head.io.r.req.valid && (needResetUsefulCtr || needIncreaseAllocFailCtr)
-      allocFailCtr.io.w.req.bits.setIdx := setIdx
-      allocFailCtr.io.w.req.bits.waymask.foreach(_ := 1.U(1.W))
-      allocFailCtr.io.w.req.bits.data.head.value := Mux(
-        needResetUsefulCtr,
-        0.U,
-        buffer.io.deq.bits.oldAllocFailCtr.getIncrease
-      )
-  }
-
+  // read and write srams
   entrySram.zip(allocFailCtrSram).zipWithIndex.foreach {
     case ((bank, allocFailCtr), bankIdx) =>
       bank.foreach { way =>
@@ -142,6 +95,49 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
       }
       allocFailCtr.io.r.req.valid       := io.readReq.valid && io.readReq.bits.bankMask(bankIdx)
       allocFailCtr.io.r.req.bits.setIdx := io.readReq.bits.setIdx
+  }
+
+  entrySram.flatten.zip(entryWriteBuffers.flatten).foreach {
+    case (way, buffer) =>
+      val valid  = buffer.io.read.head.valid && !way.io.r.req.valid
+      val setIdx = buffer.io.read.head.bits.setIdx
+      val entry  = buffer.io.read.head.bits.entry
+      way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
+      buffer.io.read.head.ready := way.io.w.req.ready && !way.io.r.req.valid
+  }
+
+  allocFailCtrSram.zip(allocFailCtrWriteBuffers).foreach {
+    case (allocFailCtr, buffer) =>
+      val valid  = buffer.io.read.head.valid && !allocFailCtr.io.r.req.valid
+      val setIdx = buffer.io.read.head.bits.setIdx
+      val data   = buffer.io.read.head.bits.allocFailCtr
+      allocFailCtr.io.w.apply(valid, data, setIdx, 1.U(1.W))
+      buffer.io.read.head.ready := allocFailCtr.io.w.req.ready && !allocFailCtr.io.r.req.valid
+  }
+
+  // write to write buffer
+  private val wayMask:      Vec[Bool]      = WireInit(VecInit(Seq.fill(NumWays)(false.B)))
+  private val writeEntries: Vec[TageEntry] = WireInit(VecInit(Seq.fill(NumWays)(0.U.asTypeOf(new TageEntry))))
+  writeEntries := io.updateReq.bits.entries
+  wayMask      := io.updateReq.bits.wayMask.asBools
+
+  entryWriteBuffers.zip(allocFailCtrWriteBuffers).zip(io.writeBankMask.asBools).foreach {
+    case ((wayBuffers, allocFailCtrBuffer), bankEnable) =>
+      val writeValid = (io.updateReq.valid) && bankEnable
+      // write to allocFailCtrBuffer
+      allocFailCtrBuffer.io.write.head.valid       := writeValid
+      allocFailCtrBuffer.io.write.head.bits.setIdx := io.writeSetIdx
+      allocFailCtrBuffer.io.write.head.bits.allocFailCtr.value := Mux(
+        io.needResetUsefulCtr,
+        0.U,
+        io.oldAllocFailCtr.getIncrease
+      )
+      wayBuffers.zip(wayMask).zip(writeEntries).foreach {
+        case ((buffer, mask), entry) =>
+          buffer.io.write.head.valid       := writeValid && mask
+          buffer.io.write.head.bits.setIdx := io.writeSetIdx
+          buffer.io.write.head.bits.entry  := entry
+      }
   }
 
   io.resetDone :=
@@ -154,15 +150,4 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
       entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
     )
   io.readResp.allocFailCtr := Mux1H(readBankMaskNext, allocFailCtrSram.map(_.io.r.resp.data.head))
-
-  writeBuffers.zipWithIndex.foreach {
-    case (buffer, bankIdx) =>
-      buffer.io.enq.valid                   := (io.updateReq.valid || io.allocateReq.valid) && io.writeBankMask(bankIdx)
-      buffer.io.enq.bits.setIdx             := io.writeSetIdx
-      buffer.io.enq.bits.updateReq          := io.updateReq
-      buffer.io.enq.bits.allocateReq        := io.allocateReq
-      buffer.io.enq.bits.needResetUsefulCtr := io.needResetUsefulCtr
-      buffer.io.enq.bits.needIncreaseAllocFailCtr := io.needIncreaseAllocFailCtr
-      buffer.io.enq.bits.oldAllocFailCtr          := io.oldAllocFailCtr
-  }
 }
