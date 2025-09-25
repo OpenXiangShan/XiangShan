@@ -120,6 +120,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s3_pc = RegEnable(s2_pc, s2_fire)
   private val s4_pc = RegEnable(s3_pc, s3_fire) // for abtb fast train
 
+  // abtb meta won't be sent to ftq, used for abtb fast train and fast predict
+  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
+  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -171,10 +175,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid       := redirect.valid
-  abtb.io.overrideValid       := s3_override
-  abtb.io.t0_previousPc.valid := s4_valid // for fast train
-  abtb.io.t0_previousPc.bits  := s4_pc    // for fast train
+  abtb.io.redirectValid                  := redirect.valid
+  abtb.io.overrideValid                  := s3_override
+  abtb.io.previousVAddr.valid            := s4_valid // for fast train
+  abtb.io.previousVAddr.bits             := s4_pc    // for fast train
+  abtb.io.fastTrain.valid                := s3_valid
+  abtb.io.fastTrain.bits.startVAddr      := s3_pc
+  abtb.io.fastTrain.bits.finalPrediction := s3_prediction
+  abtb.io.fastTrain.bits.abtbMeta        := s3_abtbMeta
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -301,10 +309,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   // tell ftq s3 ftqPtr for meta enqueue and s3 override
   io.toFtq.s3FtqPtr := s3_ftqPtr
 
-  // abtb meta
-  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
-  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
-
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
@@ -323,7 +327,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
-  s3_meta.abtb              := s3_abtbMeta
   s3_meta.mbtb              := s3_mbtbMeta
   s3_meta.ras               := s3_rasMeta
   s3_meta.phr               := s3_phrMeta
