@@ -38,6 +38,7 @@ class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
   val traceRange = Input(UInt(PredictWidth.W))
   val predInfo = Input(new TracePredictInfo())
   val ifuRange = Input(UInt(PredictWidth.W)) // fixed Range
+  val otherBlock = Input(Bool()) // when trace not ready(only in Sim-FPGA)
 
   val redirect = Input(new Bundle {
    val fromBackend = Valid(new BranchPredictionRedirect()) // backend -> ftq -> ifu
@@ -60,7 +61,7 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   // BoringUtils.addSource(firstInstFastSim, "TraceFastSimInstFinish")
 
   val pcMismatch = io.out.recv.bits.instNum === 0.U
-  io.out.block := pcMismatch || (!firstInstFastSim && !fastSimMemAddrFinish)
+  io.out.block := pcMismatch || (!firstInstFastSim && !fastSimMemAddrFinish) || io.otherBlock
   XSPerfAccumulate("FastSimMemoryBlock", !firstInstFastSim && !fastSimMemAddrFinish)
   XSPerfAccumulate("FastSimFetchBlock", firstInstFastSim && fastSimMemAddrFinish)
   XSPerfAccumulate("FastSimFetchCycle", firstInstFastSim)

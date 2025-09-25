@@ -16,7 +16,9 @@
 package xiangshan.frontend.tracertl
 
 import chisel3._
+import chisel3.util.experimental.BoringUtils
 import chisel3.util.experimental.BoringUtils.tapAndRead
+import chisel3.util._
 import chisel3.reflect.DataMirror.isVisible
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{DebugOptionsKey, XSTileKey}

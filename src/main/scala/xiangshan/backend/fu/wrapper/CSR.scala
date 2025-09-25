@@ -250,7 +250,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
   if (env.TraceRTLMode) {
-    if (!env.TraceRTLSYNTHESIS) {
+    if (!(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
       val traceSatpMod = Module(new TraceSatp())
       val traceSatp = RegEnable(traceSatpMod.io.satp_ppn.bits, 0.U, traceSatpMod.io.satp_ppn.valid)
       tlb.satp.ppn      := traceSatp

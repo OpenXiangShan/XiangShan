@@ -28,9 +28,12 @@ import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, ChiselMap, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
+import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceRTLAXISMaster, TraceRTLAXISSlave}
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
+  require(debugOpts.TraceRTLMode, "SimTop require enable TraceRTLMode")
+  println(s"SimTop TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -86,6 +89,26 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.mfr_id := 0.U(11.W)
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
+
+  // TODO: mv the parameter to trait param
+  val axis_h2c = Module(new TraceRTLAXISMaster)
+  val axis_c2h = Module(new TraceRTLAXISSlave)
+  val axis_unpackage = Module(new TraceAXISUnpackage(
+    // 200 * 16, 512, 16
+    1 * 16, 512, 16
+  ))
+  val axis_package = Module(new TraceAXISPackage(128, 512))
+  axis_h2c.io.axis <> axis_unpackage.io.axis
+  soc.io.gateWay.in <> axis_unpackage.io.data
+  soc.io.gateWay.out <> axis_package.io.in
+  axis_c2h.io.axis <> axis_package.io.axis
+
+  require(soc.io.gateWay.in.bits.getWidth == axis_unpackage.io.data.bits.getWidth,
+    s"ERROR in TraceRTLSimTop, soc.io.gateWay.in.bits.getWidth ${soc.io.gateWay.in.bits.getWidth} != axis_unpackage.io.data.bits.getWidth ${axis_unpackage.io.data.bits.getWidth}")
+  require(soc.io.gateWay.out.bits.getWidth == axis_package.io.in.bits.getWidth,
+      s"ERROR in TraceRTLSimTop, soc.io.gateWay.out.bits.getWidth ${soc.io.gateWay.out.bits.getWidth} != axis_package.io.in.bits.getWidth ${axis_package.io.in.bits.getWidth}")
+  dontTouch(soc.io.gateWay.in)
+  dontTouch(soc.io.gateWay.out)
 
   val difftest = DifftestModule.finish("XiangShan")
 

@@ -437,3 +437,40 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
     )
   })
 )
+
+class FpgaTraceRTLDefaultConfig(n: Int = 1) extends Config (
+  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false,
+      TraceRTLMode = true,
+      TraceRTLOnFPGA = true,
+      TraceRTLOnPLDM = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)
+
+class FpgaTraceRTLMinimalConfig(n: Int = 1) extends Config(
+  (new MinimalConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false,
+      TraceRTLMode = true,
+      TraceRTLOnFPGA = true,
+      TraceRTLOnPLDM = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)

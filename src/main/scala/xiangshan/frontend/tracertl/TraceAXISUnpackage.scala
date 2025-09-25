@@ -1,0 +1,158 @@
+/***************************************************************************************
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2024 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+package xiangshan.frontend.tracertl
+
+import chisel3._
+import chisel3.util._
+import utility._
+
+
+class TraceUnpackageBufferPtr(entries: Int) extends CircularQueuePtr[TraceUnpackageBufferPtr](entries) with HasCircularQueuePtrHelper
+
+// recv data from xdma-axis-steam bus to a buffer with MAX_DATA_WIDTH width
+// tran data to core in format of UInt of DATA_WIDTH
+// FIXME: these *DATA_WIDTH may not suit each other
+// DATA_WIDTH = 16 * 48 = 768
+// AXIS_DATA_WIDTH = 512
+// MAX_DATA_WIDTH = ~20000(maybe)
+class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INST_NUM: Int) extends Module {
+
+  private val TRACE_INNER_INST_WIDTH = (new TraceInstrInnerBundle).getWidth
+  private val TRACE_OUTER_INST_WIDTH = (new TraceInstrOuterBundle).getWidth
+
+  private val BUS_CORE_DATA_WIDTH = TRACE_INNER_INST_WIDTH  * DUT_BUS_INST_NUM
+  private val PACKET_INST_WIDTH = TRACE_OUTER_INST_WIDTH  * PACKET_INST_NUM
+  private val PACKET_CYCLE_NUM = (PACKET_INST_WIDTH + AXIS_DATA_WIDTH - 1) / AXIS_DATA_WIDTH
+  private val PLUS_EXTRA_WIDTH = PACKET_CYCLE_NUM * AXIS_DATA_WIDTH
+
+  println(s"[TraceAXISUnpackage] PACKET_INST_NUM: $PACKET_INST_NUM AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH DUT_BUS_INST_NUM: $DUT_BUS_INST_NUM")
+  println(s"BUS_CORE_DATA_WIDTH: $BUS_CORE_DATA_WIDTH PACKET_INST_WIDTH: $PACKET_INST_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
+
+  val io = IO(new Bundle {
+    val axis = Flipped(new TraceRTLAXISIO(AXIS_DATA_WIDTH))
+    val data = DecoupledIO(UInt(BUS_CORE_DATA_WIDTH.W))
+  })
+
+  val BufferNum = 2
+  val buffer = Reg(Vec(BufferNum, Vec(PACKET_CYCLE_NUM, UInt(AXIS_DATA_WIDTH.W))))
+  val bufferValid = RegInit(VecInit(Seq.fill(BufferNum)(false.B)))
+
+  val recvIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
+  val tranIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
+
+  // recv
+  // TODO: fsm seems not necessary
+  // val axi_IDLE :: axi_TRANSFER :: Nil = Enum(2)
+  // val state = RegInit(axi_IDLE)
+
+  io.axis.tready := !bufferValid(recvIdx.value)
+  val axis_fire = io.axis.tvalid && io.axis.tready
+
+  val axis_cycle_index = Counter(axis_fire, PACKET_CYCLE_NUM)._1
+  when (axis_fire) {
+    buffer(recvIdx.value)(axis_cycle_index) := io.axis.tdata
+  }
+  when (axis_fire && io.axis.tlast) {
+    recvIdx := recvIdx + 1.U
+    bufferValid(recvIdx.value) := true.B
+  }
+  when (axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U)) {
+    assert(io.axis.tlast, "ERROR in TraceAXISUnpackage, not the last cycle but tlast is true")
+  }
+  assert(!(axis_fire && io.axis.tlast && (axis_cycle_index =/= (PACKET_CYCLE_NUM-1).U)),
+    s"ERROR in TraceAXISUnpackage, counter not finish but encounter tlast PACKET_CYCLE_NUM ${PACKET_CYCLE_NUM}")
+  when (axis_fire && !io.axis.tlast) {
+    assert(io.axis.tkeep === ~(0.U((AXIS_DATA_WIDTH/8).W)),
+      "ERROR in TraceAXISUnpackage, not the tlast but tkeep not all true")
+  }
+
+  // tranfer to core
+  require(PACKET_INST_NUM % DUT_BUS_INST_NUM == 0, s"ERROR in TraceAXISUnpackage, PACKET_INST_NUM $PACKET_INST_NUM should be times of DUT_BUS_INST_NUM $DUT_BUS_INST_NUM")
+  val MAX_CORE_CYCLE = PACKET_INST_NUM / DUT_BUS_INST_NUM
+  val data_cycle_index = Counter(io.data.fire, MAX_CORE_CYCLE)._1
+
+  val dataFlatten = buffer(tranIdx.value).asUInt
+  val dataOuterVec = dataFlatten(PACKET_INST_WIDTH-1, 0).asTypeOf(
+    Vec(MAX_CORE_CYCLE, UInt((TRACE_OUTER_INST_WIDTH * DUT_BUS_INST_NUM).W)))
+  val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
+
+  val dataOutOuterUInt = WireInit(dataOuterVecAtIndex.asTypeOf(Vec(DUT_BUS_INST_NUM, UInt(TRACE_OUTER_INST_WIDTH.W))))
+  val dataOutOuterFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrOuterBundle))
+  dataOutOuterFormat.zip(dataOutOuterUInt).foreach { case (outer, uint) =>
+    outer := TraceInstrOuterBundle.readRaw(uint)
+  }
+
+  val dataOutInnerUInt = Wire(Vec(DUT_BUS_INST_NUM, UInt(TRACE_INNER_INST_WIDTH.W)))
+  val dataOutInnerFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
+  dataOutInnerFormat.zip(dataOutOuterFormat).foreach { case (inner, outer) =>
+    inner := outer.toInnerBundle
+  }
+  dataOutInnerUInt.zip(dataOutInnerFormat).foreach { case (uint, inner) =>
+    uint := inner.asUInt
+  }
+
+  for (i <- 0 until (DUT_BUS_INST_NUM - 1)) {
+    when (io.data.valid) {
+      assert((dataOutInnerFormat(i).InstID + 1.U) === dataOutInnerFormat(i + 1).InstID,
+        s"ERROR in TraceAXISUnpackage, in one cycle, the ${i}th InstID not match the ${i+1}th InstID")
+      assert(dataOutInnerFormat(i).nextPC === dataOutInnerFormat(i + 1).pcVA,
+        s"ERROR in TraceAXISUnpackage, in one cycle, the ${i}th nextPC not match the ${i+1}th pcVA")
+    }
+  }
+
+  dontTouch(dataOuterVec)
+  dontTouch(dataOuterVecAtIndex)
+  dontTouch(dataOutOuterUInt)
+  dontTouch(dataOutOuterFormat)
+  dontTouch(dataOutInnerFormat)
+  dontTouch(dataOutInnerUInt)
+
+  io.data.bits := dataOutInnerFormat.asUInt
+  io.data.valid := bufferValid(tranIdx.value)
+
+  when (io.data.fire) {
+    when (data_cycle_index === (MAX_CORE_CYCLE-1).U) {
+      bufferValid(tranIdx.value) := false.B
+      tranIdx := tranIdx + 1.U
+    }
+  }
+
+  // assert the first instruction
+  val firstChecked = RegInit(false.B)
+  when (io.data.fire) {
+    when (firstChecked) {
+      firstChecked := false.B
+     assert(io.data.bits(39-1,0) === 0x80000000L.U(39.W), "ERROR in TraceAXISUnpackage, the first instruction pcVA is not 0x80000000")
+     assert(io.data.bits(39+48-1, 39) === 0x80000000L.U(48.W), "ERROR in TraceAXISUnpackage, the first instruction pcPA is not 0x80000000")
+    }
+  }
+
+  // debug
+  // val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
+  // val dataOuterTraceFormat = dataOuterVec(data_cycle_index).asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrOuterBundle))
+  // val dataInnerTraceFormat = io.data.bits.asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
+
+  // dontTouch(dataFlatten)
+  // dontTouch(dataOuterVecAtIndex)
+  // dontTouch(dataOuterTraceFormat)
+  // dontTouch(dataInnerTraceFormat)
+
+  dontTouch(io.data)
+  dontTouch(io.axis)
+  dontTouch(recvIdx)
+  dontTouch(tranIdx)
+  dontTouch(data_cycle_index)
+}

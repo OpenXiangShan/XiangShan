@@ -516,7 +516,7 @@ class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
     val resp = Valid(new TraceFakeICacheRespBundle)
   })
 
-  if (env.TraceRTLSYNTHESIS) {
+  if (env.TraceRTLOnPLDM || env.TraceRTLOnFPGA) {
     io.resp.valid := RegNext(io.req.valid)
     io.resp.bits.data(0) := 0.U // TODO: Fixme
     io.resp.bits.data(1) := 0.U
@@ -788,7 +788,7 @@ class TraceSatpHelper() extends ExtModule
        |logic [63:0] logic_satp_ppn;
        |
        |always @(negedge clock) begin
-       |  if (enable) begin
+       |  if (!reset && enable) begin
        |    logic_satp_ppn <= trace_get_satp_ppn();
        |  end
        |  else begin

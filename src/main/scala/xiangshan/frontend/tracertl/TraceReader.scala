@@ -18,11 +18,10 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError}
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError, ParallelPriorityMux}
+import utils.OptionWrapper
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
-import utility.ParallelPriorityMux
-import chisel3.experimental.Trace
 
 class TracePredInfoBundle extends Bundle {
   val fixTarget = UInt(64.W)
@@ -57,14 +56,15 @@ object TraceInstrBundle {
   }
 }
 
-class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
+class TraceReaderIO(implicit p: Parameters) extends TraceBundle
+  with HasTraceReaderFPGAParam {
   // recv.valid from f3_fire, bits.instNum from range
   val recv = Flipped(Valid(new TraceRecvInfo()))
   // BranchPredictionRedirect === Redirect with some traits
   val redirect = Flipped(Valid(new BranchPredictionRedirect()))
 
   // traceInst should always be valid
-  val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
+  val traceInsts = Output(Valid(Vec(PredictWidth, new TraceInstrBundle())))
 
   // pc match
   val pcMatch = Flipped(new TracePCMatchBundle())
@@ -74,16 +74,18 @@ class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr
 
 class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
   with TraceParams
+  with HasTraceReaderFPGAParam
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val enable = Input(Bool())
+    val instsReady = Output(Bool())
     val insts = Output(Vec(TraceFetchWidth, new TraceInstrInnerBundle()))
     val redirect_valid = Input(Bool())
     val redirect_instID = Input(UInt(64.W))
     val workingState = Input(Bool())
   })
 
-  if (env.TraceRTLSYNTHESIS) {
+  if (env.TraceRTLOnPLDM) {
     val file_reader = Module(new TraceRTL_FileReader())
     file_reader.clock := clock
     file_reader.reset := reset
@@ -106,6 +108,19 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
       inst.branchType := file_reader.branch_type(i);
       inst.exception := file_reader.exception(i);
     }
+    io.instsReady := true.B
+  }
+  else if (env.TraceRTLOnFPGA) {
+    val helper = Module(new TraceReaderFPGA)
+
+    // helper.io.enable := io.enable
+    // FIXME: consider helper.io.instsToDut.valid
+    helper.io.enable := io.enable
+    helper.io.redirect.valid := io.redirect_valid
+    helper.io.redirect.bits := io.redirect_instID
+    helper.io.workingState := io.workingState
+    io.insts := helper.io.instsToDut
+    io.instsReady := helper.io.instsValid
   } else {
     val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
     val traceRedirecter = Module(new TraceRedirectHelper)
@@ -120,8 +135,8 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
     traceReaderHelper.enable := io.enable
 
     io.insts := traceReaderHelper.insts
+    io.instsReady := true.B
   }
-
 }
 
 
@@ -159,12 +174,13 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     val readTraceEnableForHelper = readTraceEnable
     val readTraceEnableForPtr = readTraceEnable
     val readTraceEnableForBuffer = readTraceEnable
+    val readTraceReady = trace_reader_helper.io.instsReady
     enqPtrVec.zipWithIndex.foreach { case (e, i) =>
       e := enqPtr + i.U
       // e := RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
     }
 
-    when (readTraceEnableForBuffer) {
+    when (readTraceEnableForBuffer && readTraceReady) {
       (0 until TraceFetchWidth).foreach { case i =>
         traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(trace_reader_helper.io.insts(i))
       }
@@ -176,25 +192,17 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
     trace_reader_helper.io.workingState := workingState
 
-    // traceRedirecter.clock := clock
-    // traceRedirecter.reset := reset
-    // traceRedirecter.enable := redirect.valid
-    // traceRedirecter.InstID := redirect.bits.traceInfo.InstID +
-    //   Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
-
-    // traceReaderHelper.clock := clock
-    // traceReaderHelper.reset := reset
-    // traceReaderHelper.enable := readTraceEnableForHelper
-
-    io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
+    // FIXME: case: some inst valid but not all valid
+    io.traceInsts.bits.zipWithIndex.foreach { case (inst, i) =>
       val ptr = (deqPtr + i.U).value
       inst := traceBuffer(ptr)
     }
+    io.traceInsts.valid := distanceBetween(enqPtr, deqPtr) >= FetchWidth.U
 
     when(io.recv.valid) {
       deqPtr := deqPtr + io.recv.bits.instNum
     }
-    when (readTraceEnableForPtr) {
+    when (readTraceEnableForPtr && readTraceReady) {
       enqPtr := enqPtr + TraceFetchWidth.U
     }
 
@@ -238,16 +246,26 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       debugRedirectTarget := redirect.bits.cfiUpdate.target
     }
 
-
     if (!TraceEnableDuplicateFlush) {
       when (redirect.valid) {
         XSError(redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
           "TraceEnableDuplicateFlush is false. Please check wrong path redirect")
       }
-  }
+    }
 
-  XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
-  XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
-    "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
+    XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
+    XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
+      "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
+
+    for (i <- 0 until (FetchWidth - 1)) {
+      XSError(io.traceInsts.valid && (io.traceInsts.bits(i+1).InstID =/= (io.traceInsts.bits(i).InstID + 1.U)),
+        s"Error in TraceReader: the ${i}th inst's next InstID is not ${i + 1}'s")
+    }
+    val firstInstCheck = RegInit(true.B)
+    when (io.traceInsts.valid && firstInstCheck) {
+      firstInstCheck := false.B
+      XSError(io.traceInsts.bits(0).pcVA =/= 0x80000000L.U, "Error in TraceReader: the first inst's PC is not 0x80000000")
+      XSError(io.traceInsts.bits(0).InstID =/= 1.U, "Error in TraceReader: the first inst's InstID is not 1")
+    }
   }
 }

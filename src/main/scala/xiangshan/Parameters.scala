@@ -560,7 +560,8 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   TraceRTLMode: Boolean = false,
-  TraceRTLSYNTHESIS: Boolean = true, // for fpga and pldm
+  TraceRTLOnPLDM: Boolean = false, // for pldm
+  TraceRTLOnFPGA: Boolean = true, // for fpga
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false
 )

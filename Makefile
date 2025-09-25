@@ -88,8 +88,10 @@ endif
 
 # trace xiangshan mode: accept trace instead of gcpt
 TRACERTL_MODE ?= 1
+TRACERTLOnFPGA ?= 0
 ifeq ($(TRACERTL_MODE),1)
 override SIM_ARGS += --trace-rtl
+SIM_FPGA_ARGS += --trace-rtl
 endif
 
 
@@ -161,7 +163,7 @@ $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
-		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
+		--num-cores $(NUM_CORES) $(RELEASE_ARGS) $(SIM_FPGA_ARGS)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__

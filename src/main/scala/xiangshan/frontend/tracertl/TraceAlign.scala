@@ -24,7 +24,7 @@ import xiangshan.frontend.HasPdConst
 class TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
   val debug_valid = Input(Bool())
 
-  val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
+  val traceInsts = Input(Valid(Vec(PredictWidth, new TraceInstrBundle())))
   // icacheData is align with ICacheHalfLine(256bits)
   val icacheData = Input(Valid(new TraceFakeICacheRespBundle()))
   // preDInfo's startAddr
@@ -49,7 +49,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
   with HasPdConst {
   val io = IO(new TraceAlignToIFUCutIO())
 
-  val width = io.traceInsts.size
+  val width = io.traceInsts.bits.size
   require(width == io.instRange.getWidth, f"Width of traceInsts ${width} and instRange ${io.instRange.getWidth} should be the same")
   val traceRangeVec = Wire(Vec(width, Bool()))
   val lastInstEndVec = Wire(Vec(PredictWidth + 1, Bool()))
@@ -57,7 +57,9 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
   val curInstIdxVec = Wire(Vec(PredictWidth + 1, UInt(log2Ceil(width).W)))
   val stillConsecutiveVec = Wire(Vec(width, Bool()))
   val pdValidVec = Wire(Vec(PredictWidth, Bool()))
+
   val startPC = io.predStartAddr
+  val traceInsts = io.traceInsts.bits
 
   io.traceRange := traceRangeVec.asUInt
   io.pdValid := pdValidVec.asUInt
@@ -107,7 +109,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
 
   (0 until width).foreach { i =>
     val curPC = startPC + (i * 2).U
-    val curTrace = io.traceInsts(curInstIdxVec(i))
+    val curTrace = traceInsts(curInstIdxVec(i))
     stillConsecutiveVec(i) := traceRangeVec.take(i).foldRight(true.B)(_ && _)
 
     val inst = io.cutInsts(i)
@@ -162,7 +164,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
         traceRangeVec(i) := (curPC + 2.U) === curTrace.pcVA
       else {
         traceRangeVec(i) := true.B
-        XSError(io.debug_valid && (curPC =/= (io.traceInsts(curInstIdxVec(i) - 1.U).pcVA + 2.U)),
+        XSError(io.debug_valid && (curPC =/= (traceInsts(curInstIdxVec(i) - 1.U).pcVA + 2.U)),
           "traceRange should not be true.B at stillConsecutive path?")
       }
 
@@ -178,9 +180,9 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
 
   // Force Execution of Interrupt(Interrupt is a force jump)
   io.traceForceJump := false.B
-  when (io.traceInsts(0).isForceJump) {
+  when (traceInsts(0).isForceJump) {
     io.cutInsts(0).valid := true.B
-    io.cutInsts(0).bits := io.traceInsts(0)
+    io.cutInsts(0).bits := traceInsts(0)
     io.pdValid := 1.U
     io.traceForceJump := true.B
   }

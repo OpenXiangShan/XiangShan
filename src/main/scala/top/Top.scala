@@ -19,6 +19,7 @@ package top
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import chisel3.experimental.dataview._
 import difftest.DifftestModule
 import xiangshan._
@@ -39,6 +40,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -198,6 +200,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
+    // TODO: change the const to trait param
+    val gateWayInWidth = (new TraceInstrInnerBundle).getWidth * 16
+    val gateWayOutWidth = (new TraceFPGACollectBundle).getWidth * 128
+
+    println(s"[XSTop] gateWayInWidth: $gateWayInWidth gateWayOutWidth: $gateWayOutWidth")
+
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(AsyncReset())
@@ -217,6 +225,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
+
+      // TODO: add option
+      val gateWay = new Bundle {
+        val in = Flipped(DecoupledIO(UInt(gateWayInWidth.W)))
+        val out = DecoupledIO(UInt(gateWayOutWidth.W))
+      }
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
@@ -303,6 +317,24 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
+    if (p(DebugOptionsKey).TraceRTLMode && p(DebugOptionsKey).TraceRTLOnFPGA) {
+      // add Top Module IO for data connect
+      // FIXME: rm ugly code
+      BoringUtils.addSource(io.gateWay.in.bits, "TraceRTLFPGATraces")
+      BoringUtils.addSource(io.gateWay.in.valid, "TraceRTLFPGATracesValid")
+      BoringUtils.addSink(io.gateWay.in.ready, "TraceRTLFPGATracesReady")
+
+      BoringUtils.addSink(io.gateWay.out.bits, "TraceRTLFPGATracesCollect")
+      BoringUtils.addSink(io.gateWay.out.valid, "TraceRTLFPGATracesCollectValid")
+      BoringUtils.addSource(io.gateWay.out.ready, "TraceRTLFPGATracesCollectReady")
+
+      println("[XSTop] TraceRTLMode and TraceRTLOnFPGA")
+    } else {
+      io.gateWay.in <> DontCare
+      io.gateWay.out <> DontCare
+      println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(DebugOptionsKey).TraceRTLOnFPGA}")
+    }
+
     withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
@@ -327,6 +359,8 @@ object TopMain extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
   ChiselMap.init(enable = enableChiselMap && !envInFPGA)
+
+  println(s"TopMain: TraceRTLMode ${config(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${config(DebugOptionsKey).TraceRTLOnFPGA}")
 
   val soc = if (config(SoCParamsKey).UseXSNoCTop)
     DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)

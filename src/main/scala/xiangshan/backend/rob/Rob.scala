@@ -1499,7 +1499,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
 
   // TraceRTL Collect Commit Trace to check the correctness of the pipeline
-  if (env.TraceRTLMode && !env.TraceRTLSYNTHESIS) {
+  if (env.TraceRTLMode) {
+    // TraceRTLOnPLDM, not support debug now
     when (io.enq.canAccept) {
       val hasNonWPEnq = Cat(io.enq.req.map{ case r =>
         r.valid && !r.bits.traceInfo.isWrongPath
@@ -1514,31 +1515,50 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         }
       }
     }
-
-    import xiangshan.frontend.tracertl.TraceCollector
-    val traceCollector = Module(new TraceCollector)
-    traceCollector.io.enable := io.commits.commitValid(0) && io.commits.isCommit
-    (0 until CommitWidth).foreach { case i =>
-      val uop = commitDebugUop(i)
-      val commitInfo = io.commits.info(i)
-      traceCollector.io.in(i).valid := io.commits.commitValid(i)
-      traceCollector.io.in(i).bits.pc := SignExt(uop.pc, XLEN)
-      traceCollector.io.in(i).bits.inst := uop.traceInfo.inst
-      traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
-      traceCollector.io.traceInfo(i) := uop.traceInfo
-      // TODO: do expandInst check. traceinfo.inst and uop.inst
-
-      when (traceCollector.io.enable && io.commits.commitValid(i)) {
-        XSError(uop.traceInfo.isWrongPath, "WrongPath instruction should not commit. Should be flushed by older instr")
-      }
-
-      when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
-        XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
-      }
-    }
     (0 until CommitWidth).foreach{ case i =>
       XSError(!io.commits.commitValid(0) && io.commits.isCommit && io.commits.commitValid(i),
         "When CommitValid is true, CommitValid(0) should be true")
+    }
+
+    if (env.TraceRTLOnFPGA) {
+      println(s"TraceRTL Mode: FPGA enable TraceCollectQueue")
+
+      import xiangshan.frontend.tracertl.TraceFPGACollectQueue
+      // TODO: change 128 to trait param
+      val traceCollectQueue = Module(new TraceFPGACollectQueue(128))
+      traceCollectQueue.io.in.valid := io.commits.commitValid(0) && io.commits.isCommit
+      (0 until CommitWidth).foreach { case i =>
+        val uop = commitDebugUop(i)
+        val commitInfo = io.commits.info(i)
+        traceCollectQueue.io.in.bits(i).valid := io.commits.commitValid(i)
+        traceCollectQueue.io.in.bits(i).bits.pcVA := SignExt(uop.pc, XLEN)
+        traceCollectQueue.io.in.bits(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
+        traceCollectQueue.io.in.bits(i).bits.padding := 0.U
+
+        when (traceCollectQueue.io.in.valid && traceCollectQueue.io.in.bits(i).valid) {
+          XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
+        }
+      }
+    } else if (!env.TraceRTLOnPLDM) {
+      println(s"TraceRTL Mode: verilator enable TraceCollector")
+
+      import xiangshan.frontend.tracertl.TraceCollector
+      val traceCollector = Module(new TraceCollector)
+      traceCollector.io.enable := io.commits.commitValid(0) && io.commits.isCommit
+      (0 until CommitWidth).foreach { case i =>
+        val uop = commitDebugUop(i)
+        val commitInfo = io.commits.info(i)
+        traceCollector.io.in(i).valid := io.commits.commitValid(i)
+        traceCollector.io.in(i).bits.pc := SignExt(uop.pc, XLEN)
+        traceCollector.io.in(i).bits.inst := uop.traceInfo.inst
+        traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
+        traceCollector.io.traceInfo(i) := uop.traceInfo
+        // TODO: do expandInst check. traceinfo.inst and uop.inst
+
+        when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
+          XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
+        }
+      }
     }
   }
 

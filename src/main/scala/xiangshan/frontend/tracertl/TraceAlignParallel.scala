@@ -29,10 +29,11 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule
   with HasPdConst {
   val io = IO(new TraceAlignToIFUCutIO())
 
-  val width = io.traceInsts.size
+  val width = io.traceInsts.bits.size
   require(width == io.instRange.getWidth, f"Width of traceInsts ${width} and instRange ${io.instRange.getWidth} should be the same")
 
-  val rawInsts = io.traceInsts
+  val rawInstsValid = io.traceInsts.valid // this should always be true, only can be false in Sim-FPGA mode
+  val rawInsts = io.traceInsts.bits
   val startPC = io.predStartAddr
   // consectiveWithLast map with rawInsts
   val consectiveWithLast = Wire(Vec(width, Bool()))
@@ -96,7 +97,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule
   io.traceForceJump := rawInsts.head.isForceJump
   when (io.traceForceJump) {
     io.cutInsts.head.valid := true.B
-    io.cutInsts.head.bits := io.traceInsts(0)
+    io.cutInsts.head.bits := io.traceInsts.bits(0)
     io.pdValid := 1.U
   }
 }

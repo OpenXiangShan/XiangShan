@@ -189,6 +189,7 @@ if (env.TraceRTLMode) {
     _.predInfo := io.fromIFU.predInfo, // duplicate signal, just to speed up waveform debug
     _.ifuRange := predChecker.io.out.stage1Out.fixedRange.asUInt,
     _.redirect := io.redirect,
+    _.otherBlock := !traceReader.io.traceInsts.valid,
   )
   traceFakeICache.io.specifyField(
     _.req.valid := io.fromIFU.f2_fire,
