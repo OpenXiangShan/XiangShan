@@ -20,8 +20,7 @@ import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import huancun._
-import system.SoCParamsKey
-import system.CVMParamskey
+import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
@@ -61,7 +60,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
-  HasBitmapCheck: Boolean = false,
+  HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
@@ -115,7 +114,7 @@ case class XSCoreParameters
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 160,
+  RobSize: Int = 224,
   RabSize: Int = 256,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
@@ -493,11 +492,13 @@ case class DebugOptions
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   PerfLevel: String = "VERBOSE",
+  EnableXMR: Boolean = true,
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
-  EnableRollingDB: Boolean = false
+  EnableRollingDB: Boolean = false,
+  EnableSimFrontend: Boolean = false
 )
 
 case object DFTOptionsKey extends Field[DFTOptions]
@@ -514,7 +515,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   def PmemRanges = p(SoCParamsKey).PmemRanges
-  def KeyIDBits = p(CVMParamskey).KeyIDBits
+  def KeyIDBits = p(CVMParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 

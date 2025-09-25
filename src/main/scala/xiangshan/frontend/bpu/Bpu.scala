@@ -66,7 +66,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
 
   /* *** aliases *** */
   private val train        = io.fromFtq.train
-  private val commitUpdate = io.fromFtq.train
+  private val commitUpdate = io.fromFtq.commit
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
@@ -94,15 +94,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s1_flush = Wire(Bool())
   private val s2_flush = Wire(Bool())
   private val s3_flush = Wire(Bool())
+  private val s4_flush = Wire(Bool()) // for abtb fast train
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
+  private val s4_valid = RegInit(false.B) // for abtb fast train
 
   private val s3_override = WireDefault(false.B)
 
   private val s1_prediction = Wire(new Prediction)
   private val s3_prediction = Wire(new Prediction)
+
+  private val s3_meta = Wire(new BpuMeta)
 
   private val s0_pc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val s0_pcReg = RegEnable(s0_pc, !s0_stall)
@@ -114,6 +118,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s1_pc = RegEnable(s0_pc, s0_fire)
   private val s2_pc = RegEnable(s1_pc, s1_fire)
   private val s3_pc = RegEnable(s2_pc, s2_fire)
+  private val s4_pc = RegEnable(s3_pc, s3_fire) // for abtb fast train
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -123,28 +128,53 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   stageCtrl.s3_fire := s3_fire
 
   private val t0_compareMatrix = CompareMatrix(VecInit(train.bits.branches.map(_.bits.cfiPosition)))
-  private val t0_firstMispredict = t0_compareMatrix.getLeastElement(
-    (b: Valid[BranchInfo]) => b.valid && b.bits.mispredict,
-    train.bits.branches
+  // mark all branches after the first mispredict as invalid
+  // i.e. we have (valid, position, mispredict) for each branch:
+  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
+  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
+  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
+    VecInit(train.bits.branches.map(b => b.valid && b.bits.mispredict))
   )
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
-    p.io.startVAddr                 := s0_pc
-    p.io.stageCtrl                  := stageCtrl
-    p.io.train.valid                := train.valid
-    p.io.train.bits.meta            := train.bits.meta
-    p.io.train.bits.startVAddr      := train.bits.startVAddr
-    p.io.train.bits.branches        := train.bits.branches
-    p.io.train.bits.firstMispredict := t0_firstMispredict
+    p.io.startVAddr := s0_pc
+    p.io.stageCtrl  := stageCtrl
+
+    if (p.EnableFastTrain) {
+      // fast train: from s3 override
+      println(s"[Bpu] use fast train for ${p.getClass.getSimpleName}")
+      p.io.train.valid           := s3_fire
+      p.io.train.bits.meta       := s3_meta
+      p.io.train.bits.startVAddr := s3_pc
+      // FIXME: use all mbtb identified branches?
+      p.io.train.bits.branches                       := 0.U.asTypeOf(train.bits.branches)
+      p.io.train.bits.branches.head.valid            := true.B
+      p.io.train.bits.branches.head.bits.target      := s3_prediction.target
+      p.io.train.bits.branches.head.bits.taken       := s3_prediction.taken
+      p.io.train.bits.branches.head.bits.cfiPosition := s3_prediction.cfiPosition
+      p.io.train.bits.branches.head.bits.attribute   := s3_prediction.attribute
+      p.io.train.bits.branches.head.bits.mispredict  := s3_override
+    } else {
+      // train: from Ftq + selected (first mispredict)
+      p.io.train.valid           := train.valid
+      p.io.train.bits.meta       := train.bits.meta
+      p.io.train.bits.startVAddr := train.bits.startVAddr
+      p.io.train.bits.branches.zipWithIndex.foreach { case (b, i) =>
+        b.valid := train.bits.branches(i).valid && t0_firstMispredictMask(i)
+        b.bits  := train.bits.branches(i).bits
+      }
+    }
   }
 
   /* *** predictor specific inputs *** */
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid := redirect.valid
-  abtb.io.overrideValid := s3_override
+  abtb.io.redirectValid       := redirect.valid
+  abtb.io.overrideValid       := s3_override
+  abtb.io.t0_previousPc.valid := s4_valid // for fast train
+  abtb.io.t0_previousPc.bits  := s4_pc    // for fast train
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -154,11 +184,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
   ras.io.commit.valid            := commitUpdate.valid
-  ras.io.commit.bits.attribute   := commitUpdate.bits.branches(0).bits.attribute
-  ras.io.commit.bits.startPc     := commitUpdate.bits.startVAddr.toUInt
-  ras.io.commit.bits.isRvc       := false.B // commitUpdate.bits.isRvc
-  ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
-  ras.io.commit.bits.cfiPosition := commitUpdate.bits.branches(0).bits.cfiPosition
+  ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
+  ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
+  ras.io.commit.bits.pushAddr    := commitUpdate.bits.pushAddr
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
   ras.io.specIn.bits.isRvc       := false.B
@@ -177,6 +205,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
+  s4_flush := redirect.valid
   s3_flush := redirect.valid
   s2_flush := s3_flush || s3_override
   s1_flush := s2_flush
@@ -202,6 +231,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
     .elsewhen(s2_fire)(s3_valid := !s2_flush)
     .elsewhen(s3_fire)(s3_valid := false.B)
 
+  when(s4_flush)(s4_valid := false.B)
+    .elsewhen(s3_fire)(s4_valid := !s3_flush)
+
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
@@ -218,9 +250,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       )
     )
 
-  private val s2_taken              = tage.io.takenMask.reduce(_ || _)
-  private val s2_mbtbResult         = mbtb.io.result
-  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, tage.io.takenMask)
+  private val s2_mbtbResult    = mbtb.io.result
+  private val s2_condTakenMask = tage.io.condTakenMask
+  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map {
+    case (hit, attribute) => hit && (attribute.isDirect || attribute.isIndirect)
+  })
+  private val s2_takenMask          = s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b }
+  private val s2_taken              = s2_takenMask.reduce(_ || _)
+  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, s2_takenMask)
 
   private val s3_taken                      = RegEnable(s2_taken, s2_fire)
   private val s3_mbtbResult                 = RegEnable(s2_mbtbResult, s2_fire)
@@ -286,7 +323,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
-  private val s3_meta = Wire(new BpuMeta)
   s3_meta.abtb              := s3_abtbMeta
   s3_meta.mbtb              := s3_mbtbMeta
   s3_meta.ras               := s3_rasMeta

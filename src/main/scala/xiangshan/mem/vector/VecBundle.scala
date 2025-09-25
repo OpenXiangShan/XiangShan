@@ -261,7 +261,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 
-  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
+//  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
 }
 
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{

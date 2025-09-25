@@ -254,9 +254,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val resp_pte = Mux(pte_valid, pte, fake_pte)
   ptw_resp.apply(resp_pf, resp_af, resp_level, resp_pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false, not_merge = false, bitmap_checkfailed.asBool)
 
-  val normal_resp = idle === false.B && mem_addr_update && !need_last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
-  val stageHit_resp = idle === false.B && hptw_resp_stage2
-  io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
+  val normal_resp = mem_addr_update && !need_last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
+  val stageHit_resp = hptw_resp_stage2
+  io.resp.valid := !idle && Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit || (l3Hit || l2Hit) && guestFault && !pte_valid, stage1, ptw_resp)
   io.resp.bits.h_resp := Mux(gvpn_gpf, fake_h_resp, hptw_resp)
@@ -288,6 +288,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     io.bitmap.get.req.bits.level := Mux(jmp_bitmap_check_r, cache_level, level)
     io.bitmap.get.req.bits.way_info := DontCare
     io.bitmap.get.req.bits.hptw_bypassed := false.B
+    io.bitmap.get.req.bits.n := pte.n
+    io.bitmap.get.req.bits.s2xlate := req_s2xlate
     io.bitmap.get.resp.ready := !w_bitmap_resp
   }
   mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
@@ -513,7 +515,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   if (HasBitmapCheck) {
     when (whether_need_bitmap_check) {
-      when (bitmap_enable && (!enableS2xlate || onlyS1xlate) && pte.isLeaf()) {
+      when (bitmap_enable && (!enableS2xlate || onlyS1xlate) && pte.isLeaf() && !pageFault) {
         s_bitmap_check := false.B
         whether_need_bitmap_check := false.B
       } .otherwise {
@@ -566,6 +568,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         mem_addr_update := false.B
         accessFault := false.B
         first_gvpn_check_fail := false.B
+        if (HasBitmapCheck) {
+          bitmap_checkfailed := false.B
+        }
       }
       finish := true.B
     }
@@ -699,6 +704,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val from_l0 = Bool()
   val way_info = UInt(l2tlbParams.l0nWays.W)
   val jmp_bitmap_check = Bool()
+  val n = Bool()
   val ptes = Vec(tlbcontiguous, UInt(XLEN.W))
   val cfs = Vec(tlbcontiguous, Bool())
 }
@@ -755,7 +761,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
 
-  val bitmap_arb = Option.when(HasBitmapCheck)(Module(new RRArbiter(new bitmapReqBundle(), l2tlbParams.llptwsize)))
+  val bitmap_arb = Option.when(HasBitmapCheck)(Module(new RRArbiterInit(new bitmapReqBundle(), l2tlbParams.llptwsize)))
   val way_info = Option.when(HasBitmapCheck)(Wire(Vec(l2tlbParams.llptwsize, UInt(l2tlbParams.l0nWays.W))))
   if (HasBitmapCheck) {
     for (i <- 0 until l2tlbParams.llptwsize) {
@@ -766,6 +772,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       bitmap_arb.get.io.in(i).bits.level := 0.U // last level
       bitmap_arb.get.io.in(i).bits.way_info := Mux(entries(i).from_l0, entries(i).way_info, way_info.get(i))
       bitmap_arb.get.io.in(i).bits.hptw_bypassed := false.B
+      bitmap_arb.get.io.in(i).bits.n := entries(i).n
+      bitmap_arb.get.io.in(i).bits.s2xlate := entries(i).req_info.s2xlate
     }
   }
 
@@ -796,11 +804,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val last_hptw_vsStagePf = last_hptw_req_pte.isPf(0.U, io.csr.hPBMTE) || !last_hptw_req_pte.isLeaf()
   val last_hptw_gStagePf = last_hptw_req_pte.isStage1Gpf(io.csr.hgatp.mode) && !last_hptw_vsStagePf
 
+  // (noS2xlate || onlyStage1 || allStage) but exception; do not need bitmap check
+  val mem_resp_enableS2xlate = entries(io.mem.resp.bits.id).req_info.s2xlate =/= noS2xlate
+  val mem_resp_s1Pbmte = Mux(mem_resp_enableS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
+  val mem_resp_Pf = last_hptw_req_pte.isPf(0.U, mem_resp_s1Pbmte) || !last_hptw_req_pte.isLeaf()
+  val mem_resp_gStagePf = entries(io.mem.resp.bits.id).req_info.s2xlate === allStage && last_hptw_req_pte.isStage1Gpf(io.csr.hgatp.mode) && !mem_resp_Pf
+
   // noS2xlate || onlyStage1 || allStage but exception; do not need Stage2 translate
   val noStage2 = ((entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate) || (entries(io.mem.resp.bits.id).req_info.s2xlate === onlyStage1)) ||
     (entries(io.mem.resp.bits.id).req_info.s2xlate === allStage && (last_hptw_vsStagePf || last_hptw_gStagePf))
-  val to_mem_out = dup_wait_resp && noStage2 && !bitmap_enable
-  val to_bitmap_req = (if (HasBitmapCheck) true.B else false.B) && dup_wait_resp && noStage2 && bitmap_enable
+  val to_mem_out = dup_wait_resp && noStage2 && (!bitmap_enable || mem_resp_Pf || mem_resp_gStagePf)
+  val to_bitmap_req = (if (HasBitmapCheck) true.B else false.B) && dup_wait_resp && noStage2 && bitmap_enable && !(mem_resp_Pf || mem_resp_gStagePf)
   val to_cache = if (HasBitmapCheck) Cat(dup_vec_bitmap).orR || Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
                  else Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
   val to_hptw_req = io.in.bits.req_info.s2xlate === allStage
@@ -826,7 +840,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // so 2 + FilterSize is enough to avoid dead-lock
     state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
-    entries(enq_ptr).ppn := Mux(to_last_hptw_req || last_hptw_excp, last_hptw_req_ppn, io.in.bits.ppn)
+    entries(enq_ptr).ppn := Mux(to_bitmap_req || to_last_hptw_req || last_hptw_excp, last_hptw_req_ppn, io.in.bits.ppn)
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
     if (HasBitmapCheck) {
@@ -838,6 +852,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         entries(enq_ptr).ptes(i) := 0.U
       }
       entries(enq_ptr).cfs := io.in.bits.bitmapCheck.get.cfs
+      entries(enq_ptr).n := last_hptw_req_pte.n
     }
     entries(enq_ptr).hptw_resp := Mux(to_last_hptw_req, entries(last_hptw_req_id).hptw_resp, Mux(to_wait, entries(wait_id).hptw_resp, entries(enq_ptr).hptw_resp))
     entries(enq_ptr).hptw_resp.gpf := Mux(last_hptw_excp, last_hptw_gStagePf, false.B)
@@ -856,8 +871,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       entries(enq_ptr).from_l0 := true.B
       entries(enq_ptr).way_info := io.in.bits.bitmapCheck.get.hitway
       entries(enq_ptr).jmp_bitmap_check := io.in.bits.bitmapCheck.get.jmp_bitmap_check
+      entries(enq_ptr).n := io.in.bits.bitmapCheck.get.ptes(io.in.bits.req_info.vpn(sectortlbwidth - 1, 0)).asTypeOf(new PteBundle().cloneType).n
       entries(enq_ptr).ptes := io.in.bits.bitmapCheck.get.ptes
       entries(enq_ptr).cfs := io.in.bits.bitmapCheck.get.cfs
+      entries(enq_ptr).first_s2xlate_fault := false.B
       mem_resp_hit(enq_ptr) := false.B
     }
   }
@@ -924,11 +941,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         val gStagePf = ptes(index).isStage1Gpf(io.csr.hgatp.mode) && !vsStagePf
         state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(vsStagePf || gStagePf),
                         state_last_hptw_req,
-                        Mux(bitmap_enable, state_bitmap_check, state_mem_out))
+                        Mux(bitmap_enable && !(vsStagePf || (entries(i).req_info.s2xlate === allStage && gStagePf)), state_bitmap_check, state_mem_out))
         mem_resp_hit(i) := true.B
         entries(i).ppn := Mux(ptes(index).n === 0.U, ptes(index).getPPN(), Cat(ptes(index).getPPN()(ptePPNLen - 1, pteNapotBits), entries(i).req_info.vpn(pteNapotBits - 1, 0))) // for last stage 2 translation
         // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
         entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, gStagePf, false.B)
+        if (HasBitmapCheck) {
+          entries(i).n := ptes(index).n
+        }
       }
     }
   }
@@ -1085,6 +1105,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     io.bitmap.get.req.bits.level := 0.U
     io.bitmap.get.req.bits.way_info := bitmap_arb.get.io.out.bits.way_info
     io.bitmap.get.req.bits.hptw_bypassed := bitmap_arb.get.io.out.bits.hptw_bypassed
+    io.bitmap.get.req.bits.s2xlate := bitmap_arb.get.io.out.bits.s2xlate
+    io.bitmap.get.req.bits.n := bitmap_arb.get.io.out.bits.n
     bitmap_arb.get.io.out.ready := io.bitmap.get.req.ready
     io.bitmap.get.resp.ready := has_bitmap_resp
   }
@@ -1275,6 +1297,8 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.bitmap.get.req.bits.level := Mux(jmp_bitmap_check, Mux(fromSP,cache_level,0.U), level)
     io.bitmap.get.req.bits.way_info := Mux(jmp_bitmap_check, cache_hitway, way_info)
     io.bitmap.get.req.bits.hptw_bypassed := bypassed
+    io.bitmap.get.req.bits.n := pte.n
+    io.bitmap.get.req.bits.s2xlate := onlyStage2
     io.bitmap.get.resp.ready := !w_bitmap_resp
   }
 
@@ -1366,7 +1390,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   if (HasBitmapCheck) {
     when (whether_need_bitmap_check) {
-      when (bitmap_enable && pte.isLeaf()) {
+      when (bitmap_enable && pte.isLeaf() && !pageFault) {
         s_bitmap_check := false.B
         whether_need_bitmap_check := false.B
       } .otherwise {
@@ -1396,6 +1420,9 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
         idle := true.B
         mem_addr_update := false.B
         accessFault := false.B
+        if (HasBitmapCheck) {
+          bitmap_checkfailed := false.B
+        }
       }
       finish := true.B
     }

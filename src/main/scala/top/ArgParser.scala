@@ -49,6 +49,7 @@ object ArgParser {
       |--disable-perf
       |--disable-alwaysdb
       |--enable-dfx
+      |--enable-simfrontend
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -141,6 +142,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
+        case "--enable-simfrontend" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableSimFrontend = true)
+          }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
@@ -218,6 +223,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
           }), tail)
+        case "--disable-xmr" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableXMR = false)
+          }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>
@@ -226,20 +235,21 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    val newArgs = DifftestModule.parseArgs(args)
+    val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
-        here(DebugOptionsKey).EnableDebug,
-        here(DebugOptionsKey).EnablePerfDebug,
-        here(DebugOptionsKey).FPGAPlatform
+        enableDebug = here(DebugOptionsKey).EnableDebug,
+        enablePerf = here(DebugOptionsKey).EnablePerfDebug,
+        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform,
+        enableXMR = here(DebugOptionsKey).EnableXMR
       )
       case PerfCounterOptionsKey => PerfCounterOptions(
-        here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
-        here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
-        XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
-        0
+        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        enablePerfDB = here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        perfLevel = XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
+        perfDBHartID = 0
       )
     })
-    (config, firrtlOpts, firtoolOpts)
+    (config, firrtlOpts, firtoolOpts ++ firtoolOptions.map(_.option))
   }
 }

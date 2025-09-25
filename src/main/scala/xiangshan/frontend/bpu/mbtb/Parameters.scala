@@ -53,4 +53,6 @@ trait HasMainBtbParameters extends HasBpuParameters {
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - log2Ceil(NumAlignBanks)
 
+  // mbtb cannot be fast-trained, this is required by abstract class BasePredictor
+  def EnableFastTrain: Boolean = false
 }

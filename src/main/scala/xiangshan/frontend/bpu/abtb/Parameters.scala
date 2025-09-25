@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.HasBpuParameters
 case class AheadBtbParameters(
     NumEntries:           Int = 1024,
     NumBanks:             Int = 4,
-    NumWays:              Int = 4,
+    NumWays:              Int = 8,
     TagWidth:             Int = 24,
     TargetLowerBitsWidth: Int = 22,
     WriteBufferSize:      Int = 4,
@@ -47,4 +47,7 @@ trait HasAheadBtbParameters extends HasBpuParameters {
   def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
 
   def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
+
+  // abtb can only be fast-trained, we don't have continous predict block on resolve
+  def EnableFastTrain: Boolean = true
 }
