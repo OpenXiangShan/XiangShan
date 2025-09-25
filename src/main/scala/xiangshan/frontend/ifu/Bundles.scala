@@ -63,7 +63,7 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val ftqIdx:         FtqPtr      = new FtqPtr
   val doubleline:     Bool        = Bool()
-  val predTakenIdx:   Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
+  val predTakenIdx:   Valid[UInt] = Valid(UInt(IfuIdxWidth.W))
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val invalidTaken:   Bool        = Bool()
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
@@ -87,14 +87,16 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
   val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
 }
 
-class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
+class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
   val target:       PrunedAddr      = PrunedAddr(VAddrBits)
   val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
-  val cfiIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
-  val instrRange:   UInt            = UInt(FetchBlockInstNum.W)
+  val taken:        Bool            = Bool()
   val invalidTaken: Bool            = Bool()
   val isRVC:        Bool            = Bool()
+  val selectBlock:  Bool            = Bool()
   val attribute:    BranchAttribute = new BranchAttribute
+  val mispredPc:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val endOffset:    UInt            = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 /* ***** DB ***** */
@@ -106,9 +108,10 @@ class FetchToIBufferDB(implicit p: Parameters) extends IfuBundle {
 }
 
 class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
-  val startAddr:         Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W)) // do not use PrunedAddr for DB
-  val isMissPred:        Vec[Bool] = Vec(FetchPorts, Bool())
-  val missPredOffset:    Vec[UInt] = Vec(FetchPorts, UInt(FetchBlockInstOffsetWidth.W))
+  val startAddr:         Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
+  val misId:             UInt      = UInt(log2Ceil(FetchPorts).W)
+  val isMissPred:        Bool      = Bool()
+  val missPredOffset:    UInt      = UInt(FetchBlockInstOffsetWidth.W)
   val checkJalFault:     Bool      = Bool()
   val checkJalrFault:    Bool      = Bool()
   val checkRetFault:     Bool      = Bool()
