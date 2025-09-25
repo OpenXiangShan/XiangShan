@@ -37,7 +37,7 @@ class IttageTable(
     val tagLen:   Int,
     val tableIdx: Int
 )(implicit p: Parameters) extends IttageModule with PhrHelper {
-  class IttageTableIO extends Bundle {
+  class IttageTableIO extends IttageBundle {
     class Req extends Bundle {
       val pc:         PrunedAddr            = PrunedAddr(VAddrBits)
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
@@ -73,16 +73,6 @@ class IttageTable(
 
   val io: IttageTableIO = IO(new IttageTableIO)
 
-  private class Entry extends Bundle {
-    val valid:         Bool            = Bool()
-    val tag:           UInt            = UInt(tagLen.W)
-    val confidenceCnt: SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
-    val targetOffset:  IttageOffset    = new IttageOffset()
-    val usefulCnt: SaturateCounter =
-      new SaturateCounter(UsefulCntWidth) // Due to the bitMask the useful bit needs to be at the lowest bit
-    val paddingBit: UInt = UInt(1.W)
-  }
-
   private val foldedWidth = if (nRows >= TableSramSize) nRows / TableSramSize else 1
   private val dataSplit   = if (nRows <= 2 * TableSramSize) 1 else 2
 
@@ -113,7 +103,7 @@ class IttageTable(
   // The least significant bit of offset is pruned
   def ittageEntrySz: Int =
     1 + tagLen + ConfidenceCntWidth + UsefulCntWidth + TargetOffsetWidth + log2Ceil(RegionNums) + 1
-  require(ittageEntrySz == (new Entry).getWidth)
+  require(ittageEntrySz == (new IttageEntry(tagLen)).getWidth)
 
   // pc is start address of basic block, most 2 branch inst in block
   def getUnhashedIdx(pc: PrunedAddr): UInt = (pc >> instOffsetBits).asUInt
@@ -127,7 +117,7 @@ class IttageTable(
   private val s1_valid         = RegNext(s0_valid)
 
   private val table = Module(new FoldedSRAMTemplate(
-    new Entry,
+    new IttageEntry(tagLen),
     setSplit = 1,
     waySplit = 1,
     dataSplit = dataSplit,
@@ -160,7 +150,7 @@ class IttageTable(
   // Use fetchpc to compute hash
   private val updateFoldedHist       = io.update.foldedHist
   private val (updateIdx, updateTag) = computeTagAndHash(getUnhashedIdx(io.update.pc), updateFoldedHist)
-  private val updateWdata            = Wire(new Entry)
+  private val updateWdata            = Wire(new IttageEntry(tagLen))
 
   private val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
   private val updateNoBitmask  = VecInit.fill(ittageEntrySz)(0.U).asUInt // update no
@@ -202,18 +192,12 @@ class IttageTable(
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
 
-  private val wrbypass =
-    Module(new WrBypass(new SaturateCounter(ConfidenceCntWidth), TableWrBypassEntries, log2Ceil(nRows)))
 
-  wrbypass.io.wen       := io.update.valid
-  wrbypass.io.write_idx := updateIdx
-  wrbypass.io.write_data.foreach(_ := updateWdata.confidenceCnt)
-
-  private val oldCtr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCnt)
+  private val oldCtr = io.update.oldCnt
   updateWdata.valid := true.B
   updateWdata.confidenceCnt.value := Mux(
     io.update.alloc,
-    (1 << (ConfidenceCntWidth - 1)).U,
+    oldCtr.getNeutral, // reset to neutral when allocate
     oldCtr.getUpdate(io.update.correct)
   )
   updateWdata.tag := updateTag

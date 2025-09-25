@@ -20,6 +20,17 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.WriteReqBundle
+
+class IttageEntry(tagLen: Int)(implicit p: Parameters) extends IttageBundle {
+  val valid:         Bool            = Bool()
+  val tag:           UInt            = UInt(tagLen.W)
+  val confidenceCnt: SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+  val targetOffset:  IttageOffset    = new IttageOffset()
+  val usefulCnt:     SaturateCounter =
+    new SaturateCounter(UsefulCntWidth) // Due to the bitMask the useful bit needs to be at the lowest bit
+  val paddingBit: UInt = UInt(1.W)
+}
 
 class IttageOffset(implicit p: Parameters) extends IttageBundle {
   val offset:      PrunedAddr = PrunedAddr(TargetOffsetWidth)
@@ -33,6 +44,8 @@ class IttagePrediction(implicit p: Parameters) extends IttageBundle {
 }
 
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
+  val valid: Bool = Bool()
+
   val provider:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
   val altProvider:       Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
   val altDiffers:        Bool            = Bool()
@@ -48,4 +61,11 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   override def toPrintable =
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCnt u:$providerUsefulCnt tar:${Hexadecimal(providerTarget.toUInt)}), " +
       p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCnt, tar:${Hexadecimal(altProviderTarget.toUInt)})"
+}
+
+class IttageWriteReq(tagLen:Int, nRows: Int, ittageEntrySz: Int)(implicit p: Parameters) extends WriteReqBundle
+  with HasIttageParameters {
+  val entry:   IttageEntry = new IttageEntry(tagLen)
+  val setIdx:  UInt        = UInt(log2Ceil(nRows).W)
+  val bitmask: UInt        = UInt(ittageEntrySz.W)
 }

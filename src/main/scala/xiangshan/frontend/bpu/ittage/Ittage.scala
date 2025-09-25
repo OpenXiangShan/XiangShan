@@ -146,22 +146,18 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     0.U.asTypeOf(t0_meta.altProviderTarget),
     io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
   )
-  t1_train.branches(0).bits.target := RegEnable(
-    io.train.bits.branches(0).bits.target,
-    io.train.valid // not using mispred_mask, because mispred_mask timing is bad
-  )
-  t1_train.branches(0).bits.cfiPosition := RegEnable(
-    io.train.bits.branches(0).bits.cfiPosition,
-    io.train.valid && io.train.bits.branches(0).bits.taken
-  )
 
-//  val updateValid = t1_train.is_jalr && !t1_train.is_ret && RegNext(io.t1_train.valid, init = false.B) && t1_train.ftb_entry.jmpValid &&
-//    t1_train.jmp_taken && t1_train.ftqOffset.valid &&
-//    t1_train.ftqOffset.bits === t1_train.ftb_entry.tailSlot.offset && !t1_train.ftb_entry.strong_bias(numBr - 1)
-  // FIXME: original code is above, need to adapt to mbtb, not sure if this is correct
-  private val updateValid =
-    t1_train.branches(0).bits.attribute.isOtherIndirect && RegNext(io.train.valid, init = false.B) &&
-      t1_train.branches(0).bits.taken
+
+  // Select the branch needed for training
+  val trainBranchIdxOH: Vec[Bool] = VecInit(t1_train.branches.map(b =>
+    b.valid && b.bits.attribute.isOtherIndirect && b.bits.taken
+  ))
+  assert(PopCount(trainBranchIdxOH) <= 1.U, "At most one branch in branches should be valid and isOtherIndirect for ITTAGE update")
+  val trainBranchIdx: UInt = OHToUInt(trainBranchIdxOH)
+  val hasTrainBranch: Bool = trainBranchIdxOH.asUInt.orR
+
+  // Update condition for ittage
+  private val updateValid = hasTrainBranch && RegNext(io.train.valid, init = false.B)
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
@@ -179,8 +175,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   updateTargetOffset    := DontCare
   updateOldTargetOffset := DontCare
 
-//  private val updateMisPred = t1_train.mispred_mask(numBr) // the last one indicates jmp results
-  private val updateMisPred = true.B
+  // Use the misprediction bits from the training bundle so allocation and
+  // certain updates (e.g. alt-provider penalty) only happen on actual mispreds.
+  private val updateMisPred = hasTrainBranch && t1_train.branches(trainBranchIdx).bits.mispredict
 
   // Predict
   tables.foreach { t =>
@@ -275,6 +272,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   XSDebug(s2_fire, p"hit_taken_jalr:")
 
+  ittageMeta.valid             := s3_fire
   ittageMeta.provider.valid    := s3_provided
   ittageMeta.provider.bits     := s3_provider
   ittageMeta.altProvider.valid := s3_altProvided
@@ -286,7 +284,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.providerTarget    := s3_providerTarget
   ittageMeta.altProviderTarget := s3_altProviderTarget
   ittageMeta.debug_predCycle.foreach(_ := GTimer())
-  // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
   private val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && r.bits.usefulCnt.isSaturateNegative)).asUInt &
@@ -299,7 +296,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.allocate.bits  := RegEnable(s2_allocEntry, s2_fire)
 
   // Update in loop
-  private val updateRealTarget       = t1_train.branches(0).bits.target
+  private val updateRealTarget       = t1_train.branches(trainBranchIdx).bits.target
   private val updatePCRegion         = targetGetRegion(t1_train.startVAddr)
   private val updateRealTargetRegion = targetGetRegion(updateRealTarget)
   private val metaProviderTargetOffset, metaAltProviderTargetOffset, updateRealTargetOffset =
@@ -497,7 +494,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
   XSDebug(
     updateValid,
-    p"pc: ${Hexadecimal(updatePc.toUInt)}, target: ${Hexadecimal(t1_train.branches(0).bits.target.toUInt)}\n"
+    p"pc: ${Hexadecimal(updatePc.toUInt)}, target: ${Hexadecimal(t1_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
   )
   XSDebug(updateValid, t1_meta.toPrintable + p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
