@@ -678,8 +678,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
     s3_fire,
-    Mux(s3_firstIsMmio, 1.U, s3_instrCount), // FIXME: consider the second fetch block
-    Mux(s4_firstIsMmio, 1.U, s4_instrCount)
+    Mux(s3_firstIsUncache, 1.U, s3_instrCount), // FIXME: consider the second fetch block
+    Mux(s4_reqIsUncache, 1.U, s4_instrCount)
   )
 
   // Find last using PriorityMux
