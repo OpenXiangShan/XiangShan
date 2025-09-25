@@ -30,6 +30,7 @@ import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqFetchRequest
+import xiangshan.frontend.ftq.BpuFlushInfo
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
@@ -51,8 +52,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
     /* *** outside interface *** */
     // Ftq
-    val req:   DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
-    val flush: Bool                         = Input(Bool())
+    val req:          DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
+    val flush:        Bool                         = Input(Bool())
+    val flushFromBpu: BpuFlushInfo                 = Input(new BpuFlushInfo)
     // Pmp
     val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
@@ -104,6 +106,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val fromFtqReq = fromFtq.bits
   private val s0_valid   = fromFtq.valid
 
+  private val s0_ftqIdx    = fromFtqReq.ftqIdx
   private val s0_vAddr     = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
   private val s0_vSetIdx   = VecInit(s0_vAddr.map(get_idx))
   private val s0_blkOffset = fromFtqReq.startVAddr(blockOffBits - 1, 0)
@@ -154,7 +157,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.bits.waymask      := s0_waymasks
 
   private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
-  s0_flush := io.flush
+  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx)
   s0_fire  := s0_valid && s0_canGo && !s0_flush
 
   fromFtq.ready := s0_canGo
@@ -169,6 +172,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    */
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
+  private val s1_ftqIdx = RegEnable(s0_ftqIdx, 0.U.asTypeOf(s0_ftqIdx), s0_fire)
   private val s1_vAddr  = RegEnable(s0_vAddr, 0.U.asTypeOf(s0_vAddr), s0_fire)
   private val s1_pTag   = RegEnable(s0_pTag, 0.U(tagBits.W), s0_fire)
   private val s1_gpAddr = RegEnable(s0_gpAddr, 0.U.asTypeOf(s0_gpAddr), s0_fire)
@@ -374,7 +378,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toIfu.bits.gpAddr            := s1_gpAddr
   toIfu.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-  s1_flush := io.flush
+  s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx)
   s1_ready := (s1_fetchFinish && !io.respStall) || !s1_valid
   s1_fire  := s1_valid && s1_fetchFinish && !io.respStall && !s1_flush
 
