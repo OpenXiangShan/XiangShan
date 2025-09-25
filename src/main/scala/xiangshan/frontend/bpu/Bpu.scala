@@ -486,6 +486,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
   )
+  XSPerfAccumulate("s3_use_ittage", s3_fire && s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit && !s3_firstTakenBranchIsReturn)
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
