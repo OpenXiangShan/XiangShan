@@ -25,10 +25,10 @@ import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.WrBypass
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
 class IttageTable(
@@ -172,13 +172,34 @@ class IttageTable(
     Mux(io.update.valid, updateNoUsBitmask, Mux(usefulCanReset, updateUsBitmask, updateNoBitmask))
   )
 
-  table.io.w.apply(
-    valid = io.update.valid || usefulCanReset,
-    data = updateWdata,
-    setIdx = Mux(usefulCanReset, resetSet, updateIdx),
-    waymask = true.B,
-    bitmask = updateBitmask
-  )
+  /** 
+    Bypass write data from WriteBuffer to sram when read port is empty.
+  */
+  private val writeBuffer = Module(new WriteBuffer(
+    gen = new IttageWriteReq(tagLen, nRows, ittageEntrySz),
+    numEntries = TableWriteBufferSize,
+    numPorts = 1
+  ))
+
+  // read/write port of write buffer
+  private val writeBufferWPort = writeBuffer.io.write.head
+  private val writeBufferRPort = writeBuffer.io.read.head
+  // read the stored write req from write buffer
+  private val writeValid   = writeBufferRPort.valid && !table.io.r.req.valid
+  private val writeEntry   = writeBufferRPort.bits.entry
+  private val writeSetIdx  = writeBufferRPort.bits.setIdx
+  private val writeWayMask = true.B
+  private val writeBitmask = writeBufferRPort.bits.bitmask
+  writeBufferRPort.ready := table.io.w.req.ready && !table.io.r.req.valid
+
+  // write to writeBuffer
+  writeBufferWPort.valid        := io.update.valid || usefulCanReset
+  writeBufferWPort.bits.entry   := updateWdata
+  writeBufferWPort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
+  writeBufferWPort.bits.bitmask := updateBitmask
+
+  // write from writeBuffer to sram
+  table.io.w.apply(writeValid, writeEntry, writeSetIdx, writeWayMask, writeBitmask)
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)
@@ -191,7 +212,6 @@ class IttageTable(
   // We do not want write request block the whole BPU pipeline
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
-
 
   private val oldCtr = io.update.oldCnt
   updateWdata.valid := true.B
