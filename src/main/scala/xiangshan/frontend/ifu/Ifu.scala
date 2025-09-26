@@ -1157,7 +1157,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   when(s4_reqIsMmio) {
     val inst = Cat(mmioData(1), mmioData(0))
 
-    val (brType, isCall, isRet) = getBrInfo(inst)
+    val brAttribute = BranchAttribute.decode(inst)
 
     io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
       mmioRvcExpander.io.ill,
@@ -1167,9 +1167,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     io.toIBuffer.bits.pd(s4_shiftNum).valid              := true.B
     io.toIBuffer.bits.pd(s4_shiftNum).isRVC              := mmioIsRvc
-    io.toIBuffer.bits.pd(s4_shiftNum).brType             := brType
-    io.toIBuffer.bits.pd(s4_shiftNum).isCall             := isCall
-    io.toIBuffer.bits.pd(s4_shiftNum).isRet              := isRet
+    io.toIBuffer.bits.pd(s4_shiftNum).brAttribute        := brAttribute
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(s4_prevLastIsHalfRvi || mmioIsRvc, 0.U, 1.U)
 
     io.toIBuffer.bits.exceptionType(s4_shiftNum) := mmioException
@@ -1180,7 +1178,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt // s4_mmioRange.asUInt
 
     mmioFlushWb.bits.isRVC     := mmioIsRvc
-    mmioFlushWb.bits.attribute := BranchAttribute(brType, Cat(isCall, isRet))
+    mmioFlushWb.bits.attribute := brAttribute
   }
 
   mmioRedirect.valid := s4_reqIsMmio && mmioState === MmioFsmState.WaitCommit &&
