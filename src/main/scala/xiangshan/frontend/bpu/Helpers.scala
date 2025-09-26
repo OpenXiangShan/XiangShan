@@ -151,30 +151,6 @@ trait TargetFixHelper extends HasBpuParameters {
   }
 }
 
-trait CommonHelper {
-
-  /**
-   * Return the one-hot mask of the position of the minimal value.
-   */
-  def getMinimalValueOH(value: Seq[UInt], valid: Seq[Bool]): Seq[Bool] = {
-    require(value.length == valid.length)
-    val n = value.length
-    val compareMatrix =
-      (0 until n).map(i =>
-        (0 until i).map(j =>
-          value(i) < value(j)
-        )
-      )
-    (0 until n).map { i =>
-      (0 until n).map { j =>
-        if (j < i) !valid(j) || compareMatrix(i)(j) // value(i) < value(j)
-        else if (j == i) valid(i)
-        else !valid(j) || !compareMatrix(j)(i) // value(i) <= value(j)
-      }.reduce(_ && _)
-    }
-  }
-}
-
 trait RotateHelper {
 
   /**
