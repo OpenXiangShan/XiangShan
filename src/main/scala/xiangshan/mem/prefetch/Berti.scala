@@ -605,18 +605,18 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       val pcTag = getPcTag(learn.pc)
       val matchVec = VecInit((0 until DtWaySize).map(i => valids(i) && entries(i).pcTag === pcTag)).asUInt
       val hit = matchVec.orR
-      when(hit) {
-        val way = OHToUInt(matchVec)
-        entries(way).updateLite(learn.delta)
-        replacer.access(way)
-        stat_update_isEntryHit := true.B
-      }.otherwise {
+      when(!hit) {
         val way = replacer.way
         entries(way).setLite(pcTag, learn.delta)
         valids(way) := true.B
         stat_update_isEntryMiss := true.B
         stat_update_isEntryReplace := true.B
         stat_update_evictEntryIdx := way
+      }.otherwise {
+        val way = OHToUInt(matchVec)
+        entries(way).updateLite(learn.delta)
+        replacer.access(way)
+        stat_update_isEntryHit := true.B
       }
     }
   }
@@ -655,12 +655,11 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   }
 
   /*** processing logic */
+  entries.foreach(x => x.setStatus())
   this.updateLite(io.learn)
   val pfRes = this.prefetch(io.train)
   io.prefetch := pfRes._1
   val deltaInfo = WireInit(0.U.asTypeOf(new DeltaInfo()))
-
-  entries.foreach(x => x.setStatus())
 
   /** performance counter */
   class DeltaInfo2Db extends Bundle {
