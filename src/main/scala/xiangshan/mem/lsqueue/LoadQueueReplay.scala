@@ -276,14 +276,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val canEnqueue = io.enq.map(_.valid)
   val cancelEnq = io.enq.map(enq => enq.bits.uop.robIdx.needFlush(io.redirect))
   val needReplay = io.enq.map(enq => enq.bits.rep_info.need_rep)
-  val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.exceptionVec, LduCfg).asUInt.orR && !enq.bits.tlbMiss)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
-    canEnqueue(w) && !cancelEnq(w) && needReplay(w) && !hasExceptions(w)
+    canEnqueue(w) && !cancelEnq(w) && needReplay(w)
   }))
   val newEnqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   val canFreeVec = VecInit((0 until LoadPipelineWidth).map(w => {
-    canEnqueue(w) && loadReplay(w) && (!needReplay(w) || hasExceptions(w))
+    canEnqueue(w) && loadReplay(w) && !needReplay(w)
   }))
 
   // select LoadPipelineWidth valid index.
@@ -631,10 +630,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       needEnqueue(w) && enq.ready &&
       allocated(enqIndex) && !enq.bits.isLoadReplay,
       p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
-    XSError(
-      needEnqueue(w) && enq.ready &&
-      hasExceptions(w),
-      p"LoadQueueReplay: The instruction has exception, it can not be replay, check: ldu $w, robIdx $debug_robIdx!")
+
     when (needEnqueue(w) && enq.ready) {
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
@@ -722,7 +718,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     //
     val schedIndex = enq.bits.schedIndex
     when (enq.valid && enq.bits.isLoadReplay) {
-      when (!needReplay(w) || hasExceptions(w)) {
+      when (!needReplay(w)) {
         allocated(schedIndex) := false.B
         freeMaskVec(schedIndex) := true.B
       } .otherwise {
