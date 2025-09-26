@@ -22,6 +22,7 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 
@@ -153,11 +154,12 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_realEntries = s2_entries // TODO
   private val s2_hitMask     = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
   private val s2_hit         = s2_hitMask.reduce(_ || _)
-  private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
+  private val s2_takenMask   = VecInit(s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken })
   private val s2_taken       = s2_takenMask.reduce(_ || _)
 
-  private val s2_positions         = s2_realEntries.map(_.position)
-  private val s2_firstTakenEntryOH = getMinimalValueOH(s2_positions, s2_takenMask)
+  private val s2_positions         = VecInit(s2_realEntries.map(_.position))
+  private val s2_compareMatrix     = CompareMatrix(s2_positions)
+  private val s2_firstTakenEntryOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
   private val s2_firstTakenEntry   = Mux1H(s2_firstTakenEntryOH, s2_realEntries)
 
   // When detect multi-hit, we need to invalidate one entry.

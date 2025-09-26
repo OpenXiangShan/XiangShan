@@ -22,13 +22,12 @@ import chisel3.util.log2Ceil
 import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.CommonHelper
 import xiangshan.frontend.bpu.CrossPageHelper
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMainBtbParameters
-    with HasXSParameter with TargetFixHelper with CommonHelper with HalfAlignHelper with CrossPageHelper {
+    with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 

@@ -19,9 +19,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.CommonHelper
 
-trait Helpers extends HasTageParameters with HasXSParameter with CommonHelper {
+trait Helpers extends HasTageParameters with HasXSParameter {
   def getBaseTableSetIndex(pc: PrunedAddr): UInt =
     pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
 

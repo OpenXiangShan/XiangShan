@@ -34,7 +34,7 @@ import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
-class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with CommonHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -252,16 +252,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
-  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map {
-    case (hit, attribute) => hit && (attribute.isDirect || attribute.isIndirect)
+  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map { case (hit, attribute) =>
+    hit && (attribute.isDirect || attribute.isIndirect)
   })
-  private val s2_takenMask          = s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b }
-  private val s2_taken              = s2_takenMask.reduce(_ || _)
-  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, s2_takenMask)
+  private val s2_takenMask = VecInit(s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b })
+  private val s2_taken     = s2_takenMask.reduce(_ || _)
+
+  private val s2_compareMatrix      = CompareMatrix(s2_mbtbResult.positions)
+  private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
 
   private val s3_taken                      = RegEnable(s2_taken, s2_fire)
   private val s3_mbtbResult                 = RegEnable(s2_mbtbResult, s2_fire)
-  private val s3_firstTakenBranchOH         = s2_firstTakenBranchOH.map(RegEnable(_, s2_fire))
+  private val s3_firstTakenBranchOH         = RegEnable(s2_firstTakenBranchOH, s2_fire)
   private val s3_takenBranchPosition        = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.positions)
   private val s3_takenBranchAttribute       = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.attributes)
   private val s3_mbtbTarget                 = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.targets)
