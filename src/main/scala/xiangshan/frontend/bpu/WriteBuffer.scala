@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
+import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.XSModule
@@ -34,178 +35,186 @@ import xiangshan.XSModule
  * @param gen The type of the write request bundle
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
- * @param usefulWidth The width of the useful counter, used to determine if the entry is useful
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
- * @param pipe Whether the write buffer is pipelined, used to determine if the read
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write bufferq
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:             T,
-    val numEntries:  Int,
-    val numPorts:    Int,
-    val usefulWidth: Int = 1,
-    val hasCnt:      Boolean = false,
-    val pipe:        Boolean = false,
-    val hasFlush:    Boolean = false
+    gen:            T,
+    val numEntries: Int = 1,
+    val numPorts:   Int = 1,
+    val hasCnt:     Boolean = false,
+    val hasFlush:   Boolean = false
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
-  require(usefulWidth >= 1)
   require(numPorts >= 1)
+  require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
     val write: Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
     val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
     val flush: Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
-    val taken: Option[Bool]        = Option.when(hasCnt)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
 
-  private val usefulCnts =
-    RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(new SaturateCounter(usefulWidth)))))))
+  private val needWrite = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val entries = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))))
   private val valids  = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
-  private val hitMask = WireInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
-  private val writeValidPortVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
-  private val writePort         = Wire(Valid(gen.cloneType))
-  private val hit               = WireInit(false.B)
 
-  for (i <- 0 until numPorts) {
-    writeValidPortVec(i) := io.write(i).valid
+  private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
+  // writePortNum * histMask ->  writePortNum * (readPortNum * numEntries)
+  private val portsHitMask = VecInit.fill(numPorts)(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
+  private val hitTouchVec =
+    WireInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W))))))
+  private val writeTouchVec = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
+  // private val replacer      = ReplacementPolicy.fromString(Some("setplru"), numEntries, numPorts)
+  private val replacerWay  = Wire(Vec(numPorts, UInt(log2Ceil(numEntries).W)))
+  private val readValidVec = WireInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
+  private val readReadyVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+  private val emptyVec     = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+  private val fullVec      = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+  private val writeFlowVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+
+  private val writePortVec = io.write
+  dontTouch(writePortVec)
+  dontTouch(readValidVec)
+  dontTouch(replacerWay)
+  dontTouch(emptyVec)
+
+  // not allowed to write entries with same setIdx and tag
+  for {
+    i <- 0 until numPorts
+    j <- i + 1 until numPorts
+  } {
+    XSError(
+      writePortVec(i).valid && writePortVec(j).valid && writePortVec(i).bits.setIdx === writePortVec(j).bits.setIdx &&
+        writePortVec(i).bits.tag.getOrElse(0.U) === writePortVec(j).bits.tag.getOrElse(0.U),
+      "WriteBuffer can not support write same data"
+    )
   }
-  assert(PopCount(writeValidPortVec) <= 1.U, "Only one port can be written at a time")
 
-  when(!writeValidPortVec.reduce(_ || _)) {
-    writePort.valid := false.B
-    writePort.bits  := DontCare
-  }.otherwise {
-    writePort.valid := io.write(OHToUInt(writeValidPortVec)).valid
-    writePort.bits  := io.write(OHToUInt(writeValidPortVec)).bits
+  // maintain a set of hitMask for each write port
+  for {
+    i <- 0 until numPorts
+    p <- 0 until numPorts
+    e <- 0 until numEntries
+  } {
+    portsHitMask(i)(p)(e) := writePortVec(i).valid && valids(p)(e) &&
+      writePortVec(i).bits.setIdx === entries(p)(e).setIdx &&
+      writePortVec(i).bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U)
+    writePortValid(i) := writePortVec(i).valid
   }
 
-  for (p <- 0 until numPorts) {
-    for (e <- 0 until numEntries) {
-      hitMask(p)(e) := writePort.valid && valids(p)(e) && writePort.bits.setIdx === entries(p)(e).setIdx &&
-        writePort.bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U)
-    }
-  }
-  assert(PopCount(hitMask.flatten) <= 1.U, "WriteBuffer hitMask should be one-hot")
-
-  hit := hitMask.flatten.reduce(_ || _)
-
-  for (port <- 0 until numPorts) {
-    val hitTouch   = WireInit(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W))))
-    val writeTouch = WireInit(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W))))
-    val writeValid = WireInit(io.write(port).valid)
-    val readReady  = WireInit(io.read(port).ready)
-    val replacer   = ReplacementPolicy.fromString("plru", numEntries)
-
-    // Select a flag entry for writing to SRAM
-    val readVec = VecInit(usefulCnts(port).map(_.isPositive))
-    val readIdx = PriorityEncoder(readVec)
-
-    val empty                = !readVec.reduce(_ || _)
-    val full                 = readVec.reduce(_ && _)
-    val victim               = WireInit(0.U(log2Up(numEntries).W))
-    val notUsefulVec         = VecInit(usefulCnts(port).map(_.isSaturateNegative))
-    val notUseful            = notUsefulVec.reduce(_ || _)
-    val notUsefulIdx         = PriorityEncoder(notUsefulVec)
-    val replacerWayNotUseful = usefulCnts(port)(replacer.way).isSaturateNegative
-    val hitUsefulEntry       = hitTouch.valid && usefulCnts(port)(hitTouch.bits).isPositive
-    val hitUselessEntry      = hitTouch.valid && usefulCnts(port)(hitTouch.bits).isNegative
-    val writeFlow            = !hit && readReady && empty
-
-    victim               := Mux(replacerWayNotUseful, replacer.way, Mux(notUseful, notUsefulIdx, replacer.way))
-    io.write(port).ready := !full
-    io.read(port).valid  := !empty
-    io.read(port).bits   := DontCare
-
-    // If a hit occurs, update the replacer regardless of whether the entry is valid
-    hitTouch.valid := hitMask(port).reduce(_ || _)
-    hitTouch.bits  := OHToUInt(hitMask(port))
-    assert(PopCount(hitMask(port)) <= 1.U, "WriteBuffer hitMask should be one-hot")
-
-    when(readReady && !empty) {
-      io.read(port).bits        := entries(port)(readIdx)
-      usefulCnts(port)(readIdx) := 0.U.asTypeOf(new SaturateCounter(usefulWidth))
-    }
-
-    /**
+  /**
      * Write request processing cases:
-     * 1. Write hit
-     *  1.1 Hit occurs on a useful entry update the entry
-     *  1.2 Hit occurs on a useless entry with data mismatch, triggers re-write
-     * 2. Write miss but bypassable
-     *  Write flow and record the entry as useless
-     * 3. Default handling
-     *  Write data into WriteBuffer
+     * 1. Write miss but bypassable
+     *  1.1 Write data into WriteBuffer
+     * 2. Write hit
+     *  2.1 Hit occurs on a useful entry update the entry
+     *  2.2 Hit occurs on a useless entry with data mismatch, triggers re-write
+     *  2.3 Hit and hasCnt, update the entry's counter
     */
-
+  writePortValid.zip(portsHitMask).zipWithIndex.foreach { case ((writeValid, hitMask), portIdx) =>
+    // each write port can only hit at most one entry
+    XSError(
+      writeValid && PopCount(hitMask.flatten) > 1.U,
+      f"WriteBuffer port${portIdx}_hitMask should be no more than 1"
+    )
+    val hit           = hitMask.flatten.reduce(_ || _)
+    val hitPortVec    = VecInit(hitMask.map(_.reduce(_ || _)))
+    val hitIdxVec     = VecInit(hitMask.map(OHToUInt(_)))
+    val hitPortIdx    = OHToUInt(hitPortVec)
+    val hitNotWritten = hit && needWrite(hitPortIdx)(hitIdxVec(hitPortIdx))
+    val hitWritten    = hit && !needWrite(hitPortIdx)(hitIdxVec(hitPortIdx))
+    dontTouch(hitPortVec)
+    dontTouch(hitIdxVec)
     when(writeValid) {
-      when(hit) {
-        when(hitUsefulEntry) {
-          entries(port)(hitTouch.bits) := io.write(port).bits
-          valids(port)(hitTouch.bits)  := true.B
-        }.elsewhen(hitUselessEntry) {
-          val entryChange = entries(port)(hitTouch.bits).asUInt =/= io.write(port).bits.asUInt
-          when(entryChange && !hasCnt.B) {
-            usefulCnts(port)(hitTouch.bits).increase()
-            entries(port)(hitTouch.bits) := io.write(port).bits
-            valids(port)(hitTouch.bits)  := true.B
+      // if the entry is not written, it is useful
+      val notUsefulVec = needWrite(portIdx).map(!_)
+      val notUseful    = notUsefulVec.reduce(_ || _)
+      val notUsefulIdx = PriorityEncoder(notUsefulVec)
+      val victim       = Mux(notUseful, notUsefulIdx, replacerWay(portIdx))
+      // if this wirte port !hit need to write a new entry
+      when(!hit) {
+        entries(portIdx)(victim)    := io.write(portIdx).bits
+        valids(portIdx)(victim)     := true.B
+        needWrite(portIdx)(victim)  := true.B
+        writeTouchVec(victim).valid := true.B
+        writeTouchVec(victim).bits  := victim
+      }
+      // if hit need to update the entry
+      for (entryRow <- 0 until numPorts) {
+        val hitPort = hitPortVec(entryRow)
+        val hitIdx  = hitIdxVec(entryRow)
+        hitTouchVec(entryRow)(hitIdx).valid := hitPort
+        hitTouchVec(entryRow)(hitIdx).bits  := hitIdx
+
+        val hitNotWrittenEntry = hitPort && needWrite(entryRow)(hitIdx)
+        val hitWrittenEntry    = hitPort && !needWrite(entryRow)(hitIdx)
+        when(hitPort) {
+          when(hitNotWrittenEntry) {
+            entries(entryRow)(hitIdx) := io.write(portIdx).bits
+            valids(entryRow)(hitIdx)  := true.B
+          }.elsewhen(hitWrittenEntry) {
+            val entryChange = entries(entryRow)(hitIdx).asUInt =/= io.write(portIdx).bits.asUInt
+            when(entryChange) {
+              needWrite(entryRow)(hitIdx) := true.B
+              entries(entryRow)(hitIdx)   := io.write(portIdx).bits
+              valids(entryRow)(hitIdx)    := true.B
+            }
           }
         }
-      }.elsewhen(writeFlow) {
-        entries(port)(victim)    := io.write(port).bits
-        valids(port)(victim)     := true.B
-        usefulCnts(port)(victim) := 0.U.asTypeOf(new SaturateCounter(usefulWidth))
-        io.read(port).valid      := true.B
-        io.read(port).bits       := io.write(port).bits
-        writeTouch.valid         := true.B
-        writeTouch.bits          := victim
-      }.otherwise {
-        entries(port)(victim) := io.write(port).bits
-        valids(port)(victim)  := true.B
-        usefulCnts(port)(victim).increase()
-        writeTouch.valid := true.B
-        writeTouch.bits  := victim
-      }
-    }
-
-    if (pipe) {
-      when(io.read(port).ready)(io.write(port).ready := true.B)
-    }
-    // If the write request has conuter need update
-    val temporarily = WireInit(io.write(port).bits)
-    if (hasCnt) {
-      when(hitTouch.valid) {
-        // If a write request hits an entry, update its counter using 'taken'
-        // and write other entry information
-        val updateCnt = entries(port)(hitTouch.bits).cnt.get.getUpdate(io.taken.getOrElse(false.B))
-        temporarily.cnt.get          := updateCnt.asTypeOf(entries(port)(hitTouch.bits).cnt.get)
-        entries(port)(hitTouch.bits) := temporarily
-        valids(port)(hitTouch.bits)  := true.B
-        // If the write request hits a not write flag entry, update the usefulCnts
-        when(usefulCnts(port)(hitTouch.bits).isNegative) {
-          usefulCnts(port)(hitTouch.bits).increase()
+        // If the write request has conuter need update
+        val temporarily = WireInit(io.write(portIdx).bits)
+        if (hasCnt) {
+          when(hitPort) {
+            // If a write request hits an entry, update its counter using 'taken'
+            // and write other entry information
+            val writePortTaken = io.write(portIdx).bits.taken.getOrElse(false.B)
+            val updateCnt      = entries(entryRow)(hitIdx).cnt.get.getUpdate(writePortTaken)
+            temporarily.cnt.get       := updateCnt.asTypeOf(temporarily.cnt.get)
+            entries(entryRow)(hitIdx) := temporarily
+            valids(entryRow)(hitIdx)  := true.B
+            // If the write port hit a written entry, update the needWrite
+            needWrite(entryRow)(hitIdx) := true.B
+          }
         }
       }
     }
+    XSPerfAccumulate(f"port${portIdx}_hit_not_written", writeValid && hitNotWritten)
+    XSPerfAccumulate(f"port${portIdx}_hit_written", writeValid && hitWritten)
+    XSPerfAccumulate(f"port${portIdx}_hit", writeValid && hit)
+    XSPerfAccumulate(f"port${portIdx}_not_hit", writeValid && !hit)
+
+  }
+
+  for (nRows <- 0 until numPorts) {
+    val replacer = ReplacementPolicy.fromString("plru", numEntries)
+    readReadyVec(nRows) := io.read(nRows).ready
+    readValidVec(nRows) := needWrite(nRows)
+    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
+    fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
+    val readIdx = PriorityEncoder(readValidVec(nRows))
+
+    io.write(nRows).ready := !fullVec(nRows)
+    io.read(nRows).valid  := !emptyVec(nRows)
+    io.read(nRows).bits   := DontCare
+
+    when(readReadyVec(nRows) && !emptyVec(nRows)) {
+      io.read(nRows).bits       := entries(nRows)(readIdx)
+      needWrite(nRows)(readIdx) := false.B
+    }
+    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
+    replacerWay(nRows) := replacer.way
+    replacer.access(touchWays)
     when(flush) {
-      // Reset the write buffer usefulCnts when flush is true
+      // Reset the write buffer needWrite when flush is true
       for (i <- 0 until numEntries) {
-        usefulCnts(port)(i) := 0.U.asTypeOf(new SaturateCounter(usefulWidth))
+        needWrite(nRows)(i) := false.B
       }
     }
-
-    replacer.access(Seq(hitTouch, writeTouch))
-
-    XSPerfAccumulate(f"write_buffer_port${port}_hit_useful_entry", writeValid && hitUsefulEntry)
-    XSPerfAccumulate(f"write_buffer_port${port}_hit_useless_entry", writeValid && hitUselessEntry)
-    XSPerfAccumulate(f"write_buffer_port${port}_not_hit", writeValid && !hitTouch.valid)
-    XSPerfAccumulate(f"write_buffer_port${port}_not_hit_flow", writeValid && writeFlow)
-    XSPerfAccumulate(f"write_buffer_port${port}_is_full", writeValid && full)
-    XSPerfHistogram(f"write_buffer_port${port}_useful", PopCount(readVec), readReady, 0, numEntries)
+    XSPerfAccumulate(f"port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
+    XSPerfHistogram(f"port${nRows}_useful", PopCount(readValidVec(nRows)), readReadyVec(nRows), 0, numEntries)
   }
-  XSPerfAccumulate("write_buffer_hit", writePort.valid && hit)
 }
