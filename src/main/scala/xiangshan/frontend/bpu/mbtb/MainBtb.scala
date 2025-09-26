@@ -55,7 +55,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
       ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
     }
   private val writeBuffers = Seq.tabulate(NumAlignBanks, NumInternalBanks) { (_, _) =>
-    Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay, pipe = true))
+    Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay))
   }
 
   private val resetDone = RegInit(false.B)

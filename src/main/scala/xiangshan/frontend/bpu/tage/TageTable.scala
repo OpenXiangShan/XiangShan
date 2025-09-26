@@ -68,21 +68,20 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
   // use a write buffer to store a entrySram write request
   // TODO: add writeBuffer multi port simultaneous writing
   private val entryWriteBuffers =
-    Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
+    Seq.tabulate(NumBanks) { bankIdx =>
       Module(new WriteBuffer(
         new EntrySramWriteReq(numSets),
         WriteBufferSize,
-        numPorts = 1,
-        pipe = true
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
+        numPorts = NumWays,
+        hasCnt = true
+      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
     }
   private val allocFailCtrWriteBuffers =
     Seq.fill(NumBanks)(
       Module(new WriteBuffer(
         new AllocFailCtrSramWriteReq(numSets),
         WriteBufferSize,
-        numPorts = 1,
-        pipe = true
+        numPorts = 1
       ))
     )
 
@@ -97,13 +96,16 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
       allocFailCtr.io.r.req.bits.setIdx := io.readReq.bits.setIdx
   }
 
-  entrySram.flatten.zip(entryWriteBuffers.flatten).foreach {
-    case (way, buffer) =>
-      val valid  = buffer.io.read.head.valid && !way.io.r.req.valid
-      val setIdx = buffer.io.read.head.bits.setIdx
-      val entry  = buffer.io.read.head.bits.entry
-      way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
-      buffer.io.read.head.ready := way.io.w.req.ready && !way.io.r.req.valid
+  entrySram.zip(entryWriteBuffers).foreach {
+    case (ways, buffer) =>
+      ways zip buffer.io.read foreach {
+        case (way, readPort) =>
+          val valid  = readPort.valid && !way.io.r.req.valid
+          val setIdx = readPort.bits.setIdx
+          val entry  = readPort.bits.entry
+          way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
+          readPort.ready := way.io.w.req.ready && !way.io.r.req.valid
+      }
   }
 
   allocFailCtrSram.zip(allocFailCtrWriteBuffers).foreach {
@@ -132,11 +134,11 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         0.U,
         io.oldAllocFailCtr.getIncrease
       )
-      wayBuffers.zip(wayMask).zip(writeEntries).foreach {
-        case ((buffer, mask), entry) =>
-          buffer.io.write.head.valid       := writeValid && mask
-          buffer.io.write.head.bits.setIdx := io.writeSetIdx
-          buffer.io.write.head.bits.entry  := entry
+      wayBuffers.io.write.zip(wayMask).zip(writeEntries).foreach {
+        case ((writePort, mask), entry) =>
+          writePort.valid       := writeValid && mask
+          writePort.bits.setIdx := io.writeSetIdx
+          writePort.bits.entry  := entry
       }
   }
 
