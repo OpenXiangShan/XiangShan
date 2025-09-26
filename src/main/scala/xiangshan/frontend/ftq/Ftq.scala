@@ -182,7 +182,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   // TODO: wait for Ifu/ICache to remove bpu s2 flush
-  for (stage <- 2 to 3) {
+  for (stage <- 3 to 3) {
     val redirect = if (stage == 3) prediction.bits.s3Override else false.B
     val ftqIdx   = if (stage == 3) io.fromBpu.s3FtqPtr else 0.U.asTypeOf(new FtqPtr)
 
