@@ -124,27 +124,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    * get result from SRAM
    * rotate SRAM result
    */
-  private val s1_fire             = io.stageCtrl.s1_fire && io.enable
-  private val s1_startVAddr       = RegEnable(s0_startVAddr, s0_fire)
-  private val s1_internalBankIdx  = RegEnable(s0_internalBankIdx, s0_fire)
-  private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
-  private val s1_setIdxVec        = RegEnable(s0_setIdxVec, s0_fire)
-  private val s1_tag              = getTag(s1_startVAddr)
-  private val s1_alignBankIdx     = getAlignBankIndex(s1_startVAddr)
-  private val s1_posHighestBits: Vec[UInt] =
-    VecInit(for {
-      bankIdx <- 0 until NumAlignBanks
-      _       <- 0 until NumWay
-    } yield bankIdx.U + s1_alignBankIdx) // FIXME: not working for NumAlignBanks > 2
+  private val s1_fire                      = io.stageCtrl.s1_fire && io.enable
+  private val s1_startVAddr                = RegEnable(s0_startVAddr, s0_fire)
+  private val s1_internalBankMask          = RegEnable(s0_internalBankMask, s0_fire)
+  private val s1_setIdxVec                 = RegEnable(s0_setIdxVec, s0_fire)
+  private val s1_tag                       = getTag(s1_startVAddr)
+  private val s1_alignBankIdx              = getAlignBankIndex(s1_startVAddr)
+  private val s1_posHigherBitsPerAlignBank = vecRotateRight(VecInit.tabulate(NumAlignBanks)(i => i.U), s1_alignBankIdx)
+  private val s1_posHigherBits             = VecInit(s1_posHigherBitsPerAlignBank.flatMap(Seq.fill(NumWay)(_)))
 
-  private val s1_rawBtbEntries: Vec[MainBtbEntry] = VecInit(sramBanks.map(a =>
-    VecInit(for {
-      wayIdx <- 0 until NumWay
-    } yield {
-      val way = VecInit(a.map(_(wayIdx).io.r.resp.data(0)))
-      Mux1H(s1_internalBankMask, way)
-    })
-  ).flatten)
+  private val s1_rawBtbEntries = VecInit(sramBanks.flatMap { alignBank =>
+    Mux1H(s1_internalBankMask, alignBank.map(bank => VecInit(bank.flatMap(_.io.r.resp.data))))
+  })
 
   private val s1_alignBankCrossPageMask = (0 until NumAlignBanks).map { i =>
     val currentAlignStartVAddr = getAlignedAddr(s1_startVAddr + (i * FetchBlockAlignSize).U)
@@ -168,9 +159,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawBtbEntries    = RegEnable(s1_rawBtbEntries, s1_fire)
   private val s2_tag              = RegEnable(s1_tag, s1_fire)
-  private val s2_posHighesBits    = RegEnable(s1_posHighestBits, s1_fire)
+  private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
   private val s2_crossPageMask    = RegEnable(s1_crossPageMask, s1_fire)
-  private val s2_positions = s2_rawBtbEntries zip s2_posHighesBits map { case (entry, h) =>
+  private val s2_positions = s2_posHigherBits.zip(s2_rawBtbEntries).map { case (h, entry) =>
     Cat(h, entry.position) // Add higher bits before using
   }
   private val s2_rawHitMask = s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag)
@@ -261,10 +252,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   t1_writeEntry.attribute       := t1_mispredictBranch.bits.attribute
   t1_writeEntry.stronglyBiased  := false.B  // FIXME
   t1_writeEntry.replaceCnt      := DontCare // FIXME:
-  private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
-    // FIXME: not working for NumAlignBanks > 2
-    bankIdx.U === (t1_mispredictBranch.bits.cfiPosition.asBools.last + t1_alignBankIdx)
-  )
+
+  private val t1_writeAlignBankIdx =
+    t1_mispredictBranch.bits.cfiPosition(CfiPositionWidth - 1, CfiPositionWidth - log2Ceil(NumAlignBanks))
+  private val t1_rawWriteAlignBankMask = VecInit(UIntToOH(t1_writeAlignBankIdx).asBools)
+  private val t1_writeAlignBankMask    = vecRotateRight(t1_rawWriteAlignBankMask, s1_alignBankIdx)
+
   private val t1_thisReplacerSetIdx = getReplacerSetIndex(t1_train.startVAddr)
   private val t1_nextReplacerSetIdx = t1_thisReplacerSetIdx + 2.U
   private val t1_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
