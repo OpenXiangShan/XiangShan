@@ -1,17 +1,75 @@
+#!/usr/bin/env python3
+
 import sqlite3 as sql
 import argparse
+import subprocess
+import tempfile
 
-
+class dasm_query:
+    def __init__(self, cmd='riscv64-linux-gnu-objdump', enable_cache=True):
+        if cmd.endswith('objdump'):
+            self.cmd = cmd
+            self.mode = 'objdump'
+        elif cmd == 'spike-dasm':
+            self.cmd = cmd
+            self.mode = 'spike-dasm'
+            self.spike = subprocess.Popen(
+                [self.cmd],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+        if enable_cache:
+            self.cache = {}
+        else:
+            self.cache = None
+    def __del__(self):
+        if self.mode == 'spike-dasm':
+            self.spike.terminate()
+            self.spike.wait()
+    def dasm(self, instr):
+        if self.cache is not None and instr in self.cache:
+            return self.cache[instr]
+        if self.mode == 'spike-dasm':
+            self.spike.stdin.write(f"DASM(0x{instr:x})\n")
+            self.spike.stdin.flush()
+            res = self.spike.stdout.readline().strip()
+            if self.cache is not None:
+                self.cache[instr] = res
+            return res
+        elif self.mode == 'objdump':
+            # write instr.to_bytes(4, byteorder='little')
+            with tempfile.NamedTemporaryFile() as f:
+                f.write(instr.to_bytes(4, byteorder='little'))
+                f.flush()
+                res = subprocess.run(
+                    [self.cmd, '-b', 'binary', '-m', 'riscv:rv64', '-M,max', '-D', f.name],
+                    capture_output=True,
+                    text=True
+                )
+                lines = res.stdout.splitlines()
+                for line in lines:
+                    if line.startswith("   0:\t"):
+                        res = "\t".join(line.split("\t")[2:])
+                        if self.cache is not None:
+                            self.cache[instr] = res
+                        return res
+                return ""
 
 parser = argparse.ArgumentParser()
 parser.add_argument('sqldb')
 parser.add_argument('-v', '--visual', action='store_true', default=False)
 parser.add_argument('-z', '--zoom', action='store', type=float, default=1)
 parser.add_argument('-p', '--period', action='store', default=1)
+parser.add_argument('-d', '--dasm', action='store', help='dasm command, can be "spike-dasm" or "riscv64-linux-gnu-objdump"', default=None)
 
 args = parser.parse_args()
 
 sqldb = args.sqldb
+dasm = None
+if args.dasm is not None:
+    dasm = dasm_query(args.dasm)
 
 tick_per_cycle = int(args.period)
 cycle_per_line = int(100 * args.zoom)
@@ -53,7 +111,11 @@ def dump_visual(pos, records):
         line += f'[{stage(i)}{non_stage() * (cycle_per_line - 1)}]\n'
     else:
         line += f'{stage(i)}' + non_stage() * (cycle_per_line - pos_next - 1) + ']'
-    line += str(records)
+    instr = records[0]
+    pc = records[1]
+    if dasm is not None and type(instr) == int:
+        instr = f"{instr:08x} {dasm.dasm(instr)}"
+    line += f"{pc}: {instr}"
     print(line)
 
 
