@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('sqldb')
 parser.add_argument('-v', '--visual', action='store_true', default=False)
 parser.add_argument('-z', '--zoom', action='store', type=float, default=1)
-parser.add_argument('-p', '--period', action='store', default=333)
+parser.add_argument('-p', '--period', action='store', default=1)
 
 args = parser.parse_args()
 
