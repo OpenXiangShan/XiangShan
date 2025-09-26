@@ -45,6 +45,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
     val axis = Flipped(new TraceRTLAXISIO(AXIS_DATA_WIDTH))
     val data = DecoupledIO(UInt(BUS_CORE_DATA_WIDTH.W))
   })
+  dontTouch(io)
 
   val BufferNum = 2
   val buffer = Reg(Vec(BufferNum, Vec(PACKET_CYCLE_NUM, UInt(AXIS_DATA_WIDTH.W))))

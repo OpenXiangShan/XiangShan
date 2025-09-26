@@ -245,6 +245,10 @@ pldm-run:
 pldm-debug:
 	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
+# generate AXI Stream package/unpackage module into ./build/tracertl
+trtl-axis-gen:
+	mill -i xiangshan.test.runMain tracertl.TraceRTLAXISModGen
+
 include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk

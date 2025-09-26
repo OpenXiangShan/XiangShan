@@ -104,6 +104,7 @@ class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int) extends Modul
     val in = Flipped(DecoupledIO(UInt(PACKET_INST_WIDTH.W)))
     val axis = new TraceRTLAXISIO(AXIS_DATA_WIDTH)
   })
+  dontTouch(io)
 
   val BufferNum = 2
   val buffer = Reg(Vec(BufferNum, UInt(PLUS_EXTRA_WIDTH.W)))
