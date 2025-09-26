@@ -78,6 +78,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
+  println(s"XSTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
 
   val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alter((site, here, up) => {
@@ -320,6 +321,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if (p(DebugOptionsKey).TraceRTLMode && p(DebugOptionsKey).TraceRTLOnFPGA) {
       // add Top Module IO for data connect
       // FIXME: rm ugly code
+      // FIXME: update XSNoCTop TraceRTL modification
       BoringUtils.addSource(io.gateWay.in.bits, "TraceRTLFPGATraces")
       BoringUtils.addSource(io.gateWay.in.valid, "TraceRTLFPGATracesValid")
       BoringUtils.addSink(io.gateWay.in.ready, "TraceRTLFPGATracesReady")
@@ -359,8 +361,6 @@ object TopMain extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
   ChiselMap.init(enable = enableChiselMap && !envInFPGA)
-
-  println(s"TopMain: TraceRTLMode ${config(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${config(DebugOptionsKey).TraceRTLOnFPGA}")
 
   val soc = if (config(SoCParamsKey).UseXSNoCTop)
     DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)

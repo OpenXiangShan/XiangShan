@@ -561,10 +561,14 @@ case class DebugOptions
   EnableChiselDB: Boolean = false,
   TraceRTLMode: Boolean = false,
   TraceRTLOnPLDM: Boolean = false, // for pldm
-  TraceRTLOnFPGA: Boolean = true, // for fpga
+  TraceRTLOnFPGA: Boolean = false, // for fpga
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false
-)
+) {
+  if (FPGAPlatform && TraceRTLMode) {
+    require(TraceRTLOnFPGA, "TraceRTLOnFPGA must be true on FPGA platform when enable TraceRTLMode")
+  }
+}
 
 trait HasXSParameter {
 

@@ -32,8 +32,7 @@ import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceR
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
-  require(debugOpts.TraceRTLMode, "SimTop require enable TraceRTLMode")
-  println(s"SimTop TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
+  println(s"SimTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)

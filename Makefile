@@ -87,13 +87,19 @@ override SIM_ARGS += --with-dramsim3
 endif
 
 # trace xiangshan mode: accept trace instead of gcpt
-TRACERTL_MODE ?= 1
-TRACERTLOnFPGA ?= 0
+TRACERTL_MODE ?= 0
+TRACERTLOnFPGA ?= 0 # currently only used for difftest
 ifeq ($(TRACERTL_MODE),1)
 override SIM_ARGS += --trace-rtl
-SIM_FPGA_ARGS += --trace-rtl
+override RELEASE_ARGS += --trace-rtl
+override PLDM_ARGS += --trace-rtl
 endif
 
+ifeq ($(TRACERTLOnFPGA),1)
+ifneq ($(TRACERTL_MODE),1)
+$(error TRACERTLOnFPGA requires TRACERTL_MODE)
+endif
+endif
 
 # run emu with chisel-db
 ifeq ($(WITH_CHISELDB),1)
@@ -163,7 +169,7 @@ $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
-		--num-cores $(NUM_CORES) $(RELEASE_ARGS) $(SIM_FPGA_ARGS)
+		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -174,6 +180,9 @@ $(TOP_V): $(SCALA_FILE)
 	@rm .__head__ .__diff__
 
 verilog: $(TOP_V)
+ifeq ($(TRACERTLOnFPGA),1)
+	$(MAKE) trtl-axis-gen
+endif
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
