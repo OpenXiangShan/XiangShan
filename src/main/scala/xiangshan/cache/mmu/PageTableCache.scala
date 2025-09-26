@@ -561,7 +561,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hit = WireInit(false.B)
     val l0bitmapreg = WireInit((VecInit(Seq.fill(l2tlbParams.l0nWays)(VecInit(Seq.fill(tlbcontiguous)(0.U(1.W)))))))
     if (HasBitmapCheck) {
-      l0bitmapreg := RegEnable(RegNext(l0BitmapReg(ridx)), stageDelay(1).fire)
+      l0bitmapreg := RegEnable(RegEnable(l0BitmapReg(ridx), stageReq.fire), stageDelay(1).fire)
       // cause llptw will trigger bitmapcheck
       // add a coniditonal logic
       // (s2x_info =/= allStage || ishptw)
