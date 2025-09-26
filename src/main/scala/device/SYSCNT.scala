@@ -70,7 +70,6 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    Annotated.params(this, params)
 
     val rtc_clock = IO(Input(Clock()))
     val rtc_reset = IO(Input(AsyncReset()))
