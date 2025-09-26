@@ -62,7 +62,7 @@ class AheadBtbBank(implicit p: Parameters) extends AheadBtbModule {
   // single port SRAM can not be written and read at the same time
   // read has higher priority than write
   // we use a write buffer to store the write requests when read and write are both valid
-  private val writeBuffer = Module(new WriteBuffer(new BankWriteReq, WriteBufferSize, numPorts = 1, pipe = true))
+  private val writeBuffer = Module(new WriteBuffer(new BankWriteReq, WriteBufferSize, numPorts = 1))
 
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
   writeBuffer.io.write.head.valid := io.writeReq.valid

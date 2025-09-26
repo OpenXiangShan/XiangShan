@@ -47,9 +47,11 @@ class TableReadResp(implicit p: Parameters) extends TageBundle {
 
 class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasTageParameters {
-  val setIdx:       UInt         = UInt(log2Ceil(numSets / NumBanks).W)
-  val entry:        TageEntry    = new TageEntry
-  override def tag: Option[UInt] = Some(entry.tag)
+  val setIdx:         UInt                    = UInt(log2Ceil(numSets / NumBanks).W)
+  val entry:          TageEntry               = new TageEntry
+  override def tag:   Option[UInt]            = Some(entry.tag)
+  override def cnt:   Option[SaturateCounter] = Some(entry.takenCtr)
+  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive)
 }
 class AllocFailCtrSramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasTageParameters {
