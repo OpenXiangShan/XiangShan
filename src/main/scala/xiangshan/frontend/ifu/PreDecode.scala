@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSDebug
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 
 class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class PreDecodeIO(implicit p: Parameters) extends IfuBundle {
@@ -46,17 +47,14 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   for (i <- 0 until IBufferEnqueueWidth) {
     val inst = WireInit(rawInsts(i))
 
-    val (brType, isCall, isRet) = getBrInfo(inst)
-    val jalOffset               = getJalOffset(inst, io.req.bits.isRvc(i))
-    val brOffset                = getBrOffset(inst, io.req.bits.isRvc(i))
+    val jalOffset = getJalOffset(inst, io.req.bits.isRvc(i))
+    val brOffset  = getBrOffset(inst, io.req.bits.isRvc(i))
 
     io.resp.pd(i).valid := io.req.bits.instrValid(i)
     io.resp.pd(i).isRVC := io.req.bits.isRvc(i)
 
     // for diff purpose only
-    io.resp.pd(i).brType := brType
-    io.resp.pd(i).isCall := isCall
-    io.resp.pd(i).isRet  := isRet
+    io.resp.pd(i).brAttribute := BranchAttribute.decode(inst, io.req.valid)
 
     io.resp.instr(i)      := inst
     io.resp.jumpOffset(i) := Mux(io.resp.pd(i).isBr, brOffset, jalOffset)
@@ -67,9 +65,8 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
       true.B,
       p"instr ${Hexadecimal(io.resp.instr(i))}, " +
         p"isRVC ${Binary(io.resp.pd(i).isRVC)}, " +
-        p"brType ${Binary(io.resp.pd(i).brType)}, " +
-        p"isRet ${Binary(io.resp.pd(i).isRet)}, " +
-        p"isCall ${Binary(io.resp.pd(i).isCall)}\n"
+        p"branchType ${Binary(io.resp.pd(i).brAttribute.branchType)}, " +
+        p"rasAction ${Binary(io.resp.pd(i).brAttribute.rasAction)}, "
     )
   }
 }

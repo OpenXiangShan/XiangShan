@@ -80,10 +80,6 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
-  io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
-  io.toFrontendBJUResolve.get.bits.attribute.rasAction := Mux1H(
-    Seq(io.in.bits.ctrl.preDecode.get.isCall, io.in.bits.ctrl.preDecode.get.isRet),
-    Seq(BranchAttribute.RasAction.Push, BranchAttribute.RasAction.Pop)
-  )
+  io.toFrontendBJUResolve.get.bits.attribute  := io.in.bits.ctrl.preDecode.get.brAttribute
   connect0LatencyCtrlSingal
 }

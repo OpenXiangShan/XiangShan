@@ -102,13 +102,13 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   // Stage 1: detect remask fault
   /** first check: remask Fault */
   jalFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isJal && instrValid(i) && !isPredTaken(i) && !ignore(i)
+    pd.brAttribute.isDirect && instrValid(i) && !isPredTaken(i) && !ignore(i)
   })
   jalrFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isJalr && !pd.isRet && instrValid(i) && !isPredTaken(i) && !ignore(i)
+    pd.brAttribute.isIndirect && !pd.brAttribute.hasPop && instrValid(i) && !isPredTaken(i) && !ignore(i)
   })
   retFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isRet && instrValid(i) && !isPredTaken(i) && !ignore(i)
+    pd.brAttribute.hasPop && instrValid(i) && !isPredTaken(i) && !ignore(i)
   })
   notCfiTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
@@ -136,14 +136,14 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   private val fixedTwoFetchFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
-      pd.isRet || pd.isJal || pd.isJalr ||
+      pd.brAttribute.isIndirect || pd.brAttribute.isDirect ||
         (isPredTaken(i) && !selectFetchBlock(i) && !pd.notCFI)
     ) && !ignore(i)
   })
 
   private val fixedTwoFetchSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && fixedRange(i) && (
-      pd.isRet || pd.isJal || pd.isJalr ||
+      pd.brAttribute.isIndirect || pd.brAttribute.isDirect ||
         (isPredTaken(i) && selectFetchBlock(i) && !pd.notCFI)
     ) && !ignore(i)
   })
@@ -184,9 +184,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val finalInvalidTaken = invalidTaken(mispredIdx.bits)
   private val finalSelectBlock  = selectFetchBlock(mispredIdx.bits)
   private val finalPc           = pc(mispredIdx.bits)
-  private val finalAttribute    = WireDefault(BranchAttribute.None)
-  finalAttribute.branchType := pds(mispredIdx.bits).brType
-  finalAttribute.rasAction  := Cat(pds(mispredIdx.bits).isCall, pds(mispredIdx.bits).isRet)
+  private val finalAttribute    = pds(mispredIdx.bits).brAttribute
 
   // The actual end of the prediction block is the instruction before invalidTaken.
   private val endOffset = instrEndOffset(mispredIdx.bits)

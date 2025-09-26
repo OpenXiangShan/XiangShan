@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
+import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
@@ -55,7 +56,7 @@ class BranchAttribute extends Bundle {
 }
 
 object BranchAttribute {
-  private object BranchType extends EnumUInt(4) {
+  object BranchType extends EnumUInt(4) {
     // no branch
     def None: UInt = 0.U(width.W)
     // conditional branches: beq, bne, blt, bge, bltu, bgeu
@@ -79,13 +80,46 @@ object BranchAttribute {
     def PopAndPush: UInt = ((1 << popBit) | (1 << pushBit)).U(width.W)
   }
 
-  def apply(branchType: UInt, rasAction: UInt): BranchAttribute = {
-    BranchType.assertLegal(branchType)
-    RasAction.assertLegal(rasAction)
+  def apply(branchType: UInt, rasAction: UInt, canAssert: Bool = true.B): BranchAttribute = {
+    // for some register, we allow X-state on init, so we assert only when canAssert (e.g. stage valid)
+    when(canAssert) {
+      BranchType.assertLegal(branchType)
+      RasAction.assertLegal(rasAction)
+    }
     val e = Wire(new BranchAttribute)
     e.branchType := branchType
     e.rasAction  := rasAction
     e
+  }
+
+  def decode(inst: UInt, canAssert: Bool = true.B): BranchAttribute = {
+    def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
+
+    def isLink(reg: UInt): Bool = reg === 1.U || reg === 5.U
+
+    val branchType = ListLookup(inst, List(BranchType.None), PreDecodeInst.brTable).head
+
+    // for jal/jalr, rd=inst(11, 7)
+    // for c.jal/jalr, rd is always x1
+    // for c.j/jr, rd is always x0
+    // we can use inst(12) (funct4(0)) to distinguish c.jal/c.jalr (=1) and c.j/c.jr (=0)
+    val rd = Mux(isRVC(inst), inst(12), inst(11, 7))
+    // for jal/jalr, rs=inst(19, 15)
+    // for c.jal/jalr, rs=inst(11, 7)
+    // for c.j/jr, we don't have rs
+    val rs = Mux(isRVC(inst), Mux(branchType === BranchType.Direct, 0.U, inst(11, 7)), inst(19, 15))
+
+    // refer to risc-v spec Table3. Return-address stack prediction hints
+    val hasPush =
+      // we do not support RV32C here, and in RV64C, c.jal should be decoded as c.addiw, so we ask !RVC here
+      branchType === BranchType.Direct && isLink(rd) && !isRVC(inst) ||
+        branchType === BranchType.Indirect && isLink(rd)
+    val hasPop =
+      branchType === BranchType.Indirect && isLink(rs) && rd =/= rs
+
+    val rasAction = Cat(hasPush, hasPop)
+
+    apply(branchType, rasAction, canAssert)
   }
 
   def None:          BranchAttribute = apply(BranchType.None, RasAction.None)
