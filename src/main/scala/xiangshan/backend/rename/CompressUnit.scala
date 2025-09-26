@@ -55,7 +55,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     in.valid && in.bits.lastUop && noExc && canComp
   }
   val extendedCanCompress = canCompress.zip(io.in).zip(io.oddFtqVec).flatMap { case ((canComp, in), oddFtq) =>
-    Seq((FuType.isBlockBackCompress(in.bits.fuType) && in.valid ) || canComp ,canComp && !oddFtq)
+    Seq((FuType.isBlockBackCompress(in.bits.fuType) && in.valid && backendParams.robCompressEn.B) || canComp ,canComp && !oddFtq)
   }
 
   val compressTable = (0 until 1 << (2 * RenameWidth)).filter { baseCandidate =>
