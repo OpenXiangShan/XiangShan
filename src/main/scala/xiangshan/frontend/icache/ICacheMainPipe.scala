@@ -157,7 +157,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.bits.waymask      := s0_waymasks
 
   private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
-  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx)
+  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_fire  := s0_valid && s0_canGo && !s0_flush
 
   fromFtq.ready := s0_canGo
@@ -378,7 +378,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toIfu.bits.gpAddr            := s1_gpAddr
   toIfu.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-  s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx)
+  s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
   s1_ready := (s1_fetchFinish && !io.respStall) || !s1_valid
   s1_fire  := s1_valid && s1_fetchFinish && !io.respStall && !s1_flush
 

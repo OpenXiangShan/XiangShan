@@ -204,7 +204,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s0_fire := fromFtq.req.fire
 
   s0_flushFromBpu := s0_ftqFetch.map(fetch =>
-    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
+    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx, fetch.valid)
   )
 
   private val backendRedirect          = WireInit(false.B)
@@ -249,7 +249,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_doubleline = RegEnable(s0_doubleline, s0_fire)
 
   s1_flushFromBpu := s1_ftqFetch.map(fetch =>
-    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx)
+    fromFtq.flushFromBpu.shouldFlushByStage3(fetch.ftqIdx, fetch.valid)
   )
 
   private val icacheRespAllValid = WireInit(false.B)
