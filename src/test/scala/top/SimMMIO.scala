@@ -37,15 +37,17 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val sdRange = AddressSet(0x40002000L, 0xfff)
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
 
+  val uart16550Range = AddressSet(0x310b0000L, 0xfff)
   val illegalRange = (onChipPeripheralRanges.values ++ Seq(
     soc.UARTLiteRange,
+    uart16550Range,
     flashRange,
     sdRange,
     intrGenRange
   )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
-  val uart = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
+  val uart = LazyModule(new AXI4UART16550(Seq(AddressSet(0x310b0000L, 0xfff))))
   // val vga = LazyModule(new AXI4VGA(
   //   sim = false,
   //   fbAddress = Seq(AddressSet(0x50000000L, 0x3fffffL)),
