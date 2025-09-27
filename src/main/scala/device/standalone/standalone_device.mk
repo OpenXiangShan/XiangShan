@@ -4,7 +4,7 @@ DEBUG_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 PLDM_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 endif
 
-STANDALONE_DEVICES = StandAloneCLINT StandAlonePLIC StandAloneDebugModule
+STANDALONE_DEVICES = StandAlonePLIC StandAloneDebugModule StandAloneSYSCNT
 STANDALONE_DEVICES_PATH = $(shell for module in $(STANDALONE_DEVICES); do echo $(RTL_DIR)/$$module/$(DEVICE_PREFIX)$$module.$(RTL_SUFFIX); done)
 
 ifeq ($(DEVICE_TL),1)
