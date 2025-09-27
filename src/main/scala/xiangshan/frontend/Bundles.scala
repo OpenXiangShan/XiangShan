@@ -257,24 +257,15 @@ object ExceptionType {
     apply(hasAf = resp.instr)
 }
 
-object BrType extends EnumUInt(4) {
-  def NotCfi: UInt = 0.U(width.W)
-  def Branch: UInt = 1.U(width.W)
-  def Jal:    UInt = 2.U(width.W)
-  def Jalr:   UInt = 3.U(width.W)
-}
-
 class PreDecodeInfo extends Bundle { // 8 bit
-  val valid:  Bool = Bool()
-  val isRVC:  Bool = Bool()
-  val brType: UInt = UInt(2.W)
-  val isCall: Bool = Bool()
-  val isRet:  Bool = Bool()
+  val valid:       Bool            = Bool()
+  val isRVC:       Bool            = Bool()
+  val brAttribute: BranchAttribute = new BranchAttribute
   // val excType = UInt(3.W)
-  def isBr:   Bool = brType === BrType.Branch
-  def isJal:  Bool = brType === BrType.Jal
-  def isJalr: Bool = brType === BrType.Jalr
-  def notCFI: Bool = brType === BrType.NotCfi
+  def isBr:   Bool = brAttribute.isConditional
+  def isJal:  Bool = brAttribute.isDirect
+  def isJalr: Bool = brAttribute.isIndirect
+  def notCFI: Bool = brAttribute.isNone
 }
 
 // pc = ftq.startAddr + Cat(offset, 0.U(1.W)) - Cat(borrow, 0.U(1.W))
