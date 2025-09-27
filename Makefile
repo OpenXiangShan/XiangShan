@@ -194,6 +194,12 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+# run with sim frontend(ideal frontend)
+ifeq ($(ENABLE_SIMFRONTEND),1)
+override SIM_ARGS += --enable-simfrontend
+endif
+
+
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest

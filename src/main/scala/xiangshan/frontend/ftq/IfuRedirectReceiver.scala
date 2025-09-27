@@ -19,21 +19,25 @@ import chisel3._
 import chisel3.util._
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
-import xiangshan.frontend.PredecodeWritebackBundle
+import xiangshan.frontend.FrontendRedirect
 
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
-      pdWb: Valid[PredecodeWritebackBundle]
+      wbRedirect:  Valid[FrontendRedirect],
+      specTopAddr: UInt
   ): Valid[Redirect] = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
-    redirect.valid          := pdWb.valid && pdWb.bits.misEndOffset.valid
-    redirect.bits.ftqIdx    := pdWb.bits.ftqIdx
-    redirect.bits.ftqOffset := pdWb.bits.takenCfiOffset
+    redirect.valid          := wbRedirect.valid
+    redirect.bits.ftqIdx    := wbRedirect.bits.ftqIdx
+    redirect.bits.ftqOffset := wbRedirect.bits.ftqOffset
     redirect.bits.level     := RedirectLevel.flushAfter
-    redirect.bits.pc        := pdWb.bits.pc.toUInt
-    redirect.bits.target    := pdWb.bits.target.toUInt
-    redirect.bits.taken     := pdWb.bits.cfiEndOffset.valid
+    redirect.bits.isRVC     := wbRedirect.bits.isRVC
+    redirect.bits.attribute := wbRedirect.bits.attribute
+    redirect.bits.pc        := wbRedirect.bits.pc
+    // redirect.bits.target    := Mux(pdWb.bits.attribute.isReturn, specTopAddr, pdWb.bits.target.toUInt)
+    redirect.bits.target := wbRedirect.bits.target
+    redirect.bits.taken  := wbRedirect.bits.taken
     redirect
   }
 }

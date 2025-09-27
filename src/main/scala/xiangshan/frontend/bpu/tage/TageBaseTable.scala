@@ -51,7 +51,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   // use a write buffer to store the write requests when read and write are both valid
   private val writeBuffers =
     Seq.fill(BaseTableNumAlignBanks, NumBanks)(
-      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1, pipe = true, hasTag = false))
+      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1, pipe = true))
     )
 
   // Connect write buffers to SRAMs
@@ -77,21 +77,12 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   private val s0_startPc = io.startPc
 
   private val s0_alignBankIdx = getBaseTableAlignBankIndex(s0_startPc)
-  private val s0_setIdx       = getBaseTableSetIndex(s0_startPc)
-  private val s0_setIdxVec =
-    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_setIdx + 1.U, s0_setIdx))
+  private val s0_rawSetIdx    = getBaseTableSetIndex(s0_startPc)
+  private val s0_setIdx =
+    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_rawSetIdx + 1.U, s0_rawSetIdx))
 
   private val s0_bankIdx  = getBaseTableBankIndex(s0_startPc)
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
-
-  sramBanks.zip(s0_setIdxVec).foreach {
-    case (alignBank, setIdx) =>
-      alignBank.zipWithIndex.foreach {
-        case (bank, bankIdx) =>
-          bank.io.r.req.valid       := s0_fire && s0_bankMask(bankIdx)
-          bank.io.r.req.bits.setIdx := setIdx
-      }
-  }
 
   /* --------------------------------------------------------------------------------------------------------------
      stage 1
@@ -136,8 +127,8 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
     case (alignBank, alignIdx) =>
       alignBank.zipWithIndex.foreach {
         case (bank, bankIdx) =>
-          bank.io.r.req.valid       := t0_valid && t0_bankMask(bankIdx)
-          bank.io.r.req.bits.setIdx := t0_setIdx(alignIdx)
+          bank.io.r.req.valid       := s0_fire && s0_bankMask(bankIdx) || t0_valid && t0_bankMask(bankIdx)
+          bank.io.r.req.bits.setIdx := Mux(t0_valid, t0_setIdx(alignIdx), s0_setIdx(alignIdx))
       }
   }
 

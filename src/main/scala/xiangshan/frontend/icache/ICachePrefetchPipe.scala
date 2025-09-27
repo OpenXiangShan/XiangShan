@@ -42,15 +42,15 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val eccEnable:   Bool = Input(Bool())
     val flush:       Bool = Input(Bool())
 
-    val req:            DecoupledIO[PrefetchReqBundle] = Flipped(Decoupled(new PrefetchReqBundle))
-    val flushFromBpu:   BpuFlushInfo                   = Flipped(new BpuFlushInfo)
-    val itlb:           TlbRequestIO                   = new TlbRequestIO
-    val itlbFlushPipe:  Bool                           = Output(Bool())
-    val pmp:            PmpCheckBundle                 = new PmpCheckBundle
-    val metaRead:       MetaReadBundle                 = new MetaReadBundle
-    val missReq:        DecoupledIO[MissReqBundle]     = DecoupledIO(new MissReqBundle)
-    val missResp:       Valid[MissRespBundle]          = Flipped(ValidIO(new MissRespBundle))
-    val wayLookupWrite: DecoupledIO[WayLookupBundle]   = DecoupledIO(new WayLookupBundle)
+    val req:            DecoupledIO[PrefetchReqBundle]    = Flipped(Decoupled(new PrefetchReqBundle))
+    val flushFromBpu:   BpuFlushInfo                      = Flipped(new BpuFlushInfo)
+    val itlb:           TlbRequestIO                      = new TlbRequestIO
+    val itlbFlushPipe:  Bool                              = Output(Bool())
+    val pmp:            PmpCheckBundle                    = new PmpCheckBundle
+    val metaRead:       MetaReadBundle                    = new MetaReadBundle
+    val missReq:        DecoupledIO[MissReqBundle]        = DecoupledIO(new MissReqBundle)
+    val missResp:       Valid[MissRespBundle]             = Flipped(ValidIO(new MissRespBundle))
+    val wayLookupWrite: DecoupledIO[WayLookupWriteBundle] = DecoupledIO(new WayLookupWriteBundle)
 
     val perf: PrefetchPipePerfInfo = Output(new PrefetchPipePerfInfo)
   }
@@ -90,11 +90,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_vSetIdx          = VecInit(s0_vAddr.map(get_idx))
   private val s0_backendException = io.req.bits.backendException
 
-  fromBpuS0Flush := !s0_isSoftPrefetch && (
-    io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx) ||
-      io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx)
-  )
-  s0_flush := io.flush || fromBpuS0Flush || s1_flush
+  fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx)
+  s0_flush       := io.flush || fromBpuS0Flush || s1_flush
 
   private val s0_canGo = s1_ready && toItlb.ready && toMeta.ready
   io.req.ready := s0_canGo
@@ -271,6 +268,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     (s1_state === S1FsmState.EnqWay) ||
       ((s1_state === S1FsmState.Idle) && tlbFinish)
   ) && !s1_flush && !fromMiss.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
+  toWayLookup.bits.ftqIdx            := s1_ftqIdx
   toWayLookup.bits.vSetIdx           := s1_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
   toWayLookup.bits.pTag              := s1_pTag

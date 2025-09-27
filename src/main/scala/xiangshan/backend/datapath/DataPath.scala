@@ -14,7 +14,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, SchdBlockParams, VecScheduler}
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
@@ -23,40 +23,38 @@ import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.backend.fu.FuType.isUncertain
 import xiangshan.mem.{LqPtr, SqPtr}
 
-class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
-  override def shouldBeInlined: Boolean = false
+//class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
+//  override def shouldBeInlined: Boolean = false
+//
+//  private implicit val dpParams: BackendParams = params
+//  lazy val module = new DataPathImp(this)
+//
+//  println(s"[DataPath] Preg Params: ")
+//  println(s"[DataPath]   Int R(${params.getRfReadSize(IntData())}), W(${params.getRfWriteSize(IntData())}) ")
+//  println(s"[DataPath]   Fp R(${params.getRfReadSize(FpData())}), W(${params.getRfWriteSize(FpData())}) ")
+//  println(s"[DataPath]   Vf R(${params.getRfReadSize(VecData())}), W(${params.getRfWriteSize(VecData())}) ")
+//  println(s"[DataPath]   V0 R(${params.getRfReadSize(V0Data())}), W(${params.getRfWriteSize(V0Data())}) ")
+//  println(s"[DataPath]   Vl R(${params.getRfReadSize(VlData())}), W(${params.getRfWriteSize(VlData())}) ")
+//}
 
-  private implicit val dpParams: BackendParams = params
-  lazy val module = new DataPathImp(this)
-
-  println(s"[DataPath] Preg Params: ")
-  println(s"[DataPath]   Int R(${params.getRfReadSize(IntData())}), W(${params.getRfWriteSize(IntData())}) ")
-  println(s"[DataPath]   Fp R(${params.getRfReadSize(FpData())}), W(${params.getRfWriteSize(FpData())}) ")
-  println(s"[DataPath]   Vf R(${params.getRfReadSize(VecData())}), W(${params.getRfWriteSize(VecData())}) ")
-  println(s"[DataPath]   V0 R(${params.getRfReadSize(V0Data())}), W(${params.getRfWriteSize(V0Data())}) ")
-  println(s"[DataPath]   Vl R(${params.getRfReadSize(VlData())}), W(${params.getRfWriteSize(VlData())}) ")
-}
-
-class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
-  extends LazyModuleImp(wrapper) with HasXSParameter with HasPerfEvents {
+class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockParams)
+  extends XSModule with HasXSParameter with HasPerfEvents {
 
   val io = IO(new DataPathIO())
 
   private val (fromIntIQ, toIntIQ, toIntExu) = (io.fromIntIQ, io.toIntIQ, io.toIntExu)
   private val (fromFpIQ,  toFpIQ,  toFpExu)  = (io.fromFpIQ,  io.toFpIQ,  io.toFpExu)
-  private val (fromMemIQ, toMemIQ, toMemExu) = (io.fromMemIQ, io.toMemIQ, io.toMemExu)
   private val (fromVfIQ,  toVfIQ,  toVfExu ) = (io.fromVfIQ,  io.toVfIQ,  io.toVecExu)
-  private val (fromVecExcp, toVecExcp)       = (io.fromVecExcpMod, io.toVecExcpMod)
 
-  println(s"[DataPath] IntIQ(${fromIntIQ.size}), FpIQ(${fromFpIQ.size}), VecIQ(${fromVfIQ.size}), MemIQ(${fromMemIQ.size})")
-  println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), FpExu(${fromFpIQ.map(_.size).sum}), VecExu(${fromVfIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
+  println(s"[${param.getName}DataPath] IntIQ(${fromIntIQ.size}), FpIQ(${fromFpIQ.size}), VecIQ(${fromVfIQ.size})")
+  println(s"[${param.getName}DataPath] IntExu(${fromIntIQ.map(_.size).sum}), FpExu(${fromFpIQ.map(_.size).sum}), VecExu(${fromVfIQ.map(_.size).sum})")
 
   // just refences for convience
-  private val fromIQ: Seq[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = (fromIntIQ ++ fromFpIQ ++ fromVfIQ ++ fromMemIQ).toSeq
+  private val fromIQ: Seq[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = (fromIntIQ ++ fromFpIQ ++ fromVfIQ).toSeq
 
-  private val toIQs = toIntIQ ++ toFpIQ ++ toVfIQ ++ toMemIQ
+  private val toIQs = toIntIQ ++ toFpIQ ++ toVfIQ
 
-  private val toExu: Seq[MixedVec[DecoupledIO[ExuInput]]] = (toIntExu ++ toFpExu ++ toVfExu ++ toMemExu).toSeq
+  private val toExu: Seq[MixedVec[DecoupledIO[ExuInput]]] = (toIntExu ++ toFpExu ++ toVfExu).toSeq
 
   private val fromFlattenIQ: Seq[DecoupledIO[IssueQueueIssueBundle]] = fromIQ.flatten
 
@@ -217,8 +215,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val intSchdParams = params.schdParams(IntScheduler())
   private val fpSchdParams = params.schdParams(FpScheduler())
-  private val vfSchdParams = params.schdParams(VfScheduler())
-  private val memSchdParams = params.schdParams(MemScheduler())
+  private val vecSchdParams = params.schdParams(VecScheduler())
 
   private val schdParams = params.allSchdParams
 
@@ -228,38 +225,38 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val targetPCRdata = io.fromPcTargetMem.toDataPathTargetPC
   private val pcRdata = io.fromPcTargetMem.toDataPathPC
   private val intRfRaddr = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.pregIdxWidth.W)))
-  private val intRfRdata = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.rfDataWidth.W)))
+  private val intRfRdata = Option.when(param.isIntSchd)(Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.rfDataWidth.W))))
   private val intRfWen = Wire(Vec(io.fromIntWb.length, Bool()))
   private val intRfWaddr = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfWdata = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.rfDataWidth.W)))
 
   private val fpRfRaddr = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.pregIdxWidth.W)))
-  private val fpRfRdata = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W)))
+  private val fpRfRdata = Option.when(param.isFpSchd)(Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
   private val fpRfWen = Wire(Vec(io.fromFpWb.length, Bool()))
   private val fpRfWaddr = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.pregIdxWidth.W)))
   private val fpRfWdata = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.rfDataWidth.W)))
 
-  private val vfRfSplitNum = 4
-  private val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.pregIdxWidth.W)))
-  private val vfRfRdata = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.rfDataWidth.W)))
-  private val vfRfWen = Wire(Vec(vfRfSplitNum, Vec(io.fromVfWb.length, Bool())))
-  private val vfRfWaddr = Wire(Vec(io.fromVfWb.length, UInt(vfSchdParams.pregIdxWidth.W)))
-  private val vfRfWdata = Wire(Vec(io.fromVfWb.length, UInt(vfSchdParams.rfDataWidth.W)))
+  private val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vecSchdParams.pregIdxWidth.W)))
+  private val vfRfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(VecData()), UInt(vecSchdParams.rfDataWidth.W))))
+  val splitNum = if (backendParams.debugEn) 1 else 4
+  private val vfRfWen = Wire(Vec(splitNum, Vec(io.fromVfWb.length, Bool())))
+  private val vfRfWaddr = Wire(Vec(io.fromVfWb.length, UInt(vecSchdParams.pregIdxWidth.W)))
+  private val vfRfWdata = Wire(Vec(io.fromVfWb.length, UInt(vecSchdParams.rfDataWidth.W)))
 
   private val v0RfSplitNum = VLEN / XLEN
   private val v0RfRaddr = Wire(Vec(params.numPregRd(V0Data()), UInt(log2Up(V0PhyRegs).W)))
-  private val v0RfRdata = Wire(Vec(params.numPregRd(V0Data()), UInt(V0Data().dataWidth.W)))
+  private val v0RfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(V0Data()), UInt(V0Data().dataWidth.W))))
   private val v0RfWen = Wire(Vec(v0RfSplitNum, Vec(io.fromV0Wb.length, Bool())))
   private val v0RfWaddr = Wire(Vec(io.fromV0Wb.length, UInt(log2Up(V0PhyRegs).W)))
   private val v0RfWdata = Wire(Vec(io.fromV0Wb.length, UInt(V0Data().dataWidth.W)))
 
   private val vlRfRaddr = Wire(Vec(params.numPregRd(VlData()), UInt(log2Up(VlPhyRegs).W)))
-  private val vlRfRdata = Wire(Vec(params.numPregRd(VlData()), UInt(VlData().dataWidth.W)))
+  private val vlRfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(VlData()), UInt(VlData().dataWidth.W))))
   private val vlRfWen = Wire(Vec(io.fromVlWb.length, Bool()))
   private val vlRfWaddr = Wire(Vec(io.fromVlWb.length, UInt(log2Up(VlPhyRegs).W)))
   private val vlRfWdata = Wire(Vec(io.fromVlWb.length, UInt(VlData().dataWidth.W)))
 
-  val pcReadFtqPtrFormIQ = (fromIntIQ ++ fromMemIQ).flatten.filter(x => x.bits.exuParams.needPc)
+  val pcReadFtqPtrFormIQ = fromIntIQ.flatten.filter(x => x.bits.exuParams.needPc)
   assert(pcReadFtqPtrFormIQ.size == pcReadFtqPtr.size, s"pcReadFtqPtrFormIQ.size ${pcReadFtqPtrFormIQ.size} not equal pcReadFtqPtr.size ${pcReadFtqPtr.size}")
   pcReadValid.zip(pcReadFtqPtrFormIQ.map(_.valid)).map(x => x._1 := x._2)
   pcReadFtqPtr.zip(pcReadFtqPtrFormIQ.map(_.bits.common.ftqIdx.get)).map(x => x._1 := x._2)
@@ -269,22 +266,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
   private val intDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+    OptionWrapper(backendParams.basicDebugEn && param.isIntSchd, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
   private val fpDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+    OptionWrapper(backendParams.basicDebugEn && param.isFpSchd, (Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
   private val vfDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(31, UInt(vecSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
   private val v0DiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
   private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
   private val fpDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(32, UInt(XLEN.W))))
+    OptionWrapper(backendParams.basicDebugEn && param.isFpSchd, Wire(Vec(32, UInt(XLEN.W))))
   private val vecDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
   private val vlDiffReadData: Option[UInt] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(UInt(VlData().dataWidth.W)))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(UInt(VlData().dataWidth.W)))
 
 
   fpDiffReadData.foreach(_ := fpDiffRead
@@ -307,31 +304,36 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   )
 
   io.diffVl.foreach(_ := vlDiffReadData.get)
-
-  IntRegFileSplit("IntRegFile", intSchdParams.numPregs, splitNum = 4, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
-    bankNum = 1,
-    debugReadAddr = intDiffRead.map(_._1),
-    debugReadData = intDiffRead.map(_._2)
-  )
-  FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum = 4, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
-    bankNum = 1,
-    debugReadAddr = fpDiffRead.map(_._1),
-    debugReadData = fpDiffRead.map(_._2)
-  )
-  VfRegFile("VfRegFile", vfSchdParams.numPregs, vfRfSplitNum, vfRfRaddr, vfRfRdata, vfRfWen, vfRfWaddr, vfRfWdata,
-    debugReadAddr = vfDiffRead.map(_._1),
-    debugReadData = vfDiffRead.map(_._2)
-  )
-  VfRegFile("V0RegFile", V0PhyRegs, v0RfSplitNum, v0RfRaddr, v0RfRdata, v0RfWen, v0RfWaddr, v0RfWdata,
-    debugReadAddr = v0DiffRead.map(_._1),
-    debugReadData = v0DiffRead.map(_._2)
-  )
-  FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata, vlRfWen, vlRfWaddr, vlRfWdata,
-    bankNum = 1,
-    isVlRegfile = true,
-    debugReadAddr = vlDiffRead.map(_._1),
-    debugReadData = vlDiffRead.map(_._2)
-  )
+  if (param.isIntSchd) {
+    IntRegFileSplit("IntRegFile", intSchdParams.numPregs, splitNum, intRfRaddr, intRfRdata.get, intRfWen, intRfWaddr, intRfWdata,
+      bankNum = 1,
+      debugReadAddr = intDiffRead.map(_._1),
+      debugReadData = intDiffRead.map(_._2)
+    )
+  }
+  else if (param.isFpSchd) {
+    FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum, fpRfRaddr, fpRfRdata.get, fpRfWen, fpRfWaddr, fpRfWdata,
+      bankNum = 1,
+      debugReadAddr = fpDiffRead.map(_._1),
+      debugReadData = fpDiffRead.map(_._2)
+    )
+  }
+  else {
+    VfRegFile("VfRegFile", vecSchdParams.numPregs, splitNum, vfRfRaddr, vfRfRdata.get, vfRfWen, vfRfWaddr, vfRfWdata,
+      debugReadAddr = vfDiffRead.map(_._1),
+      debugReadData = vfDiffRead.map(_._2)
+    )
+    VfRegFile("V0RegFile", V0PhyRegs, v0RfSplitNum, v0RfRaddr, v0RfRdata.get, v0RfWen, v0RfWaddr, v0RfWdata,
+      debugReadAddr = v0DiffRead.map(_._1),
+      debugReadData = v0DiffRead.map(_._2)
+    )
+    FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata.get, vlRfWen, vlRfWaddr, vlRfWdata,
+      bankNum = 1,
+      isVlRegfile = true,
+      debugReadAddr = vlDiffRead.map(_._1),
+      debugReadData = vlDiffRead.map(_._2)
+    )
+  }
 
   intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   intRfWdata := io.fromIntWb.map(x => RegEnable(x.data, x.wen)).toSeq
@@ -385,35 +387,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private var v0RdPortsIter: Iterator[Int] = vecExcpUseV0RdPorts.iterator
   private val v0WrPortsIter: Iterator[Int] = vecExcpUsev0WrPorts.iterator
 
-  for (i <- fromVecExcp.r.indices) {
-    when (fromVecExcp.r(i).valid && !fromVecExcp.r(i).bits.isV0) {
-      vfRfRaddr(vecExcpUseVecRdPorts(i)) := fromVecExcp.r(i).bits.addr
-    }
-    if (i % maxMergeNumPerCycle == 0) {
-      val v0RdPort = v0RdPortsIter.next()
-      when (fromVecExcp.r(i).valid && fromVecExcp.r(i).bits.isV0) {
-        v0RfRaddr(v0RdPort) := fromVecExcp.r(i).bits.addr
-      }
-    }
-  }
-
-  for (i <- fromVecExcp.w.indices) {
-    when (fromVecExcp.w(i).valid && !fromVecExcp.w(i).bits.isV0) {
-      val vecWrPort = vecExcpUseVecWrPorts(i)
-      vfRfWen.foreach(_(vecWrPort) := true.B)
-      vfRfWaddr(vecWrPort) := fromVecExcp.w(i).bits.newVdAddr
-      vfRfWdata(vecWrPort) := fromVecExcp.w(i).bits.newVdData
-    }
-    if (i % maxMergeNumPerCycle == 0) {
-      when(fromVecExcp.w(i).valid && fromVecExcp.w(i).bits.isV0) {
-        val v0WrPort = v0WrPortsIter.next()
-        v0RfWen.foreach(_(v0WrPort) := true.B)
-        v0RfWaddr(v0WrPort) := fromVecExcp.w(i).bits.newVdAddr
-        v0RfWdata(v0WrPort) := fromVecExcp.w(i).bits.newVdData
-      }
-    }
-  }
-
   vlRfWaddr := io.fromVlWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   vlRfWdata := io.fromVlWb.map(x => RegEnable(x.data, x.wen)).toSeq
   vlRfWen := io.fromVlWb.map(x => RegNext(x.wen)).toSeq
@@ -464,16 +437,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     readPorts
   }
 
-  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++ 
-                                fromMemIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
+  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
   private val regCacheReadData = regCache.io.readPorts.map(_.data)
 
   println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
   require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
-
-  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) => 
-    r.ren := req.ren
-    r.addr := req.addr
+  if (param.isIntSchd){
+    regCache.io.readPorts.zip(regCacheReadReq).foreach { case (r, req) =>
+      r.ren := req.ren
+      r.addr := req.addr
+    }
+  }
+  else {
+    regCache.io.readPorts.map{ case x =>
+      x.ren := false.B
+      x.addr := 0.U
+    }
   }
 
   val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -522,55 +501,53 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val rfrPortConfigs = schdParams.map(_.issueBlockParams).flatten.map(_.exuBlockParams.map(_.rfrPortConfigs))
 
-  println(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
-  s1_intPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  val allRData = (s1_intPregRData ++ s1_fpPregRData ++ s1_vfPregRData ++ s1_v0PregRData ++ s1_vlPregRData)
+  allRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  if (param.isIntSchd) {
   s1_intPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
         iuRdata.zip(iuCfg)
           .filter { case (_, cfg) => cfg.count(_.isInstanceOf[IntRD]) > 0 }
-          .foreach { case (sink, cfg) => sink := intRfRdata(cfg.find(_.isInstanceOf[IntRD]).get.port) }
+          .foreach { case (sink, cfg) => sink := intRfRdata.get(cfg.find(_.isInstanceOf[IntRD]).get.port) }
       }
+    }
+  }
+  if (param.isIntSchd || param.isFpSchd) {
+   val fpRfRdataFinal = if (param.isIntSchd) io.fpRfRdataIn.get else fpRfRdata.get
+     io.fpRfRdataOut.foreach(_ := fpRfRdata.get)
+     s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+     s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
+       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
+         iuRdata.zip(iuCfg)
+           .filter { case (_, cfg) => cfg.count(_.isInstanceOf[FpRD]) > 0 }
+           .foreach { case (sink, cfg) => sink := fpRfRdataFinal(cfg.find(_.isInstanceOf[FpRD]).get.port) }
+       }
+     }
+  }
+  if (param.isVecSchd) {
+   s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
+     iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
+       iuRdata.zip(iuCfg)
+         .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VfRD]) > 0 }
+         .foreach { case (sink, cfg) => sink := vfRfRdata.get(cfg.find(_.isInstanceOf[VfRD]).get.port) }
+     }
+    }
+   s1_v0PregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
+     iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
+       iuRdata.zip(iuCfg)
+         .filter { case (_, cfg) => cfg.count(_.isInstanceOf[V0RD]) > 0 }
+         .foreach { case (sink, cfg) => sink := v0RfRdata.get(cfg.find(_.isInstanceOf[V0RD]).get.port) }
+     }
+    }
+   s1_vlPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
+     iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
+       iuRdata.zip(iuCfg)
+         .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VlRD]) > 0 }
+         .foreach { case (sink, cfg) => sink := vlRfRdata.get(cfg.find(_.isInstanceOf[VlRD]).get.port) }
+     }
+    }
   }
 
-  println(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
-  s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
-      iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
-        iuRdata.zip(iuCfg)
-          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[FpRD]) > 0 }
-          .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.find(_.isInstanceOf[FpRD]).get.port) }
-      }
-  }
-
-  println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
-  s1_vfPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
-      iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        iuRdata.zip(iuCfg)
-          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VfRD]) > 0 }
-          .foreach { case (sink, cfg) => sink := vfRfRdata(cfg.find(_.isInstanceOf[VfRD]).get.port) }
-      }
-  }
-
-  println(s"[DataPath] s1_v0PregRData.flatten.flatten.size: ${s1_v0PregRData.flatten.flatten.size}, v0RfRdata.size: ${v0RfRdata.size}")
-  s1_v0PregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_v0PregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
-      iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        iuRdata.zip(iuCfg)
-          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[V0RD]) > 0 }
-          .foreach { case (sink, cfg) => sink := v0RfRdata(cfg.find(_.isInstanceOf[V0RD]).get.port) }
-      }
-  }
-
-  println(s"[DataPath] s1_vlPregRData.flatten.flatten.size: ${s1_vlPregRData.flatten.flatten.size}, vlRfRdata.size: ${vlRfRdata.size}")
-  s1_vlPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_vlPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
-      iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        iuRdata.zip(iuCfg)
-          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VlRD]) > 0 }
-          .foreach { case (sink, cfg) => sink := vlRfRdata(cfg.find(_.isInstanceOf[VlRD]).get.port) }
-      }
-  }
 
   val og0_cancel_no_load = VecInit(og0FailedVec2.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1).toSeq)
   val exuParamsNoLoad = fromIQ.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu)
@@ -736,17 +713,21 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val delayedCnt = 2
-    val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
-    difftestArchIntRegState.coreid := io.hartId
-    difftestArchIntRegState.value := intDiffRead.get._2
-
-    val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
-    difftestArchFpRegState.coreid := io.hartId
-    difftestArchFpRegState.value := fpDiffReadData.get
-
-    val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
-    difftestArchVecRegState.coreid := io.hartId
-    difftestArchVecRegState.value := vecDiffReadData.get
+    if (param.isIntSchd) {
+      val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
+      difftestArchIntRegState.coreid := io.hartId
+      difftestArchIntRegState.value := intDiffRead.get._2
+    }
+    if (param.isFpSchd) {
+      val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
+      difftestArchFpRegState.coreid := io.hartId
+      difftestArchFpRegState.value := fpDiffReadData.get
+    }
+    if (param.isVecSchd) {
+      val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
+      difftestArchVecRegState.coreid := io.hartId
+      difftestArchVecRegState.value := vecDiffReadData.get
+    }
   }
 
   val int_regcache_size = 48
@@ -760,7 +741,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
   val vf_regcache_size = 48
-  val vf_regcache_tag = RegInit(VecInit(Seq.fill(vf_regcache_size)(0.U(vfSchdParams.pregIdxWidth.W))))
+  val vf_regcache_tag = RegInit(VecInit(Seq.fill(vf_regcache_size)(0.U(vecSchdParams.pregIdxWidth.W))))
   val vf_regcache_enqPtr = RegInit(0.U(log2Up(vf_regcache_size).W))
   vf_regcache_enqPtr := vf_regcache_enqPtr + PopCount(vfRfWen.head)
   for (i <- vfRfWen.indices) {
@@ -769,14 +750,44 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  v0RdPortsIter = vecExcpUseV0RdPorts.iterator
-  for (i <- toVecExcp.rdata.indices) {
-    toVecExcp.rdata(i).valid := RegNext(fromVecExcp.r(i).valid)
-    toVecExcp.rdata(i).bits := Mux(
-      RegEnable(!fromVecExcp.r(i).bits.isV0, fromVecExcp.r(i).valid),
-      vfRfRdata(vecExcpUseVecRdPorts(i)),
-      if (i % maxMergeNumPerCycle == 0) v0RfRdata(v0RdPortsIter.next()) else 0.U,
-    )
+  if (param.isVecSchd) {
+    val (fromVecExcp, toVecExcp) = (io.fromVecExcpMod.get, io.toVecExcpMod.get)
+    for (i <- fromVecExcp.r.indices) {
+      when(fromVecExcp.r(i).valid && !fromVecExcp.r(i).bits.isV0) {
+        vfRfRaddr(vecExcpUseVecRdPorts(i)) := fromVecExcp.r(i).bits.addr
+      }
+      if (i % maxMergeNumPerCycle == 0) {
+        val v0RdPort = v0RdPortsIter.next()
+        when(fromVecExcp.r(i).valid && fromVecExcp.r(i).bits.isV0) {
+          v0RfRaddr(v0RdPort) := fromVecExcp.r(i).bits.addr
+        }
+      }
+    }
+    for (i <- fromVecExcp.w.indices) {
+      when(fromVecExcp.w(i).valid && !fromVecExcp.w(i).bits.isV0) {
+        val vecWrPort = vecExcpUseVecWrPorts(i)
+        vfRfWen.foreach(_(vecWrPort) := true.B)
+        vfRfWaddr(vecWrPort) := fromVecExcp.w(i).bits.newVdAddr
+        vfRfWdata(vecWrPort) := fromVecExcp.w(i).bits.newVdData
+      }
+      if (i % maxMergeNumPerCycle == 0) {
+        when(fromVecExcp.w(i).valid && fromVecExcp.w(i).bits.isV0) {
+          val v0WrPort = v0WrPortsIter.next()
+          v0RfWen.foreach(_(v0WrPort) := true.B)
+          v0RfWaddr(v0WrPort) := fromVecExcp.w(i).bits.newVdAddr
+          v0RfWdata(v0WrPort) := fromVecExcp.w(i).bits.newVdData
+        }
+      }
+    }
+    v0RdPortsIter = vecExcpUseV0RdPorts.iterator
+    for (i <- toVecExcp.rdata.indices) {
+      toVecExcp.rdata(i).valid := RegNext(fromVecExcp.r(i).valid)
+      toVecExcp.rdata(i).bits := Mux(
+        RegEnable(!fromVecExcp.r(i).bits.isV0, fromVecExcp.r(i).valid),
+        vfRfRdata.get(vecExcpUseVecRdPorts(i)),
+        if (i % maxMergeNumPerCycle == 0) v0RfRdata.get(v0RdPortsIter.next()) else 0.U,
+      )
+    }
   }
 
   XSPerfHistogram(s"IntRegFileRead_hist", PopCount(intRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
@@ -811,8 +822,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   XSPerfAccumulate(s"VfRFReadAfterArb", PopCount(vfRFReadArbiter.io.out.map(_.valid)))
   XSPerfAccumulate(s"IntUopBeforeArb", PopCount(fromIntIQ.flatten.map(_.valid)))
   XSPerfAccumulate(s"IntUopAfterArb", PopCount(fromIntIQ.flatten.map(_.fire)))
-  XSPerfAccumulate(s"MemUopBeforeArb", PopCount(fromMemIQ.flatten.map(_.valid)))
-  XSPerfAccumulate(s"MemUopAfterArb", PopCount(fromMemIQ.flatten.map(_.fire)))
   XSPerfAccumulate(s"VfUopBeforeArb", PopCount(fromVfIQ.flatten.map(_.valid)))
   XSPerfAccumulate(s"VfUopAfterArb", PopCount(fromVfIQ.flatten.map(_.fire)))
 
@@ -824,8 +833,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   XSPerfHistogram(s"VfRFReadAfterArb_hist", PopCount(vfRFReadArbiter.io.out.map(_.valid)), true.B, 0, 16, 2)
   XSPerfHistogram(s"IntUopBeforeArb_hist", PopCount(fromIntIQ.flatten.map(_.valid)), true.B, 0, 8, 2)
   XSPerfHistogram(s"IntUopAfterArb_hist", PopCount(fromIntIQ.flatten.map(_.fire)), true.B, 0, 8, 2)
-  XSPerfHistogram(s"MemUopBeforeArb_hist", PopCount(fromMemIQ.flatten.map(_.valid)), true.B, 0, 8, 2)
-  XSPerfHistogram(s"MemUopAfterArb_hist", PopCount(fromMemIQ.flatten.map(_.fire)), true.B, 0, 8, 2)
   XSPerfHistogram(s"VfUopBeforeArb_hist", PopCount(fromVfIQ.flatten.map(_.valid)), true.B, 0, 8, 2)
   XSPerfHistogram(s"VfUopAfterArb_hist", PopCount(fromVfIQ.flatten.map(_.fire)), true.B, 0, 8, 2)
 
@@ -865,7 +872,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val stallLoad = !uopsIssued
 
-  val noStoreIssued = !fromMemIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
+  val noStoreIssued = !fromIntIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
                                                          memIq.bits.exuParams.fuConfigs.contains(FuConfig.StdCfg)
   ).map(_.fire).reduce(_ || _)
   val stallStore = uopsIssued && noStoreIssued
@@ -897,12 +904,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   generatePerfEvent()
 }
 
-class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
+class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlockParams) extends XSBundle {
   // params
   private val intSchdParams = params.schdParams(IntScheduler())
   private val fpSchdParams = params.schdParams(FpScheduler())
-  private val vfSchdParams = params.schdParams(VfScheduler())
-  private val memSchdParams = params.schdParams(MemScheduler())
+  private val vecSchdParams = params.schdParams(VecScheduler())
   // bundles
   val hartId = Input(UInt(8.W))
 
@@ -916,22 +922,21 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val fromFpIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(fpSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
-  val fromMemIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
-    Flipped(MixedVec(memSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
+  val fromVfIQ = Flipped(MixedVec(vecSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
-  val fromVfIQ = Flipped(MixedVec(vfSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
-
-  val fromVecExcpMod = Input(new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle))
+  val fromVecExcpMod = Option.when(param.isVecSchd)(Input(new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle)))
 
   val toIntIQ = MixedVec(intSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
   val toFpIQ = MixedVec(fpSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
-  val toMemIQ = MixedVec(memSchdParams.issueBlockParams.map(_.genOGRespBundle))
+  val toVfIQ = MixedVec(vecSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
-  val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
+  val toVecExcpMod = Option.when(param.isVecSchd)(Output(new VprfToExcpMod(maxMergeNumPerCycle * 2)))
 
-  val toVecExcpMod = Output(new VprfToExcpMod(maxMergeNumPerCycle * 2))
+  val fpRfRdataIn = Option.when(param.isIntSchd)(Input(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
+
+  val fpRfRdataOut = Option.when(param.isFpSchd)(Output(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
 
   val og0Cancel = Output(ExuVec())
 
@@ -943,9 +948,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val toFpExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(fpSchdParams.genExuInputBundle)
 
-  val toVecExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(vfSchdParams.genExuInputBundle)
-
-  val toMemExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = memSchdParams.genExuInputBundle
+  val toVecExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(vecSchdParams.genExuInputBundle)
 
   val og1ImmInfo: Vec[ImmInfo] = Output(Vec(params.allExuParams.size, new ImmInfo))
 
@@ -966,7 +969,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   )
 
   val toBypassNetworkRCData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
-    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
+    Seq(intSchdParams, fpSchdParams, vecSchdParams).map(schd => schd.issueBlockParams.map(iq =>
       MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
     )).flatten
   )
@@ -975,12 +978,12 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
     Output(UInt(RegCacheIdxWidth.W))
   )
 
-  val diffIntRat = if (params.basicDebugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
-  val diffFpRat  = if (params.basicDebugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
-  val diffVecRat = if (params.basicDebugEn) Some(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W)))) else None
-  val diffV0Rat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
-  val diffVlRat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
-  val diffVl     = if (params.basicDebugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
+  val diffIntRat = if (params.basicDebugEn && param.isIntSchd) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
+  val diffFpRat  = if (params.basicDebugEn && param.isFpSchd) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
+  val diffVecRat = if (params.basicDebugEn && param.isVecSchd) Some(Input(Vec(31, UInt(vecSchdParams.pregIdxWidth.W)))) else None
+  val diffV0Rat  = if (params.basicDebugEn && param.isVecSchd) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
+  val diffVlRat  = if (params.basicDebugEn && param.isVecSchd) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
+  val diffVl     = if (params.basicDebugEn && param.isVecSchd) Some(Output(UInt(VlData().dataWidth.W))) else None
 
   val topDownInfo = new TopDownInfo
 }

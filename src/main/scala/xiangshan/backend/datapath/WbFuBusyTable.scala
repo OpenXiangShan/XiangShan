@@ -13,46 +13,38 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.implicitCast._
 
-class WbFuBusyTable(bp: BackendParams)(implicit  p: Parameters) extends LazyModule {
-  override def shouldBeInlined: Boolean = false
-  implicit val params: BackendParams = bp
-  lazy val module = new WbFuBusyTableImp(this)
-}
-
-class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper) {
+class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSModule {
   val io = IO(new WbFuBusyTableIO)
 
   private val intSchdBusyTable = io.in.intSchdBusyTable
   private val fpSchdBusyTable = io.in.fpSchdBusyTable
   private val vfSchdBusyTable = io.in.vfSchdBusyTable
-  private val memSchdBusyTable = io.in.memSchdBusyTable
   private val intRespRead = io.out.intRespRead
   private val fpRespRead = io.out.fpRespRead
   private val vfRespRead = io.out.vfRespRead
-  private val memRespRead = io.out.memRespRead
   private val intAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.intConflict)
   private val fpAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.fpConflict)
   private val vfAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.vfConflict)
   private val v0AllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.v0Conflict)
   private val vlAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.vlConflict)
 
-  private val intAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.intWbBusyTable)
-  private val fpAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.fpWbBusyTable)
-  private val vfAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vfWbBusyTable)
-  private val v0AllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.v0WbBusyTable)
-  private val vlAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vlWbBusyTable)
+  private val intAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.intWbBusyTable)
+  private val fpAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.fpWbBusyTable)
+  private val vfAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.vfWbBusyTable)
+  private val v0AllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.v0WbBusyTable)
+  private val vlAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.vlWbBusyTable)
 
-  private val intAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.intDeqRespSet)
-  private val fpAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.fpDeqRespSet)
-  private val vfAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vfDeqRespSet)
-  private val v0AllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.v0DeqRespSet)
-  private val vlAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vlDeqRespSet)
+  private val intAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.intDeqRespSet)
+  private val fpAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.fpDeqRespSet)
+  private val vfAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.vfDeqRespSet)
+  private val v0AllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.v0DeqRespSet)
+  private val vlAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable).flatten.map(_.vlDeqRespSet)
 
-  private val intAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.intWbBusyTable)
-  private val fpAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.fpWbBusyTable)
-  private val vfAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.vfWbBusyTable)
-  private val v0AllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.v0WbBusyTable)
-  private val vlAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.vlWbBusyTable)
+  private val intAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead).flatten.map(_.intWbBusyTable)
+  private val fpAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead).flatten.map(_.fpWbBusyTable)
+  private val vfAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead).flatten.map(_.vfWbBusyTable)
+  private val v0AllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead).flatten.map(_.v0WbBusyTable)
+  private val vlAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead).flatten.map(_.vlWbBusyTable)
 
   private val allExuParams = params.allExuParams
   private val intAllBusyTableWithParms = intAllBusyTable.zip(allExuParams).toSeq
@@ -163,14 +155,12 @@ class WbFuBusyTableIO(implicit p: Parameters, params: BackendParams) extends XSB
   val in = new Bundle {
     val intSchdBusyTable = MixedVec(params.intSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
     val fpSchdBusyTable = MixedVec(params.fpSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
-    val vfSchdBusyTable = MixedVec(params.vfSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
-    val memSchdBusyTable = MixedVec(params.memSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
+    val vfSchdBusyTable = MixedVec(params.vecSchdParams.get.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
   }
   val out = new Bundle {
     val intRespRead = MixedVec(params.intSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
     val fpRespRead = MixedVec(params.fpSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
-    val vfRespRead = MixedVec(params.vfSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
-    val memRespRead = MixedVec(params.memSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
+    val vfRespRead = MixedVec(params.vecSchdParams.get.issueBlockParams.map(x => Output(x.genWbFuBusyTableReadBundle)))
     val wbConflictRead = MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => Output(x.genWbConflictBundle())))))
   }
 }

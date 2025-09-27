@@ -16,13 +16,19 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
+import chisel3.util.MuxLookup
+import chisel3.util.isPow2
+import chisel3.util.log2Ceil
 import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CommonHelper
+import xiangshan.frontend.bpu.CrossPageHelper
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHelper with CommonHelper {
+trait Helpers extends HasMainBtbParameters
+    with HasXSParameter with TargetFixHelper with CommonHelper with HalfAlignHelper with CrossPageHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
@@ -68,5 +74,18 @@ trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHel
       }
     }
     (isMultiHit, isHigherAlignBank, multiHitWayIdx, multiHitMask)
+  }
+
+  // TODO: remove it
+  def vecRotateRight[T <: Data](vec: Vec[T], idx: UInt): Vec[T] = {
+    require(isPow2(vec.length))
+    require(idx.getWidth == log2Ceil(vec.length))
+    val len = vec.length
+    // generate all possible results of rotation
+    val rotations = (0 until len).map { i =>
+      val rotatedIndices = (0 until len).map(j => (j + i) % len)
+      i.U -> VecInit(rotatedIndices.map(idx => vec(idx)))
+    }
+    MuxLookup(idx, vec)(rotations)
   }
 }

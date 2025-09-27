@@ -27,6 +27,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.ParallelPriorityMux
 import utility.XSError
+import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
@@ -39,6 +40,7 @@ import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.ras.RasMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
@@ -101,7 +103,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // resolveQueue stores branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
 
-  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.pdWb(0))
+  private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect(0).bits.ftqIdx.value).topRetAddr.toUInt
+  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect(0), specTopAddr)
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
@@ -283,7 +286,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.target          := redirect.bits.target
   io.toBpu.redirect.bits.isRvc           := redirect.bits.isRVC
   io.toBpu.redirect.bits.taken           := redirect.bits.taken
-  io.toBpu.redirect.bits.attribute       := DontCare
+  io.toBpu.redirect.bits.attribute       := redirect.bits.attribute
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
@@ -324,6 +327,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
+  // FIXME: commit info for return stack, connected once ready.
+  io.toBpu.commit := DontCare
 
   // --------------------------------------------------------------------------------
   // MMIO fetch

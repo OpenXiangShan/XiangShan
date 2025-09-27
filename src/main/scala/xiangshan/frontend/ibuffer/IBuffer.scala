@@ -123,11 +123,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // counter current number of valid
   private val numValid = distanceBetween(enqPtr, deqPtr)
   // counter next number of valid
-  private val numValidNext = numValid + numEnq - numDeq
-  private val allowEnq     = RegInit(true.B)
+  private val nextNumValid = numValid + numEnq - numDeq
   private val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
 
-  allowEnq := (Size - FetchBlockInstNum).U >= numValidNext // Disable when almost full
+  // TODO: Use ParallelAdder to calculate the sum of Seq(Size.U, -numValid, -numEnq, numDeq)
+  private val nextNumInvalid = Size.U - nextNumValid
+  private val allowEnq       = RegInit(true.B)
+
+  /* prevInstrCount is equal to next cycle's numFromFetch, "prev" means ifu.s3;
+   * so compare it with next cycle's number of invalid entries (i.e. nextNumInvalid);
+   * the answer is next cycle's ready (NOT considering dequeue behavior and predChecker).
+   */
+  allowEnq := io.in.bits.prevInstrCount < nextNumInvalid
 
   private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))

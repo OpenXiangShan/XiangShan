@@ -66,14 +66,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
 
   /* *** aliases *** */
   private val train        = io.fromFtq.train
-  private val commitUpdate = io.fromFtq.train
+  private val commitUpdate = io.fromFtq.commit
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := false.B
+  abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
   ittage.io.enable      := ctrl.ittageEnable
@@ -128,9 +128,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   stageCtrl.s3_fire := s3_fire
 
   private val t0_compareMatrix = CompareMatrix(VecInit(train.bits.branches.map(_.bits.cfiPosition)))
-  private val t0_firstMispredict = t0_compareMatrix.getLeastElement(
-    (b: Valid[BranchInfo]) => b.valid && b.bits.mispredict,
-    train.bits.branches
+  // mark all branches after the first mispredict as invalid
+  // i.e. we have (valid, position, mispredict) for each branch:
+  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
+  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
+  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
+    VecInit(train.bits.branches.map(b => b.valid && b.bits.mispredict))
   )
 
   predictors.foreach { p =>
@@ -152,14 +155,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       p.io.train.bits.branches.head.bits.cfiPosition := s3_prediction.cfiPosition
       p.io.train.bits.branches.head.bits.attribute   := s3_prediction.attribute
       p.io.train.bits.branches.head.bits.mispredict  := s3_override
-      p.io.train.bits.firstMispredict                := p.io.train.bits.branches.head
     } else {
       // train: from Ftq + selected (first mispredict)
-      p.io.train.valid                := train.valid
-      p.io.train.bits.meta            := train.bits.meta
-      p.io.train.bits.startVAddr      := train.bits.startVAddr
-      p.io.train.bits.branches        := train.bits.branches
-      p.io.train.bits.firstMispredict := t0_firstMispredict
+      p.io.train.valid           := train.valid
+      p.io.train.bits.meta       := train.bits.meta
+      p.io.train.bits.startVAddr := train.bits.startVAddr
+      p.io.train.bits.branches.zipWithIndex.foreach { case (b, i) =>
+        b.valid := train.bits.branches(i).valid && t0_firstMispredictMask(i)
+        b.bits  := train.bits.branches(i).bits
+      }
     }
   }
 
@@ -180,11 +184,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
   ras.io.commit.valid            := commitUpdate.valid
-  ras.io.commit.bits.attribute   := commitUpdate.bits.branches(0).bits.attribute
-  ras.io.commit.bits.startPc     := commitUpdate.bits.startVAddr.toUInt
-  ras.io.commit.bits.isRvc       := false.B // commitUpdate.bits.isRvc
-  ras.io.commit.bits.meta        := commitUpdate.bits.meta.ras
-  ras.io.commit.bits.cfiPosition := commitUpdate.bits.branches(0).bits.cfiPosition
+  ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
+  ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
+  ras.io.commit.bits.pushAddr    := commitUpdate.bits.pushAddr
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
   ras.io.specIn.bits.isRvc       := false.B
@@ -248,9 +250,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       )
     )
 
-  private val s2_taken              = tage.io.takenMask.reduce(_ || _)
-  private val s2_mbtbResult         = mbtb.io.result
-  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, tage.io.takenMask)
+  private val s2_mbtbResult    = mbtb.io.result
+  private val s2_condTakenMask = tage.io.condTakenMask
+  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map {
+    case (hit, attribute) => hit && (attribute.isDirect || attribute.isIndirect)
+  })
+  private val s2_takenMask          = s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b }
+  private val s2_taken              = s2_takenMask.reduce(_ || _)
+  private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, s2_takenMask)
 
   private val s3_taken                      = RegEnable(s2_taken, s2_fire)
   private val s3_mbtbResult                 = RegEnable(s2_mbtbResult, s2_fire)
