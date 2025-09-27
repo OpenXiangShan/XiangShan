@@ -162,7 +162,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   val nmi = InModuleBody(nmiIntNode.makeIOs())
 
   for (i <- 0 until NumCores) {
-    core_with_l2(i).clint_int_node := misc.clint.intnode
+    core_with_l2(i).clint_int_node := misc.timer.intnode
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     core_with_l2(i).nmi_int_node := nmiIntNode
@@ -175,17 +175,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
-    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+    misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")
-      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      println(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
       require(core_with_l2(i).sep_tl_opt.isDefined)
-      require(SeperateTLBusRanges.size == 1)
-      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
-      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+      require(SeperateTLBusRanges.size >= 1)
+      require(SeperateTLBusRanges.head.base <= p(DebugModuleKey).get.address.base)
+      require(SeperateTLBusRanges.head.base <= p(SoCParamsKey).TIMERRange.base)
+      SepTLXbarOpt := core_with_l2(i).sep_tl_opt.get
     }
   }
-
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
   l3cacheOpt.map(_.intnode.map(int => {
     misc.plic.intnode := IntBuffer() := int
@@ -276,7 +276,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
-      val rtc_clock = Input(Bool())
+      val rtc_clock = Input(Clock())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_critical_error = Output(Vec(NumCores, Bool()))
@@ -322,13 +322,22 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     dontTouch(io)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
-    misc.module.rtc_clock := io.rtc_clock
     misc.module.pll0_lock := io.pll0_lock
     misc.module.cacheable_check <> io.cacheable_check
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
     val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+    // syscnt io input descrip
+    val ref_reset_sync = withClockAndReset(io.rtc_clock, io.reset) { ResetGen() }
+    misc.module.scntIO.update_en := false.B
+    misc.module.scntIO.update_value := 0.U
+    misc.module.scntIO.stop_en := false.B
+    misc.module.rtc_clock := io.rtc_clock // syscnt clock
+    misc.module.rtc_reset := ref_reset_sync.asAsyncReset
+    misc.module.bus_clock := io.clock
+    misc.module.bus_reset := io.reset
+
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
