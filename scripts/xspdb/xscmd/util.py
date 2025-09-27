@@ -28,6 +28,11 @@ YELLOW = "\033[33m"
 
 _xspdb_enable_log = False
 _xspdb_logger = None
+logging_level_map = {"debug": logging.DEBUG,
+                     "error": logging.ERROR,
+                     "info" : logging.INFO,
+                     "warn" : logging.WARN,
+                    }
 
 def xspdb_set_log(xspdb_enable_log:bool):
     global _xspdb_enable_log
