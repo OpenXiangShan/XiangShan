@@ -101,9 +101,9 @@ case class SoCParameters
   UseXSNoCDiffTop: Boolean = false,
   UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  SeperateTLBus: Boolean = false,
-  SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
-  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
+  SeperateBus: top.SeperatedBusType.Value = top.SeperatedBusType.NONE,
+  SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateBus
+  SeperateBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
@@ -117,7 +117,7 @@ case class SoCParameters
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
-  SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -171,17 +171,17 @@ trait HasSoCParameter {
   val NumIRSrc = soc.NumIRSrc
 
   val SeperateDM = soc.SeperateDM
-  val SeperateTLBus = soc.SeperateTLBus
-  val SeperateTLBusRanges = soc.SeperateTLBusRanges
+  val SeperateBus = soc.SeperateBus
+  val SeperateBusRanges = soc.SeperateBusRanges
 
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val SeperateTLAsyncBridge = if (SeperateTLBus && soc.SeperateTLAsyncBridge.isDefined)
-    soc.SeperateTLAsyncBridge else None
+  val SeperateBusAsyncBridge = if (SeperateBus != top.SeperatedBusType.NONE && soc.SeperateBusAsyncBridge.isDefined)
+    soc.SeperateBusAsyncBridge else None
 
   // seperate TL bus
-  val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
+  val EnableSeperateBusAsync = SeperateBusAsyncBridge.isDefined
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
@@ -509,7 +509,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   // instance timer
   val timer = LazyModule(new TIMER(TIMERParams(IsSelfTest = true, soc.TIMERRange.base), 8))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
-  val SepTLXbarOpt = Option.when(SeperateTLBus)(TLXbar())
+  private val hasSeperateBus = SeperateBus != top.SeperatedBusType.NONE
+  val SepTLXbarOpt = Option.when(hasSeperateBus)(TLXbar())
   if (enableCHI) {
     if (SeperateDM) {
       debugModule.debug.node := SepTLXbarOpt.get
@@ -519,7 +520,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
     }
-    if(SeperateTLBus){
+    if(hasSeperateBus){
       timer.node := SepTLXbarOpt.get
     } else{
       timer.node := device_xbar.get
@@ -533,7 +534,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
       l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
-    if(SeperateTLBus){
+    if(hasSeperateBus){
       timer.node := SepTLXbarOpt.get
     } else{
       timer.node := peripheralXbar.get
