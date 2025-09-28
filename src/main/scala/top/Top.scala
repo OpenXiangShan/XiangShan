@@ -332,9 +332,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
       println("[XSTop] TraceRTLMode and TraceRTLOnFPGA")
     } else {
+      println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(DebugOptionsKey).TraceRTLOnFPGA}")
+      if (p(DebugOptionsKey).TraceRTLMode) {
+        require(!p(DebugOptionsKey).TraceRTLOnFPGA, "[XSTop] TraceRTLMode, dontCare gateway, require no FPGA mode")
+      }
+
       io.gateWay.in <> DontCare
       io.gateWay.out <> DontCare
-      println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(DebugOptionsKey).TraceRTLOnFPGA}")
     }
 
     withClockAndReset(io.clock.asClock, reset_sync) {

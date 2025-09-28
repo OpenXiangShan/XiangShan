@@ -96,6 +96,9 @@ override PLDM_ARGS += --trace-rtl
 endif
 
 ifeq ($(TRACERTLOnFPGA),1)
+override SIM_ARGS += --trace-rtl-fpga
+override RELEASE_ARGS += --trace-rtl-fpga
+override PLDM_ARGS += --trace-rtl-fpga
 ifneq ($(TRACERTL_MODE),1)
 $(error TRACERTLOnFPGA requires TRACERTL_MODE)
 endif

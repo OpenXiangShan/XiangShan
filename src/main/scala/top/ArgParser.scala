@@ -108,13 +108,20 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(TraceRTLMode = true)
           }), tail)
+        case "--trace-rtl-fpga" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(TraceRTLOnFPGA = true)
+          }), tail)
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableConstantin = true)
           }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+            case DebugOptionsKey => up(DebugOptionsKey).copy(
+              FPGAPlatform = true,
+              TraceRTLOnFPGA = true
+            )
           }), tail)
         case "--reset-gen" :: tail =>
           nextOption(config.alter((site, here, up) => {
