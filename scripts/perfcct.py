@@ -90,7 +90,7 @@ def dump_visual(pos, records):
     pos_next = pos_start
     last_index = 0
     for i in range(1, len(pos)):
-        if (pos[i] == pos[last_index]) or pos[i] == 0:
+        if (pos[i] <= pos[last_index]) or pos[i] == 0:
             continue
         if pos[i] - pos[last_index] >= cycle_per_line - pos_next:
             diff = cycle_per_line - pos_next
