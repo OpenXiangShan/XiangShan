@@ -788,7 +788,7 @@ class TraceSatpHelper() extends ExtModule
        |logic [63:0] logic_satp_ppn;
        |
        |always @(negedge clock) begin
-       |  if (!reset && enable) begin
+       |  if (enable) begin
        |    logic_satp_ppn <= trace_get_satp_ppn();
        |  end
        |  else begin
@@ -817,7 +817,6 @@ class TraceSatp()(implicit p: Parameters) extends TraceModule {
 
   val helper = Module(new TraceSatpHelper())
   helper.clock := clock
-  // helper.reset := reset
 
   val workingState = WireInit(false.B)
   val startCount = RegInit(0.U(4.W))
