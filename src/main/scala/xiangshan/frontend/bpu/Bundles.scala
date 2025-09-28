@@ -153,7 +153,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:       BpuMeta                = new BpuMeta
   val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+  val branches:   Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 
   // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
   // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot

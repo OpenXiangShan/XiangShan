@@ -36,9 +36,10 @@ class MetaEntry(implicit p: Parameters) extends FtqBundle {
 }
 
 class ResolveEntry(implicit p: Parameters) extends FtqBundle {
-  val ftqIdx:     FtqPtr                 = new FtqPtr
-  val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+  val ftqIdx:     FtqPtr     = new FtqPtr
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  // TODO: Reconsider branch number
+  val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
