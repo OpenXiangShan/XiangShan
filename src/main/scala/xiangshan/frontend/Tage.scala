@@ -144,6 +144,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val io = IO(new Bundle {
     val req           = Flipped(DecoupledIO(UInt(VAddrBits.W))) // s0_pc
     val s1_cnt        = Output(Vec(numBr, UInt(2.W)))
+    val s1_resp_valid = Output(Bool())
     val update_mask   = Input(Vec(TageBanks, Bool()))
     val update_pc     = Input(UInt(VAddrBits.W))
     val update_cnt    = Input(Vec(numBr, UInt(2.W)))
@@ -155,31 +156,36 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
 
   // Physical SRAM Size
   val SRAMSize  = 512
-  val foldWidth = BtSize / SRAMSize
+  val nBanks    = 2
+  val foldWidth = BtSize / SRAMSize / nBanks
 
-  val bt = Module(
+  val bankIdxWidth = log2Ceil(nBanks)
+  def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth - 1, 0) === _.U))
+  def get_bank_idx(idx:  UInt) = idx >> bankIdxWidth
+
+  val bt = Seq.fill(nBanks)(Module(
     new FoldedSRAMTemplate(
       UInt(2.W),
       setSplit = 2,
       waySplit = 1,
       dataSplit = 1,
-      set = BtSize,
+      set = BtSize / nBanks,
       width = foldWidth,
       way = numBr,
       shouldReset = false,
+      singlePort = true,
       holdRead = true,
-      conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
     )
-  )
+  ))
 
   // Power-on reset to weak taken
   val doing_reset = RegInit(true.B)
-  val resetRow    = RegInit(0.U(log2Ceil(BtSize).W))
+  val resetRow    = RegInit(0.U(log2Ceil(BtSize / nBanks).W))
   resetRow := resetRow + doing_reset
-  when(resetRow === (BtSize - 1).U) {
+  when(resetRow === (BtSize / nBanks - 1).U) {
     doing_reset := false.B
   }
 
@@ -189,17 +195,29 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val s0_pc   = io.req.bits
   val s0_fire = io.req.valid
   val s0_idx  = bimAddr.getIdx(s0_pc)
-  bt.io.r.req.valid       := s0_fire
-  bt.io.r.req.bits.setIdx := s0_idx
+  val s0_bank_req_1h: Vec[Bool] = get_bank_mask(s0_idx)
+  val s0_bank_idx            = get_bank_idx(s0_idx)
+  val s0_invalid_by_conflict = Mux1H(s0_bank_req_1h, bt.map(_.io.w.req.valid))
 
-  val s1_read = bt.io.r.resp.data
-  val s1_idx  = RegEnable(s0_idx, s0_fire)
+  for (b <- 0 until nBanks) {
+    bt(b).io.r.req.valid       := s0_fire && s0_bank_req_1h(b)
+    bt(b).io.r.req.bits.setIdx := s0_bank_idx
+  }
+
+  val s1_resp_invalid_by_conflict = RegEnable(s0_invalid_by_conflict, s0_fire)
+  val s1_bank_req_1h              = RegEnable(s0_bank_req_1h, s0_fire)
+  val s1_idx                      = RegEnable(s0_idx, s0_fire)
+  val s1_resps                    = bt.map(_.io.r.resp.data)
+  val s1_read                     = Mux1H(s1_bank_req_1h, s1_resps)
 
   val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
-  io.s1_cnt := per_br_ctr
+  io.s1_cnt        := per_br_ctr
+  io.s1_resp_valid := !s1_resp_invalid_by_conflict
 
   // Update logic
   val u_idx = bimAddr.getIdx(io.update_pc)
+  val u_bank_req_1h: Vec[Bool] = get_bank_mask(u_idx)
+  val u_bank_idx = get_bank_idx(u_idx)
 
   val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
 
@@ -239,13 +257,16 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       io.update_mask(li) && get_phy_br_idx(u_idx, li) === pi.U
     ).reduce(_ || _)
   )).asUInt
+  for (b <- 0 until nBanks) {
+    bt(b).io.w.apply(
+      valid = (io.update_mask.reduce(_ || _) || doing_reset) && u_bank_req_1h(b),
+      data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
+      setIdx = Mux(doing_reset, resetRow, u_bank_idx),
+      waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
+    )
+  }
+  XSPerfAccumulate(f"tage_base_table_bank_conflict", s0_invalid_by_conflict && s0_fire)
 
-  bt.io.w.apply(
-    valid = io.update_mask.reduce(_ || _) || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
-    setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
-  )
 }
 
 class TageTable(
@@ -801,10 +822,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     resp_meta.allocates(i) := RegEnable(allocatableSlots, io.s2_fire(1))
 
-    val s1_bimCtr = bt.io.s1_cnt(i)
+    val s1_bimCtr      = bt.io.s1_cnt(i)
+    val s1_bimCtrValid = bt.io.s1_resp_valid
     s1_altUsed(i) := !provided || providerInfo.use_alt_on_unconf
+    val s1_taken_mask = io.in.bits.resp_in(0).s1.full_pred(0).br_taken_mask(i)
     s1_tageTakens(i) :=
-      Mux(s1_altUsed(i), s1_bimCtr(1), providerInfo.resp.ctr(TageCtrBits - 1))
+      Mux(s1_altUsed(i), Mux(s1_bimCtrValid, s1_bimCtr(1), s1_taken_mask), providerInfo.resp.ctr(TageCtrBits - 1))
     s1_basecnts(i)   := s1_bimCtr
     s1_useAltOnNa(i) := providerInfo.use_alt_on_unconf
 
