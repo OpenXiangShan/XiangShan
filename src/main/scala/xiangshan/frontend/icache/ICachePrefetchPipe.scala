@@ -90,7 +90,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_vSetIdx          = VecInit(s0_vAddr.map(get_idx))
   private val s0_backendException = io.req.bits.backendException
 
-  fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx)
+  fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_flush       := io.flush || fromBpuS0Flush || s1_flush
 
   private val s0_canGo = s1_ready && toItlb.ready && toMeta.ready
@@ -367,7 +367,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }
 
   /** Stage 1 control */
-  fromBpuS1Flush := s1_valid && !s1_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx)
+  fromBpuS1Flush := !s1_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
   s1_flush       := io.flush || fromBpuS1Flush
   // when s1 is flushed, itlb pipeline should also be flushed
   io.itlbFlushPipe := s1_flush
