@@ -114,8 +114,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val wakeUpAll = new Bundle {
       val wakeUpInt: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
       val wakeUpFp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
-      val wakeUpVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.vfSchdParams.get.genIQWakeUpOutValidBundle)
-      val wakeUpMem: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.memSchdParams.get.genIQWakeUpOutValidBundle)
+      val wakeUpVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.vecSchdParams.get.genIQWakeUpOutValidBundle)
     }
     val og0Cancel = Input(ExuVec())
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
@@ -262,12 +261,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       sink.bits := fromRename(i).bits.pdest
     }}
   })
-  val wakeUp = io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpFp ++ io.wakeUpAll.wakeUpVec ++ io.wakeUpAll.wakeUpMem
+  val wakeUp = io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpFp ++ io.wakeUpAll.wakeUpVec
   busyTables.zip(wbPregs).zip(allocPregs).map{ case ((b, w), a) => {
     b.io.wakeUpInt := io.wakeUpAll.wakeUpInt
     b.io.wakeUpFp  := io.wakeUpAll.wakeUpFp
     b.io.wakeUpVec := io.wakeUpAll.wakeUpVec
-    b.io.wakeUpMem := io.wakeUpAll.wakeUpMem
     b.io.og0Cancel := io.og0Cancel
     b.io.ldCancel := io.ldCancel
     b.io.wbPregs := w
@@ -276,8 +274,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   rcTagTable.io.allocPregs.zip(allocPregs(0)).map(x => x._1 := x._2)
   println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.length}")
   println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.length}")
-  println(s"io.wakeUpAll.wakeUpMem.length: ${io.wakeUpAll.wakeUpMem.length}")
-  rcTagTable.io.wakeupFromIQ := io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem
+  println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.size}")
+  println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.size}")
+  rcTagTable.io.wakeupFromIQ := io.wakeUpAll.wakeUpInt
   rcTagTable.io.og0Cancel := io.og0Cancel
   rcTagTable.io.ldCancel := io.ldCancel
   busyTables.zip(idxRegType).zipWithIndex.map { case ((b, idxseq), i) => {

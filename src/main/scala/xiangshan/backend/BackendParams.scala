@@ -41,7 +41,7 @@ case class BackendParams(
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
 
-  def robCompressEn: Boolean = true
+  def robCompressEn: Boolean = false
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
@@ -68,10 +68,9 @@ case class BackendParams(
   }
   def intSchdParams = schdParams.get(IntScheduler())
   def fpSchdParams = schdParams.get(FpScheduler())
-  def vfSchdParams = schdParams.get(VfScheduler())
-  def memSchdParams = schdParams.get(MemScheduler())
+  def vecSchdParams = schdParams.get(VecScheduler())
   def allSchdParams: Seq[SchdBlockParams] =
-    (Seq(intSchdParams) :+ fpSchdParams :+ vfSchdParams :+ memSchdParams)
+    (Seq(intSchdParams) :+ fpSchdParams :+ vecSchdParams)
     .filter(_.nonEmpty)
     .map(_.get)
   def allIssueParams: Seq[IssueBlockParams] =
@@ -129,9 +128,9 @@ case class BackendParams(
 
   def numRedirect = 1 // only for ahead info to frontend
 
-  def numLoadDp = memSchdParams.get.issueBlockParams.filter(x => x.isLdAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
+  def numLoadDp = intSchdParams.get.issueBlockParams.filter(x => x.isLdAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
 
-  def numStoreDp = memSchdParams.get.issueBlockParams.filter(x => x.isStAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
+  def numStoreDp = intSchdParams.get.issueBlockParams.filter(x => x.isStAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
 
   def genIntIQValidNumBundle(implicit p: Parameters) = {
     this.intSchdParams.get.issueBlockParams.map(x => Vec(x.numDeq, UInt((x.numEntries).U.getWidth.W)))
@@ -344,11 +343,11 @@ case class BackendParams(
     * Get size of write ports of int regcache
     */
   def getIntExuRCWriteSize = {
-    this.allExuParams.filter(x => x.isIntExeUnit && x.isIQWakeUpSource).size
+    this.allExuParams.filter(x => x.hasAluFu && x.isIQWakeUpSource).size
   }
 
   def getMemExuRCWriteSize = {
-    this.allExuParams.filter(x => x.isMemExeUnit && x.isIQWakeUpSource && x.readIntRf).size
+    this.allExuParams.filter(x => x.hasLoadExu && x.isIQWakeUpSource && x.readIntRf).size
   }
 
   def getExuIdx(name: String): Int = {

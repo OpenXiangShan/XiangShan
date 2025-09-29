@@ -25,4 +25,7 @@ case class ScParameters(
 trait HasScParameters extends HasBpuParameters {
   def scParameters: ScParameters = bpuParameters.scParameters
   // TODO
+
+  // sc cannot be fast-trained, this is required by abstract class BasePredictor
+  def EnableFastTrain: Boolean = false
 }

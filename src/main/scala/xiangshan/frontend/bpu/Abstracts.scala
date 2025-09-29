@@ -28,6 +28,8 @@ abstract class BpuModule(implicit p: Parameters) extends XSModule with HasBpuPar
 
 abstract class BasePredictor(implicit p: Parameters) extends BpuModule {
   val io: BasePredictorIO
+
+  def EnableFastTrain: Boolean
 }
 
 abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {

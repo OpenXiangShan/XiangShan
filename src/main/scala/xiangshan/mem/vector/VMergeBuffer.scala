@@ -478,9 +478,4 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.vecDebug.get     := DontCare
     sink
   }
-
-  // from misalignBuffer flush
-  when(io.fromMisalignBuffer.get.flush){
-    needRSReplay(io.fromMisalignBuffer.get.mbIndex) := true.B
-  }
 }

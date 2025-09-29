@@ -34,6 +34,7 @@ import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ftq.FtqToCtrlIO
+import xiangshan.frontend.FrontendRedirect
 
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
@@ -244,15 +245,9 @@ class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new DynInst
 }
 
-class Redirect(implicit p: Parameters) extends XSBundle {
+class Redirect(implicit p: Parameters) extends FrontendRedirect {
   // for frontend
-  val ftqIdx = new FtqPtr
-  val ftqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
-  val target: UInt = UInt(VAddrBits.W)
-  val isRVC: Bool = Bool()
-  val level: UInt = RedirectLevel()
-  val pc: UInt = UInt(VAddrBits.W)
-  val taken: Bool = Bool()
+  val level:       Bool = Bool()
   val backendIGPF: Bool = Bool() // instruction guest page fault
   val backendIPF: Bool = Bool() // instruction page fault
   val backendIAF: Bool = Bool() // instruction access fault

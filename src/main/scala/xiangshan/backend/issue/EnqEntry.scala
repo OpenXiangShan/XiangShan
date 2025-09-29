@@ -97,15 +97,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))),
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))))
     }
-    else if (params.inMemSchd && params.readVfRf && params.hasIQWakeUp) {
-      enqDelayDataSources(i).value            := MuxCase(entryReg.status.srcStatus(i).dataSources.value, Seq(
-                                                    enqDelayOut1.srcWakeUpByIQ(i).asBool                                 -> DataSource.bypass,
-                                                    (enqDelayOut2.srcWakeUpByIQ(i).asBool && enqDelay2IsWakeupByVfIQ)    -> DataSource.bypass2,
-                                                 ))
-      enqDelayExuSources.get(i).value         := Mux(enqDelay1WakeUpValid,
-                                                      ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))),
-                                                      ExuSource().fromExuOH(params, Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))))
-    }
     else {
       enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, DataSource.bypass, entryReg.status.srcStatus(i).dataSources.value)
       if (params.hasIQWakeUp) {
@@ -169,10 +160,9 @@ object EnqEntry {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
       case FpScheduler()  => new EnqEntry(isComp)
-      case MemScheduler() =>
+      case VecScheduler() =>
         if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
         else new EnqEntry(isComp)
-      case VfScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }

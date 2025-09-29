@@ -30,6 +30,7 @@ import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqFetchRequest
+import xiangshan.frontend.ftq.BpuFlushInfo
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
@@ -51,8 +52,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
     /* *** outside interface *** */
     // Ftq
-    val req:   DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
-    val flush: Bool                         = Input(Bool())
+    val req:          DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
+    val flush:        Bool                         = Input(Bool())
+    val flushFromBpu: BpuFlushInfo                 = Input(new BpuFlushInfo)
     // Pmp
     val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
@@ -90,23 +92,21 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     right_strict = true
   )
 
-  /** pipeline control signal */
-  private val s1_ready, s2_ready           = Wire(Bool())
-  private val s0_fire, s1_fire, s2_fire    = Wire(Bool())
-  private val s0_flush, s1_flush, s2_flush = Wire(Bool())
+  /* *** pipeline control signal *** */
+  private val s1_ready           = Wire(Bool())
+  private val s0_fire, s1_fire   = Wire(Bool())
+  private val s0_flush, s1_flush = Wire(Bool())
 
-  /**
-    ******************************************************************************
-    * ICache Stage 0
-    * - send req to data SRAM
-    * - get waymask and tlb info from wayLookup
-    ******************************************************************************
-    */
+  /* ICache Stage 0
+   * - send req to data SRAM
+   * - get waymask and tlb info from wayLookup
+   */
 
   /** s0 control */
   private val fromFtqReq = fromFtq.bits
   private val s0_valid   = fromFtq.valid
 
+  private val s0_ftqIdx    = fromFtqReq.ftqIdx
   private val s0_vAddr     = VecInit(Seq(fromFtqReq.startVAddr, fromFtqReq.nextCachelineVAddr))
   private val s0_vSetIdx   = VecInit(s0_vAddr.map(get_idx))
   private val s0_blkOffset = fromFtqReq.startVAddr(blockOffBits - 1, 0)
@@ -157,28 +157,28 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.bits.waymask      := s0_waymasks
 
   private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
-  s0_flush := io.flush
+  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_fire  := s0_valid && s0_canGo && !s0_flush
 
   fromFtq.ready := s0_canGo
 
-  /**
-    ******************************************************************************
-    * ICache Stage 1
-    * - PMP check
-    * - get Data SRAM read responses (latched for pipeline stop)
-    * - monitor missUint response port
-    ******************************************************************************
-    */
+  /* ICache Stage 1
+   * - Pmp check (to be removed)
+   * - get Data Sram read responses (latched for pipeline stop)
+   * - monitor missUnit response port
+   * - Ecc check
+   * - send request to Mshr if ICache miss
+   * - response to Ifu
+   */
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
+  private val s1_ftqIdx = RegEnable(s0_ftqIdx, 0.U.asTypeOf(s0_ftqIdx), s0_fire)
   private val s1_vAddr  = RegEnable(s0_vAddr, 0.U.asTypeOf(s0_vAddr), s0_fire)
   private val s1_pTag   = RegEnable(s0_pTag, 0.U(tagBits.W), s0_fire)
   private val s1_gpAddr = RegEnable(s0_gpAddr, 0.U.asTypeOf(s0_gpAddr), s0_fire)
   private val s1_isForVSnonLeafPTE =
     RegEnable(s0_isForVSnonLeafPTE, 0.U.asTypeOf(s0_isForVSnonLeafPTE), s0_fire)
   private val s1_doubleline         = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
-  private val s1_sramHits           = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
   private val s1_itlbException      = RegEnable(s0_itlbException, 0.U.asTypeOf(s0_itlbException), s0_fire)
   private val s1_isBackendException = RegEnable(s0_isBackendException, false.B, s0_fire)
   private val s1_itlbPbmt           = RegEnable(s0_itlbPbmt, 0.U.asTypeOf(s0_itlbPbmt), s0_fire)
@@ -190,16 +190,56 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_blkEndOffset = RegEnable(s0_blkEndOffset, 0.U.asTypeOf(s0_blkEndOffset), s0_fire)
 
-  // do metaArray ECC check
-  // NOTE: we may have meta other that pTag in the future, we do a VecInit.fill now
-  private val s1_metaCorrupt =
-    checkMetaEcc(VecInit.fill(PortNumber)(s1_pTag), s1_metaCodes, s1_waymasks, eccEnable, s1_doubleline)
+  /* *******************************************************************
+   * Receive data from sram and mshr
+   * ******************************************************************* */
+  // sram: valid when RegNext(s0_fire)
+  private val s1_sramHits  = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
+  private val s1_sramDatas = fromData.datas
+  private val s1_sramCodes = fromData.codes
 
-  /**
-    ******************************************************************************
-    * update replacement status register
-    ******************************************************************************
-    */
+  // mshr: valid when fromMiss.valid
+  private val s1_mshrHits = checkMshrHitVec(
+    fromMiss,
+    s1_vSetIdx,
+    s1_pTag,
+    VecInit(s1_valid, s1_valid && s1_doubleline),
+    allowCorrupt = true // we also need to update registers when fromMiss.bits.corrupt
+  )
+  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
+
+  // select data
+  private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
+
+  private val s1_dataIsFromMshr = VecInit((0 until DataBanks).map { i =>
+    DataHoldBypass(
+      s1_bankMshrHit(i),
+      s1_bankMshrHit(i) || RegNext(s0_fire)
+    )
+  })
+
+  private val s1_hits = VecInit((0 until PortNumber).map { i =>
+    DataHoldBypass(
+      s1_mshrHits(i) || s1_sramHits(i),
+      s1_mshrHits(i) || RegNext(s0_fire)
+    )
+  })
+
+  private val s1_datas = VecInit((0 until DataBanks).map { i =>
+    DataHoldBypass(
+      Mux(s1_bankMshrHit(i), s1_mshrDatas(i), s1_sramDatas(i)),
+      s1_bankMshrHit(i) || RegNext(s0_fire)
+    )
+  })
+
+  private val s1_l2Corrupt = VecInit((0 until PortNumber).map { i =>
+    DataHoldBypass(
+      s1_mshrHits(i) && fromMiss.bits.corrupt,
+      s1_mshrHits(i) || RegNext(s0_fire)
+    )
+  })
+
+  /* *** Update replacer *** */
   (0 until PortNumber).foreach { i =>
     io.replacerTouch.req(i).bits.vSetIdx := s1_vSetIdx(i)
     io.replacerTouch.req(i).bits.way     := OHToUInt(s1_waymasks(i))
@@ -207,11 +247,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_sramHits(0)
   io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_sramHits(1) && s1_doubleline
 
-  /**
-    ******************************************************************************
-    * PMP check
-    ******************************************************************************
-    */
+  /* *** PMP check (to be removed) *** */
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
   toPmp.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
   toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
@@ -221,283 +257,141 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_pmpMmio      = fromPmp.mmio
 
   // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
-  private val s1_exceptionOut = s1_itlbException || s1_pmpException
+  private val s1_exception = s1_itlbException || s1_pmpException
 
-  /**
-    ******************************************************************************
-    * select data from MSHR, SRAM
-    ******************************************************************************
-    */
-  private val s1_mshrHits = checkMshrHitVec(
-    fromMiss,
-    s1_vSetIdx,
-    s1_pTag,
-    VecInit(s1_valid, s1_valid && s1_doubleline)
-  )
-  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
+  /* *** Ecc check *** */
+  private val s1_metaCorrupt =
+    checkMetaEcc(VecInit.fill(PortNumber)(s1_pTag), s1_metaCodes, s1_waymasks, eccEnable, s1_doubleline)
 
-  private val s1_hits = VecInit((0 until PortNumber).map { i =>
-    ValidHoldBypass(s1_mshrHits(i) || (RegNext(s0_fire) && s1_sramHits(i)), s1_fire || s1_flush)
-  })
-
-  private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
-
-  private val s1_datas = VecInit((0 until DataBanks).map { i =>
-    DataHoldBypass(Mux(s1_bankMshrHit(i), s1_mshrDatas(i), fromData.datas(i)), s1_bankMshrHit(i) || RegNext(s0_fire))
-  })
-  private val s1_dataIsFromMshr = VecInit((0 until DataBanks).map { i =>
-    DataHoldBypass(s1_bankMshrHit(i), s1_bankMshrHit(i) || RegNext(s0_fire))
-  })
-  private val s1_codes = DataHoldBypass(fromData.codes, RegNext(s0_fire))
-
-  s1_flush := io.flush
-  s1_ready := s2_ready || !s1_valid
-  s1_fire  := s1_valid && s2_ready && !s1_flush
-
-  /**
-    ******************************************************************************
-    * ICache Stage 2
-    * - send request to MSHR if ICache miss
-    * - monitor missUint response port
-    * - response to IFU
-    ******************************************************************************
-    */
-  private val s2_valid = ValidHold(s1_fire, s2_fire, s2_flush)
-
-  private val s2_vAddr  = RegEnable(s1_vAddr, 0.U.asTypeOf(s1_vAddr), s1_fire)
-  private val s2_pTag   = RegEnable(s1_pTag, 0.U(tagBits.W), s1_fire)
-  private val s2_gpAddr = RegEnable(s1_gpAddr, 0.U.asTypeOf(s1_gpAddr), s1_fire)
-  private val s2_isForVSnonLeafPTE =
-    RegEnable(s1_isForVSnonLeafPTE, 0.U.asTypeOf(s1_isForVSnonLeafPTE), s1_fire)
-  private val s2_doubleline         = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
-  private val s2_exception          = RegEnable(s1_exceptionOut, 0.U.asTypeOf(s1_exceptionOut), s1_fire)
-  private val s2_isBackendException = RegEnable(s1_isBackendException, false.B, s1_fire)
-  private val s2_pmpMmio            = RegEnable(s1_pmpMmio, 0.U.asTypeOf(s1_pmpMmio), s1_fire)
-  private val s2_itlbPbmt           = RegEnable(s1_itlbPbmt, 0.U.asTypeOf(s1_itlbPbmt), s1_fire)
-  private val s2_waymasks           = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
-
-  private val s2_vSetIdx = VecInit(s2_vAddr.map(get_idx))
-  private val s2_offset  = s2_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
-
-  private val s2_blkEndOffset = RegEnable(s1_blkEndOffset, 0.U.asTypeOf(s1_blkEndOffset), s1_fire)
-
-  private val s2_sramHits       = RegEnable(s1_sramHits, 0.U.asTypeOf(s1_sramHits), s1_fire)
-  private val s2_codes          = RegEnable(s1_codes, 0.U.asTypeOf(s1_codes), s1_fire)
-  private val s2_hits           = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  private val s2_datas          = RegInit(VecInit(Seq.fill(DataBanks)(0.U((blockBits / DataBanks).W))))
-  private val s2_dataIsFromMshr = RegInit(VecInit(Seq.fill(DataBanks)(false.B)))
-
-  /**
-    ******************************************************************************
-    * ECC check
-    ******************************************************************************
-    */
+  // valid only when RegNext(s0_fire)
   // check data error
-  private val s2_dataCorrupt = checkDataEcc(
-    s2_datas,
-    s2_codes,
+  private val s1_dataCorrupt = checkDataEcc(
+    s1_sramDatas,
+    s1_sramCodes,
     eccEnable,
-    getBankSel(s2_offset, s2_blkEndOffset, s2_doubleline),
-    VecInit(s2_dataIsFromMshr.map(!_)),
-    s2_sramHits
+    getBankSel(s1_offset, s1_valid, s1_doubleline),
+    VecInit(s1_dataIsFromMshr.map(!_)),
+    s1_sramHits
   )
-  // force clear data_corrupt when parity check is disabled
-  when(!eccEnable) {
-    s2_dataCorrupt := VecInit(Seq.fill(PortNumber)(false.B))
-  }
-  // meta error is checked in s1 stage
-  private val s2_metaCorrupt = RegEnable(s1_metaCorrupt, 0.U.asTypeOf(s1_metaCorrupt), s1_fire)
-  /* NOTE: if !s2_doubline:
-   * - s2_meta_corrupt(1) should be false.B (as waymask(1) is invalid, and meta ecc is not checked)
-   * - s2_data_corrupt(1) should also be false.B, as getLineSel() should not select line(1)
+
+  /* NOTE: if !s1_doubleline:
+   * - s1_meta_corrupt(1) should be false.B (as waymask(1) is invalid, and meta ecc is not checked)
+   * - s1_data_corrupt(1) should also be false.B, as getLineSel() should not select line(1)
    * so we don't need to check s2_doubleline in the following io.errors and toMetaFlush ports
    * we add a sanity check to make sure the above assumption holds
    */
   assert(
-    !(!s2_doubleline && (s2_metaCorrupt(1) || s2_dataCorrupt(1))),
+    !(!s1_doubleline && (s1_metaCorrupt(1) || s1_dataCorrupt(1))),
     "meta or data corrupt detected on line 1 but s2_doubleline is false.B"
   )
 
   // send errors to top
   // TODO: support RERI spec standard interface
   (0 until PortNumber).foreach { i =>
-    io.errors(i).valid              := (s2_metaCorrupt(i) || s2_dataCorrupt(i)) && RegNext(s1_fire)
-    io.errors(i).bits.report_to_beu := (s2_metaCorrupt(i) || s2_dataCorrupt(i)) && RegNext(s1_fire)
-    io.errors(i).bits.paddr         := getPAddrFromPTag(s2_vAddr(i), s2_pTag).toUInt
+    io.errors(i).valid              := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
+    io.errors(i).bits.report_to_beu := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
+    io.errors(i).bits.paddr         := getPAddrFromPTag(s1_vAddr(i), s1_pTag).toUInt
     io.errors(i).bits.source        := DontCare
-    io.errors(i).bits.source.tag    := s2_metaCorrupt(i)
-    io.errors(i).bits.source.data   := s2_dataCorrupt(i)
+    io.errors(i).bits.source.tag    := s1_metaCorrupt(i)
+    io.errors(i).bits.source.data   := s1_dataCorrupt(i)
     io.errors(i).bits.source.l2     := false.B
     io.errors(i).bits.opType        := DontCare
     io.errors(i).bits.opType.fetch  := true.B
   }
   // flush metaArray to prepare for re-fetch
   (0 until PortNumber).foreach { i =>
-    toMetaFlush(i).valid        := (s2_metaCorrupt(i) || s2_dataCorrupt(i)) && RegNext(s1_fire)
-    toMetaFlush(i).bits.vSetIdx := s2_vSetIdx(i)
+    toMetaFlush(i).valid        := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
+    toMetaFlush(i).bits.vSetIdx := s1_vSetIdx(i)
     // if is meta corrupt, clear all way (since waymask may be unreliable)
     // if is data corrupt, only clear the way that has error
-    toMetaFlush(i).bits.waymask := Mux(s2_metaCorrupt(i), Fill(nWays, true.B), s2_waymasks(i).asUInt)
+    toMetaFlush(i).bits.waymask := Mux(s1_metaCorrupt(i), Fill(nWays, true.B), s1_waymasks(i).asUInt)
   }
   // PERF: count the number of data parity errors
-  XSPerfAccumulate("data_corrupt_0", s2_dataCorrupt(0) && RegNext(s1_fire))
-  XSPerfAccumulate("data_corrupt_1", s2_dataCorrupt(1) && RegNext(s1_fire))
-  XSPerfAccumulate("meta_corrupt_0", s2_metaCorrupt(0) && RegNext(s1_fire))
-  XSPerfAccumulate("meta_corrupt_1", s2_metaCorrupt(1) && RegNext(s1_fire))
+  XSPerfAccumulate("data_corrupt_0", s1_dataCorrupt(0) && RegNext(s0_fire))
+  XSPerfAccumulate("data_corrupt_1", s1_dataCorrupt(1) && RegNext(s0_fire))
+  XSPerfAccumulate("meta_corrupt_0", s1_metaCorrupt(0) && RegNext(s0_fire))
+  XSPerfAccumulate("meta_corrupt_1", s1_metaCorrupt(1) && RegNext(s0_fire))
   // TEST: stop simulation if parity error is detected, and dump wave
 //  val (assert_valid, assert_val) = DelayNWithValid(s2_metaCorrupt.reduce(_ || _), s2_valid, 1000)
 //  assert(!(assert_valid && assert_val))
 //  val (assert_valid, assert_val) = DelayNWithValid(s2_dataCorrupt.reduce(_ || _), s2_valid, 1000)
 //  assert(!(assert_valid && assert_val))
 
-  /**
-    ******************************************************************************
-    * monitor missUint response port
-    ******************************************************************************
-    */
-  private val s2_mshrHits = checkMshrHitVec(
-    fromMiss,
-    s2_vSetIdx,
-    s2_pTag,
-    VecInit(s2_valid, s2_valid && s2_doubleline),
-    allowCorrupt = true // we also need to update s2_hits when fromMiss.bits.corrupt
-  )
-  private val s2_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
+  private val s1_corruptRefetch = VecInit((0 until PortNumber).map { i =>
+    ValidHoldBypass(
+      (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire),
+      s1_mshrHits(i), // clear re-fetch flag when re-fetched from mshr
+      s1_flush
+    )
+  })
 
-  private val s2_bankMshrHit = getBankValid(s2_mshrHits, s2_offset)
+  /* *** Fetch when miss or corrupt *** */
+  // do not fetch if is mmio
+  private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
 
-  (0 until DataBanks).foreach { i =>
-    when(s1_fire) {
-      s2_datas          := s1_datas
-      s2_dataIsFromMshr := s1_dataIsFromMshr
-    }.elsewhen(s2_bankMshrHit(i)) {
-      s2_datas(i) := s2_mshrDatas(i)
-      // also update s2_dataIsFromMshr when re-fetched, to clear s2_dataCorrupt flag and let s2_fire
-      s2_dataIsFromMshr(i) := true.B
-    }
-  }
-
-  (0 until PortNumber).foreach { i =>
-    when(s1_fire) {
-      s2_hits := s1_hits
-    }.elsewhen(s2_mshrHits(i)) {
-      // update s2_hits even if it's corrupt, to let s2_fire
-      s2_hits(i) := true.B
-      // also clear s2_metaCorrupt flag when re-fetched, to let s2_fire
-      s2_metaCorrupt(i) := false.B
-    }
-  }
-
-  private val s2_l2Corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  (0 until PortNumber).foreach { i =>
-    when(s1_fire) {
-      s2_l2Corrupt(i) := false.B
-    }.elsewhen(s2_mshrHits(i)) {
-      s2_l2Corrupt(i) := fromMiss.bits.corrupt
-    }
-  }
-
-  /**
-    ******************************************************************************
-    * send request to MSHR if ICache miss / ECC corrupt
-    ******************************************************************************
-    */
-
-  // merge pmp mmio and itlb pbmt
-  private val s2_isMmio = s2_pmpMmio || Pbmt.isUncache(s2_itlbPbmt)
-
-  // try re-fetch data from L2 cache if ECC error is detected, unless it's from MSHR
-  private val s2_corruptRefetch = (s2_metaCorrupt zip s2_dataCorrupt).map {
-    case (meta, data) => meta || data
-  }
-
-  // do fetch if (not hit or trying re-fetch) and no exception/mmio
-  private val s2_shouldFetch = VecInit((0 until PortNumber).map { i =>
-    (!s2_hits(i) || s2_corruptRefetch(i)) &&
-    (if (i == 0) true.B else s2_doubleline) &&
-    s2_exception.isNone && !s2_isMmio
+  private val s1_shouldFetch = VecInit((0 until PortNumber).map { i =>
+    (!s1_hits(i) || s1_corruptRefetch(i)) &&
+    (if (i == 0) true.B else s1_doubleline) &&
+    s1_exception.isNone && !s1_isMmio
   })
 
   private val toMissArbiter = Module(new Arbiter(new MissReqBundle, PortNumber))
 
   // To avoid sending duplicate requests.
-  private val s2_hasSend = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  (0 until PortNumber).foreach { i =>
-    when(s1_fire) {
-      s2_hasSend(i) := false.B
-    }.elsewhen(toMissArbiter.io.in(i).fire) {
-      s2_hasSend(i) := true.B
-    }
-  }
+  private val s1_hasSend = VecInit((0 until PortNumber).map { i =>
+    ValidHold(
+      toMissArbiter.io.in(i).fire,
+      s1_fire,
+      s1_flush
+    )
+  })
 
   (0 until PortNumber).foreach { i =>
-    toMissArbiter.io.in(i).valid         := s2_valid && s2_shouldFetch(i) && !s2_hasSend(i) && !s2_flush
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
-    toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
+    toMissArbiter.io.in(i).valid         := s1_valid && s1_shouldFetch(i) && !s1_hasSend(i) && !s1_flush
+    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
+    toMissArbiter.io.in(i).bits.vSetIdx  := s1_vSetIdx(i)
   }
   toMiss <> toMissArbiter.io.out
 
   XSPerfAccumulate("to_missUnit_stall", toMiss.valid && !toMiss.ready)
 
-  private val s2_fetchFinish = !s2_shouldFetch.reduce(_ || _)
+  private val s1_fetchFinish = !s1_shouldFetch.reduce(_ || _)
 
   // also raise af if l2 corrupt is detected
-  private val s2_l2Exception = ExceptionType(hasAf = s2_l2Corrupt.reduce(_ || _))
+  private val s1_l2Exception = ExceptionType(hasAf = s1_l2Corrupt.reduce(_ || _))
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb/pmp has the highest priority, then l2
-  private val s2_exceptionOut = s2_exception || s2_l2Exception
+  private val s1_exceptionOut = s1_exception || s1_l2Exception
 
-  /**
-    ******************************************************************************
-    * response to IFU
-    ******************************************************************************
-    */
-  toIfu.valid                   := s2_fire
-  toIfu.bits.doubleline         := s2_doubleline
-  toIfu.bits.data               := s2_datas.asTypeOf(UInt(blockBits.W))
-  toIfu.bits.isBackendException := s2_isBackendException
-  toIfu.bits.vAddr              := s2_vAddr
-  toIfu.bits.pAddr              := getPAddrFromPTag(s2_vAddr.head, s2_pTag)
-  toIfu.bits.exception          := s2_exceptionOut
-  toIfu.bits.pmpMmio            := s2_pmpMmio
-  toIfu.bits.itlbPbmt           := s2_itlbPbmt
+  /* *** send response to IFU *** */
+  toIfu.valid                   := s1_fire
+  toIfu.bits.doubleline         := s1_doubleline
+  toIfu.bits.data               := s1_datas.asTypeOf(UInt(blockBits.W))
+  toIfu.bits.isBackendException := s1_isBackendException
+  toIfu.bits.vAddr              := s1_vAddr
+  toIfu.bits.pAddr              := getPAddrFromPTag(s1_vAddr.head, s1_pTag)
+  toIfu.bits.exception          := s1_exceptionOut
+  toIfu.bits.pmpMmio            := s1_pmpMmio
+  toIfu.bits.itlbPbmt           := s1_itlbPbmt
   // valid only for the first gpf
-  toIfu.bits.gpAddr            := s2_gpAddr
-  toIfu.bits.isForVSnonLeafPTE := s2_isForVSnonLeafPTE
+  toIfu.bits.gpAddr            := s1_gpAddr
+  toIfu.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-  s2_flush := io.flush
-  s2_ready := (s2_fetchFinish && !io.respStall) || !s2_valid
-  s2_fire  := s2_valid && s2_fetchFinish && !io.respStall && !s2_flush
+  s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
+  s1_ready := (s1_fetchFinish && !io.respStall) || !s1_valid
+  s1_fire  := s1_valid && s1_fetchFinish && !io.respStall && !s1_flush
 
-  /**
-    ******************************************************************************
-    * report Tilelink corrupt error
-    ******************************************************************************
-    */
-  (0 until PortNumber).foreach { i =>
-    when(RegNext(s2_fire && s2_l2Corrupt(i))) {
-      io.errors(i).valid              := true.B
-      io.errors(i).bits.report_to_beu := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).bits.paddr         := RegNext(getPAddrFromPTag(s2_vAddr(i), s2_pTag).toUInt)
-      io.errors(i).bits.source.tag    := false.B
-      io.errors(i).bits.source.data   := false.B
-      io.errors(i).bits.source.l2     := true.B
-    }
-  }
-
-  /* *****************************************************************************
-   * perf
-   * ***************************************************************************** */
+  /* *** perf *** */
   // when fired, tell ifu raw hit state of each cache line
   // NOTE: we cannot use s2_hits, it will be reset when refilled from L2
-  private val s2_rawHits = RegEnable(s1_hits, 0.U.asTypeOf(s1_hits), s1_fire)
-  io.perf.rawHits := s2_rawHits
+  private val s1_rawHits = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
+  io.perf.rawHits := s1_rawHits
   // tell ICache top when handling miss
-  io.perf.pendingMiss := s2_valid && !s2_fetchFinish
+  io.perf.pendingMiss := s1_valid && !s1_fetchFinish
 
   XSPerfAccumulate("missUnitStall", toMiss.valid && !toMiss.ready)
-  XSPerfAccumulate("missBubble", s2_valid && !s2_fetchFinish)
+  XSPerfAccumulate("missBubble", s1_valid && !s1_fetchFinish)
   XSPerfAccumulate("wayLookupBubble", s0_valid && !fromWayLookup.valid)
 
   // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
@@ -513,9 +407,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   // val ICacheTouchDumpData = Wire(Vec(PortNumber, new ICacheTouchDB))
   // (0 until PortNumber).foreach{ i =>
-  //   ICacheTouchDumpData(i).blkPAddr  := getBlkAddr(s2_pAddr(i))
-  //   ICacheTouchDumpData(i).vSetIdx   := s2_vSetIdx(i)
-  //   ICacheTouchDumpData(i).waymask   := OHToUInt(s2_tag_match_vec(i))
+  //   ICacheTouchDumpData(i).blkPAddr  := getBlkAddr(s1_pAddr(i))
+  //   ICacheTouchDumpData(i).vSetIdx   := s1_vSetIdx(i)
+  //   ICacheTouchDumpData(i).waymask   := OHToUInt(s1_tag_match_vec(i))
   //   ICacheTouchTable.log(
   //     data  = ICacheTouchDumpData(i),
   //     en    = io.replacerTouch.req(i).valid,
@@ -525,34 +419,27 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //   )
   // }
 
-  /**
-    ******************************************************************************
-    * difftest refill check
-    ******************************************************************************
-    */
+  /* *** difftest refill check *** */
   if (env.EnableDifftest) {
-    val discard = toIfu.bits.exception.hasException ||
-      toIfu.bits.pmpMmio ||
-      Pbmt.isUncache(toIfu.bits.itlbPbmt)
+    val discard = toIfu.bits.exception.hasException || toIfu.bits.pmpMmio || Pbmt.isUncache(toIfu.bits.itlbPbmt)
     val blkPaddrAll =
-      VecInit(s2_vAddr.map(va => (getPAddrFromPTag(va, s2_pTag)(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt))
+      VecInit(s1_vAddr.map(va => (getPAddrFromPTag(va, s1_pTag)(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt))
     (0 until DataBanks).foreach { i =>
       val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index  := (3 + i).U
 
-      val bankSel =
-        getBankSel(s2_offset, s2_blkEndOffset, s2_doubleline).map(_.asUInt).reduce(_ | _)
-      val lineSel = getLineSel(s2_offset)
+      val bankSel = getBankSel(s1_offset, s1_blkEndOffset, s1_doubleline).map(_.asUInt).reduce(_ | _)
+      val lineSel = getLineSel(s1_offset)
 
-      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && !discard
+      diffMainPipeOut.valid := s1_fire && bankSel(i).asBool && !discard
       diffMainPipeOut.addr := Mux(
         lineSel(i),
         blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / DataBanks)).asUInt,
         blkPaddrAll(0) + (i.U << log2Ceil(blockBytes / DataBanks)).asUInt
       )
 
-      diffMainPipeOut.data  := s2_datas(i).asTypeOf(diffMainPipeOut.data)
+      diffMainPipeOut.data  := s1_datas(i).asTypeOf(diffMainPipeOut.data)
       diffMainPipeOut.idtfr := DontCare
     }
   }

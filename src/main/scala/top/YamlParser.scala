@@ -21,7 +21,7 @@ import io.circe.generic.extras.auto._
 
 import aia.IMSICParams
 import org.chipsalliance.cde.config.Parameters
-import system.SoCParamsKey
+import system.{CVMParameters, CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import xiangshan.{DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.devices.debug.{DebugAttachParams, ExportDebug}
@@ -57,6 +57,9 @@ case class YamlConfig(
   EnableSramCtl: Option[Boolean],
   EnableCHINS: Option[Boolean],
   CHIAddrWidth: Option[Int],
+  CVMParams: Option[CVMParameters],
+  EnableBitmapCheck: Option[Boolean],
+  EnableBitmapCheckDefault: Option[Boolean],
 )
 
 object YamlParser {
@@ -189,6 +192,21 @@ object YamlParser {
     yamlConfig.CHIAddrWidth.foreach { width =>
       newConfig = newConfig.alter((site, here, up) => {
         case coupledL2.tl2chi.CHIAddrWidthKey => width
+      })
+    }
+    yamlConfig.CVMParams.foreach { cvmParams =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case CVMParamsKey => cvmParams
+      })
+    }
+    yamlConfig.EnableBitmapCheck.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheck = enable))
+      })
+    }
+    yamlConfig.EnableBitmapCheckDefault.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheckDefault = enable))
       })
     }
     newConfig

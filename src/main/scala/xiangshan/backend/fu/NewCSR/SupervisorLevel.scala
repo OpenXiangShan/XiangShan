@@ -253,7 +253,7 @@ class SatpBundle extends CSRBundle {
 
 class ScontextBundle extends CSRBundle {
   override val len = 32
-  val ALL = RW(31, 0)
+  val ALL = RW(31, 0).withReset(0.U)
 }
 
 class SEnvCfg extends EnvCfg

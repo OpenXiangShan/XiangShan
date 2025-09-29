@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
@@ -194,6 +194,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val stDataReadyVec = Output(Vec(StoreQueueSize, Bool()))
     val stIssuePtr = Output(new SqPtr)
     val sqDeqPtr = Output(new SqPtr)
+    val sqDeqUopIdx = Output(UopIdx())
+    val sqDeqRobIdx = Output(new RobPtr)
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -498,6 +500,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.stDataReadySqPtr := dataReadyPtrExt
   io.stIssuePtr := enqPtrExt(0)
   io.sqDeqPtr := deqPtrExt(0)
+  io.sqDeqUopIdx := uop(deqPtrExt(0).value).uopIdx
+  io.sqDeqRobIdx := uop(deqPtrExt(0).value).robIdx
 
   /**
     * Writeback store from store units

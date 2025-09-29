@@ -22,6 +22,7 @@ import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
@@ -68,7 +69,7 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
   val instrRange:     UInt        = UInt(FetchBlockInstNum.W)
-  val rawInstrValid:  UInt        = UInt(FetchBlockInstNum.W)
+  val rawInstrEndVec: UInt        = UInt(FetchBlockInstNum.W)
   val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
@@ -86,11 +87,13 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
-  val target:       PrunedAddr  = PrunedAddr(VAddrBits)
-  val misIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
-  val cfiIdx:       Valid[UInt] = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
-  val instrRange:   UInt        = UInt(FetchBlockInstNum.W)
-  val invalidTaken: Bool        = Bool()
+  val target:       PrunedAddr      = PrunedAddr(VAddrBits)
+  val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
+  val cfiIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
+  val instrRange:   UInt            = UInt(FetchBlockInstNum.W)
+  val invalidTaken: Bool            = Bool()
+  val isRVC:        Bool            = Bool()
+  val attribute:    BranchAttribute = new BranchAttribute
 }
 
 /* ***** DB ***** */

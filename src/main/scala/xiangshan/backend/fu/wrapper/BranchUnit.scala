@@ -2,6 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.util._
 import chisel3.util.log2Up
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.decode.ImmUnion
@@ -9,6 +10,7 @@ import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BranchAttribute
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -50,7 +52,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val brhRealTarget = addModule.io.target
-  val isMisPred = dataModule.io.mispredict || (brhRealTarget =/= brhPredictTarget)
+  val isMisPred = dataModule.io.mispredict || dataModule.io.pred_taken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
@@ -68,6 +70,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
       redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
       redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
+      redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
@@ -77,6 +80,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
-  io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction := Mux1H(
+    Seq(io.in.bits.ctrl.preDecode.get.isCall, io.in.bits.ctrl.preDecode.get.isRet),
+    Seq(BranchAttribute.RasAction.Push, BranchAttribute.RasAction.Pop)
+  )
   connect0LatencyCtrlSingal
 }

@@ -27,6 +27,9 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
     val prediction: Prediction = Output(new Prediction)
   }
 
+  // fall-through cannot be fast-trained (actually cannot be trained), this is required by abstract class BasePredictor
+  def EnableFastTrain: Boolean = false
+
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
 
   io.resetDone := true.B

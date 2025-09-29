@@ -22,21 +22,42 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
-  val valid:  Bool            = Bool()
-  val tag:    UInt            = UInt(TagWidth.W)
-  val ctr:    SaturateCounter = new SaturateCounter(CtrWidth)
-  val useful: SaturateCounter = new SaturateCounter(UsefulWidth)
+  val valid:     Bool            = Bool()
+  val tag:       UInt            = UInt(TagWidth.W)
+  val takenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 }
 
-class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasTageParameters {
-  val setIdx:   UInt                 = UInt(BaseTableSetIdxLen.W)
-  val ctrs:     Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val waymasks: UInt                 = UInt(FetchBlockAlignInstNum.W)
+class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val setIdx:    UInt                 = UInt(BaseTableSetIdxWidth.W)
+  val wayMask:   UInt                 = UInt(FetchBlockAlignInstNum.W)
+  val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
 }
 
-class TageMeta(implicit p: Parameters) extends TageBundle {
-  val valid:               Bool                 = Bool()
-  val baseTableCtrs:       Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableCtrWidth))
-  val debug_taken:         Bool                 = Bool()
-  val debug_takenPosition: UInt                 = UInt(FetchBlockInstNum.W)
+class TableReadReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
+  val setIdx:   UInt = UInt(log2Ceil(numSets / NumBanks).W)
+  val bankMask: UInt = UInt(NumBanks.W)
+}
+
+class TableReadResp(implicit p: Parameters) extends TageBundle {
+  val entries:      Vec[TageEntry]  = Vec(NumWays, new TageEntry)
+  val allocFailCtr: SaturateCounter = new SaturateCounter(AllocFailCtrWidth)
+}
+
+class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val setIdx:       UInt         = UInt(log2Ceil(numSets / NumBanks).W)
+  val entry:        TageEntry    = new TageEntry
+  override def tag: Option[UInt] = Some(entry.tag)
+}
+class AllocFailCtrSramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
+    with HasTageParameters {
+  val setIdx:       UInt            = UInt(log2Ceil(numSets / NumBanks).W)
+  val allocFailCtr: SaturateCounter = new SaturateCounter(AllocFailCtrWidth)
+}
+
+class TableUpadteEntriesReq(implicit p: Parameters) extends TageBundle {
+  val wayMask: UInt           = UInt(NumWays.W)
+  val entries: Vec[TageEntry] = Vec(NumWays, new TageEntry)
 }

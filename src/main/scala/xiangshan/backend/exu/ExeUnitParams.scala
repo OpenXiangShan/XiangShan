@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
-import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, FpScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, FpScheduler, VecScheduler}
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -84,10 +84,10 @@ case class ExeUnitParams(
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
-  val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
+  val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && name.contains("ALU")
   val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
-  val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
-  val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
+  val isVfExeUnit: Boolean = schdType.isInstanceOf[VecScheduler] && name.contains("VFEX")
+  val isMemExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && !name.contains("ALU") || schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
 
   def needDataFromI2F: Boolean = {
     val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
@@ -331,7 +331,7 @@ case class ExeUnitParams(
   def hasCrossWb: Boolean = {
     schdType match {
       case IntScheduler() => writeFpRf || writeVecRf
-      case VfScheduler() => writeIntRf
+      case VecScheduler() => writeIntRf
       case _ => false
     }
   }
@@ -449,8 +449,8 @@ case class ExeUnitParams(
     }.toMap
   }
 
-  def genExuModule(implicit p: Parameters): ExeUnit = {
-    new ExeUnit(this)
+  def genExuModule(implicit p: Parameters) = {
+    new ExeUnitImp()(p, this)
   }
 
   def genExuInputBundle(implicit p: Parameters): ExuInput = {

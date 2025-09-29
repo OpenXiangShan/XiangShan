@@ -17,202 +17,354 @@ package xiangshan.frontend.bpu.tage
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
+import scala.math.min
 import utility.XSPerfAccumulate
-import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbHelper
-import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.mbtb.MainBtbResult
+import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
-class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with Helpers with BtbHelper {
+/**
+ * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
+ */
+class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with Helpers {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
-    // prediction bundles
-    val mbtbResult: MainBtbResult = Input(new MainBtbResult)
-    val prediction: Prediction    = Output(new Prediction)
-    val meta:       TageMeta      = Output(new TageMeta)
+    val mbtbResult:             MainBtbResult         = Input(new MainBtbResult)
+    val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val condTakenMask:          Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
+    val readBankIdx:            UInt                  = Output(UInt(log2Ceil(NumBanks).W)) // to resolveQueue
   }
-
   val io: TageIO = IO(new TageIO)
 
   /* *** submodules *** */
-  private val baseTableSramBanks =
-    Seq.tabulate(BaseTableNumAlignBanks, BaseTableInternalBanks) { (alignIdx, bankIdx) =>
-      Module(
-        new SRAMTemplate(
-          new SaturateCounter(BaseTableCtrWidth),
-          set = BaseTableSramSets,
-          way = FetchBlockAlignInstNum,
-          singlePort = true,
-          shouldReset = true,
-          withClockGate = true,
-          hasMbist = hasMbist,
-          hasSramCtl = hasSramCtl
-        )
-      ).suggestName(s"tage_base_table_sram_align${alignIdx}_bank${bankIdx}")
-    }
+  private val baseTable = Module(new TageBaseTable)
+  private val tables    = TableInfos.map(tableInfo => Module(new TageTable(tableInfo.NumSets)))
 
+  /* *** history information *** */
+  private val histInfoForIdx = TableInfos.map { tableInfo =>
+    new FoldedHistoryInfo(tableInfo.HistoryLength, min(tableInfo.HistoryLength, log2Ceil(tableInfo.NumSets / NumBanks)))
+  }
+  private val histInfoForTag = TableInfos.map { tableInfo =>
+    new FoldedHistoryInfo(tableInfo.HistoryLength, min(tableInfo.HistoryLength, TagWidth))
+  }
+  private val anotherHistInfoForTag = TableInfos.map { tableInfo =>
+    new FoldedHistoryInfo(tableInfo.HistoryLength, min(tableInfo.HistoryLength, TagWidth - 1))
+  }
+
+  /* *** reset *** */
   private val resetDone = RegInit(false.B)
-  when(baseTableSramBanks.flatMap(_.map(_.io.r.req.ready)).reduce(_ && _)) {
+  when(baseTable.io.resetDone && tables.map(_.io.resetDone).reduce(_ && _)) {
     resetDone := true.B
   }
   io.resetDone := resetDone
 
-  private val baseTableWriteBuffers =
-    Seq.tabulate(BaseTableNumAlignBanks, BaseTableInternalBanks) { (_, _) =>
-      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1, pipe = true, hasTag = false))
-    }
+  /* --------------------------------------------------------------------------------------------------------------
+     predict pipeline stage 0
+     - send read request to tables
+     -------------------------------------------------------------------------------------------------------------- */
 
-  // Connect write buffers to SRAMs
-  baseTableSramBanks.flatten.zip(baseTableWriteBuffers.flatten).foreach {
-    case (bank, buf) => {
-      bank.io.w.req.valid := buf.io.read(0).valid && !bank.io.r.req.valid
-      bank.io.w.req.bits.waymask.foreach(_ := buf.io.read(0).bits.waymasks)
-      bank.io.w.req.bits.data   := buf.io.read(0).bits.ctrs
-      bank.io.w.req.bits.setIdx := buf.io.read(0).bits.setIdx
-      buf.io.read(0).ready      := bank.io.w.req.ready && !bank.io.r.req.valid
-    }
+  private val s0_fire       = io.stageCtrl.s0_fire && io.enable
+  private val s0_startVAddr = io.startVAddr
+
+  private val s0_foldedHistForIdx        = histInfoForIdx.map(io.foldedPathHist.getHistWithInfo(_).foldedHist)
+  private val s0_foldedHistForTag        = histInfoForTag.map(io.foldedPathHist.getHistWithInfo(_).foldedHist)
+  private val s0_anotherFoldedHistForTag = anotherHistInfoForTag.map(io.foldedPathHist.getHistWithInfo(_).foldedHist)
+
+  private val s0_setIdx = TableInfos.zip(s0_foldedHistForIdx).map {
+    case (tableInfo, hist) =>
+      getSetIndex(s0_startVAddr, hist, tableInfo.NumSets)
   }
 
-  /* predict stage 0
-   * setup SRAM
-   */
-  private val s0_fire           = io.stageCtrl.s0_fire && io.enable
-  private val s0_startVAddr     = io.startVAddr
-  private val s0_baseSetIdx     = getBaseSetIndex(s0_startVAddr)
-  private val s0_nextBaseSetIdx = s0_baseSetIdx + 1.U
-  // FIXME: halfAlign
-  private val s0_baseTableInternalBankIdx  = getBaseTableInternalBankIndex(s0_startVAddr)
-  private val s0_baseTableInternalBankMask = UIntToOH(s0_baseTableInternalBankIdx, BaseTableInternalBanks)
+  private val s0_bankIdx  = getBankIndex(s0_startVAddr)
+  private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
-  baseTableSramBanks foreach { alignmentBank =>
-    alignmentBank zip s0_baseTableInternalBankMask.asBools foreach {
-      case (bank, bankEnable) => {
-        bank.io.r.req.valid       := s0_fire && bankEnable
-        bank.io.r.req.bits.setIdx := s0_baseSetIdx
-      }
-    }
+  baseTable.io.readReqValid := s0_fire
+  baseTable.io.startPc      := s0_startVAddr
+
+  // to stall resolveQueue when bank conflict
+  io.readBankIdx := s0_bankIdx
+
+  /* --------------------------------------------------------------------------------------------------------------
+     predict pipeline stage 1
+     - get read data from tables
+     - compute temp tag
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val s1_fire       = io.stageCtrl.s1_fire && io.enable
+  private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
+
+  private val s1_baseTableCtrs   = baseTable.io.takenCtrs
+  private val s1_allTableEntries = tables.map(_.io.readResp.entries)
+
+  private val s1_foldedHistForTag        = s0_foldedHistForTag.map(RegEnable(_, s0_fire))
+  private val s1_anotherFoldedHistForTag = s0_anotherFoldedHistForTag.map(RegEnable(_, s0_fire))
+
+  private val s1_tempTag = (0 until NumTables).map { tableIdx =>
+    getTag(s1_startVAddr, s1_foldedHistForTag(tableIdx), s1_anotherFoldedHistForTag(tableIdx))
   }
 
-  /* predict stage 1
-   * get result from SRAM
-   */
-  private val s1_fire                      = io.stageCtrl.s1_fire && io.enable
-  private val s1_startVAddr                = RegEnable(s0_startVAddr, s0_fire)
-  private val s1_baseTableInternalBankMask = RegEnable(s0_baseTableInternalBankMask, s0_fire)
-  private val s1_rawBaseTableCtrs: Vec[SaturateCounter] =
-    VecInit(baseTableSramBanks.flatMap((alignmentBank: Seq[SRAMTemplate[SaturateCounter]]) =>
-      Mux1H(s1_baseTableInternalBankMask, alignmentBank.map(_.io.r.resp.data))
-    ))
-  require(s1_rawBaseTableCtrs.length == FetchBlockInstNum)
+  /* --------------------------------------------------------------------------------------------------------------
+     predict pipeline stage 2
+     - get results from mbtb
+     - get hcPred for each btb entry
+     - get takenMask
+     -------------------------------------------------------------------------------------------------------------- */
 
-  /* predict stage 2
-   * calculate prediction
-   */
-  private val s2_fire             = io.stageCtrl.s2_fire && io.enable
-  private val s2_rawBaseTableCtrs = RegEnable(s1_rawBaseTableCtrs, s1_fire)
-  // positions should be directly from SRAM, without tag comparison
-  private val s2_mbtbPositions  = io.mbtbResult.positions
+  private val s2_baseTableCtrs   = RegEnable(s1_baseTableCtrs, s1_fire)
+  private val s2_allTableEntries = s1_allTableEntries.map(RegEnable(_, s1_fire))
+
+  private val s2_tempTag = s1_tempTag.map(RegEnable(_, s1_fire))
+
   private val s2_mbtbHitMask    = io.mbtbResult.hitMask
-  private val s2_mbtbTargets    = io.mbtbResult.targets
+  private val s2_mbtbPositions  = io.mbtbResult.positions
   private val s2_mbtbAttributes = io.mbtbResult.attributes
-  private val s2_takens = s2_mbtbPositions.zip(s2_mbtbHitMask).map { case (pos, hit) =>
-    hit && s2_rawBaseTableCtrs(pos).isPositive
-  }
-  private val s2_firstTakenOH   = getFirstTakenEntryWayIdxOH(s2_mbtbPositions, s2_takens)
-  private val s2_target         = Mux1H(s2_firstTakenOH, s2_mbtbTargets)
-  private val s2_taken          = s2_takens.reduce(_ || _)
-  private val s2_takenPosition  = Mux1H(s2_firstTakenOH, s2_mbtbPositions)
-  private val s2_takenAttribute = Mux1H(s2_firstTakenOH, s2_mbtbAttributes)
 
-  /* predict stage 3
-   * do basically nothing, clean reg out
-   */
-  private val s3_fire             = io.stageCtrl.s3_fire && io.enable
-  private val s3_target           = RegEnable(s2_target, s2_fire)
-  private val s3_taken            = RegEnable(s2_taken, s2_fire)
-  private val s3_takenPosition    = RegEnable(s2_takenPosition, s2_fire)
-  private val s3_takenAttribute   = RegEnable(s2_takenAttribute, s2_fire)
-  private val s3_rawBaseTableCtrs = RegEnable(s2_rawBaseTableCtrs, s2_fire)
-
-  io.prediction.target      := s3_target
-  io.prediction.taken       := s3_taken
-  io.prediction.cfiPosition := s3_takenPosition
-  io.prediction.attribute   := s3_takenAttribute
-
-  io.meta.valid               := s3_fire
-  io.meta.baseTableCtrs       := s3_rawBaseTableCtrs
-  io.meta.debug_taken         := s3_taken
-  io.meta.debug_takenPosition := s3_takenPosition
-
-  /* training */
-  private val t1_trainValid                = RegNext(io.train.valid && io.enable)
-  private val t1_train                     = RegEnable(io.train.bits, io.train.valid && io.enable)
-  private val t1_startVAddr                = t1_train.startVAddr
-  private val t1_alignBankIdx              = getAlignBankIndex(t1_startVAddr)
-  private val t1_baseTableInternalBankIdx  = getBaseTableInternalBankIndex(t1_startVAddr)
-  private val t1_baseTableInternalBankMask = UIntToOH(t1_baseTableInternalBankIdx, BaseTableInternalBanks).asBools
-  private val t1_baseTableSetIdx           = getBaseSetIndex(t1_startVAddr)
-  private val t1_oldBaseTableCtrs          = t1_train.meta.tage.baseTableCtrs
-  private val t1_mbtbPositions             = t1_train.meta.mbtb.positions
-  private val t1_mbtbHitMasks              = t1_train.meta.mbtb.hitMask
-  // FIXME: train only on conditional
-  private val t1_cfiPosition = t1_train.branches(0).bits.cfiPosition
-  private val t1_taken       = t1_train.branches(0).bits.taken
-  // FIXME: halfAlign
-  private val t1_baseTableWriteCtrs: Vec[Vec[SaturateCounter]] =
-    Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableCtrWidth))))
-  private val t1_baseTableWriteWaymask: Vec[Vec[Bool]] =
-    Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, Bool())))
-  private val t1_debug_taken         = t1_train.meta.tage.debug_taken
-  private val t1_debug_takenPosition = t1_train.meta.tage.debug_takenPosition
-  private val t1_debug_mispredict    = t1_debug_takenPosition =/= t1_cfiPosition || t1_debug_taken =/= t1_taken
-
-  t1_baseTableWriteCtrs := DontCare
-  t1_baseTableWriteWaymask.foreach(_.foreach(_ := false.B))
-  for (pos <- 0 until FetchBlockInstNum) {
-    // FIXME: won't work when alignment bank is not 2
-    when(pos.U < t1_cfiPosition) {
-      t1_baseTableWriteCtrs(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ).value := t1_oldBaseTableCtrs(pos).getDecrease
-      t1_baseTableWriteWaymask(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ) := true.B
-    }.elsewhen(pos.U === t1_cfiPosition) {
-      t1_baseTableWriteCtrs(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ).value := t1_oldBaseTableCtrs(pos).getUpdate(t1_taken)
-      t1_baseTableWriteWaymask(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ) := true.B
-    }.otherwise {
-      t1_baseTableWriteCtrs(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ).value := DontCare
-      t1_baseTableWriteWaymask(pos.U.asBools.last + t1_alignBankIdx)(
-        pos.U.take(log2Ceil(FetchBlockAlignInstNum))
-      ) := false.B
-    }
+  private val s2_mbtbHitCondMask = s2_mbtbHitMask.zip(s2_mbtbAttributes).map {
+    case (hit, attribute) => hit && attribute.isConditional
   }
 
-  // Write to writebuffer
-  baseTableWriteBuffers zip t1_baseTableWriteCtrs zip t1_baseTableWriteWaymask foreach {
-    case ((alignmentBank, ctrs), waymask) =>
-      alignmentBank zip t1_baseTableInternalBankMask foreach {
-        case (buf, bankEnable) => {
-          buf.io.write(0).valid         := t1_trainValid && bankEnable
-          buf.io.write(0).bits.setIdx   := t1_baseTableSetIdx
-          buf.io.write(0).bits.ctrs     := ctrs
-          buf.io.write(0).bits.waymasks := waymask.asUInt
-        }
+  private val s2_tableResult = s2_mbtbHitCondMask.zip(s2_mbtbPositions).map {
+    case (mbtbHit, position) => // for each btb entry
+      val result = s2_allTableEntries.zipWithIndex.map {
+        case (entries, tableIdx) => // for each table
+          val tag        = s2_tempTag(tableIdx) ^ position // use position to distinguish different branches
+          val hitWayMask = entries.map(entry => entry.valid && entry.tag === tag)
+          val hit        = mbtbHit && hitWayMask.reduce(_ || _)
+          val takenCtr   = Mux1H(PriorityEncoderOH(hitWayMask), entries.map(_.takenCtr))
+          (hit, takenCtr)
       }
+      val hitTableMask = result.map(_._1)
+      val hasProvider  = hitTableMask.reduce(_ || _)
+      val pred         = Mux1H(PriorityEncoderOH(hitTableMask.reverse), result.map(_._2)).isPositive
+      (hasProvider, pred)
   }
 
-  /* *** perf counters */
-  XSPerfAccumulate("tage_mispredict", t1_debug_mispredict && t1_trainValid)
+  private val s2_condTakenMask = s2_mbtbHitCondMask.zip(s2_mbtbPositions).zip(s2_tableResult).map {
+    case ((hit, position), result) =>
+      val hasProvider = result._1
+      val pred        = result._2
+      val altPred     = s2_baseTableCtrs(position).isPositive
+      hit && Mux(hasProvider, pred, altPred)
+  }
 
+  io.condTakenMask := s2_condTakenMask
+
+  /* --------------------------------------------------------------------------------------------------------------
+     train pipeline stage 0
+     - send train request to base table
+     - send read request to tables
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val t0_hasConditionalBranch = io.train.bits.branches.map { branch =>
+    branch.valid && branch.bits.attribute.isConditional
+  }.reduce(_ || _)
+
+  private val t0_trainValid       = io.train.valid && t0_hasConditionalBranch
+  private val t0_startVAddr       = io.train.bits.startVAddr
+  private val t0_branches         = io.train.bits.branches
+  private val t0_mispredictBranch = io.train.bits.mispredictBranch
+
+  private val t0_bankIdx  = getBankIndex(t0_startVAddr)
+  private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
+
+  // TODO: should block resolveQueue when bank conflict
+  private val t0_readBankConflict = t0_trainValid && s0_fire && t0_bankMask === s0_bankMask
+
+  private val t0_valid = t0_trainValid && !t0_readBankConflict && io.enable
+
+  private val t0_foldedHistForIdx = histInfoForIdx.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
+  private val t0_foldedHistForTag = histInfoForTag.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
+  private val t0_anotherFoldedHistForTag =
+    anotherHistInfoForTag.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
+
+  private val t0_setIdx = TableInfos.zip(t0_foldedHistForIdx).map {
+    case (tableInfo, hist) =>
+      getSetIndex(t0_startVAddr, hist, tableInfo.NumSets)
+  }
+
+  baseTable.io.train.valid := t0_valid
+  baseTable.io.train.bits  := io.train.bits
+
+  tables.zipWithIndex.foreach {
+    case (table, tableIdx) =>
+      table.io.readReq.valid         := s0_fire || t0_valid
+      table.io.readReq.bits.setIdx   := Mux(t0_valid, t0_setIdx(tableIdx), s0_setIdx(tableIdx))
+      table.io.readReq.bits.bankMask := Mux(t0_valid, t0_bankMask, s0_bankMask)
+  }
+
+  /* --------------------------------------------------------------------------------------------------------------
+     train pipeline stage 1
+     - get read data from tables
+     - compute temp tag
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val t1_valid            = RegNext(t0_valid) && io.enable
+  private val t1_startVAddr       = RegEnable(t0_startVAddr, t0_valid)
+  private val t1_branches         = RegEnable(t0_branches, t0_valid)
+  private val t1_mispredictBranch = RegEnable(t0_mispredictBranch, t0_valid)
+
+  private val t1_setIdx   = t0_setIdx.map(RegEnable(_, t0_valid))
+  private val t1_bankMask = RegEnable(t0_bankMask, t0_valid)
+
+  private val t1_foldedHistForTag        = t0_foldedHistForTag.map(RegEnable(_, t0_valid))
+  private val t1_anotherFoldedHistForTag = t0_anotherFoldedHistForTag.map(RegEnable(_, t0_valid))
+
+  private val t1_allTableEntries = tables.map(_.io.readResp.entries)
+  private val t1_allocFailCtr    = tables.map(_.io.readResp.allocFailCtr)
+
+  private val t1_tempTag = (0 until NumTables).map { tableIdx =>
+    getTag(t1_startVAddr, t1_foldedHistForTag(tableIdx), t1_anotherFoldedHistForTag(tableIdx))
+  }
+
+  private val t1_hasMispredictBranch = t1_mispredictBranch.valid && t1_mispredictBranch.bits.attribute.isConditional
+
+  /* --------------------------------------------------------------------------------------------------------------
+     train pipeline stage 2
+     - update branches' takenCtr and usefulCtr
+     - allocate a new entry when mispredict
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val t2_valid    = RegNext(t1_valid) && io.enable
+  private val t2_branches = RegEnable(t1_branches, t1_valid)
+
+  private val t2_setIdx   = t1_setIdx.map(RegEnable(_, t1_valid))
+  private val t2_bankMask = RegEnable(t1_bankMask, t1_valid)
+
+  private val t2_allTableEntries = t1_allTableEntries.map(RegEnable(_, t1_valid))
+  private val t2_allocFailCtr    = t1_allocFailCtr.map(RegEnable(_, t1_valid))
+  private val t2_tempTag         = t1_tempTag.map(RegEnable(_, t1_valid))
+
+  private val t2_hasMispredictBranch = RegEnable(t1_hasMispredictBranch, t1_valid)
+  private val t2_mispredictBranch    = RegEnable(t1_mispredictBranch, t1_valid)
+
+  private val t2_newTakenCtr  = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(TakenCtrWidth))))
+  private val t2_newUsefulCtr = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(UsefulCtrWidth))))
+  private val t2_hitTag       = Wire(Vec(NumTables, Vec(NumWays, UInt(TagWidth.W))))
+
+  // Seq[NumTables][NumWays]
+  private val t2_updateMask = t2_allTableEntries.zipWithIndex.map {
+    case (entries, tableIdx) => // for each table
+      val hitWayMask = entries.zipWithIndex.map {
+        case (entry, wayIdx) => // for each way
+          val result = t2_branches.map {
+            branch => // for each branch
+              val taken        = branch.bits.taken
+              val mispredict   = branch.bits.mispredict
+              val attribute    = branch.bits.attribute
+              val position     = branch.bits.cfiPosition
+              val tag          = t2_tempTag(tableIdx) ^ position
+              val hit          = entry.valid && branch.valid && entry.tag === tag && attribute.isConditional
+              val newTakenCtr  = entry.takenCtr.getUpdate(taken)
+              val newUsefulCtr = entry.usefulCtr.getUpdate(!mispredict)
+              (hit, newTakenCtr, newUsefulCtr, tag)
+          }
+          val hitBranchMask = result.map(_._1)
+          t2_newTakenCtr(tableIdx)(wayIdx).value  := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._2))
+          t2_newUsefulCtr(tableIdx)(wayIdx).value := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._3))
+          t2_hitTag(tableIdx)(wayIdx)             := Mux1H(PriorityEncoderOH(hitBranchMask), result.map(_._4))
+          hitBranchMask.reduce(_ || _)
+      }
+      hitWayMask
+  }
+
+  private val t2_mispredictBranchHitTableMask = t2_allTableEntries.zipWithIndex.map {
+    case (entries, tableIdx) => // for each table
+      val tag        = t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition
+      val hitWayMask = entries.map(entry => entry.valid && entry.tag === tag)
+      hitWayMask.reduce(_ || _)
+  }
+  private val t2_hasProvider = t2_mispredictBranchHitTableMask.reduce(_ || _)
+
+  // only allocate new entry to tables with longer history
+  private val t2_providerIdxOH = PriorityEncoderOH(t2_mispredictBranchHitTableMask.reverse).asUInt
+
+  private val t2_longerHistoryTableMask = (~((t2_providerIdxOH - 1.U) | t2_providerIdxOH)).asUInt
+
+  // only allocate new entry to tables that have not useful entry
+  private val t2_allTableNotUsefulWayMask = t2_allTableEntries.map { entries =>
+    entries.map(entry => entry.usefulCtr.value === 0.U).asUInt
+  }
+  private val t2_hasNotUsefulTableMask = t2_allTableNotUsefulWayMask.map(_.orR).asUInt
+
+  private val t2_canAllocateTableMask =
+    Mux(
+      t2_hasProvider,
+      t2_longerHistoryTableMask & t2_hasNotUsefulTableMask,
+      t2_hasNotUsefulTableMask
+    )
+
+  // FIXME: currently only allocate one table, maybe a dynamic number of allocation
+  private val t2_needAllocate        = t2_hasMispredictBranch && t2_canAllocateTableMask.orR
+  private val t2_allocateTableMaskOH = PriorityEncoderOH(t2_canAllocateTableMask) & Fill(NumTables, t2_needAllocate)
+  private val t2_allocateWayMask     = Mux1H(t2_allocateTableMaskOH, t2_allTableNotUsefulWayMask)
+  private val t2_allocateWayMaskOH   = PriorityEncoderOH(t2_allocateWayMask) & Fill(NumWays, t2_needAllocate)
+
+  private val t2_allocFailTableMask =
+    Mux(
+      t2_hasProvider,
+      t2_longerHistoryTableMask & (~t2_hasNotUsefulTableMask).asUInt,
+      (~t2_hasNotUsefulTableMask).asUInt
+    )
+
+  private val t2_needResetUsefulCtr = t2_allocFailTableMask.asBools.zip(t2_allocFailCtr).map {
+    case (allocFail, ctr) =>
+      allocFail && ctr.isSaturatePositive
+  }
+  private val t2_needIncreaseAllocFailCtr = t2_allocFailTableMask.asBools.zip(t2_allocFailCtr).map {
+    case (allocFail, ctr) =>
+      allocFail && !ctr.isSaturatePositive
+  }
+
+  tables.zipWithIndex.foreach {
+    case (table, tableIdx) =>
+      table.io.writeSetIdx   := t2_setIdx(tableIdx)
+      table.io.writeBankMask := t2_bankMask
+
+      table.io.updateReq.valid := t2_valid && (t2_updateMask(tableIdx).reduce(_ || _)
+        || t2_allocateTableMaskOH(tableIdx))
+
+      val writeEntries    = Wire(Vec(NumWays, new TageEntry))
+      val writeWayMask    = Wire(Vec(NumWays, Bool()))
+      val allocateWayMask = t2_allocateWayMaskOH & Fill(NumWays, t2_allocateTableMaskOH(tableIdx))
+      writeEntries.zip(t2_updateMask(tableIdx)).zip(allocateWayMask.asBools)
+        .zip(writeWayMask).zipWithIndex.foreach {
+          case ((((entry, update), allocate), writeWayEnable), wayIdx) =>
+            entry.valid := update || allocate
+            entry.tag := Mux(
+              allocate,
+              t2_tempTag(tableIdx) ^ t2_mispredictBranch.bits.cfiPosition,
+              t2_hitTag(tableIdx)(wayIdx)
+            )
+            entry.takenCtr.value := Mux(
+              allocate,
+              Mux(t2_mispredictBranch.bits.taken, (1 << (TakenCtrWidth - 1)).U, (1 << (TakenCtrWidth - 1) - 1).U),
+              t2_newTakenCtr(tableIdx)(wayIdx).value
+            )
+            entry.usefulCtr.value := Mux(
+              allocate,
+              Mux(t2_needResetUsefulCtr(tableIdx), 0.U, UsefulCtrInitValue.U),
+              t2_newUsefulCtr(tableIdx)(wayIdx).value
+            )
+            writeWayEnable := update || allocate
+        }
+      table.io.updateReq.bits.wayMask := writeWayMask.asUInt
+      table.io.updateReq.bits.entries := writeEntries
+
+      table.io.needResetUsefulCtr       := t2_valid && t2_needAllocate && t2_needResetUsefulCtr(tableIdx)
+      table.io.needIncreaseAllocFailCtr := t2_valid && t2_needAllocate && t2_needIncreaseAllocFailCtr(tableIdx)
+      table.io.oldAllocFailCtr          := t2_allocFailCtr(tableIdx)
+  }
+
+  /* --------------------------------------------------------------------------------------------------------------
+     performance counter
+     -------------------------------------------------------------------------------------------------------------- */
+
+  XSPerfAccumulate("total_train", t0_valid)
+  XSPerfAccumulate("read_conflict", t0_readBankConflict)
+  // TODO: add more
 }

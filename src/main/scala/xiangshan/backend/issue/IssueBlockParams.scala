@@ -9,7 +9,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
-import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
 import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
@@ -41,25 +41,26 @@ case class IssueBlockParams(
     this.idxInSchBlk = idx
   }
 
-  def inMemSchd: Boolean = schdType == MemScheduler()
 
   def inIntSchd: Boolean = schdType == IntScheduler()
 
   def inFpSchd: Boolean = schdType == FpScheduler()
 
-  def inVfSchd: Boolean = schdType == VfScheduler()
+  def inVfSchd: Boolean = schdType == VecScheduler()
 
-  def isMemAddrIQ: Boolean = inMemSchd && (LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0)
+  def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
 
-  def isLdAddrIQ: Boolean = inMemSchd && LduCnt > 0
+  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
 
-  def isStAddrIQ: Boolean = inMemSchd && StaCnt > 0
+  def isLdAddrIQ: Boolean = LduCnt > 0
 
-  def isHyAddrIQ: Boolean = inMemSchd && HyuCnt > 0
+  def isStAddrIQ: Boolean = StaCnt > 0
 
-  def isVecLduIQ: Boolean = inMemSchd && (VlduCnt + VseglduCnt) > 0
+  def isHyAddrIQ: Boolean = HyuCnt > 0
 
-  def isVecStuIQ: Boolean = inMemSchd && (VstuCnt + VsegstuCnt) > 0
+  def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0
+
+  def isVecStuIQ: Boolean = (VstuCnt + VsegstuCnt) > 0
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
@@ -190,8 +191,6 @@ case class IssueBlockParams(
   def LdExuCnt = LduCnt + HyuCnt
 
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
-
-  def VfpuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vfpu)).sum
 
   def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
 
@@ -375,23 +374,23 @@ case class IssueBlockParams(
 
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case IntScheduler() | MemScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case IntScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val fpBundle = schdType match {
-      case FpScheduler() | MemScheduler() => needWakeupFromFpWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case FpScheduler() => needWakeupFromFpWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VfScheduler() | MemScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {
-      case VfScheduler() | MemScheduler() => needWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VfScheduler() | MemScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
@@ -436,6 +435,10 @@ case class IssueBlockParams(
 
   def getIQName = {
     "IssueQueue" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
+  }
+
+  def getIQFuName = {
+    getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
   }
 
   def getEntryName = {

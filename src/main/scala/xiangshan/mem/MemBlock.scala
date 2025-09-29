@@ -259,7 +259,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
   val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
-  val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty) 
+  val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
     Some(BundleBridgeSource(() => new PrefetchRecv)) else None
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty && coreParams.prefetcher.nonEmpty)
     Some(BundleBridgeSource(() => new huancun.PrefetchRecv)) else None
@@ -405,7 +405,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
+  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.intSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
@@ -653,7 +653,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
    *  - L1 prefetch request: set confidence
    *  - L1 prefetcher: fuzzer interface
    ******************************************************************/
-  
+
   /** prefetcher site in L1 */
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
@@ -691,7 +691,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
   XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
   XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
-  
+
   /** prefetcher site in L2 */
   dtlb_reqs(L2toL1DTLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DTLBPortIndex).resp.ready := true.B
@@ -1092,6 +1092,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(TlbStartVec(dtlb_st_idx) + i).resp
+    stu.io.sqDeqPtr     <> lsq.io.sqDeqPtr
+    stu.io.sqDeqUopIdx  <> lsq.io.sqDeqUopIdx
+    stu.io.sqDeqRobIdx  <> lsq.io.sqDeqRobIdx
 
     // -------------------------
     // Store Triggers
@@ -1396,8 +1399,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsMergeBuffer(i).io.fromPipeline := DontCare
     vsMergeBuffer(i).io.fromSplit := DontCare
 
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
+//    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
+//    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
   }
 
   (0 until VstuCnt).foreach{i =>
@@ -1416,7 +1419,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferRobIdx := storeMisalignBuffer.io.toVecSplit.robIdx
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferUopIdx := storeMisalignBuffer.io.toVecSplit.uopIdx
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits(i).io.s0_s1_s2_valid
+    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits.map(_.io.s0_s1_s2_valid).reduce(_||_)
 
   }
   (0 until VlduCnt).foreach{i =>

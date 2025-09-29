@@ -23,16 +23,19 @@ import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.InstSeqNum
 import xiangshan.Redirect
+import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.TriggerAction
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
+import xiangshan.frontend.bpu.BpuCommit
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -57,6 +60,7 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val redirect:        Valid[BpuRedirect] = Valid(new BpuRedirect)
   val train:           Valid[BpuTrain]    = Valid(new BpuTrain)
+  val commit:          Valid[BpuCommit]   = Valid(new BpuCommit)
   val bpuPtr:          FtqPtr             = Output(new FtqPtr)
   val redirectFromIFU: Bool               = Output(Bool())
 }
@@ -140,21 +144,20 @@ class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
   val flushFromBpu:    BpuFlushInfo             = new BpuFlushInfo
 }
 
-class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val mmioCommitRead: MmioCommitRead                       = new MmioCommitRead
-  val pdWb:           Vec[Valid[PredecodeWritebackBundle]] = Vec(FetchPorts, Valid(new PredecodeWritebackBundle))
+class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
+  val ftqIdx: FtqPtr = new FtqPtr
+  val pc:     UInt   = UInt(VAddrBits.W)
+  val taken:  Bool   = Bool()
+  // The early end position may not always be a branch instruction.
+  val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
+  val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
+  val attribute: BranchAttribute = new BranchAttribute
+  val target:    UInt            = UInt(VAddrBits.W)
 }
 
-class PredecodeWritebackBundle(implicit p: Parameters) extends FrontendBundle {
-  val pd:             Vec[PreDecodeInfo] = Vec(FetchBlockInstNum, new PreDecodeInfo) // TODO: redefine Predecode
-  val pc:             PrunedAddr         = PrunedAddr(VAddrBits)
-  val ftqIdx:         FtqPtr             = new FtqPtr
-  val takenCfiOffset: UInt               = UInt(FetchBlockInstOffsetWidth.W)
-  val misEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val cfiEndOffset:   Valid[UInt]        = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val target:         PrunedAddr         = PrunedAddr(VAddrBits)
-  val jalTarget:      PrunedAddr         = PrunedAddr(VAddrBits)
-  val instrRange:     Vec[Bool]          = Vec(FetchBlockInstNum, Bool())
+class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
+  val mmioCommitRead: MmioCommitRead               = new MmioCommitRead
+  val wbRedirect:     Vec[Valid[FrontendRedirect]] = Vec(FetchPorts, Valid(new FrontendRedirect))
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {
@@ -229,6 +232,14 @@ object ExceptionType {
   def apply(hasAf: Bool): ExceptionType =
     apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf)
 
+  // raise pf/gpf/af according to backend redirect request (tlb pre-check)
+  def fromBackend(redirect: Redirect): ExceptionType =
+    apply(
+      hasPf = redirect.backendIPF,
+      hasGpf = redirect.backendIGPF,
+      hasAf = redirect.backendIAF
+    )
+
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): ExceptionType = {
     require(useDup >= 0 && useDup < resp.excp.length)
@@ -293,6 +304,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
 
   val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
+  val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[UInt]             = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         FtqPtr                = new FtqPtr
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle

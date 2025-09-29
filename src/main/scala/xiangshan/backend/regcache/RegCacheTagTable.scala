@@ -113,7 +113,7 @@ class RegCacheTagTableIO(numReadPorts: Int)(implicit p: Parameters) extends XSBu
 
   val readPorts = Vec(numReadPorts, new RCTagTableReadPort(RegCacheIdxWidth, IntPhyRegIdxWidth))
 
-  val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpInValidBundle)
+  val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
 
   // set preg state to invalid
   val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(IntPhyRegIdxWidth.W))))

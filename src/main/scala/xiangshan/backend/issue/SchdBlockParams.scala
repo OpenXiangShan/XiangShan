@@ -18,13 +18,13 @@ case class SchdBlockParams(
 ) {
   var backendParam: BackendParams = null
 
-  def isMemSchd: Boolean = schdType == MemScheduler()
-
   def isIntSchd: Boolean = schdType == IntScheduler()
 
   def isFpSchd: Boolean = schdType == FpScheduler()
 
-  def isVfSchd: Boolean = schdType == VfScheduler()
+  def isVecSchd: Boolean = schdType == VecScheduler()
+
+  def getName: String = if (isIntSchd) "Int" else if (isFpSchd) "Fp" else "Vec"
 
   def JmpCnt: Int = issueBlockParams.map(_.JmpCnt).sum
 
@@ -64,8 +64,6 @@ case class SchdBlockParams(
 
   def VipuCnt: Int = issueBlockParams.map(_.VipuCnt).sum
 
-  def VfpuCnt: Int = issueBlockParams.map(_.VfpuCnt).sum
-
   def VlduCnt: Int = issueBlockParams.map(_.VlduCnt).sum
 
   def VstuCnt: Int = issueBlockParams.map(_.VstuCnt).sum
@@ -75,6 +73,12 @@ case class SchdBlockParams(
   def hasCSR = CsrCnt > 0
 
   def hasFence = FenceCnt > 0
+
+  def exuBlockParams =  issueBlockParams.flatMap(_.exuBlockParams)
+
+  def numUopFromDispatch: Int = issueBlockParams.map(_.numEnq).sum
+
+  def numWritebackToRob: Int = issueBlockParams.map(_.numDeq).sum
 
   def numWriteIntRf: Int = issueBlockParams.map(_.numWriteIntRf).sum
 
@@ -86,7 +90,7 @@ case class SchdBlockParams(
 
   def numNoDataWB: Int = issueBlockParams.map(_.numNoDataWB).sum
 
-  def needOg2Resp: Boolean = isVfSchd || isMemSchd && issueBlockParams.map(_.needOg2Resp).reduce(_ || _)
+  def needOg2Resp: Boolean = isVecSchd
 
   def needSrcFrm: Boolean = issueBlockParams.map(_.needSrcFrm).reduce(_ || _)
 
@@ -99,12 +103,6 @@ case class SchdBlockParams(
   def numRedirect: Int = issueBlockParams.map(_.numRedirect).sum
 
   def pregIdxWidth: Int = log2Up(numPregs)
-
-  def numWakeupFromWB: Int = schdType match {
-    case IntScheduler() | VfScheduler() => 8
-    case MemScheduler() => 16 // Todo
-    case _ => 0
-  }
 
   def numIntRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numIntSrc).sum).sum
 
@@ -132,8 +130,28 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledCopySrcBundle))
   }
 
+  def genExuInputCopySrcBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
+    MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genExuInputDecoupledCopySrcBundle))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genExuOutputDecoupledBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
+    MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genExuOutputDecoupledBundleLoad(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
+    MixedVec(backendParam.intSchdParams.get.issueBlockParams.filter(_.isLdAddrIQ).map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genExuInputCopySrcBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
+    MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuInputDecoupledCopySrcBundle))
+  }
+
+  def genExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
+    MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
   }
 
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuOutput]]] = {
@@ -188,23 +206,23 @@ case class SchdBlockParams(
 
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case IntScheduler() | MemScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case IntScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val fpBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case FpScheduler() | MemScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case FpScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VfScheduler() | MemScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {
-      case VfScheduler() | MemScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VfScheduler() | MemScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
@@ -230,6 +248,12 @@ case class SchdBlockParams(
     MixedVec(backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
   }
 
+  def genWriteBackBundle(implicit p: Parameters) =  schdType match {
+    case IntScheduler() => backendParam.genIntWriteBackBundle
+    case FpScheduler() => backendParam.genFpWriteBackBundle
+    case VecScheduler() => backendParam.genVfWriteBackBundle
+
+  }
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)
   def getWbCfgs: Seq[Seq[Set[PregWB]]] = {
     this.issueBlockParams.map(_.getWbCfgs)

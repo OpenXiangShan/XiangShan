@@ -18,22 +18,25 @@ src/main/scala/xiangshan/frontend/FrontendBundle.scala @eastonman
 src/main/scala/xiangshan/frontend/IBuffer.scala @eastonman
 
 src/main/scala/xiangshan/cache/ @linjuanZ
-src/main/scala/xiangshan/cache/dcache/ @cz4e @bosscharlie @linjuanZ
+src/main/scala/xiangshan/cache/dcache/ @linjuanZ
 src/main/scala/xiangshan/cache/mmu/ @good-circle @cebarobot @linjuanZ
-src/main/scala/xiangshan/cache/wpu/ @Maxpicca-Li @bosscharlie @linjuanZ
+src/main/scala/xiangshan/cache/wpu/ @Maxpicca-Li @linjuanZ
 
 src/main/scala/xiangshan/mem/ @linjuanZ
-src/main/scala/xiangshan/mem/lsqueue/ @cz4e @good-circle @linjuanZ
-src/main/scala/xiangshan/mem/mdp/ @cz4e @linjuanZ
-src/main/scala/xiangshan/mem/pipeline/ @cz4e @good-circle @linjuanZ
+src/main/scala/xiangshan/mem/lsqueue/ @good-circle @linjuanZ
+src/main/scala/xiangshan/mem/mdp/ @weidingliu @linjuanZ
+src/main/scala/xiangshan/mem/pipeline/ @good-circle @linjuanZ
 src/main/scala/xiangshan/mem/prefetch/ @happy-lx @Maxpicca-Li @linjuanZ
-src/main/scala/xiangshan/mem/sbuffer/ @cz4e @good-circle @linjuanZ
+src/main/scala/xiangshan/mem/sbuffer/ @good-circle @linjuanZ
 src/main/scala/xiangshan/mem/vector/ @weidingliu @good-circle @linjuanZ
 
-src/main/scala/xiangshan/L2Top.scala @linjuanZ @Ivyfeather
-src/main/scala/xiangshan/XSTile.scala @linjuanZ @Ivyfeather
+src/main/scala/xiangshan/L2Top.scala @linjuanZ
+src/main/scala/xiangshan/XSTile.scala @linjuanZ
 
-coupledL2/ @linjuanZ @Ivyfeather
-huancun/ @linjuanZ @Ivyfeather
+coupledL2/ @linjuanZ
+huancun/ @linjuanZ
 
 src/main/scala/top/ @Tang-Haojin
+
+scripts/pdb-run.py @yaozhicheng @forever043 @SFangYy @Tang-Haojin 
+scripts/xspdb/ @yaozhicheng @forever043 @SFangYy @Tang-Haojin 

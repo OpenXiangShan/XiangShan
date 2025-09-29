@@ -151,26 +151,50 @@ trait TargetFixHelper extends HasBpuParameters {
   }
 }
 
-trait BtbHelper extends HasBpuParameters {
-  def getFirstTakenEntryWayIdxOH(positions: IndexedSeq[UInt], takenMask: IndexedSeq[Bool]): IndexedSeq[Bool] = {
-    require(positions.length == takenMask.length)
-    val n = positions.length
-    val compareMatrix = (0 until n).map(i =>
-      (0 until i).map(j =>
-        positions(j) > positions(i)
+trait CommonHelper {
+
+  /**
+   * Return the one-hot mask of the position of the minimal value.
+   */
+  def getMinimalValueOH(value: Seq[UInt], valid: Seq[Bool]): Seq[Bool] = {
+    require(value.length == valid.length)
+    val n = value.length
+    val compareMatrix =
+      (0 until n).map(i =>
+        (0 until i).map(j =>
+          value(i) < value(j)
+        )
       )
-    )
     (0 until n).map { i =>
       (0 until n).map { j =>
-        if (j < i) !takenMask(j) || compareMatrix(i)(j)
-        else if (j == i) takenMask(i)
-        else !takenMask(j) || !compareMatrix(j)(i)
+        if (j < i) !valid(j) || compareMatrix(i)(j) // value(i) < value(j)
+        else if (j == i) valid(i)
+        else !valid(j) || !compareMatrix(j)(i) // value(i) <= value(j)
       }.reduce(_ && _)
     }
   }
 }
 
-trait PhrHelper extends HasBpuParameters {
+trait RotateHelper {
+
+  /**
+   * Circular shift a Vec to the right by idx.
+   * For example, vecRotateRight(Vec(a, b, c, d), 1.U) = Vec(d, a, b, c).
+   */
+  def vecRotateRight[T <: Data](vec: Vec[T], idx: UInt): Vec[T] = {
+    require(isPow2(vec.length))
+    require(idx.getWidth == log2Ceil(vec.length))
+    val len = vec.length
+    // generate all possible results of rotation
+    val rotations = (0 until len).map { i =>
+      val rotatedIndices = (0 until len).map(j => (j + i) % len)
+      i.U -> VecInit(rotatedIndices.map(idx => vec(idx)))
+    }
+    MuxLookup(idx, vec)(rotations)
+  }
+}
+
+trait PhrHelper {
   def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt =
     if (histLen > 0) {
       val nChunks    = (histLen + compLen - 1) / compLen

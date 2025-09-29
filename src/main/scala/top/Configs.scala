@@ -52,7 +52,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
-  case CVMParamskey => CVMParameters()
+  case CVMParamsKey => CVMParameters()
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
@@ -102,6 +102,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RobSize = 48,
         RabSize = 96,
         frontendParameters = FrontendParameters(
+          FetchBlockSize = 32, // in bytes
           bpuParameters = BpuParameters(
             // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
             mbtbParameters = MainBtbParameters(
@@ -110,11 +111,10 @@ class MinimalConfig(n: Int = 1) extends Config(
             ),
             tageParameters = TageParameters(
               TableInfos = Seq(
-                new TageTableInfo(512, 4, 3),
-                new TageTableInfo(512, 9, 3),
-                new TageTableInfo(1024, 19, 3)
+                new TageTableInfo(512, 4),
+                new TageTableInfo(512, 9),
+                new TageTableInfo(512, 17)
               ),
-              TagWidth = 6
             ),
             // FIXME: these are from V2 SC, we don't have equivalent parameters now
             scParameters = ScParameters(
@@ -444,7 +444,7 @@ class WithFuzzer extends Config((site, here, up) => {
 })
 
 class CVMCompile extends Config((site, here, up) => {
-  case CVMParamskey => up(CVMParamskey).copy(
+  case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
     HasMEMencryption = true,
     HasDelayNoencryption = false
@@ -455,7 +455,7 @@ class CVMCompile extends Config((site, here, up) => {
 })
 
 class CVMTestCompile extends Config((site, here, up) => {
-  case CVMParamskey => up(CVMParamskey).copy(
+  case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
     HasMEMencryption = true,
     HasDelayNoencryption = true

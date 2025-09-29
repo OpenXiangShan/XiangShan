@@ -35,9 +35,10 @@ class MetaEntry(implicit p: Parameters) extends FtqBundle {
 }
 
 class ResolveEntry(implicit p: Parameters) extends FtqBundle {
-  val ftqIdx:     FtqPtr                 = new FtqPtr
-  val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+  val ftqIdx:     FtqPtr     = new FtqPtr
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  // TODO: Reconsider branch number
+  val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
@@ -54,23 +55,19 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
 }
 
 class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQueuePtrHelper {
-  // when ifu pipeline is not stalled,
-  // a packet from bpu s3 can reach f1 at most
-  val s2 = Valid(new FtqPtr)
   val s3 = Valid(new FtqPtr)
 
   def stage(idx: Int): Valid[FtqPtr] = {
-    require(idx >= 2 && idx <= 3)
+    require(idx >= 3 && idx <= 3)
     idx match {
-      case 2 => s2
       case 3 => s3
     }
   }
 
-  def shouldFlushBy(src: Valid[FtqPtr], idx_to_flush: FtqPtr) =
-    src.valid && !isAfter(src.bits, idx_to_flush)
-  def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
-  def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
+  private def shouldFlushBy(src: Valid[FtqPtr], idxToFlush: FtqPtr, valid: Bool): Bool =
+    valid && src.valid && !isAfter(src.bits, idxToFlush)
+
+  def shouldFlushByStage3(idx: FtqPtr, valid: Bool): Bool = shouldFlushBy(s3, idx, valid)
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {

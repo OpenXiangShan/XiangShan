@@ -247,21 +247,22 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   arb2.io.out.ready := cache.io.req.ready
 
-  // Instructs requests from cache need go to LLPTW for processing
-  val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
+  // Instructs jmp_bitmap_check requests from cache need go to LLPTW/PTW for processing
+  val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
+  val toFsm_toPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && !cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
 
   val mq_arb = Module(new Arbiter(new L2TlbWithHptwIdBundle, 2))
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
     !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptwReq && // hptw reqs are not sent to missqueue
     (cache.io.resp.bits.bypassed || (
-      (((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
-      || ((cache.io.resp.bits.toFsm.l1Hit || toFsm_toLLPTW) && !llptw.io.in.ready) // send to llptw, llptw is full
+      ((((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || toFsm_toPTW) || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
+      || (((cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW) || toFsm_toLLPTW) && !llptw.io.in.ready) // send to llptw, llptw is full
     ))
 
   mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
   mq_arb.io.in(0).bits.isHptwReq := false.B
   mq_arb.io.in(0).bits.hptwId :=  DontCare
-  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l1Hit || toFsm_toLLPTW
+  mq_arb.io.in(0).bits.isLLptw := (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW) || toFsm_toLLPTW
   mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
   mq_arb.io.in(1).bits.isHptwReq := false.B
   mq_arb.io.in(1).bits.hptwId := DontCare
@@ -277,7 +278,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   llptw.io.in.valid := cache.io.resp.valid &&
     !cache.io.resp.bits.hit &&
-    (toFsm_toLLPTW || cache.io.resp.bits.toFsm.l1Hit) &&
+    (toFsm_toLLPTW || (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW)) &&
     !cache.io.resp.bits.bypassed &&
     !cache.io.resp.bits.isHptwReq
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
@@ -309,16 +310,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     (!cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw.io.req.ready,
     (cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw_resp_arb.io.in(HptwRespArbCachePort).ready,
     cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    ((toFsm_toLLPTW || cache.io.resp.bits.toFsm.l1Hit) && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
+    ((toFsm_toLLPTW || (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW)) && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
     (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) -> mq_arb.io.in(0).ready
   ))
 
   // NOTE: missQueue req has higher priority
-  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l1Hit &&
+  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && ((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || toFsm_toPTW) &&
     !cache.io.resp.bits.bypassed &&
     !cache.io.resp.bits.isFirst &&
-    !cache.io.resp.bits.isHptwReq &&
-    !toFsm_toLLPTW
+    !cache.io.resp.bits.isHptwReq
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   if (EnableSv48) {
     ptw.io.req.bits.l3Hit.get := cache.io.resp.bits.toFsm.l3Hit.get
@@ -650,8 +650,29 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := mergeArb(i).out.valid
     outArb(i).in(0).bits.s2xlate := mergeArb(i).out.bits.s2xlate
-    outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
-    outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
+    if (HasBitmapCheck) {
+      // mbmc:bitmap csr
+      val mbmc = csr_dup(0).mbmc
+      val bitmap_enable = mbmc.BME === 1.U && mbmc.CMODE === 0.U
+      when (!bitmap_enable) {
+        outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
+        outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
+      } .otherwise {
+        when (mergeArb(i).out.bits.s2xlate === noS2xlate || mergeArb(i).out.bits.s2xlate === onlyStage1) {
+          outArb(i).in(0).bits.s1 := ptwResp_to_sector_4kptwResp(mergeArb(i).out.bits.s1)
+          outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
+        } .otherwise {
+          outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
+          outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
+          outArb(i).in(0).bits.s2.entry.level.map(_ := 0.U(2.W))
+          outArb(i).in(0).bits.s2.entry.ppn := get_4kppn(mergeArb(i).out.bits.s2.entry.ppn, mergeArb(i).out.bits.s2.entry.tag, mergeArb(i).out.bits.s2.entry.level.get, mergeArb(i).out.bits.s2.entry.n.get.asBool)
+          outArb(i).in(0).bits.s2.entry.n.map(_ := false.B)
+        }
+      }
+    } else {
+      outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
+      outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
+    }
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -672,6 +693,24 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   when (mem_resp_done) {
     waiting_resp(mem.d.bits.source) := false.B
     flush_latch(mem.d.bits.source) := false.B
+  }
+
+  def get_4kppn(ppn: UInt, vpn: UInt, level: UInt, n: Bool): UInt = {
+    MuxLookup(level, 0.U)(Seq(
+      3.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
+      2.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+      0.U -> Mux(n === 0.U, ppn(ppn.getWidth - 1, 0), Cat(ppn(ppn.getWidth - 1, pteNapotBits), vpn(pteNapotBits - 1, 0)))
+    ))
+  }
+
+  def get_4kppn_up(ppn_up: UInt, vpn_up: UInt, level: UInt, n: Bool): UInt = {
+    MuxLookup(level, 0.U)(Seq(
+      3.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen * 3 - sectortlbwidth), vpn_up(vpnnLen * 3 - 1 - sectortlbwidth, 0)),
+      2.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen * 2 - sectortlbwidth), vpn_up(vpnnLen * 2 - 1 - sectortlbwidth, 0)),
+      1.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen - sectortlbwidth), vpn_up(vpnnLen - 1 - sectortlbwidth, 0)),
+      0.U -> Mux(n === 0.U, ppn_up(ppn_up.getWidth - 1, 0), Cat(ppn_up(ppn_up.getWidth - 1, pteNapotBits - sectortlbwidth), vpn_up(pteNapotBits - 1 - sectortlbwidth, 0)))
+    ))
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
@@ -752,6 +791,44 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val cf_equal = if (HasBitmapCheck) pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf else true.B
       ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
+    }
+    ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
+    ptw_sector_resp
+  }
+
+  def ptwResp_to_sector_4kptwResp(pte: PtwMergeResp) : PtwSectorResp = {
+    assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
+    val ptw_sector_resp = Wire(new PtwSectorResp)
+    ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
+    ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid
+    ptw_sector_resp.entry.vmid.map(_ := pte.entry(OHToUInt(pte.pteidx)).vmid.getOrElse(0.U))
+    ptw_sector_resp.entry.ppn := get_4kppn_up(pte.entry(OHToUInt(pte.pteidx)).ppn, pte.entry(OHToUInt(pte.pteidx)).tag, pte.entry(OHToUInt(pte.pteidx)).level.getOrElse(0.U(log2Up(Level + 1).W)), pte.entry(OHToUInt(pte.pteidx)).n.getOrElse(0.U).asBool)
+    ptw_sector_resp.entry.pbmt := pte.entry(OHToUInt(pte.pteidx)).pbmt
+    ptw_sector_resp.entry.n.map(_ := false.B)
+    ptw_sector_resp.entry.perm.map(_ := pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
+    ptw_sector_resp.entry.level.map(_ := (0.U(log2Up(Level + 1).W)))
+    ptw_sector_resp.entry.prefetch := pte.entry(OHToUInt(pte.pteidx)).prefetch
+    ptw_sector_resp.entry.v := pte.entry(OHToUInt(pte.pteidx)).v
+    ptw_sector_resp.af := pte.entry(OHToUInt(pte.pteidx)).af
+    ptw_sector_resp.pf := pte.entry(OHToUInt(pte.pteidx)).pf
+    ptw_sector_resp.addr_low := OHToUInt(pte.pteidx)
+    ptw_sector_resp.pteidx := pte.pteidx
+    for (i <- 0 until tlbcontiguous) {
+      val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
+      val pbmt_equal = pte.entry(i).pbmt === pte.entry(OHToUInt(pte.pteidx)).pbmt
+      val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
+      val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
+      val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
+      val cf_equal = pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf
+      ptw_sector_resp.valididx(i) := (ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) && !pte.not_merge
+      ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
+    }
+    when (!pte.not_super) {
+      for (i <- 0 until tlbcontiguous) {
+        ptw_sector_resp.valididx(i) := false.B
+        ptw_sector_resp.ppn_low(i) := OHToUInt(pte.pteidx)
+      }
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
     ptw_sector_resp

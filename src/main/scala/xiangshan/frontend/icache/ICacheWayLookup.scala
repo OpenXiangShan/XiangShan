@@ -21,16 +21,19 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.HasCircularQueuePtrHelper
 import utility.XSPerfHistogram
+import xiangshan.frontend.ftq.BpuFlushInfo
+import xiangshan.frontend.ftq.FtqPtr
 
 class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     with ICacheMissUpdateHelper
     with HasCircularQueuePtrHelper {
 
   class ICacheWayLookupIO(implicit p: Parameters) extends ICacheBundle {
-    val flush:  Bool                         = Input(Bool())
-    val read:   DecoupledIO[WayLookupBundle] = DecoupledIO(new WayLookupBundle)
-    val write:  DecoupledIO[WayLookupBundle] = Flipped(DecoupledIO(new WayLookupBundle))
-    val update: Valid[MissRespBundle]        = Flipped(ValidIO(new MissRespBundle))
+    val flush:        Bool                              = Input(Bool())
+    val flushFromBpu: BpuFlushInfo                      = Input(new BpuFlushInfo)
+    val read:         DecoupledIO[WayLookupBundle]      = DecoupledIO(new WayLookupBundle)
+    val write:        DecoupledIO[WayLookupWriteBundle] = Flipped(DecoupledIO(new WayLookupWriteBundle))
+    val update:       Valid[MissRespBundle]             = Flipped(ValidIO(new MissRespBundle))
 
     val perf: WayLookupPerfInfo = Output(new WayLookupPerfInfo)
   }
@@ -51,12 +54,23 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   private val readPtr  = RegInit(ICacheWayLookupPtr(false.B, 0.U))
   private val writePtr = RegInit(ICacheWayLookupPtr(false.B, 0.U))
 
+  private val tailFtqIdx = RegInit(0.U.asTypeOf(new FtqPtr))
+
   private val empty = readPtr === writePtr
   private val full  = (readPtr.value === writePtr.value) && (readPtr.flag ^ writePtr.flag)
+
+  // NOTE: May be unportable, we have bp3 == pf2 now, and WayLookup is written in pf1,
+  // so the tailing 0 (already bypassed to if1) or 1 (if1 stall, stored here) entries might be flushed by bp3,
+  // therefore, when shouldFlushByStage3, we need to move back writePtr by 0 (empty) or 1.
+  // If in future we have bp4 (or even more) flush, this might not be enough.
+  private val bpuS3FlushValid = io.flushFromBpu.shouldFlushByStage3(tailFtqIdx, !empty)
+  private val bpuS3FlushPtr   = writePtr - 1.U
 
   when(io.flush) {
     writePtr.value := 0.U
     writePtr.flag  := false.B
+  }.elsewhen(bpuS3FlushValid) {
+    writePtr := bpuS3FlushPtr
   }.elsewhen(io.write.fire) {
     writePtr := writePtr + 1.U
   }
@@ -68,11 +82,19 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     readPtr := readPtr + 1.U
   }
 
+  when(io.flush) {
+    tailFtqIdx.value := 0.U
+    tailFtqIdx.flag  := false.B
+  }.elsewhen(io.write.fire) {
+    tailFtqIdx := io.write.bits.ftqIdx
+  }
+
   private val gpfEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupGpfEntry)))
   private val gpfPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
   private val gpfHit   = gpfPtr === readPtr && gpfEntry.valid
 
-  when(io.flush) {
+  when(io.flush || bpuS3FlushValid && gpfPtr === bpuS3FlushPtr) {
+    // When flushed by bp3
     // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
     gpfEntry.valid := false.B
     gpfEntry.bits  := 0.U.asTypeOf(new WayLookupGpfEntry)
@@ -96,18 +118,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     }.reduce(_ || _)
   })
   // if the entry is being updated, we should not read it (i.e. read.valid should be false)
-  // NOTE: this is not necessary in current design:
-  //       when update is valid, DataArray is refilling at the same cycle, so DataArray.read.req.ready will be false.B
-  //       then, MainPipe will get s0_canGo (= toData.last.ready && fromWayLookup.valid && s1_ready) = false.B
-  //       then, WayLookup.read.ready (= s0_fire = s0_valid && s0_canGo && !s0_flush) will be false.B
-  //       so, even if read.valid is true, read.fire will still be false.B, and no read happens.
-//  private val updateStall = entryUpdate(readPtr.value)
-  //       currently, we use a simple assertion to avoid using extra logic
-  assert(
-    !(!empty && io.read.fire && entryUpdate(readPtr.value)),
-    "WayLookup read should not happen when entry is being updated"
-  )
-  private val updateStall = false.B
+  private val updateStall = entryUpdate(readPtr.value)
 
   /* *** read *** */
   // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)

@@ -43,9 +43,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val commit:   Valid[RasCommitInfo]   = Flipped(Valid(new RasCommitInfo))
     val redirect: Valid[RasRedirectInfo] = Flipped(Valid(new RasRedirectInfo))
 
-    val rasOverride: Bool            = Output(Bool())
-    val topRetAddr:  PrunedAddr      = Output(PrunedAddr(VAddrBits))
-    val specMeta:    RasInternalMeta = Output(new RasInternalMeta)
+    val topRetAddr: PrunedAddr      = Output(PrunedAddr(VAddrBits))
+    val specMeta:   RasInternalMeta = Output(new RasInternalMeta)
   }
 
   val io: RasIO = IO(new RasIO)
@@ -77,9 +76,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   specMeta.tosw := stack.meta.tosw
   specMeta.nos  := stack.meta.nos
 
-  io.rasOverride := io.specIn.valid && (io.specIn.bits.target =/= stack.spec.popAddr) && specPop && io.enable
-  io.specMeta    := specMeta
-  io.topRetAddr  := stack.spec.popAddr
+  io.specMeta   := specMeta
+  io.topRetAddr := stack.spec.popAddr
 
   private val redirect = RegNextWithEnable(io.redirect)
   // when we mispredict a call, we must redo a push operation
@@ -87,20 +85,20 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stackTOSW    = stack.meta.tosw
   private val redirectTOSW = redirect.bits.meta.tosw
 
-  stack.redirect.valid    := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
-  stack.redirect.isCall   := redirect.bits.attribute.isCall && (redirect.bits.level === 0.U)
-  stack.redirect.isRet    := redirect.bits.attribute.isReturn && (redirect.bits.level === 0.U)
-  stack.redirect.meta     := redirect.bits.meta
-  stack.redirect.callAddr := redirect.bits.brPc + Mux(redirect.bits.isRvc, 2.U, 4.U)
+  stack.redirect.valid  := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
+  stack.redirect.isCall := redirect.bits.attribute.isCall && (redirect.bits.level === 0.U)
+  stack.redirect.isRet  := redirect.bits.attribute.isReturn && (redirect.bits.level === 0.U)
+  stack.redirect.meta   := redirect.bits.meta
+  // Redirected branch PC points to end of instruction.
+  stack.redirect.callAddr := redirect.bits.brPc + 2.U
 
-  private val commitValid     = RegNext(io.commit.valid, init = false.B)
-  private val commitInfo      = RegEnable(io.commit.bits, io.commit.valid)
-  private val commitBrAlignPc = commitInfo.startPc & alignMask
-  private val commitPushAddr  = commitBrAlignPc + commitInfo.cfiPosition + Mux(commitInfo.isRvc, 2.U, 4.U)
+  private val commitValid    = RegNext(io.commit.valid, init = false.B)
+  private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
+  private val commitPushAddr = commitInfo.pushAddr
   stack.commit.valid     := commitValid
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
   stack.commit.popValid  := commitValid && commitInfo.attribute.isReturn
-  stack.commit.pushAddr  := PrunedAddrInit(commitPushAddr)
+  stack.commit.pushAddr  := commitPushAddr
   stack.commit.metaTosw  := commitInfo.meta.tosw
   stack.commit.metaSsp   := commitInfo.meta.ssp
 

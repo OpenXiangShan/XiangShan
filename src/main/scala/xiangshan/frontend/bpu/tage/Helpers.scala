@@ -19,15 +19,26 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.RotateHelper
 
-trait Helpers extends HasTageParameters with HasXSParameter {
-  def getBaseSetIndex(pc: PrunedAddr): UInt = {
-    val highBits = pc(VAddrBits - 1, FetchBlockSizeWidth + BaseTableInternalBanksIdxLen)
-    (highBits ^ (highBits >> BaseTableSetIdxLen).asUInt)(BaseTableSetIdxLen - 1, 0)
-  }
-  def getBaseTableInternalBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth + BaseTableInternalBanksIdxLen - 1, FetchBlockSizeWidth)
-  def getAlignBankIndex(pc: PrunedAddr): UInt =
+trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper {
+  def getBaseTableSetIndex(pc: PrunedAddr): UInt =
+    pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
+
+  def getBaseTableBankIndex(pc: PrunedAddr): UInt =
+    pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
+
+  def getBaseTableAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
 
+  def getSetIndex(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
+    val setIdxWidth = log2Ceil(numSets / NumBanks)
+    pc(setIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth) ^ hist
+  }
+
+  def getTag(pc: PrunedAddr, hist1: UInt, hist2: UInt): UInt =
+    pc(TagWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth) ^ hist1 ^ hist2
+
+  def getBankIndex(pc: PrunedAddr): UInt =
+    pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
 }

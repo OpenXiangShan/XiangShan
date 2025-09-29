@@ -1,11 +1,12 @@
 name: Problem
 description: Problem encountered when compiling XiangShan, running EMU, etc.
-labels: 'problem'
+labels:
+  - 'type: problem'
 body:
   - type: markdown
     attributes:
       value: |
-        You could use English or Chineses to open an issue.
+        You could use English or Chinese to open an issue.
         您可以使用中文或英文提问，我们推荐使用英文。
 
         This template is only used for problem encountered when compiling XiangShan, running EMU, etc. If this doesn't look right, please back and choose another template.
@@ -37,9 +38,12 @@ body:
     attributes:
       label: Describe you problem
       description: |
-        A clear and concise description of what the problem is. 请清晰、准确地描述您遇到的问题。
-        If applicable, add screenshots to help explain your problem. 建议您附上遇到问题时的屏幕截图。
-      placeholder: 
+        A clear and concise description of what the problem is.
+        请清晰、准确地描述您遇到的问题。
+
+        If applicable, add screenshots to help explain your problem.
+        建议您附上遇到问题时的屏幕截图。
+      placeholder:
     validations:
       required: true
   - type: textarea
@@ -47,9 +51,12 @@ body:
     attributes:
       label: What did you do before
       description: |
-        Please describe step by step what did you do before you encounted the problem. 请描述您遇到问题前都做了哪些操作。
-        This will help us to reproduce your problem. 这将有助于我们复现您的问题。
-      placeholder: 
+        Please describe step by step what did you do before you encountered the problem.
+        请描述您遇到问题前都做了哪些操作。
+
+        This will help us to reproduce your problem.
+        这将有助于我们复现您的问题。
+      placeholder:
     validations:
       required: true
   - type: textarea
@@ -57,33 +64,36 @@ body:
     attributes:
       label: Environment
       description: |
-        Please provide your environment information. 请提供您的环境信息。
-        
-        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`. 
+        Please provide your environment information.
+        请提供您的环境信息。
+
+        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`.
         XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `DefaultConfig`。
-        
-        Tips: 
+
+        Tips:
          - gcc version: **run `gcc --version` and paste first line of the output**
          - mill version: **run `mill -i --version` and paste first line of the output**
          - java version: **run `java --version` and paste first line of the output**
-      placeholder: 
+      placeholder:
       value: |
-       - XiangShan branch: 
-       - XiangShan commit id: 
-       - XiangShan config: 
-       - NEMU commit id: 
-       - SPIKE commit id: 
-       - Operating System: 
-       - gcc version: 
-       - mill version: 
-       - java version: 
+        - XiangShan branch:
+        - XiangShan commit id:
+        - XiangShan config:
+        - NEMU commit id:
+        - SPIKE commit id:
+        - Operating System:
+        - gcc version:
+        - mill version:
+        - java version:
     validations:
       required: true
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Add any other context about the problem here. 可在此处附上其他相关信息。
-      placeholder: 
+      description: |
+        Add any other context about the problem here.
+        可在此处附上其他相关信息。
+      placeholder:
     validations:
       required: false

@@ -16,12 +16,19 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
+import chisel3.util.MuxLookup
+import chisel3.util.isPow2
+import chisel3.util.log2Ceil
 import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.CrossPageHelper
+import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.RotateHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
-trait Helpers extends HasMainBtbParameters with HasXSParameter with TargetFixHelper {
+trait Helpers extends HasMainBtbParameters
+    with HasXSParameter with TargetFixHelper with RotateHelper with HalfAlignHelper with CrossPageHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 

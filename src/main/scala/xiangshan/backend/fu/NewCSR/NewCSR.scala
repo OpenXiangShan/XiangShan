@@ -690,6 +690,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasPMAAddrSink =>
         m.addrRData := pmaEntryMod.io.out.pmaAddrRData
+        m.addrRegOut := pmaEntryMod.io.out.pmaAddrRegOut
       case _ =>
     }
     mod match {

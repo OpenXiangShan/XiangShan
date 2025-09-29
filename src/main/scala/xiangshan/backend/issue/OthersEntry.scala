@@ -75,10 +75,9 @@ object OthersEntry {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry(isComp)
       case FpScheduler()  => new OthersEntry(isComp)
-      case MemScheduler() =>
+      case VecScheduler() =>
         if (iqParams.isVecMemIQ) new OthersEntryVecMem(isComp)
         else new OthersEntry(isComp)
-      case VfScheduler() => new OthersEntry(isComp)
       case _ => null
     }
   }

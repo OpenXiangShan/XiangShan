@@ -21,43 +21,52 @@ import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
-    BaseTableSize:          Int = 8192,
-    BaseTableInternalBanks: Int = 4,
-    BaseTableCtrWidth:      Int = 2,
+    BaseTableSize:          Int = 1024 * 8,
+    BaseTableTakenCtrWidth: Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
-      // Table size, history length, NumWay
-      new TageTableInfo(1024, 4, 3),
-      new TageTableInfo(1024, 9, 3),
-      new TageTableInfo(1024, 17, 3),
-      new TageTableInfo(1024, 31, 3),
-      new TageTableInfo(1024, 58, 3),
-      new TageTableInfo(1024, 109, 3),
-      new TageTableInfo(1024, 211, 3),
-      new TageTableInfo(1024, 407, 3)
+      // TageTableInfo(NumSets, HistoryLength)
+      new TageTableInfo(1024, 4),
+      new TageTableInfo(1024, 9),
+      new TageTableInfo(1024, 17),
+      new TageTableInfo(1024, 31),
+      new TageTableInfo(1024, 58),
+      new TageTableInfo(1024, 109),
+      new TageTableInfo(1024, 211),
+      new TageTableInfo(1024, 407)
     ),
-    NumInternalBanks: Int = 2,
-    TagWidth:         Int = 13,
-    CtrWidth:         Int = 3,
-    UsefulWidth:      Int = 2,
-    WriteBufferSize:  Int = 4
+    NumWays:            Int = 3,
+    NumBanks:           Int = 4, // to alleviate read-write conflicts in single-port SRAM
+    TagWidth:           Int = 13,
+    TakenCtrWidth:      Int = 3,
+    UsefulCtrWidth:     Int = 2,
+    UsefulCtrInitValue: Int = 0,
+    WriteBufferSize:    Int = 4,
+    AllocFailCtrWidth:  Int = 6  // TODO
 ) {}
 
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
-  def BaseTableSize:                Int                = tageParameters.BaseTableSize
-  def BaseTableInternalBanks:       Int                = tageParameters.BaseTableInternalBanks
-  def BaseTableInternalBanksIdxLen: Int                = log2Ceil(BaseTableInternalBanks)
-  def BaseTableSramSets:            Int                = BaseTableSize / BaseTableInternalBanks / FetchBlockInstNum
-  def BaseTableSetIdxLen:           Int                = log2Ceil(BaseTableSramSets)
-  def BaseTableNumAlignBanks:       Int                = FetchBlockSize / FetchBlockAlignSize
-  def BaseTableCtrWidth:            Int                = tageParameters.BaseTableCtrWidth
-  def TableInfos:                   Seq[TageTableInfo] = tageParameters.TableInfos
-  def NumInternalBanks:             Int                = tageParameters.NumInternalBanks
-  def TagWidth:                     Int                = tageParameters.TagWidth
-  def CtrWidth:                     Int                = tageParameters.CtrWidth
-  def UsefulWidth:                  Int                = tageParameters.UsefulWidth
-  def WriteBufferSize:              Int                = tageParameters.WriteBufferSize
+  def BaseTableNumSets:       Int = tageParameters.BaseTableSize / NumBanks / FetchBlockInstNum
+  def BaseTableSetIdxWidth:   Int = log2Ceil(BaseTableNumSets)
+  def BaseTableNumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
+  def BaseTableTakenCtrWidth: Int = tageParameters.BaseTableTakenCtrWidth
 
-  def NumTables: Int = TableInfos.length
+  def NumWays:            Int = tageParameters.NumWays
+  def NumBanks:           Int = tageParameters.NumBanks
+  def BankIdxWidth:       Int = log2Ceil(NumBanks)
+  def TagWidth:           Int = tageParameters.TagWidth
+  def TakenCtrWidth:      Int = tageParameters.TakenCtrWidth
+  def UsefulCtrWidth:     Int = tageParameters.UsefulCtrWidth
+  def UsefulCtrInitValue: Int = tageParameters.UsefulCtrInitValue
+  def WriteBufferSize:    Int = tageParameters.WriteBufferSize
+  def AllocFailCtrWidth:  Int = tageParameters.AllocFailCtrWidth
+
+  def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
+  def NumTables:  Int                = TableInfos.length
+
+  def TageEntryWidth: Int = (new TageEntry).getWidth
+
+  // tage cannot be fast-trained, this is required by abstract class BasePredictor
+  def EnableFastTrain: Boolean = false
 }

@@ -22,21 +22,23 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbHelper
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with BtbHelper {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
     val redirectValid: Bool = Input(Bool())
     val overrideValid: Bool = Input(Bool())
 
-    val prediction:       Prediction   = Output(new Prediction)
-    val meta:             AheadBtbMeta = Output(new AheadBtbMeta)
-    val debug_startVaddr: PrunedAddr   = Output(PrunedAddr(VAddrBits))
+    val prediction: Prediction   = Output(new Prediction)
+    val meta:       AheadBtbMeta = Output(new AheadBtbMeta)
+
+    val t0_previousPc: Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
+
+    val debug_startVAddr: PrunedAddr = Output(PrunedAddr(VAddrBits))
   }
 
   val io: AheadBtbIO = IO(new AheadBtbIO)
@@ -50,10 +52,15 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   }
   io.resetDone := resetDone
 
-  private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
+  private val takenCounter = RegInit(
+    VecInit.fill(NumBanks)(
+      VecInit.fill(NumSets)(
+        VecInit.fill(NumWays)(0.U.asTypeOf(new SaturateCounter(TakenCounterWidth)))
+      )
+    )
+  )
 
   // TODO: write ctr bypass to read
-  // TODO: train after execution
 
   private val s0_fire = Wire(Bool())
   private val s1_fire = Wire(Bool())
@@ -61,6 +68,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
 
   private val s1_ready = Wire(Bool())
   private val s2_ready = Wire(Bool())
+
+  private val s1_flush = Wire(Bool())
+  private val s2_flush = Wire(Bool())
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
@@ -76,12 +86,15 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
 
+  s2_flush := redirectValid || overrideValid
+  s1_flush := s2_flush
+
   when(s0_fire)(s1_valid := true.B)
-    .elsewhen(redirectValid)(s1_valid := false.B)
+    .elsewhen(s1_flush)(s1_valid := false.B)
     .elsewhen(s1_fire)(s1_valid := false.B)
 
-  when(redirectValid)(s2_valid := false.B)
-    .elsewhen(s1_fire)(s2_valid := !redirectValid)
+  when(s2_flush)(s2_valid := false.B)
+    .elsewhen(s1_fire)(s2_valid := !s1_flush)
     .elsewhen(s2_fire)(s2_valid := false.B)
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -143,9 +156,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val s2_takenMask   = s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken }
   private val s2_taken       = s2_takenMask.reduce(_ || _)
 
-  private val s2_positions               = s2_realEntries.map(_.position)
-  private val s2_firstTakenEntryWayIdxOH = getFirstTakenEntryWayIdxOH(s2_positions, s2_takenMask)
-  private val s2_firstTakenEntry         = Mux1H(s2_firstTakenEntryWayIdxOH, s2_realEntries)
+  private val s2_positions         = s2_realEntries.map(_.position)
+  private val s2_firstTakenEntryOH = getMinimalValueOH(s2_positions, s2_takenMask)
+  private val s2_firstTakenEntry   = Mux1H(s2_firstTakenEntryOH, s2_realEntries)
 
   // When detect multi-hit, we need to invalidate one entry.
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
@@ -162,13 +175,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   io.prediction := s2_prediction
 
   // used for check abtb output
-  io.debug_startVaddr := s2_startPc
+  io.debug_startVAddr := s2_startPc
 
-  private val meta = Wire(new AheadBtbMeta)
+  private val meta = WireInit(0.U.asTypeOf(new AheadBtbMeta))
   meta.valid           := s2_valid
   meta.hitMask         := s2_hitMask
   meta.taken           := s2_taken
-  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryWayIdxOH)
+  meta.takenWayIdx     := OHToUInt(s2_firstTakenEntryOH)
   meta.attributes      := s2_realEntries.map(_.attribute)
   meta.positions       := s2_positions
   meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
@@ -189,7 +202,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
      - receive train request
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t0_train = io.train
+  private val t0_valid      = io.enable && io.train.valid && io.train.bits.meta.abtb.valid && io.t0_previousPc.valid
+  private val t0_train      = io.train.bits
+  private val t0_previousPc = io.t0_previousPc.bits
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -197,30 +212,17 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
      - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
-  // delay one cycle for better timing
-  private val t1_trainValid = RegNext(t0_train.valid)
-  private val t1_train      = RegEnable(t0_train.bits, t0_train.valid)
+  private val t1_valid      = RegNext(t0_valid)
+  private val t1_train      = RegEnable(t0_train, t0_valid)
+  private val t1_previousPc = RegEnable(t0_previousPc, t0_valid)
 
-  private val t1_previousPcValid = RegInit(false.B)
-  private val t1_bankIdx         = Reg(UInt(BankIdxWidth.W))
-  private val t1_setIdx          = Reg(UInt(SetIdxWidth.W))
+  private val t1_setIdx  = getSetIndex(t1_previousPc)
+  private val t1_setMask = UIntToOH(t1_setIdx)
 
-  when(t1_trainValid) {
-    t1_previousPcValid := true.B
-    t1_bankIdx         := getBankIndex(t1_train.startVAddr)
-    t1_setIdx          := getSetIndex(t1_train.startVAddr)
-  }
-
+  private val t1_bankIdx  = getBankIndex(t1_previousPc)
   private val t1_bankMask = UIntToOH(t1_bankIdx)
-  private val t1_setMask  = UIntToOH(t1_setIdx)
 
   private val t1_meta = t1_train.meta.abtb
-
-  private val t1_valid = t1_previousPcValid && t1_trainValid && t1_meta.valid
-
-  // TODO: if we want update after execution, we need FTQ send a previousPc with one update request
-  //  if we want update after commit, we just ues previous update request to get bankIdx and setIdx
-  //  because the order of prediction and commit is the same
 
   private val perf_t1_hit = t1_meta.hitMask.reduce(_ || _)
 

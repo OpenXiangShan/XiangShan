@@ -19,16 +19,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.Redirect
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
-import xiangshan.frontend.bpu.tage.TageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -67,7 +64,7 @@ object BranchAttribute {
     // indirect branches: jr, jalr
     def Indirect: UInt = 3.U(width.W)
   }
-  private object RasAction extends EnumUInt(4) {
+  object RasAction extends EnumUInt(4) {
     def popBit:  Int = 0
     def pushBit: Int = 1
     // no action
@@ -153,7 +150,20 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:       BpuMeta                = new BpuMeta
   val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(backendParams.BrhCnt, Valid(new BranchInfo))
+  val branches:   Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+
+  // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
+  // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
+  // NOTE: do not use this on Bpu.io.fromFtq.train, it does not ensure the above assertion
+  def mispredictBranch: Valid[BranchInfo] =
+    Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
+}
+
+class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+  val rasMeta:   RasMeta         = new RasMeta
+  val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute: BranchAttribute = new BranchAttribute
+  // TODO: and maybe more
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
@@ -171,8 +181,9 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val mbtb:   MainBtbMeta  = new MainBtbMeta
   val ras:    RasMeta      = new RasMeta
   val phr:    PhrPtr       = new PhrPtr
-  val tage:   TageMeta     = new TageMeta
   val ittage: IttageMeta   = new IttageMeta
+  // used for performance counter
+  val perf_s3Prediction: Prediction = new Prediction
 }
 
 /* *** internal const & type *** */
@@ -223,4 +234,10 @@ class Prediction(implicit p: Parameters) extends BpuBundle {
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
   // TODO: what else do we need?
+
+  def isIdentical(other: Prediction): Bool =
+    this.taken === other.taken &&
+      this.cfiPosition === other.cfiPosition &&
+      this.target === other.target &&
+      this.attribute === other.attribute
 }
