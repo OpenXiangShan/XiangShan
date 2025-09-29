@@ -88,19 +88,19 @@ endif
 
 # trace xiangshan mode: accept trace instead of gcpt
 TRACERTL_MODE ?= 0
-TRACERTLOnFPGA ?= 0 # currently only used for difftest
+TRACERTL_FPGA ?= 0 # currently only used for difftest
 ifeq ($(TRACERTL_MODE),1)
 override SIM_ARGS += --trace-rtl
 RELEASE_ARGS += --trace-rtl
 PLDM_ARGS += --trace-rtl
 endif
 
-ifeq ($(TRACERTLOnFPGA),1)
+ifeq ($(TRACERTL_FPGA),1)
 override SIM_ARGS += --trace-rtl-fpga
 RELEASE_ARGS += --trace-rtl-fpga
 PLDM_ARGS += --trace-rtl-fpga
 ifneq ($(TRACERTL_MODE),1)
-$(error TRACERTLOnFPGA requires TRACERTL_MODE)
+$(error TRACERTL_FPGA requires TRACERTL_MODE)
 endif
 endif
 
@@ -183,7 +183,7 @@ $(TOP_V): $(SCALA_FILE)
 	@rm .__head__ .__diff__
 
 verilog: $(TOP_V)
-ifeq ($(TRACERTLOnFPGA),1)
+ifeq ($(TRACERTL_FPGA),1)
 	$(MAKE) trtl-axis-gen
 endif
 
