@@ -281,7 +281,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_hasProvider = t2_mispredictBranchHitTableMask.reduce(_ || _)
 
   // only allocate new entry to tables with longer history
-  private val t2_providerIdxOH = PriorityEncoderOH(t2_mispredictBranchHitTableMask.reverse).asUInt
+  private val t2_providerIdxOH = PriorityEncoderOH(t2_mispredictBranchHitTableMask.reverse).reverse.asUInt
 
   private val t2_longerHistoryTableMask = (~((t2_providerIdxOH - 1.U) | t2_providerIdxOH)).asUInt
 
