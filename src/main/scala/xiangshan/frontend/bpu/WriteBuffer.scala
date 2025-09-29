@@ -90,7 +90,7 @@ class WriteBuffer[T <: WriteReqBundle](
     XSError(
       writePortVec(i).valid && writePortVec(j).valid && writePortVec(i).bits.setIdx === writePortVec(j).bits.setIdx &&
         writePortVec(i).bits.tag.getOrElse(0.U) === writePortVec(j).bits.tag.getOrElse(0.U),
-      "WriteBuffer can not support write same data"
+      f"WriteBuffer can not support write same data on the same cycle, port${i} and port${j} write the same entry "
     )
   }
 
