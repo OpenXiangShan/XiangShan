@@ -25,8 +25,10 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
 
   class ResolveQueueIO extends Bundle {
-    val backendResolve: Vec[Valid[Resolve]] = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
-    val bpuTrain:       Valid[ResolveEntry] = Output(Valid(new ResolveEntry))
+    val backendResolve:     Vec[Valid[Resolve]] = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
+    val backendRedirect:    Bool                = Input(Bool())
+    val backendRedirectPtr: FtqPtr              = Input(new FtqPtr)
+    val bpuTrain:           Valid[ResolveEntry] = Output(Valid(new ResolveEntry))
   }
 
   val io: ResolveQueueIO = IO(new ResolveQueueIO)
@@ -79,6 +81,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     }
   }
 
+  when(io.backendRedirect) {
+    mem.foreach(entry => entry.bits.flushed := entry.bits.ftqIdx > io.backendRedirectPtr)
+  }
+
   private val deqValid = mem(deqPtr.value).valid && !io.backendResolve.map(branch =>
     branch.valid && branch.bits.ftqIdx === mem(deqPtr.value).bits.ftqIdx
   ).reduce(_ || _)
@@ -89,7 +95,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   when(deqValid) {
     deqPtr := deqPtr + 1.U
 
-    mem(deqPtr.value).valid := false.B
+    mem(deqPtr.value).valid        := false.B
+    mem(deqPtr.value).bits.flushed := false.B
     mem(deqPtr.value).bits.branches.foreach(_.valid := false.B)
   }
 
