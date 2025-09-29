@@ -185,7 +185,9 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
     val taken = Mux1H(hitMask, t2_branches.map(_.bits.taken))
     needUpdate   := hitMask.reduce(_ || _)
     newCtr.value := t2_oldCtrs(position).getUpdate(taken)
-    assert(PopCount(hitMask) <= 1.U, "TageBaseTable: multiple resolve branches hit the same position")
+    when(t2_valid) {
+      assert(PopCount(hitMask) <= 1.U, "TageBaseTable: multiple resolve branches hit the same position")
+    }
   }
 
   private val t2_rotatedNewCtrs    = vecRotateRight(t2_newCtrs, t2_alignBankIdx)

@@ -23,7 +23,11 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{DelayN, HasCircularQueuePtrHelper, HasPerfEvents, ParallelPriorityMux, XSError}
+import utility.DelayN
+import utility.HasCircularQueuePtrHelper
+import utility.HasPerfEvents
+import utility.ParallelPriorityMux
+import utility.XSError
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO

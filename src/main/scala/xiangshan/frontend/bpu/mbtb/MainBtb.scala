@@ -279,7 +279,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   dontTouch(t1_replacerSetIdxVec)
   dontTouch(t1_replacerSetIdx)
   dontTouch(t1_writeAlignBankMask)
-  private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
+//  private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
+  private val t1_LFSR         = random.LFSR(16, true.B)
+  private val t1_writeWayMask = UIntToOH(t1_LFSR(log2Ceil(NumWay) - 1, 0))
   require(t1_writeWayMask.getWidth == NumWay, s"Write way mask width mismatch: ${t1_writeWayMask.getWidth} != $NumWay")
 
   private val multiWriteConflict = s2_multihit && s2_fire && t1_writeValid &&
@@ -314,7 +316,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* ** statistics ** */
 
   XSPerfAccumulate("total_train", t1_valid)
-  XSPerfAccumulate("pred_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("train_write_new_entry", t1_writeValid)
   XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
