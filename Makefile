@@ -91,14 +91,14 @@ TRACERTL_MODE ?= 0
 TRACERTLOnFPGA ?= 0 # currently only used for difftest
 ifeq ($(TRACERTL_MODE),1)
 override SIM_ARGS += --trace-rtl
-override RELEASE_ARGS += --trace-rtl
-override PLDM_ARGS += --trace-rtl
+RELEASE_ARGS += --trace-rtl
+PLDM_ARGS += --trace-rtl
 endif
 
 ifeq ($(TRACERTLOnFPGA),1)
 override SIM_ARGS += --trace-rtl-fpga
-override RELEASE_ARGS += --trace-rtl-fpga
-override PLDM_ARGS += --trace-rtl-fpga
+RELEASE_ARGS += --trace-rtl-fpga
+PLDM_ARGS += --trace-rtl-fpga
 ifneq ($(TRACERTL_MODE),1)
 $(error TRACERTLOnFPGA requires TRACERTL_MODE)
 endif
