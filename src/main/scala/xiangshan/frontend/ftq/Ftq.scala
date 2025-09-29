@@ -23,10 +23,7 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.HasCircularQueuePtrHelper
-import utility.HasPerfEvents
-import utility.ParallelPriorityMux
-import utility.XSError
+import utility.{DelayN, HasCircularQueuePtrHelper, HasPerfEvents, ParallelPriorityMux, XSError}
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
@@ -290,8 +287,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
-  resolveQueue.io.backendRedirect    := RegNext(backendRedirect.valid)
-  resolveQueue.io.backendRedirectPtr := RegNext(backendRedirect.bits.ftqIdx)
+  resolveQueue.io.backendRedirect    := DelayN(backendRedirect.valid, 2)
+  resolveQueue.io.backendRedirectPtr := DelayN(backendRedirect.bits.ftqIdx, 2)
 
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
