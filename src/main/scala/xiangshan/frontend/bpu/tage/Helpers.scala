@@ -19,9 +19,9 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.CommonHelper
+import xiangshan.frontend.bpu.RotateHelper
 
-trait Helpers extends HasTageParameters with HasXSParameter with CommonHelper {
+trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper {
   def getBaseTableSetIndex(pc: PrunedAddr): UInt =
     pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
 
@@ -41,16 +41,4 @@ trait Helpers extends HasTageParameters with HasXSParameter with CommonHelper {
 
   def getBankIndex(pc: PrunedAddr): UInt =
     pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
-
-  def vecRotateRight[T <: Data](vec: Vec[T], idx: UInt): Vec[T] = {
-    require(isPow2(vec.length))
-    require(idx.getWidth == log2Ceil(vec.length))
-    val len = vec.length
-    // generate all possible results of rotation
-    val rotations = (0 until len).map { i =>
-      val rotatedIndices = (0 until len).map(j => (j + i) % len)
-      i.U -> VecInit(rotatedIndices.map(idx => vec(idx)))
-    }
-    MuxLookup(idx, vec)(rotations)
-  }
 }
