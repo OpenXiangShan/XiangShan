@@ -1322,7 +1322,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     s2_troublem
 
   // need allocate new entry
-  val s2_can_query = !(s2_dcache_fast_rep || s2_nuke) && s2_troublem
+  val s2_can_query = !(s2_dcache_fast_rep || s2_in.rep_info.nuke) && s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && s2_full_fwd
 
