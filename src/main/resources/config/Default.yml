@@ -38,7 +38,7 @@ WFIResume: true
 
 SeperateDM: false
 
-SeperateBus: false
+SeperateBus: NONE
 
 SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
