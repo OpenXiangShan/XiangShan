@@ -128,6 +128,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_mbtbHitCondMask = s2_mbtbHitMask.zip(s2_mbtbAttributes).map {
     case (hit, attribute) => hit && attribute.isConditional
   }
+  dontTouch(s2_mbtbHitCondMask.asUInt)
 
   private val s2_tableResult = s2_mbtbHitCondMask.zip(s2_mbtbPositions).map {
     case (mbtbHit, position) => // for each btb entry
@@ -189,7 +190,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       getSetIndex(t0_startVAddr, hist, tableInfo.NumSets)
   }
 
-  baseTable.io.train.valid := t0_valid
+  baseTable.io.train.valid := t0_trainValid
   baseTable.io.train.bits  := io.train.bits
 
   tables.zipWithIndex.foreach {

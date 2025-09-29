@@ -170,20 +170,24 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s2_tag              = RegEnable(s1_tag, s1_fire)
   private val s2_posHighesBits    = RegEnable(s1_posHighestBits, s1_fire)
   private val s2_crossPageMask    = RegEnable(s1_crossPageMask, s1_fire)
+  private val s2_alignBankIdx     = RegEnable(s1_alignBankIdx, s1_fire)
   private val s2_positions = s2_rawBtbEntries zip s2_posHighesBits map { case (entry, h) =>
     Cat(h, entry.position) // Add higher bits before using
   }
   private val s2_rawHitMask = s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag)
   private val s2_hitMask = s2_rawHitMask.zip(s2_positions).zip(s2_crossPageMask).map {
     case ((hit, position), isCrossPage) =>
-      hit && position > s2_startVAddr(FetchBlockSizeWidth - 1, 1) && !isCrossPage
+      Mux(
+        s2_alignBankIdx === 0.U,
+        hit && position > s2_startVAddr(FetchBlockSizeWidth - 1, 1) && !isCrossPage,
+        hit && ((position +& (FetchBlockAlignSize / 2).U) > s2_startVAddr(FetchBlockSizeWidth - 1, 1)) && !isCrossPage
+      )
   }
   private val s2_targets =
     s2_rawBtbEntries.map(e =>
       getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
     ) // FIXME: parameterize target carry
 
-  private val s2_alignBankIdx       = getAlignBankIndex(s2_startVAddr)
   private val s2_thisReplacerSetIdx = getReplacerSetIndex(s2_startVAddr)
   private val s2_nextReplacerSetIdx = s2_thisReplacerSetIdx + 2.U
   private val s2_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
@@ -261,6 +265,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   t1_writeEntry.attribute       := t1_mispredictBranch.bits.attribute
   t1_writeEntry.stronglyBiased  := false.B  // FIXME
   t1_writeEntry.replaceCnt      := DontCare // FIXME:
+
+  dontTouch(t1_writeEntry.position)
+
   private val t1_writeAlignBankMask = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     // FIXME: not working for NumAlignBanks > 2
     bankIdx.U === (t1_mispredictBranch.bits.cfiPosition.asBools.last + t1_alignBankIdx)
@@ -280,6 +287,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   dontTouch(t1_replacerSetIdx)
   dontTouch(t1_writeAlignBankMask)
   private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
+//  private val t1_LFSR         = random.LFSR(16, true.B)
+//  private val t1_writeWayMask = UIntToOH(t1_LFSR(log2Ceil(NumWay) - 1, 0))
   require(t1_writeWayMask.getWidth == NumWay, s"Write way mask width mismatch: ${t1_writeWayMask.getWidth} != $NumWay")
 
   private val multiWriteConflict = s2_multihit && s2_fire && t1_writeValid &&
@@ -314,7 +323,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* ** statistics ** */
 
   XSPerfAccumulate("total_train", t1_valid)
-  XSPerfAccumulate("pred_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("train_write_new_entry", t1_writeValid)
   XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)

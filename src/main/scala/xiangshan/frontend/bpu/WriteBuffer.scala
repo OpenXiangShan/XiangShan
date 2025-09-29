@@ -87,7 +87,8 @@ class WriteBuffer[T <: WriteReqBundle](
   for (p <- 0 until numPorts) {
     for (e <- 0 until numEntries) {
       hitMask(p)(e) := writePort.valid && valids(p)(e) && writePort.bits.setIdx === entries(p)(e).setIdx &&
-        writePort.bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U)
+        writePort.bits.tag.getOrElse(0.U) === entries(p)(e).tag.getOrElse(0.U) &&
+        writePort.bits.position.getOrElse(0.U) === entries(p)(e).position.getOrElse(0.U)
     }
   }
   assert(PopCount(hitMask.flatten) <= 1.U, "WriteBuffer hitMask should be one-hot")

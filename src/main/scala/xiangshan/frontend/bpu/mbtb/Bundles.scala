@@ -50,6 +50,7 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
   val setIdx:       UInt         = UInt(SetIdxLen.W)
   val entry:        MainBtbEntry = new MainBtbEntry
   override def tag: Option[UInt] = Some(entry.tag) // use entry's tag directly
+  override def position: Option[UInt] = Some(entry.position) // use entry's tag directly
 }
 
 class ReplacerIO(implicit p: Parameters) extends MainBtbBundle {

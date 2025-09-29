@@ -50,4 +50,5 @@ abstract class WriteReqBundle(implicit p: Parameters) extends BpuBundle {
   val setIdx: UInt
   def tag: Option[UInt]            = None
   def cnt: Option[SaturateCounter] = None
+  def position: Option[UInt] = None
 }

@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ChiselDB
 import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
@@ -255,6 +256,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map {
     case (hit, attribute) => hit && (attribute.isDirect || attribute.isIndirect)
   })
+  dontTouch(s2_condTakenMask.asUInt)
+  dontTouch(s2_jumpMask.asUInt)
   private val s2_takenMask          = s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b }
   private val s2_taken              = s2_takenMask.reduce(_ || _)
   private val s2_firstTakenBranchOH = getMinimalValueOH(s2_mbtbResult.positions, s2_takenMask)
@@ -279,7 +282,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
       s3_fallThroughPrediction.target,
       Seq(
 //        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
-        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
+//        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
         s3_taken                                                                -> s3_mbtbTarget
       )
     )
@@ -294,11 +297,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s3_positionDiff  = s3_override && s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition
   private val s3_attributeDiff = s3_override && !(s3_prediction.attribute === s3_s1Prediction.attribute)
 
-  private val s3_mbtbHitUbtb = s3_mbtbResult.hitMask.zip(s3_mbtbResult.positions).zip(s3_mbtbResult.attributes)
+  private val perf_mbtbHitUbtb = s3_mbtbResult.hitMask.zip(s3_mbtbResult.positions).zip(s3_mbtbResult.attributes)
     .zip(s3_mbtbResult.targets).map { case (((hit, position), attribute), target) =>
       hit && position === s3_s1Prediction.cfiPosition && attribute === s3_s1Prediction.attribute &&
       target === s3_s1Prediction.target
-    }.reduce(_ || _) && s3_override && s3_s1Prediction.taken
+    }.reduce(_ || _)
+  private val perf_tageWrong1NT3T =
+    io.toFtq.prediction.fire && s3_override && !s3_s1Prediction.taken && s3_prediction.taken
+  private val perf_tageWrong1T3NT =
+    io.toFtq.prediction.fire && s3_override && s3_s1Prediction.taken && !s3_prediction.taken && perf_mbtbHitUbtb
+  private val perf_tageWrong1T3T =
+    io.toFtq.prediction.fire && s3_override && s3_s1Prediction.taken && s3_prediction.taken && perf_mbtbHitUbtb &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition
+  private val perf_totalTageWrong = perf_tageWrong1NT3T || perf_tageWrong1T3NT || perf_tageWrong1T3T
+  private val perf_mbtbMiss       = s3_override && s3_s1Prediction.taken && !perf_mbtbHitUbtb
 
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_override
@@ -450,7 +462,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   XSPerfAccumulate("s3_target_diff", s3_targetDiff)
   XSPerfAccumulate("s3_position_diff", s3_positionDiff)
   XSPerfAccumulate("s3_attribute_diff", s3_attributeDiff)
-  XSPerfAccumulate("s3_mbtb_hit_ubtb", s3_mbtbHitUbtb)
+  XSPerfAccumulate("s3_override_tageWrong1NT3T", perf_tageWrong1NT3T)
+  XSPerfAccumulate("s3_override_tageWrong1T3NT", perf_tageWrong1T3NT)
+  XSPerfAccumulate("s3_override_tageWrong1T3T", perf_tageWrong1T3T)
+  XSPerfAccumulate("s3_override_tageWrong", perf_totalTageWrong)
+  XSPerfAccumulate("s3_override_mbtbMiss", perf_mbtbMiss)
 
   /* *** perf train *** */
   XSPerfAccumulate("train", io.fromFtq.train.valid)
