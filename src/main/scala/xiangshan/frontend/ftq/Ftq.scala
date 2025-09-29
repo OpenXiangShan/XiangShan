@@ -290,8 +290,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
-  resolveQueue.io.backendRedirect    := backendRedirect.valid
-  resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
+  resolveQueue.io.backendRedirect    := RegNext(backendRedirect.valid)
+  resolveQueue.io.backendRedirectPtr := RegNext(backendRedirect.bits.ftqIdx)
 
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
