@@ -207,9 +207,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = true)
           }), tail)
-        case "--seperate-tl-bus" :: tail =>
+        case "--seperate-bus" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateBus = SeperatedBusType.withName(value))
           }), tail)
         case "--seperate-dm" :: tail =>
           nextOption(config.alter((site, here, up) => {
