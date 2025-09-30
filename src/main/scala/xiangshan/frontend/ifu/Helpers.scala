@@ -19,9 +19,12 @@ import chisel3._
 import chisel3.util._
 import utility.SignExt
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
+import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.BrType
+import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.icache.ICacheRespBundle
 
 trait PreDecodeHelper extends HasIfuParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
@@ -55,13 +58,6 @@ trait PreDecodeHelper extends HasIfuParameters {
   }
 }
 
-trait FetchBlockHelper extends HasIfuParameters {
-  def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
-    val byteOffset = (pc - start).toUInt
-    (byteOffset - instBytes.U)(FetchBlockInstOffsetWidth, instOffsetBits)
-  }
-}
-
 trait IfuHelper extends HasIfuParameters {
   private object ShiftType {
     val NoShift     = 0.U(2.W)
@@ -69,6 +65,30 @@ trait IfuHelper extends HasIfuParameters {
     val ShiftRight2 = 2.U(2.W)
     val ShiftRight3 = 3.U(2.W)
   }
+
+  def iCacheMatchAssert(fromICache: Valid[ICacheRespBundle], fetchBlock: Vec[FetchBlockInfo]): Unit =
+    when(fromICache.valid) {
+      assert(
+        fromICache.bits.vAddr(0) === fetchBlock(0).startVAddr &&
+          fromICache.bits.doubleline === fetchBlock(0).doubleline,
+        "On ICache resp.valid, VAddr must match IFU fetchBlock.VAddr"
+      )
+    }
+
+  def mergeInstrRange(needMerge: Bool, firstRange: UInt, secondRange: UInt, firstSize: UInt): UInt =
+    Mux(needMerge, (secondRange << firstSize) | firstRange, firstRange)
+
+  def genPredMask(
+      firstFlag:  Bool,
+      firstIdx:   UInt,
+      secondFlag: Bool,
+      secondIdx:  UInt,
+      select:     Vec[Bool]
+  ): Vec[Bool] =
+    VecInit.tabulate(FetchBlockInstNum) { i =>
+      ((firstIdx === i.U) && !select(i) && firstFlag) || ((secondIdx === i.U) && select(i) && secondFlag)
+    }
+
   def bitMask(index: UInt, blockSize: Int, numBlocks: Int): UInt = {
     val selectOH = UIntToOH(index)
     val blocks   = VecInit((0 until numBlocks).map(i => Mux(selectOH(i), Fill(blockSize, 1.U(1.W)), 0.U(blockSize.W))))
@@ -109,5 +129,15 @@ trait IfuHelper extends HasIfuParameters {
         ShiftType.ShiftRight3 -> (if (i < 3) 0.U.asTypeOf(default) else dataVec(i - 3))
       ))
     })
+  }
+
+  def alignInstrCompact(indata: InstrCompactBundle, shiftNum: UInt): InstrCompactBundle = {
+    val out = Wire(new InstrCompactBundle(IBufferEnqueueWidth))
+    out.instrIndex     := alignData(indata.instrIndex, shiftNum, 0.U.asTypeOf(new InstrIndexEntry))
+    out.instrIsRvc     := alignData(indata.instrIsRvc, shiftNum, false.B)
+    out.selectBlock    := alignData(indata.selectBlock, shiftNum, false.B)
+    out.instrPcLower   := alignData(indata.instrPcLower, shiftNum, 0.U((PcCutPoint + 1).W))
+    out.instrEndOffset := alignData(indata.instrEndOffset, shiftNum, 0.U(log2Ceil(FetchBlockInstNum).W))
+    out
   }
 }

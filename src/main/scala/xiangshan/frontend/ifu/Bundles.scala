@@ -21,11 +21,13 @@ import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.icache.ICacheRespBundle
 
 /* ***
  * Naming:
@@ -70,13 +72,45 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
   val instrRange:     UInt        = UInt(FetchBlockInstNum.W)
   val rawInstrEndVec: UInt        = UInt(FetchBlockInstNum.W)
-  val pcHigh:         UInt        = UInt((VAddrBits - PcCutPoint).W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+
+  def pcHigh: UInt = startVAddr(VAddrBits - 1, PcCutPoint)
+
+  def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
+    val byteOffset = (pc - start).toUInt
+    (byteOffset - instBytes.U)(FetchBlockInstOffsetWidth, instOffsetBits)
+  }
+
+  def fromFtqRequest(ftqFetch: FetchRequestBundle): FetchBlockInfo = {
+    val cfiOffset = ftqFetch.takenCfiOffset.bits
+    val taken     = ftqFetch.takenCfiOffset.valid
+    val jumpRange = Fill(FetchBlockInstNum, !taken) | Fill(FetchBlockInstNum, 1.U(1.W)) >> ~cfiOffset
+    val ftrRange = Fill(FetchBlockInstNum, taken) |
+      Fill(FetchBlockInstNum, 1.U(1.W)) >> ~getBasicBlockIdx(ftqFetch.nextStartVAddr, ftqFetch.startVAddr)
+    val calcInstrRange = jumpRange & ftrRange
+    val calcFetchSize = Mux(
+      taken,
+      cfiOffset + 1.U(log2Ceil(FetchBlockInstNum + 1).W),
+      (ftqFetch.nextStartVAddr - ftqFetch.startVAddr)(log2Ceil(FetchBlockInstNum + 1) + 1, 1)
+    )
+    ftqIdx         := ftqFetch.ftqIdx
+    predTakenIdx   := DontCare // It will be overwritten later with the required value.
+    invalidTaken   := DontCare // It will be overwritten later with the required value.
+    rawInstrEndVec := DontCare // It will be overwritten later with the required value.
+    doubleline     := ftqFetch.crossCacheline
+    takenCfiOffset := ftqFetch.takenCfiOffset
+    instrRange     := calcInstrRange
+    startVAddr     := ftqFetch.startVAddr
+    target         := ftqFetch.nextStartVAddr
+    pcHighPlus1    := ftqFetch.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
+    fetchSize      := calcFetchSize
+    this
+  }
 }
 
 // HasICacheParameters is for PortNumber
-class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
+class ICacheMeta(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
@@ -84,6 +118,19 @@ class ICacheInfo(implicit p: Parameters) extends IfuBundle with HasICacheParamet
   val isForVSnonLeafPTE:  Bool          = Bool()
   val gpAddr:             PrunedAddr    = PrunedAddr(PAddrBitsMax)
   val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
+
+  def isUncache: Bool = pmpMmio || Pbmt.isUncache(itlbPbmt)
+
+  def fromICacheResp(fromICache: ICacheRespBundle): ICacheMeta = {
+    exception          := fromICache.exception
+    pmpMmio            := fromICache.pmpMmio
+    itlbPbmt           := fromICache.itlbPbmt
+    isBackendException := fromICache.isBackendException
+    pAddr              := fromICache.pAddr
+    gpAddr             := fromICache.gpAddr
+    isForVSnonLeafPTE  := fromICache.isForVSnonLeafPTE
+    this
+  }
 }
 
 class FinalPredCheckResult(implicit p: Parameters) extends IfuBundle {
@@ -124,4 +171,12 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val isHalfInstr: Bool       = Bool()
   val halfPc:      PrunedAddr = PrunedAddr(VAddrBits)
   val halfData:    UInt       = UInt(16.W)
+}
+
+class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
+  val instrIndex:     Vec[InstrIndexEntry] = Vec(width, new InstrIndexEntry)
+  val instrIsRvc:     Vec[Bool]            = Vec(width, Bool())
+  val selectBlock:    Vec[Bool]            = Vec(width, Bool())
+  val instrPcLower:   Vec[UInt]            = Vec(width, UInt((PcCutPoint + 1).W))
+  val instrEndOffset: Vec[UInt]            = Vec(width, UInt(log2Ceil(FetchBlockInstNum).W))
 }

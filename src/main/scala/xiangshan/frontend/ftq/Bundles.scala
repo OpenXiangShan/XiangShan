@@ -36,6 +36,7 @@ class MetaEntry(implicit p: Parameters) extends FtqBundle {
 
 class ResolveEntry(implicit p: Parameters) extends FtqBundle {
   val ftqIdx:     FtqPtr     = new FtqPtr
+  val flushed:    Bool       = Bool()
   val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
   // TODO: Reconsider branch number
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
