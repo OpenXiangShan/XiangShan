@@ -159,7 +159,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
     entryQueue(predictionPtr.value).startVAddr     := prediction.bits.startVAddr
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
-    entryQueue(predictionPtr.value).identifiedCfi  := prediction.bits.identifiedCfi
   }
 
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
@@ -245,7 +244,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
   io.toIfu.req.bits.fetch(0).ftqIdx             := ifuPtr(0)
   io.toIfu.req.bits.fetch(0).takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset
-  io.toIfu.req.bits.fetch(0).identifiedCfi      := entryQueue(ifuPtr(0).value).identifiedCfi
 
   io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
   // --------------------------------------------------------------------------------

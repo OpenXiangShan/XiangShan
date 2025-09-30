@@ -72,7 +72,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
       redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
   }
-  io.toFrontendBJUResolve.get.valid := io.out.valid && (io.in.bits.ctrl.identifiedCfi.get || isMisPred)
+  io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend)

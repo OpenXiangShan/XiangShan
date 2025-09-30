@@ -258,14 +258,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(dealInstrValid.take(i))
   }
-  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(dealInstrValid)
-  private val twoFetchIdentifiedCfi = VecInit.tabulate(FetchBlockInstNum) { i =>
-    // This is a dirty hack, make sure it's correct.
-    val identifiedCfi = s2_fetchBlock(0).identifiedCfi
-    if (i == 0) Mux(s2_prevLastIsHalfRvi | rawIsRvc(0), identifiedCfi(0), identifiedCfi(1))
-    else if (i < FetchBlockInstNum - 1) Mux(rawIsRvc(i), identifiedCfi(i), identifiedCfi(i + 1))
-    else identifiedCfi(i)
-  }
+  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid)
   instrCompactor.io.req.fetchSize(0)            := s2_fetchBlock(0).fetchSize
   instrCompactor.io.req.fetchSize(1)            := s2_fetchBlock(1).fetchSize
   instrCompactor.io.req.startVAddr(0)           := s2_fetchBlock(0).startVAddr
@@ -273,7 +266,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   instrCompactor.io.req.rawInstrValid           := dealInstrValid
   instrCompactor.io.req.rawIsRvc                := rawIsRvc
   instrCompactor.io.req.instrCountBeforeCurrent := instrCountBeforeCurrent
-  instrCompactor.io.req.identifiedCfi           := twoFetchIdentifiedCfi
   private val instrCompactInfo = Wire(new InstrCompactBundle(FetchBlockInstNum))
   instrCompactInfo                   := instrCompactor.io.resp
   instrCompactInfo.instrEndOffset(0) := Mux(s2_prevLastIsHalfRvi, 0.U, Mux(rawIsRvc(0), 0.U, 1.U))
@@ -690,9 +682,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
   }
-  io.toIBuffer.bits.illegalInstr  := s4_alignIll
-  io.toIBuffer.bits.triggered     := s4_alignTriggered
-  io.toIBuffer.bits.identifiedCfi := s4_alignCompactInfo.identifiedCfi
+  io.toIBuffer.bits.illegalInstr := s4_alignIll
+  io.toIBuffer.bits.triggered    := s4_alignTriggered
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>

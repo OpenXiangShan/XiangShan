@@ -74,7 +74,6 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val rawInstrEndVec: UInt        = UInt(FetchBlockInstNum.W)
   val pcHighPlus1:    UInt        = UInt((VAddrBits - PcCutPoint).W)
   val fetchSize:      UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
-  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 
   def pcHigh: UInt = startVAddr(VAddrBits - 1, PcCutPoint)
 
@@ -106,7 +105,6 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
     target         := ftqFetch.nextStartVAddr
     pcHighPlus1    := ftqFetch.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
     fetchSize      := calcFetchSize
-    identifiedCfi  := ftqFetch.identifiedCfi
     this
   }
 }
@@ -181,5 +179,4 @@ class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
   val selectBlock:    Vec[Bool]            = Vec(width, Bool())
   val instrPcLower:   Vec[UInt]            = Vec(width, UInt((PcCutPoint + 1).W))
   val instrEndOffset: Vec[UInt]            = Vec(width, UInt(log2Ceil(FetchBlockInstNum).W))
-  val identifiedCfi:  Vec[Bool]            = Vec(width, Bool())
 }
