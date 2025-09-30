@@ -38,6 +38,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val condTakenMask:          Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val readBankIdx:            UInt                  = Output(UInt(log2Ceil(NumBanks).W)) // to resolveQueue
+    val meta:                   TageMeta              = Output(new TageMeta)
   }
   val io: TageIO = IO(new TageIO)
 
@@ -149,10 +150,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val hasProvider = result._1
       val pred        = result._2
       val altPred     = s2_baseTableCtrs(position).isPositive
-      hit && Mux(hasProvider, pred, altPred)
+      hit && altPred
   }
 
-  io.condTakenMask := s2_condTakenMask
+  io.condTakenMask      := s2_condTakenMask
+  io.meta.baseTableCtrs := s2_baseTableCtrs
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -364,7 +366,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  XSPerfAccumulate("total_train", t0_valid)
+  XSPerfAccumulate("total_train", io.train.valid)
+  XSPerfAccumulate("total_actual_train", t0_valid)
   XSPerfAccumulate("read_conflict", t0_readBankConflict)
+  XSPerfAccumulate("hit_table", t2_valid && t2_hasProvider)
+  XSPerfAccumulate("allocate", t2_valid && t2_needAllocate)
   // TODO: add more
 }

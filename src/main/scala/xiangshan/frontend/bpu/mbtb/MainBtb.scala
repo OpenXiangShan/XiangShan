@@ -221,7 +221,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.result.targets    := s2_targets
   io.result.attributes := s2_rawBtbEntries.map(_.attribute)
 
-  io.meta.hitMask            := s2_hitMask
+  io.meta.hitMask            := s2_rawHitMask
   io.meta.positions          := s2_positions
   io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
   io.meta.attributes         := s2_rawBtbEntries.map(_.attribute)
@@ -243,14 +243,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_setIdxVec =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < t1_alignBankIdx, t1_nextSetIdx, t1_thisSetIdx))
 
-  private val t1_mispredictBranch = io.train.bits.mispredictBranch
+  private val t1_mispredictBranch = t1_train.mispredictBranch
 
   private val t1_hitMispredictBranch = t1_meta.hitMask.zip(t1_meta.positions).zip(t1_meta.attributes).map {
     case ((hit, position), attribute) =>
       hit && position === t1_mispredictBranch.bits.cfiPosition && attribute === t1_mispredictBranch.bits.attribute
-  }.reduce(_ || _) && t1_mispredictBranch.valid
+  }.reduce(_ || _)
 
-  private val t1_writeValid = t1_valid && !t1_hitMispredictBranch
+  private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
   t1_writeEntry.valid           := true.B   // FIXME: invalidate
@@ -314,11 +314,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* ** statistics ** */
 
   XSPerfAccumulate("total_train", t1_valid)
-  XSPerfAccumulate("mbtb_pred_has_hit", s2_fire && s2_hitMask.reduce(_ || _))
+  XSPerfAccumulate("pred_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("mbtb_pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
-  XSPerfAccumulate("mbtb_update_new_entry", t1_writeValid)
-  XSPerfAccumulate("mbtb_update_has_mispredict", t1_valid && t1_mispredictBranch.valid)
-  XSPerfAccumulate("mbtb_update_hit_mispredict", t1_valid && t1_hitMispredictBranch)
+  XSPerfAccumulate("train_write_new_entry", t1_writeValid)
+  XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
+  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && t1_hitMispredictBranch)
   XSPerfAccumulate("mbtb_multihit_write_conflict", multiWriteConflict)
   XSPerfHistogram("mbtb_multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay * NumAlignBanks)
 }

@@ -26,6 +26,7 @@ import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
+import xiangshan.frontend.bpu.tage.TageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -185,8 +186,11 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val ras:    RasMeta      = new RasMeta
   val phr:    PhrPtr       = new PhrPtr
   val ittage: IttageMeta   = new IttageMeta
+  val tage:   TageMeta     = new TageMeta
   // used for performance counter
   val perf_s3Prediction: Prediction = new Prediction
+  // used for debug
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 /* *** internal const & type *** */

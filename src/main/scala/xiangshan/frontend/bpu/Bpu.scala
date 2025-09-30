@@ -278,7 +278,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
     MuxCase(
       s3_fallThroughPrediction.target,
       Seq(
-        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
+//        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
         (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
         s3_taken                                                                -> s3_mbtbTarget
       )
@@ -287,7 +287,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
   private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
 
-//  s3_override := s3_valid && !s3_prediction.isIdentical(s3_s1Prediction)
+  s3_override := s3_valid && !(s3_prediction === s3_s1Prediction)
+
+  private val s3_takenDiff     = s3_override && s3_prediction.taken =/= s3_s1Prediction.taken
+  private val s3_targetDiff    = s3_override && s3_prediction.target =/= s3_s1Prediction.target
+  private val s3_positionDiff  = s3_override && s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition
+  private val s3_attributeDiff = s3_override && !(s3_prediction.attribute === s3_s1Prediction.attribute)
+
+  private val s3_mbtbHitUbtb = s3_mbtbResult.hitMask.zip(s3_mbtbResult.positions).zip(s3_mbtbResult.attributes)
+    .zip(s3_mbtbResult.targets).map { case (((hit, position), attribute), target) =>
+      hit && position === s3_s1Prediction.cfiPosition && attribute === s3_s1Prediction.attribute &&
+      target === s3_s1Prediction.target
+    }.reduce(_ || _) && s3_override && s3_s1Prediction.taken
 
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_override
@@ -307,6 +318,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
 
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
+
+  // tage meta
+  private val s3_tageMeta = RegEnable(tage.io.meta, s2_fire)
 
   // ittage meta
   private val s3_ittageMeta = ittage.io.meta
@@ -329,6 +343,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   s3_meta.phr               := s3_phrMeta
   s3_meta.ittage            := s3_ittageMeta
   s3_meta.perf_s3Prediction := s3_prediction
+  s3_meta.startVAddr        := s3_pc
+  s3_meta.tage              := s3_tageMeta
+
+  when(io.fromFtq.train.valid) {
+    assert(io.fromFtq.train.bits.startVAddr === io.fromFtq.train.bits.meta.startVAddr, "meta startVAddr mismatch")
+  }
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
@@ -425,6 +445,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Co
   )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
+
+  XSPerfAccumulate("s3_taken_diff", s3_takenDiff)
+  XSPerfAccumulate("s3_target_diff", s3_targetDiff)
+  XSPerfAccumulate("s3_position_diff", s3_positionDiff)
+  XSPerfAccumulate("s3_attribute_diff", s3_attributeDiff)
+  XSPerfAccumulate("s3_mbtb_hit_ubtb", s3_mbtbHitUbtb)
 
   /* *** perf train *** */
   XSPerfAccumulate("train", io.fromFtq.train.valid)
