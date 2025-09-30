@@ -28,8 +28,7 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
   val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 }
 
-class BaseTableSramWriteReq(implicit p: Parameters) extends WriteReqBundle
-    with HasTageParameters {
+class BaseTableSramWriteReq(implicit p: Parameters) extends TageBundle {
   val setIdx:    UInt                 = UInt(BaseTableSetIdxWidth.W)
   val wayMask:   UInt                 = UInt(FetchBlockAlignInstNum.W)
   val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
