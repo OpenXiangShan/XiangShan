@@ -288,12 +288,46 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
 
   def apply(item: PtwRespS2): TlbSectorEntry = {
     this.asid := item.s1.entry.asid
-    val inner_level = MuxLookup(item.s2xlate, 2.U)(Seq(
+    val merge_level = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.level.getOrElse(0.U),
       allStage -> (item.s1.entry.level.getOrElse(0.U) min item.s2.entry.level.getOrElse(0.U)),
       noS2xlate -> item.s1.entry.level.getOrElse(0.U)
     ))
+    /* In previous design, the smaller value between the stage1 and stage2 levels was always written back into
+    the TLB entry. However, this approach caused issues when exceptions occurred: a larger page could mistakenly
+    be treated as a smaller one. During TLB lookups this would only result in performance bugs, for example:
+
+    (1) The first lookup of vpn 0x0 should return a 1 GB page, but instead a 2 MB page is written back.
+    (2) The second lookup of vpn 0x0 + 4 MB should hit, but because the level written back last time was incorrect,
+    it actually misses, triggering another PTW.
+    (3) After the PTW completes, a new 2 MB page starting at vpn 0x0 + 4 MB is written back.
+
+    However, this handling leads to a functional bug in the sfence scenario. For a 1 GB page, an sfence with any
+    address within the 1 GB range should be able to invalidate the page. If the page is mistakenly treated as only
+    2 MB, the sfence may fail to invalidate the page as expected, causing a functional bug.
+
+    Specifically, for allStage with exceptions:
+
+    1. If stage1 encounters an exception, the entry’s level should be written back as s1_level.
+    2. If stage2 encounters an exception:
+    (1) If stage1 is a fakePTE, the entry’s level should be written back as the maximum value
+    (indicating vsatp is misconfigured).
+    (2) If stage1 is a non-leaf node, the entry’s level should be written back as s1_level.
+    (3) If stage1 is a leaf node, the entry’s level should be written back as the smaller value of stage1 and stage2.
+
+    In fact, the stage1_level min stage2_level logic is used in multiple places in the code. But in those other cases,
+    it is only used for lookups and does not affect sfence invalidation.
+    Therefore, for now, only this particular case needs to be fixed.
+    */
+    val s1_valid = !item.s1.isFakePte()
+    val s1_exception = (item.s1.pf || item.s1.af) && s1_valid
+    val s2_exception = item.s2.gpf || item.s2.gaf
+    val s1_leaf = item.s1.isLeaf()
+    val allStage_level =
+      Mux(s1_exception || (s2_exception && !s1_leaf), item.s1.entry.level.getOrElse(0.U),
+        Mux(s2_exception && !s1_valid, 3.U, merge_level))
+    val inner_level = Mux(item.s2xlate =/= allStage, merge_level, allStage_level)
     this.level.map(_ := inner_level)
     this.perm.apply(item.s1)
     this.pbmt := item.s1.entry.pbmt
