@@ -38,12 +38,12 @@ WFIResume: true
 
 SeperateDM: false
 
-SeperateTLBus: false
+SeperateBus: NONE
 
-SeperateTLBusRanges:
+SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
 
-EnableSeperateTLBusAsyncBridge: true
+EnableSeperateBusAsyncBridge: true
 
 IMSICBusType: AXI
 

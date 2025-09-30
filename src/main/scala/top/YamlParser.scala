@@ -44,9 +44,9 @@ case class YamlConfig(
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
   SeperateDM: Option[Boolean],
-  SeperateTLBus: Option[Boolean],
-  SeperateTLBusRanges: Option[List[AddressSet]],
-  EnableSeperateTLBusAsyncBridge: Option[Boolean],
+  SeperateBus: Option[String],
+  SeperateBusRanges: Option[List[AddressSet]],
+  EnableSeperateBusAsyncBridge: Option[Boolean],
   IMSICBusType: Option[String],
   IMSICParams: Option[IMSICParams],
   CHIIssue: Option[String],
@@ -127,20 +127,20 @@ object YamlParser {
         case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = enable)
       })
     }
-    yamlConfig.SeperateTLBus.foreach { enable =>
+    yamlConfig.SeperateBus.foreach { busType =>
       newConfig = newConfig.alter((site, here, up) => {
-        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = enable)
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateBus = top.SeperatedBusType.withName(busType))
       })
     }
-    yamlConfig.SeperateTLBusRanges.foreach { ranges =>
+    yamlConfig.SeperateBusRanges.foreach { ranges =>
       newConfig = newConfig.alter((site, here, up) => {
-        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBusRanges = ranges)
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateBusRanges = ranges)
       })
     }
-    yamlConfig.EnableSeperateTLBusAsyncBridge.foreach { enable =>
+    yamlConfig.EnableSeperateBusAsyncBridge.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(
-          SeperateTLAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+          SeperateBusAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 1, sync = 3, safe = false))
         )
       })
     }
