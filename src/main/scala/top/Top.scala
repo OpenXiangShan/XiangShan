@@ -176,13 +176,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       recv := core_with_l2(i).core_l3_pf_port.get
     })
     misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
-      // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
+      // SeperateBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")
       println(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
       require(core_with_l2(i).sep_tl_opt.isDefined)
-      require(SeperateTLBusRanges.size >= 1)
-      require(SeperateTLBusRanges.head.base <= p(DebugModuleKey).get.address.base)
-      require(SeperateTLBusRanges.head.base <= p(SoCParamsKey).TIMERRange.base)
+      require(SeperateBusRanges.size >= 1)
+      require(SeperateBusRanges.head.base <= p(DebugModuleKey).get.address.base)
+      require(SeperateBusRanges.head.base <= p(SoCParamsKey).TIMERRange.base)
       SepTLXbarOpt := core_with_l2(i).sep_tl_opt.get
     }
   }
