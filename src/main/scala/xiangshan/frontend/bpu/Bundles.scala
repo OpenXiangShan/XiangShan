@@ -162,6 +162,13 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
     Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
 
+// use s3 prediction to train ubtb and abtb
+class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
+  val startVAddr:      PrunedAddr   = PrunedAddr(VAddrBits)
+  val finalPrediction: Prediction   = new Prediction
+  val abtbMeta:        AheadBtbMeta = new AheadBtbMeta
+}
+
 class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val rasMeta:   RasMeta         = new RasMeta
   val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
@@ -180,11 +187,10 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val abtb:   AheadBtbMeta = new AheadBtbMeta
-  val mbtb:   MainBtbMeta  = new MainBtbMeta
-  val ras:    RasMeta      = new RasMeta
-  val phr:    PhrPtr       = new PhrPtr
-  val ittage: IttageMeta   = new IttageMeta
+  val mbtb:   MainBtbMeta = new MainBtbMeta
+  val ras:    RasMeta     = new RasMeta
+  val phr:    PhrPtr      = new PhrPtr
+  val ittage: IttageMeta  = new IttageMeta
   // used for performance counter
   val perf_s3Prediction: Prediction = new Prediction
 }
