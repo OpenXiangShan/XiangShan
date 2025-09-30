@@ -23,6 +23,7 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DelayN
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.ParallelPriorityMux
@@ -290,15 +291,19 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
+  resolveQueue.io.backendRedirect    := DelayN(backendRedirect.valid, 2)
+  resolveQueue.io.backendRedirectPtr := DelayN(backendRedirect.bits.ftqIdx, 2)
+
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
   // --------------------------------------------------------------------------------
+
   resolveQueue.io.backendResolve := io.fromBackend.resolve
 
-  metaQueue.io.ren   := resolveQueue.io.bpuTrain.valid
+  metaQueue.io.ren   := resolveQueue.io.bpuTrain.valid && !resolveQueue.io.bpuTrain.bits.flushed
   metaQueue.io.raddr := resolveQueue.io.bpuTrain.bits.ftqIdx.value
 
-  io.toBpu.train.valid           := RegNext(resolveQueue.io.bpuTrain.valid)
+  io.toBpu.train.valid           := RegNext(resolveQueue.io.bpuTrain.valid && !resolveQueue.io.bpuTrain.bits.flushed)
   io.toBpu.train.bits.meta       := metaQueue.io.rdata.meta
   io.toBpu.train.bits.startVAddr := RegEnable(resolveQueue.io.bpuTrain.bits.startVAddr, resolveQueue.io.bpuTrain.valid)
   io.toBpu.train.bits.branches   := RegEnable(resolveQueue.io.bpuTrain.bits.branches, resolveQueue.io.bpuTrain.valid)
