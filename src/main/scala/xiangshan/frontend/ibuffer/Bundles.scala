@@ -92,8 +92,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val fixedTaken:       Bool          = Bool()
   val ftqPtr:           FtqPtr        = new FtqPtr
   val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
-  val exceptionType:    UInt          = IBufferExceptionType()
-  val backendException: Bool          = Bool()
+//  val exceptionType:    UInt          = IBufferExceptionType()
+//  val backendException: Bool          = Bool()
   val triggered:        UInt          = TriggerAction()
   val isLastInFtqEntry: Bool          = Bool()
   val debug_seqNum:     InstSeqNum    = InstSeqNum()
@@ -107,19 +107,19 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     fixedTaken     := fetch.instrEndOffset(i).fixedTaken
     ftqPtr         := fetch.ftqPtr(i)
     instrEndOffset := fetch.instrEndOffset(i).offset
-    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-      fetch.exceptionType(i),
-      fetch.crossPageIPFFix(i),
-      fetch.illegalInstr(i)
-    )
-    backendException := fetch.backendException(i)
+//    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+//      fetch.exceptionType(i),
+//      fetch.crossPageIPFFix(i),
+//      fetch.illegalInstr(i)
+//    )
+//    backendException := fetch.backendException(i)
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
     debug_seqNum     := fetch.debug_seqNum(i)
     this
   }
 
-  def toIBufOutEntry: IBufOutEntry = {
+  def toIBufOutEntry(exceptionType: UInt, backendException: Bool): IBufOutEntry = {
     val result = Wire(new IBufOutEntry)
     result.inst             := inst
     result.pc               := pc
