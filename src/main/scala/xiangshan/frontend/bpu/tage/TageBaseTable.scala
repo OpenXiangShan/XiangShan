@@ -51,7 +51,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   // use a write buffer to store the write requests when read and write are both valid
   private val writeBuffers =
     Seq.fill(BaseTableNumAlignBanks, NumBanks)(
-      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1, pipe = true))
+      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1))
     )
 
   // Connect write buffers to SRAMs
