@@ -258,7 +258,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(dealInstrValid.take(i))
   }
-  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(dealInstrValid)
+  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid)
   instrCompactor.io.req.fetchSize(0)            := s2_fetchBlock(0).fetchSize
   instrCompactor.io.req.fetchSize(1)            := s2_fetchBlock(1).fetchSize
   instrCompactor.io.req.startVAddr(0)           := s2_fetchBlock(0).startVAddr
@@ -682,8 +682,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
   }
-  io.toIBuffer.bits.illegalInstr  := s4_alignIll
-  io.toIBuffer.bits.triggered     := s4_alignTriggered
+  io.toIBuffer.bits.illegalInstr := s4_alignIll
+  io.toIBuffer.bits.triggered    := s4_alignTriggered
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
