@@ -79,7 +79,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       req_out(i).fullva := EffectiveVa(i)
     }
   }
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i) || flush_mmu))
 
   val isHyperInst = (0 until Width).map(i => req_out_v(i) && req_out(i).hyperinst)
 
