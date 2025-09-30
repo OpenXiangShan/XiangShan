@@ -632,11 +632,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val wakeup_hitVec_delay = VecInit(wakeup_data_resp.zip(wakeup_vVec_delay.asBools).zip(wakeup_hVec_delay).map { case ((wayData, v), h) =>
       wayData.entries.hit(wakeup_delay_vpn, io.csr_dup(0).satp.asid, io.csr_dup(0).vsatp.asid, io.csr_dup(0).hgatp.vmid, s2xlate = wakeup_delay_h) && v && (wakeup_delay_h === h)})
 
-    val wakeup_setindex_delay = wakeup_req_delay.setIndex
-    val wakeup_way_info_delay = wakeup_req_delay.way_info
+    val wakeup_req_valid = OneCycleValid(wakeup_req_delay_valid, flush)
+    val wakeup_req = RegEnable(wakeup_req_delay, wakeup_req_delay_valid)
+    val wakeup_hitVec = RegEnable(wakeup_hitVec_delay, wakeup_req_delay_valid)
+    val wakeup_setindex = wakeup_req.setIndex
+    val wakeup_way_info = wakeup_req.way_info
 
-    when (wakeup_req_delay_valid && wakeup_hitVec_delay(OHToUInt(wakeup_way_info_delay))) {
-      l0BitmapReg(wakeup_setindex_delay)(OHToUInt(wakeup_way_info_delay))(wakeup_req_delay.pte_index) := wakeup_req_delay.check_success
+    when (wakeup_req_valid && wakeup_hitVec(OHToUInt(wakeup_way_info))) {
+      l0BitmapReg(wakeup_setindex)(OHToUInt(wakeup_way_info))(wakeup_req.pte_index) := wakeup_req.check_success
     }
   }
 
