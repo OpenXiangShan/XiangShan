@@ -619,7 +619,7 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      val cross2Ftq = decodePipeRename(i).bits.isLastInFtqEntry && decodePipeRename(i + 1).bits.isLastInFtqEntry
+      val cross2Ftq = decodePipeRename(i).bits.isLastInFtqEntry && decodePipeRename(i + 1).bits.isLastInFtqEntry && backendParams.robCompressEn.B
       val cross1Ftq = decodePipeRename(i).bits.isLastInFtqEntry || decodePipeRename(i + 1).bits.isLastInFtqEntry
       rename.io.in(i + 1).bits.isLastInFtqEntry := cross1Ftq
       rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
