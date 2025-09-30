@@ -14,7 +14,8 @@
 // See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.ifu
-
+import chisel3._
+import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 
 case class IfuParameters(
@@ -28,6 +29,7 @@ trait HasIfuParameters extends HasFrontendParameters {
   // equal lower_result overflow bit
   def PcCutPoint:    Int = ifuParameters.PcCutPoint.getOrElse((VAddrBits / 4) - 1)
   def IfuAlignWidth: Int = frontendParameters.ibufferParameters.NumWriteBank
+  def IfuIdxWidth:   Int = log2Ceil(IBufferEnqueueWidth)
 
   require(PcCutPoint > 0 && PcCutPoint < VAddrBits, s"PcCutPoint($PcCutPoint) must be in range (0, $VAddrBits)")
 }
