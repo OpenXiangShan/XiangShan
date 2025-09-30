@@ -422,15 +422,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Mux(s2_fetchSize(0) > i.U, s2_fetchPcLowerResult(0)(i), s2_fetchPcLowerResult(1)(i))
   )
 
-  // FIXME: This is wrong when 2-taken is enabled
-  private val twoFetchIdentifiedCfi = VecInit.tabulate(FetchBlockInstNum) { i =>
-    // This is a dirty hack, make sure it's correct.
-    val identifiedCfi = s2_ftqFetch(0).identifiedCfi
-    if (i == 0) Mux(s2_prevLastIsHalfRvi | rawIsRvc(0), identifiedCfi(0), identifiedCfi(1))
-    else if (i < FetchBlockInstNum - 1) Mux(rawIsRvc(i), identifiedCfi(i), identifiedCfi(i + 1))
-    else identifiedCfi(i)
-  }
-
   private val s2_rawPcLowerResult = twoFetchPcLowerResult
 
   private val instrSelectLowIndex   = WireDefault(VecInit.fill(FetchBlockInstNum)(true.B))
