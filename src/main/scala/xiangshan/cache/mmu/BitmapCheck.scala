@@ -323,7 +323,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.req.ready := !full
 
   // io.resp.ready always ture
-  val wakeup_valid_1cycle = io.resp.valid && !entries(mem_ptr).hptw_bypassed && entries(mem_ptr).level =/= 0.U && entries(mem_ptr).n === 0.U
+  val wakeup_valid_1cycle = io.resp.valid && !entries(mem_ptr).hptw_bypassed && entries(mem_ptr).level === 0.U && entries(mem_ptr).n === 0.U
   // when wakeup is stall, block resp valid too
   val wakeup_stall = {
     val valid = RegInit(false.B)
