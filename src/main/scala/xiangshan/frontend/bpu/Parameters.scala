@@ -31,7 +31,10 @@ import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 case class BpuParameters(
     // general
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
-    phrParameters:       PhrParameters = PhrParameters(),
+    // debug
+    EnableBpTrace: Boolean = false,
+    // history
+    phrParameters: PhrParameters = PhrParameters(),
     // sub predictors
     ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
     abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
@@ -44,6 +47,8 @@ case class BpuParameters(
 
 trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
+
+  def EnableBpTrace: Boolean = bpuParameters.EnableBpTrace
 
   // general
   def FetchBlockSizeWidth:    Int = log2Ceil(FetchBlockSize)
