@@ -114,7 +114,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
 
     is(UncacheFsmState.WaitResp) {
       when(fromUncache.fire) {
-        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
+        val exception = ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
         val crossPage = fromUncache.bits.incomplete
         uncacheState     := UncacheFsmState.Idle
         uncacheException := exception
