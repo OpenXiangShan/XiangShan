@@ -94,15 +94,15 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Between Bank
   private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
-  private val deqBankPtr:    IBufBankPtr      = deqBankPtrVec(0)
-  private val deqBankPtrVecNext = Wire(deqBankPtrVec.cloneType)
+  private val deqBankPtrVecNext: Vec[IBufBankPtr] = Wire(deqBankPtrVec.cloneType)
+  private val deqBankPtr:        IBufBankPtr      = deqBankPtrVec(0)
   // Inside Bank
-  private val deqInBankPtr: Vec[IBufInBankPtr] = RegInit(VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr)))
-  private val deqInBankPtrNext = Wire(deqInBankPtr.cloneType)
+  private val deqInBankPtr:     Vec[IBufInBankPtr] = RegInit(VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr)))
+  private val deqInBankPtrNext: Vec[IBufInBankPtr] = Wire(deqInBankPtr.cloneType)
 
-  private val deqPtrVec     = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufPtr)))
-  private val deqPtr        = deqPtrVec(0)
-  private val deqPtrVecNext = Wire(deqPtrVec.cloneType)
+  private val deqPtrVec:     Vec[IBufPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufPtr)))
+  private val deqPtrVecNext: Vec[IBufPtr] = Wire(deqPtrVec.cloneType)
+  private val deqPtr:        IBufPtr      = deqPtrVec(0)
 
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
   private val enqPtr    = enqPtrVec(0)
@@ -115,6 +115,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val firstIBufferExceptionType: UInt    = RegInit(IBufferExceptionType.None)
   private val firstBackendException:     Bool    = RegInit(false.B)
   private val firstExceptionIBufIdx:     IBufPtr = RegInit(0.U.asTypeOf(new IBufPtr))
+  private val firstHasException:         Bool    = RegInit(false.B)
   private val deqHasException:           Bool    = Wire(Bool())
   private val deqExceptionOffset:        UInt    = Wire(UInt(log2Ceil(DecodeWidth).W))
 
@@ -240,7 +241,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       }.otherwise {
         out.valid := deqEntries(i).valid
         // use first exceptions
-        when(deqHasException && i.U === deqExceptionOffset) {
+        when(firstHasException && deqHasException && i.U === deqExceptionOffset) {
           out.bits := deqEntries(i).bits.toIBufOutEntry(firstIBufferExceptionType, firstBackendException)
         }.otherwise {
           out.bits := deqEntries(i).bits.toIBufOutEntry(IBufferExceptionType.None, false.B)
@@ -253,7 +254,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         out.bits,
         // use first exceptions
         Mux(
-          deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
+          firstHasException && deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
           VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
             firstIBufferExceptionType,
             firstBackendException
@@ -334,30 +335,12 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
   }
 
-  // Flush
-  when(io.flush) {
-    allowEnq      := true.B
-    enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
-    deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
-    deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
-    deqPtr        := 0.U.asTypeOf(new IBufPtr())
-    outputEntries.foreach(_.valid := false.B)
-    firstIBufferExceptionType := IBufferExceptionType.None
-    firstExceptionIBufIdx     := 0.U.asTypeOf(new IBufPtr())
-    firstBackendException     := false.B
-    canReceiveException       := true.B
-  }.otherwise {
-    deqPtrVec     := deqPtrVecNext
-    deqInBankPtr  := deqInBankPtrNext
-    deqBankPtrVec := deqBankPtrVecNext
-  }
-  io.full := !allowEnq
-
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Exception
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  private val rawRVCII =
+  // bypass exception
+  private val rawRVCII = // restore to raw mask
     (io.in.bits.illegalInstr.asUInt & io.in.bits.enqEnable) >> alignShiftNum
   private val bypassRVCII       = rawRVCII(DecodeWidth - 1, 0)
   private val bypassRVCIIOffset = ParallelPriorityEncoder(bypassRVCII)
@@ -372,6 +355,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     bypassHasExceptionWithoutRVCII ||
       bypassHasRVCII
 
+  // when we have a bypassExceptionWithoutRVCII taken, we mark the exception only on first instruction
+  // otherwise, mark the exception at rvcIll's offset
   bypassExceptionOffset  := Mux(bypassHasExceptionWithoutRVCII, 0.U, bypassRVCIIOffset)
   bypassBackendException := currentBackendException
   bypassIBufferExceptionType := Mux(
@@ -379,7 +364,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       currentExceptionType,
       currentCrossPageIPFFix,
-      bypassRVCII(0)
+      bypassRVCII(0) // rvcIll may happen at offset 0
     ),
     IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       ExceptionType.None,
@@ -388,70 +373,98 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     )
   )
 
-  // Fetch Exceptions from IFU
-  private val firstRVCII       = rawRVCII(FetchBlockInstNum - 1, 0)
-  private val firstRVCIIOffset = ParallelPriorityEncoder(firstRVCII)
-  private val firstHasRVCII    = firstRVCII.orR
-  private val firstHasException =
-    bypassHasExceptionWithoutRVCII ||
-      firstHasRVCII
+  // register the first exception
 
-  private val firstExceptionOffset = Mux(
+  // we calculate rvcIll excluding bypass
+  // when bypassHasRVCII, we use bypassRVCIIOffset
+  // otherwise, we use nextFirstRVCII as higher bits and 8'h0 as lower bits
+  private val nextFirstRVCII = rawRVCII(FetchBlockInstNum - 1, DecodeWidth)
+  private val nextFirstRVCIIOffset = Mux(
+    bypassHasRVCII,
+    bypassRVCIIOffset,
+    ParallelPriorityEncoder(Cat(nextFirstRVCII, Fill(DecodeWidth, false.B)))
+  )
+  private val nextFirstHasRVCII = bypassHasRVCII || nextFirstRVCII.orR
+
+  private val nextFirstExceptionOffset = Mux(
     bypassHasExceptionWithoutRVCII,
     0.U,
-    firstRVCIIOffset
+    nextFirstRVCIIOffset
   )
-
   private val nextFirstBackendException     = WireDefault(false.B)
   private val nextFirstExceptionIBufIdx     = WireDefault(firstExceptionIBufIdx)
   private val nextFirstIBufferExceptionType = WireDefault(IBufferExceptionType.None)
 
-  when(io.in.fire && !io.flush && canReceiveException) {
-    when(nextFirstIBufferExceptionType =/= IBufferExceptionType.None) {
-      canReceiveException := false.B
-    }
-    when(useBypass) {
-      when(bypassIBufferExceptionType =/= IBufferExceptionType.None) {
-        canReceiveException := false.B
-      }
-      when(!bypassHasException && firstHasException) { // only can rvcIll happens
-        nextFirstBackendException     := false.B
-        nextFirstExceptionIBufIdx     := enqPtrVec(firstRVCIIOffset)
-        nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
-      }
-    }.otherwise {
-      nextFirstBackendException := currentBackendException
-      nextFirstExceptionIBufIdx := enqPtrVec(firstExceptionOffset)
-      nextFirstIBufferExceptionType := Mux(
-        bypassHasExceptionWithoutRVCII,
-        IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-          currentExceptionType,
-          currentCrossPageIPFFix,
-          bypassRVCII(0)
-        ),
-        IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-          ExceptionType.None,
-          false.B,
-          firstHasRVCII
-        )
+  when(useBypass && !bypassHasException && nextFirstHasRVCII) { // only can rvcIll happens
+    nextFirstBackendException     := false.B
+    nextFirstExceptionIBufIdx     := enqPtrVec(nextFirstRVCIIOffset)
+    nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
+  }.otherwise {
+    nextFirstBackendException := currentBackendException
+    nextFirstExceptionIBufIdx := enqPtrVec(nextFirstExceptionOffset)
+    nextFirstIBufferExceptionType := Mux(
+      bypassHasExceptionWithoutRVCII,
+      IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+        currentExceptionType,
+        currentCrossPageIPFFix,
+        bypassRVCII(0)
+      ),
+      IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+        ExceptionType.None,
+        false.B,
+        nextFirstHasRVCII
       )
-    }
+    )
+  }
+
+  private val receiveExceptionFire  = io.in.fire && !io.flush && canReceiveException
+  private val nextFirstHasException = nextFirstIBufferExceptionType =/= IBufferExceptionType.None
+
+  when(receiveExceptionFire && nextFirstHasException) {
     firstBackendException     := nextFirstBackendException
     firstExceptionIBufIdx     := nextFirstExceptionIBufIdx
     firstIBufferExceptionType := nextFirstIBufferExceptionType
+    firstHasException         := true.B
   }
+
+  canReceiveException := Mux(
+    receiveExceptionFire &&
+      (nextFirstHasException || (useBypass && bypassHasException)),
+    false.B,
+    canReceiveException
+  )
 
   // Exceptions to outputEntries
   private val deqExceptionMatchMask = VecInit((0 until DecodeWidth).map(i =>
-    deqPtrVec(i) === firstExceptionIBufIdx && firstIBufferExceptionType =/= IBufferExceptionType.None
+    deqPtrVec(i) === firstExceptionIBufIdx && firstHasException
   ))
   private val deqHasExceptionMask = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchMask.asUInt
   deqHasException    := deqHasExceptionMask.orR
   deqExceptionOffset := OHToUInt(deqHasExceptionMask)
 
-  when(deqHasException)(firstIBufferExceptionType := IBufferExceptionType.None)
+  when(deqHasException)(firstHasException := false.B)
 
   XSError(PopCount(deqHasExceptionMask) > 1.U, "exception cannot multiHit")
+
+  // Flush
+  when(io.flush) {
+    allowEnq      := true.B
+    enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
+    deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
+    deqPtrVec     := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    outputEntries.foreach(_.valid := false.B)
+    firstIBufferExceptionType := IBufferExceptionType.None
+    firstExceptionIBufIdx     := 0.U.asTypeOf(new IBufPtr())
+    firstBackendException     := false.B
+    firstHasException         := false.B
+    canReceiveException       := true.B
+  }.otherwise {
+    deqPtrVec     := deqPtrVecNext
+    deqInBankPtr  := deqInBankPtrNext
+    deqBankPtrVec := deqBankPtrVecNext
+  }
+  io.full := !allowEnq
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
