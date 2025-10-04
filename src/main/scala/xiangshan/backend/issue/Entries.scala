@@ -81,6 +81,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val issuedVec           = Wire(Vec(params.numEntries, Bool()))
   val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec         = Wire(Vec(params.numEntries, Bool()))
+  val srcReadyVec         = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(2.W)))
@@ -388,6 +389,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.valid                          := validVec.asUInt
   io.issued                         := issuedVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
+  io.srcReady                       := srcReadyVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
   io.exuSources.foreach(_           := exuSourceVec.get)
@@ -422,6 +424,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
+    srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
     dataSourceVec(entryIdx)     := out.dataSources
@@ -547,6 +550,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val valid               = Output(UInt(params.numEntries.W))
   val issued              = Output(UInt(params.numEntries.W))
   val canIssue            = Output(UInt(params.numEntries.W))
+  val srcReady            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))

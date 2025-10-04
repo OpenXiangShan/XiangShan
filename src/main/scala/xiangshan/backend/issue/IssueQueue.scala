@@ -60,7 +60,12 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
   val status = Output(new IssueQueueStatusBundle(params.numEnq, params.numEntries))
   val validCntDeqVec = Output(Vec(params.numDeq,UInt(params.numEntries.U.getWidth.W)))
-  // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
+  // perf counter
+  val validVec = Output(Vec(params.numEntries, Bool()))
+  val issuedVec = Output(Vec(params.numEntries, Bool()))
+  val fuTypeVec = Output(Vec(params.numEntries, FuType()))
+  val canIssueVec = Output(Vec(params.numEntries, Bool()))
+  val srcReadyVec = Output(Vec(params.numEntries, Bool()))
 
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
@@ -222,6 +227,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val issuedVec = VecInit(entries.io.issued.asBools)
   val requestForTrans = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
+  val srcReadyVec = VecInit(entries.io.srcReady.asBools)
+  io.validVec := validVec
+  io.issuedVec := issuedVec
+  io.canIssueVec := canIssueVec
+  io.srcReadyVec := srcReadyVec
   dontTouch(canIssueVec)
   val deqFirstIssueVec = entries.io.isFirstIssue
 
@@ -235,6 +245,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val finalExuSources: Option[Vec[Vec[ExuSource]]] = exuSources.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
+  io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val deqCanIssue = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))

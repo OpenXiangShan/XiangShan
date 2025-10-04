@@ -36,7 +36,7 @@ case class ICacheParameters(
     Replacer: String = "setplru", // "random", "setlru", "setplru"
     // missUnit
     NumFetchMshr:    Int = 4,
-    NumPrefetchMshr: Int = 10,
+    NumPrefetchMshr: Int = 64,
     // wayLookup
     WayLookupSize: Int = 32,
     // ecc
