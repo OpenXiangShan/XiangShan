@@ -867,6 +867,122 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   io.fromLduOutput.foreach(_.map(_.ready := true.B))
   io.fpRfRdataOut.foreach(_ := dataPath.io.fpRfRdataOut.get)
   dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
+
+  // perf counter
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.AluCnt > 0) && (issueQueues(j).param.AluCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isAlu(f)
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isAlu(f)
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"ALU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.AluCnt > 0) && (issueQueues(j).param.AluCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isAlu(f) && s
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqi.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isAlu(f) && s
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"ALU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.BrhCnt > 0) && (issueQueues(j).param.BrhCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isBJU(f)
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isBJU(f)
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"BJU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.BrhCnt > 0) && (issueQueues(j).param.BrhCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isBJU(f) && s
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqi.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isBJU(f) && s
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"BJU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.LduCnt > 0) && (issueQueues(j).param.LduCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isLoad(f)
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
+            case (((v, i), c), f) => v && !i && c && FuType.isLoad(f)
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"LDU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
+  if (params.isIntSchd) {
+    val iqNum = issueQueues.size
+    for (i <- 0 until iqNum) {
+      for (j <- 0 until iqNum) {
+        if ((i != j) && (issueQueues(i).param.LduCnt > 0) && (issueQueues(j).param.LduCnt > 0)) {
+          val iqi = issueQueues(i).io
+          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isLoad(f) && s
+          }
+          val iqj = issueQueues(j).io
+          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqj.srcReadyVec).map {
+            case ((((v, i), c), f), s) => v && !i && c && FuType.isLoad(f) && s
+          }
+          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
+          XSPerfAccumulate(s"LDU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
+        }
+      }
+    }
+  }
 }
 
 class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {

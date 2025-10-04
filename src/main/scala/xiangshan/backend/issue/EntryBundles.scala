@@ -129,6 +129,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val valid                 = Output(Bool())
     val issued                = Output(Bool())
     val canIssue              = Output(Bool())
+    val srcReady              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
     val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
@@ -403,6 +404,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.issued                                  := entryReg.status.issued
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
+    commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
     commonOut.dataSources.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
