@@ -226,7 +226,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     * // TODO lyq: how to support multi port of access. Maybe hard due to set division
     * 
     */
-  def accessLRU(pc: UInt, vaddr: UInt): Bool = {
+  /* def accessLRU(pc: UInt, vaddr: UInt): Bool = {
     val isReplace = Wire(Bool())
     val set = getIndex(pc)
     val tag = getTag(pc)
@@ -273,7 +273,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     }
 
     res
-  }
+  } */
 
   def accessFIFO(pc: UInt, vaddr: UInt): Bool = {
     val isReplace = Wire(Bool())
@@ -286,7 +286,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     }.otherwise {
       isReplace := valids(set)(way)
       val lastWay = (accessPtrs(set)-1.U).value
-      decrModes(set) := baseVAddr < entries(set)(lastWay).baseVAddr
+      decrModes(set) := valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr
       valids(set)(way) := true.B
       entries(set)(way).alloc(
         getTag(pc),
@@ -316,7 +316,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     res
   }
 
-  def searchFIFO(valid: Bool, pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasIO = {
+  /* def searchFIFO(valid: Bool, pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasIO = {
     val set = getIndex(pc)
     val tag = getTag(pc)
     val res = Wire(new LearnDeltasIO)
@@ -339,7 +339,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       res.validVec := 0.U.asTypeOf(chiselTypeOf(res.validVec))
     }
     res
-  }
+  } */
 
   /*** processing logic */
   val isReplace = Wire(Bool())
@@ -382,7 +382,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = true)
   searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
 
-  class ParallelSearchResult extends Bundle {
+  /* class ParallelSearchResult extends Bundle {
     val validVec = Vec(HtWaySize, Bool())
     val deltaVec = Vec(HtWaySize, UInt(DeltaWidth.W))
     val pc = UInt(VAddrBits.W)
@@ -400,7 +400,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     data = debug_parallelSearchResult,
     en = io.search.req.valid,
     clock = clock, reset = reset
-  )
+  ) */
 }
 
 class DeltaTable()(implicit p: Parameters) extends BertiModule {
@@ -826,9 +826,9 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   val s1_tlbFire = RegNext(s0_tlbFire)
   val s2_tlbFire = RegNext(s1_tlbFire)
   // data
-  val s1_tlbFireOH = RegEnable(s0_tlbFireOH, s0_tlbFire)
-  val s2_tlbFireOH = RegEnable(s1_tlbFireOH, s1_tlbFire)
-  val s3_tlbFireOH = RegEnable(s2_tlbFireOH, s2_tlbFire)
+  val s1_tlbFireOH = RegEnable(s0_tlbFireOH, 0.U.asTypeOf(s0_tlbFireOH), s0_tlbFire)
+  val s2_tlbFireOH = RegEnable(s1_tlbFireOH, 0.U.asTypeOf(s0_tlbFireOH), s1_tlbFire)
+  val s3_tlbFireOH = RegEnable(s2_tlbFireOH, 0.U.asTypeOf(s0_tlbFireOH), s2_tlbFire)
   val s0_notSelectOH = sizeMap(i => !s1_tlbFireOH(i) && !s2_tlbFireOH(i) && !s3_tlbFireOH(i))
   for(i <- 0 until size) {
     tlbReqArb.io.in(i).valid := valids(i) && !entries(i).pvalid && s0_notSelectOH(i)
