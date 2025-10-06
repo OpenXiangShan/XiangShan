@@ -19,11 +19,11 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
+import utility.InstSeqNum
 import utils.EnumUInt
 import xiangshan.CtrlFlow
 import xiangshan.ExceptionNO
 import xiangshan.ExceptionVec
-import xiangshan.InstSeqNum
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.ExceptionType
@@ -96,8 +96,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val backendException: Bool          = Bool()
   val triggered:        UInt          = TriggerAction()
   val isLastInFtqEntry: Bool          = Bool()
-
-  val debug_seqNum: UInt = InstSeqNum()
+  val debug_seqNum:     InstSeqNum    = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst           := fetch.instrs(i)
@@ -155,8 +154,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt          = TriggerAction()
   val isLastInFtqEntry: Bool          = Bool()
   val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
-
-  val debug_seqNum: UInt = InstSeqNum()
+  val debug_seqNum:     InstSeqNum    = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)

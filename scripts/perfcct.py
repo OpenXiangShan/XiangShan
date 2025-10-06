@@ -63,9 +63,13 @@ parser.add_argument('-v', '--visual', action='store_true', default=False)
 parser.add_argument('-z', '--zoom', action='store', type=float, default=1)
 parser.add_argument('-p', '--period', action='store', default=1)
 parser.add_argument('-d', '--dasm', action='store', help='dasm command, can be "spike-dasm" or "riscv64-linux-gnu-objdump"', default=None)
+parser.add_argument('-s', '--spec', action='store_true', default=False, help='Show speculative execution')
+parser.add_argument('-l', '--singleline', action='store_true', default=False, help='Single line per instruction (only with -v)')
+parser.add_argument('-c', '--cycle', action='store_true', default=False, help='Show cycle number (only with -v)')
 
 args = parser.parse_args()
-
+singleline = args.singleline
+showcycle = args.cycle
 sqldb = args.sqldb
 dasm = None
 if args.dasm is not None:
@@ -74,8 +78,19 @@ if args.dasm is not None:
 tick_per_cycle = int(args.period)
 cycle_per_line = int(100 * args.zoom)
 
-stages = ['f','d','r','D','i','a','g','e','b','w','c']
-
+stages = {
+    'AtFetch': 'f',
+    'AtDecode': 'd',
+    'AtRename': 'r',
+    'AtDispQue': 'D',
+    'AtIssueQue': 'i',
+    'AtIssueArb': 'a',
+    'AtIssueReadReg': 'g',
+    'AtFU': 'e',
+    'AtBypassVal': 'b',
+    'AtWriteVal': 'w',
+    'AtCommit': 'c'
+}
 
 def non_stage():
     return '.'
@@ -84,35 +99,51 @@ def stage(x):
     return stages[x]
 
 def dump_visual(pos, records):
-    pos_start = pos[0] % cycle_per_line
-    line = ''
-    line += '[' + non_stage() * pos_start
-    pos_next = pos_start
-    last_index = 0
-    for i in range(1, len(pos)):
-        if (pos[i] <= pos[last_index]) or pos[i] == 0:
+    empty_line = list(f"[{non_stage() * cycle_per_line}]")
+    line_buffer = empty_line.copy()
+    line = ""
+    last_key = None
+    last_line = None # Only used for multi-line mode
+    def fill_line_pos(pos, char):
+        nonlocal line_buffer
+        line_buffer[1 + pos] = char
+    def check_should_commit_last_line(pos = None):
+        nonlocal line, line_buffer
+        # pos is None means force commit
+        if pos is None or (last_line is not None and \
+                           pos // cycle_per_line != last_line and \
+                           line_buffer != empty_line):
+            line_number = f"{last_line * cycle_per_line:07d}:" if showcycle else ""
+            line += line_number + "".join(line_buffer) + "\n"
+            line_buffer = empty_line.copy()
+    for key, value in sorted(pos.items(), key=lambda item: item[1]):
+        assert key in stages
+        if value == 0:
             continue
-        if pos[i] - pos[last_index] >= cycle_per_line - pos_next:
-            diff = cycle_per_line - pos_next
-            line += f'{stage(last_index)}' * diff + ']\n'
-            diff_line = ((pos[i] - pos[last_index]) - diff - 1) // cycle_per_line
-            if diff_line > 0:
-                line += '[' + f'{stage(last_index)}' * cycle_per_line + ']\n'
-
-            pos_next = pos[i] % cycle_per_line
-            line += '[' + f'{stage(last_index)}' * pos_next
-        else:
-            diff = pos[i] - pos[last_index]
-            pos_next = pos[i] % cycle_per_line
-            line += f'{stage(last_index)}' * diff
-        last_index = i
-    if cycle_per_line - pos_next == 0:
-        line += ']\n'
-        line += f'[{stage(i)}{non_stage() * (cycle_per_line - 1)}]\n'
+        if last_key is not None:
+            if singleline:
+                for i in range(pos[last_key], value):
+                    fill_line_pos(i % cycle_per_line, stage(last_key))
+            else:
+                # multi-line mode
+                # if current pos brings a new line, draw last line and clear buffer
+                for i in range(pos[last_key], value):
+                    check_should_commit_last_line(i)
+                    fill_line_pos(i % cycle_per_line, stage(last_key))
+                    last_line = i // cycle_per_line
+        last_key = key
+    # draw last stage
+    if not singleline and last_line is not None:
+        check_should_commit_last_line(pos[last_key])
     else:
-        line += f'{stage(i)}' + non_stage() * (cycle_per_line - pos_next - 1) + ']'
-    instr = records[0]
-    pc = records[1]
+        # fill last_line in single line mode
+        # and for multi-line mode but has only fetch stage
+        last_line = pos[last_key] // cycle_per_line
+    fill_line_pos(pos[last_key] % cycle_per_line, stage(last_key))
+    check_should_commit_last_line()
+    line = line.strip() # remove last \n
+    instr = records['DisAsm']
+    pc = records['PC']
     if dasm is not None and type(instr) == int:
         instr = f"{instr:08x} {dasm.dasm(instr)}"
     line += f"{pc}: {instr}"
@@ -120,8 +151,9 @@ def dump_visual(pos, records):
 
 
 def dump_txt(pos, records):
-    for i in range(len(pos)):
-        print(f'{stage(i)}{pos[i]}', end=' ')
+    for key in pos:
+        assert key in stages
+        print(f'{stage(key)}{pos[key]}', end=' ')
     print(records)
 
 
@@ -131,24 +163,23 @@ if args.visual:
 
 with sql.connect(sqldb) as con:
     cur = con.cursor()
-    cur.execute("SELECT * FROM LifeTimeCommitTrace")
+    cur.execute(f"SELECT * FROM LifeTimeCommitTrace {'WHERE AtCommit != 0' if not args.spec else ''}")
     col_name = [i[0] for i in cur.description]
-    col_name = col_name[1:]
-    col_name = [i.lower() for i in col_name]
+    col_name = col_name[1:] # Remove ID
     rows = cur.fetchall()
     for row in rows:
-        row = row[1:]
-        pos = []
-        records = []
+        row = row[1:] # Remove ID
+        pos = dict()
+        records = dict()
         i = 0
         for val in row:
-            if col_name[i].startswith('at'):
-                pos.append(val//tick_per_cycle)
-            elif col_name[i].startswith('pc'):
+            if col_name[i].startswith('At'):
+                pos[col_name[i]] = val // tick_per_cycle
+            elif col_name[i].startswith('PC'):
                 if val < 0:
                     val = val + 1 << 64
-                records.append(hex(val))
+                records[col_name[i]] = f"{val:016x}"
             else:
-                records.append(val)
+                records[col_name[i]] = val
             i += 1
         dump(pos, records)
