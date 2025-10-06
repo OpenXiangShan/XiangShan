@@ -20,8 +20,8 @@ import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
+import utility.InstSeqNum
 import utils.EnumUInt
-import xiangshan.InstSeqNum
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
@@ -298,7 +298,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
-  val debug_seqNum:   Vec[UInt]             = Vec(IBufferEnqueueWidth, InstSeqNum())
+  val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }

@@ -22,6 +22,7 @@ import utility.ChiselDB
 import utility.Constantin
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
+import utility.InstSeqNum
 import utility.PerfCCT
 import utility.UIntToMask
 import utility.ValidHold
@@ -723,10 +724,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val idx  = PopCount(enqVec.take(i + 1))
     val pc   = s4_alignPc(i).toUInt
     val code = io.toIBuffer.bits.instrs(i)
-    PerfCCT.createInstMetaAtFetch(idx, pc, code, s4_fire & enqVec(i), clock, reset)
+    val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s4_fire & enqVec(i), clock, reset)
+    val res  = 0.U.asTypeOf(new InstSeqNum)
+    res.seqNum := seq
+    // leave uopIdx to 0.U
+    res
   })
   io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
-    seqNum := Mux(s4_fire, allocateSeqNum(i), 0.U)
+    seqNum := Mux(s4_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
   }
 
   /** to backend */

@@ -959,8 +959,6 @@ package object xiangshan {
       partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
 
-  object InstSeqNum extends NamedUInt(64)
-
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base
     // frontend
