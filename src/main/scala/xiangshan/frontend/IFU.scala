@@ -974,14 +974,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
       val idx  = PopCount(enqVec.take(i + 1))
       val pc   = f3_pc(i)
       val code = io.toIbuffer.bits.instrs(i)
-      PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
+      val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
+      val res  = 0.U.asTypeOf(new InstSeqNum)
+      res.seqNum := seq
+      // leave uopIdx to 0.U
+      res
     })
     io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
       a := allocateSeqNum(i)
     }
   }.otherwise {
     io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
-      a := 0.U
+      a := 0.U.asTypeOf(new InstSeqNum)
     }
   }
 
