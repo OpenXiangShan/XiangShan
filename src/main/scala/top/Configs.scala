@@ -106,8 +106,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           bpuParameters = BpuParameters(
             // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
             mbtbParameters = MainBtbParameters(
-              NumEntries = 512,
-              NumWay = 2
+              // NumEntries = 512,
+              // NumWay = 2
             ),
             tageParameters = TageParameters(
               TableInfos = Seq(

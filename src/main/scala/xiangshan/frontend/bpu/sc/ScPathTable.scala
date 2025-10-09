@@ -55,8 +55,7 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       new PathTableSramWriteReq(numRows),
       WriteBufferSize,
       numPorts = 1,
-      pipe = true,
-      hasTag = false
+      pipe = true
     ))
   )
 
@@ -92,19 +91,22 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       buffer.io.write.head.bits.wayIdxVec := Mux(
         writeValid,
         io.update.wayIdxVec,
-        VecInit.fill(backendParams.BrhCnt)(0.U.asTypeOf(UInt(log2Ceil(NumWays).W)))
+        VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(UInt(log2Ceil(NumWays).W)))
       )
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
-        VecInit.fill(backendParams.BrhCnt)(0.U.asTypeOf(new ScEntry()))
+        VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(new ScEntry()))
       )
   }
 
   sram.zip(writeBuffer).zipWithIndex.foreach {
     case ((bank, buffer), i) =>
       // brand way extend to sram way
-      require(backendParams.BrhCnt <= NumWays, "resolve branches should be less than or equal to NumWays")
+      require(
+        ResolveEntryBranchNumber <= NumWays,
+        s"resolve branches: ${ResolveEntryBranchNumber} should be less than or equal to NumWays: ${NumWays}"
+      )
       val wayMask     = WireInit(VecInit.fill(NumWays)(false.B))
       val entryVec    = WireInit(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
       val wayIdxVecIn = buffer.io.read.head.bits.wayIdxVec
