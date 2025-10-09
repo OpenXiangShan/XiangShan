@@ -31,6 +31,7 @@ import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.phr.Phr
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ras.Ras
+import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
@@ -51,6 +52,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
   private val ittage      = Module(new Ittage)
+  private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
 
@@ -60,6 +62,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     abtb,
     mbtb,
     tage,
+    sc,
     ittage,
     ras
   )
@@ -76,6 +79,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
+  sc.io.enable          := false.B
   ittage.io.enable      := ctrl.ittageEnable
   ras.io.enable         := false.B
 
@@ -202,6 +206,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
+  // sc
+  sc.io.mbtbResult          := mbtb.io.result
+  sc.io.foldedPathHist      := phr.io.s1_foldedPhr
+  sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
+  sc.io.train.valid         := train.valid
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
@@ -313,6 +323,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // ittage meta
   private val s3_ittageMeta = ittage.io.meta
 
+  // sc meta
+  private val s3_scMeta = sc.io.meta
+
   // ras meta
   private val s3_rasMeta = ras.io.specMeta
 
@@ -330,6 +343,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.ras               := s3_rasMeta
   s3_meta.phr               := s3_phrMeta
   s3_meta.ittage            := s3_ittageMeta
+  s3_meta.sc                := s3_scMeta
   s3_meta.perf_s3Prediction := s3_prediction
 
   io.toFtq.meta.valid := s3_valid
