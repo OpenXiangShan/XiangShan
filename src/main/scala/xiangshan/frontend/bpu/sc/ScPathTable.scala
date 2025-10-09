@@ -54,8 +54,7 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
     Module(new WriteBuffer(
       new PathTableSramWriteReq(numRows),
       WriteBufferSize,
-      numPorts = 1,
-      pipe = true
+      numPorts = 1
     ))
   )
 
