@@ -375,16 +375,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // register the first exception
 
-  // we calculate rvcIll excluding bypass
-  // when bypassHasRVCII, we use bypassRVCIIOffset
-  // otherwise, we use nextFirstRVCII as higher bits and 8'h0 as lower bits
-  private val nextFirstRVCII = rawRVCII(FetchBlockInstNum - 1, DecodeWidth)
-  private val nextFirstRVCIIOffset = Mux(
-    bypassHasRVCII,
-    bypassRVCIIOffset,
-    ParallelPriorityEncoder(Cat(nextFirstRVCII, Fill(DecodeWidth, false.B)))
-  )
-  private val nextFirstHasRVCII = bypassHasRVCII || nextFirstRVCII.orR
+  private val nextFirstRVCII       = rawRVCII(FetchBlockInstNum - 1, 0)
+  private val nextFirstRVCIIOffset = ParallelPriorityEncoder(nextFirstRVCII)
+  private val nextFirstHasRVCII    = nextFirstRVCII.orR
 
   private val nextFirstExceptionOffset = Mux(
     bypassHasExceptionWithoutRVCII,
