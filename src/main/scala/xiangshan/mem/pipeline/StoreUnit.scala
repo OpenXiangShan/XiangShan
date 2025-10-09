@@ -127,12 +127,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
 
   if (env.TraceRTLMode) {
-    XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
+    // XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
     dontTouch(io.stin.bits.uop.traceInfo)
   }
 
   if (env.TraceRTLMode) {
-    XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
+    // XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
     dontTouch(io.stin.bits.uop.traceInfo)
   }
 

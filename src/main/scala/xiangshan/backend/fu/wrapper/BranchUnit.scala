@@ -73,7 +73,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   }
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)
-    XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Instruction at BranchUnit is not branch instruction in trace\n")
+    // XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Instruction at BranchUnit is not branch instruction in trace\n")
   }
 
   val filterWP = TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath)

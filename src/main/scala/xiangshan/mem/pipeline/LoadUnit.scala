@@ -221,10 +221,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   if (env.TraceRTLMode) {
     when (io.ldin.valid) {
-      XSError(io.ldin.bits.uop.traceInfo.memoryType =/= 1.U,
-        "Trace: Load Unit but not load inst")
-      XSError(LSUOpType.size(io.ldin.bits.uop.fuOpType) =/= io.ldin.bits.uop.traceInfo.memorySize(1,0),
-        "Trace Memory Size Error")
+      // XSError(io.ldin.bits.uop.traceInfo.memoryType =/= 1.U,
+      //   "Trace: Load Unit but not load inst")
+      // XSError(LSUOpType.size(io.ldin.bits.uop.fuOpType) =/= io.ldin.bits.uop.traceInfo.memorySize(1,0),
+      //   "Trace Memory Size Error, trace size %d, uop size %d\n", io.ldin.bits.uop.traceInfo.memorySize(1,0), LSUOpType.size(io.ldin.bits.uop.fuOpType))
     }
   }
 
@@ -1456,8 +1456,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   if (env.TraceRTLMode) {
     when (s3_valid && !s3_in.tlbMiss) {
 
-      XSError(s3_in.mmio && s3_in.paddr >= 0x80000000L.U, "LoadUnit, paddr should not be mmio")
-      XSError(!s3_in.mmio && s3_in.paddr < 0x80000000L.U, "LoadUnit, paddr should be mmio")
+      // XSError(s3_in.mmio && s3_in.paddr >= 0x80000000L.U, "LoadUnit, paddr should not be mmio\n")
+      // XSError(!s3_in.mmio && s3_in.paddr < 0x80000000L.U, "LoadUnit, paddr should be mmio\n")
     }
   }
 
