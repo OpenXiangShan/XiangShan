@@ -13,7 +13,6 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
       val instrCountBeforeCurrent = Vec(FetchBlockInstNum + 1, UInt(log2Ceil(FetchBlockInstNum + 1).W))
       val rawInstrValid           = Vec(FetchBlockInstNum, Bool())
       val rawIsRvc                = Vec(FetchBlockInstNum, Bool())
-      val identifiedCfi           = Vec(FetchBlockInstNum, Bool())
     }
     val req:  InstrCompactReq    = Input(new InstrCompactReq)
     val resp: InstrCompactBundle = Output(new InstrCompactBundle(FetchBlockInstNum))
@@ -25,7 +24,6 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
   private val instrCountBeforeCurrent = io.req.instrCountBeforeCurrent
   private val rawInstrValid           = io.req.rawInstrValid
   private val rawIsRvc                = io.req.rawIsRvc
-  private val rawIdentifiedCfi        = io.req.identifiedCfi
   private val fetchBlockSelect = VecInit.tabulate(FetchBlockInstNum)(i => Mux(fetchSize(0) > i.U, false.B, true.B))
   private val fetchPcLowerResult = VecInit.tabulate(FetchPorts)(i =>
     VecInit((0 until FetchBlockInstNum).map(j =>
@@ -54,7 +52,6 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
   private val instrIsRvc         = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
   private val instrEndOffset     = WireDefault(VecInit.fill(FetchBlockInstNum)(0.U(FetchBlockInstOffsetWidth.W)))
   private val instrIndexEntry    = Wire(Vec(FetchBlockInstNum, new InstrIndexEntry))
-  private val instrIdentifiedCfi = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
 
   // Fetch PC and index info for valid instructions based on their positions.
   instrIndexEntry.zipWithIndex.foreach {
@@ -71,7 +68,6 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
       val isRvc         = instrRange.map(rawIsRvc(_))
       val instrOffset   = instrRange.map(i => Mux(rawIsRvc(i), i.U, (i + 1).U))
       // FIXME: This is wrong when 2-taken is enabled
-      val identifiedCfi = instrRange.map(rawIdentifiedCfi(_))
 
       instrIndex.valid           := validOH.reduce(_ || _)
       instrIndex.value           := Mux1H(validOH, index)
@@ -79,7 +75,6 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
       instrPcLowerResult(idx)    := Mux1H(validOH, pcLowerResult)
       instrIsRvc(idx)            := Mux1H(validOH, isRvc)
       instrEndOffset(idx)        := Mux1H(validOH, instrOffset)
-      instrIdentifiedCfi(idx)    := Mux1H(validOH, identifiedCfi)
   }
 
   io.resp.instrIndex     := instrIndexEntry
@@ -87,5 +82,4 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
   io.resp.selectBlock    := instrSelectFetchBlock
   io.resp.instrPcLower   := instrPcLowerResult
   io.resp.instrEndOffset := instrEndOffset
-  io.resp.identifiedCfi  := instrIdentifiedCfi
 }

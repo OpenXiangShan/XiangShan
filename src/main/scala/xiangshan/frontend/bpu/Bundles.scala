@@ -116,7 +116,6 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val identifiedCfi:  Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
   // override valid
   val s3Override: Bool = Bool()
 
@@ -125,8 +124,6 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
     this.takenCfiOffset.valid := prediction.taken
     this.takenCfiOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
     this.target               := prediction.target
-    // FIXME: BP should mark all branches identified by itself
-    this.identifiedCfi := (0 until FetchBlockInstNum).map(i => i.U === this.takenCfiOffset.bits)
   }
   // TODO: what else do we need?
 }
