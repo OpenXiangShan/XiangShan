@@ -106,7 +106,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     pd             := fetch.pd(i)
     predTaken      := fetch.instrEndOffset(i).predTaken
     fixedTaken     := fetch.instrEndOffset(i).fixedTaken
-    ftqPtr         := fetch.ftqPtr
+    ftqPtr         := fetch.ftqPtr(i)
     instrEndOffset := fetch.instrEndOffset(i).offset
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       fetch.exceptionType(i),
