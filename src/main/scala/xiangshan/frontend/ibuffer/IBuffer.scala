@@ -232,7 +232,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     when(decodeCanAccept) {
       when(useBypass && io.in.valid) {
         out.valid := bypass.valid
-        // bypass exceptions
+        // use bypass exceptions
         when(canReceiveException && bypassHasException && i.U === bypassExceptionOffset) {
           out.bits := bypass.bits.toIBufOutEntry(bypassIBufferExceptionType, bypassBackendException)
         }.otherwise {
@@ -252,7 +252,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       out.bits := Mux(
         i.U < outputEntriesValidNum,
         out.bits,
-        // use first exceptions
+        // use first exceptions, match offset at i - outputEntriesValidNum
         Mux(
           firstHasException && deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
           VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
@@ -379,20 +379,19 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val nextFirstRVCIIOffset = ParallelPriorityEncoder(nextFirstRVCII)
   private val nextFirstHasRVCII    = nextFirstRVCII.orR
 
-  private val nextFirstExceptionOffset = Mux(
-    bypassHasExceptionWithoutRVCII,
-    0.U,
-    nextFirstRVCIIOffset
-  )
+  private val nextFirstExceptionOffset      = Mux(bypassHasExceptionWithoutRVCII, 0.U, nextFirstRVCIIOffset)
   private val nextFirstBackendException     = WireDefault(false.B)
   private val nextFirstExceptionIBufIdx     = WireDefault(firstExceptionIBufIdx)
   private val nextFirstIBufferExceptionType = WireDefault(IBufferExceptionType.None)
 
-  when(useBypass && !bypassHasException && nextFirstHasRVCII) { // only can rvcIll happens
+  // when useBypass and no exception in range(DecodeWidth - 1, 0),
+  // rvcIll happens out of range(DecodeWidth - 1, 0),
+  // then register rvcIll
+  when(useBypass && !bypassHasException && nextFirstHasRVCII) {
     nextFirstBackendException     := false.B
     nextFirstExceptionIBufIdx     := enqPtrVec(nextFirstRVCIIOffset)
     nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
-  }.otherwise {
+  }.otherwise { // when not useBypass, register all
     nextFirstBackendException := currentBackendException
     nextFirstExceptionIBufIdx := enqPtrVec(nextFirstExceptionOffset)
     nextFirstIBufferExceptionType := Mux(
@@ -400,7 +399,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
         currentExceptionType,
         currentCrossPageIPFFix,
-        bypassRVCII(0)
+        bypassRVCII(0) // rvcIll may happen at offset 0
       ),
       IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
         ExceptionType.None,
