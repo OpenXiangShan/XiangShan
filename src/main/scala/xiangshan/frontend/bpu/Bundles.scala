@@ -26,6 +26,7 @@ import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
+import xiangshan.frontend.bpu.sc.ScMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -106,7 +107,7 @@ class BpuCtrl extends Bundle {
   // s3 predictor enable
   val mbtbEnable:   Bool = Bool()
   val tageEnable:   Bool = Bool()
-  val scEnable:     Bool = Bool() // depends on tageEnable
+  val scEnable:     Bool = Bool()
   val ittageEnable: Bool = Bool()
   val rasEnable:    Bool = Bool()
 }
@@ -181,6 +182,7 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val mbtb:   MainBtbMeta  = new MainBtbMeta
   val ras:    RasMeta      = new RasMeta
   val phr:    PhrPtr       = new PhrPtr
+  val sc:     ScMeta       = new ScMeta
   val ittage: IttageMeta   = new IttageMeta
   // used for performance counter
   val perf_s3Prediction: Prediction = new Prediction

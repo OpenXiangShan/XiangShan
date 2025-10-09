@@ -17,13 +17,43 @@ package xiangshan.frontend.bpu.sc
 
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
+import xiangshan.frontend.bpu.ScTableInfo
 
 case class ScParameters(
-    // TODO
+    PathTableInfos: Seq[ScTableInfo] = Seq(
+      new ScTableInfo(1024, 8),
+      new ScTableInfo(1024, 16)
+    ),
+    TableInfos: Seq[ScTableInfo] = Seq(
+      new ScTableInfo(1024, 0),
+      new ScTableInfo(1024, 4),
+      new ScTableInfo(1024, 10),
+      new ScTableInfo(1024, 16)
+    ),
+    ctrWidth:            Int = 6,
+    weightCtrWidth:      Int = 6,
+    thresholdCtrWidth:   Int = 6,
+    thresholdThresWidth: Int = 8,
+    NumTables:           Int = 2,
+    NumBanks:            Int = 2,
+    WriteBufferSize:     Int = 4,
+    TagWidth:            Int = 12
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
-  def scParameters: ScParameters = bpuParameters.scParameters
+  def scParameters:        ScParameters     = bpuParameters.scParameters
+  def ctrWidth:            Int              = scParameters.ctrWidth
+  def weightCtrWidth:      Int              = scParameters.weightCtrWidth
+  def thresholdCtrWidth:   Int              = scParameters.thresholdCtrWidth
+  def thresholdThresWidth: Int              = scParameters.thresholdThresWidth
+  def TableInfos:          Seq[ScTableInfo] = scParameters.TableInfos
+  def PathTableInfos:      Seq[ScTableInfo] = scParameters.PathTableInfos
+  def PathTableSize:       Int              = PathTableInfos.length
+  def NumTables:           Int              = PathTableInfos.length
+  def NumWays:             Int              = NumBtbResultEntries
+  def NumBanks:            Int              = scParameters.NumBanks
+  def WriteBufferSize:     Int              = scParameters.WriteBufferSize
+  def TagWidth:            Int              = scParameters.TagWidth
   // TODO
 
   // sc cannot be fast-trained, this is required by abstract class BasePredictor
