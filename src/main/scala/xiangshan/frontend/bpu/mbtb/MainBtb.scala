@@ -166,12 +166,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     Cat(h, entry.position) // Add higher bits before using
   }
   private val s2_rawHitMask = s2_rawBtbEntries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hitMask = s2_rawHitMask.zip(s2_positions).zip(s2_crossPageMask).map {
-    case ((hit, position), isCrossPage) =>
-      Mux(
-        s2_alignBankIdx === 0.U,
-        hit && position > s2_startVAddr(FetchBlockSizeWidth - 1, 1) && !isCrossPage,
-        hit && ((position +& (FetchBlockAlignSize / 2).U) > s2_startVAddr(FetchBlockSizeWidth - 1, 1)) && !isCrossPage
+  private val s2_hitMask = s2_rawHitMask.zip(s2_rawBtbEntries).zip(s2_crossPageMask).zipWithIndex.map {
+    case (((hit, entry), isCrossPage), i) =>
+      hit && !isCrossPage && (
+        (i / NumWay).U =/= s2_alignBankIdx ||
+          entry.position > getAlignedInstOffset(s2_startVAddr)
       )
   }
   private val s2_targets =
