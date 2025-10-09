@@ -828,7 +828,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val s1_taken_mask = io.in.bits.resp_in(0).s1.full_pred(0).br_taken_mask(i)
     s1_tageTakens(i) :=
       Mux(s1_altUsed(i), Mux(s1_bimCtrValid, s1_bimCtr(1), s1_taken_mask), providerInfo.resp.ctr(TageCtrBits - 1))
-    s1_basecnts(i)   := s1_bimCtr
+    s1_basecnts(i) := Mux(
+      s1_bimCtrValid,
+      s1_bimCtr,
+      Mux(s1_taken_mask, 2.U(2.W), 1.U(2.W))
+    ) // if bim not valid, Cat(s1_taken_mask,0.U(1.W))
     s1_useAltOnNa(i) := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)  := RegEnable(s2_altUsed(i), io.s2_fire(1))
