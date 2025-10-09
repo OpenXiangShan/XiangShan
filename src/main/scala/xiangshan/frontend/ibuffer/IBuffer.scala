@@ -330,9 +330,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Exception
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  // bypass exception
   private val rawRVCII = // restore to raw mask
     (io.in.bits.illegalInstr.asUInt & io.in.bits.enqEnable) >> alignShiftNum
+  // bypass the first met exception to outputEntries
   private val bypassRVCII       = rawRVCII(DecodeWidth - 1, 0)
   private val bypassRVCIIOffset = ParallelPriorityEncoder(bypassRVCII)
   private val bypassHasRVCII    = bypassRVCII.orR
@@ -364,8 +364,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     )
   )
 
-  // register the first exception
-
+  // register the first met exception
   private val nextFirstRVCII       = rawRVCII(FetchBlockInstNum - 1, 0)
   private val nextFirstRVCIIOffset = ParallelPriorityEncoder(nextFirstRVCII)
   private val nextFirstHasRVCII    = nextFirstRVCII.orR
@@ -374,6 +373,20 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val nextFirstBackendException     = WireDefault(false.B)
   private val nextFirstExceptionIBufIdx     = WireDefault(firstExceptionIBufIdx)
   private val nextFirstIBufferExceptionType = WireDefault(IBufferExceptionType.None)
+
+  private val receiveExceptionFire  = io.in.fire && !io.flush && canReceiveException
+  private val nextFirstHasException = nextFirstIBufferExceptionType =/= IBufferExceptionType.None
+
+  // exceptions are registered in IBuffer, set firstHasException
+  when(receiveExceptionFire && nextFirstHasException) {
+    firstHasException := true.B
+  }
+
+  // exceptions are received(bypass or registered), unset canReceiveException until flush
+  when(receiveExceptionFire &&
+    (nextFirstHasException || (useBypass && bypassHasException))) {
+    canReceiveException := false.B
+  }
 
   // when useBypass and no exception in range(DecodeWidth - 1, 0),
   // and rvcIll happens out of range(DecodeWidth - 1, 0),
@@ -405,23 +418,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       )
     )
   }
-
-  private val receiveExceptionFire  = io.in.fire && !io.flush && canReceiveException
-  private val nextFirstHasException = nextFirstIBufferExceptionType =/= IBufferExceptionType.None
-
-  when(receiveExceptionFire && nextFirstHasException) {
+  when(canReceiveException) {
     firstBackendException     := nextFirstBackendException
     firstExceptionIBufIdx     := nextFirstExceptionIBufIdx
     firstIBufferExceptionType := nextFirstIBufferExceptionType
-    firstHasException         := true.B
   }
-
-  canReceiveException := Mux(
-    receiveExceptionFire &&
-      (nextFirstHasException || (useBypass && bypassHasException)),
-    false.B,
-    canReceiveException
-  )
 
   // Exceptions to outputEntries
   private val deqExceptionMatchOH = VecInit((0 until DecodeWidth).map(i =>
@@ -431,6 +432,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   deqHasException    := deqHasExceptionOH.orR
   deqExceptionOffset := OHToUInt(deqHasExceptionOH)
 
+  // exceptions dequeue, unset firstHasException
   when(deqHasException && (decodeCanAccept || outputEntriesIsNotFull)) {
     firstHasException := false.B
   }
