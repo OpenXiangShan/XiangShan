@@ -232,7 +232,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       }.otherwise {
         out.valid := deqEntries(i).valid
         // use first exceptions
-        when(firstHasException && deqHasException && i.U === deqExceptionOffset) {
+        when(deqHasException && i.U === deqExceptionOffset) {
           out.bits := deqEntries(i).bits.toIBufOutEntry(firstIBufferExceptionType, firstBackendException)
         }.otherwise {
           out.bits := deqEntries(i).bits.toIBufOutEntry(IBufferExceptionType.None, false.B)
@@ -245,7 +245,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         out.bits,
         // use first exceptions, match offset at i - outputEntriesValidNum
         Mux(
-          firstHasException && deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
+          deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
           VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
             firstIBufferExceptionType,
             firstBackendException
@@ -346,8 +346,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     bypassHasExceptionWithoutRVCII ||
       bypassHasRVCII
 
-  // when we have a bypassExceptionWithoutRVCII taken, we mark the exception only on first instruction
-  // otherwise, mark the exception at rvcIll's offset
+  // when bypassExceptionWithoutRVCII happens, mark the exception only on first instruction
+  // otherwise, mark the exception on rvcIll's offset
   bypassExceptionOffset  := Mux(bypassHasExceptionWithoutRVCII, 0.U, bypassRVCIIOffset)
   bypassBackendException := currentBackendException
   bypassIBufferExceptionType := Mux(
@@ -355,7 +355,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       currentExceptionType,
       currentCrossPageIPFFix,
-      bypassRVCII(0) // rvcIll may happen at offset 0
+      bypassRVCII(0) // rvcIll may happen on offset 0
     ),
     IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       ExceptionType.None,
@@ -378,10 +378,16 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // when useBypass and no exception in range(DecodeWidth - 1, 0),
   // and rvcIll happens out of range(DecodeWidth - 1, 0),
   // rvcIll should be registered
-  when(useBypass && !bypassHasException && nextFirstHasRVCII) {
-    nextFirstBackendException     := false.B
-    nextFirstExceptionIBufIdx     := enqPtrVec(nextFirstRVCIIOffset)
-    nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
+  when(useBypass) {
+    when(!bypassHasException && nextFirstHasRVCII) {
+      nextFirstBackendException     := false.B
+      nextFirstExceptionIBufIdx     := enqPtrVec(nextFirstRVCIIOffset)
+      nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
+    }.otherwise {
+      nextFirstBackendException     := false.B
+      nextFirstExceptionIBufIdx     := firstExceptionIBufIdx
+      nextFirstIBufferExceptionType := IBufferExceptionType.None
+    }
   }.otherwise {
     nextFirstBackendException := currentBackendException
     nextFirstExceptionIBufIdx := enqPtrVec(nextFirstExceptionOffset)
@@ -390,7 +396,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
         currentExceptionType,
         currentCrossPageIPFFix,
-        bypassRVCII(0) // rvcIll may happen at offset 0
+        bypassRVCII(0) // rvcIll may happen on offset 0
       ),
       IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
         ExceptionType.None,
@@ -418,16 +424,22 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   )
 
   // Exceptions to outputEntries
-  private val deqExceptionMatchMask = VecInit((0 until DecodeWidth).map(i =>
+  private val deqExceptionMatchOH = VecInit((0 until DecodeWidth).map(i =>
     deqPtrVec(i) === firstExceptionIBufIdx && firstHasException
   ))
-  private val deqHasExceptionMask = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchMask.asUInt
-  deqHasException    := deqHasExceptionMask.orR
-  deqExceptionOffset := OHToUInt(deqHasExceptionMask)
+  private val deqHasExceptionOH = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchOH.asUInt
+  deqHasException    := deqHasExceptionOH.orR
+  deqExceptionOffset := OHToUInt(deqHasExceptionOH)
 
-  when(deqHasException)(firstHasException := false.B)
+  when(deqHasException && (decodeCanAccept || outputEntriesIsNotFull)) {
+    firstHasException := false.B
+  }
 
-  XSError(PopCount(deqHasExceptionMask) > 1.U, "exception cannot multiHit")
+  XSError(
+    deqHasException && decodeCanAccept && useBypass,
+    "exception not dequeue, cannot use bypass"
+  )
+  XSError(PopCount(deqHasExceptionOH) > 1.U, "exception cannot multiHit")
 
   // Flush
   when(io.flush) {
