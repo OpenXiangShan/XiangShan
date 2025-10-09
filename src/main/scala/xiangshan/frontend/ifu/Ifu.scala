@@ -702,22 +702,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
   io.toIBuffer.bits.foldpc := s4_alignFoldPc
   // mark the exception only on first instruction
-  // TODO: store only the first exception in IBuffer, instead of store in every entry
-  io.toIBuffer.bits.exceptionType := (0 until IBufferEnqueueWidth).map {
-    i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheMeta(0).exception, ExceptionType.None)
-  }
+  io.toIBuffer.bits.exceptionType := s4_icacheMeta(0).exception
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := (0 until IBufferEnqueueWidth).map {
-    i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).isBackendException
-  }
+  io.toIBuffer.bits.backendException := s4_icacheMeta(0).isBackendException
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
-  io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
-    i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
-  }
-  io.toIBuffer.bits.illegalInstr := s4_alignIll
-  io.toIBuffer.bits.triggered    := s4_alignTriggered
+  io.toIBuffer.bits.crossPageIPFFix := s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
+  io.toIBuffer.bits.illegalInstr    := s4_alignIll
+  io.toIBuffer.bits.triggered       := s4_alignTriggered
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
@@ -783,11 +776,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(s4_shiftNum).brAttribute        := brAttribute
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
-    io.toIBuffer.bits.exceptionType(s4_shiftNum) := uncacheException
+    io.toIBuffer.bits.illegalInstr(s4_shiftNum) := uncacheRvcExpander.io.ill
+    io.toIBuffer.bits.exceptionType             := uncacheException
     // execption can happen in next page only when cross page.
-    io.toIBuffer.bits.crossPageIPFFix(s4_shiftNum) := prevUncacheCrossPage && uncacheException.hasException
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum)    := uncacheRvcExpander.io.ill
-    io.toIBuffer.bits.enqEnable                    := s4_alignBlockStartPos.asUInt
+    io.toIBuffer.bits.crossPageIPFFix := prevUncacheCrossPage && uncacheException.hasException
+    io.toIBuffer.bits.enqEnable       := s4_alignBlockStartPos.asUInt
 
     uncacheFlushWb.bits.isRVC     := uncacheIsRvc
     uncacheFlushWb.bits.attribute := brAttribute
