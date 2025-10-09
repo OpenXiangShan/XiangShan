@@ -259,7 +259,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   )).asUInt
   for (b <- 0 until nBanks) {
     bt(b).io.w.apply(
-      valid = (io.update_mask.reduce(_ || _) || doing_reset) && u_bank_req_1h(b),
+      valid = (io.update_mask.reduce(_ || _) && u_bank_req_1h(b)) || doing_reset,
       data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
       setIdx = Mux(doing_reset, resetRow, u_bank_idx),
       waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
