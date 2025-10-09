@@ -70,8 +70,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
       mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
       mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
 
-      val lastValid  = mem(enqIndex(i)).bits.branches.lastIndexWhere(_.valid)
-      val branchSlot = mem(enqIndex(i)).bits.branches(lastValid + PopCount(hitPrevious(i)) + 1.U)
+      val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
+      val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))
       branchSlot.valid            := true.B
       branchSlot.bits.target      := branch.bits.target
       branchSlot.bits.taken       := branch.bits.taken
