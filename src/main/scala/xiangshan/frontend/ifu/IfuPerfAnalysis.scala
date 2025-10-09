@@ -40,8 +40,9 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val startVAddr:    Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
       val target:        Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
       val taken:         Vec[Bool] = Vec(FetchPorts, Bool())
-      val misPred:       Vec[Bool] = Vec(FetchPorts, Bool())
-      val misEndOffset:  Vec[UInt] = Vec(FetchPorts, UInt(log2Ceil(FetchBlockInstNum).W))
+      val selectBlock:   Bool      = Bool()
+      val misPred:       Bool      = Bool()
+      val misEndOffset:  UInt      = UInt(log2Ceil(FetchBlockInstNum).W)
     }
 
     class IfuTopdownIn(implicit p: Parameters) extends IfuBundle {
@@ -213,10 +214,11 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
 
   private val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
   for (i <- 0 until FetchPorts) {
-    ifuWbToFtqDumpData.startAddr(i)      := checkPerfInfo.startVAddr(i)
-    ifuWbToFtqDumpData.isMissPred(i)     := checkPerfInfo.misPred(i)
-    ifuWbToFtqDumpData.missPredOffset(i) := checkPerfInfo.misEndOffset(i)
+    ifuWbToFtqDumpData.startAddr(i) := checkPerfInfo.startVAddr(i)
   }
+  ifuWbToFtqDumpData.isMispred         := checkPerfInfo.misPred
+  ifuWbToFtqDumpData.misId             := checkPerfInfo.selectBlock
+  ifuWbToFtqDumpData.misPredOffset     := checkPerfInfo.misEndOffset
   ifuWbToFtqDumpData.checkJalFault     := checkJalFault(0) | checkJalFault(1)
   ifuWbToFtqDumpData.checkJalrFault    := checkJalrFault(0) | checkJalrFault(1)
   ifuWbToFtqDumpData.checkRetFault     := checkRetFault(0) | checkRetFault(1)
