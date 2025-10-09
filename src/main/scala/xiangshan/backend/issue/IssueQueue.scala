@@ -1127,7 +1127,6 @@ class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extend
       x.target := DontCare
       x.taken := deqEntryVec(i).bits.payload.pred_taken
     })
-    deq.bits.common.identifiedCfi.foreach(_ := deqEntryVec(i).bits.payload.identifiedCfi)
     // for std
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx)
     // for i2f

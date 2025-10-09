@@ -138,7 +138,6 @@ trait IfuHelper extends HasIfuParameters {
     out.selectBlock    := alignData(indata.selectBlock, shiftNum, false.B)
     out.instrPcLower   := alignData(indata.instrPcLower, shiftNum, 0.U((PcCutPoint + 1).W))
     out.instrEndOffset := alignData(indata.instrEndOffset, shiftNum, 0.U(log2Ceil(FetchBlockInstNum).W))
-    out.identifiedCfi  := alignData(indata.identifiedCfi, shiftNum, false.B)
     out
   }
 }
