@@ -108,7 +108,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Only one exception (excluding rvcIll) is stored at a time.
   // The rvcIll exception is stored in IBufEntry instead,
-  // because calculating the first rvcIll(i.e. PriorityEncoder([31:0])) introduces latency.
+  // because calculating the first rvcIll introduces latency.
   private val firstHasExceptionExcludingRVCII: Bool = RegInit(false.B)
   // First Exception Register
   private val firstExceptionType:    ExceptionType = RegInit(ExceptionType.None)
@@ -223,7 +223,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       when(useBypass && io.in.valid) {
         out.valid := bypass.valid
         out.bits := {
-          if (i == 0)
+          if (i == 0) // Exceptions excluding rvcIll can only happen at offset 0
             bypass.bits.toIBufOutEntry(
               bypassExceptionType,
               bypassBackendException,
