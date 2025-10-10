@@ -73,7 +73,10 @@ class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle 
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
-  val scResp:    Vec[Vec[ScEntry]] = Vec(PathTableSize, Vec(NumWays, new ScEntry()))
-  val scPred:    Vec[Bool]         = Vec(NumWays, Bool())
-  val useScPred: Vec[Bool]         = Vec(NumWays, Bool())
+  // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
+  // FIXME: is there a better way to do this?
+  private def ScEntryWidth = (new ScEntry).getWidth
+  val scResp:    Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scPred:    Vec[Bool]      = Vec(NumWays, Bool())
+  val useScPred: Vec[Bool]      = Vec(NumWays, Bool())
 }
