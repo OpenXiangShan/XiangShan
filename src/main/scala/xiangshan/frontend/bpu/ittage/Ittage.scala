@@ -111,7 +111,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   io.meta := ittageMeta
 
   private val t1_train = Wire(new BpuTrain)
-  t1_train := RegEnable(io.train.bits, io.train.valid)
+  t1_train := RegEnable(io.train.bits, 0.U.asTypeOf(new BpuTrain), io.train.valid)
 
   private val t1_meta = Wire(new IttageMeta)
   t1_train.meta.ittage := t1_meta
