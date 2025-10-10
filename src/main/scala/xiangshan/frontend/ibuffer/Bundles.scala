@@ -94,32 +94,32 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
 //  val exceptionType:    UInt          = IBufferExceptionType()
 //  val backendException: Bool          = Bool()
+  val rvcIll:           Bool          = Bool()
   val triggered:        UInt          = TriggerAction()
   val isLastInFtqEntry: Bool          = Bool()
   val debug_seqNum:     InstSeqNum    = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst           := fetch.instrs(i)
-    pc             := fetch.pc(i)
-    foldpc         := fetch.foldpc(i)
-    pd             := fetch.pd(i)
-    predTaken      := fetch.instrEndOffset(i).predTaken
-    fixedTaken     := fetch.instrEndOffset(i).fixedTaken
-    ftqPtr         := fetch.ftqPtr(i)
-    instrEndOffset := fetch.instrEndOffset(i).offset
-//    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-//      fetch.exceptionType(i),
-//      fetch.crossPageIPFFix(i),
-//      fetch.illegalInstr(i)
-//    )
-//    backendException := fetch.backendException(i)
+    inst             := fetch.instrs(i)
+    pc               := fetch.pc(i)
+    foldpc           := fetch.foldpc(i)
+    pd               := fetch.pd(i)
+    predTaken        := fetch.instrEndOffset(i).predTaken
+    fixedTaken       := fetch.instrEndOffset(i).fixedTaken
+    ftqPtr           := fetch.ftqPtr(i)
+    instrEndOffset   := fetch.instrEndOffset(i).offset
+    rvcIll           := fetch.illegalInstr(i)
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
     debug_seqNum     := fetch.debug_seqNum(i)
     this
   }
 
-  def toIBufOutEntry(exceptionType: UInt, backendException: Bool): IBufOutEntry = {
+  def toIBufOutEntry(
+      exceptionType:    ExceptionType,
+      backendException: Bool,
+      crossPageIPFFix:  Bool
+  ): IBufOutEntry = {
     val result = Wire(new IBufOutEntry)
     result.inst             := inst
     result.pc               := pc
@@ -128,7 +128,11 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.predTaken        := predTaken
     result.fixedTaken       := fixedTaken
     result.ftqPtr           := ftqPtr
-    result.exceptionType    := exceptionType
+    result.exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+      exceptionType,
+      crossPageIPFFix,
+      rvcIll
+    )
     result.backendException := backendException
     result.triggered        := triggered
     result.isLastInFtqEntry := isLastInFtqEntry

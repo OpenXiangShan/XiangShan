@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
-import utility.ParallelPriorityEncoder
 import utility.PriorityMuxDefault
 import utility.QueuePerf
 import utility.UIntToMask
@@ -107,27 +106,27 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
   private val enqPtr    = enqPtrVec(0)
 
-  // use Ifu.s4_shiftNum
-  private val alignShiftNum = io.in.bits.prevIBufEnqPtr.value(log2Ceil(NumWriteBank) - 1, 0)
-  // FIXME: only pass one exception after flush, is it correct?
-  private val canReceiveException = RegInit(true.B)
+  // Only one exception (excluding rvcIll) is stored at a time.
+  // The rvcIll exception is stored in IBufEntry instead,
+  // because calculating the first rvcIll(i.e. PriorityEncoder([31:0])) introduces latency.
+  private val firstHasExceptionExcludingRVCII: Bool = RegInit(false.B)
   // First Exception Register
-  private val firstIBufferExceptionType: UInt    = RegInit(IBufferExceptionType.None)
-  private val firstBackendException:     Bool    = RegInit(false.B)
-  private val firstExceptionIBufIdx:     IBufPtr = RegInit(0.U.asTypeOf(new IBufPtr))
-  private val firstHasException:         Bool    = RegInit(false.B)
-  private val deqHasException:           Bool    = Wire(Bool())
-  private val deqExceptionOffset:        UInt    = Wire(UInt(log2Ceil(DecodeWidth).W))
+  private val firstExceptionType:    ExceptionType = RegInit(ExceptionType.None)
+  private val firstBackendException: Bool          = RegInit(false.B)
+  private val firstCrossPageIPFFix:  Bool          = RegInit(false.B)
+  private val firstExceptionIBufIdx: IBufPtr       = RegInit(0.U.asTypeOf(new IBufPtr))
+  private val deqHasException:       Bool          = Wire(Bool())
+  private val deqExceptionOffset:    UInt          = Wire(UInt(log2Ceil(DecodeWidth).W))
 
   // Current Exception Wire
   private val currentExceptionType    = io.in.bits.exceptionType
   private val currentCrossPageIPFFix  = io.in.bits.crossPageIPFFix
   private val currentBackendException = io.in.bits.backendException
 
-  private val bypassHasException:         Bool = Wire(Bool())
-  private val bypassExceptionOffset:      UInt = Wire(UInt(log2Ceil(DecodeWidth).W))
-  private val bypassIBufferExceptionType: UInt = Wire(IBufferExceptionType())
-  private val bypassBackendException:     Bool = Wire(Bool())
+  private val bypassHasExceptionExcludingRVCII: Bool          = Wire(Bool())
+  private val bypassExceptionType:              ExceptionType = Wire(new ExceptionType)
+  private val bypassBackendException:           Bool          = Wire(Bool())
+  private val bypassCrossPageIPFFix:            Bool          = Wire(Bool())
 
   XSError(
     io.in.valid && io.in.bits.prevIBufEnqPtr =/= enqPtr,
@@ -223,35 +222,42 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     when(decodeCanAccept) {
       when(useBypass && io.in.valid) {
         out.valid := bypass.valid
-        // use bypass exceptions
-        when(canReceiveException && bypassHasException && i.U === bypassExceptionOffset) {
-          out.bits := bypass.bits.toIBufOutEntry(bypassIBufferExceptionType, bypassBackendException)
-        }.otherwise {
-          out.bits := bypass.bits.toIBufOutEntry(IBufferExceptionType.None, false.B)
+        out.bits := {
+          if (i == 0)
+            bypass.bits.toIBufOutEntry(
+              bypassExceptionType,
+              bypassBackendException,
+              bypassCrossPageIPFFix
+            )
+          else bypass.bits.toIBufOutEntry(ExceptionType.None, false.B, false.B)
         }
       }.otherwise {
         out.valid := deqEntries(i).valid
-        // use first exceptions
-        when(deqHasException && i.U === deqExceptionOffset) {
-          out.bits := deqEntries(i).bits.toIBufOutEntry(firstIBufferExceptionType, firstBackendException)
-        }.otherwise {
-          out.bits := deqEntries(i).bits.toIBufOutEntry(IBufferExceptionType.None, false.B)
-        }
+        out.bits := Mux(
+          deqHasException && i.U === deqExceptionOffset,
+          deqEntries(i).bits.toIBufOutEntry(
+            firstExceptionType,
+            firstBackendException,
+            firstCrossPageIPFFix
+          ),
+          deqEntries(i).bits.toIBufOutEntry(ExceptionType.None, false.B, false.B)
+        )
       }
     }.elsewhen(outputEntriesIsNotFull) {
       out.valid := deqEntries(i).valid
       out.bits := Mux(
         i.U < outputEntriesValidNum,
         out.bits,
-        // use first exceptions, match offset at i - outputEntriesValidNum
         Mux(
           deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
           VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
-            firstIBufferExceptionType,
-            firstBackendException
+            firstExceptionType,
+            firstBackendException,
+            firstCrossPageIPFFix
           ),
           VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
-            IBufferExceptionType.None,
+            ExceptionType.None,
+            false.B,
             false.B
           )
         )
@@ -330,111 +336,45 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Exception
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  private val rawRVCII = // restore to raw mask
-    (io.in.bits.illegalInstr.asUInt & io.in.bits.enqEnable) >> alignShiftNum
-  // bypass the first met exception to outputEntries
-  private val bypassRVCII       = rawRVCII(DecodeWidth - 1, 0)
-  private val bypassRVCIIOffset = ParallelPriorityEncoder(bypassRVCII)
-  private val bypassHasRVCII    = bypassRVCII.orR
-
-  private val bypassHasExceptionWithoutRVCII =
-    currentExceptionType.hasException ||
-      currentBackendException || // FIXME: is this necessary?
-      currentCrossPageIPFFix
-
-  bypassHasException :=
-    bypassHasExceptionWithoutRVCII ||
-      bypassHasRVCII
-
-  // when bypassExceptionWithoutRVCII happens, mark the exception only on first instruction
-  // otherwise, mark the exception on rvcIll's offset
-  bypassExceptionOffset  := Mux(bypassHasExceptionWithoutRVCII, 0.U, bypassRVCIIOffset)
+  // Bypass the first encountered exceptions to outputEntries.
+  bypassExceptionType    := currentExceptionType
   bypassBackendException := currentBackendException
-  bypassIBufferExceptionType := Mux(
-    bypassHasExceptionWithoutRVCII,
-    IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-      currentExceptionType,
-      currentCrossPageIPFFix,
-      bypassRVCII(0) // rvcIll may happen on offset 0
-    ),
-    IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-      ExceptionType.None,
-      false.B,
-      bypassHasRVCII
-    )
-  )
+  bypassCrossPageIPFFix  := currentCrossPageIPFFix
+  bypassHasExceptionExcludingRVCII :=
+    bypassExceptionType.hasException ||
+      bypassBackendException ||
+      bypassCrossPageIPFFix
 
-  // register the first met exception
-  private val nextFirstRVCII       = rawRVCII(FetchBlockInstNum - 1, 0)
-  private val nextFirstRVCIIOffset = ParallelPriorityEncoder(nextFirstRVCII)
-  private val nextFirstHasRVCII    = nextFirstRVCII.orR
+  // Register the first encountered exceptions into the IBuffer.
+  private val receiveExceptionFire = io.in.fire && !io.flush && !firstHasExceptionExcludingRVCII
+  private val nextFirstHasExceptionExcludingRVCII =
+    bypassHasExceptionExcludingRVCII && !useBypass
 
-  private val nextFirstExceptionOffset      = Mux(bypassHasExceptionWithoutRVCII, 0.U, nextFirstRVCIIOffset)
-  private val nextFirstBackendException     = WireDefault(false.B)
-  private val nextFirstExceptionIBufIdx     = WireDefault(firstExceptionIBufIdx)
-  private val nextFirstIBufferExceptionType = WireDefault(IBufferExceptionType.None)
-
-  private val receiveExceptionFire  = io.in.fire && !io.flush && canReceiveException
-  private val nextFirstHasException = nextFirstIBufferExceptionType =/= IBufferExceptionType.None
-
-  // exceptions are registered in IBuffer, set firstHasException
-  when(receiveExceptionFire && nextFirstHasException) {
-    firstHasException := true.B
+  // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
+  when(receiveExceptionFire && nextFirstHasExceptionExcludingRVCII) {
+    firstHasExceptionExcludingRVCII := true.B
   }
 
-  // exceptions are received(bypass or registered), unset canReceiveException until flush
-  when(receiveExceptionFire &&
-    (nextFirstHasException || (useBypass && bypassHasException))) {
-    canReceiveException := false.B
+  when(!firstHasExceptionExcludingRVCII) {
+    firstExceptionType    := currentExceptionType
+    firstBackendException := currentBackendException
+    firstCrossPageIPFFix  := currentCrossPageIPFFix
+    firstExceptionIBufIdx := enqPtrVec(0)
   }
 
-  // when useBypass and no exception in range(DecodeWidth - 1, 0),
-  // and rvcIll happens out of range(DecodeWidth - 1, 0),
-  // rvcIll should be registered
-  when(useBypass) {
-    when(!bypassHasException && nextFirstHasRVCII) {
-      nextFirstBackendException     := false.B
-      nextFirstExceptionIBufIdx     := enqPtrVec(nextFirstRVCIIOffset)
-      nextFirstIBufferExceptionType := IBufferExceptionType.RvcII
-    }.otherwise {
-      nextFirstBackendException     := false.B
-      nextFirstExceptionIBufIdx     := firstExceptionIBufIdx
-      nextFirstIBufferExceptionType := IBufferExceptionType.None
-    }
-  }.otherwise {
-    nextFirstBackendException := currentBackendException
-    nextFirstExceptionIBufIdx := enqPtrVec(nextFirstExceptionOffset)
-    nextFirstIBufferExceptionType := Mux(
-      bypassHasExceptionWithoutRVCII,
-      IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-        currentExceptionType,
-        currentCrossPageIPFFix,
-        bypassRVCII(0) // rvcIll may happen on offset 0
-      ),
-      IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-        ExceptionType.None,
-        false.B,
-        nextFirstHasRVCII
-      )
-    )
-  }
-  when(canReceiveException) {
-    firstBackendException     := nextFirstBackendException
-    firstExceptionIBufIdx     := nextFirstExceptionIBufIdx
-    firstIBufferExceptionType := nextFirstIBufferExceptionType
-  }
-
-  // Exceptions to outputEntries
+  // Dequeue the first encountered exceptions to outputEntries.
   private val deqExceptionMatchOH = VecInit((0 until DecodeWidth).map(i =>
-    deqPtrVec(i) === firstExceptionIBufIdx && firstHasException
+    deqPtrVec(i) === firstExceptionIBufIdx && firstHasExceptionExcludingRVCII
   ))
   private val deqHasExceptionOH = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchOH.asUInt
   deqHasException    := deqHasExceptionOH.orR
   deqExceptionOffset := OHToUInt(deqHasExceptionOH)
 
-  // exceptions dequeue, unset firstHasException
+  // When exceptions are dequeued, clear firstHasExceptionExcludingRVCII.
+  // Dequeue has higher priority, because once an exception has been processed,
+  // later exceptions are no longer relevant.
   when(deqHasException && (decodeCanAccept || outputEntriesIsNotFull)) {
-    firstHasException := false.B
+    firstHasExceptionExcludingRVCII := false.B
   }
 
   XSError(
@@ -451,11 +391,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
     deqPtrVec     := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     outputEntries.foreach(_.valid := false.B)
-    firstIBufferExceptionType := IBufferExceptionType.None
-    firstExceptionIBufIdx     := 0.U.asTypeOf(new IBufPtr())
-    firstBackendException     := false.B
-    firstHasException         := false.B
-    canReceiveException       := true.B
+    firstHasExceptionExcludingRVCII := false.B
   }.otherwise {
     deqPtrVec     := deqPtrVecNext
     deqInBankPtr  := deqInBankPtrNext

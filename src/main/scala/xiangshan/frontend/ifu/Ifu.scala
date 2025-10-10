@@ -775,9 +775,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(s4_shiftNum).isRVC              := uncacheIsRvc
     io.toIBuffer.bits.pd(s4_shiftNum).brAttribute        := brAttribute
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
+    io.toIBuffer.bits.illegalInstr(s4_shiftNum)          := uncacheRvcExpander.io.ill
 
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum) := uncacheRvcExpander.io.ill
-    io.toIBuffer.bits.exceptionType             := uncacheException
+    io.toIBuffer.bits.exceptionType := uncacheException
     // execption can happen in next page only when cross page.
     io.toIBuffer.bits.crossPageIPFFix := prevUncacheCrossPage && uncacheException.hasException
     io.toIBuffer.bits.enqEnable       := s4_alignBlockStartPos.asUInt
