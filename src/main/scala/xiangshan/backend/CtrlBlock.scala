@@ -247,18 +247,13 @@ class CtrlBlockImp(
     io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
   }
 
-  val newestEn = RegNext(io.frontend.fromFtq.newest_entry_en)
-  val newestTarget = RegEnable(io.frontend.fromFtq.newest_entry_target, io.frontend.fromFtq.newest_entry_en)
-  val newestPtr = RegEnable(io.frontend.fromFtq.newest_entry_ptr, io.frontend.fromFtq.newest_entry_en)
-  val newestTargetNext = RegEnable(newestTarget, newestEn)
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
     val baseAddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    val needNewest = RegNext(baseAddr === newestPtr.value)
-    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := Mux(needNewest, newestTargetNext, pcMem.io.rdata(pcMemIdx).toUInt)
+    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
   }
 
   val baseIdx = params.BrhCnt
@@ -773,9 +768,9 @@ class CtrlBlockImp(
   }}
   io.toIssueBlock.flush <> s2_s4_redirect
 
-  pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.pc_mem_wen)
-  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
-  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.pc_mem_wdata, io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.wen)
+  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.ftqIdx, io.frontend.fromFtq.wen)
+  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.startVAddr, io.frontend.fromFtq.wen)
 
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect

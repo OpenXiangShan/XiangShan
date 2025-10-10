@@ -16,6 +16,7 @@
 package xiangshan.frontend.ftq
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.XSCoreParamsKey
@@ -31,4 +32,6 @@ object FtqPtr {
     ptr.value := v
     ptr
   }
+
+  def width(implicit p: Parameters): Int = log2Up(p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize)
 }
