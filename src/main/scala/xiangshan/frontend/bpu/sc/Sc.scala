@@ -153,11 +153,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     VecInit(t1_branches.map(b => b.valid && b.bits.attribute.isConditional && t1_trainValid))
   private val t1_writeValid     = t1_writeValidMask.reduce(_ || _)
   private val t1_writeWayIdxVec = VecInit(t1_branches.map(b => b.bits.cfiPosition(log2Ceil(NumWays) - 1, 0)))
+  require(
+    t1_writeWayIdxVec(0).getWidth == log2Ceil(NumWays),
+    s"t1_writeWayIdxVec entry width: ${t1_writeWayIdxVec(0).getWidth} should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
+  )
   private val t1_newThresVec = VecInit(t1_writeWayIdxVec.zip(t1_takenMask).map { case (wayIdx, taken) =>
     scThreshold(wayIdx).update(taken =/= t1_meta.scPred(wayIdx))
   })
   private val t1_writeEntryVec = WireInit(
-    VecInit.fill(PathTableSize)(VecInit.fill(backendParams.BrhCnt)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(PathTableSize)(VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(new ScEntry())))
   )
 
   t1_oldCtrs.zip(t1_writeEntryVec).foreach {

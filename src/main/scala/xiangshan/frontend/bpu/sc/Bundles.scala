@@ -61,15 +61,15 @@ object ScThreshold {
 
 class PathTableSramWriteReq(val numSets: Int)(implicit p: Parameters) extends WriteReqBundle with HasScParameters {
   val setIdx:    UInt         = UInt(log2Ceil(numSets).W)
-  val wayIdxVec: Vec[UInt]    = Vec(backendParams.BrhCnt, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(backendParams.BrhCnt, new ScEntry())
+  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
+  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
 }
 
 class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle {
   val valid:     Bool         = Bool()
   val setIdx:    UInt         = UInt(log2Ceil(numSets / NumBanks).W)
-  val wayIdxVec: Vec[UInt]    = Vec(backendParams.BrhCnt, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(backendParams.BrhCnt, new ScEntry())
+  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
+  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {

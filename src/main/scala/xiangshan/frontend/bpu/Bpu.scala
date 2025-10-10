@@ -324,7 +324,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_ittageMeta = ittage.io.meta
 
   // sc meta
-  private val s3_scMeta = sc.io.meta
+  private val s3_scMeta = 0.U.asTypeOf(sc.io.meta)
 
   // ras meta
   private val s3_rasMeta = ras.io.specMeta
