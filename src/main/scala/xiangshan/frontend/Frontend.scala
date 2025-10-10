@@ -226,7 +226,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   for (i <- 0 until DecodeWidth) {
     checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
-    checkTarget(i) := checkPcMem((checkTargetPtr(i) + 1.U).value)
+    checkTarget(i)    := checkPcMem((checkTargetPtr(i) + 1.U).value)
   }
 
   // FIXME: reconsider this check when newest_target_entry is deleted
