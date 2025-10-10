@@ -112,6 +112,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_prediction = Wire(new Prediction)
 
   private val s3_meta = Wire(new BpuMeta)
+  println("bpu meta width: " + s3_meta.getWidth)
 
   private val debug_bpId = RegInit(0.U(XLEN.W))
 
@@ -323,6 +324,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
+  // tage meta
+  private val s3_tageMeta = RegEnable(tage.io.meta, s2_fire)
+
   // ittage meta
   private val s3_ittageMeta = ittage.io.meta
 
@@ -343,6 +347,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s3_meta.abtb   := s3_abtbMeta
   s3_meta.mbtb   := s3_mbtbMeta
+  s3_meta.tage   := s3_tageMeta
   s3_meta.ras    := s3_rasMeta
   s3_meta.phr    := s3_phrMeta
   s3_meta.ittage := s3_ittageMeta
@@ -350,8 +355,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s3_meta.debug_startVAddr := s3_pc
   s3_meta.debug_bpId       := debug_bpId
-
-  s3_meta.perf_s3Prediction := s3_prediction
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta

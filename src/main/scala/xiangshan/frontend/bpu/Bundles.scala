@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.bpu.sc.ScMeta
+import xiangshan.frontend.bpu.tage.TageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -180,6 +181,7 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val abtb:   AheadBtbMeta = new AheadBtbMeta
   val mbtb:   MainBtbMeta  = new MainBtbMeta
+  val tage:   TageMeta     = new TageMeta
   val ras:    RasMeta      = new RasMeta
   val phr:    PhrPtr       = new PhrPtr
   val sc:     ScMeta       = new ScMeta
@@ -187,8 +189,6 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   // used for BpTrace
   val debug_bpId:       UInt       = UInt(XLEN.W)
   val debug_startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
-  // used for performance counter
-  val perf_s3Prediction: Prediction = new Prediction
 }
 
 /* *** internal const & type *** */
