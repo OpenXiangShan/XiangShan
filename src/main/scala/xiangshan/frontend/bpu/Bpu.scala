@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ChiselDB
 import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
@@ -111,6 +112,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_prediction = Wire(new Prediction)
 
   private val s3_meta = Wire(new BpuMeta)
+
+  private val debug_bpId = RegInit(0.U(XLEN.W))
 
   private val s0_pc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val s0_pcReg = RegEnable(s0_pc, !s0_stall)
@@ -338,12 +341,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
-  s3_meta.abtb              := s3_abtbMeta
-  s3_meta.mbtb              := s3_mbtbMeta
-  s3_meta.ras               := s3_rasMeta
-  s3_meta.phr               := s3_phrMeta
-  s3_meta.ittage            := s3_ittageMeta
-  s3_meta.sc                := s3_scMeta
+  s3_meta.abtb   := s3_abtbMeta
+  s3_meta.mbtb   := s3_mbtbMeta
+  s3_meta.ras    := s3_rasMeta
+  s3_meta.phr    := s3_phrMeta
+  s3_meta.ittage := s3_ittageMeta
+  s3_meta.sc     := s3_scMeta
+
+  s3_meta.debug_startVAddr := s3_pc
+  s3_meta.debug_bpId       := debug_bpId
+
   s3_meta.perf_s3Prediction := s3_prediction
 
   io.toFtq.meta.valid := s3_valid
@@ -418,6 +425,46 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   when(abtb.io.prediction.taken) {
     assert(abtb.io.debug_startVAddr === s1_pc)
   }
+
+  /* *** BpTrace *** */
+  when(io.toFtq.meta.fire) {
+    debug_bpId := debug_bpId + 1.U
+  }
+
+  private class PredictionTrace extends Bundle {
+    val s1Prediction = new Prediction
+    val s3Prediction = new Prediction
+    val meta         = new BpuMeta
+  }
+
+  private class TrainTrace extends Bundle {
+    val train = new BpuTrain
+  }
+
+  private val predictionTable = ChiselDB.createTable("BpuPredictionTrace", new PredictionTrace, EnableBpTrace)
+  private val trainTable      = ChiselDB.createTable("BpuTrainTrace", new TrainTrace, EnableBpTrace)
+
+  private val predictionTrace = Wire(new PredictionTrace)
+  predictionTrace.s1Prediction := s3_s1Prediction
+  predictionTrace.s3Prediction := s3_prediction
+  predictionTrace.meta         := s3_meta
+
+  private val trainTrace = Wire(new TrainTrace)
+  trainTrace.train := train.bits
+
+  predictionTable.log(
+    data = predictionTrace,
+    en = io.toFtq.meta.fire,
+    clock = clock,
+    reset = reset
+  )
+
+  trainTable.log(
+    data = trainTrace,
+    en = io.fromFtq.train.valid,
+    clock = clock,
+    reset = reset
+  )
 
   /* *** perf pred *** */
   XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)

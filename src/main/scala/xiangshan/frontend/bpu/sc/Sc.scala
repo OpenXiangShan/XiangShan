@@ -123,7 +123,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       }
   }
   io.takenMask      := s2_useScPred.zip(s2_scPred).map { case (u, p) => u && p }
-  io.meta.scResp    := s2_resp
+  io.meta.scResp    := VecInit(s2_resp.map(v => VecInit(v.map(_.asUInt))))
   io.meta.scPred    := s2_scPred
   io.meta.useScPred := s2_useScPred
 
@@ -147,7 +147,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     )
   )
   private val t1_meta      = t1_train.meta.sc
-  private val t1_oldCtrs   = t1_meta.scResp
+  private val t1_oldCtrs   = VecInit(t1_meta.scResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
   private val t1_takenMask = VecInit(t1_branches.map(b => b.valid && b.bits.taken))
   private val t1_writeValidMask =
     VecInit(t1_branches.map(b => b.valid && b.bits.attribute.isConditional && t1_trainValid))

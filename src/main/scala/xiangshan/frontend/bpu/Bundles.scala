@@ -184,6 +184,9 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val phr:    PhrPtr       = new PhrPtr
   val sc:     ScMeta       = new ScMeta
   val ittage: IttageMeta   = new IttageMeta
+  // used for BpTrace
+  val debug_bpId:       UInt       = UInt(XLEN.W)
+  val debug_startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
   // used for performance counter
   val perf_s3Prediction: Prediction = new Prediction
 }
