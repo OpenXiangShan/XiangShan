@@ -35,7 +35,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.src(0) := io.in.bits.data.src(0) // rs1
   dataModule.io.src(1) := io.in.bits.data.src(1) // rs2
   dataModule.io.func := io.in.bits.ctrl.fuOpType
-  dataModule.io.pred_taken := io.in.bits.ctrl.predictInfo.get.taken
+  dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
 
   val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
     SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
@@ -52,7 +52,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val brhRealTarget = addModule.io.target
-  val isMisPred = dataModule.io.mispredict || dataModule.io.pred_taken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
+  val targetWrong = dataModule.io.fixedTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
+  val isMisPred = dataModule.io.mispredict || targetWrong
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>

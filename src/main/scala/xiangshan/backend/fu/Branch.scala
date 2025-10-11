@@ -26,7 +26,7 @@ class BranchModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
-    val pred_taken = Input(Bool())
+    val fixedTaken = Input(Bool())
     val taken, mispredict = Output(Bool())
   })
   val (src1, src2, func) = (io.src(0), io.src(1), io.func)
@@ -47,5 +47,5 @@ class BranchModule(implicit p: Parameters) extends XSModule {
   val taken = LookupTree(BRUOpType.getBranchType(func), branchOpTable) ^ BRUOpType.isBranchInvert(func)
 
   io.taken := taken
-  io.mispredict := io.pred_taken ^ taken
+  io.mispredict := io.fixedTaken ^ taken
 }

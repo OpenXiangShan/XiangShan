@@ -33,10 +33,14 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
 
-  val predTaken = io.in.bits.ctrl.predictInfo.get.taken
+  val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
+  val predTaken  = io.in.bits.ctrl.predictInfo.get.predTaken
   val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val jumpRealTarget = jumpDataModule.io.target(VAddrData().dataWidth - 1, 0)
-  val isMisPred = !predTaken || (jumpRealTarget =/= jmpPredictTarget)
+
+  val targetWrong = jumpRealTarget =/= jmpPredictTarget
+  val needRedirect = !fixedTaken || targetWrong
+  val needTrain = !predTaken || targetWrong
 
   val redirect = io.out.bits.res.redirect.get.bits
   val redirectValid = io.out.bits.res.redirect.get.valid
@@ -50,7 +54,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.taken := true.B
   redirect.target := jumpDataModule.io.target
   redirect.pc := io.in.bits.data.pc.get
-  redirect.isMisPred := isMisPred
+  redirect.isMisPred := needRedirect
   redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
@@ -66,7 +70,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pc)
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(jumpDataModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := true.B
-  io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
+  io.toFrontendBJUResolve.get.bits.mispredict := needTrain
   io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
   io.toFrontendBJUResolve.get.bits.attribute.rasAction :=  Mux1H(
     Seq(io.in.bits.ctrl.preDecode.get.isCall, io.in.bits.ctrl.preDecode.get.isRet),

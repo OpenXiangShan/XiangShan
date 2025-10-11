@@ -59,7 +59,8 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
-    val pred_taken = Bool()
+    val fixedTaken = Bool()
+    val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -70,7 +71,6 @@ object Bundles {
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
       this.preDecodeInfo := source.pd
-      this.pred_taken := source.pred_taken
       this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
@@ -88,7 +88,8 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
-    val pred_taken = Bool()
+    val fixedTaken = Bool()
+    val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -180,7 +181,8 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val preDecodeInfo = new PreDecodeInfo
-    val pred_taken = Bool()
+    val fixedTaken = Bool()
+    val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -253,7 +255,8 @@ object Bundles {
     def numSrc = backendParams.numSrc
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
-    val pred_taken = Bool()
+    val fixedTaken = Bool()
+    val predTaken = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     // from decode
@@ -309,7 +312,8 @@ object Bundles {
     def numSrc = backendParams.numSrc
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
-    val pred_taken = Bool()
+    val fixedTaken = Bool()
+    val predTaken = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     // from decode
@@ -375,7 +379,8 @@ object Bundles {
     val hasException    = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
-    val pred_taken      = Bool()
+    val fixedTaken      = Bool()
+    val predTaken       = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
@@ -858,7 +863,8 @@ object Bundles {
                                                   Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
-      val taken = Bool()
+      val fixedTaken = Bool()
+      val predTaken = Bool()
     }) else None
     val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
     val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx

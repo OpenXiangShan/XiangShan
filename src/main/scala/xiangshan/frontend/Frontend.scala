@@ -240,7 +240,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     for (i <- 0 until DecodeWidth - 1) {
       // for instrs that is not the last, if a taken br, the next instr should not have the same ftqPtr
       // for instrs that is the last, record and check next request
-      when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken) {
+      when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.fixedTaken) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
         }.otherwise {
@@ -250,15 +250,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
         }
       }
       XSError(
-        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken &&
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.fixedTaken &&
           ibuffer.io.out(i + 1).fire &&
           (checkTargetPtr(i) + 1.U).value =/= checkTargetPtr(i + 1).value,
         "taken br should have consecutive ftqPtr\n"
       )
     }
-    when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && ibuffer.io.out(
-      DecodeWidth - 1
-    ).bits.pred_taken) {
+    when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr &&
+      ibuffer.io.out(DecodeWidth - 1).bits.fixedTaken) {
       // last instr is a br, record its info
       prevTakenValid  := true.B
       prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
@@ -283,7 +282,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     val prevNotTakenValid = RegInit(0.B)
 
     for (i <- 0 until DecodeWidth - 1) {
-      when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken) {
+      when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.fixedTaken) {
         when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevNotTakenValid := true.B
           prevIsRVC         := ibuffer.io.out(i).bits.pd.isRVC
@@ -291,7 +290,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
         }
       }
       XSError(
-        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken &&
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.fixedTaken &&
           ibuffer.io.out(i + 1).fire &&
           ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(
             i + 1
@@ -299,9 +298,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
         "not-taken br should have consecutive pc\n"
       )
     }
-    when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && !ibuffer.io.out(
-      DecodeWidth - 1
-    ).bits.pred_taken) {
+    when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr &&
+      !ibuffer.io.out(DecodeWidth - 1).bits.fixedTaken) {
       prevNotTakenValid := true.B
       prevIsRVC         := ibuffer.io.out(DecodeWidth - 1).bits.pd.isRVC
       prevNotTakenPC    := ibuffer.io.out(DecodeWidth - 1).bits.pc
@@ -327,22 +325,21 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value)
 
     for (i <- 0 until DecodeWidth - 1) {
-      when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {
+      when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.fixedTaken) {
         when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevTakenValid  := true.B
           prevTakenFtqPtr := checkTargetPtr(i)
         }
       }
       XSError(
-        ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken &&
+        ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.fixedTaken &&
           ibuffer.io.out(i + 1).fire &&
           checkTarget(i) =/= PrunedAddrInit(ibuffer.io.out(i + 1).bits.pc),
         "taken instr should follow target pc\n"
       )
     }
-    when(ibuffer.io.out(DecodeWidth - 1).fire && !ibuffer.io.out(DecodeWidth - 1).bits.pd.notCFI && ibuffer.io.out(
-      DecodeWidth - 1
-    ).bits.pred_taken) {
+    when(ibuffer.io.out(DecodeWidth - 1).fire && !ibuffer.io.out(DecodeWidth - 1).bits.pd.notCFI &&
+      ibuffer.io.out(DecodeWidth - 1).bits.fixedTaken) {
       prevTakenValid  := true.B
       prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }

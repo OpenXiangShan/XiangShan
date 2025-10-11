@@ -1125,7 +1125,8 @@ class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extend
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
     deq.bits.common.predictInfo.foreach(x => {
       x.target := DontCare
-      x.taken := deqEntryVec(i).bits.payload.pred_taken
+      x.fixedTaken := deqEntryVec(i).bits.payload.fixedTaken
+      x.predTaken  := deqEntryVec(i).bits.payload.predTaken
     })
     // for std
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx)
