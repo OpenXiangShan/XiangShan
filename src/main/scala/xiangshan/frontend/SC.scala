@@ -49,7 +49,6 @@ abstract class SCBundle(implicit p: Parameters) extends TageBundle with HasSCPar
 abstract class SCModule(implicit p: Parameters) extends TageModule with HasSCParameter {}
 
 class SCMeta(val ntables: Int)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-  val valid   = Bool()
   val scPreds = Vec(numBr, Bool())
   // Suppose ctrbits of all tables are identical
   val ctrs = Vec(numBr, Vec(ntables, SInt(SCCtrBits.W)))
@@ -70,7 +69,7 @@ class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 
 class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val req    = Input(Valid(new SCReq))
-  val resp   = Output(Valid(new SCResp(ctrBits)))
+  val resp   = Output(new SCResp(ctrBits))
   val update = Input(new SCUpdate(ctrBits))
 }
 
@@ -141,8 +140,9 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     )
   ))
 
-  io.resp.valid     := !s1_resp_invalid_by_conflict
-  io.resp.bits.ctrs := per_br_ctrs
+  io.resp.ctrs := Mux(s1_resp_invalid_by_conflict, 0.U.asTypeOf(per_br_ctrs), per_br_ctrs)
+
+  XSPerfAccumulate("sc_table_conflict", io.req.valid && s0_invalid_by_conflict)
 
   val update_wdata        = Wire(Vec(numBr, SInt(ctrBits.W))) // correspond to physical bridx
   val update_wdata_packed = VecInit(update_wdata.map(Seq.fill(2)(_)).reduce(_ ++ _))
@@ -214,7 +214,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   XSDebug(
     RegNext(io.req.valid),
     p"scTableResp: s1_idx=${s1_idx}," +
-      p"ctr:${io.resp.bits.ctrs}\n"
+      p"ctr:${io.resp.ctrs}\n"
   )
   XSDebug(
     io.update.mask.reduce(_ || _),
@@ -319,25 +319,19 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       // do summation in s2
       val s1_scTableSums = VecInit(
         (0 to 1) map { i =>
-          ParallelSingedExpandingAdd(s1_scResps map (r =>
-            getCentered(r.bits.ctrs(w)(i))
-          )) // TODO: rewrite with wallace tree
+          ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
-      val s2_scResps             = VecInit(s1_scResps.map(RegEnable(_, io.s1_fire(3))))
-      val s2_scRespValids        = VecInit(s2_scResps.map(_.valid))
       val s2_scTableSums         = RegEnable(s1_scTableSums, io.s1_fire(3))
       val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(3)))
       val s2_totalSums           = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds =
-        VecInit((0 to 1).map(i =>
-          aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w)) && s2_scRespValids(i)
-        ))
+        VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val s2_scRespsCtrs = VecInit(s2_scResps.map(_.bits.ctrs(w)))
-      val s2_scCtrs      = VecInit(s2_scRespsCtrs.map(_(s2_tageTakens_dup(3)(w).asUInt)))
-      val s2_chooseBit   = s2_tageTakens_dup(3)(w)
+      val s2_scResps   = VecInit(RegEnable(s1_scResps, io.s1_fire(3)).map(_.ctrs(w)))
+      val s2_scCtrs    = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
+      val s2_chooseBit = s2_tageTakens_dup(3)(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens_dup(3)(w))
@@ -345,7 +339,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3))
       io.out.last_stage_spec_info.sc_disagree.map(_ := s3_disagree)
 
-      scMeta.valid      := RegEnable(s2_scRespValids(w), io.s2_fire(3))
       scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
       scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3))
 
@@ -385,7 +378,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val tagePred          = updateTageMeta.takens(w)
       val taken             = update.br_taken_mask(w)
       val scOldCtrs         = updateSCMeta.ctrs(w)
-      val scPredValid       = updateSCMeta.valid
       val pvdrCtr           = updateTageMeta.providerResps(w).ctr
       val tableSum          = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered))
       val totalSumAbs       = (tableSum +& getPvdrCentered(pvdrCtr)).abs.asUInt
@@ -393,7 +385,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val sumAboveThreshold = aboveThreshold(tableSum, getPvdrCentered(pvdrCtr), updateThres)
       val thres             = useThresholds(w)
       val newThres          = scThresholds(w).update(scPred =/= taken)
-      when(scPredValid && updateValids(w) && updateTageMeta.providers(w).valid) {
+      when(updateValids(w) && updateTageMeta.providers(w).valid) {
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w)    := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach { case (t, c) => t := c }
