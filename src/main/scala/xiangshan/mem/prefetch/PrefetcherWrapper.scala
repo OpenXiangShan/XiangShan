@@ -155,6 +155,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     */
   val HasSMS = prefetcherSeq.exists(_.isInstanceOf[SMSParams])
   val IdxSMS = prefetcherSeq.indexWhere(_.isInstanceOf[SMSParams])
+  val HasStreamStride = prefetcherSeq.exists(_.isInstanceOf[StreamStrideParams])
+  val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
+  val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
+  val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
+
   val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
     val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
@@ -205,8 +210,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.l3_req.ready := false.B
   })
 
-  val HasStreamStride = prefetcherSeq.exists(_.isInstanceOf[StreamStrideParams])
-  val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
   val strideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   strideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
@@ -216,6 +219,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
+    pf.strideEnable := !HasBerti.B
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
@@ -247,8 +251,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
   })
 
-  val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
-  val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
   val bertiOpt: Option[BertiPrefetcher] = if(HasBerti) Some(Module(new BertiPrefetcher())) else None
   bertiOpt.foreach(pf => {
     val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = true)

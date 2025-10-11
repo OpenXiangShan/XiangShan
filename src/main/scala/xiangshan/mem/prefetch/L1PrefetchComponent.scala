@@ -962,6 +962,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val pf_ctrl = IO(Input(Vec(L1PrefetcherNum, new PrefetchControlBundle)))
   val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LsPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
+  val strideEnable = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
@@ -999,7 +1000,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   stream_bit_vec_array.io.confidence := stream_pf_ctrl.confidence
   stream_bit_vec_array.io.train_req <> stream_train_filter.io.train_req
 
-  stride_meta_array.io.enable := enable
+  stride_meta_array.io.enable := enable && strideEnable
   stride_meta_array.io.flush := stride_pf_ctrl.flush
   stride_meta_array.io.dynamic_depth := 0.U
   stride_meta_array.io.confidence := stride_pf_ctrl.confidence
