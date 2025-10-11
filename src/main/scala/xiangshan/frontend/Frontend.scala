@@ -421,7 +421,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   instrUncache.io.req <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
-  instrUncache.io.flush := false.B
   io.error <> RegNext(RegNext(icache.io.error))
 
   icache.io.hartId := io.hartId

@@ -10,7 +10,7 @@ PMAConfigs:
   - { base_addr: 0x39000000, a: 1, w: true, r: true }
   - { base_addr: 0x38022000, a: 1, w: true, r: true }
   - { base_addr: 0x38021000, a: 1, x: true, w: true, r: true }
-  - { base_addr: 0x30010000, a: 1, w: true, r: true }
+  - { base_addr: 0x38020000, a: 1, w: true, r: true }
   - { base_addr: 0x20000000, a: 1, x: true, w: true, r: true }
   - { base_addr: 0x10000000, a: 1, w: true, r: true }
   - { base_addr: 0 }
@@ -38,12 +38,12 @@ WFIResume: true
 
 SeperateDM: false
 
-SeperateTLBus: false
+SeperateBus: NONE
 
-SeperateTLBusRanges:
+SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
 
-EnableSeperateTLBusAsyncBridge: true
+EnableSeperateBusAsyncBridge: true
 
 IMSICBusType: AXI
 
@@ -72,3 +72,14 @@ EnableSramCtl: false
 EnableCHINS: false
 
 CHIAddrWidth: 48
+
+CVMParams:
+  MEMENCRange: { base: 0x38030000, mask: 0xFFF }
+  KeyIDBits: 0
+  MemencPipes: 4
+  HasMEMencryption: false
+  HasDelayNoencryption: false
+
+EnableBitmapCheck: true
+
+EnableBitmapCheckDefault: false

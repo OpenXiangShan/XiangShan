@@ -479,7 +479,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
-    out.isnc          := src.nc
     out.data          := src.data
     out
   }
@@ -1133,6 +1132,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
   loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
   loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
+  loadTrigger.io.isPrf.get                           := s1_prf
 
   val s1_trigger_action = loadTrigger.io.toLoadStore.triggerAction
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)

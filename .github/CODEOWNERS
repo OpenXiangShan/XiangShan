@@ -36,3 +36,6 @@ coupledL2/ @linjuanZ @Ivyfeather
 huancun/ @linjuanZ @Ivyfeather
 
 src/main/scala/top/ @Tang-Haojin
+
+scripts/pdb-run.py @yaozhicheng @forever043 @SFangYy @Tang-Haojin 
+scripts/xspdb/ @yaozhicheng @forever043 @SFangYy @Tang-Haojin 

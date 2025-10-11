@@ -13,3 +13,5 @@ IMSICParams:
   iselectWidth: 12
   EnableImsicAsyncBridge: true
   HasTEEIMSIC: false
+
+EnableSramCtl: true

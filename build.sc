@@ -39,12 +39,12 @@ val defaultScalaVersion = "2.13.15"
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
 def defaultVersions = Map(
-  "chisel"        -> ivy"org.chipsalliance::chisel:6.6.0",
-  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.6.0",
+  "chisel"        -> ivy"org.chipsalliance::chisel:6.7.0",
+  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.7.0",
   "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
 )
 /* resolve firtool dependency */
-import $ivy.`org.chipsalliance::chisel:6.6.0`
+import $ivy.`org.chipsalliance::chisel:6.7.0`
 import $ivy.`org.chipsalliance::firtool-resolver:1.3.0`
 
 trait HasChisel extends SbtModule {

@@ -41,7 +41,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
-  case CVMParamskey => CVMParameters()
+  case CVMParamsKey => CVMParameters()
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
@@ -418,7 +418,7 @@ class WithFuzzer extends Config((site, here, up) => {
 })
 
 class CVMCompile extends Config((site, here, up) => {
-  case CVMParamskey => up(CVMParamskey).copy(
+  case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
     HasMEMencryption = true,
     HasDelayNoencryption = false
@@ -429,7 +429,7 @@ class CVMCompile extends Config((site, here, up) => {
 })
 
 class CVMTestCompile extends Config((site, here, up) => {
-  case CVMParamskey => up(CVMParamskey).copy(
+  case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
     HasMEMencryption = true,
     HasDelayNoencryption = true

@@ -1,11 +1,13 @@
 name: Bug report
 description: Report a bug (incorrect behaviors) of XiangShan Processor Cores.
-labels: 'bug report'
+labels:
+  - 'type: bug/reported'
+  - 'module: unknown'
 body:
   - type: markdown
     attributes:
       value: |
-        You could use English or Chineses to open an issue.
+        You could use English or Chinese to open an issue.
         您可以使用中文或英文提问，我们推荐使用英文。
 
         This template is only used for reporting a bug (incorrect behaviors) of XiangShan Processor Cores. If this doesn't look right, please back and choose another template.
@@ -39,9 +41,15 @@ body:
     attributes:
       label: Describe the bug
       description: |
-        A clear and concise description of what the bug is. 请清晰、准确地描述这一缺陷。
-        If applicable, add screenshots to help explain your problem. 如果可能，请提供有助于您描述问题的屏幕截图。
-      placeholder: 
+        A clear and concise description of what the bug is.
+        请清晰、准确地描述这一缺陷。
+
+        If applicable, add screenshots / logs to help explain your problem.
+        如果可能，请提供有助于您描述问题的屏幕截图和日志。
+
+        Please upload logs as attachments, do not paste them directly into the text box.
+        请使用附件的形式上传日志，不要直接粘贴到文本框中。
+      placeholder:
     validations:
       required: true
   - type: textarea
@@ -49,8 +57,9 @@ body:
     attributes:
       label: Expected behavior
       description: |
-        A clear and concise description of what you expected to happen. 请清晰、准确地描述期望的行为。
-      placeholder: 
+        A clear and concise description of what you expected to happen.
+        请清晰、准确地描述期望的行为。
+      placeholder:
     validations:
       required: true
   - type: textarea
@@ -58,8 +67,9 @@ body:
     attributes:
       label: To Reproduce
       description: |
-        Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description. 复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
-      placeholder: 
+        Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description.
+        复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
+      placeholder:
     validations:
       required: true
   - type: textarea
@@ -69,23 +79,28 @@ body:
       description: |
         Please provide your environment information.
         请提供您的环境信息。
-        
-        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`. 
+
+        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`.
         XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `DefaultConfig`。
-      placeholder: 
+      placeholder:
       value: |
-       - XiangShan branch: 
-       - XiangShan commit id: 
-       - XiangShan config: 
-       - NEMU commit id: 
-       - SPIKE commit id:
+        - XiangShan branch:
+        - XiangShan commit id:
+        - XiangShan config:
+        - NEMU commit id:
+        - SPIKE commit id:
     validations:
       required: true
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Add any other context about the problem here. 可在此处附上其他相关信息。
-      placeholder: 
+      description: |
+        Add any other context about the problem here.
+        可在此处附上其他相关信息。
+
+        For example, your guess about the cause of the bug, or the modules that may be related.
+        例如，您对 bug 可能原因的猜测，或者可能与 bug 相关的模块。
+      placeholder:
     validations:
       required: false

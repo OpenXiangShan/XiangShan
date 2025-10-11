@@ -1249,6 +1249,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
+    stu.io.sqDeqPtr     <> lsq.io.sqDeqPtr
+    stu.io.sqDeqUopIdx  <> lsq.io.sqDeqUopIdx
+    stu.io.sqDeqRobIdx  <> lsq.io.sqDeqRobIdx
 
     // -------------------------
     // Store Triggers
@@ -1375,10 +1378,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.vecmmioStout.ready := false.B
 
   // miss align buffer will overwrite stOut(0)
-  val storeMisalignCanWriteBack = !otherStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid
+  val storeMisalignCanWriteBack = !otherStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid && !storeUnits(1).io.vecstout.valid
   storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
   storeMisalignBuffer.io.storeOutValid := storeUnits(0).io.stout.valid
-  storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid
+  storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid || storeUnits(1).io.vecstout.valid
   when (storeMisalignBuffer.io.writeBack.valid && storeMisalignCanWriteBack) {
     stOut(0).valid := true.B
     stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
@@ -1576,8 +1579,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsMergeBuffer(i).io.fromPipeline := DontCare
     vsMergeBuffer(i).io.fromSplit := DontCare
 
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
+//    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
+//    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
   }
 
   (0 until VstuCnt).foreach{i =>
@@ -1593,8 +1596,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty := !storeMisalignBuffer.io.full
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits(i).io.s0_s1_valid
+    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
+    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferRobIdx := storeMisalignBuffer.io.toVecSplit.robIdx
+    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferUopIdx := storeMisalignBuffer.io.toVecSplit.uopIdx
+    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits.map(_.io.s0_s1_s2_valid).reduce(_||_)
 
   }
   (0 until VlduCnt).foreach{i =>

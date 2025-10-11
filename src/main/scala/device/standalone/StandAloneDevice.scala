@@ -18,7 +18,7 @@ package device.standalone
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{annotate, ChiselAnnotation}
+import chisel3.experimental.annotate
 import chisel3.experimental.dataview._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
@@ -149,18 +149,14 @@ abstract class StandAloneDevice (
 class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) with RequireAsyncReset {
   p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
-    annotate(new ChiselAnnotation {
-      def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
-    })
+    annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
   }
 }
 
 class StandAloneDeviceRawImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
   p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
-    annotate(new ChiselAnnotation {
-      def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
-    })
+    annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
   }
 }
 
@@ -209,8 +205,8 @@ object ArgParser {
     require(addrWidth >= 0, "addrWidth not specified correctly")
     require(dataWidth >= 0, "dataWidth not specified correctly")
     val device: StandAloneDevice = module match {
-      case "StandAloneCLINT" =>
-        DisableMonitors(p => LazyModule(new StandAloneCLINT(
+      case "StandAloneSYSCNT" =>
+        DisableMonitors(p => LazyModule(new StandAloneSYSCNT(
           useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size
         )(p)))(p)
       case "StandAlonePLIC" =>

@@ -221,8 +221,10 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 }
 
 class storeMisaignIO(implicit p: Parameters) extends Bundle{
-  val storePipeEmpty           = Input(Bool())
-  val storeMisalignBufferEmpty = Input(Bool())
+  val storePipeEmpty            = Input(Bool())
+  val storeMisalignBufferEmpty  = Input(Bool())
+  val storeMisalignBufferRobIdx = Input(new RobPtr)
+  val storeMisalignBufferUopIdx = Input(UopIdx())
 }
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -259,7 +261,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 
-  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
+//  val fromMisalignBuffer  = OptionWrapper(isVStore, Flipped(new StoreMaBufToVecStoreMergeBufferIO))
 }
 
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{

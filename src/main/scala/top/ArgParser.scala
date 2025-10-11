@@ -202,9 +202,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = true)
           }), tail)
-        case "--seperate-tl-bus" :: tail =>
+        case "--seperate-bus" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateBus = SeperatedBusType.withName(value))
           }), tail)
         case "--seperate-dm" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -218,6 +218,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
           }), tail)
+        case "--disable-xmr" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableXMR = false)
+          }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>
@@ -226,20 +230,21 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    val newArgs = DifftestModule.parseArgs(args)
+    val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
-        here(DebugOptionsKey).EnableDebug,
-        here(DebugOptionsKey).EnablePerfDebug,
-        here(DebugOptionsKey).FPGAPlatform
+        enableDebug = here(DebugOptionsKey).EnableDebug,
+        enablePerf = here(DebugOptionsKey).EnablePerfDebug,
+        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform,
+        enableXMR = here(DebugOptionsKey).EnableXMR
       )
       case PerfCounterOptionsKey => PerfCounterOptions(
-        here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
-        here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
-        XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
-        0
+        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        enablePerfDB = here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        perfLevel = XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
+        perfDBHartID = 0
       )
     })
-    (config, firrtlOpts, firtoolOpts)
+    (config, firrtlOpts, firtoolOpts ++ firtoolOptions.map(_.option))
   }
 }

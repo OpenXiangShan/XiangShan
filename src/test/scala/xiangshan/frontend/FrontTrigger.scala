@@ -16,7 +16,8 @@ class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Ma
     case LogUtilsOptionsKey => LogUtilsOptions(
       here(DebugOptionsKey).EnableDebug,
       here(DebugOptionsKey).EnablePerfDebug,
-      here(DebugOptionsKey).FPGAPlatform
+      here(DebugOptionsKey).FPGAPlatform,
+      here(DebugOptionsKey).EnableXMR
     )
   })
 

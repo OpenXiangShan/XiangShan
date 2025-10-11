@@ -587,7 +587,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_tag_error_wb = RegEnable(s2_tag_error, s2_fire_to_s3)
 
   // data_error will be reported by data array 1 cycle after data read resp
-  val s3_data_error_beu = io.readline_error && GatedValidRegNext(s2_fire_to_s3) && RegEnable(s2_may_report_data_error, s2_fire)
+  val s3_data_error_beu = io.readline_error_delayed && GatedValidRegNext(s2_fire_to_s3) && RegEnable(s2_may_report_data_error, s2_fire)
   val s3_data_error_wb = io.readline_error_delayed && RegEnable(s2_may_report_data_error, s2_fire_to_s3)
 
   val s3_l2_error_beu = RegEnable(s2_l2_error, s2_fire)

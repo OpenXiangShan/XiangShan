@@ -21,6 +21,9 @@ RTL_DIR = $(BUILD_DIR)/rtl
 # import docker support
 include scripts/Makefile.docker
 
+# import pdb support
+include scripts/Makefile.pdb
+
 # if XSTopPrefix is specified in yaml, use it.
 ifneq ($(YAML_CONFIG),)
 HAS_PREFIX_FROM_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG))
@@ -77,8 +80,16 @@ MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
-MFC_ARGS = --dump-fir --target $(CHISEL_TARGET) --split-verilog \
+MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
+
+ifeq ($(CHISEL_TARGET),systemverilog)
+MFC_ARGS += --split-verilog --dump-fir
+endif
+
+ifneq ($(FIRTOOL),)
+MFC_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
+endif
 
 # prefix of XSTop or XSNoCTop
 ifneq ($(XSTOP_PREFIX),)
@@ -128,6 +139,11 @@ endif
 # hart id bits
 ifneq ($(HART_ID_BITS),)
 COMMON_EXTRA_ARGS += --hartidbits $(HART_ID_BITS)
+endif
+
+# disable xmr
+ifeq ($(DISABLE_XMR),1)
+COMMON_EXTRA_ARGS += --disable-xmr
 endif
 
 # configuration from yaml file
@@ -192,6 +208,13 @@ else ifeq ($(PLDM),1)
 override SIM_ARGS += $(PLDM_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
+endif
+
+# Coverage support
+ifneq ($(FIRRTL_COVER),)
+comma := ,
+splitcomma = $(foreach w,$(subst $(comma), ,$1),$(if $(strip $w),$w))
+override SIM_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(c)-cover)
 endif
 
 # use RELEASE_ARGS for TopMain by default
@@ -321,6 +344,13 @@ simv: sim-verilog
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+# galaxsim simulation
+xsim: sim-verilog
+	$(MAKE) -C ./difftest xsim SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+xsim-run:
+	$(MAKE) -C ./difftest xsim-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # palladium simulation
 pldm-build: sim-verilog

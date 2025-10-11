@@ -18,6 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import device.{TIMER, TIMERParams, TimeAsync}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -42,26 +43,31 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val tile = LazyModule(new XSTile())
 
   // interrupts sync
-  val clintIntNode = IntIdentityNode()
+  val clintIntNode = Option.when(SeperateBus == top.SeperatedBusType.NONE)(IntIdentityNode()) // interrupt from CHI or (TL & async)
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
-  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
+  // instance clint timer
+  val timer = Option.when(SeperateBus != top.SeperatedBusType.NONE)(LazyModule(new TIMER(TIMERParams(IsSelfTest=false,soc.TIMERRange.base), 8))) // TL & sync
+  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(timer.get.intnode)
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
 
   // seperate TL bus
-  println(s"SeperateTLBus = $SeperateTLBus")
-  println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
+  println(s"SeperateBus = $SeperateBus")
+  println(s"EnableSeperateBusAsync = $EnableSeperateBusAsync")
+  val tlXbar = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLXbar())
+  tlXbar.map(_ := tile.sep_tl_opt.get) // TLXbar node in connect with tile master
+  timer.map(_.node := tlXbar.get) // TLXbar node out connnect with timer mmio
   // asynchronous bridge source node
-  val tlAsyncSourceOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
-  tlAsyncSourceOpt.foreach(_.node := tile.sep_tl_opt.get)
+  val tlAsyncSourceOpt = Option.when(SeperateBus != top.SeperatedBusType.NONE && EnableSeperateBusAsync)(LazyModule(new TLAsyncCrossingSource()))
+  tlAsyncSourceOpt.foreach(_.node := tlXbar.get)
   // synchronous source node
-  val tlSyncSourceOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
-  tlSyncSourceOpt.foreach(_ := tile.sep_tl_opt.get)
+  val tlSyncSourceOpt = Option.when(SeperateBus != top.SeperatedBusType.NONE && !EnableSeperateBusAsync)(TLTempNode())
+  tlSyncSourceOpt.foreach(_ := tlXbar.get)
 
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))
@@ -109,6 +115,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     childClock := clock
     childReset := reset_sync
 
+    timer.foreach { timerInst =>
+      timerInst.module.io.hartId := io.hartId
+      timerInst.module.io.time := tile.module.io.clintTime
+    }
+
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := io.msiInfo
     tile.module.io.reset_vector := io.reset_vector
@@ -134,11 +145,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
       case Some(param) =>
-        val sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
-        sink.io.async <> io.clintTime
-        sink.io.deq.ready := true.B
-        tile.module.io.clintTime.valid := sink.io.deq.valid
-        tile.module.io.clintTime.bits := sink.io.deq.bits
+        val time_sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        time_sink.io.async <> io.clintTime
+        time_sink.io.deq.ready := true.B
+        tile.module.io.clintTime.valid := time_sink.io.deq.valid
+        tile.module.io.clintTime.bits := time_sink.io.deq.bits
       case None =>
         tile.module.io.clintTime := io.clintTime
     }
@@ -155,7 +166,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // Seperate DebugModule TL Async Queue Source
-    if (SeperateTLBus && EnableSeperateTLAsync) {
+    if (SeperateBus != top.SeperatedBusType.NONE && EnableSeperateBusAsync) {
       tlAsyncSourceOpt.get.module.clock := clock
       tlAsyncSourceOpt.get.module.reset := soc_reset_sync
     }

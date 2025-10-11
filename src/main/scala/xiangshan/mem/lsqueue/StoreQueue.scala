@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
@@ -194,6 +194,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val stDataReadyVec = Output(Vec(StoreQueueSize, Bool()))
     val stIssuePtr = Output(new SqPtr)
     val sqDeqPtr = Output(new SqPtr)
+    val sqDeqUopIdx = Output(UopIdx())
+    val sqDeqRobIdx = Output(new RobPtr)
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -498,6 +500,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.stDataReadySqPtr := dataReadyPtrExt
   io.stIssuePtr := enqPtrExt(0)
   io.sqDeqPtr := deqPtrExt(0)
+  io.sqDeqUopIdx := uop(deqPtrExt(0).value).uopIdx
+  io.sqDeqRobIdx := uop(deqPtrExt(0).value).robIdx
 
   /**
     * Writeback store from store units
@@ -1361,14 +1365,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   )
   val onlyCommit0 = dataBuffer.io.enq(0).fire && !dataBuffer.io.enq(1).fire
 
-  /**
-   * If rdataPtr(0) is misaligned and Cross16Byte, this store request will fill two ports of rdataBuffer,
-   * Therefore, the judgement of vecCommitLastFlow should't to use rdataPtr(1)
-   * */
-  val firstSplit = canDeqMisaligned && firstWithMisalign && firstWithCross16Byte
   val vecCommitLastFlow =
     // robidx equal => check if 1 is last flow
-    robidxEQ && vecCommitHasExceptionLastFlow(1) && !firstSplit ||
+    robidxEQ && vecCommitHasExceptionLastFlow(1) ||
     // robidx not equal => 0 must be the last flow, just check if 1 is last flow when 1 has exception
     robidxNE && (vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1) || !vecCommitHasExceptionValid(1)) ||
     onlyCommit0 && vecCommitHasExceptionLastFlow(0)
@@ -1377,7 +1376,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr = rdataPtrExt(i).value
     val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
-                            dataBuffer.io.enq(i).fire && !firstSplit
+                            dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq
     vecLastFlowCommit
   }.reduce(_ || _)
 

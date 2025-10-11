@@ -371,7 +371,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   val vecActive = Mux(!issuePreIsSplit, usSplitMask.orR, (flowMask & UIntToOH(splitIdx)).orR)
   // no-unit-stride can trigger misalign
-  val addrAligned = LookupTree(issueEew, List(
+  val addrAligned = LookupTree(Mux(isIndexed(issueInstType), issueSew, issueEew), List(
     "b00".U   -> true.B,                //b
     "b01".U   -> (vaddr(0)    === 0.U), //h
     "b10".U   -> (vaddr(1, 0) === 0.U), //w
@@ -451,7 +451,11 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
-  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty && io.vstdMisalign.get.storeMisalignBufferEmpty
+  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty &&
+    (io.vstdMisalign.get.storeMisalignBufferEmpty ||
+      io.vstdMisalign.get.storeMisalignBufferRobIdx > io.out.bits.uop.robIdx ||
+      io.vstdMisalign.get.storeMisalignBufferRobIdx === io.out.bits.uop.robIdx &&
+        io.vstdMisalign.get.storeMisalignBufferUopIdx > io.out.bits.uop.uopIdx)
 
   // split data
   val splitData = genVSData(
@@ -468,7 +472,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := issueValid && (vecActive || !issuePreIsSplit)
+  vstd.valid := io.out.valid
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.uop.fuType := FuType.vstu.U

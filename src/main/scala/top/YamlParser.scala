@@ -21,7 +21,7 @@ import io.circe.generic.extras.auto._
 
 import aia.IMSICParams
 import org.chipsalliance.cde.config.Parameters
-import system.SoCParamsKey
+import system.{CVMParameters, CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import xiangshan.{DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.devices.debug.{DebugAttachParams, ExportDebug}
@@ -44,9 +44,9 @@ case class YamlConfig(
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
   SeperateDM: Option[Boolean],
-  SeperateTLBus: Option[Boolean],
-  SeperateTLBusRanges: Option[List[AddressSet]],
-  EnableSeperateTLBusAsyncBridge: Option[Boolean],
+  SeperateBus: Option[String],
+  SeperateBusRanges: Option[List[AddressSet]],
+  EnableSeperateBusAsyncBridge: Option[Boolean],
   IMSICBusType: Option[String],
   IMSICParams: Option[IMSICParams],
   CHIIssue: Option[String],
@@ -57,6 +57,9 @@ case class YamlConfig(
   EnableSramCtl: Option[Boolean],
   EnableCHINS: Option[Boolean],
   CHIAddrWidth: Option[Int],
+  CVMParams: Option[CVMParameters],
+  EnableBitmapCheck: Option[Boolean],
+  EnableBitmapCheckDefault: Option[Boolean],
 )
 
 object YamlParser {
@@ -124,20 +127,20 @@ object YamlParser {
         case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = enable)
       })
     }
-    yamlConfig.SeperateTLBus.foreach { enable =>
+    yamlConfig.SeperateBus.foreach { busType =>
       newConfig = newConfig.alter((site, here, up) => {
-        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = enable)
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateBus = top.SeperatedBusType.withName(busType))
       })
     }
-    yamlConfig.SeperateTLBusRanges.foreach { ranges =>
+    yamlConfig.SeperateBusRanges.foreach { ranges =>
       newConfig = newConfig.alter((site, here, up) => {
-        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBusRanges = ranges)
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateBusRanges = ranges)
       })
     }
-    yamlConfig.EnableSeperateTLBusAsyncBridge.foreach { enable =>
+    yamlConfig.EnableSeperateBusAsyncBridge.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(
-          SeperateTLAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+          SeperateBusAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 1, sync = 3, safe = false))
         )
       })
     }
@@ -189,6 +192,21 @@ object YamlParser {
     yamlConfig.CHIAddrWidth.foreach { width =>
       newConfig = newConfig.alter((site, here, up) => {
         case coupledL2.tl2chi.CHIAddrWidthKey => width
+      })
+    }
+    yamlConfig.CVMParams.foreach { cvmParams =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case CVMParamsKey => cvmParams
+      })
+    }
+    yamlConfig.EnableBitmapCheck.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheck = enable))
+      })
+    }
+    yamlConfig.EnableBitmapCheckDefault.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheckDefault = enable))
       })
     }
     newConfig

@@ -26,8 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import coupledL2.VaddrKey
-import coupledL2.IsKeywordKey
+import coupledL2.{IsKeywordKey, MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField, VaddrKey}
 import difftest._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
@@ -855,6 +854,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
     }
   }
+  io.mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := true.B)
+  io.mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := false.B)
   require(nSets <= 256)
 
   // io.mem_grant.ready := !w_grantlast && s_acquire

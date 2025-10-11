@@ -858,7 +858,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftb_write.entry := Mux(update_now, update.ftb_entry, delay2_entry)
   ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update_pc, delay2_pc))(tagLength - 1, 0)
 
-  val write_valid = update_now || DelayN(u_valid && !u_meta.hit, 2)
+  val write_valid = (update_now || DelayN(u_valid && !u_meta.hit, 2)) && !update_need_read
   val write_pc    = Mux(update_now, update_pc, delay2_pc)
 
   ftbBank.io.update_write_data.valid := write_valid

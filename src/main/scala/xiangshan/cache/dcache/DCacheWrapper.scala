@@ -19,9 +19,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import coupledL2.VaddrField
-import coupledL2.IsKeywordField
-import coupledL2.IsKeywordKey
+import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, VaddrField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
@@ -931,6 +929,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     PrefetchField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
+    MemBackTypeMMField(),
+    MemPageTypeNCField(),
   //  IsKeywordField()
   ) ++ cacheParams.aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Seq(
