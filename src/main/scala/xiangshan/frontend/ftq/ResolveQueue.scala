@@ -39,10 +39,14 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   private val deqPtr = RegInit(ResolveQueuePtr(false.B, 0.U))
 
   private val hit = io.backendResolve.map { branch =>
-    mem.map(entry => branch.valid && entry.valid && entry.bits.ftqIdx === branch.bits.ftqIdx).reduce(_ || _)
+    mem.map(entry =>
+      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
+    ).reduce(_ || _)
   }
   private val hitIndex = io.backendResolve.map { branch =>
-    mem.indexWhere(entry => branch.valid && entry.valid && entry.bits.ftqIdx === branch.bits.ftqIdx)
+    mem.indexWhere(entry =>
+      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
+    )
   }
   private val hitPrevious = io.backendResolve.zipWithIndex.map { case (branch, i) =>
     io.backendResolve.take(i).map(previousBranch =>
@@ -82,7 +86,7 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   }
 
   when(io.backendRedirect) {
-    mem.foreach(entry => entry.bits.flushed := entry.bits.ftqIdx > io.backendRedirectPtr)
+    mem.foreach(entry => entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > io.backendRedirectPtr)
   }
 
   private val deqValid = mem(deqPtr.value).valid && !io.backendResolve.map(branch =>
