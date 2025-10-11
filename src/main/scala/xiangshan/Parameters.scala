@@ -141,7 +141,7 @@ case class XSCoreParameters
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams(), BertiParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
