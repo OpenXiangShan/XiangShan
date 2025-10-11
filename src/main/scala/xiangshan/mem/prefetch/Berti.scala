@@ -220,8 +220,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     * the current timestamp (not shown in the figure)
     * 
     * understand:
-    *   1. tag match (here used)
-    *   2. FIFO queue (?)
+    *   1. tag match
+    *   2. FIFO queue (here used)
     * 
     * // TODO lyq: how to support multi port of access. Maybe hard due to set division
     * 
@@ -307,7 +307,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
     res.pc := pc
     res.valid := stat_find_delta && pair._1
-    when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){ // 实际符号和delta不符，说明出现乱序导致refill晚于历史记录
+    when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
       res.delta := -pair._2
     }.otherwise{
       res.delta := pair._2
@@ -315,31 +315,6 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     learnPtrs(set) := learnPtrs(set) + 1.U
     res
   }
-
-  /* def searchFIFO(valid: Bool, pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasIO = {
-    val set = getIndex(pc)
-    val tag = getTag(pc)
-    val res = Wire(new LearnDeltasIO)
-    when(valid){
-      res.pc := pc
-      for(i <- 0 until HtWaySize){
-        // method1: low wiring complexity; BUT no order
-        // val way = i.U
-
-        // method2: order of visit from newest to oldest; BUT the wiring complexity is very high
-        // FIXME lyq: to check physically for the wiring complexity
-        val way = accessPtrs(set).value - (i.U + 1.U)
-        val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
-
-        res.validVec(i) := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp) && pair._1
-        res.deltaVec(i) := pair._2
-      }
-    }.otherwise{
-      res := DontCare
-      res.validVec := 0.U.asTypeOf(chiselTypeOf(res.validVec))
-    }
-    res
-  } */
 
   /*** processing logic */
   val isReplace = Wire(Bool())
@@ -381,26 +356,6 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   searchLog.calDelta := io.search.resp.delta.asUInt
   val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = true)
   searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
-
-  /* class ParallelSearchResult extends Bundle {
-    val validVec = Vec(HtWaySize, Bool())
-    val deltaVec = Vec(HtWaySize, UInt(DeltaWidth.W))
-    val pc = UInt(VAddrBits.W)
-  }
-  val debug_parallelSearchResult = Wire(new ParallelSearchResult())
-  val _res = this.searchFIFO(
-    io.search.req.valid, io.search.req.bits.pc,
-    io.search.req.bits.vaddr, io.search.req.bits.latency
-  )
-  debug_parallelSearchResult.pc := _res.pc
-  debug_parallelSearchResult.validVec := _res.validVec
-  debug_parallelSearchResult.deltaVec zip _res.deltaVec map {case(x,y) => x := y.asUInt}
-  val debug_parallelSearchLogDb = ChiselDB.createTable("berti_parallel_search_result" + p(XSCoreParamsKey).HartId.toString, new ParallelSearchResult, basicDB = true)
-  debug_parallelSearchLogDb.log(
-    data = debug_parallelSearchResult,
-    en = io.search.req.valid,
-    clock = clock, reset = reset
-  ) */
 }
 
 class DeltaTable()(implicit p: Parameters) extends BertiModule {
