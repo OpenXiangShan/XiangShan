@@ -84,7 +84,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Seq.fill(nBanks)(Module(new SRAMTemplate(
     SInt(ctrBits.W),
-    set = nRows,
+    set = nRows / nBanks,
     way = 2 * TageBanks,
     shouldReset = true,
     holdRead = true,
