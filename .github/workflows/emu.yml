@@ -214,13 +214,6 @@ jobs:
     name: EMU - GSIM
     steps:
       - uses: actions/checkout@v4
-      - name: Install GSIM
-        run: |
-          sudo apt install libgmp-dev clang-19
-          cd $GITHUB_WORKSPACE/..
-          git clone https://github.com/OpenXiangShan/gsim.git
-          cd gsim && make build-gsim
-          echo "GSIM_BIN=$(pwd)/build/gsim/gsim" >> $GITHUB_ENV
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
