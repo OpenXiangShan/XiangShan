@@ -422,7 +422,6 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   // -----
   val addr_search = io.req.bits.tag
   val hitVecT = bitmapcache.map(_.hit(addr_search))
-  val hitIdxT = PriorityEncoder(hitVecT)
 
   // -----
   // -S1--
@@ -430,9 +429,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   val index = RegEnable(addr_search(log2Up(XLEN)-1,0), io.req.fire)
   val order = RegEnable(io.req.bits.order, io.req.fire)
   val hitVec = RegEnable(VecInit(hitVecT), io.req.fire)
-  val hitIdx = RegEnable(hitIdxT, io.req.fire)
-  val CacheDatas = RegEnable(VecInit(bitmapcache.map(_.data)), io.req.fire)
-  val CacheData = CacheDatas(hitIdx)
+  val CacheData = RegEnable(ParallelPriorityMux(hitVecT zip bitmapcache.map(_.data)), io.req.fire)
   val cfs = Wire(Vec(tlbcontiguous, Bool()))
 
   val cfsdata = CacheData.asTypeOf(Vec(XLEN/8, UInt(8.W)))(index(log2Up(XLEN)-1, log2Up(8)))
