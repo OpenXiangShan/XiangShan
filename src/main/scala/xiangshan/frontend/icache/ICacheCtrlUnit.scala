@@ -170,6 +170,7 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
     io.metaWrite.req.valid := iState === InjectFsmState.WriteMeta
     io.metaWrite.req.bits.generate(
       phyTag = get_phy_tag(iPAddr),
+      maybeRvcMap = 0.U,
       vSetIdx = iVSetIdx,
       waymask = iWaymask,
       bankIdx = iVSetIdx(0),

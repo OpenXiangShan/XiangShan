@@ -220,6 +220,9 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.victim.req.valid        := acquireArb.io.out.fire
   io.victim.req.bits.vSetIdx := acquireArb.io.out.bits.vSetIdx
   private val waymask = UIntToOH(mshrResp.way)
+  // maybeRvcMap: whether lower 2 bits of each 2 bytes is not 0b11
+  private val maybeRvcMap =
+    VecInit(respDataReg.asTypeOf(Vec(MaxInstNumPerBlock, UInt((instBytes * 8).W))).map(_(1, 0) =/= 3.U)).asUInt
   // NOTE: when flush/fencei, missUnit will still send response to mainPipe/prefetchPipe
   //       this is intentional to fix timing (io.flush -> mainPipe/prefetchPipe s2_miss -> s2_ready -> ftq ready)
   //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
@@ -230,6 +233,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   // write SRAM
   io.metaWrite.req.bits.generate(
     phyTag = getPTagFromBlk(mshrResp.blkPAddr),
+    maybeRvcMap = maybeRvcMap,
     vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     bankIdx = mshrResp.vSetIdx(0),
@@ -252,6 +256,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.resp.bits.vSetIdx  := mshrResp.vSetIdx
   io.resp.bits.waymask  := waymask
   io.resp.bits.data     := respDataReg.asUInt
+  io.resp.bits.maybeRvcMap := maybeRvcMap
   io.resp.bits.corrupt  := corruptReg
 
   // we are safe to enter wfi if all entries have no pending response from L2

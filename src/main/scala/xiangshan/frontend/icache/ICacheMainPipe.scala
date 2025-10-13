@@ -129,6 +129,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_isForVSnonLeafPTE = fromWayLookup.bits.isForVSnonLeafPTE
   private val s0_itlbException     = fromWayLookup.bits.itlbException
   private val s0_itlbPbmt          = fromWayLookup.bits.itlbPbmt
+  private val s0_maybeRvcMap       = fromWayLookup.bits.maybeRvcMap
   private val s0_metaCodes         = fromWayLookup.bits.metaCodes
   private val s0_hits              = VecInit(fromWayLookup.bits.waymask.map(_.orR))
 
@@ -183,6 +184,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_isBackendException = RegEnable(s0_isBackendException, false.B, s0_fire)
   private val s1_itlbPbmt           = RegEnable(s0_itlbPbmt, 0.U.asTypeOf(s0_itlbPbmt), s0_fire)
   private val s1_waymasks           = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
+  private val s1_sramMaybeRvcMapRaw = RegEnable(s0_maybeRvcMap, 0.U.asTypeOf(s0_maybeRvcMap), s0_fire)
   private val s1_metaCodes          = RegEnable(s0_metaCodes, 0.U.asTypeOf(s0_metaCodes), s0_fire)
 
   private val s1_vSetIdx = VecInit(s1_vAddr.map(get_idx))
@@ -206,7 +208,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit(s1_valid, s1_valid && s1_doubleline),
     allowCorrupt = true // we also need to update registers when fromMiss.bits.corrupt
   )
-  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt((blockBits / DataBanks).W)))
+  private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
 
   // select data
   private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
@@ -218,6 +220,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     )
   })
 
+  // select maybeRvc
+  private val s1_sramMaybeRvcMap =
+    s1_sramMaybeRvcMapRaw.asTypeOf(Vec(PortNumber, Vec(DataBanks, UInt(MaxInstNumPerBank.W))))
+  private val s1_mshrMaybeRvcMap =
+    fromMiss.bits.maybeRvcMap.asTypeOf(Vec(DataBanks, UInt(MaxInstNumPerBank.W)))
+
   private val s1_hits = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(
       s1_mshrHits(i) || s1_sramHits(i),
@@ -228,6 +236,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_datas = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(
       Mux(s1_bankMshrHit(i), s1_mshrDatas(i), s1_sramDatas(i)),
+      s1_bankMshrHit(i) || RegNext(s0_fire)
+    )
+  })
+
+  private val s1_maybeRvcMap = VecInit((0 until DataBanks).map { i =>
+    DataHoldBypass(
+      Mux(
+        s1_bankMshrHit(i),
+        s1_mshrMaybeRvcMap(i),
+        Mux(getLineSel(s1_offset)(i), s1_sramMaybeRvcMap(1)(i), s1_sramMaybeRvcMap(0)(i))
+      ),
       s1_bankMshrHit(i) || RegNext(s0_fire)
     )
   })
@@ -261,7 +280,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /* *** Ecc check *** */
   private val s1_metaCorrupt =
-    checkMetaEcc(VecInit.fill(PortNumber)(s1_pTag), s1_metaCodes, s1_waymasks, eccEnable, s1_doubleline)
+    checkMetaEcc(
+      VecInit(s1_sramMaybeRvcMapRaw.map(rvc => ICacheMetadata(s1_pTag, rvc))),
+      s1_metaCodes,
+      s1_waymasks,
+      eccEnable,
+      s1_doubleline
+    )
 
   // valid only when RegNext(s0_fire)
   // check data error
@@ -367,7 +392,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /* *** send response to IFU *** */
   toIfu.valid                   := s1_fire
   toIfu.bits.doubleline         := s1_doubleline
-  toIfu.bits.data               := s1_datas.asTypeOf(UInt(blockBits.W))
+  toIfu.bits.data               := s1_datas.asUInt
+  toIfu.bits.maybeRvcMap        := s1_maybeRvcMap.asUInt
   toIfu.bits.isBackendException := s1_isBackendException
   toIfu.bits.vAddr              := s1_vAddr
   toIfu.bits.pAddr              := getPAddrFromPTag(s1_vAddr.head, s1_pTag)
