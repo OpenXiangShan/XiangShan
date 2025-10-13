@@ -217,8 +217,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
-  when(ftq.io.toBackend.pc_mem_wen) {
-    checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
+  when(ftq.io.toBackend.wen) {
+    checkPcMem(ftq.io.toBackend.ftqIdx) := ftq.io.toBackend.startVAddr
   }
 
   val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
@@ -226,11 +226,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   for (i <- 0 until DecodeWidth) {
     checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
-    checkTarget(i) := Mux(
-      ftq.io.toBackend.newest_entry_ptr.value === checkTargetPtr(i).value,
-      PrunedAddrInit(ftq.io.toBackend.newest_entry_target),
-      checkPcMem((checkTargetPtr(i) + 1.U).value)
-    )
+    checkTarget(i)    := checkPcMem((checkTargetPtr(i) + 1.U).value)
   }
 
   // FIXME: reconsider this check when newest_target_entry is deleted

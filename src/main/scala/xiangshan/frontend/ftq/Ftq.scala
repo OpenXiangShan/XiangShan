@@ -90,8 +90,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 //  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
 //  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
 
-  private val validEntries = distanceBetween(bpuPtr(0), commitPtr(0))
-
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
 
@@ -132,7 +130,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Interaction with BPU
   // --------------------------------------------------------------------------------
-  io.fromBpu.prediction.ready      := validEntries < FtqSize.U
+  io.fromBpu.prediction.ready      := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U
   io.fromBpu.meta.ready            := true.B
   io.fromBpu.speculationMeta.ready := true.B
 
@@ -223,16 +221,19 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ExceptionType.None
   )
 
+  private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
+    distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
+
   // TODO: consider BPU bypass
-  io.toICache.fetchReq.valid                   := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toICache.fetchReq.valid                   := ifuReqValid
   io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
   io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
   io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
   io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
-  io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toIfu.req.bits.fetch(0).valid      := bpuPtr(0) > ifuPtr(0) && !redirect.valid
+  io.toIfu.req.valid                    := ifuReqValid
+  io.toIfu.req.bits.fetch(0).valid      := ifuReqValid
   io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startVAddr
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
     entryQueue(ifuPtr(1).value).startVAddr,
@@ -250,14 +251,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.pc_mem_wen   := (prediction.fire || bpuS3Redirect) && !redirect.valid
-  io.toBackend.pc_mem_waddr := predictionPtr.value
-  io.toBackend.pc_mem_wdata := prediction.bits.startVAddr
-
-  // TODO: remove or reconsider this
-  io.toBackend.newest_entry_en     := false.B
-  io.toBackend.newest_entry_ptr    := DontCare
-  io.toBackend.newest_entry_target := DontCare
+  io.toBackend.wen        := (prediction.fire || bpuS3Redirect) && !redirect.valid
+  io.toBackend.ftqIdx     := predictionPtr.value
+  io.toBackend.startVAddr := prediction.bits.startVAddr
 
   // --------------------------------------------------------------------------------
   // Redirect from backend and IFU

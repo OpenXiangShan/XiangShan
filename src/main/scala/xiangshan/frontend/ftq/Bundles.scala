@@ -73,11 +73,7 @@ class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQue
 
 class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   // write to backend pc mem
-  val pc_mem_wen   = Output(Bool())
-  val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
-  val pc_mem_wdata = Output(PrunedAddr(VAddrBits))
-  // newest target
-  val newest_entry_en     = Output(Bool())
-  val newest_entry_target = Output(UInt(VAddrBits.W))
-  val newest_entry_ptr    = Output(new FtqPtr)
+  val wen:        Bool       = Output(Bool())
+  val ftqIdx:     UInt       = Output(UInt(FtqPtr.width.W))
+  val startVAddr: PrunedAddr = Output(PrunedAddr(VAddrBits))
 }
