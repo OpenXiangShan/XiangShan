@@ -279,7 +279,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.exceptionVec, LduCfg).asUInt.orR && !enq.bits.tlbMiss)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
-    canEnqueue(w) && !cancelEnq(w) && needReplay(w) && !hasExceptions(w)
+    canEnqueue(w) && !cancelEnq(w) && needReplay(w) && !hasExceptions(w) && !io.lqFull
   }))
   val newEnqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   val canFreeVec = VecInit((0 until LoadPipelineWidth).map(w => {
@@ -287,7 +287,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }))
 
   // select LoadPipelineWidth valid index.
-  val lqFull = freeList.io.empty
+  val lqFull = (LoadQueueReplaySize.U - freeList.io.validCount) < 6.U
   val lqFreeNums = freeList.io.validCount
 
   // replay logic
@@ -603,10 +603,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // init
   freeMaskVec.map(e => e := false.B)
-
-  // LoadQueueReplay can't backpressure.
-  // We think LoadQueueReplay can always enter, as long as it is the same size as VirtualLoadQueue.
-  assert(freeList.io.canAllocate.reduce(_ || _) || !io.enq.map(_.valid).reduce(_ || _), s"LoadQueueReplay Overflow")
 
   // Allocate logic
   needEnqueue.zip(newEnqueue).zip(io.enq).map {
