@@ -209,6 +209,7 @@ jobs:
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          source ~/.bashrc
       - name: init
         run: make init
       - name: clean up
