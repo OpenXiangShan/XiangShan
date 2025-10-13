@@ -76,21 +76,19 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
   // update path table
   private val updateValid    = io.update.valid
   private val updateIdx      = io.update.setIdx
-  private val updateWayVec   = io.update.wayIdxVec
+  private val updateWayMask  = io.update.wayMask
   private val updateBankIdx  = updateIdx(log2Ceil(NumBanks) - 1, 0)
   private val updateBankMask = UIntToOH(updateBankIdx, NumBanks)
-  private val updateWayMask  = WireInit(VecInit.fill(NumWays)(false.B))
-  updateWayVec.foreach(wayIdx => updateWayMask(wayIdx) := 1.U)
 
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>
       val writeValid = updateValid && bankEnable
       buffer.io.write.head.valid       := writeValid
       buffer.io.write.head.bits.setIdx := updateIdx >> log2Ceil(NumBanks)
-      buffer.io.write.head.bits.wayIdxVec := Mux(
+      buffer.io.write.head.bits.wayMask := Mux(
         writeValid,
-        io.update.wayIdxVec,
-        VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(UInt(log2Ceil(NumWays).W)))
+        updateWayMask,
+        VecInit.fill(NumWays)(false.B)
       )
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
@@ -101,24 +99,10 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
 
   sram.zip(writeBuffer).zipWithIndex.foreach {
     case ((bank, buffer), i) =>
-      // brand way extend to sram way
-      require(
-        ResolveEntryBranchNumber <= NumWays,
-        s"resolve branches: ${ResolveEntryBranchNumber} should be less than or equal to NumWays: ${NumWays}"
-      )
-      val wayMask     = WireInit(VecInit.fill(NumWays)(false.B))
-      val entryVec    = WireInit(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
-      val wayIdxVecIn = buffer.io.read.head.bits.wayIdxVec
-      val entryVecIn  = buffer.io.read.head.bits.entryVec
-      wayIdxVecIn.zip(entryVecIn).foreach {
-        case (wayIdx, entry) =>
-          wayMask(wayIdx)  := 1.U
-          entryVec(wayIdx) := entry
-      }
       bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
       bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
-      bank.io.w.req.bits.waymask.get := wayMask.asUInt
-      bank.io.w.req.bits.data        := entryVec
+      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.asUInt
+      bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
 }

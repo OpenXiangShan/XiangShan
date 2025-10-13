@@ -82,7 +82,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_resp: Seq[Vec[ScEntry]] = pathTable.map(_.io.resp)
 
   private val s1_pathPercsum: Vec[Vec[SInt]] = VecInit(s1_resp.map(entries =>
-    VecInit(entries.map(entry => getPercsum(entry.ctrs.value)))
+    VecInit(entries.map(entry => getPercsum(entry.ctr.value)))
   ))
 
   /*
@@ -135,7 +135,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 1
    */
-  private val t1_trainValid = RegEnable(io.train.valid, io.enable)
+  private val t1_trainValid = RegNext(io.train.valid, init = false.B)
   private val t1_train      = RegEnable(io.train.bits, io.train.valid)
   private val t1_branches   = t1_train.branches
   private val t1_setIdx = PathTableInfos.map(info =>
@@ -146,53 +146,67 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       info.Size / NumWays
     )
   )
-  private val t1_meta      = t1_train.meta.sc
-  private val t1_oldCtrs   = VecInit(t1_meta.scResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
-  private val t1_takenMask = VecInit(t1_branches.map(b => b.valid && b.bits.taken))
-  private val t1_writeValidMask =
+  private val t1_meta    = t1_train.meta.sc
+  private val t1_oldCtrs = VecInit(t1_meta.scResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
+  private val t1_writeValidVec =
     VecInit(t1_branches.map(b => b.valid && b.bits.attribute.isConditional && t1_trainValid))
-  private val t1_writeValid     = t1_writeValidMask.reduce(_ || _)
-  private val t1_writeWayIdxVec = VecInit(t1_branches.map(b => b.bits.cfiPosition(log2Ceil(NumWays) - 1, 0)))
+  private val t1_writeValid        = t1_writeValidVec.reduce(_ || _)
+  private val t1_branchesTakenMask = VecInit(t1_branches.map(b => b.valid && b.bits.taken))
+  private val t1_branchesWayIdxVec = VecInit(t1_branches.map(b => b.bits.cfiPosition(log2Ceil(NumWays) - 1, 0)))
   require(
-    t1_writeWayIdxVec(0).getWidth == log2Ceil(NumWays),
-    s"t1_writeWayIdxVec entry width: ${t1_writeWayIdxVec(0).getWidth} should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
+    t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumWays),
+    s"t1_branchesWayIdxVec entry width: ${t1_branchesWayIdxVec(0).getWidth} should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
   )
-  private val t1_newThresVec = VecInit(t1_writeWayIdxVec.zip(t1_takenMask).map { case (wayIdx, taken) =>
-    scThreshold(wayIdx).update(taken =/= t1_meta.scPred(wayIdx))
+
+  private val t1_mismatchMask = WireInit(VecInit.fill(NumWays)(false.B))
+  private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
+    val updated = t1_branchesWayIdxVec.zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
+      case (prevThres, (branchWayIdx, taken)) =>
+        val shouldUpdate = branchWayIdx === wayIdx.U
+        val mismatch     = taken =/= t1_meta.scPred(wayIdx)
+        t1_mismatchMask(wayIdx) := mismatch && shouldUpdate
+        val nextThres = prevThres.update(mismatch)
+        Mux(shouldUpdate, nextThres, prevThres)
+    }
+    WireInit(updated)
   })
+  dontTouch(t1_writeThresVec)
+
   private val t1_writeEntryVec = WireInit(
-    VecInit.fill(PathTableSize)(VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(PathTableSize)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
+  private val t1_writeWayMask = WireInit(VecInit.fill(PathTableSize)(VecInit.fill(NumWays)(false.B)))
 
-  t1_oldCtrs.zip(t1_writeEntryVec).foreach {
-    case (oldEntry: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
-      t1_takenMask.zip(t1_writeWayIdxVec).zip(t1_writeValidMask).zipWithIndex.foreach {
-        case (((taken, wayIdx), valid), i) =>
-          when(valid) {
-            writeEntries(wayIdx).ctrs.value := oldEntry(wayIdx).ctrs.getUpdate(taken)
-          }.otherwise {
-            writeEntries(wayIdx).ctrs.value := 0.S
-          }
+  t1_oldCtrs.zip(t1_writeEntryVec).zip(t1_writeWayMask).foreach {
+    case ((oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]), writeWayMask: Vec[Bool]) =>
+      oldEntries.zip(writeEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
+        val temp = t1_branchesTakenMask.zip(t1_branchesWayIdxVec).zip(t1_writeValidVec).foldLeft(oldEntry.ctr) {
+          case (prevCtr, ((writeTaken, writeWayIdx), writeValidalid)) =>
+            val needUpdate = writeValidalid && writeWayIdx === wayIdx.U
+            val nextValue  = prevCtr.getUpdate(writeTaken)
+            val nextCtr    = WireInit(prevCtr)
+            nextCtr.value             := nextValue
+            writeWayMask(writeWayIdx) := true.B
+            Mux(needUpdate, nextCtr, prevCtr)
+        }
+        dontTouch(temp)
+        newEntry.ctr := WireInit(temp)
       }
   }
 
-  pathTable zip t1_setIdx zip t1_writeEntryVec foreach {
-    case ((table, idx), writeEntries) =>
-      table.io.update.valid     := t1_writeValid
-      table.io.update.setIdx    := idx
-      table.io.update.wayIdxVec := t1_writeWayIdxVec
-      table.io.update.entryVec  := writeEntries
+  dontTouch(t1_writeEntryVec)
+
+  pathTable zip t1_setIdx zip t1_writeEntryVec zip t1_writeWayMask foreach {
+    case (((table, idx), writeEntries), wayMask) =>
+      table.io.update.valid    := t1_writeValid
+      table.io.update.setIdx   := idx
+      table.io.update.wayMask  := wayMask
+      table.io.update.entryVec := writeEntries
   }
 
-  t1_writeValidMask.zip(t1_writeWayIdxVec).zip(t1_newThresVec).map {
-    case ((valid, wayIdx), newThres) =>
-      when(valid && t1_meta.scPred(wayIdx) =/= t1_takenMask(wayIdx)) {
-        scThreshold(wayIdx) := newThres
-      }
-      XSPerfAccumulate(
-        "sc_pred_right",
-        valid && (t1_meta.scPred(wayIdx) =/= t1_takenMask(wayIdx)) && t1_meta.useScPred(wayIdx)
-      )
+  when(t1_writeValid) {
+    scThreshold := t1_writeThresVec
   }
-  // TODO： add more performance counters
+  XSPerfAccumulate("sc_pred_wrong", t1_writeValid && t1_mismatchMask.reduce(_ || _))
+  // TODO: add more performance counters
 }

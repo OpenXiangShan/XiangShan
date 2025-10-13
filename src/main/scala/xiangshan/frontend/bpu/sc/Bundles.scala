@@ -24,7 +24,7 @@ import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class ScEntry(implicit p: Parameters) extends ScBundle {
-  val ctrs: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
+  val ctr: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
 }
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
@@ -60,16 +60,16 @@ object ScThreshold {
 }
 
 class PathTableSramWriteReq(val numSets: Int)(implicit p: Parameters) extends WriteReqBundle with HasScParameters {
-  val setIdx:    UInt         = UInt(log2Ceil(numSets).W)
-  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
+  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
+  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
 }
 
 class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle {
-  val valid:     Bool         = Bool()
-  val setIdx:    UInt         = UInt(log2Ceil(numSets / NumBanks).W)
-  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
+  val valid:    Bool         = Bool()
+  val setIdx:   UInt         = UInt(log2Ceil(numSets / NumBanks).W)
+  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
