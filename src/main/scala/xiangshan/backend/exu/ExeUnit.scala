@@ -49,7 +49,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
-  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu || params.hasAluFu)(Input(new AddrTransType))
 }
 
 class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {

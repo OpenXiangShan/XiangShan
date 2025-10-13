@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan.backend.fu.{AluDataModule, PipedFuncUnit}
 import xiangshan.backend.fu.FuConfig
+import utility.{SignExt, ZeroExt}
 
 class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   private val aluModule = Module(new AluDataModule)
@@ -19,5 +20,9 @@ class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
     sink := source
   }
   aluModule.io.func := in.ctrl.fuOpType
+  aluModule.io.pc := Mux(io.instrAddrTransType.get.shouldBeSext,
+    SignExt(in.data.pc.get, cfg.destDataBits),
+    ZeroExt(in.data.pc.get, cfg.destDataBits)
+  )
   out.res.data := aluModule.io.result
 }
