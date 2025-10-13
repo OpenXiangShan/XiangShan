@@ -342,6 +342,10 @@ package object xiangshan {
     def czero_eqz  = "b111_0100".U
     def czero_nez  = "b111_0110".U
 
+    // auipc/jal/jalr
+    def auipc      = "b111_1000".U
+    def jalr       = "b111_1001".U
+
     // misc optype
     def and        = "b100_0000".U
     def andn       = "b100_0001".U
@@ -395,6 +399,8 @@ package object xiangshan {
     def isSh2add(func: UInt): Bool = !func(2) &&  func(1)
     def isSh3add(func: UInt): Bool =  func(2) && !func(1)
     def isSh4add(func: UInt): Bool =  func(2) &&  func(1)
+    def isZicond(func: UInt): Bool = func(6, 4).andR && !func(3)
+    def isJmp(func: UInt): Bool = func(6, 3).andR & !func(2)
 
     def apply() = UInt(FuOpTypeWidth.W)
   }

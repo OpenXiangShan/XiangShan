@@ -58,7 +58,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.destDataBits.W)
-  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+  val pc        = OptionWrapper(cfg.needPc || cfg.aluNeedPc, UInt(VAddrData().dataWidth.W))
   val nextPcOffset = OptionWrapper(cfg.needPc, UInt((FetchBlockInstOffsetWidth + 2).W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)
@@ -108,7 +108,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
-  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh || cfg.isAlu)(Input(new AddrTransType))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {

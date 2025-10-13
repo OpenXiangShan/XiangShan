@@ -172,66 +172,14 @@ class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   io.condRes := Mux(use_zero, 0.U, io.value)
 }
 
-class ShiftResultSelect(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val func = Input(UInt(4.W))
-    val sll, srl, sra, rol, ror, bclr, bset, binv, bext = Input(UInt(XLEN.W))
-    val shiftRes = Output(UInt(XLEN.W))
-  })
-
-  // val leftBit  = Mux(io.func(1), io.binv, Mux(io.func(0), io.bset, io.bclr))
-  // val leftRes  = Mux(io.func(2), leftBit, io.sll)
-  // val rightRes = Mux(io.func(1) && io.func(0), io.sra, Mux(io.func(1), io.bext, io.srl))
-  val resultSource = VecInit(Seq(
-    io.sll,
-    io.sll,
-    io.bclr,
-    io.bset,
-    io.binv,
-    io.srl,
-    io.bext,
-    io.sra
-  ))
-  val simple = resultSource(io.func(2, 0))
-
-  io.shiftRes := Mux(io.func(3), Mux(io.func(1), io.ror, io.rol), simple)
-}
-
-class WordResultSelect(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val func = Input(UInt())
-    val sllw, srlw, sraw, rolw, rorw, addw, subw = Input(UInt((XLEN/2).W))
-    val wordRes = Output(UInt(XLEN.W))
-  })
-
-  val addsubRes = Mux(!io.func(2) && io.func(1) && !io.func(0), io.subw, io.addw)
-  val shiftRes = Mux(io.func(2), Mux(io.func(0), io.rorw, io.rolw),
-                  Mux(io.func(1), io.sraw, Mux(io.func(0), io.srlw, io.sllw)))
-  val wordRes = Mux(io.func(3), shiftRes, addsubRes)
-  io.wordRes := SignExt(wordRes, XLEN)
-}
-
-
-class AluResSel(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val func = Input(UInt(3.W))
-    val addRes, shiftRes, miscRes, compareRes, wordRes, condRes = Input(UInt(XLEN.W))
-    val aluRes = Output(UInt(XLEN.W))
-  })
-
-  val res = Mux(io.func(2, 1) === 0.U, Mux(io.func(0), io.wordRes, io.shiftRes),
-                                       Mux(!io.func(2), Mux(io.func(0), io.compareRes, io.addRes),
-                                                        Mux(io.func(1, 0) === 3.U, io.condRes, io.miscRes)))
-  io.aluRes := res
-}
-
 class AluDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
+    val pc = Input(UInt(XLEN.W))
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
     val result = Output(UInt(XLEN.W))
   })
-  val (src1, src2, func) = (io.src(0), io.src(1), io.func)
+  val (src1, src2, func, pc) = (io.src(0), io.src(1), io.func, io.pc)
 
   val shamt = src2(5, 0)
 
@@ -277,11 +225,13 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
     ZeroExt(addwModule.io.addw(15, 0), XLEN),
     SignExt(addwModule.io.addw(15, 0), XLEN)
   ))
-  val addw = Mux(func(2), addwResultAll(func(1, 0)), addwModule.io.addw)
+  val addw = Wire(UInt((XLEN / 2).W))
+  addw := Mux(func(2), addwResultAll(func(1, 0)), addwModule.io.addw)
 
   // subw
   val subModule = Module(new SubModule)
-  val subw = subModule.io.sub
+  val subw = Wire(UInt((XLEN/2).W))
+  subw := subModule.io.sub
 
   // sllw
   val leftShiftWordModule = Module(new LeftShiftWordModule)
@@ -297,13 +247,15 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   // rolw
   val rotateLeftShiftWordModule = Module(new RotateLeftShiftWordModule)
-  val rolw = rotateLeftShiftWordModule.io.rolw
+  val rolw = Wire(UInt((XLEN/2).W))
+  rolw := rotateLeftShiftWordModule.io.rolw
   rotateLeftShiftWordModule.io.shamt := shamt
   rotateLeftShiftWordModule.io.rolwSrc := src1
 
   // rorw
   val rotateRightShiftWordModule = Module(new RotateRightShiftWordModule)
-  val rorw = rotateRightShiftWordModule.io.rorw
+  val rorw = Wire(UInt((XLEN/2).W))
+  rorw := rotateRightShiftWordModule.io.rorw
   rotateRightShiftWordModule.io.shamt := shamt
   rotateRightShiftWordModule.io.rorwSrc := src1
 
@@ -321,7 +273,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val slt     = src1(XLEN - 1) ^ src2(XLEN - 1) ^ sltu
   val maxMin  = Mux(slt ^ func(0), src2, src1)
   val maxMinU = Mux(sltu ^ func(0), src2, src1)
-  val compareRes = Mux(func(2), Mux(func(1), maxMin, maxMinU), Mux(func(1), slt, Mux(func(0), sltu, sub)))
 
   // logic
   val logicSrc2 = Mux(!func(5) && func(0), ~src2, src2)
@@ -342,19 +293,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
 
   // Result Select
-  val shiftResSel = Module(new ShiftResultSelect)
-  shiftResSel.io.func := func(3, 0)
-  shiftResSel.io.sll  := sll
-  shiftResSel.io.srl  := srl
-  shiftResSel.io.sra  := sra
-  shiftResSel.io.rol  := rol
-  shiftResSel.io.ror  := ror
-  shiftResSel.io.bclr := bclr
-  shiftResSel.io.binv := binv
-  shiftResSel.io.bset := bset
-  shiftResSel.io.bext := bext
-  val shiftRes = shiftResSel.io.shiftRes
-
   val miscResSel = Module(new MiscResultSelect)
   miscResSel.io.func    := func(5, 0)
   miscResSel.io.and     := and
@@ -378,27 +316,67 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   condModule.io.isNez     := func(1)
   val condRes = condModule.io.condRes
 
+  val jmpModule = Module(new AddModule)
+  jmpModule.io.src(0) := pc
+  jmpModule.io.src(1) := src2
+  val jmpRes = jmpModule.io.add
 
-  val wordResSel = Module(new WordResultSelect)
-  wordResSel.io.func := func
-  wordResSel.io.addw := addw
-  wordResSel.io.subw := subw
-  wordResSel.io.sllw := sllw
-  wordResSel.io.srlw := srlw
-  wordResSel.io.sraw := sraw
-  wordResSel.io.rolw := rolw
-  wordResSel.io.rorw := rorw
-  val wordRes = wordResSel.io.wordRes
+  val isAdd = !func(6) & func(5) & !func(4)
+  val isCompare = !func(6) & func(5) & func(4)
+  val isMaxMin  = isCompare & func(2) & func(1)
+  val isMaxMinU = isCompare & func(2) & !func(1)
+  val isSlt  = isCompare & !func(2) & func(1)
+  val isSltu = isCompare & !func(2) & !func(1) & func(0)
+  val isSub  = isCompare & !func(2) & !func(1) & !func(0)
+  val isShift = !func(6) & !func(5) & !func(4)
+  val isSll  = isShift & !func(3) & !func(2) & !func(1)
+  val isBclr = isShift & !func(3) & !func(2) &  func(1) & !func(0)
+  val isBset = isShift & !func(3) & !func(2) &  func(1) &  func(0)
+  val isBinv = isShift & !func(3) &  func(2) & !func(1) & !func(0)
+  val isSrl  = isShift & !func(3) &  func(2) & !func(1) &  func(0)
+  val isBext = isShift & !func(3) &  func(2) &  func(1) & !func(0)
+  val isSra  = isShift & !func(3) &  func(2) &  func(1) &  func(0)
+  val isRol  = isShift & func(3) & !func(1)
+  val isRor  = isShift & func(3) &  func(1)
+  val isMisc  =  func(6) & (!func(5) | !func(4))
+  val isWiden = !func(6) & !func(5) &  func(4)
+  val isAddw = isWiden & (!func(3) & !func(2) & (!func(1) | func(0)) | !func(3) & func(2))
+  val isSubw = isWiden & !func(3) & !func(2) &  func(1) & !func(0)
+  val isSllw = isWiden &  func(3) & !func(2) & !func(1) & !func(0)
+  val isSrlw = isWiden &  func(3) & !func(2) &  func(0)
+  val isSraw = isWiden &  func(3) & !func(2) &  func(1)
+  val isRolw = isWiden &  func(3) &  func(2) & !func(0)
+  val isRorw = isWiden &  func(3) &  func(2) &  func(0)
+  val isZicond = ALUOpType.isZicond(func)
+  val isJmp = ALUOpType.isJmp(func)
 
-  val aluResSel = Module(new AluResSel)
-  aluResSel.io.func := func(6, 4)
-  aluResSel.io.addRes := add
-  aluResSel.io.compareRes := compareRes
-  aluResSel.io.shiftRes := shiftRes
-  aluResSel.io.miscRes := miscRes
-  aluResSel.io.wordRes := wordRes
-  aluResSel.io.condRes := condRes
-  val aluRes = aluResSel.io.aluRes
+  val aluRes = Mux1H(Seq(
+    isAdd -> add,
+    isMaxMin  -> maxMin,
+    isMaxMinU -> maxMinU,
+    isSlt -> slt,
+    isSltu -> sltu,
+    isSub -> sub,
+    isSll  -> sll,
+    isBclr -> bclr,
+    isBset -> bset,
+    isBinv -> binv,
+    isSrl  -> srl,
+    isBext -> bext,
+    isSra -> sra,
+    isRol -> rol,
+    isRor -> ror,
+    isMisc -> miscRes,
+    isAddw -> SignExt(addw, XLEN),
+    isSubw -> SignExt(subw, XLEN),
+    isSllw -> SignExt(sllw, XLEN),
+    isSrlw -> SignExt(srlw, XLEN),
+    isSraw -> SignExt(sraw, XLEN),
+    isRolw -> SignExt(rolw, XLEN),
+    isRorw -> SignExt(rorw, XLEN),
+    isZicond -> condRes,
+    isJmp -> jmpRes,
+  ))
 
   io.result := aluRes
 
