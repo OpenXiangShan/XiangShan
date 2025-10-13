@@ -86,7 +86,9 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   }
 
   when(io.backendRedirect) {
-    mem.foreach(entry => entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > io.backendRedirectPtr)
+    mem.foreach(entry =>
+      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > io.backendRedirectPtr)
+    )
   }
 
   private val deqValid = mem(deqPtr.value).valid && !io.backendResolve.map(branch =>
