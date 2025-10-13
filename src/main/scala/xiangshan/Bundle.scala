@@ -99,7 +99,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val backendException = Bool()
   val trigger = TriggerAction()
   val pd = new PreDecodeInfo
-  val pred_taken = Bool()
+  val fixedTaken = Bool()
+  val predTaken  = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitForRobIdx = new RobPtr // store set predicted previous store robIdx

@@ -662,8 +662,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
-    a.taken  := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsUncache
-    a.offset := s4_alignCompactInfo.instrEndOffset(i)
+    a.predTaken  := s4_alignIsPredTaken(i) && !s4_reqIsUncache
+    a.fixedTaken := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsUncache
+    a.offset     := s4_alignCompactInfo.instrEndOffset(i)
   }
   io.toIBuffer.bits.foldpc := s4_alignFoldPc
   // mark the exception only on first instruction

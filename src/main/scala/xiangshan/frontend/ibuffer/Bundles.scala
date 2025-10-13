@@ -89,6 +89,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt          = UInt(MemPredPCWidth.W)
   val pd:               PreDecodeInfo = new PreDecodeInfo
   val predTaken:        Bool          = Bool()
+  val fixedTaken:       Bool          = Bool()
   val ftqPtr:           FtqPtr        = new FtqPtr
   val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
   val exceptionType:    UInt          = IBufferExceptionType()
@@ -103,7 +104,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     pc             := fetch.pc(i)
     foldpc         := fetch.foldpc(i)
     pd             := fetch.pd(i)
-    predTaken      := fetch.instrEndOffset(i).taken
+    predTaken      := fetch.instrEndOffset(i).predTaken
+    fixedTaken     := fetch.instrEndOffset(i).fixedTaken
     ftqPtr         := fetch.ftqPtr
     instrEndOffset := fetch.instrEndOffset(i).offset
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
@@ -125,6 +127,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.foldpc           := foldpc
     result.pd               := pd
     result.predTaken        := predTaken
+    result.fixedTaken       := fixedTaken
     result.ftqPtr           := ftqPtr
     result.exceptionType    := exceptionType
     result.backendException := backendException
@@ -145,6 +148,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt          = UInt(MemPredPCWidth.W)
   val pd:               PreDecodeInfo = new PreDecodeInfo
   val predTaken:        Bool          = Bool()
+  val fixedTaken:       Bool          = Bool()
   val ftqPtr:           FtqPtr        = new FtqPtr
   val exceptionType:    UInt          = IBufferExceptionType()
   val backendException: Bool          = Bool()
@@ -167,7 +171,8 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.backendException                              := backendException
     cf.trigger                                       := triggered
     cf.pd                                            := pd
-    cf.pred_taken                                    := predTaken
+    cf.fixedTaken                                    := fixedTaken
+    cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := IBufferExceptionType.isCrossPage(exceptionType)
     cf.storeSetHit                                   := DontCare
     cf.waitForRobIdx                                 := DontCare
