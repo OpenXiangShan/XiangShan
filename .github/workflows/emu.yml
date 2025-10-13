@@ -228,7 +228,7 @@ jobs:
       - name: System Test - Linux
         id: linux
         run: |
-          make gsim-run GSIM=1 -j 30 PGO_WORKLOAD=$(GITHUB_WORKSPACE)/ready-to-run/coremark-2-iteration.bin LLVM_PROFDATA=llvm-profdata WITH_DRAMSIM3=1 DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3
+          make gsim-run GSIM=1 -j 30 PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin LLVM_PROFDATA=llvm-profdata WITH_DRAMSIM3=1 DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3
 
   emu-chi:
     runs-on: bosc
