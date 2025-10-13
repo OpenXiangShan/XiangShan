@@ -215,9 +215,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           val sh3addSrc = Cat(shaddSrc(60, 0), 0.U(3.W))
           val sh4addSrc = Cat(originSrc(59, 0), 0.U(4.W))
 
-          val aluSrc = Wire(UInt(XLEN.W))
-          dontTouch(aluSrc)
-          aluSrc := MuxCase(originSrc, Seq(
+          val aluSrc0 = Wire(UInt(XLEN.W))
+          dontTouch(aluSrc0)
+          aluSrc0 := MuxCase(originSrc, Seq(
             isAdduw -> adduwSrc,
             isOddadd -> oddAddSrc,
             isSr29add -> sr29addSrc,
@@ -229,7 +229,17 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
             isSh3add -> sh3addSrc,
             isSh4add -> sh4addSrc,
           ))
-          src := aluSrc
+          src := aluSrc0
+        }
+      }
+
+      if (exuParm.hasAluFu && srcIdx == 1) {
+        when(isAlu) {
+          val isJmp = ALUOpType.isJmp(fuOpType)
+          val isJalr = isJmp && fuOpType(0)
+          val aluSrc1 = Wire(UInt(XLEN.W))
+          aluSrc1 := Mux(isJalr, 4.U, originSrc)
+          src := aluSrc1
         }
       }
     }

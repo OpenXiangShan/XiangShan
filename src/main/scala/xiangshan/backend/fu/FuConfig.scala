@@ -154,6 +154,8 @@ case class FuConfig (
 
   def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
 
+  def aluNeedPc: Boolean = Seq(FuType.alu).contains(fuType)
+
   def needFPUCtrl: Boolean = {
     import FuType._
     Seq(fmac, fDivSqrt, i2f).contains(fuType)
@@ -168,6 +170,8 @@ case class FuConfig (
     FuConfig.needUncertainWakeupFuConfigs.contains(this)
   }
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
+
+  def isAlu: Boolean = fuType == FuType.alu
 
   def isMul: Boolean = fuType == FuType.mul
 
@@ -332,7 +336,7 @@ object FuConfig {
     ),
     piped = true,
     writeIntRf = true,
-    immType = Set(SelImm.IMM_I, SelImm.IMM_U, SelImm.IMM_LUI32),
+    immType = Set(SelImm.IMM_I, SelImm.IMM_UJ, SelImm.IMM_U, SelImm.IMM_LUI32),
   )
 
   val MulCfg: FuConfig = FuConfig (

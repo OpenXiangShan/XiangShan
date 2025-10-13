@@ -73,6 +73,7 @@ case class ExeUnitParams(
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
+  val aluNeedPc: Boolean = fuConfigs.map(_.aluNeedPc).reduce(_ || _)
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)

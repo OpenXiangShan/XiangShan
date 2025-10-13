@@ -855,7 +855,7 @@ object Bundles {
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
-    val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
+    val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
     val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
