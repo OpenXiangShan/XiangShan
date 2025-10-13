@@ -215,6 +215,10 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     getWaymask(s1_pTag, s1_metaPTags(port), s1_metaValids(port))
   })
 
+  private val s1_sramMaybeRvcMap = VecInit((0 until PortNumber).map { port =>
+    Mux1H(s1_sramWaymasks(port), fromMeta.maybeRvcMap(port))
+  })
+
   // select ecc code
   /* NOTE:
    * When ECC check fails, s1_waymasks may be corrupted, so this selected meta_codes may be wrong.
@@ -238,24 +242,28 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
 
-  private val s1_sramValid    = s0_fireNext || RegNext(s1_needMeta && toMeta.ready)
-  private val s1_mshrValid    = fromMiss.valid && !fromMiss.bits.corrupt
-  private val s1_waymasks     = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
-  private val s1_waymasksReg  = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_sramValid || s1_mshrValid)
-  private val s1_metaCodes    = WireInit(VecInit(Seq.fill(PortNumber)(0.U(MetaEccBits.W))))
-  private val s1_metaCodesReg = RegEnable(s1_metaCodes, 0.U.asTypeOf(s1_metaCodes), s1_sramValid || s1_mshrValid)
+  private val s1_sramValid      = s0_fireNext || RegNext(s1_needMeta && toMeta.ready)
+  private val s1_mshrValid      = fromMiss.valid && !fromMiss.bits.corrupt
+  private val s1_waymasks       = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
+  private val s1_waymasksReg    = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_sramValid || s1_mshrValid)
+  private val s1_maybeRvcMap    = WireInit(VecInit(Seq.fill(PortNumber)(0.U(MaxInstNumPerBlock.W))))
+  private val s1_maybeRvcMapReg = RegEnable(s1_maybeRvcMap, 0.U.asTypeOf(s1_maybeRvcMap), s1_sramValid || s1_mshrValid)
+  private val s1_metaCodes      = WireInit(VecInit(Seq.fill(PortNumber)(0.U(MetaEccBits.W))))
+  private val s1_metaCodesReg   = RegEnable(s1_metaCodes, 0.U.asTypeOf(s1_metaCodes), s1_sramValid || s1_mshrValid)
 
   // update waymasks and meta_codes
   (0 until PortNumber).foreach { i =>
-    val (_, newMask, newCode) = updateMetaInfo(
+    val (_, newMask, newMaybeRvcMap, newCode) = updateMetaInfo(
       fromMiss,
       Mux(s1_sramValid, s1_sramWaymasks(i), s1_waymasksReg(i)),
       s1_vSetIdx(i),
       s1_pTag,
+      Mux(s1_sramValid, s1_sramMaybeRvcMap(i), s1_maybeRvcMapReg(i)),
       Mux(s1_sramValid, s1_sramMetaCodes(i), s1_metaCodesReg(i))
     )
-    s1_waymasks(i)  := newMask
-    s1_metaCodes(i) := newCode
+    s1_waymasks(i)    := newMask
+    s1_metaCodes(i)   := newCode
+    s1_maybeRvcMap(i) := newMaybeRvcMap
   }
 
   /**
@@ -272,6 +280,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   toWayLookup.bits.vSetIdx           := s1_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
   toWayLookup.bits.pTag              := s1_pTag
+  toWayLookup.bits.maybeRvcMap       := s1_maybeRvcMap
   toWayLookup.bits.gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
   toWayLookup.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   toWayLookup.bits.metaCodes         := s1_metaCodes

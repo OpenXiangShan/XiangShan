@@ -41,13 +41,16 @@ import xiangshan.frontend.ftq.FtqPtr
 
 // meta
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
-  val tag: UInt = UInt(tagBits.W)
+  val phyTag: UInt = UInt(tagBits.W)
+  // each 2 bytes of data may be a Rvc instruction (i.e. data(1,0) === "b11".U)
+  val maybeRvcMap: Option[UInt] = if (HasCExtension) Option(UInt(MaxInstNumPerBlock.W)) else None
 }
 
 object ICacheMetadata {
-  def apply(tag: Bits)(implicit p: Parameters): ICacheMetadata = {
+  def apply(phyTag: UInt, maybeRvcMap: UInt)(implicit p: Parameters): ICacheMetadata = {
     val meta = Wire(new ICacheMetadata)
-    meta.tag := tag
+    meta.phyTag := phyTag
+    meta.maybeRvcMap.foreach(_ := maybeRvcMap)
     meta
   }
 }
@@ -56,14 +59,21 @@ object ICacheMetadata {
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val phyTag:  UInt = UInt(tagBits.W)
-    val vSetIdx: UInt = UInt(idxBits.W)
-    val waymask: UInt = UInt(nWays.W)
-    val bankIdx: Bool = Bool()
-    val poison:  Bool = Bool()
+    val meta:    ICacheMetadata = new ICacheMetadata
+    val vSetIdx: UInt           = UInt(idxBits.W)
+    val waymask: UInt           = UInt(nWays.W)
+    val bankIdx: Bool           = Bool()
+    val poison:  Bool           = Bool()
 
-    def generate(phyTag: UInt, vSetIdx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.phyTag  := phyTag
+    def generate(
+        phyTag:      UInt,
+        maybeRvcMap: UInt,
+        vSetIdx:     UInt,
+        waymask:     UInt,
+        bankIdx:     Bool,
+        poison:      Bool
+    ): Unit = {
+      this.meta    := ICacheMetadata(phyTag, maybeRvcMap)
       this.vSetIdx := vSetIdx
       this.waymask := waymask
       this.bankIdx := bankIdx
@@ -76,8 +86,8 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
 // ICacheMissUnit <-> ICacheDataArray
 class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
   class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val vSetIdx: UInt = UInt(idxBits.W)
     val data:    UInt = UInt(blockBits.W)
+    val vSetIdx: UInt = UInt(idxBits.W)
     val waymask: UInt = UInt(nWays.W)
     val bankIdx: Bool = Bool()
     val poison:  Bool = Bool()
@@ -117,7 +127,10 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
     val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(MetaEccBits.W)))
     val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
     // for compatibility
-    def tags: Vec[Vec[UInt]] = VecInit(metas.map(port => VecInit(port.map(way => way.tag))))
+    def tags: Vec[Vec[UInt]] =
+      VecInit(metas.map(port => VecInit(port.map(way => way.phyTag))))
+    def maybeRvcMap: Vec[Vec[UInt]] =
+      VecInit(metas.map(port => VecInit(port.map(way => way.maybeRvcMap.getOrElse(0.U(MaxInstNumPerBlock.W))))))
   }
   val req:  DecoupledIO[MetaReadReqBundle] = DecoupledIO(new MetaReadReqBundle)
   val resp: MetaReadRespBundle             = Input(new MetaReadRespBundle)
@@ -166,6 +179,7 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
   val doubleline:         Bool            = Bool()
   val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
   val data:               UInt            = UInt(blockBits.W)
+  val maybeRvcMap:        UInt            = UInt(MaxInstNumPerBlock.W)
   val pAddr:              PrunedAddr      = PrunedAddr(PAddrBits)
   val exception:          ExceptionType   = new ExceptionType
   val pmpMmio:            Bool            = Bool()
@@ -221,6 +235,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val vSetIdx:       Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
   val waymask:       Vec[UInt]     = Vec(PortNumber, UInt(nWays.W))
+  val maybeRvcMap:   Vec[UInt]     = Vec(PortNumber, UInt(MaxInstNumPerBlock.W))
   val metaCodes:     Vec[UInt]     = Vec(PortNumber, UInt(MetaEccBits.W))
   val pTag:          UInt          = UInt(tagBits.W)
   val itlbException: ExceptionType = new ExceptionType
@@ -240,6 +255,7 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   // for compatibility
   def vSetIdx:           Vec[UInt]     = entry.vSetIdx
   def waymask:           Vec[UInt]     = entry.waymask
+  def maybeRvcMap:       Vec[UInt]     = entry.maybeRvcMap
   def metaCodes:         Vec[UInt]     = entry.metaCodes
   def pTag:              UInt          = entry.pTag
   def itlbException:     ExceptionType = entry.itlbException
@@ -260,11 +276,12 @@ class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
 }
 // MissUnit -> ICacheMainPipe / ICachePrefetchPipe / ICacheWayLookup
 class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt = UInt(idxBits.W)
-  val waymask:  UInt = UInt(nWays.W)
-  val data:     UInt = UInt(blockBits.W)
-  val corrupt:  Bool = Bool()
+  val blkPAddr:    UInt = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:     UInt = UInt(idxBits.W)
+  val waymask:     UInt = UInt(nWays.W)
+  val data:        UInt = UInt(blockBits.W)
+  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+  val corrupt:     Bool = Bool()
 }
 
 /* ***** Mshr ***** */

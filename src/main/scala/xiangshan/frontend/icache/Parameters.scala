@@ -85,6 +85,10 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
 
   def PortNumber: Int = icacheParameters.PortNumber
 
+  // maybeRvc
+  def MaxInstNumPerBlock: Int = blockBytes / instBytes
+  def MaxInstNumPerBank:  Int = MaxInstNumPerBlock / DataBanks
+
   // replacer
   def Replacer: String = icacheParameters.Replacer
 
@@ -98,7 +102,7 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   // metaArray w/ parity
   def MetaEcc:       String = icacheParameters.MetaEcc
   def MetaCode:      Code   = Code.fromString(MetaEcc)
-  def MetaBits:      Int    = tagBits
+  def MetaBits:      Int    = (new ICacheMetadata).getWidth
   def MetaEntryBits: Int    = MetaCode.width(MetaBits)
   def MetaEccBits:   Int    = MetaEntryBits - MetaBits
 

@@ -22,15 +22,13 @@ import xiangshan.frontend.PrunedAddrInit
 
 trait ICacheEccHelper extends HasICacheParameters {
   // per-port
-  def encodeMetaEccByPort(meta: UInt, poison: Bool = false.B): UInt = {
-    require(meta.getWidth == MetaBits)
-    val code = MetaCode.encode(meta, poison) >> MetaBits
+  def encodeMetaEccByPort(meta: ICacheMetadata, poison: Bool = false.B): UInt = {
+    val code = MetaCode.encode(meta.asUInt, poison) >> MetaBits
     code.asTypeOf(UInt(MetaEccBits.W))
   }
 
   // per-port
-  def checkMetaEccByPort(meta: UInt, code: UInt, waymask: Vec[Bool], enable: Bool): Bool = {
-    require(meta.getWidth == MetaBits)
+  def checkMetaEccByPort(meta: ICacheMetadata, code: UInt, waymask: Vec[Bool], enable: Bool): Bool = {
     require(code.getWidth == MetaEccBits)
     val hitNum = PopCount(waymask)
     // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
@@ -43,7 +41,7 @@ trait ICacheEccHelper extends HasICacheParameters {
 
   // all ports
   def checkMetaEcc(
-      metaVec:    Vec[UInt],
+      metaVec:    Vec[ICacheMetadata],
       codeVec:    Vec[UInt],
       waymaskVec: Vec[Vec[Bool]],
       enable:     Bool,
@@ -162,35 +160,38 @@ trait ICacheAddrHelper extends HasICacheParameters {
 
 trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper with ICacheAddrHelper {
   def updateMetaInfo(
-      update:  Valid[MissRespBundle],
-      waymask: UInt,
-      vSetIdx: UInt,
-      pTag:    UInt,
-      code:    UInt
-  ): (Bool, UInt, UInt) = {
+      update:      Valid[MissRespBundle],
+      waymask:     UInt,
+      vSetIdx:     UInt,
+      pTag:        UInt,
+      maybeRvcMap: UInt,
+      code:        UInt
+  ): (Bool, UInt, UInt, UInt) = {
     require(waymask.getWidth == nWays)
-    val newMask  = WireInit(waymask)
-    val newCode  = WireInit(code)
-    val valid    = update.valid && !update.bits.corrupt
-    val vSetSame = update.bits.vSetIdx === vSetIdx
-    val pTagSame = getPTagFromBlk(update.bits.blkPAddr) === pTag
-    val waySame  = update.bits.waymask === waymask
+    val newMask        = WireInit(waymask)
+    val newMaybeRvcMap = WireInit(maybeRvcMap)
+    val newCode        = WireInit(code)
+    val valid          = update.valid && !update.bits.corrupt
+    val vSetSame       = update.bits.vSetIdx === vSetIdx
+    val pTagSame       = getPTagFromBlk(update.bits.blkPAddr) === pTag
+    val waySame        = update.bits.waymask === waymask
     when(valid && vSetSame) {
       when(pTagSame) {
         // vSetIdx & pTag match => update has newer data
         newMask := update.bits.waymask
-        // also update meta_codes
+        // also update maybeRvcMap and ecc code
+        newMaybeRvcMap := update.bits.maybeRvcMap
         // we have getPhyTagFromBlk(fromMSHR.bits.blkPAddr) === pTag, so we can use pTag directly for better timing
-        newCode := encodeMetaEccByPort(pTag)
+        newCode := encodeMetaEccByPort(ICacheMetadata(pTag, update.bits.maybeRvcMap))
       }.elsewhen(waySame) {
         // vSetIdx & way match, but pTag not match => older hit data has been replaced, treat as a miss
         newMask := 0.U
-        // we don't care about newCode, since it's not used for a missed request
+        // we don't care about maybeRvcMap/code, since it's not used for a missed request
       }
       // otherwise is an irrelevant update, ignore it
     }
     val updated = valid && vSetSame && (pTagSame || waySame)
-    (updated, newMask, newCode)
+    (updated, newMask, newMaybeRvcMap, newCode)
   }
 
   def checkMshrHit(
