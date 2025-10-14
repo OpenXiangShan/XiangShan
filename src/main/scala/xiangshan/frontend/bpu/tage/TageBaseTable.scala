@@ -42,6 +42,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
         way = FetchBlockAlignInstNum,
         singlePort = true,
         shouldReset = true,
+        holdRead = true,
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl
