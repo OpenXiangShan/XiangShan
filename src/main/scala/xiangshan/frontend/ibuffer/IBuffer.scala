@@ -206,7 +206,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       enqOffset(i) === idx.asUInt
     } // Should be OneHot
     entry.valid := validOH.reduce(_ || _) && io.in.fire && !io.flush
-    entry.bits  := Mux1H(validOH, enqData)
+    entry.bits  := Mux1H(validOH, enqData.take(MaxBypassNum))
 
     // Debug Assertion
     XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
