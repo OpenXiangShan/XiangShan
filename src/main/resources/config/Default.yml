@@ -65,7 +65,7 @@ EnablePowerDown: false
 
 XSTopPrefix: ""
 
-EnableDFX: true
+EnableDFX: false
 
 EnableSramCtl: false
 
@@ -80,6 +80,6 @@ CVMParams:
   HasMEMencryption: false
   HasDelayNoencryption: false
 
-EnableBitmapCheck: true
+EnableBitmapCheck: false
 
 EnableBitmapCheckDefault: false
