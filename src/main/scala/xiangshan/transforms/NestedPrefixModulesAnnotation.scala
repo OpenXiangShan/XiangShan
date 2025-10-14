@@ -1,6 +1,7 @@
 // Hacked from CIRCT source code. Look like some SiFive internal annotations.
 package sifive.enterprise.firrtl
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class NestedPrefixModulesAnnotation(
   target: firrtl.annotations.ModuleTarget,
   prefix: String,

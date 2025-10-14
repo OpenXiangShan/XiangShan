@@ -22,7 +22,7 @@ import xiangshan.transforms._
 import circt.stage.CLI
 import circt.stage.ChiselStage
 
-
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 class XiangShanStage extends ChiselStage {
 
   override val shell = new firrtl.options.Shell("xiangshan") with CLI with XiangShanCli {
