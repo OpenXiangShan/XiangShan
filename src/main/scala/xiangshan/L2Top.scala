@@ -105,6 +105,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val plic_int_node = IntIdentityNode()
   val nmi_int_node = IntIdentityNode()
   val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
+  val beu_local_int_source_buffer = IntBuffer()
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
@@ -163,6 +164,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
     mmio_xbar
+  
+  beu_local_int_source_buffer := beu_local_int_source
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
