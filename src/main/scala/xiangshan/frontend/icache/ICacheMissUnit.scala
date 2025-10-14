@@ -251,13 +251,13 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.dataWrite.req.valid := writeSramValid
 
   // response fetch
-  io.resp.valid         := respValid
-  io.resp.bits.blkPAddr := mshrResp.blkPAddr
-  io.resp.bits.vSetIdx  := mshrResp.vSetIdx
-  io.resp.bits.waymask  := waymask
-  io.resp.bits.data     := respDataReg.asUInt
+  io.resp.valid            := respValid
+  io.resp.bits.blkPAddr    := mshrResp.blkPAddr
+  io.resp.bits.vSetIdx     := mshrResp.vSetIdx
+  io.resp.bits.waymask     := waymask
+  io.resp.bits.data        := respDataReg.asUInt
   io.resp.bits.maybeRvcMap := maybeRvcMap
-  io.resp.bits.corrupt  := corruptReg
+  io.resp.bits.corrupt     := corruptReg
 
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)

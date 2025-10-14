@@ -83,7 +83,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   private val icacheTopdown     = io.topdownIn.icacheTopdown
   private val ftqTopdown        = io.topdownIn.ftqTopdown
   private val topdownRedirect   = io.topdownIn.topdownRedirect
-  private val s4_icachePerfInfo = io.perfInfo.icachePerfInfo
+  private val s3_icachePerfInfo = io.perfInfo.icachePerfInfo
   private val checkPerfInfo     = io.perfInfo.checkPerfInfo
   private val toIBufferInfo     = io.perfInfo.toIBufferInfo
 
@@ -177,18 +177,18 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   private val ibufferFire = toIBufferInfo.ibufferFire
   XSPerfAccumulate("frontendFlush", io.ifuPerfCtrl.ifuWbRedirect)
   XSPerfAccumulate("ifu_req", ibufferFire)
-  XSPerfAccumulate("ifu_miss", ibufferFire && !s4_icachePerfInfo.hit)
+  XSPerfAccumulate("ifu_miss", ibufferFire && !s3_icachePerfInfo.hit)
   XSPerfAccumulate("ifu_req_cacheline_0", ibufferFire)
-  XSPerfAccumulate("ifu_req_cacheline_1", ibufferFire && s4_icachePerfInfo.isDoubleLine)
-  XSPerfAccumulate("ifu_req_cacheline_0_hit", ibufferFire && s4_icachePerfInfo.hit0)
-  XSPerfAccumulate("ifu_req_cacheline_1_hit", ibufferFire && s4_icachePerfInfo.hit1)
-  XSPerfAccumulate("only_0_hit", ibufferFire && s4_icachePerfInfo.hit0NoReq1)
-  XSPerfAccumulate("only_0_miss", ibufferFire && s4_icachePerfInfo.miss0NoReq1)
-  XSPerfAccumulate("hit_0_hit_1", ibufferFire && s4_icachePerfInfo.hit0Hit1)
-  XSPerfAccumulate("hit_0_miss_1", ibufferFire && s4_icachePerfInfo.hit0Miss1)
-  XSPerfAccumulate("miss_0_hit_1", ibufferFire && s4_icachePerfInfo.miss0Hit1)
-  XSPerfAccumulate("miss_0_miss_1", ibufferFire && s4_icachePerfInfo.miss0Miss1)
-  XSPerfAccumulate("except_0", ibufferFire && s4_icachePerfInfo.except)
+  XSPerfAccumulate("ifu_req_cacheline_1", ibufferFire && s3_icachePerfInfo.isDoubleLine)
+  XSPerfAccumulate("ifu_req_cacheline_0_hit", ibufferFire && s3_icachePerfInfo.hit0)
+  XSPerfAccumulate("ifu_req_cacheline_1_hit", ibufferFire && s3_icachePerfInfo.hit1)
+  XSPerfAccumulate("only_0_hit", ibufferFire && s3_icachePerfInfo.hit0NoReq1)
+  XSPerfAccumulate("only_0_miss", ibufferFire && s3_icachePerfInfo.miss0NoReq1)
+  XSPerfAccumulate("hit_0_hit_1", ibufferFire && s3_icachePerfInfo.hit0Hit1)
+  XSPerfAccumulate("hit_0_miss_1", ibufferFire && s3_icachePerfInfo.hit0Miss1)
+  XSPerfAccumulate("miss_0_hit_1", ibufferFire && s3_icachePerfInfo.miss0Hit1)
+  XSPerfAccumulate("miss_0_miss_1", ibufferFire && s3_icachePerfInfo.miss0Miss1)
+  XSPerfAccumulate("except_0", ibufferFire && s3_icachePerfInfo.except)
   XSPerfHistogram(
     "ifu2ibuffer_validCnt",
     PopCount(toIBufferInfo.enqEnable),
@@ -209,8 +209,8 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   fetchIBufferDumpData.startAddr(0) := toIBufferInfo.startVAddr(0)
   fetchIBufferDumpData.startAddr(1) := toIBufferInfo.startVAddr(1)
   fetchIBufferDumpData.instrCount   := PopCount(toIBufferInfo.enqEnable)
-  fetchIBufferDumpData.exception    := ibufferFire && s4_icachePerfInfo.except
-  fetchIBufferDumpData.isCacheHit   := ibufferFire && s4_icachePerfInfo.hit
+  fetchIBufferDumpData.exception    := ibufferFire && s3_icachePerfInfo.except
+  fetchIBufferDumpData.isCacheHit   := ibufferFire && s3_icachePerfInfo.hit
 
   private val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
   for (i <- 0 until FetchPorts) {

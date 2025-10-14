@@ -23,13 +23,12 @@ import utility.XSError
 class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class InstrBoundaryIO(implicit p: Parameters) extends IfuBundle {
     class InstrBoundaryReq(implicit p: Parameters) extends IfuBundle {
-      val valid:      Bool      = Bool()
-      val instrRange: Vec[Bool] = Vec(FetchBlockInstNum, Bool())
-      // FIXME: magic number 512
-      val cacheData:             UInt = UInt((FetchBlockSize * 8).W)
-      val firstInstrIsHalfRvi:   Bool = Bool()
-      val firstFetchBlockEndPos: UInt = UInt(log2Ceil(FetchBlockInstNum).W)
-      val endPos:                UInt = UInt(log2Ceil(FetchBlockInstNum).W)
+      val valid:                 Bool      = Bool()
+      val instrRange:            Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+      val maybeRvc:              Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+      val firstInstrIsHalfRvi:   Bool      = Bool()
+      val firstFetchBlockEndPos: UInt      = UInt(log2Ceil(FetchBlockInstNum).W)
+      val endPos:                UInt      = UInt(log2Ceil(FetchBlockInstNum).W)
     }
     class InstrBoundaryResp(implicit p: Parameters) extends IfuBundle {
       val instrValid:                        Vec[Bool] = Vec(FetchBlockInstNum, Bool())
@@ -44,12 +43,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
   }
   val io: InstrBoundaryIO = IO(new InstrBoundaryIO)
 
-  // FIXME: magic number 32, shoule be FetBlockInstNum after it changes to 32
-  private val data = io.req.cacheData.asTypeOf(Vec(FetchBlockInstNum, UInt((instBytes * 8).W)))
-  private val rawInstrs = VecInit((0 until FetchBlockInstNum).map(i =>
-    if (i == FetchBlockInstNum - 1) data(i) else Cat(data(i + 1), data(i))
-  ))
-  private val isRvc = VecInit(rawInstrs.map(isRVC))
+  private val isRvc = io.req.maybeRvc
 
   // We compute the boundaries of instructions in the first half of the fetch block directly, and compute the boundaries
   // of instructions in the latter half in two cases in parallel. Then we can choose the correct case according to

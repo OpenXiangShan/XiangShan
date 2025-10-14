@@ -126,10 +126,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
     (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
 
-  private val s1_ready, s2_ready, s3_ready, s4_ready           = WireInit(false.B)
-  private val s0_fire, s1_fire, s2_fire, s3_fire, s4_fire      = WireInit(false.B)
-  private val s0_flush, s1_flush, s2_flush, s3_flush, s4_flush = WireInit(false.B)
-  private val s0_flushFromBpu, s1_flushFromBpu                 = Wire(Vec(FetchPorts, Bool()))
+  private val s1_ready, s2_ready, s3_ready           = WireInit(false.B)
+  private val s0_fire, s1_fire, s2_fire, s3_fire     = WireInit(false.B)
+  private val s0_flush, s1_flush, s2_flush, s3_flush = WireInit(false.B)
+  private val s0_flushFromBpu, s1_flushFromBpu       = Wire(Vec(FetchPorts, Bool()))
 
   /* *****************************************************************************
    * IFU Stage 0
@@ -149,12 +149,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val backendRedirect             = WireInit(false.B)
   private val wbRedirect, uncacheRedirect = WireInit(0.U.asTypeOf(new IfuRedirectInternal))
 
-  private val s4_wbNotFlush = WireInit(false.B)
+  private val s3_wbNotFlush = WireInit(false.B)
 
   backendRedirect := fromFtq.redirect.valid
-  s4_flush        := backendRedirect || (wbRedirect.valid && !s4_wbNotFlush)
-  s3_flush        := backendRedirect || uncacheRedirect.valid || wbRedirect.valid
-  s2_flush        := s3_flush
+  s3_flush        := backendRedirect || (wbRedirect.valid && !s3_wbNotFlush)
+  s2_flush        := backendRedirect || uncacheRedirect.valid || wbRedirect.valid
   s1_flush        := s2_flush || s1_flushFromBpu(0)
   s0_flush        := s1_flush || s0_flushFromBpu(0)
 
@@ -162,21 +161,51 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s0_fetchBlock = VecInit.tabulate(FetchPorts)(i =>
     Wire(new FetchBlockInfo).fromFtqRequest(s0_ftqFetch(i), s0_flush || s0_flushFromBpu(i))
   )
+  private val s0_firstSize       = s0_fetchBlock(0).fetchSize
+  private val s0_firstValid      = s0_ftqFetch(0).valid
+  private val s0_secondValid     = s0_ftqFetch(1).valid
+  private val s0_firstRange      = s0_fetchBlock(0).instrRange
+  private val s0_secondRange     = s0_fetchBlock(1).instrRange
+  private val s0_totalInstrRange = mergeInstrRange(s0_secondValid, s0_firstRange, s0_secondRange, s0_firstSize)
+  private val s0_firstEndPos     = s0_ftqFetch(0).takenCfiOffset.bits
+  private val s0_totalEndPos = Mux(
+    s0_firstValid && s0_secondValid,
+    s0_firstSize + s0_ftqFetch(1).takenCfiOffset.bits - 1.U,
+    s0_firstEndPos
+  )
 
+  private val s0_baseBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
+    Cat(0.U(1.W), s0_fetchBlock(0).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U
+  ))
+  private val s0_appendedBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
+    Cat(0.U(1.W), s0_fetchBlock(1).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U + s0_firstSize
+  ))
+  private val s0_appendedInstrOffset = VecInit((0 until FetchBlockInstNum).map(i =>
+    i.U + s0_firstSize
+  ))
+  private val s0_fetchBlockSelect = VecInit.tabulate(FetchBlockInstNum)(i => Mux(s0_firstSize > i.U, false.B, true.B))
+  private val s0_twoFetchPcLower = VecInit.tabulate(FetchBlockInstNum)(i =>
+    Mux(s0_fetchBlockSelect(i), s0_appendedBlockPcLower(i), s0_baseBlockPcLower(i))
+  )
+  private val s0_twoFetchInstrOffset = VecInit.tabulate(FetchBlockInstNum)(i =>
+    Mux(s0_fetchBlockSelect(i), s0_appendedInstrOffset(i), i.U)
+  )
   /* *****************************************************************************
    * IFU Stage 1
-   * - icache response data (latched for pipeline stop)
-   * - calculate pc/half_pc/cut_ptr for every instruction
    * ***************************************************************************** */
   private val s1_valid      = ValidHold(s0_fire && !s0_flush, s1_fire, s1_flush)
   private val s1_firstValid = ValidHold(s0_fire && !s0_flush && s0_ftqFetch(0).valid, s1_fire, s1_flush)
   private val s1_secondValid =
     ValidHold(s0_fire && !s0_flush && s0_ftqFetch(1).valid && !s0_flushFromBpu(1), s1_fire, s1_flush)
-  private val s1_fetchBlock  = RegEnable(s0_fetchBlock, s0_fire)
-  private val s1_firstSize   = s1_fetchBlock(0).fetchSize
-  private val s1_secondSize  = s1_fetchBlock(1).fetchSize
-  private val s1_firstRange  = s1_fetchBlock(0).instrRange
-  private val s1_secondRange = s1_fetchBlock(1).instrRange
+  private val s1_fetchBlock          = RegEnable(s0_fetchBlock, s0_fire)
+  private val s1_firstSize           = s1_fetchBlock(0).fetchSize
+  private val s1_prevLastIsHalfRvi   = RegInit(false.B)
+  private val s1_totalInstrRange     = RegEnable(s0_totalInstrRange, s0_fire)
+  private val s1_firstEndPos         = RegEnable(s0_firstEndPos, s0_fire)
+  private val s1_totalEndPos         = RegEnable(s0_totalEndPos, s0_fire)
+  private val s1_fetchBlockSelect    = RegEnable(s0_fetchBlockSelect, s0_fire)
+  private val s1_twoFetchPcLower     = RegEnable(s0_twoFetchPcLower, s0_fire)
+  private val s1_twoFetchInstrOffset = RegEnable(s0_twoFetchInstrOffset, s0_fire)
 
   s1_flushFromBpu(0) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(0).ftqIdx, s1_firstValid)
   s1_flushFromBpu(1) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(1).ftqIdx, s1_secondValid)
@@ -186,83 +215,34 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s1_fire  := s1_valid && s2_ready && s1_iCacheRespValid
   s1_ready := s1_fire || !s1_valid
 
-  private val s1_totalEndPos = Mux(
-    s1_firstValid && s1_secondValid,
-    s1_firstSize + s1_secondSize - 1.U,
-    s1_firstSize - 1.U
-  )
-
-  private val s1_firstEndPos     = s1_fetchBlock(0).fetchSize - 1.U
-  private val s1_secondEndPos    = s1_fetchBlock(1).fetchSize - 1.U
-  private val s1_totalInstrRange = mergeInstrRange(s1_secondValid, s1_firstRange, s1_secondRange, s1_firstSize)
-
   io.toICache.stall := !s2_ready
   iCacheMatchAssert(fromICache, s1_fetchBlock)
 
-  private val s1_icacheMeta = VecInit.tabulate(FetchPorts)(i => Wire(new ICacheMeta).fromICacheResp(fromICache.bits))
-  private val s1_rawData    = fromICache.bits.data
-  private val s1_perfInfo   = io.fromICache.perf
+  private val s1_maybeRvcMap = fromICache.bits.maybeRvcMap
+  private val s1_icacheMeta  = VecInit.tabulate(FetchPorts)(i => Wire(new ICacheMeta).fromICacheResp(fromICache.bits))
+  private val s1_maybeRvc    = Cat(s1_maybeRvcMap, s1_maybeRvcMap) >> s1_fetchBlock(0).startVAddr(5, 1)
+  private val s1_rawData     = fromICache.bits.data
+  private val s1_perfInfo    = io.fromICache.perf
 
-  private val s1_baseBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
-    Cat(0.U(1.W), s1_fetchBlock(0).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U
-  ))
-  private val s1_appendedBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
-    Cat(0.U(1.W), s1_fetchBlock(1).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U + s1_firstSize
-  ))
-  private val s1_appendedInstrOffset = VecInit((0 until FetchBlockInstNum).map(i =>
-    i.U + s1_firstSize
-  ))
-  private val s1_fetchBlockSelect = VecInit.tabulate(FetchBlockInstNum)(i => Mux(s1_firstSize > i.U, false.B, true.B))
-  private val s1_twoFetchPcLower = VecInit.tabulate(FetchBlockInstNum)(i =>
-    Mux(s1_fetchBlockSelect(i), s1_appendedBlockPcLower(i), s1_baseBlockPcLower(i))
-  )
-  private val s1_twoFetchInstrOffset = VecInit.tabulate(FetchBlockInstNum)(i =>
-    Mux(s1_fetchBlockSelect(i), s1_appendedInstrOffset(i), i.U)
-  )
-  /* *****************************************************************************
-   * IFU Stage 2
-   * - generate exception bits for every instruction (page fault/access fault/mmio)
-   * - generate predicted instruction range (1 means this instruction is in this fetch packet)
-   * - cut data from cachelines to packet instruction code
-   * - instruction preDecode and RVC expand
-   * ***************************************************************************** */
-  private val s2_valid               = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
-  private val s2_firstValid          = ValidHold(s1_fire && !s1_flush && s1_firstValid, s2_fire, s2_flush)
-  private val s2_secondValid         = ValidHold(s1_fire && !s1_flush && s1_secondValid, s2_fire, s2_flush)
-  private val s2_fetchBlock          = RegEnable(s1_fetchBlock, s1_fire)
-  private val s2_prevLastIsHalfRvi   = RegInit(false.B)
-  private val s2_totalInstrRange     = RegEnable(s1_totalInstrRange, s1_fire)
-  private val s2_firstEndPos         = RegEnable(s1_firstEndPos, s1_fire)
-  private val s2_totalEndPos         = RegEnable(s1_totalEndPos, s1_fire)
-  private val s2_twoFetchPcLower     = RegEnable(s1_twoFetchPcLower, s1_fire)
-  private val s2_twoFetchInstrOffset = RegEnable(s1_twoFetchInstrOffset, s1_fire)
-  private val s2_fetchBlockSelect    = RegEnable(s1_fetchBlockSelect, s1_fire)
+  instrBoundary.io.req.valid                 := s1_valid
+  instrBoundary.io.req.instrRange            := s1_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
+  instrBoundary.io.req.firstFetchBlockEndPos := s1_firstEndPos
+  instrBoundary.io.req.endPos                := s1_totalEndPos
+  instrBoundary.io.req.firstInstrIsHalfRvi   := s1_prevLastIsHalfRvi
+  instrBoundary.io.req.maybeRvc              := VecInit((0 until FetchBlockInstNum).map(i => s1_maybeRvc(i)))
 
-  s2_fire  := s2_valid && s3_ready
-  s2_ready := s2_fire || !s2_valid
-
-  private val s2_icacheMeta = RegEnable(s1_icacheMeta, s1_fire)
-  private val s2_rawData    = RegEnable(s1_rawData, s1_fire)
-
-  instrBoundary.io.req.valid                 := s2_valid
-  instrBoundary.io.req.instrRange            := s2_totalInstrRange.asTypeOf(Vec(FetchBlockInstNum, Bool()))
-  instrBoundary.io.req.firstFetchBlockEndPos := s2_firstEndPos
-  instrBoundary.io.req.endPos                := s2_totalEndPos
-  instrBoundary.io.req.firstInstrIsHalfRvi   := s2_prevLastIsHalfRvi
-  instrBoundary.io.req.cacheData := Cat(s2_rawData, s2_rawData) >> Cat(s2_fetchBlock(0).startVAddr(5, 0), 0.U(3.W))
-
-  private val s2_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
-  private val s2_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
+  private val s1_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
+  private val s1_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
 
   // When invalidTaken is true, we can not flush s2_prevLastIsHalfRvi because the fetch block after it is fall-through.
   when(backendRedirect) {
-    s2_prevLastIsHalfRvi := false.B
+    s1_prevLastIsHalfRvi := false.B
   }.elsewhen(wbRedirect.valid) {
-    s2_prevLastIsHalfRvi := wbRedirect.isHalfInstr
+    s1_prevLastIsHalfRvi := wbRedirect.isHalfInstr
   }.elsewhen(uncacheRedirect.valid) {
-    s2_prevLastIsHalfRvi := false.B
-  }.elsewhen(s2_fire && !s2_icacheMeta(0).isUncache) {
-    s2_prevLastIsHalfRvi := s2_fetchEndIsHalf
+    s1_prevLastIsHalfRvi := false.B
+  }.elsewhen(s1_fire && !s1_icacheMeta(0).isUncache) {
+    s1_prevLastIsHalfRvi := s1_fetchEndIsHalf
   }
 
 // rawInstrValid(i) and instrCountBeforeCurrent(i) also handle instructions
@@ -270,7 +250,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 // used for s3_prevLastHalfData calculation.
   private val dealInstrValid = Wire(Vec(FetchBlockInstNum, Bool()))
   dealInstrValid    := instrBoundary.io.resp.instrValid
-  dealInstrValid(0) := instrBoundary.io.resp.instrValid(0) | s2_prevLastIsHalfRvi
+  dealInstrValid(0) := instrBoundary.io.resp.instrValid(0) | s1_prevLastIsHalfRvi
 
   private val rawInstrEndVec = instrBoundary.io.resp.instrEndVec
   private val rawIsRvc       = instrBoundary.io.resp.isRvc
@@ -283,210 +263,181 @@ class Ifu(implicit p: Parameters) extends IfuModule
   for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(dealInstrValid.take(i))
   }
-  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(dealInstrValid)
-
-  instrCompactor.io.req.fetchBlockSelect        := s2_fetchBlockSelect
-  instrCompactor.io.req.twoFetchPcLower         := s2_twoFetchPcLower
-  instrCompactor.io.req.twoFetchInstrOffset     := s2_twoFetchInstrOffset
+  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid)
+  instrCompactor.io.req.fetchBlockSelect        := s1_fetchBlockSelect
+  instrCompactor.io.req.twoFetchPcLower         := s1_twoFetchPcLower
+  instrCompactor.io.req.twoFetchInstrOffset     := s1_twoFetchInstrOffset
   instrCompactor.io.req.rawInstrValid           := dealInstrValid
   instrCompactor.io.req.rawIsRvc                := rawIsRvc
   instrCompactor.io.req.instrCountBeforeCurrent := instrCountBeforeCurrent
   private val instrCompactInfo = Wire(new InstrCompactBundle(FetchBlockInstNum))
   instrCompactInfo                   := instrCompactor.io.resp
-  instrCompactInfo.instrEndOffset(0) := Mux(s2_prevLastIsHalfRvi, 0.U, Mux(rawIsRvc(0), 0.U, 1.U))
+  instrCompactInfo.instrEndOffset(0) := Mux(s1_prevLastIsHalfRvi, 0.U, Mux(rawIsRvc(0), 0.U, 1.U))
 
-  private val s2_firstRange    = s2_fetchBlock(0).instrRange
-  private val s2_secondRange   = s2_fetchBlock(1).instrRange
-  private val s2_firstSize     = s2_fetchBlock(0).fetchSize
-  private val s2_fetchTakenIdx = Wire(Vec(FetchPorts, new Valid(UInt(FetchBlockInstOffsetWidth.W))))
-  s2_fetchTakenIdx(0).bits  := PopCount(dealInstrValid.asUInt & s2_firstRange) - 1.U
-  s2_fetchTakenIdx(1).bits  := PopCount(dealInstrValid.asUInt & s2_totalInstrRange) - 1.U
-  s2_fetchTakenIdx(0).valid := s2_fetchBlock(0).takenCfiOffset.valid && s2_firstValid
-  s2_fetchTakenIdx(1).valid := s2_fetchBlock(1).takenCfiOffset.valid && s2_secondValid
+  private val s1_firstRange    = s1_fetchBlock(0).instrRange
+  private val s1_secondRange   = s1_fetchBlock(1).instrRange
+  private val s1_fetchTakenIdx = Wire(Vec(FetchPorts, new Valid(UInt(FetchBlockInstOffsetWidth.W))))
+  s1_fetchTakenIdx(0).bits  := PopCount(dealInstrValid.asUInt & s1_firstRange) - 1.U
+  s1_fetchTakenIdx(1).bits  := PopCount(dealInstrValid.asUInt & s1_totalInstrRange) - 1.U
+  s1_fetchTakenIdx(0).valid := s1_fetchBlock(0).takenCfiOffset.valid && s1_firstValid
+  s1_fetchTakenIdx(1).valid := s1_fetchBlock(1).takenCfiOffset.valid && s1_secondValid
 
-  private val s2_realFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
-  s2_realFetchBlock                 := s2_fetchBlock
-  s2_realFetchBlock(0).predTakenIdx := s2_fetchTakenIdx(0)
-  s2_realFetchBlock(1).predTakenIdx := s2_fetchTakenIdx(1)
-  s2_realFetchBlock(0).invalidTaken := !rawInstrEndVec(s2_fetchBlock(0).takenCfiOffset.bits) &&
-    s2_fetchBlock(0).takenCfiOffset.valid
-  s2_realFetchBlock(1).invalidTaken := !rawInstrEndVec(s2_fetchBlock(1).takenCfiOffset.bits) &&
-    s2_fetchBlock(1).takenCfiOffset.valid
-  s2_realFetchBlock(0).takenCfiOffset.valid := s2_fetchBlock(0).takenCfiOffset.valid && s2_firstValid
-  s2_realFetchBlock(1).takenCfiOffset.valid := s2_fetchBlock(1).takenCfiOffset.valid && s2_secondValid
-  s2_realFetchBlock(0).rawInstrEndVec       := rawInstrEndVec.asUInt & s2_firstRange
-  s2_realFetchBlock(1).rawInstrEndVec       := (rawInstrEndVec.asUInt >> s2_firstSize).asUInt & s2_secondRange
-  private val s2_rawFirstData         = s2_rawData
-  private val s2_rawSecondData        = 0.U((ICacheLineBytes * 8).W)
-  private val s2_rawFirstDataDupWire  = VecInit(Seq.fill(FetchPorts)(s2_rawFirstData))
-  private val s2_rawSecondDataDupWire = VecInit(Seq.fill(FetchPorts)(s2_rawSecondData))
+  private val s1_realFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
+  s1_realFetchBlock                 := s1_fetchBlock
+  s1_realFetchBlock(0).predTakenIdx := s1_fetchTakenIdx(0)
+  s1_realFetchBlock(1).predTakenIdx := s1_fetchTakenIdx(1)
+  s1_realFetchBlock(0).invalidTaken := !rawInstrEndVec(s1_fetchBlock(0).takenCfiOffset.bits) &&
+    s1_fetchBlock(0).takenCfiOffset.valid
+  s1_realFetchBlock(1).invalidTaken := !rawInstrEndVec(s1_fetchBlock(1).takenCfiOffset.bits) &&
+    s1_fetchBlock(1).takenCfiOffset.valid
+  s1_realFetchBlock(0).takenCfiOffset.valid := s1_fetchBlock(0).takenCfiOffset.valid && s1_firstValid
+  s1_realFetchBlock(1).takenCfiOffset.valid := s1_fetchBlock(1).takenCfiOffset.valid && s1_secondValid
+  s1_realFetchBlock(0).rawInstrEndVec       := rawInstrEndVec.asUInt & s1_firstRange
+  s1_realFetchBlock(1).rawInstrEndVec       := (rawInstrEndVec.asUInt >> s1_firstSize).asUInt & s1_secondRange
+  private val s1_rawFirstData         = s1_rawData
+  private val s1_rawSecondData        = 0.U((ICacheLineBytes * 8).W)
+  private val s1_rawFirstDataDupWire  = VecInit(Seq.fill(FetchPorts)(s1_rawFirstData))
+  private val s1_rawSecondDataDupWire = VecInit(Seq.fill(FetchPorts)(s1_rawSecondData))
   // Special case for MMIO:
   // If two fetches occur and the first is non-MMIO while the second is MMIO,
   // delay the second fetch by one cycle to split into a one-fetch.
 
   /* *****************************************************************************
-   * IFU Stage 3
+   * IFU Stage 2
    * ***************************************************************************** */
-  private val s3_valid          = ValidHold(s2_fire && !s2_flush, s3_fire, s3_flush)
-  private val s3_firstValid     = ValidHold(s2_fire && !s2_flush && s2_firstValid, s3_fire, s3_flush)
-  private val s3_secondValid    = ValidHold(s2_fire && !s2_flush && s2_secondValid, s3_fire, s3_flush)
-  private val s3_fetchBlock     = RegEnable(s2_realFetchBlock, s2_fire)
-  private val s3_prevIBufEnqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
+  private val s2_valid      = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
+  private val s2_firstValid = ValidHold(s1_fire && !s1_flush && s1_firstValid, s2_fire, s2_flush)
+  private val s2_secondValid =
+    ValidHold(s1_fire && !s1_flush && s1_secondValid && !s1_flushFromBpu(1), s2_fire, s2_flush)
+  private val s2_fetchBlock     = RegEnable(s1_realFetchBlock, s1_fire)
+  private val s2_prevIBufEnqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
 
-  private val s3_prevShiftSelect = UIntToMask(s3_prevIBufEnqPtr.value(1, 0), IfuAlignWidth)
+  private val s2_prevShiftSelect = UIntToMask(s2_prevIBufEnqPtr.value(1, 0), IfuAlignWidth)
 
-  s3_fire  := s3_valid && s4_ready
-  s3_ready := s3_fire || !s3_valid
+  s2_fire  := s2_valid && s3_ready
+  s2_ready := s2_fire || !s2_valid
 
-  private val s3_instrCompactInfo = RegEnable(instrCompactInfo, s2_fire)
-  private val s3_instrCount       = RegEnable(PopCount(rawInstrEndVec), s2_fire)
-  private val s3_instrValid       = RegEnable(UIntToMask(PopCount(rawInstrEndVec), FetchBlockInstNum), s2_fire)
+  private val s2_instrCompactInfo = RegEnable(instrCompactInfo, s1_fire)
+  private val s2_instrCount       = RegEnable(PopCount(rawInstrEndVec), s1_fire)
+  private val s2_instrValid       = RegEnable(UIntToMask(PopCount(rawInstrEndVec), FetchBlockInstNum), s1_fire)
 
-  private val s3_rawIndex           = RegEnable(instrCountBeforeCurrent, s2_fire)
-  private val s3_rawInstrEndVec     = RegEnable(rawInstrEndVec, s2_fire)
-  private val s3_prevLastIsHalfRvi  = RegEnable(s2_prevLastIsHalfRvi, s2_fire)
-  private val s3_prevLastHalfData   = RegInit(0.U(16.W))
-  private val s3_prevLastHalfPc     = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val s3_currentLastHalfRvi = RegEnable(s2_fetchEndIsHalf, s2_fire)
+  private val s2_rawIndex           = RegEnable(instrCountBeforeCurrent, s1_fire)
+  private val s2_rawInstrEndVec     = RegEnable(rawInstrEndVec, s1_fire)
+  private val s2_prevLastIsHalfRvi  = RegEnable(s1_prevLastIsHalfRvi, s1_fire)
+  private val s2_prevLastHalfData   = RegInit(0.U(16.W))
+  private val s2_prevLastHalfPc     = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val s2_currentLastHalfRvi = RegEnable(s1_fetchEndIsHalf, s1_fire)
 
-  private val s3_rawFirstDataDup  = RegEnable(s2_rawFirstDataDupWire, s2_fire)
-  private val s3_rawSecondDataDup = RegEnable(s2_rawSecondDataDupWire, s2_fire)
+  private val s2_rawFirstDataDup  = RegEnable(s1_rawFirstDataDupWire, s1_fire)
+  private val s2_rawSecondDataDup = RegEnable(s1_rawSecondDataDupWire, s1_fire)
 
-  private val s3_icacheMeta = RegEnable(s2_icacheMeta, s2_fire)
-  /* NOTE: the following `Cat(_data, _data)` *is* intentional.
-   * Explanation:
-   * In the old design, IFU is responsible for selecting requested data from two adjacent cachelines,
-   *    so IFU has to receive 2*64B (2cacheline * 64B) data from ICache, and do `Cat(_data(1), _data(0))` here.
-   * However, a fetch block is 34B at max, sending 2*64B is quiet a waste of power.
-   * In current design (2024.06~), ICacheDataArray is responsible for selecting data from two adjacent cachelines,
-   *    so IFU only need to receive 40B (5bank * 8B) valid data, and use only one port is enough.
-   * For example, when pc falls on the 6th bank in cacheline0(so this is a doubleline request):
-   *                      MSB                                         LSB
-   *        cacheline 1 || 1-7 | 1-6 | 1-5 | 1-4 | 1-3 | 1-2 | 1-1 | 1-0 ||
-   *        cacheline 0 || 0-7 | 0-6 | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | 0-0 ||
-   *    and ICacheDataArray will respond:
-   *         s2_rawData || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
-   *    therefore simply make a copy of the response and `Cat` together, and obtain the requested data from centre:
-   *      s2_copiedData || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 | 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
-   *                                   requested data: ^-----------------------------^
-   * For another example, pc falls on the 1st bank in cacheline 0, we have:
-   *         s2_rawData || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
-   *      s2_copiedData || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx | xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
-   *                                                                 requested data: ^-----------------------------^
-   * Each "| x-y |" block is a 8B bank from cacheline(x).bank(y)
-   * Please also refer to:
-   * - DataArray selects data:
-   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L355-L381
-   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L149-L161
-   * - ICache respond to IFU:
-   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
-   */
+  private val s2_icacheMeta = RegEnable(s1_icacheMeta, s1_fire)
   // Placeholder logic for now; subject to change later
-  private val s3_firstLowICacheData   = cutICacheData(s3_rawFirstDataDup(0))
-  private val s3_firstHighICacheData  = cutICacheData(s3_rawFirstDataDup(1))
-  private val s3_secondLowICacheData  = cutICacheData(s3_rawSecondDataDup(0))
-  private val s3_secondHighICacheData = cutICacheData(s3_rawSecondDataDup(1))
+  private val s2_firstLowICacheData   = cutICacheData(s2_rawFirstDataDup(0))
+  private val s2_firstHighICacheData  = cutICacheData(s2_rawFirstDataDup(1))
+  private val s2_secondLowICacheData  = cutICacheData(s2_rawSecondDataDup(0))
+  private val s2_secondHighICacheData = cutICacheData(s2_rawSecondDataDup(1))
 
-  private val s3_isPredTaken = VecInit.tabulate(FetchBlockInstNum)(i =>
-    ((s3_fetchBlock(0).predTakenIdx.bits === i.U && s3_fetchBlock(0).predTakenIdx.valid) &&
-      !s3_instrCompactInfo.selectBlock(i) && s3_firstValid) ||
-      ((s3_fetchBlock(1).predTakenIdx.bits === i.U && s3_fetchBlock(1).predTakenIdx.valid) &&
-        s3_instrCompactInfo.selectBlock(i) && s3_secondValid)
+  private val s2_isPredTaken = VecInit.tabulate(FetchBlockInstNum)(i =>
+    ((s2_fetchBlock(0).predTakenIdx.bits === i.U && s2_fetchBlock(0).predTakenIdx.valid) &&
+      !s2_instrCompactInfo.selectBlock(i) && s2_firstValid) ||
+      ((s2_fetchBlock(1).predTakenIdx.bits === i.U && s2_fetchBlock(1).predTakenIdx.valid) &&
+        s2_instrCompactInfo.selectBlock(i) && s2_secondValid)
   )
 
-  private val s3_invalidTaken = VecInit.tabulate(FetchBlockInstNum)(i =>
-    ((s3_fetchBlock(0).predTakenIdx.bits === i.U && s3_fetchBlock(0).invalidTaken) &&
-      !s3_instrCompactInfo.selectBlock(i) && s3_firstValid) ||
-      ((s3_fetchBlock(1).predTakenIdx.bits === i.U && s3_fetchBlock(1).invalidTaken) &&
-        s3_instrCompactInfo.selectBlock(i) && s3_secondValid)
+  private val s2_invalidTaken = VecInit.tabulate(FetchBlockInstNum)(i =>
+    ((s2_fetchBlock(0).predTakenIdx.bits === i.U && s2_fetchBlock(0).invalidTaken) &&
+      !s2_instrCompactInfo.selectBlock(i) && s2_firstValid) ||
+      ((s2_fetchBlock(1).predTakenIdx.bits === i.U && s2_fetchBlock(1).invalidTaken) &&
+        s2_instrCompactInfo.selectBlock(i) && s2_secondValid)
   )
 
-  private val s3_alignShiftNum = s3_prevIBufEnqPtr.value(1, 0)
+  private val s2_alignShiftNum = s2_prevIBufEnqPtr.value(1, 0)
   // Maybe it's better to move the calculation of enqBlockStartPos to the previous pipeline stage
   // — at least from a timing perspective. But it would require modifying IBufferPrevPtr.
-  private val s3_alignBlockStartPos = WireDefault(VecInit.fill(IBufferEnqueueWidth)(false.B))
-  s3_alignBlockStartPos(s3_alignShiftNum) := true.B
-  private val s3_alignCompactInfo = alignInstrCompact(s3_instrCompactInfo, s3_alignShiftNum)
-  private val s3_alignInstrData   = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
-  private val s3_alignInstrValid =
-    alignData(s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool())), s3_alignShiftNum, false.B)
-  private val s3_alignInvalidTaken = alignData(s3_invalidTaken, s3_alignShiftNum, false.B)
-  private val s3_alignIsPredTaken  = alignData(s3_isPredTaken, s3_alignShiftNum, false.B)
-  private val s3_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
+  private val s2_alignBlockStartPos = WireDefault(VecInit.fill(IBufferEnqueueWidth)(false.B))
+  s2_alignBlockStartPos(s2_alignShiftNum) := true.B
+  private val s2_alignCompactInfo = alignInstrCompact(s2_instrCompactInfo, s2_alignShiftNum)
+  private val s2_alignInstrData   = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
+  private val s2_alignInstrValid =
+    alignData(s2_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool())), s2_alignShiftNum, false.B)
+  private val s2_alignInvalidTaken = alignData(s2_invalidTaken, s2_alignShiftNum, false.B)
+  private val s2_alignIsPredTaken  = alignData(s2_isPredTaken, s2_alignShiftNum, false.B)
+  private val s2_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     catPC(
-      s3_alignCompactInfo.instrPcLower(i),
-      Mux(s3_alignCompactInfo.selectBlock(i), s3_fetchBlock(1).pcHigh, s3_fetchBlock(0).pcHigh),
-      Mux(s3_alignCompactInfo.selectBlock(i), s3_fetchBlock(1).pcHighPlus1, s3_fetchBlock(0).pcHighPlus1)
+      s2_alignCompactInfo.instrPcLower(i),
+      Mux(s2_alignCompactInfo.selectBlock(i), s2_fetchBlock(1).pcHigh, s2_fetchBlock(0).pcHigh),
+      Mux(s2_alignCompactInfo.selectBlock(i), s2_fetchBlock(1).pcHighPlus1, s2_fetchBlock(0).pcHighPlus1)
     )
   )
-  private val s3_realAlignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
-  private val s3_realAlignPc = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
-  private val s3_alignFoldPc = VecInit(s3_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
+  private val s2_realAlignInstrData = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U(32.W)))
+  private val s2_realAlignPc = WireDefault(VecInit.fill(IBufferEnqueueWidth)(0.U.asTypeOf(PrunedAddr(VAddrBits))))
+  private val s2_alignFoldPc = VecInit(s2_realAlignPc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
 
   for (i <- 0 until IBufferEnqueueWidth / 2) {
-    val lowIdx     = s3_alignCompactInfo.instrIndex(i).value
-    val highIdx    = s3_alignCompactInfo.instrIndex(i + IBufferEnqueueWidth / 2).value
+    val lowIdx     = s2_alignCompactInfo.instrIndex(i).value
+    val highIdx    = s2_alignCompactInfo.instrIndex(i + IBufferEnqueueWidth / 2).value
     val j          = i + IBufferEnqueueWidth / 2
-    val lowSelect  = s3_alignCompactInfo.selectBlock(i)
-    val highSelect = s3_alignCompactInfo.selectBlock(j)
-    s3_alignInstrData(i) := Mux(!lowSelect, s3_firstLowICacheData(lowIdx), s3_secondLowICacheData(lowIdx))
-    s3_alignInstrData(j) := Mux(!highSelect, s3_firstHighICacheData(highIdx), s3_secondHighICacheData(highIdx))
+    val lowSelect  = s2_alignCompactInfo.selectBlock(i)
+    val highSelect = s2_alignCompactInfo.selectBlock(j)
+    s2_alignInstrData(i) := Mux(!lowSelect, s2_firstLowICacheData(lowIdx), s2_secondLowICacheData(lowIdx))
+    s2_alignInstrData(j) := Mux(!highSelect, s2_firstHighICacheData(highIdx), s2_secondHighICacheData(highIdx))
   }
 
   for (i <- 0 until IBufferEnqueueWidth) {
     // Handling of cross-predict-block instructions in the one-fetch case.
     // This part should only be modified after the backend changes are completed.
     val adjustedBlockHeadInst =
-      Mux(s3_prevLastIsHalfRvi, Cat(s3_alignInstrData(i)(15, 0), s3_prevLastHalfData), s3_alignInstrData(i))
+      Mux(s2_prevLastIsHalfRvi, Cat(s2_alignInstrData(i)(15, 0), s2_prevLastHalfData), s2_alignInstrData(i))
     val adjustedBlockHeadPc =
-      Mux(s3_prevLastIsHalfRvi, s3_prevLastHalfPc, s3_alignPc(i))
-    s3_realAlignInstrData(i) := Mux(s3_alignBlockStartPos(i), adjustedBlockHeadInst, s3_alignInstrData(i))
-    s3_realAlignPc(i)        := Mux(s3_alignBlockStartPos(i), adjustedBlockHeadPc, s3_alignPc(i))
+      Mux(s2_prevLastIsHalfRvi, s2_prevLastHalfPc, s2_alignPc(i))
+    s2_realAlignInstrData(i) := Mux(s2_alignBlockStartPos(i), adjustedBlockHeadInst, s2_alignInstrData(i))
+    s2_realAlignPc(i)        := Mux(s2_alignBlockStartPos(i), adjustedBlockHeadPc, s2_alignPc(i))
   }
 
   // backendRedirect has the highest priority
   when(backendRedirect) {
-    s3_prevLastHalfData := 0.U
-    s3_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+    s2_prevLastHalfData := 0.U
+    s2_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
   }.elsewhen(wbRedirect.valid) {
-    s3_prevLastHalfData := wbRedirect.halfData
-    s3_prevLastHalfPc   := wbRedirect.halfPc
+    s2_prevLastHalfData := wbRedirect.halfData
+    s2_prevLastHalfPc   := wbRedirect.halfPc
   }.elsewhen(uncacheRedirect.valid) {
-    s3_prevLastHalfData := 0.U
-    s3_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
-  }.elsewhen(s3_fire) {
-    s3_prevLastHalfData := s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0)
-    s3_prevLastHalfPc   := s3_alignPc(s3_instrCount + s3_alignShiftNum)
+    s2_prevLastHalfData := 0.U
+    s2_prevLastHalfPc   := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+  }.elsewhen(s2_fire) {
+    s2_prevLastHalfData := s2_alignInstrData(s2_instrCount + s2_alignShiftNum)(15, 0)
+    s2_prevLastHalfPc   := s2_alignPc(s2_instrCount + s2_alignShiftNum)
   }
 
   when(backendRedirect) {
-    s3_prevIBufEnqPtr := 0.U.asTypeOf(new IBufPtr)
+    s2_prevIBufEnqPtr := 0.U.asTypeOf(new IBufPtr)
   }.elsewhen(wbRedirect.valid) {
-    s3_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
+    s2_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
   }.elsewhen(uncacheRedirect.valid) {
-    s3_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
-  }.elsewhen(s3_fire && !s3_icacheMeta(0).isUncache) {
-    s3_prevIBufEnqPtr := s3_prevIBufEnqPtr + s3_instrCount
+    s2_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
+  }.elsewhen(s2_fire && !s2_icacheMeta(0).isUncache) {
+    s2_prevIBufEnqPtr := s2_prevIBufEnqPtr + s2_instrCount
   }
 
   // PreDecode: delimitation, does not expand RVC
-  preDecoderIn.valid           := s3_valid
-  preDecoderIn.bits.data       := s3_realAlignInstrData
-  preDecoderIn.bits.isRvc      := s3_alignCompactInfo.instrIsRvc
-  preDecoderIn.bits.instrValid := s3_alignInstrValid // s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool()))
+  preDecoderIn.valid           := s2_valid
+  preDecoderIn.bits.data       := s2_realAlignInstrData
+  preDecoderIn.bits.isRvc      := s2_alignCompactInfo.instrIsRvc
+  preDecoderIn.bits.instrValid := s2_alignInstrValid // s3_instrValid.asTypeOf(Vec(FetchBlockInstNum, Bool()))
 
-  private val s3_alignPd         = preDecoderOut.pd
-  private val s3_alignJumpOffset = preDecoderOut.jumpOffset
+  private val s2_alignPd         = preDecoderOut.pd
+  private val s2_alignJumpOffset = preDecoderOut.jumpOffset
 
-  private val s3_reqIsUncache = s3_valid && s3_icacheMeta(0).isUncache &&
-    s3_icacheMeta(0).exception.isNone
-  private val s3_alignFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
-  s3_alignFetchBlock                      := s3_fetchBlock
-  s3_alignFetchBlock(0).predTakenIdx.bits := s3_fetchBlock(0).predTakenIdx.bits + s3_prevIBufEnqPtr.value(1, 0)
-  s3_alignFetchBlock(1).predTakenIdx.bits := s3_fetchBlock(1).predTakenIdx.bits + s3_prevIBufEnqPtr.value(1, 0)
+  private val s2_reqIsUncache = s2_valid && s2_icacheMeta(0).isUncache &&
+    s2_icacheMeta(0).exception.isNone
+  private val s2_alignFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
+  s2_alignFetchBlock                      := s2_fetchBlock
+  s2_alignFetchBlock(0).predTakenIdx.bits := s2_fetchBlock(0).predTakenIdx.bits + s2_prevIBufEnqPtr.value(1, 0)
+  s2_alignFetchBlock(1).predTakenIdx.bits := s2_fetchBlock(1).predTakenIdx.bits + s2_prevIBufEnqPtr.value(1, 0)
 
   /* *****************************************************************************
-   * IFU Stage 4
+   * IFU Stage 3
    * - handle MMIO instruction
    *   - send request to Uncache fetch Unit
    *   - every packet include 1 MMIO instruction
@@ -498,86 +449,84 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * ***************************************************************************** */
 
   // assign later
-  private val s4_valid               = WireInit(false.B)
-  private val s4_firstValid          = ValidHold(s3_fire && !s3_flush && s3_firstValid, s4_fire, s4_flush)
-  private val s4_secondValid         = ValidHold(s3_fire && !s3_flush && s3_secondValid, s4_fire, s4_flush)
-  private val s4_alignFetchBlock     = RegEnable(s3_alignFetchBlock, s3_fire)
-  private val s4_prevIBufEnqPtr      = RegEnable(s3_prevIBufEnqPtr, s3_fire)
-  private val s4_rawIndex            = RegEnable(s3_rawIndex, s3_fire)
-  private val s4_prevShiftSelect     = RegEnable(s3_prevShiftSelect, s3_fire)
-  private val s4_prevLastRvi         = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
-  private val s4_currentLastHalfData = RegEnable(s3_alignInstrData(s3_instrCount + s3_alignShiftNum)(15, 0), s3_fire)
-  private val s4_currentLastHalfRvi  = RegEnable(s3_currentLastHalfRvi, s3_fire)
-  private val s4_currentLastHalfPC   = RegEnable(s3_realAlignPc(s3_instrCount + s3_alignShiftNum), s3_fire)
-  private val s4_instrCount          = RegEnable(s3_instrCount, s3_fire)
-  s4_fire := io.toIBuffer.fire
+  private val s3_valid               = WireInit(false.B)
+  private val s3_firstValid          = ValidHold(s2_fire && !s2_flush && s2_firstValid, s3_fire, s3_flush)
+  private val s3_secondValid         = ValidHold(s2_fire && !s2_flush && s2_secondValid, s3_fire, s3_flush)
+  private val s3_alignFetchBlock     = RegEnable(s2_alignFetchBlock, s2_fire)
+  private val s3_prevIBufEnqPtr      = RegEnable(s2_prevIBufEnqPtr, s2_fire)
+  private val s3_rawIndex            = RegEnable(s2_rawIndex, s2_fire)
+  private val s3_prevShiftSelect     = RegEnable(s2_prevShiftSelect, s2_fire)
+  private val s3_prevLastRvi         = RegEnable(s2_prevLastIsHalfRvi, s2_fire)
+  private val s3_currentLastHalfData = RegEnable(s2_alignInstrData(s2_instrCount + s2_alignShiftNum)(15, 0), s2_fire)
+  private val s3_currentLastHalfRvi  = RegEnable(s2_currentLastHalfRvi, s2_fire)
+  private val s3_currentLastHalfPC   = RegEnable(s2_realAlignPc(s2_instrCount + s2_alignShiftNum), s2_fire)
+  private val s3_instrCount          = RegEnable(s2_instrCount, s2_fire)
+  s3_fire := io.toIBuffer.fire
 
-  private val s4_alignInvalidTaken = RegEnable(s3_alignInvalidTaken, s3_fire)
-  private val s4_alignIsPredTaken  = RegEnable(s3_alignIsPredTaken, s3_fire)
-  private val s4_alignInstrData    = RegEnable(s3_realAlignInstrData, s3_fire)
-  private val s4_alignInstrValid   = RegEnable(s3_alignInstrValid, s3_fire)
-  private val s4_icacheMeta        = RegEnable(s3_icacheMeta, s3_fire)
-  private val s4_alignCompactInfo  = RegEnable(s3_alignCompactInfo, s3_fire)
+  private val s3_alignInvalidTaken = RegEnable(s2_alignInvalidTaken, s2_fire)
+  private val s3_alignIsPredTaken  = RegEnable(s2_alignIsPredTaken, s2_fire)
+  private val s3_alignInstrData    = RegEnable(s2_realAlignInstrData, s2_fire)
+  private val s3_alignInstrValid   = RegEnable(s2_alignInstrValid, s2_fire)
+  private val s3_icacheMeta        = RegEnable(s2_icacheMeta, s2_fire)
+  private val s3_alignCompactInfo  = RegEnable(s2_alignCompactInfo, s2_fire)
   private val isFirstInstr         = RegInit(true.B)
   when(isFirstInstr && io.toIBuffer.fire) {
     isFirstInstr := false.B
   }
 
   rvcExpanders.zipWithIndex.foreach { case (expander, i) =>
-    expander.io.in      := s4_alignInstrData(i)
+    expander.io.in      := s3_alignInstrData(i)
     expander.io.fsIsOff := io.csrFsIsOff
   }
   // Use expanded instruction only when input is legal.
   // Otherwise, use origin illegal RVC instruction.
-  private val s4_alignExpdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
+  private val s3_alignExpdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
     Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
-  private val s4_alignIll = VecInit(rvcExpanders.map(_.io.ill))
+  private val s3_alignIll        = VecInit(rvcExpanders.map(_.io.ill))
+  private val s3_alignPds        = RegEnable(s2_alignPd, s2_fire)
+  private val s3_alignJumpOffset = RegEnable(s2_alignJumpOffset, s2_fire)
 
-  private val s4_alignPdWire     = RegEnable(s3_alignPd, s3_fire)
-  private val s4_alignPds        = WireInit(s4_alignPdWire)
-  private val s4_alignJumpOffset = RegEnable(s3_alignJumpOffset, s3_fire)
-
-  private val s4_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
+  private val s3_alignPc = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     if (i < IfuAlignWidth) {
-      RegEnable(s3_realAlignPc(i), s3_fire)
+      RegEnable(s2_realAlignPc(i), s2_fire)
     } else {
       catPC(
-        s4_alignCompactInfo.instrPcLower(i),
-        Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).pcHigh, s4_alignFetchBlock(0).pcHigh),
-        Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).pcHighPlus1, s4_alignFetchBlock(0).pcHighPlus1)
+        s3_alignCompactInfo.instrPcLower(i),
+        Mux(s3_alignCompactInfo.selectBlock(i), s3_alignFetchBlock(1).pcHigh, s3_alignFetchBlock(0).pcHigh),
+        Mux(s3_alignCompactInfo.selectBlock(i), s3_alignFetchBlock(1).pcHighPlus1, s3_alignFetchBlock(0).pcHighPlus1)
       )
     }
   )
 
   // Exapnd 1 bit to prevent overflow when assert
-  private val s4_fetchStartAddr = VecInit.tabulate(FetchPorts)(i =>
-    PrunedAddrInit(Cat(0.U(1.W), s4_alignFetchBlock(i).startVAddr.toUInt))
+  private val s3_fetchStartAddr = VecInit.tabulate(FetchPorts)(i =>
+    PrunedAddrInit(Cat(0.U(1.W), s3_alignFetchBlock(i).startVAddr.toUInt))
   )
-  private val s4_fetchNextStartAddr = VecInit.tabulate(FetchPorts)(i =>
-    PrunedAddrInit(Cat(0.U(1.W), s4_alignFetchBlock(i).target.toUInt))
+  private val s3_fetchNextStartAddr = VecInit.tabulate(FetchPorts)(i =>
+    PrunedAddrInit(Cat(0.U(1.W), s3_alignFetchBlock(i).target.toUInt))
   )
   for (i <- 0 until FetchPorts) {
-    when(s4_valid && !s4_alignFetchBlock(i).takenCfiOffset.valid) {
+    when(s3_valid && !s3_alignFetchBlock(i).takenCfiOffset.valid) {
       assert(
-        s4_fetchStartAddr(i) + (2 * FetchBlockInstNum).U >= s4_fetchNextStartAddr(i),
+        s3_fetchStartAddr(i) + (2 * FetchBlockInstNum).U >= s3_fetchNextStartAddr(i),
         s"More than ${2 * FetchBlockInstNum} Bytes fetch is not allowed!"
       )
     }
   }
 
-  private val s4_alignFoldPc        = RegEnable(s3_alignFoldPc, s3_fire)
-  private val s4_rawInstrEndVec     = RegEnable(s3_rawInstrEndVec, s3_fire)
-  private val s4_prevLastIsHalfRvi  = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
-  private val s4_uncacheLowerPc     = RegEnable(s3_alignCompactInfo.instrPcLower(s3_alignShiftNum), s3_fire)
-  private val s4_alignBlockStartPos = RegEnable(s3_alignBlockStartPos, s3_fire)
-  private val s4_uncachePc = catPC(s4_uncacheLowerPc, s4_alignFetchBlock(0).pcHigh, s4_alignFetchBlock(0).pcHighPlus1)
-  private val s4_reqIsUncache         = RegEnable(s3_reqIsUncache, s3_fire)
-  private val s4_uncacheCanGo         = uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage
-  private val s4_uncacheCrossPageMask = s4_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
-  private val s4_toIBufferValid = s4_valid && (!s4_reqIsUncache || (s4_uncacheCanGo && s4_reqIsUncache)) && !s4_flush
-  private val s4_shiftNum       = s4_prevIBufEnqPtr.value(1, 0)
-  private val s4_ignore         = s4_prevShiftSelect // possibly redundant, may remove later.
+  private val s3_alignFoldPc        = RegEnable(s2_alignFoldPc, s2_fire)
+  private val s3_rawInstrEndVec     = RegEnable(s2_rawInstrEndVec, s2_fire)
+  private val s3_prevLastIsHalfRvi  = RegEnable(s2_prevLastIsHalfRvi, s2_fire)
+  private val s3_uncacheLowerPc     = RegEnable(s2_alignCompactInfo.instrPcLower(s2_alignShiftNum), s2_fire)
+  private val s3_alignBlockStartPos = RegEnable(s2_alignBlockStartPos, s2_fire)
+  private val s3_uncachePc = catPC(s3_uncacheLowerPc, s3_alignFetchBlock(0).pcHigh, s3_alignFetchBlock(0).pcHighPlus1)
+  private val s3_reqIsUncache         = RegEnable(s2_reqIsUncache, s2_fire)
+  private val s3_uncacheCanGo         = uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage
+  private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
+  private val s3_toIBufferValid = s3_valid && (!s3_reqIsUncache || (s3_uncacheCanGo && s3_reqIsUncache)) && !s3_flush
+  private val s3_shiftNum       = s3_prevIBufEnqPtr.value(1, 0)
+  private val s3_ignore         = s3_prevShiftSelect // possibly redundant, may remove later.
 
   /* ** unache state handle ** */
   private val uncacheBusy = RegInit(false.B)
@@ -588,26 +537,26 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncachePc = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   // Uncache cross-page may hit seq fetch or mispred, check required.
   private val uncacheCrossPageCheck = RegInit(false.B)
-  when(s4_flush) {
+  when(s3_flush) {
     uncacheBusy           := false.B
     uncachePc             := 0.U.asTypeOf(PrunedAddr(VAddrBits))
     uncacheCrossPageCheck := false.B
   }.elsewhen(uncacheUnit.io.req.fire) {
     uncacheBusy           := true.B
-    uncachePc             := Mux(prevUncacheCrossPage, uncachePc, s4_alignPc(s4_shiftNum))
-    uncacheCrossPageCheck := (s4_alignFetchBlock(0).startVAddr + 2.U) === s4_alignFetchBlock(0).target
+    uncachePc             := Mux(prevUncacheCrossPage, uncachePc, s3_alignPc(s3_shiftNum))
+    uncacheCrossPageCheck := (s3_alignFetchBlock(0).startVAddr + 2.U) === s3_alignFetchBlock(0).target
   }.elsewhen(uncacheUnit.io.resp.valid) {
     uncacheBusy := false.B
     // uncachePc := uncachePc
     uncacheCrossPageCheck := false.B
   }
 
-  uncacheUnit.io.req.valid       := s4_valid && s4_reqIsUncache && !uncacheBusy
-  uncacheUnit.io.req.bits.ftqIdx := s4_alignFetchBlock(0).ftqIdx
-  uncacheUnit.io.req.bits.pbmt   := s4_icacheMeta(0).itlbPbmt
-  uncacheUnit.io.req.bits.isMmio := s4_icacheMeta(0).pmpMmio
-  uncacheUnit.io.req.bits.paddr  := s4_icacheMeta(0).pAddr
-  uncacheUnit.io.flush           := s4_flush
+  uncacheUnit.io.req.valid       := s3_valid && s3_reqIsUncache && !uncacheBusy
+  uncacheUnit.io.req.bits.ftqIdx := s3_alignFetchBlock(0).ftqIdx
+  uncacheUnit.io.req.bits.pbmt   := s3_icacheMeta(0).itlbPbmt
+  uncacheUnit.io.req.bits.isMmio := s3_icacheMeta(0).pmpMmio
+  uncacheUnit.io.req.bits.paddr  := s3_icacheMeta(0).pAddr
+  uncacheUnit.io.flush           := s3_flush
   uncacheUnit.io.isFirstInstr    := isFirstInstr
   uncacheUnit.io.ifuStall        := !io.toIBuffer.ready
   io.toFtq.mmioCommitRead <> uncacheUnit.io.mmioCommitRead
@@ -624,123 +573,122 @@ class Ifu(implicit p: Parameters) extends IfuModule
     prevUncacheData      := uncacheData
   }
 
-  private val s4_uncacheData = Mux(prevUncacheCrossPage, Cat(uncacheData(15, 0), prevUncacheData), uncacheData)
-  private val uncacheIsRvc   = s4_uncacheData(1, 0) =/= "b11".U
-  uncacheRvcExpander.io.in      := Mux(s4_reqIsUncache, s4_uncacheData, 0.U)
+  private val s3_uncacheData = Mux(prevUncacheCrossPage, Cat(uncacheData(15, 0), prevUncacheData), uncacheData)
+  private val uncacheIsRvc   = s3_uncacheData(1, 0) =/= "b11".U
+  uncacheRvcExpander.io.in      := Mux(s3_reqIsUncache, s3_uncacheData, 0.U)
   uncacheRvcExpander.io.fsIsOff := io.csrFsIsOff
 
-  s4_valid := ValidHold(
-    // infire: s3 -> s4 fire
-    s3_fire && !s3_flush,
+  s3_valid := ValidHold(
+    // infire: s2 -> s3 fire
+    s2_fire && !s2_flush,
     // outfire:
-    io.toIBuffer.fire || s4_uncacheCrossPageMask,
+    io.toIBuffer.fire || s3_uncacheCrossPageMask,
     // On flush, waiting for uncache response is handled by the channel itself.
-    s4_flush
+    s3_flush
   )
 
-  s4_ready := (io.toIBuffer.ready && (s4_uncacheCanGo || !s4_reqIsUncache)) || !s4_valid
+  s3_ready := (io.toIBuffer.ready && (s3_uncacheCanGo || !s3_reqIsUncache)) || !s3_valid
 
   /* ** prediction result check ** */
-  checkerIn.valid                   := s4_valid
-  checkerIn.bits.instrJumpOffset    := s4_alignJumpOffset
-  checkerIn.bits.instrValid         := s4_alignInstrValid.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
-  checkerIn.bits.instrPds           := s4_alignPds
-  checkerIn.bits.instrPc            := s4_alignPc
-  checkerIn.bits.isPredTaken        := s4_alignIsPredTaken
-  checkerIn.bits.ignore             := s4_ignore.asBools
-  checkerIn.bits.shiftNum           := s4_prevIBufEnqPtr.value(1, 0)
-  checkerIn.bits.firstPredTakenIdx  := s4_alignFetchBlock(0).predTakenIdx
-  checkerIn.bits.secondPredTakenIdx := s4_alignFetchBlock(1).predTakenIdx
-  checkerIn.bits.firstTarget        := s4_alignFetchBlock(0).target
-  checkerIn.bits.secondTarget       := s4_alignFetchBlock(1).target
-  checkerIn.bits.selectFetchBlock   := s4_alignCompactInfo.selectBlock
-  checkerIn.bits.invalidTaken       := s4_alignInvalidTaken
-  checkerIn.bits.instrEndOffset     := s4_alignCompactInfo.instrEndOffset
+  checkerIn.valid                   := s3_valid
+  checkerIn.bits.instrJumpOffset    := s3_alignJumpOffset
+  checkerIn.bits.instrValid         := s3_alignInstrValid.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
+  checkerIn.bits.instrPds           := s3_alignPds
+  checkerIn.bits.instrPc            := s3_alignPc
+  checkerIn.bits.isPredTaken        := s3_alignIsPredTaken
+  checkerIn.bits.ignore             := s3_ignore.asBools
+  checkerIn.bits.shiftNum           := s3_prevIBufEnqPtr.value(1, 0)
+  checkerIn.bits.firstPredTakenIdx  := s3_alignFetchBlock(0).predTakenIdx
+  checkerIn.bits.secondPredTakenIdx := s3_alignFetchBlock(1).predTakenIdx
+  checkerIn.bits.firstTarget        := s3_alignFetchBlock(0).target
+  checkerIn.bits.secondTarget       := s3_alignFetchBlock(1).target
+  checkerIn.bits.selectFetchBlock   := s3_alignCompactInfo.selectBlock
+  checkerIn.bits.invalidTaken       := s3_alignInvalidTaken
+  checkerIn.bits.instrEndOffset     := s3_alignCompactInfo.instrEndOffset
 
   /* ** frontend Trigger  ** */
-  frontendTrigger.io.pds             := s4_alignPds
-  frontendTrigger.io.pc              := s4_alignPc
-  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W))) // s4_alignInstrData
+  frontendTrigger.io.pds             := s3_alignPds
+  frontendTrigger.io.pc              := s3_alignPc
+  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W))) // s3_alignInstrData
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
-  private val s4_alignTriggered = frontendTrigger.io.triggered
+  private val s3_alignTriggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
-  private val ignoreRange = Cat(Fill(IBufferEnqueueWidth - IfuAlignWidth, 1.U(1.W)), ~s4_ignore) // maybe remove
-  io.toIBuffer.valid          := s4_toIBufferValid
-  io.toIBuffer.bits.instrs    := s4_alignExpdInstr
-  io.toIBuffer.bits.valid     := s4_alignInstrValid.asUInt & ignoreRange
-  io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedTwoFetchRange.asUInt & s4_alignInstrValid.asUInt & ignoreRange
-  io.toIBuffer.bits.pd        := s4_alignPds
-  io.toIBuffer.bits.pc        := s4_alignPc
-  io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  io.toIBuffer.valid               := s3_toIBufferValid
+  io.toIBuffer.bits.instrs         := s3_alignExpdInstr
+  io.toIBuffer.bits.valid          := s3_alignInstrValid.asUInt
+  io.toIBuffer.bits.enqEnable      := checkerOutStage1.fixedTwoFetchRange.asUInt & s3_alignInstrValid.asUInt
+  io.toIBuffer.bits.pd             := s3_alignPds
+  io.toIBuffer.bits.pc             := s3_alignPc
+  io.toIBuffer.bits.prevIBufEnqPtr := s3_prevIBufEnqPtr
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
-    ftqPtr := Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).ftqIdx, s4_alignFetchBlock(0).ftqIdx)
+    ftqPtr := Mux(s3_alignCompactInfo.selectBlock(i), s3_alignFetchBlock(1).ftqIdx, s3_alignFetchBlock(0).ftqIdx)
   }
 
-  /* in s4, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s3;
-   * when s3 fire (s4_valid && s4_ready), use s3_instrCount;
-   * else when s4 stall (s4_valid && !s4_ready). use s4_instrCount because prevInstrCount equals to current instrCount;
+  /* in s3, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s2;
+   * when s2 fire (s2_valid && s3_ready), use s2_instrCount;
+   * else when s3 stall (s3_valid && !s3_ready). use s3_instrCount because prevInstrCount equals to current instrCount;
    * otherwise, we don't care about prevInstrCount because next cycle's toIBuffer.valid won't set.
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
-    s3_fire,
-    Mux(s3_reqIsUncache, 1.U, s3_instrCount), // FIXME: consider the second fetch block
-    Mux(s4_reqIsUncache, 1.U, s4_instrCount)
+    s2_fire,
+    Mux(s2_reqIsUncache, 1.U, s2_instrCount), // FIXME: consider the second fetch block
+    Mux(s3_reqIsUncache, 1.U, s3_instrCount)
   )
 
   // Find the last entry based on the boundaries of compacted valid signals.
-  private val select = s4_alignCompactInfo.selectBlock
+  private val select = s3_alignCompactInfo.selectBlock
   private val enq    = io.toIBuffer.bits.enqEnable
   io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
     if (i == IBufferEnqueueWidth - 1) enq(i)
     else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
   }
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
-    a.predTaken  := s4_alignIsPredTaken(i) && !s4_reqIsUncache
-    a.fixedTaken := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsUncache
-    a.offset     := s4_alignCompactInfo.instrEndOffset(i)
+    a.predTaken  := s3_alignIsPredTaken(i) && !s3_reqIsUncache
+    a.fixedTaken := checkerOutStage1.fixedTwoFetchTaken(i) && !s3_reqIsUncache
+    a.offset     := s3_alignCompactInfo.instrEndOffset(i)
   }
-  io.toIBuffer.bits.foldpc := s4_alignFoldPc
+  io.toIBuffer.bits.foldpc := s3_alignFoldPc
   // mark the exception only on first instruction
-  io.toIBuffer.bits.exceptionType := s4_icacheMeta(0).exception
+  io.toIBuffer.bits.exceptionType := s3_icacheMeta(0).exception
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := s4_icacheMeta(0).isBackendException
+  io.toIBuffer.bits.backendException := s3_icacheMeta(0).isBackendException
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
-  io.toIBuffer.bits.crossPageIPFFix := s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
-  io.toIBuffer.bits.illegalInstr    := s4_alignIll
-  io.toIBuffer.bits.triggered       := s4_alignTriggered
+  io.toIBuffer.bits.crossPageIPFFix := s3_icacheMeta(0).exception.hasException && s3_prevLastIsHalfRvi
+  io.toIBuffer.bits.illegalInstr    := s3_alignIll
+  io.toIBuffer.bits.triggered       := s3_alignTriggered
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
     val idx  = PopCount(enqVec.take(i + 1))
-    val pc   = s4_alignPc(i).toUInt
+    val pc   = s3_alignPc(i).toUInt
     val code = io.toIBuffer.bits.instrs(i)
-    val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s4_fire & enqVec(i), clock, reset)
+    val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s3_fire & enqVec(i), clock, reset)
     val res  = 0.U.asTypeOf(new InstSeqNum)
     res.seqNum := seq
     // leave uopIdx to 0.U
     res
   })
   io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
-    seqNum := Mux(s4_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
+    seqNum := Mux(s3_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
   }
 
   /** to backend */
   // s4_gpAddr is valid iff gpf is detected.
   // Uncache doesn’t request iTLB; it only returns bus exceptions.
-  io.toBackend.gpAddrMem.wen                     := s4_toIBufferValid && s4_icacheMeta(0).exception.isGpf
-  io.toBackend.gpAddrMem.waddr                   := s4_alignFetchBlock(0).ftqIdx.value
-  io.toBackend.gpAddrMem.wdata.gpaddr            := s4_icacheMeta(0).gpAddr.toUInt
-  io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := s4_icacheMeta(0).isForVSnonLeafPTE
+  io.toBackend.gpAddrMem.wen                     := s3_toIBufferValid && s3_icacheMeta(0).exception.isGpf
+  io.toBackend.gpAddrMem.waddr                   := s3_alignFetchBlock(0).ftqIdx.value
+  io.toBackend.gpAddrMem.wdata.gpaddr            := s3_icacheMeta(0).gpAddr.toUInt
+  io.toBackend.gpAddrMem.wdata.isForVSnonLeafPTE := s3_icacheMeta(0).isForVSnonLeafPTE
 
   // Write back to Ftq
-  private val s4_uncacheRange     = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
+  private val s3_uncacheRange     = VecInit((0 until FetchBlockInstNum).map(i => if (i == 0) true.B else false.B))
   private val uncacheFlushWb      = Wire(Valid(new FrontendRedirect))
   private val uncachePd           = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
-  uncacheMisEndOffset.valid := s4_reqIsUncache
+  uncacheMisEndOffset.valid := s3_reqIsUncache
   uncacheMisEndOffset.bits  := Mux(prevUncacheCrossPage || uncacheIsRvc || uncacheCheckFault, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
@@ -749,46 +697,50 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncacheTarget =
     Mux(
       uncacheIsRvc || prevUncacheCrossPage || uncacheCheckFault,
-      s4_alignFetchBlock(0).startVAddr + 2.U,
-      s4_alignFetchBlock(0).startVAddr + 4.U
+      s3_alignFetchBlock(0).startVAddr + 2.U,
+      s3_alignFetchBlock(0).startVAddr + 4.U
     )
-  uncacheFlushWb.valid          := s4_reqIsUncache && !backendRedirect && (s4_uncacheCanGo || uncacheCheckFault)
-  uncacheFlushWb.bits.ftqIdx    := s4_alignFetchBlock(0).ftqIdx
-  uncacheFlushWb.bits.pc        := s4_alignFetchBlock(0).startVAddr.toUInt
+  uncacheFlushWb.valid          := s3_reqIsUncache && !backendRedirect && (s3_uncacheCanGo || uncacheCheckFault)
+  uncacheFlushWb.bits.ftqIdx    := s3_alignFetchBlock(0).ftqIdx
+  uncacheFlushWb.bits.pc        := s3_alignFetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
   uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
   uncacheFlushWb.bits.attribute := BranchAttribute.None
   uncacheFlushWb.bits.target    := uncacheTarget.toUInt
 
-  when(s4_reqIsUncache) {
-    val inst        = s4_uncacheData
+  when(s3_reqIsUncache) {
+    val inst        = s3_uncacheData
     val brAttribute = BranchAttribute.decode(inst)
-    io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
+    io.toIBuffer.bits.instrs(s3_shiftNum) := Mux(
       uncacheRvcExpander.io.ill,
       uncacheRvcExpander.io.in,
       uncacheRvcExpander.io.out.bits
     )
 
-    io.toIBuffer.bits.pc(s4_shiftNum)                    := uncachePc
-    io.toIBuffer.bits.pd(s4_shiftNum).valid              := true.B
-    io.toIBuffer.bits.pd(s4_shiftNum).isRVC              := uncacheIsRvc
-    io.toIBuffer.bits.pd(s4_shiftNum).brAttribute        := brAttribute
-    io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum)          := uncacheRvcExpander.io.ill
+    io.toIBuffer.bits.pc(s3_shiftNum)                    := uncachePc
+    io.toIBuffer.bits.pd(s3_shiftNum).valid              := true.B
+    io.toIBuffer.bits.pd(s3_shiftNum).isRVC              := uncacheIsRvc
+    io.toIBuffer.bits.pd(s3_shiftNum).brAttribute        := brAttribute
+    io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
+    io.toIBuffer.bits.illegalInstr(s3_shiftNum)          := uncacheRvcExpander.io.ill
 
     io.toIBuffer.bits.exceptionType := uncacheException
     // execption can happen in next page only when cross page.
     io.toIBuffer.bits.crossPageIPFFix := prevUncacheCrossPage && uncacheException.hasException
-    io.toIBuffer.bits.enqEnable       := s4_alignBlockStartPos.asUInt
+    // The s3_alignBlockStartPos vector marks the position of the first instruction.
+    // In uncache scenarios, only a single instruction is allowed for execution,
+    // so the valid signal enqueued into the IBuffer must align with s3_alignBlockStartPos.
+    io.toIBuffer.bits.valid     := s3_alignBlockStartPos.asUInt
+    io.toIBuffer.bits.enqEnable := s3_alignBlockStartPos.asUInt
 
     uncacheFlushWb.bits.isRVC     := uncacheIsRvc
     uncacheFlushWb.bits.attribute := brAttribute
   }
 
-  uncacheRedirect.valid          := s4_reqIsUncache && (s4_uncacheCanGo || uncacheCheckFault)
+  uncacheRedirect.valid          := s3_reqIsUncache && (s3_uncacheCanGo || uncacheCheckFault)
   uncacheRedirect.instrCount     := Mux(uncacheCheckFault, 0.U, 1.U)
-  uncacheRedirect.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  uncacheRedirect.prevIBufEnqPtr := s3_prevIBufEnqPtr
   uncacheRedirect.isHalfInstr    := false.B
   uncacheRedirect.halfPc         := 0.U.asTypeOf(PrunedAddr(VAddrBits))
   uncacheRedirect.halfData       := 0.U
@@ -798,22 +750,22 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - redirect if found fault prediction
    * - redirect if false hit last half(last PC is not start + 32 Bytes, but in the middle of an notCFI RVI instruction)
    * ***************************************************************************** */
-  private val wbEnable              = RegNext(s3_fire && !s3_flush) && !s4_reqIsUncache && !s4_flush
+  private val wbEnable              = RegNext(s2_fire && !s2_flush) && !s3_reqIsUncache && !s3_flush
   private val wbValid               = RegNext(wbEnable, init = false.B)
-  private val wbFirstValid          = RegEnable(s4_firstValid, wbEnable)
-  private val wbSecondValid         = RegEnable(s4_secondValid, wbEnable)
-  private val wbAlignFetchBlock     = RegEnable(s4_alignFetchBlock, wbEnable)
-  private val wbPrevIBufEnqPtr      = RegEnable(s4_prevIBufEnqPtr, wbEnable)
+  private val wbFirstValid          = RegEnable(s3_firstValid, wbEnable)
+  private val wbSecondValid         = RegEnable(s3_secondValid, wbEnable)
+  private val wbAlignFetchBlock     = RegEnable(s3_alignFetchBlock, wbEnable)
+  private val wbPrevIBufEnqPtr      = RegEnable(s3_prevIBufEnqPtr, wbEnable)
   private val wbInstrCount          = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
-  private val wbAlignCompactInfo    = RegEnable(s4_alignCompactInfo, wbEnable)
+  private val wbAlignCompactInfo    = RegEnable(s3_alignCompactInfo, wbEnable)
   private val wbAlignInstrPcLower   = wbAlignCompactInfo.instrPcLower
   private val wbAlignInstrEndOffset = wbAlignCompactInfo.instrEndOffset
 
-  private val wbCurrentLastHalfData = RegEnable(s4_currentLastHalfData, wbEnable)
-  private val wbCurrentLastHalfPc   = RegEnable(s4_currentLastHalfPC, wbEnable)
-  private val wbCurrentLastRvi      = RegEnable(s4_currentLastHalfRvi, wbEnable)
+  private val wbCurrentLastHalfData = RegEnable(s3_currentLastHalfData, wbEnable)
+  private val wbCurrentLastHalfPc   = RegEnable(s3_currentLastHalfPC, wbEnable)
+  private val wbCurrentLastRvi      = RegEnable(s3_currentLastHalfRvi, wbEnable)
 
-  s4_wbNotFlush := wbAlignFetchBlock(0).ftqIdx === s4_alignFetchBlock(0).ftqIdx && s4_valid && wbValid
+  s3_wbNotFlush := wbAlignFetchBlock(0).ftqIdx === s3_alignFetchBlock(0).ftqIdx && s3_valid && wbValid
 
   private val checkerRedirect = checkerOutStage2.checkerRedirect
   private val checkFlushWb = {
@@ -843,22 +795,21 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_icachePerfInfo = RegEnable(io.fromICache.perf, s1_fire)
   private val s3_icachePerfInfo = RegEnable(s2_icachePerfInfo, s2_fire)
-  private val s4_icachePerfInfo = RegEnable(s3_icachePerfInfo, s3_fire)
 
   val perfEvents: Seq[(String, Bool)] = Seq(
     ("frontendFlush                ", wbRedirect.valid),
     ("ifu_req                      ", io.toIBuffer.fire),
-    ("ifu_miss                     ", io.toIBuffer.fire && !s4_icachePerfInfo.hit),
+    ("ifu_miss                     ", io.toIBuffer.fire && !s3_icachePerfInfo.hit),
     ("ifu_req_cacheline_0          ", io.toIBuffer.fire),
-    ("ifu_req_cacheline_1          ", io.toIBuffer.fire && s4_icachePerfInfo.isDoubleLine),
-    ("ifu_req_cacheline_0_hit      ", io.toIBuffer.fire && s4_icachePerfInfo.hit0),
-    ("ifu_req_cacheline_1_hit      ", io.toIBuffer.fire && s4_icachePerfInfo.hit1),
-    ("only_0_hit                   ", io.toIBuffer.fire && s4_icachePerfInfo.hit0NoReq1),
-    ("only_0_miss                  ", io.toIBuffer.fire && s4_icachePerfInfo.miss0NoReq1),
-    ("hit_0_hit_1                  ", io.toIBuffer.fire && s4_icachePerfInfo.hit0Hit1),
-    ("hit_0_miss_1                 ", io.toIBuffer.fire && s4_icachePerfInfo.hit0Miss1),
-    ("miss_0_hit_1                 ", io.toIBuffer.fire && s4_icachePerfInfo.miss0Hit1),
-    ("miss_0_miss_1                ", io.toIBuffer.fire && s4_icachePerfInfo.miss0Miss1)
+    ("ifu_req_cacheline_1          ", io.toIBuffer.fire && s3_icachePerfInfo.isDoubleLine),
+    ("ifu_req_cacheline_0_hit      ", io.toIBuffer.fire && s3_icachePerfInfo.hit0),
+    ("ifu_req_cacheline_1_hit      ", io.toIBuffer.fire && s3_icachePerfInfo.hit1),
+    ("only_0_hit                   ", io.toIBuffer.fire && s3_icachePerfInfo.hit0NoReq1),
+    ("only_0_miss                  ", io.toIBuffer.fire && s3_icachePerfInfo.miss0NoReq1),
+    ("hit_0_hit_1                  ", io.toIBuffer.fire && s3_icachePerfInfo.hit0Hit1),
+    ("hit_0_miss_1                 ", io.toIBuffer.fire && s3_icachePerfInfo.hit0Miss1),
+    ("miss_0_hit_1                 ", io.toIBuffer.fire && s3_icachePerfInfo.miss0Hit1),
+    ("miss_0_miss_1                ", io.toIBuffer.fire && s3_icachePerfInfo.miss0Miss1)
   )
   generatePerfEvent()
   perfAnalyzer.io.ifuPerfCtrl.fromFtqBubble    := !fromFtq.req.valid && fromFtq.req.ready
@@ -871,7 +822,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.topdownIn.ftqTopdown      := fromFtq.req.bits.topdownInfo
   perfAnalyzer.io.topdownIn.topdownRedirect := fromFtq.topdownRedirect
 
-  perfAnalyzer.io.perfInfo.icachePerfInfo                 := s4_icachePerfInfo
+  perfAnalyzer.io.perfInfo.icachePerfInfo                 := s3_icachePerfInfo
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(0)         := wbValid && wbFirstValid
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(1)         := wbValid && wbSecondValid
   perfAnalyzer.io.perfInfo.checkPerfInfo.perfFaultType(0) := checkerOutStage2.perfFaultType(0)
@@ -888,7 +839,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := io.toIBuffer.fire
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
-  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s4_alignFetchBlock(0).startVAddr.toUInt
-  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s4_alignFetchBlock(1).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s3_alignFetchBlock(0).startVAddr.toUInt
+  perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s3_alignFetchBlock(1).startVAddr.toUInt
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 }
