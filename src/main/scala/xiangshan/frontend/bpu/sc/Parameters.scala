@@ -32,7 +32,6 @@ case class ScParameters(
     ),
     ctrWidth:            Int = 6,
     weightCtrWidth:      Int = 6,
-    thresholdCtrWidth:   Int = 6,
     thresholdThresWidth: Int = 8,
     NumTables:           Int = 2,
     NumBanks:            Int = 2,
@@ -44,7 +43,6 @@ trait HasScParameters extends HasBpuParameters {
   def scParameters:        ScParameters     = bpuParameters.scParameters
   def ctrWidth:            Int              = scParameters.ctrWidth
   def weightCtrWidth:      Int              = scParameters.weightCtrWidth
-  def thresholdCtrWidth:   Int              = scParameters.thresholdCtrWidth
   def thresholdThresWidth: Int              = scParameters.thresholdThresWidth
   def TableInfos:          Seq[ScTableInfo] = scParameters.TableInfos
   def PathTableInfos:      Seq[ScTableInfo] = scParameters.PathTableInfos

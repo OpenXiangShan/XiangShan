@@ -111,7 +111,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val s2_scPred: Vec[Bool] = VecInit(s2_totalPercsum.map(_ > 0.S))
 
-  private val s2_thresholds    = scThreshold.map(entry => entry.thres)
+  private val s2_thresholds    = scThreshold.map(entry => entry.thres.value)
   private val updateThresholds = VecInit(s2_thresholds.map(t => (t << 3) +& 21.U))
 
   private val s2_useScPred = WireInit(VecInit.fill(NumWays)(false.B))
@@ -180,17 +180,17 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   t1_oldCtrs.zip(t1_writeEntryVec).zip(t1_writeWayMask).foreach {
     case ((oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]), writeWayMask: Vec[Bool]) =>
       oldEntries.zip(writeEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
-        val temp = t1_branchesTakenMask.zip(t1_branchesWayIdxVec).zip(t1_writeValidVec).foldLeft(oldEntry.ctr) {
+        val newCtr = t1_branchesTakenMask.zip(t1_branchesWayIdxVec).zip(t1_writeValidVec).foldLeft(oldEntry.ctr) {
           case (prevCtr, ((writeTaken, writeWayIdx), writeValidalid)) =>
             val needUpdate = writeValidalid && writeWayIdx === wayIdx.U
             val nextValue  = prevCtr.getUpdate(writeTaken)
             val nextCtr    = WireInit(prevCtr)
             nextCtr.value             := nextValue
-            writeWayMask(writeWayIdx) := true.B
+            writeWayMask(writeWayIdx) := needUpdate
             Mux(needUpdate, nextCtr, prevCtr)
         }
-        dontTouch(temp)
-        newEntry.ctr := WireInit(temp)
+        dontTouch(newCtr)
+        newEntry.ctr := WireInit(newCtr)
       }
   }
 
