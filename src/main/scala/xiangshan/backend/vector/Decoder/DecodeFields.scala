@@ -73,9 +73,9 @@ object DecodeFields {
 
     override def genTable(op: VecInstPattern): BitPat = {
       op match {
-        case VecArithInstPattern(rawInst) => genTable(op.asInstanceOf[VecArithInstPattern])
-        case VecConfigInstPattern(rawInst) => genTable(op.asInstanceOf[VecConfigInstPattern])
-        case VecMemInstPattern(rawInst) => genTable(op.asInstanceOf[VecMemInstPattern])
+        case VecArithInstPattern() => genTable(op.asInstanceOf[VecArithInstPattern])
+        case VecConfigInstPattern() => genTable(op.asInstanceOf[VecConfigInstPattern])
+        case VecMemInstPattern() => genTable(op.asInstanceOf[VecMemInstPattern])
       }
     }
 

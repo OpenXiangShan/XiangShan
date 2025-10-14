@@ -93,25 +93,25 @@ object SimpleDecodeChannelUtil {
         op match {
           case _: IntRTypePattern => Operand.GP
           case pattern : IntITypePattern => pattern match {
-            case CboInstPattern(rawInst) => null
-            case SystemInstPattern(rawInst) => null
+            case CboInstPattern() => null
+            case SystemInstPattern() => null
             case _ =>  Operand.GP
           }
           case _: IntSTypePattern => Operand.GP
-          case IntBTypePattern(rawInst) => Operand.GP
-          case IntUTypePattern(rawInst) => null
-          case IntJTypePattern(rawInst) => null
+          case IntBTypePattern() => Operand.GP
+          case IntUTypePattern() => null
+          case IntJTypePattern() => null
           case pattern: FpInstPattern =>
             pattern match {
-              case FpITypeF2fInstPattern(rawInst)     => Operand.FP
-              case FpITypeF2iInstPattern(rawInst)     => Operand.FP
-              case FpITypeI2fR0InstPattern(rawInst)   => null
-              case _: FpITypeI2fInstPattern     => Operand.GP
-              case FpITypeLoadInstPattern(rawInst)    => Operand.GP
-              case FpRTypeIntDestInstPattern(rawInst) => Operand.FP
-              case FpRTypeFpDestInstPattern(rawInst)  => Operand.FP
-              case FpR4TypeInstPattern(rawInst)       => Operand.FP
-              case FpSTypeInstPattern(rawInst)        => Operand.GP
+              case FpITypeF2fInstPattern()     => Operand.FP
+              case FpITypeF2iInstPattern()     => Operand.FP
+              case FpITypeImmInstPattern()     => null
+              case _: FpITypeI2fInstPattern           => Operand.GP
+              case FpITypeLoadInstPattern()    => Operand.GP
+              case FpRTypeIntDestInstPattern() => Operand.FP
+              case FpRTypeFpDestInstPattern()  => Operand.FP
+              case FpR4TypeInstPattern()       => Operand.FP
+              case FpSTypeInstPattern()        => Operand.GP
             }
           case pattern: VecInstPattern =>
             throw new IllegalArgumentException(s"not support VecInstPattern $op in Src1Field")
@@ -134,18 +134,18 @@ object SimpleDecodeChannelUtil {
         case _: IntRTypePattern => Operand.GP
         case _: IntITypePattern => Operand.IMM
         case _: IntSTypePattern => Operand.GP
-        case IntBTypePattern(rawInst) => Operand.GP
-        case IntUTypePattern(rawInst) => Operand.IMM
-        case IntJTypePattern(rawInst) => Operand.IMM
+        case IntBTypePattern() => Operand.GP
+        case IntUTypePattern() => Operand.IMM
+        case IntJTypePattern() => Operand.IMM
         case pattern: FpInstPattern => pattern match {
-          case FpITypeF2fInstPattern(rawInst) => null
-          case FpITypeF2iInstPattern(rawInst) => null
+          case FpITypeF2fInstPattern() => null
+          case FpITypeF2iInstPattern() => null
           case _: FpITypeI2fInstPattern => null
-          case FpITypeLoadInstPattern(rawInst) => null
-          case FpRTypeIntDestInstPattern(rawInst) => Operand.FP
-          case FpRTypeFpDestInstPattern(rawInst) => Operand.FP
-          case FpR4TypeInstPattern(rawInst) => Operand.FP
-          case FpSTypeInstPattern(rawInst) => Operand.FP
+          case FpITypeLoadInstPattern() => null
+          case FpRTypeIntDestInstPattern() => Operand.FP
+          case FpRTypeFpDestInstPattern() => Operand.FP
+          case FpR4TypeInstPattern() => Operand.FP
+          case FpSTypeInstPattern() => Operand.FP
         }
         case pattern: VecInstPattern =>
           throw new IllegalArgumentException(s"not support VecInstPattern $op in Src2Field")
@@ -166,7 +166,7 @@ object SimpleDecodeChannelUtil {
     override def genTable(op: InstPattern): BitPat = {
       val operand = op match {
         case pattern: FpInstPattern => pattern match {
-          case FpR4TypeInstPattern(rawInst) => Operand.FP
+          case FpR4TypeInstPattern() => Operand.FP
           case _ => null
         }
         case pattern: VecInstPattern =>
@@ -190,19 +190,19 @@ object SimpleDecodeChannelUtil {
         case _: IntRTypePattern => y
         case _: IntITypePattern => y
         case _: IntSTypePattern => n
-        case IntBTypePattern(rawInst) => n
-        case IntUTypePattern(rawInst) => y
-        case IntJTypePattern(rawInst) => y
+        case IntBTypePattern() => n
+        case IntUTypePattern() => y
+        case IntJTypePattern() => y
         case fp: FpInstPattern =>
           fp match {
             case pattern :FpITypeInstPattern =>
               pattern match {
-                case FpITypeF2iInstPattern(rawInst) => y
+                case FpITypeF2iInstPattern() => y
                 case _ => n
               }
             case _: FpRTypeInstPattern => n
-            case FpR4TypeInstPattern(rawInst) => n
-            case FpSTypeInstPattern(rawInst) => n
+            case FpR4TypeInstPattern() => n
+            case FpSTypeInstPattern() => n
           }
         case pattern: VecInstPattern =>
           throw new IllegalArgumentException(s"not support VecInstPattern $op in GpWenField")
@@ -219,14 +219,14 @@ object SimpleDecodeChannelUtil {
         case fp: FpInstPattern =>
           fp match {
             case pattern: FpITypeInstPattern => pattern match {
-              case FpITypeF2fInstPattern(rawInst) => y
-              case FpITypeF2iInstPattern(rawInst) => n
+              case FpITypeF2fInstPattern() => y
+              case FpITypeF2iInstPattern() => n
               case pattern: FpITypeI2fInstPattern => y
-              case FpITypeLoadInstPattern(rawInst) => y
+              case FpITypeLoadInstPattern() => y
             }
             case pattern: FpRTypeInstPattern => y
-            case FpR4TypeInstPattern(rawInst) => y
-            case FpSTypeInstPattern(rawInst) => n
+            case FpR4TypeInstPattern() => y
+            case FpSTypeInstPattern() => n
           }
         case pattern: VecInstPattern =>
           throw new IllegalArgumentException(s"not support VecInstPattern $op in FpWenField")
@@ -243,19 +243,19 @@ object SimpleDecodeChannelUtil {
       op match {
         case pattern: IntRTypePattern => n
         case pattern: IntITypePattern => pattern match {
-          case AmoLrInstPattern(rawInst) => y
-          case CSRInstPattern(rawInst) => y
-          case CboInstPattern(rawInst) => n
-          case HyperLoadInstPattern(rawInst) => n
-          case SystemInstPattern(rawInst) => y
-          case FenceInstPattern(rawInst) => y
-          case FenceiInstPattern(rawInst) => y
+          case AmoLrInstPattern() => y
+          case CSRInstPattern() => y
+          case CboInstPattern() => n
+          case HyperLoadInstPattern() => n
+          case SystemInstPattern() => y
+          case FenceInstPattern() => y
+          case FenceiInstPattern() => y
           case _ => n
         }
         case pattern: IntSTypePattern => n
-        case IntBTypePattern(rawInst) => n
-        case IntUTypePattern(rawInst) => n
-        case IntJTypePattern(rawInst) => n
+        case IntBTypePattern() => n
+        case IntUTypePattern() => n
+        case IntJTypePattern() => n
         case pattern: FpInstPattern => n
         case pattern: VecInstPattern => n
       }
@@ -270,19 +270,19 @@ object SimpleDecodeChannelUtil {
       op match {
         case pattern: IntRTypePattern => n
         case pattern: IntITypePattern => pattern match {
-          case AmoLrInstPattern(rawInst) => y
-          case CSRInstPattern(rawInst) => y
-          case CboInstPattern(rawInst) => n
-          case HyperLoadInstPattern(rawInst) => n
-          case SystemInstPattern(rawInst) => y
-          case FenceInstPattern(rawInst) => y
-          case FenceiInstPattern(rawInst) => y
+          case AmoLrInstPattern() => y
+          case CSRInstPattern() => y
+          case CboInstPattern() => n
+          case HyperLoadInstPattern() => n
+          case SystemInstPattern() => y
+          case FenceInstPattern() => y
+          case FenceiInstPattern() => y
           case _ => n
         }
         case pattern: IntSTypePattern => n
-        case IntBTypePattern(rawInst) => n
-        case IntUTypePattern(rawInst) => n
-        case IntJTypePattern(rawInst) => n
+        case IntBTypePattern() => n
+        case IntUTypePattern() => n
+        case IntJTypePattern() => n
         case pattern: FpInstPattern => n
         case pattern: VecInstPattern => n
       }
@@ -324,22 +324,22 @@ object SimpleDecodeChannelUtil {
           case pattern: IntRTypePattern => SelImm.X
           case pattern: IntITypePattern =>
             pattern match {
-              case SystemInstPattern(rawInst) => SelImm.X
-              case HyperLoadInstPattern(rawInst) => SelImm.X
-              case CSRInstPattern(rawInst) => SelImm.IMM_Z.toBitPat
-              case AmoLrInstPattern(rawInst) => SelImm.X
-              case CboInstPattern(rawInst) => SelImm.X
-              case FenceInstPattern(rawInst) => SelImm.X
-              case FenceiInstPattern(rawInst) => SelImm.X
+              case SystemInstPattern() => SelImm.X
+              case HyperLoadInstPattern() => SelImm.X
+              case CSRInstPattern() => SelImm.IMM_Z.toBitPat
+              case AmoLrInstPattern() => SelImm.X
+              case CboInstPattern() => SelImm.X
+              case FenceInstPattern() => SelImm.X
+              case FenceiInstPattern() => SelImm.X
               case _ => SelImm.X
             }
           case pattern: IntSTypePattern => SelImm.IMM_S.toBitPat
-          case IntBTypePattern(rawInst) => SelImm.IMM_SB.toBitPat
-          case IntUTypePattern(rawInst) => SelImm.IMM_U.toBitPat
-          case IntJTypePattern(rawInst) => SelImm.IMM_UJ.toBitPat
+          case IntBTypePattern() => SelImm.IMM_SB.toBitPat
+          case IntUTypePattern() => SelImm.IMM_U.toBitPat
+          case IntJTypePattern() => SelImm.IMM_UJ.toBitPat
           case pattern: FpInstPattern =>
             pattern match {
-              case _: FpITypeI2fR0InstPattern => SelImm.X // Todo: SelImm.FLI
+              case _: FpITypeImmInstPattern => SelImm.X // Todo: SelImm.FLI
               case _ => SelImm.X
             }
           case pattern: VecInstPattern =>
