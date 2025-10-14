@@ -1,13 +1,13 @@
 package cache
 
 import chisel3._
-import chiseltest._
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import top.DefaultConfig
 import xiangshan.cache.wpu.DCacheWpuWrapper
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 
-class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {
+class WpuBasicTest extends AnyFlatSpec with ChiselSim {
   behavior of "DCacheWPU"
   it should ("run") in {
     val defaultConfig = (new DefaultConfig)
@@ -15,7 +15,7 @@ class WpuBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       case XSCoreParamsKey => defaultConfig(XSTileKey).head.copy()
     })
     println("========== Test the correctness of syntactic and datapath ==========")
-    test(new DCacheWpuWrapper()) { c =>
+    simulate(new DCacheWpuWrapper()) { c =>
       println("========== in test ==========")
       // s0
       c.io.req(0).bits.vaddr.poke(0.U)

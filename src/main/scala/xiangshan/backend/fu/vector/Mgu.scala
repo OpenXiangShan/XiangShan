@@ -21,8 +21,7 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chiseltest._
-import chiseltest.ChiselScalatestTester
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import top.{ArgParser, BaseConfig, DefaultConfig}
@@ -210,7 +209,7 @@ object VerilogMgu extends App {
   emitVerilog(new Mgu(128)(p), Array("--target-dir", "build/vifu", "--full-stacktrace"))
 }
 
-class MguTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class MguTest extends AnyFlatSpec with Matchers with ChiselSim {
 
   val defaultConfig = (new DefaultConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
@@ -220,7 +219,8 @@ class MguTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
 
   behavior of "Mgu"
   it should "run" in {
-    test(new Mgu(128)(defaultConfig)).withAnnotations(Seq(VerilatorBackendAnnotation)) {
+    import chisel3.simulator.HasSimulator.simulators.verilator
+    simulate(new Mgu(128)(defaultConfig)) {
       m: Mgu =>
         m.io.in.vd.poke("h8765_4321_8765_4321_8765_4321_8765_4321".U)
         m.io.in.oldVd.poke("h7777_7777_7777_7777_7777_7777_7777_7777".U)

@@ -1,7 +1,7 @@
 package xiangshan.frontend.ifu
 
 import chisel3._
-import chiseltest._
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
@@ -10,7 +10,7 @@ import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
 import xiangshan.frontend.PrunedAddrInit
 
 
-class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
   implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new DefaultConfig).alterPartial {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
@@ -26,7 +26,8 @@ class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Ma
 
   behavior of "FrontendTrigger"
   it should "run" in {
-    test(new FrontendTrigger()).withAnnotations(Seq(VerilatorBackendAnnotation)) {
+    import chisel3.simulator.HasSimulator.simulators.verilator
+    simulate(new FrontendTrigger()(defaultConfig)) {
       m: FrontendTrigger =>
         m.io.frontendTrigger.debugMode.poke(false.B)
         m.io.frontendTrigger.tEnableVec.map(_.poke(false.B))
@@ -41,7 +42,7 @@ class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Ma
         }
         for (_ <- 0 until 4) { m.clock.step() }
         m.io.triggered.zipWithIndex.map { case (action, i) =>
-          println(s"out.triggerAction${i}：" + action.peek().litValue.toString(16) + "\n")
+          println(s"out.triggerAction${i}: " + action.peek().litValue.toString(16) + "\n")
         }
     }
     println("test done")
