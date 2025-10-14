@@ -170,7 +170,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     case (((hit, entry), isCrossPage), i) =>
       hit && !isCrossPage && (
         (i / NumWay).U =/= s2_alignBankIdx ||
-          entry.position > getAlignedInstOffset(s2_startVAddr)
+          entry.position >= getAlignedInstOffset(s2_startVAddr)
       )
   }
   private val s2_targets =
