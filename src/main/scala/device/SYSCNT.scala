@@ -141,6 +141,11 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       time_en := true.B
     }
 
+    val time_toggle  = withClockAndReset(rtc_clock, rtc_reset)(RegInit(false.B))
+    when(time_en){
+      time_toggle := ~time_toggle
+    }
+
     when(time_req_rtc_ris) {
       time := time_sw
     }.elsewhen(stop_sync) {
@@ -156,7 +161,8 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val timeasync    = withClockAndReset(bus_clock, bus_reset)(Module(new TimeAsync()))
     val time_rpt_bus = timeasync.io.o_time.bits
 
-    timeasync.io.i_time := io.time
+    timeasync.io.i_time.bits := io.time.bits
+    timeasync.io.i_time.valid := time_toggle
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
