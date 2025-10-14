@@ -1,14 +1,14 @@
 package xiangshan.backend.fu.vector
 
 import chisel3._
-import chiseltest._
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
-class ByteMaskTailGenTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class ByteMaskTailGenTest extends AnyFlatSpec with Matchers with ChiselSim {
 
   println("Generating the ByteMaskTailGen hardware")
 
@@ -22,7 +22,8 @@ class ByteMaskTailGenTest extends AnyFlatSpec with ChiselScalatestTester with Ma
 
   behavior of "ByteMaskTailGen"
   it should "run" in {
-    test(new ByteMaskTailGen(128)(defaultConfig)).withAnnotations(Seq(VerilatorBackendAnnotation)) {
+    import chisel3.simulator.HasSimulator.simulators.verilator
+    simulate(new ByteMaskTailGen(128)(defaultConfig)) {
       m: ByteMaskTailGen =>
         m.io.in.begin.poke(2.U)
         m.io.in.end.poke(7.U)

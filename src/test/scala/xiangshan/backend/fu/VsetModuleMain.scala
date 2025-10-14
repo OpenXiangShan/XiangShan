@@ -1,14 +1,14 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chiseltest.{ChiselScalatestTester, _}
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.{VSETOpType, XSCoreParameters, XSCoreParamsKey, XSTileKey}
 
-class VsetModuleMain extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class VsetModuleMain extends AnyFlatSpec with Matchers with ChiselSim {
 
   val defaultConfig = (new DefaultConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
@@ -57,7 +57,7 @@ class VsetModuleMain extends AnyFlatSpec with ChiselScalatestTester with Matcher
 
   behavior of "VsetModule"
   it should "run" in {
-    test(new VsetTop()(defaultConfig)) { m: VsetTop =>
+    simulate(new VsetTop()(defaultConfig)) { m: VsetTop =>
       for((ill, vta, vma, vsew, vlmul, func, avl, oldVl) <- inputs) {
         val (testVl, testVill, testVta, testVma, testVsew, testVlmul) = VsetRef.test(avlPre = avl.litValue.toInt,
                                                                                      vsew = vsew.litValue.toInt,
@@ -86,8 +86,8 @@ class VsetModuleMain extends AnyFlatSpec with ChiselScalatestTester with Matcher
                       " avl: " + avl.litValue.toInt
 
         m.io.out.vconfig.vtype.illegal.expect(testVill.B, message)
-        m.io.out.vconfig.vtype.vta.expect(testVta, message)
-        m.io.out.vconfig.vtype.vma.expect(testVma, message)
+        m.io.out.vconfig.vtype.vta.expect(testVta.B, message)
+        m.io.out.vconfig.vtype.vma.expect(testVma.B, message)
         m.io.out.vconfig.vtype.vsew.expect(testVsew, message)
         m.io.out.vconfig.vtype.vlmul.expect(testVlmul, message)
         m.io.out.vconfig.vl.expect(testVl.U, message)

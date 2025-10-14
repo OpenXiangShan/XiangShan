@@ -38,7 +38,7 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.6.0", ivy"edu.berkeley.cs::chiseltest:6.0.0")
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.6.0")
 
   def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:6.6.0")
 
@@ -152,6 +152,7 @@ object xiangshan extends ChiselModule {
   )
 
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"org.scalatest::scalatest:3.2.19",
     ivy"io.circe::circe-yaml:1.15.0",
     ivy"io.circe::circe-generic-extras:0.14.4"
   )

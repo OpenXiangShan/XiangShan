@@ -2,14 +2,15 @@ package xiangshan
 
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chiseltest._
-import chiseltest.VerilatorBackendAnnotation
-import chiseltest.simulator.VerilatorFlags
+import chisel3.simulator.scalatest.ChiselSim
+import chisel3.simulator.HasSimulator
+import svsim.CommonCompilationSettings
+import svsim.CommonCompilationSettings.VerilogPreprocessorDefine
+import svsim.verilator.Backend.CompilationSettings.{TraceKind, TraceStyle}
 import top.ArgParser
 import xiangshan.backend.decode.DecodeUnit
 import xiangshan.backend.regfile.IntPregParams
 import circt.stage.ChiselStage
-import firrtl2.options.TargetDirAnnotation
 import xiangshan.transforms.PrintModuleName
 
 object DecodeMain extends App {
@@ -38,12 +39,9 @@ object DecodeMain extends App {
 class DecodeUnitTest extends XSTester {
   behavior of "DecodeUnit"
   it should "pass" in {
-    test(new DecodeUnit()(config)).withAnnotations(Seq(
-      VerilatorBackendAnnotation,
-      VerilatorFlags(Seq()),
-      WriteVcdAnnotation,
-      TargetDirAnnotation("./build")
-    )){ dut =>
+    implicit val sim = XSTester.verilatorWithVcd
+    simulate(new DecodeUnit()(config)) { dut =>
+      enableWaves()
       dut.clock.step(10)
     }
   }
