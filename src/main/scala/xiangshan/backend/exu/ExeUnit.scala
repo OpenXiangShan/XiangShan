@@ -270,11 +270,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
-  private val fuIntWenVec = if (exuParams.needDataFromF2I) {
-    funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B)) :+ io.F2IDataIn.get.valid
-  } else {
-    funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
-  }
+  private val fuIntWenVec = funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
   private val fuFpWenVec  = funcUnits.map( x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
   private val fuVecWenVec = funcUnits.map(x => x.cfg.needVecWen.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
   private val fuV0WenVec = funcUnits.map(x => x.cfg.needV0Wen.B && x.io.out.bits.ctrl.v0Wen.getOrElse(false.B))
