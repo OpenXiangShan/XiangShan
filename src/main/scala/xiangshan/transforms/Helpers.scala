@@ -17,6 +17,7 @@
 
 package xiangshan.transforms
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object Helpers {
 
   implicit class CircuitHelper(circuit: firrtl.ir.Circuit) {

@@ -17,7 +17,9 @@
 
 package xiangshan.transforms
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class DisablePrintfAnnotation(m: String) extends firrtl.annotations.NoTargetAnnotation
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object DisablePrintfAnnotation extends firrtl.options.HasShellOptions{
 
   val options = Seq(
@@ -33,7 +35,9 @@ object DisablePrintfAnnotation extends firrtl.options.HasShellOptions{
 
 }
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class EnablePrintfAnnotation(m: String) extends firrtl.annotations.NoTargetAnnotation
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object EnablePrintfAnnotation extends firrtl.options.HasShellOptions {
   val options = Seq(
     new firrtl.options.ShellOption[String](
@@ -48,7 +52,9 @@ object EnablePrintfAnnotation extends firrtl.options.HasShellOptions {
 
 }
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class DisableAllPrintAnnotation() extends firrtl.annotations.NoTargetAnnotation
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object DisableAllPrintAnnotation extends firrtl.options.HasShellOptions {
   val options = Seq(
     new firrtl.options.ShellOption[Unit](
@@ -63,6 +69,7 @@ object DisableAllPrintAnnotation extends firrtl.options.HasShellOptions {
 
 import scala.collection.mutable
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 class PrintControl extends firrtl.options.Phase {
 
   override def invalidates(a: firrtl.options.Phase) = false
