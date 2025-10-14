@@ -18,10 +18,11 @@
 package futest
 
 import chisel3._
-import chiseltest._
-import chiseltest.ChiselScalatestTester
-import chiseltest.VerilatorBackendAnnotation
-import chiseltest.simulator.VerilatorFlags
+import chisel3.simulator.scalatest.ChiselSim
+import chisel3.simulator.HasSimulator
+import svsim.CommonCompilationSettings
+import svsim.CommonCompilationSettings.VerilogPreprocessorDefine
+import svsim.verilator.Backend.CompilationSettings.{TraceKind, TraceStyle}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.transforms.PrintModuleName
@@ -62,20 +63,16 @@ class SRT4DividerWrapper extends Module {
 
 }
 
-class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class IntDividerTest extends AnyFlatSpec with Matchers with ChiselSim {
   behavior of "srt16 divider"
   it should "run" in {
     val rand = new Random(0x14226)
     val testNum = 1000
 
-    test(new SRT4DividerWrapper).withAnnotations(Seq(VerilatorBackendAnnotation,
-      // LineCoverageAnnotation,
-      // ToggleCoverageAnnotation,
-      VerilatorFlags(Seq(
-        // "--output-split 20", "--output-split-cfuncs 20",
-        "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT", "--trace")),
-      )){ m =>
+    implicit val sim = xiangshan.XSTester.verilatorWithVcd
+    simulate(new SRT4DividerWrapper) { m =>
       println("Test started!")
+      enableWaves()
       m.clock.step(20)
 
       for (i <- 1 to testNum) {

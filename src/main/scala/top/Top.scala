@@ -42,7 +42,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
-import chisel3.experimental.{annotate, ChiselAnnotation}
+import chisel3.experimental.annotate
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
 
@@ -244,9 +244,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   {
     soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
-      annotate(new ChiselAnnotation {
-        def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
-      })
+      annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
     }
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))

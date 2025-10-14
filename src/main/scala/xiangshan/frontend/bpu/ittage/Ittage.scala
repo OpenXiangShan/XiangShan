@@ -374,7 +374,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     tickCnt.update(!allocate.valid)
     when(allocate.valid) {
       updateMask(allocate.bits)          := true.B
-      updateCorrect(allocate.bits)       := DontCare // useless for alloc
+      updateCorrect(allocate.bits)       := false.B // useless for alloc
       updateAlloc(allocate.bits)         := true.B
       updateUsefulCntMask(allocate.bits) := true.B
       updateUsefulCnt(allocate.bits)     := false.B.asTypeOf(new SaturateCounter(UsefulCntWidth))

@@ -16,7 +16,7 @@
 package build
 
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
-import $ivy.`org.chipsalliance::chisel:6.6.0`
+import $ivy.`org.chipsalliance::chisel:7.1.1`
 import $ivy.`org.chipsalliance::firtool-resolver:1.3.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.io.BufferedReader
@@ -29,7 +29,7 @@ import mill.scalalib._
 import mill.scalalib.scalafmt.ScalafmtModule
 import os.Path
 
-val defaultScalaVersion = "2.13.15"
+val defaultScalaVersion = "2.13.16"
 
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
@@ -38,9 +38,9 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.6.0", ivy"edu.berkeley.cs::chiseltest:6.0.0")
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:7.1.1")
 
-  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:6.6.0")
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:7.1.1")
 
   def resolveFirtoolDeps = T {
     firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
@@ -152,6 +152,7 @@ object xiangshan extends ChiselModule {
   )
 
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"org.scalatest::scalatest:3.2.19",
     ivy"io.circe::circe-yaml:1.15.0",
     ivy"io.circe::circe-generic-extras:0.14.4"
   )

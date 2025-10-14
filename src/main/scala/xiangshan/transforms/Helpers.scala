@@ -17,6 +17,7 @@
 
 package xiangshan.transforms
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object Helpers {
 
   implicit class CircuitHelper(circuit: firrtl.ir.Circuit) {
@@ -25,13 +26,13 @@ object Helpers {
 
   implicit class DefModuleHelper(defModule: firrtl.ir.DefModule) {
     def mapStmt(f: firrtl.ir.Statement => firrtl.ir.Statement): firrtl.ir.DefModule = defModule match {
-      case firrtl.ir.Module(info, name, ports, body) => firrtl.ir.Module(info, name, ports, f(body))
+      case firrtl.ir.Module(info, name, public, layers, ports, body) => firrtl.ir.Module(info, name, public, layers, ports, f(body))
       case firrtl.ir.DefClass(info, name, ports, body) => firrtl.ir.DefClass(info, name, ports, f(body))
       case other: firrtl.ir.DefModule => other
     }
 
     def foreachStmt(f: firrtl.ir.Statement => Unit): Unit = defModule match {
-      case firrtl.ir.Module(_, _, _, body) => f(body)
+      case firrtl.ir.Module(_, _, _, _, _, body) => f(body)
       case firrtl.ir.DefClass(_, _, _, body) => f(body)
       case _: firrtl.ir.DefModule =>
     }

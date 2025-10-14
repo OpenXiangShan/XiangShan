@@ -2,7 +2,7 @@ package xiangshan.backend.fu.vector.utils
 
 import chisel3._
 import chisel3.util._
-import chiseltest._
+import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.backend.fu.vector.Utils.{NOnes, NZeros}
@@ -47,7 +47,7 @@ object UIntToContHigh1s {
   def apply(uint: UInt, width: Int): UInt = Reverse(UIntToContLow1s(uint, width))
 }
 
-class UIntToContLow1sTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+class UIntToContLow1sTest extends AnyFlatSpec with Matchers with ChiselSim {
 
   private val uintWidth = 3
   private val outWidth = (1 << uintWidth) - 1
@@ -65,7 +65,7 @@ class UIntToContLow1sTest extends AnyFlatSpec with ChiselScalatestTester with Ma
 
   behavior of "UIntToContLow1s"
   it should "run" in {
-    test(new UIntToContLow1s(uintWidth)) {
+    simulate(new UIntToContLow1s(uintWidth)) {
       m: UIntToContLow1s =>
         for (((uint, res), i) <- testSeq.zipWithIndex) {
           m.io.dataIn.poke(uint)
