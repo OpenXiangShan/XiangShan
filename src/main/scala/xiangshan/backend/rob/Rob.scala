@@ -565,6 +565,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.debugInfo.selectTime
       debug_microOp(wbIdx).debugInfo.issueTime := wb.bits.debugInfo.issueTime
       debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.debugInfo.writebackTime
+      debug_microOp(wbIdx).debugInfo.tlbFirstReqTime := wb.bits.debugInfo.tlbFirstReqTime
+      debug_microOp(wbIdx).debugInfo.tlbRespTime := wb.bits.debugInfo.tlbRespTime
 
       // debug for lqidx and sqidx
       debug_microOp(wbIdx).lqIdx := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
@@ -1382,6 +1384,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val executeLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.issueTime)
   val rsFuLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.enqRsTime)
   val commitLatency = commitDebugUop.map(uop => timer - uop.debugInfo.writebackTime)
+  val tlbLatency = commitDebugUop.map(uop => uop.debugInfo.tlbRespTime - uop.debugInfo.tlbFirstReqTime)
 
   def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
     cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)
@@ -1430,7 +1433,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   if (!env.FPGAPlatform) {
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry, basicDB = true)
     for (wb <- exuWBs) {
       when(wb.valid) {
         val debug_instData = Wire(new InstInfoEntry)
@@ -1463,6 +1466,30 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         )
       }
     }
+  }
+
+  // log when committing
+  val load_debug_table = ChiselDB.createTable("LoadDebugTable" + p(XSCoreParamsKey).HartId.toString, new LoadInfoEntry, basicDB = true)
+  for (i <- 0 until CommitWidth) {
+    val log_enable = io.commits.commitValid(i) && io.commits.isCommit && (io.commits.info(i).commitType === CommitType.LOAD)
+    val commit_index = io.commits.robIdx(i).value
+    val load_debug_data = Wire(new LoadInfoEntry)
+
+    load_debug_data.pc := io.commits.info(i).debug_pc.getOrElse(0.U)
+    load_debug_data.vaddr := debug_lsTopdownInfo(commit_index).s1.vaddr_bits
+    load_debug_data.paddr := debug_lsTopdownInfo(commit_index).s2.paddr_bits
+    load_debug_data.cacheMiss := debug_lsTopdownInfo(commit_index).s2.first_real_miss
+    load_debug_data.tlbQueryLatency := tlbLatency(i)
+    load_debug_data.exeLatency := executeLatency(i)
+
+
+    load_debug_table.log(
+      data = load_debug_data,
+      en = log_enable,
+      site = "LoadDebugTable",
+      clock = clock,
+      reset = reset
+    )
   }
 
   val debug_VecOtherPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(8)(0.U(PhyRegIdxWidth.W))))
