@@ -27,7 +27,7 @@ import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 import system.SoCParamsKey
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
-import device.DebugModule
+import device.{DebugModule, DebugModuleIO}
 import utility.{IntBuffer, RegNextN, ResetGen}
 import freechips.rocketchip.tilelink.TLWidthWidget
 
@@ -54,16 +54,14 @@ class StandAloneDebugModule (
   val int = InModuleBody(debugModuleIntNode.makeIOs())
 
   class StandAloneDebugModuleImp(val outer: StandAloneDebugModule)(implicit p: Parameters) extends StandAloneDeviceRawImp(outer) {
-    val io = IO(new outer.debugModule.DebugModuleIO)
+    val io = IO(new DebugModuleIO(outer.hartNum, asyncReset = true))
     childClock := io.clock
-    childReset := io.reset.asAsyncReset
+    childReset := io.reset
     io <> outer.debugModule.module.io
-    outer.debugModule.module.io.reset := io.reset.asAsyncReset
-    outer.debugModule.module.io.debugIO.reset := io.debugIO.reset.asAsyncReset
     outer.debugModule.module.io.debugIO.systemjtag.foreach(
-      _.reset := (withClockAndReset(io.debugIO.systemjtag.get.jtag.TCK, io.debugIO.systemjtag.get.reset.asAsyncReset) { ResetGen() })
+      _.reset := (withClockAndReset(io.debugIO.systemjtag.get.jtag.TCK, io.debugIO.systemjtag.get.reset) { ResetGen() })
     )
-    withClockAndReset(io.clock, io.reset.asAsyncReset) {
+    withClockAndReset(io.clock, io.reset) {
       outer.debugModule.module.io.resetCtrl.hartIsInReset := AsyncResetSynchronizerShiftReg(io.resetCtrl.hartIsInReset, 3, 0)
       io.resetCtrl.hartResetReq.foreach(req =>
         req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(req)), 0.U.asTypeOf(req)))

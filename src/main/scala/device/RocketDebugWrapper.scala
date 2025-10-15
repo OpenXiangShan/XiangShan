@@ -37,6 +37,12 @@ import freechips.rocketchip.devices.debug._
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm and dtm
 
+class DebugModuleIO(numCores: Int, asyncReset: Boolean = false)(implicit p: Parameters) extends Bundle {
+  val resetCtrl = new ResetCtrlIO(numCores)(p)
+  val debugIO = new DebugIO(asyncReset)(p)
+  val clock = Input(Clock())
+  val reset = Input(if (asyncReset) AsyncReset() else Reset())
+}
 
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
@@ -49,15 +55,8 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
 //  }
-  class DebugModuleIO extends Bundle {
-    val resetCtrl = new ResetCtrlIO(numCores)(p)
-    val debugIO = new DebugIO()(p)
-    val clock = Input(Clock())
-    val reset = Input(Reset())
-  }
-
   class DebugModuleImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
-    val io = IO(new DebugModuleIO)
+    val io = IO(new DebugModuleIO(numCores))
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock // this should be TL clock
     withClock(io.clock) {
