@@ -169,11 +169,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstValid = ValidHold(s0_fire && !s0_flush && s0_ftqFetch(0).valid, s1_fire, s1_flush)
   private val s1_secondValid =
     ValidHold(s0_fire && !s0_flush && s0_ftqFetch(1).valid && !s0_flushFromBpu(1), s1_fire, s1_flush)
-  private val s1_fetchBlock = RegEnable(s0_fetchBlock, s0_fire)
-  private val firstSize     = s1_fetchBlock(0).fetchSize
-  private val secondSize    = s1_fetchBlock(1).fetchSize
-  private val firstRange    = s1_fetchBlock(0).instrRange
-  private val secondRange   = s1_fetchBlock(1).instrRange
+  private val s1_fetchBlock  = RegEnable(s0_fetchBlock, s0_fire)
+  private val s1_firstSize   = s1_fetchBlock(0).fetchSize
+  private val s1_secondSize  = s1_fetchBlock(1).fetchSize
+  private val s1_firstRange  = s1_fetchBlock(0).instrRange
+  private val s1_secondRange = s1_fetchBlock(1).instrRange
 
   s1_flushFromBpu(0) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(0).ftqIdx, s1_firstValid)
   s1_flushFromBpu(1) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(1).ftqIdx, s1_secondValid)
@@ -183,11 +183,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s1_fire  := s1_valid && s2_ready && s1_iCacheRespValid
   s1_ready := s1_fire || !s1_valid
 
-  private val s1_totalEndPos = Mux(s1_firstValid && s1_secondValid, firstSize + secondSize - 1.U, firstSize - 1.U)
+  private val s1_totalEndPos = Mux(
+    s1_firstValid && s1_secondValid,
+    s1_firstSize + s1_secondSize - 1.U,
+    s1_firstSize - 1.U
+  )
 
   private val s1_firstEndPos     = s1_fetchBlock(0).fetchSize - 1.U
   private val s1_secondEndPos    = s1_fetchBlock(1).fetchSize - 1.U
-  private val s1_totalInstrRange = mergeInstrRange(s1_secondValid, firstRange, secondRange, firstSize)
+  private val s1_totalInstrRange = mergeInstrRange(s1_secondValid, s1_firstRange, s1_secondRange, s1_firstSize)
 
   io.toICache.stall := !s2_ready
   iCacheMatchAssert(fromICache, s1_fetchBlock)
@@ -195,6 +199,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_icacheMeta = VecInit.tabulate(FetchPorts)(i => Wire(new ICacheMeta).fromICacheResp(fromICache.bits))
   private val s1_rawData    = fromICache.bits.data
   private val s1_perfInfo   = io.fromICache.perf
+
+  private val s1_baseBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
+    Cat(0.U(1.W), s1_fetchBlock(0).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U
+  ))
+  private val s1_appendedBlockPcLower = VecInit((0 until FetchBlockInstNum).map(i =>
+    Cat(0.U(1.W), s1_fetchBlock(1).startVAddr(PcCutPoint - 1, 0)) + (i * 2).U + s1_firstSize
+  ))
+  private val s1_appendedInstrOffset = VecInit((0 until FetchBlockInstNum).map(i =>
+    i.U + s1_firstSize
+  ))
+  private val s1_fetchBlockSelect = VecInit.tabulate(FetchBlockInstNum)(i => Mux(s1_firstSize > i.U, false.B, true.B))
+  private val s1_twoFetchPcLower = VecInit.tabulate(FetchBlockInstNum)(i =>
+    Mux(s1_fetchBlockSelect(i), s1_appendedBlockPcLower(i), s1_baseBlockPcLower(i))
+  )
+  private val s1_twoFetchInstrOffset = VecInit.tabulate(FetchBlockInstNum)(i =>
+    Mux(s1_fetchBlockSelect(i), s1_appendedInstrOffset(i), i.U)
+  )
   /* *****************************************************************************
    * IFU Stage 2
    * - generate exception bits for every instruction (page fault/access fault/mmio)
@@ -202,14 +223,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - cut data from cachelines to packet instruction code
    * - instruction preDecode and RVC expand
    * ***************************************************************************** */
-  private val s2_valid             = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
-  private val s2_firstValid        = ValidHold(s1_fire && !s1_flush && s1_firstValid, s2_fire, s2_flush)
-  private val s2_secondValid       = ValidHold(s1_fire && !s1_flush && s1_secondValid, s2_fire, s2_flush)
-  private val s2_fetchBlock        = RegEnable(s1_fetchBlock, s1_fire)
-  private val s2_prevLastIsHalfRvi = RegInit(false.B)
-  private val s2_totalInstrRange   = RegEnable(s1_totalInstrRange, s1_fire)
-  private val s2_firstEndPos       = RegEnable(s1_firstEndPos, s1_fire)
-  private val s2_totalEndPos       = RegEnable(s1_totalEndPos, s1_fire)
+  private val s2_valid               = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
+  private val s2_firstValid          = ValidHold(s1_fire && !s1_flush && s1_firstValid, s2_fire, s2_flush)
+  private val s2_secondValid         = ValidHold(s1_fire && !s1_flush && s1_secondValid, s2_fire, s2_flush)
+  private val s2_fetchBlock          = RegEnable(s1_fetchBlock, s1_fire)
+  private val s2_prevLastIsHalfRvi   = RegInit(false.B)
+  private val s2_totalInstrRange     = RegEnable(s1_totalInstrRange, s1_fire)
+  private val s2_firstEndPos         = RegEnable(s1_firstEndPos, s1_fire)
+  private val s2_totalEndPos         = RegEnable(s1_totalEndPos, s1_fire)
+  private val s2_twoFetchPcLower     = RegEnable(s1_twoFetchPcLower, s1_fire)
+  private val s2_twoFetchInstrOffset = RegEnable(s1_twoFetchInstrOffset, s1_fire)
+  private val s2_fetchBlockSelect    = RegEnable(s1_fetchBlockSelect, s1_fire)
 
   s2_fire  := s2_valid && s3_ready
   s2_ready := s2_fire || !s2_valid
@@ -256,11 +280,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   for (i <- 0 until FetchBlockInstNum) {
     instrCountBeforeCurrent(i) := PopCount(dealInstrValid.take(i))
   }
-  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid)
-  instrCompactor.io.req.fetchSize(0)            := s2_fetchBlock(0).fetchSize
-  instrCompactor.io.req.fetchSize(1)            := s2_fetchBlock(1).fetchSize
-  instrCompactor.io.req.startVAddr(0)           := s2_fetchBlock(0).startVAddr
-  instrCompactor.io.req.startVAddr(1)           := s2_fetchBlock(1).startVAddr
+  instrCountBeforeCurrent(FetchBlockInstNum) := PopCount(dealInstrValid)
+
+  instrCompactor.io.req.fetchBlockSelect        := s2_fetchBlockSelect
+  instrCompactor.io.req.twoFetchPcLower         := s2_twoFetchPcLower
+  instrCompactor.io.req.twoFetchInstrOffset     := s2_twoFetchInstrOffset
   instrCompactor.io.req.rawInstrValid           := dealInstrValid
   instrCompactor.io.req.rawIsRvc                := rawIsRvc
   instrCompactor.io.req.instrCountBeforeCurrent := instrCountBeforeCurrent
@@ -644,9 +668,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.valid     := s4_alignInstrValid.asUInt & ignoreRange
   io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedTwoFetchRange.asUInt & s4_alignInstrValid.asUInt & ignoreRange
   io.toIBuffer.bits.pd        := s4_alignPds
-  io.toIBuffer.bits.ftqPtr    := s4_alignFetchBlock(0).ftqIdx
   io.toIBuffer.bits.pc        := s4_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s4_prevIBufEnqPtr
+  io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
+    ftqPtr := Mux(s4_alignCompactInfo.selectBlock(i), s4_alignFetchBlock(1).ftqIdx, s4_alignFetchBlock(0).ftqIdx)
+  }
 
   /* in s4, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s3;
    * when s3 fire (s4_valid && s4_ready), use s3_instrCount;
@@ -659,8 +685,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Mux(s4_reqIsUncache, 1.U, s4_instrCount)
   )
 
-  // Find last using PriorityMux
-  io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
+  // Find the last entry based on the boundaries of compacted valid signals.
+  private val select = s4_alignCompactInfo.selectBlock
+  private val enq    = io.toIBuffer.bits.enqEnable
+  io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
+    if (i == IBufferEnqueueWidth - 1) enq(i)
+    else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
+  }
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
     a.predTaken  := s4_alignIsPredTaken(i) && !s4_reqIsUncache
     a.fixedTaken := checkerOutStage1.fixedTwoFetchTaken(i) && !s4_reqIsUncache

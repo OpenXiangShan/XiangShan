@@ -308,7 +308,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[UInt]             = Vec(IBufferEnqueueWidth, InstSeqNum())
-  val ftqPtr:         FtqPtr                = new FtqPtr
+  val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
 

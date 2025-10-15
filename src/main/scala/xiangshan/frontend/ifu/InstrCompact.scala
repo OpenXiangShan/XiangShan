@@ -8,8 +8,9 @@ import xiangshan.frontend.PrunedAddr
 class InstrCompact(implicit p: Parameters) extends IfuModule {
   class InstrCompactIO extends IfuBundle {
     class InstrCompactReq(implicit p: Parameters) extends IfuBundle {
-      val fetchSize               = Vec(FetchPorts, UInt(log2Ceil(FetchBlockInstNum + 1).W))
-      val startVAddr              = Vec(FetchPorts, PrunedAddr(VAddrBits))
+      val fetchBlockSelect        = Vec(FetchBlockInstNum, Bool())
+      val twoFetchInstrOffset     = Vec(FetchBlockInstNum, UInt(FetchBlockInstOffsetWidth.W))
+      val twoFetchPcLower         = Vec(FetchBlockInstNum, UInt((PcCutPoint + 1).W))
       val instrCountBeforeCurrent = Vec(FetchBlockInstNum + 1, UInt(log2Ceil(FetchBlockInstNum + 1).W))
       val rawInstrValid           = Vec(FetchBlockInstNum, Bool())
       val rawIsRvc                = Vec(FetchBlockInstNum, Bool())
@@ -19,31 +20,18 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
   }
   val io: InstrCompactIO = IO(new InstrCompactIO)
 
-  private val fetchSize               = io.req.fetchSize
-  private val startVAddr              = io.req.startVAddr
   private val instrCountBeforeCurrent = io.req.instrCountBeforeCurrent
   private val rawInstrValid           = io.req.rawInstrValid
   private val rawIsRvc                = io.req.rawIsRvc
-  private val fetchBlockSelect = VecInit.tabulate(FetchBlockInstNum)(i => Mux(fetchSize(0) > i.U, false.B, true.B))
-  private val fetchPcLowerResult = VecInit.tabulate(FetchPorts)(i =>
-    VecInit((0 until FetchBlockInstNum).map(j =>
-      Cat(0.U(1.W), startVAddr(i)(PcCutPoint - 1, 0)) + (j * 2).U
-    ))
-  ) // cat with overflow bit
-
-  private val fetchBlockIndex = VecInit.tabulate(FetchPorts)(i =>
-    VecInit.tabulate(FetchBlockInstNum)(j => fetchPcLowerResult(i)(j)(log2Ceil(ICacheLineBytes) - 1, 1))
-  )
+  private val fetchBlockSelect        = io.req.fetchBlockSelect
+  private val twoFetchPcLower         = io.req.twoFetchPcLower
 
   private val twoFetchBlockIndex = VecInit.tabulate(FetchBlockInstNum)(i =>
-    Mux(fetchSize(0) > i.U, fetchBlockIndex(0)(i), fetchBlockIndex(1)(i))
+    twoFetchPcLower(i)(log2Ceil(ICacheLineBytes) - 1, 1)
   )
-
-  private val twoFetchPcLowerResult = VecInit.tabulate(FetchBlockInstNum)(i =>
-    Mux(fetchSize(0) > i.U, fetchPcLowerResult(0)(i), fetchPcLowerResult(1)(i))
+  private val twoFetchInstrOffset = VecInit(
+    io.req.twoFetchInstrOffset :+ 0.U(FetchBlockInstOffsetWidth.W)
   )
-
-  private val rawPcLowerResult = twoFetchPcLowerResult
 
   private val instrSelectLowIndex   = WireDefault(VecInit.fill(FetchBlockInstNum)(true.B))
   private val instrSelectFetchBlock = WireDefault(VecInit.fill(FetchBlockInstNum)(false.B))
@@ -64,9 +52,9 @@ class InstrCompact(implicit p: Parameters) extends IfuModule {
 
       val index         = instrRange.map(twoFetchBlockIndex(_))
       val select        = instrRange.map(fetchBlockSelect(_))
-      val pcLowerResult = instrRange.map(twoFetchPcLowerResult(_))
+      val pcLowerResult = instrRange.map(twoFetchPcLower(_))
       val isRvc         = instrRange.map(rawIsRvc(_))
-      val instrOffset   = instrRange.map(i => Mux(rawIsRvc(i), i.U, (i + 1).U))
+      val instrOffset   = instrRange.map(i => Mux(rawIsRvc(i), twoFetchInstrOffset(i), twoFetchInstrOffset(i + 1)))
       // FIXME: This is wrong when 2-taken is enabled
 
       instrIndex.valid           := validOH.reduce(_ || _)

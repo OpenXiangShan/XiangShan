@@ -28,6 +28,8 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 
+// IFU trigger pre-marks instructions that may be executed.
+// Actual triggering is determined by the backend (pre-match stage).
 class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
   class FrontendTriggerIO(implicit p: Parameters) extends IfuBundle {
     val frontendTrigger: FrontendTdataDistributeIO = Input(new FrontendTdataDistributeIO)
