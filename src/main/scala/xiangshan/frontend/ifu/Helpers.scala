@@ -18,30 +18,12 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import utility.SignExt
-import xiangshan.backend.decode.isa.predecode.PreDecodeInst
-import xiangshan.cache.mmu.Pbmt
-import xiangshan.frontend.BrType
-import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.icache.ICacheRespBundle
 
 trait PreDecodeHelper extends HasIfuParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
-
-  def isLink(reg: UInt): Bool = reg === 1.U || reg === 5.U
-
-  def getBrType(inst: UInt): UInt =
-    ListLookup(inst, List(BrType.NotCfi), PreDecodeInst.brTable).head
-
-  def getBrInfo(inst: UInt): (UInt, Bool, Bool) = {
-    val brType = getBrType(inst)
-    val rd     = Mux(isRVC(inst), inst(12), inst(11, 7))
-    val rs     = Mux(isRVC(inst), Mux(brType === BrType.Jal, 0.U, inst(11, 7)), inst(19, 15))
-    val isCall = (brType === BrType.Jal && !isRVC(inst) || brType === BrType.Jalr) && isLink(rd) // Only for RV64
-    val isRet  = brType === BrType.Jalr && isLink(rs) && !isCall
-    (brType, isCall, isRet)
-  }
 
   def getJalOffset(inst: UInt, isRvc: Bool): PrunedAddr = {
     val rvcOffset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))

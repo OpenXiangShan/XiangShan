@@ -17,7 +17,7 @@
 package xiangshan.backend.decode.isa.predecode
 
 import chisel3.util._
-import xiangshan.frontend.BrType
+import xiangshan.frontend.bpu.BranchAttribute
 
 object PreDecodeInst {
   // def C_JAL     = BitPat("b????????????????_?01_?_??_???_??_???_01") // RV32C
@@ -30,15 +30,14 @@ object PreDecodeInst {
   def BRANCH    = BitPat("b????????????????_???_?????_1100011")
   def NOP       = BitPat("b???????????????0_100_01010_0000001")   //li	a0,0
 
-
   val brTable = Array(
-    // C_JAL     -> List(BrType.jal),
-    C_EBREAK  -> List(BrType.NotCfi), // c.ebreak should not be decoded as jalr, higher priority than c.jalr
-    C_J       -> List(BrType.Jal),
-    C_JALR    -> List(BrType.Jalr),
-    C_BRANCH  -> List(BrType.Branch),
-    JAL       -> List(BrType.Jal),
-    JALR      -> List(BrType.Jalr),
-    BRANCH    -> List(BrType.Branch)
+    // c.ebreak should not be decoded as jalr, higher priority than c.jalr
+    C_EBREAK -> List(BranchAttribute.BranchType.None),
+    C_J      -> List(BranchAttribute.BranchType.Direct),
+    C_JALR   -> List(BranchAttribute.BranchType.Indirect),
+    C_BRANCH -> List(BranchAttribute.BranchType.Conditional),
+    JAL      -> List(BranchAttribute.BranchType.Direct),
+    JALR     -> List(BranchAttribute.BranchType.Indirect),
+    BRANCH   -> List(BranchAttribute.BranchType.Conditional)
   )
 }

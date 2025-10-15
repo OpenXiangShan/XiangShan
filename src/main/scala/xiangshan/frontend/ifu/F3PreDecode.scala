@@ -18,7 +18,9 @@ package xiangshan.frontend.ifu
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.bpu.BranchAttribute
 
+// FIXME: this seems not used, maybe remove it later
 class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class F3PreDecodeIO(implicit p: Parameters) extends IfuBundle {
     val instr: Vec[UInt]          = Input(Vec(FetchBlockInstNum, UInt(32.W)))
@@ -27,11 +29,8 @@ class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper
   val io: F3PreDecodeIO = IO(new F3PreDecodeIO)
 
   io.pd.zipWithIndex.foreach { case (pd, i) =>
-    val (brType, isCall, isRet) = getBrInfo(io.instr(i))
-    pd.valid  := DontCare
-    pd.isRVC  := DontCare
-    pd.brType := brType
-    pd.isCall := isCall
-    pd.isRet  := isRet
+    pd.valid       := DontCare
+    pd.isRVC       := DontCare
+    pd.brAttribute := BranchAttribute.decode(io.instr(i))
   }
 }

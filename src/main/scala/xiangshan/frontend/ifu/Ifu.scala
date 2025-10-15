@@ -762,8 +762,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.bits.target    := uncacheTarget.toUInt
 
   when(s4_reqIsUncache) {
-    val inst                    = s4_uncacheData
-    val (brType, isCall, isRet) = getBrInfo(inst)
+    val inst        = s4_uncacheData
+    val brAttribute = BranchAttribute.decode(inst)
     io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
       uncacheRvcExpander.io.ill,
       uncacheRvcExpander.io.in,
@@ -773,9 +773,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pc(s4_shiftNum)                    := uncachePc
     io.toIBuffer.bits.pd(s4_shiftNum).valid              := true.B
     io.toIBuffer.bits.pd(s4_shiftNum).isRVC              := uncacheIsRvc
-    io.toIBuffer.bits.pd(s4_shiftNum).brType             := brType
-    io.toIBuffer.bits.pd(s4_shiftNum).isCall             := isCall
-    io.toIBuffer.bits.pd(s4_shiftNum).isRet              := isRet
+    io.toIBuffer.bits.pd(s4_shiftNum).brAttribute        := brAttribute
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
     io.toIBuffer.bits.exceptionType(s4_shiftNum) := uncacheException
@@ -785,7 +783,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.enqEnable                    := s4_alignBlockStartPos.asUInt
 
     uncacheFlushWb.bits.isRVC     := uncacheIsRvc
-    uncacheFlushWb.bits.attribute := BranchAttribute(brType, Cat(isCall, isRet))
+    uncacheFlushWb.bits.attribute := brAttribute
   }
 
   uncacheRedirect.valid          := s4_reqIsUncache && (s4_uncacheCanGo || uncacheCheckFault)

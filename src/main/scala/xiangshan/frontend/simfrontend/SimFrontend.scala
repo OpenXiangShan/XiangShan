@@ -29,6 +29,7 @@ import chisel3.util._
 import utility._
 import xiangshan._
 import xiangshan.frontend._
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ifu._
 
 /**
@@ -244,11 +245,13 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
     cfVec.bits.trigger := TriggerAction.None
 
-    cfVec.bits.pd.valid  := fetchOut.preDecode(0)
-    cfVec.bits.pd.isRVC  := fetchOut.preDecode(1)
-    cfVec.bits.pd.brType := fetchOut.preDecode(3, 2)
-    cfVec.bits.pd.isCall := fetchOut.preDecode(4)
-    cfVec.bits.pd.isRet  := fetchOut.preDecode(5)
+    cfVec.bits.pd.valid := fetchOut.preDecode(0)
+    cfVec.bits.pd.isRVC := fetchOut.preDecode(1)
+    cfVec.bits.pd.brAttribute := BranchAttribute(
+      fetchOut.preDecode(3, 2),
+      Cat(fetchOut.preDecode(4), fetchOut.preDecode(5)),
+      fetchOut.preDecode(0)
+    )
 
     cfVec.bits.fixedTaken := fetchOut.preDecode(6)
     cfVec.bits.predTaken  := fetchOut.preDecode(6)
