@@ -19,7 +19,7 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.{DebugModule, TLPMA, TLPMAIO, AXI4MemEncrypt}
+import device.{DebugModule, DebugModuleIO, TLPMA, TLPMAIO, AXI4MemEncrypt}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -532,7 +532,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
   class SoCMiscImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
 
-    val debug_module_io = IO(new debugModule.DebugModuleIO)
+    val debug_module_io = IO(new DebugModuleIO(NumCores))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val rtc_clock = IO(Input(Bool()))
     val pll0_lock = IO(Input(Bool()))
