@@ -267,7 +267,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.dcache <> memBlock.io.dcacheError.bits.toL1BusErrorUnitInfo(memBlock.io.dcacheError.valid)
   io.beu_errors.uncache <> memBlock.io.uncacheError
   io.beu_errors.l2 <> DontCare
-  io.l2PfCtrl := backend.io.mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl()
+  io.l2PfCtrl := memBlock.io.outer_l2PfCtrl
 
   memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
