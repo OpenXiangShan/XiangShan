@@ -43,7 +43,6 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.annotate
-import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
 
 import difftest.common.DifftestWiring
@@ -242,10 +241,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   class XSTopImp(wrapper: XSTop) extends LazyRawModuleImp(wrapper)
     with HasDTSImp[XSTop]
   {
-    soc.XSTopPrefix.foreach { prefix =>
-      val mod = this.toNamed
-      annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-    }
+    override def localModulePrefix = soc.XSTopPrefix
+    override def localModulePrefixUseSeparator = false
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
     val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))

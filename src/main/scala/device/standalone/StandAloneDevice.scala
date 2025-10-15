@@ -28,7 +28,6 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
 import top.Generator
 import system.SoCParamsKey
-import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.annotation.tailrec
 import xiangshan.XSTileKey
 import utils.VerilogAXI4Record
@@ -147,17 +146,13 @@ abstract class StandAloneDevice (
 }
 
 class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) with RequireAsyncReset {
-  p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
-    val mod = this.toNamed
-    annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-  }
+  override def localModulePrefix = p(SoCParamsKey).XSTopPrefix
+  override def localModulePrefixUseSeparator = false
 }
 
 class StandAloneDeviceRawImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
-  p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
-    val mod = this.toNamed
-    annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-  }
+  override def localModulePrefix = p(SoCParamsKey).XSTopPrefix
+  override def localModulePrefixUseSeparator = false
 }
 
 object ArgParser {
