@@ -38,6 +38,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val condTakenMask:          Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val readBankIdx:            UInt                  = Output(UInt(log2Ceil(NumBanks).W)) // to resolveQueue
+    val meta:                   TageMeta              = Output(new TageMeta)
   }
   val io: TageIO = IO(new TageIO)
 
@@ -149,10 +150,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val hasProvider = result._1
       val pred        = result._2
       val altPred     = s2_baseTableCtrs(position).isPositive
-      hit && Mux(hasProvider, pred, altPred)
+//      hit && Mux(hasProvider, pred, altPred)
+      hit && altPred // temporarily only use base table prediction
   }
 
   io.condTakenMask := s2_condTakenMask
+
+  io.meta.baseTableCtrs := s2_baseTableCtrs
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -187,7 +191,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       getSetIndex(t0_startVAddr, hist, tableInfo.NumSets)
   }
 
-  baseTable.io.train.valid := t0_valid
+  baseTable.io.train.valid := t0_trainValid
   baseTable.io.train.bits  := io.train.bits
 
   tables.zipWithIndex.foreach {

@@ -30,8 +30,8 @@ class FtqEntry(implicit p: Parameters) extends FtqBundle {
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
-  val meta       = new BpuMeta
-  val paddingBit = if (meta.getWidth % 2 != 0) Some(UInt(1.W)) else None
+  val meta        = new BpuMeta
+  val paddingBits = if (meta.getWidth % 4 != 0) Some(UInt((4 - meta.getWidth % 4).W)) else None
 }
 
 class ResolveEntry(implicit p: Parameters) extends FtqBundle {

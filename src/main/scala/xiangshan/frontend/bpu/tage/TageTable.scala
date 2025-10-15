@@ -28,7 +28,7 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
     val readResp:                 TableReadResp                = Output(new TableReadResp)
     val writeSetIdx:              UInt                         = Input(UInt(log2Ceil(numSets / NumBanks).W))
     val writeBankMask:            UInt                         = Input(UInt(NumBanks.W))
-    val updateReq:                Valid[TableUpadteEntriesReq] = Flipped(Valid(new TableUpadteEntriesReq))
+    val updateReq:                Valid[TableUpdateEntriesReq] = Flipped(Valid(new TableUpdateEntriesReq))
     val needResetUsefulCtr:       Bool                         = Input(Bool())
     val needIncreaseAllocFailCtr: Bool                         = Input(Bool())
     val oldAllocFailCtr:          SaturateCounter              = Input(new SaturateCounter(AllocFailCtrWidth))

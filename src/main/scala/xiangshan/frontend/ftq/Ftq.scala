@@ -164,8 +164,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   metaQueue.io.wen        := io.fromBpu.meta.valid
   metaQueue.io.waddr      := io.fromBpu.s3FtqPtr.value
   metaQueue.io.wdata.meta := io.fromBpu.meta.bits
-  if (metaQueue.io.wdata.paddingBit.isDefined) {
-    metaQueue.io.wdata.paddingBit.get := 0.U
+  if (metaQueue.io.wdata.paddingBits.isDefined) {
+    metaQueue.io.wdata.paddingBits.get := 0.U
   }
 
   // --------------------------------------------------------------------------------

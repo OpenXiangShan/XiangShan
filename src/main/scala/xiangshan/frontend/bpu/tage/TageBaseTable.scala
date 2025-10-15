@@ -18,11 +18,11 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.WriteBuffer
 
 class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   class TageBaseTableIO extends TageBundle {
@@ -42,6 +42,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
         way = FetchBlockAlignInstNum,
         singlePort = true,
         shouldReset = true,
+        holdRead = true,
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl
@@ -51,19 +52,18 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   // use a write buffer to store the write requests when read and write are both valid
   private val writeBuffers =
     Seq.fill(BaseTableNumAlignBanks, NumBanks)(
-      Module(new WriteBuffer(new BaseTableSramWriteReq, WriteBufferSize, numPorts = 1))
+      Module(new Queue(new BaseTableSramWriteReq, WriteBufferSize, pipe = true, flow = true))
     )
 
   // Connect write buffers to SRAMs
-  sramBanks.flatten.zip(writeBuffers.flatten).foreach {
-    case (bank, buffer) =>
-      val valid   = buffer.io.read.head.valid && !bank.io.r.req.valid
-      val data    = buffer.io.read.head.bits.takenCtrs
-      val setIdx  = buffer.io.read.head.bits.setIdx
-      val wayMask = buffer.io.read.head.bits.wayMask
-      bank.io.w.apply(valid, data, setIdx, wayMask)
+  sramBanks.flatten.zip(writeBuffers.flatten).foreach { case (bank, buffer) =>
+    val valid   = buffer.io.deq.valid && !bank.io.r.req.valid
+    val data    = buffer.io.deq.bits.takenCtrs
+    val setIdx  = buffer.io.deq.bits.setIdx
+    val wayMask = buffer.io.deq.bits.wayMask
+    bank.io.w.apply(valid, data, setIdx, wayMask)
 
-      buffer.io.read.head.ready := bank.io.w.req.ready && !bank.io.r.req.valid
+    buffer.io.deq.ready := bank.io.w.req.ready && !bank.io.r.req.valid
   }
 
   io.resetDone := sramBanks.flatten.map(_.io.r.req.ready).reduce(_ && _)
@@ -83,6 +83,13 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
 
   private val s0_bankIdx  = getBaseTableBankIndex(s0_startPc)
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
+
+  sramBanks.zipWithIndex.foreach { case (alignBank, alignBankIdx) =>
+    alignBank.zipWithIndex.foreach { case (bank, bankIdx) =>
+      bank.io.r.req.valid       := s0_fire && s0_bankMask(bankIdx)
+      bank.io.r.req.bits.setIdx := s0_setIdx(alignBankIdx)
+    }
+  }
 
   /* --------------------------------------------------------------------------------------------------------------
      stage 1
@@ -108,90 +115,60 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
 
   /* --------------------------------------------------------------------------------------------------------------
    train stage 0
-   - read old ctrs
+   - delay 1 cycle for better timing
    -------------------------------------------------------------------------------------------------------------- */
 
-  private val t0_valid      = io.train.valid
-  private val t0_startVAddr = io.train.bits.startVAddr
-  private val t0_branches   = io.train.bits.branches
-
-  private val t0_alignBankIdx = getBaseTableAlignBankIndex(t0_startVAddr)
-  private val t0_rawSetIdx    = getBaseTableSetIndex(t0_startVAddr)
-  private val t0_setIdx =
-    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < t0_alignBankIdx, t0_rawSetIdx + 1.U, t0_rawSetIdx))
-
-  private val t0_bankIdx  = getBankIndex(t0_startVAddr)
-  private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
-
-  sramBanks.zipWithIndex.foreach {
-    case (alignBank, alignIdx) =>
-      alignBank.zipWithIndex.foreach {
-        case (bank, bankIdx) =>
-          bank.io.r.req.valid       := s0_fire && s0_bankMask(bankIdx) || t0_valid && t0_bankMask(bankIdx)
-          bank.io.r.req.bits.setIdx := Mux(t0_valid, t0_setIdx(alignIdx), s0_setIdx(alignIdx))
-      }
-  }
+  private val t0_valid = io.train.valid
+  private val t0_train = io.train.bits
 
   /* --------------------------------------------------------------------------------------------------------------
    train stage 1
-   - get old ctrs from SRAM
-   -------------------------------------------------------------------------------------------------------------- */
-
-  private val t1_valid    = RegNext(t0_valid)
-  private val t1_branches = RegEnable(t0_branches, t0_valid)
-
-  private val t1_alignBankIdx = RegEnable(s0_alignBankIdx, s0_fire)
-  private val t1_bankMask     = RegEnable(s0_bankMask, s0_fire)
-  private val t1_setIdx       = t0_setIdx.map(RegEnable(_, t0_valid))
-
-  private val t1_rawCtrs = VecInit(sramBanks.map(alignBank =>
-    Mux1H(s1_bankMask, alignBank.map(_.io.r.resp.data))
-  ))
-
-  private val t1_oldCtrs = vecRotateRight(t1_rawCtrs, t1_alignBankIdx).flatten
-
-  /* --------------------------------------------------------------------------------------------------------------
-   train stage 2
    - update ctrs
    -------------------------------------------------------------------------------------------------------------- */
 
-  private val t2_valid    = RegNext(t1_valid)
-  private val t2_branches = RegEnable(t1_branches, t1_valid)
+  private val t1_valid = RegNext(t0_valid)
+  private val t1_train = RegEnable(t0_train, t0_valid)
 
-  private val t2_alignBankIdx = RegEnable(t1_alignBankIdx, t1_valid)
-  private val t2_bankMask     = RegEnable(t1_bankMask, t1_valid)
-  private val t2_setIdx       = t1_setIdx.map(RegEnable(_, t1_valid))
+  private val t1_startVAddr = t1_train.startVAddr
+  private val t1_branches   = t1_train.branches
+  private val t1_oldCtrs    = t1_train.meta.tage.baseTableCtrs
 
-  private val t2_oldCtrs = t1_oldCtrs.map(RegEnable(_, t1_valid))
+  private val t1_alignBankIdx = getBaseTableAlignBankIndex(t1_startVAddr)
+  private val t1_rawSetIdx    = getBaseTableSetIndex(t1_startVAddr)
+  private val t1_setIdx = VecInit.tabulate(BaseTableNumAlignBanks)(bankIdx =>
+    Mux(bankIdx.U < t1_alignBankIdx, t1_rawSetIdx + 1.U, t1_rawSetIdx)
+  )
+  private val t1_bankIdx  = getBankIndex(t1_startVAddr)
+  private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)
 
-  private val t2_updateMask = Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, Bool())))
-  private val t2_newCtrs =
+  private val t1_updateMask = Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, Bool())))
+  private val t1_newCtrs =
     Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))))
 
-  t2_newCtrs.flatten.zip(t2_updateMask.flatten).zipWithIndex.foreach {
-    case ((newCtr, needUpdate), position) =>
-      t2_branches.foreach { branch =>
-        when(position.U === branch.bits.cfiPosition) {
-          needUpdate   := true.B
-          newCtr.value := t2_oldCtrs(position).getUpdate(branch.bits.taken)
-        }.otherwise {
-          needUpdate   := false.B
-          newCtr.value := 0.U
-        }
-      }
+  t1_newCtrs.flatten.zip(t1_updateMask.flatten).zipWithIndex.foreach { case ((newCtr, needUpdate), position) =>
+    val hitMask = t1_branches.map { branch =>
+      branch.valid && branch.bits.attribute.isConditional && position.U === branch.bits.cfiPosition
+    }
+    val taken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    needUpdate   := hitMask.reduce(_ || _)
+    newCtr.value := t1_oldCtrs(position).getUpdate(taken)
   }
 
-  private val t2_rotatedNewCtrs    = vecRotateRight(t2_newCtrs, t2_alignBankIdx)
-  private val t2_rotatedUpdateMask = vecRotateRight(t2_updateMask, t2_alignBankIdx)
+  private val t1_rotatedNewCtrs    = vecRotateRight(t1_newCtrs, t1_alignBankIdx)
+  private val t1_rotatedUpdateMask = vecRotateRight(t1_updateMask, t1_alignBankIdx)
 
-  writeBuffers.zipWithIndex.foreach {
-    case (alignBuffers, alignIdx) =>
-      alignBuffers.zipWithIndex.foreach {
-        case (buffer, bankIdx) =>
-          buffer.io.write.head.valid          := t2_valid && t2_bankMask(bankIdx)
-          buffer.io.write.head.bits.setIdx    := t2_setIdx(alignIdx)
-          buffer.io.write.head.bits.takenCtrs := t2_rotatedNewCtrs(alignIdx)
-          buffer.io.write.head.bits.wayMask   := t2_rotatedUpdateMask(alignIdx).asUInt
-      }
+  writeBuffers.zipWithIndex.foreach { case (alignBuffers, alignIdx) =>
+    alignBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
+      buffer.io.enq.valid          := t1_valid && t1_bankMask(bankIdx)
+      buffer.io.enq.bits.setIdx    := t1_setIdx(alignIdx)
+      buffer.io.enq.bits.takenCtrs := t1_rotatedNewCtrs(alignIdx)
+      buffer.io.enq.bits.wayMask   := t1_rotatedUpdateMask(alignIdx).asUInt
+    }
   }
+
+  XSPerfAccumulate("train_update_ctr", t1_valid && t1_updateMask.flatten.reduce(_ || _))
+  XSPerfAccumulate(
+    "write_buffer_drop_write",
+    PopCount(writeBuffers.flatten.map(b => !b.io.enq.ready && b.io.enq.valid))
+  )
 }
