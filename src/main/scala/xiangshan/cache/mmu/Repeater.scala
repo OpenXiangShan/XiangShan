@@ -354,7 +354,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_valid = Cat(filter.map(_.refill)).orR
   filter.map(_.tlb.resp.ready := true.B)
-  filter.map(_.ptw.resp.valid := GatedValidRegNext(io.ptw.resp.fire, init = false.B))
+  filter.map(_.ptw.resp.valid := RegNext(io.ptw.resp.fire, init = false.B))
   filter.map(_.ptw.resp.bits := ptwResp)
   filter.map(_.flush := flush)
   filter.map(_.sfence := io.sfence)
