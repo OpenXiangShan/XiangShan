@@ -81,7 +81,7 @@ abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModule
     val sfence       = Input(new SfenceBundle)
     val tlbCsr       = Input(new TlbCsrBundle)
     val csrCtrl      = Input(new CustomCSRCtrlIO)
-    val error        = ValidIO(new L1CacheErrorInfo)
+    val error        = Output(new L1BusErrorUnitInfo)
     val frontendInfo = new Bundle {
       val ibufFull = Output(Bool())
       val bpuInfo = new Bundle {
@@ -388,7 +388,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.fromUncache <> instrUncache.io.toIfu
   instrUncache.io.flush := false.B
 
-  io.error <> RegNext(RegNext(icache.io.error))
+  val errorReg = RegNext(icache.io.error)
+  io.error <> RegNext(errorReg.bits.toL1BusErrorUnitInfo(errorReg.valid))
 
   icache.io.hartId := io.hartId
 
