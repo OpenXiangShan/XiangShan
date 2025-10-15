@@ -36,7 +36,6 @@ import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.annotate
-import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 import difftest.common.DifftestWiring
@@ -46,10 +45,8 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
 {
   def socParams = wrapper.asInstanceOf[HasSoCParameter]
 
-  socParams.soc.XSTopPrefix.foreach { prefix =>
-    val mod = this.toNamed
-    annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-  }
+  override def localModulePrefix = socParams.soc.XSTopPrefix
+  override def localModulePrefixUseSeparator = false
 
   val clock = IO(Input(Clock()))
   val reset = IO(Input(AsyncReset()))
