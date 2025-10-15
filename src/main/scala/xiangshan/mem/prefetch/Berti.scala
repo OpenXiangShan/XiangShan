@@ -707,9 +707,8 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   /*** data structure */
   val entries = Reg(Vec(size, new Entry()))
   val valids = RegInit(0.U.asTypeOf(Vec(size, Bool())))
-  // drop new prefetch when there is no invalid entry to allocate
-  // so there is no need of replacer
-  // val replacer = ReplacementPolicy.fromString("plru", size)
+  // drop old prefetch when there is no invalid entry to allocate
+  val replacer = ReplacementPolicy.fromString("plru", size)
   val tlbReqArb = Module(new RRArbiterInit(new TlbReq, size))
   val pfIdxArb = Module(new RRArbiterInit(UInt(BufferIndexWidth.W), size))
   
@@ -736,37 +735,32 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   val e1_src = RegEnable(io.srcReq.bits, io.srcReq.valid)
   val e1_selIdx = RegEnable(e0_selIdx, e0_fire)
   // e0
-  val e0_invalidVec = sizeMap(i => !valids(i))
-  val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_matchPrev = e1_srcValid && e0_srcValid && getLine(e1_src.prefetchVA) === getLine(e0_src.prefetchVA)
   val e0_matchVec = sizeMap(i => e0_srcValid && valids(i) && entries(i).vline === getLine(e0_src.prefetchVA))
   assert(PopCount(e0_matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
+  val e0_allocIdx = UIntToOH(replacer.way)
 
-  e0_fire := e0_srcValid && (e0_matchPrev || e0_matchVec.orR || e0_canAlloc)
+  e0_fire := e0_srcValid
   val e0_update = e0_srcValid && (e0_matchPrev || e0_matchVec.orR)
-  val e0_alloc = e0_srcValid && e0_canAlloc
   when(e0_matchPrev){
     e0_selIdx := e1_selIdx
   }.elsewhen(e0_matchVec.orR){
     e0_selIdx := OHToUInt(e0_matchVec)
-  }.elsewhen(e0_canAlloc){
-    e0_selIdx := e0_allocIdx
   }.otherwise{
-    e0_selIdx := 0.U
+    e0_selIdx := e0_allocIdx
   }
   
   // e1
   val e1_update = RegNext(e0_update)
-  val e1_alloc = RegNext(e0_alloc)
   when(e1_update){
     entries(e1_selIdx).updateEntryMerge(e1_src.prefetchTarget)
-  }.elsewhen(e1_alloc){
+  }.otherwise{
     entries(e1_selIdx).fromSourcePrefetchReq(e1_src)
     valids(e1_selIdx) := true.B
   }
   XSPerfAccumulate("src_req_fire", e0_fire)
-  XSPerfAccumulate("src_req_fire_update", e0_update)
-  XSPerfAccumulate("src_req_fire_alloc", !e0_update && e0_alloc)
+  XSPerfAccumulate("src_req_fire_update", e0_fire && e0_update)
+  XSPerfAccumulate("src_req_fire_alloc", e0_fire && !e0_update)
 
   /******************************************************************
    * tlb

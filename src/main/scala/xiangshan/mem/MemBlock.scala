@@ -692,34 +692,38 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   /** prefetch to l1 req */
   // Stream's confidence is always 1
   // (LduCnt + HyuCnt) l1_pf_reqs ?
-  loadUnits.foreach(load_unit => {
-    load_unit.io.prefetch_req.valid <> l1_pf_req.valid
-    load_unit.io.prefetch_req.bits <> l1_pf_req.bits
-  })
-  // FIXME lyq: l1_pf_req has been already given to load_unit, why there is given to hybrid_unit?
-  hybridUnits.foreach(hybrid_unit => {
-    hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
-    hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
-  })
   // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
   // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
-  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
-  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
-
+  /** NOTE lyq:
+   * Both bank confilct and miss queue arb priority are belong to replay channel.
+   * And the priority of retransmission is higher than prefetch.
+   * So there is no need to distinguish between 0, 1, and 2.
+   * */
+//  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
+//  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
+//  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
   val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
                                   hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch) ++
                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
-  l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
-    case i => {
-      if (LowConfPorts.contains(i)) {
-        loadUnits(i).io.canAcceptLowConfPrefetch
-      } else {
-        Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
-      }
-    }
-  }.reduce(_ || _)
+  val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
+    Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+  }
+  l1_pf_req.ready := canAcceptPrefetch.reduce(_ || _)
+
+  val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
+    if(i==0) l1_pf_req.valid
+    else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
+  }
+  loadUnits.zipWithIndex.foreach { case(u, i) => {
+    u.io.prefetch_req.valid <> toPrefetchValidVec(i)
+    u.io.prefetch_req.bits <> l1_pf_req.bits
+  }}
+  hybridUnits.zipWithIndex.foreach { case (u, i) => {
+    u.io.ldu_io.prefetch_req.valid <> toPrefetchValidVec(i + LduCnt)
+    u.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
+  }}
+
   /** l1 pf fuzzer interface */
   val DebugEnableL1PFFuzzer = false
   if (DebugEnableL1PFFuzzer) {
