@@ -844,7 +844,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
-  decodedInst.numWB   := Mux(FuType.isStore(decodedInst.fuType), 2.U, 1.U)
+  val numWBIs2 = FuType.isStore(decodedInst.fuType) || FuType.isJump(decodedInst.fuType) && (decodedInst.ldest =/= 0.U)
+  decodedInst.numWB   := Mux(numWBIs2, 2.U, 1.U)
 
   val isZimop = (BitPat("b1?00??0111??_?????_100_?????_1110011") === ctrl_flow.instr) ||
                 (BitPat("b1?00??1?????_?????_100_?????_1110011") === ctrl_flow.instr)

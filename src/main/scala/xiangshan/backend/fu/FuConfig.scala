@@ -237,7 +237,6 @@ object FuConfig {
       Seq(IntData()), // jal
     ),
     piped = true,
-    writeIntRf = true,
     immType = Set(SelImm.IMM_I, SelImm.IMM_UJ, SelImm.IMM_U),
   )
 

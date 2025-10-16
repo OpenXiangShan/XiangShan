@@ -174,6 +174,18 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       println(s"[BypassNetWork] ${exuParm.name}")
       println(s"[BypassNetWork] exuIdx = ${exuIdx}")
       println(s"[BypassNetWork] srcIdx = ${srcIdx}")
+      val immALU = Wire(UInt(XLEN.W))
+      immALU := imm
+      if (exuParm.hasAluFu && srcIdx == 1) {
+        val isJmp = ALUOpType.isJmp(fuOpType)
+        when(isAlu && isJmp) {
+          // jalr's fuOpType(1) == 0
+          val isAuipc = fuOpType(1)
+          val thisPcOffset = exuInput.bits.getPcOffset()
+          val nextPcOffset = exuInput.bits.getNextPcOffset()
+          immALU := Mux(isJmp, Mux(isAuipc, imm + SignExt(thisPcOffset, imm.getWidth), ZeroExt(nextPcOffset, imm.getWidth)), imm)
+        }
+      }
       val originSrc = Mux1H(
         Seq(
           readForward    -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec),
@@ -183,7 +195,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.src(3) else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
-          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
+          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else if (exuParm.aluNeedPc) immALU else imm)
         )
       )
       src := originSrc
@@ -230,16 +242,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
             isSh4add -> sh4addSrc,
           ))
           src := aluSrc0
-        }
-      }
-
-      if (exuParm.hasAluFu && srcIdx == 1) {
-        when(isAlu) {
-          val isJmp = ALUOpType.isJmp(fuOpType)
-          val isJalr = isJmp && fuOpType(0)
-          val aluSrc1 = Wire(UInt(XLEN.W))
-          aluSrc1 := Mux(isJalr, 4.U, originSrc)
-          src := aluSrc1
         }
       }
     }

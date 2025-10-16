@@ -11,6 +11,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.vector.Utils.NOnes
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles._
@@ -82,6 +83,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec         = Wire(Vec(params.numEntries, Bool()))
   val srcReadyVec         = Wire(Vec(params.numEntries, Bool()))
+  val rfWenVec            = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(2.W)))
@@ -376,12 +378,33 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
     else {
       io.compEntryOldestSel.get.zip(io.simpEntryOldestSel.get).zipWithIndex.foreach { case ((compSel, simpSel), i) =>
-        io.deqEntry(i)     := Mux(compSel.valid,
-                                  compEntryOldest.get(i),
-                                  Mux(simpSel.valid, simpEntryOldest.get(i), enqEntryOldest(i)))
-        io.cancelDeqVec(i) := Mux(compSel.valid,
-                                  compEntryOldestCancel.get(i),
-                                  Mux(simpSel.valid, simpEntryOldestCancel.get(i), enqEntryOldestCancel(i)))
+        val deqEntry = Mux(compSel.valid,
+                           compEntryOldest.get(i),
+                           Mux(simpSel.valid, simpEntryOldest.get(i), enqEntryOldest(i)))
+        val cancelDeqVec = Mux(compSel.valid,
+                               compEntryOldestCancel.get(i),
+                               Mux(simpSel.valid, simpEntryOldestCancel.get(i), enqEntryOldestCancel(i)))
+        io.deqEntry(i)     := deqEntry
+        io.cancelDeqVec(i) := cancelDeqVec
+        if (params.aluDeqNeedPickJump) {
+          val aluDeqSelectJump = io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
+          io.aluDeqSelectJump.get := aluDeqSelectJump
+          if (params.deqFuCfgs(i).contains(AluCfg)) {
+            assert(i == 0, "IQ needPickRfWen ALU must in deq 0")
+            // alu uop fuType change to alu
+            io.deqEntry(i).bits.status.fuType := Mux(aluDeqSelectJump, FuType.alu.U.asTypeOf(deqEntry.bits.status.fuType), deqEntry.bits.status.fuType)
+          }
+          else if (params.deqFuCfgs(i).contains(JmpCfg)) {
+            val deqEntry0 = Mux(io.compEntryOldestSel.get(0).valid,
+                                compEntryOldest.get(0),
+                                Mux(io.simpEntryOldestSel.get(0).valid, simpEntryOldest.get(0), enqEntryOldest(0)))
+            assert(i == 1, "IQ needPickRfWen BJU must in deq 1")
+            // jump uop use alu uop before change
+            io.deqEntry(i) := Mux(aluDeqSelectJump, deqEntry0, deqEntry)
+            dontTouch(io.deqEntry(i))
+            io.cancelDeqVec(i) := Mux(aluDeqSelectJump, io.cancelDeqVec(0), cancelDeqVec)
+          }
+        }
       }
     }
   }
@@ -390,6 +413,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.issued                         := issuedVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
   io.srcReady                       := srcReadyVec.asUInt
+  io.rfWen                          := rfWenVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
   io.exuSources.foreach(_           := exuSourceVec.get)
@@ -424,6 +448,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
+    rfWenVec(entryIdx)          := out.entry.bits.payload.rfWen
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
@@ -550,6 +575,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val valid               = Output(UInt(params.numEntries.W))
   val issued              = Output(UInt(params.numEntries.W))
   val canIssue            = Output(UInt(params.numEntries.W))
+  val rfWen               = Output(UInt(params.numEntries.W))
   val srcReady            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
@@ -559,6 +585,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
+  val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
 
   // load/hybird only
   val fromLoad = OptionWrapper(params.isLdAddrIQ || params.isHyAddrIQ, new Bundle {

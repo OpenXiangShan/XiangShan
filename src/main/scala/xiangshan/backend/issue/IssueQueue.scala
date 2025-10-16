@@ -11,6 +11,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Bundles.VSew
@@ -111,8 +112,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
-  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap))) }
-  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap))) }
+  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap()))) }
+  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
   val intWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(x.intFuLatencyMap))) }
   val fpWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(x.fpFuLatencyMap))) }
@@ -221,12 +222,14 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
 
   val finalDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
+  dontTouch(finalDeqSelValidVec)
   val finalDeqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
   val validVec = VecInit(entries.io.valid.asBools)
   val issuedVec = VecInit(entries.io.issued.asBools)
   val requestForTrans = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
+  val rfWenVec = VecInit(entries.io.rfWen.asBools)
   val srcReadyVec = VecInit(entries.io.srcReady.asBools)
   io.validVec := validVec
   io.issuedVec := issuedVec
@@ -367,6 +370,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
       entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
+      if (params.aluDeqNeedPickJump && (deqIdx == 1)) {
+        val needCancelDeq1 = deqEntryVec(0).valid && FuType.isJump(deqEntryVec(0).bits.payload.fuType)
+        entriesIO.deqSelOH(deqIdx).valid                        := deqSelValidVec(deqIdx) && !needCancelDeq1
+      }
       entriesIO.deqSelOH(deqIdx).bits                           := deqSelOHVec(deqIdx)
       entriesIO.enqEntryOldestSel(deqIdx)                       := enqEntryOldestSel(deqIdx)
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
@@ -426,8 +433,20 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    fuTypeVec.map(fuType =>
-      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType)))
+    // alu and jmp are not same deq port, alu select intWen uop (include auipc and jalr)
+    val aluDeqNeedPickJump = param.aluDeqNeedPickJump && fuCfgs.contains(AluCfg)
+    val bjuDeqPickCond = param.aluDeqNeedPickJump && fuCfgs.contains(JmpCfg)
+    if (aluDeqNeedPickJump) println(s"${param.getIQName} need select intWen uop")
+    fuTypeVec.zip(rfWenVec).map { case (fuType, rfWen) =>
+      val bjuDeqCanAccept = FuType.isBrh(fuType) || FuType.isJump(fuType) && !rfWen
+      // alu and csr in same exeunit, but csr's rfwen may be false.B
+      // not (branch || jump && !rfWen)
+      val aluDeqCanAccept = !bjuDeqCanAccept
+      val deqCanAccept = if (aluDeqNeedPickJump) aluDeqCanAccept
+                         else if (bjuDeqPickCond) bjuDeqCanAccept
+                         else FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
+      deqCanAccept
+    }
   }
 
   canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
@@ -845,6 +864,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
+    // bju deq valid
+    if (params.aluDeqNeedPickJump && (i ==1)) {
+      deq.valid := finalDeqSelValidVec(i) && !cancelDeqVec(i) || entries.io.aluDeqSelectJump.get && deqBeforeDly(0).valid
+    }
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
@@ -864,6 +887,18 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.srcTimer.foreach(_ := DontCare)
     deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
+    // when alu select jump uop, src0's dataSource change to imm
+    if (params.aluDeqNeedPickJump && (i == 0)) {
+      deq.bits.common.dataSources(0).value := Mux(entries.io.aluDeqSelectJump.get, DataSource.imm, finalDataSources(i)(0).value)
+    }
+    else if (params.aluDeqNeedPickJump && (i == 1)) {
+      // assign jump uop form alu deq
+      when(entries.io.aluDeqSelectJump.get) {
+        deq.bits.common.dataSources := finalDataSources(0)
+        deq.bits.common.exuSources.foreach(_ := deqBeforeDly(0).bits.common.exuSources.get)
+        deq.bits.common.loadDependency.foreach(_ := deqBeforeDly(0).bits.common.loadDependency.get)
+      }
+    }
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
 
@@ -899,10 +934,17 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     // deqBeforeDly.ready is always true
     deq.ready := true.B
     // for int scheduler fdiv has high priority than alu
-    if (params.inIntSchd) {
+    if (params.inIntSchd && deqFuCfgs(i).contains(DivCfg)) {
+      // wakeupFromExu only one div
       io.wakeupFromExu.foreach(x => {
-        deq.ready := !x(i).valid
-        deqDly.valid := deq.valid && !x(i).valid
+        deq.ready := !x.head.valid
+        deqDly.valid := deq.valid && !x.head.valid
+      })
+    }
+    if (params.aluDeqNeedPickJump && deqFuCfgs(i).contains(JmpCfg)) {
+      io.wakeupFromExu.foreach(x => {
+        deq.ready := !(entries.io.aluDeqSelectJump.get && x.head.valid)
+        deqDly.valid := deq.valid && !(entries.io.aluDeqSelectJump.get && x.head.valid)
       })
     }
   }
