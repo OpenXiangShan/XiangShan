@@ -20,15 +20,12 @@ import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
 import scala.collection.mutable.ArrayBuffer
 
-object DecodeFields {
+package object DecodeFields {
   object GpWenField extends BoolDecodeField[VecInstPattern] {
     override def name: String = "gpWen"
 
     override def genTable(op: VecInstPattern): BitPat = {
-      if (usedNames.contains(op.name))
-        y
-      else
-        n
+      usedNames.contains(op.name).toBitPat
     }
 
     val usedNames: Seq[String] = getVariableNameSeq(VCPOP_M, VFIRST_M, VMV_X_S)
@@ -75,7 +72,7 @@ object DecodeFields {
       op match {
         case VecArithInstPattern() => genTable(op.asInstanceOf[VecArithInstPattern])
         case VecConfigInstPattern() => genTable(op.asInstanceOf[VecConfigInstPattern])
-        case VecMemInstPattern() => genTable(op.asInstanceOf[VecMemInstPattern])
+        case _: VecMemInstPattern => genTable(op.asInstanceOf[VecMemInstPattern])
       }
     }
 

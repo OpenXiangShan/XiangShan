@@ -26,9 +26,7 @@ object ScalaTypeExt {
   implicit def StringToExt(str: String): StringExt = new StringExt(str)
 
   class BooleanExt(val boolean: Boolean) {
-    def toBitPat: BitPat = {
-      if(this.boolean) BitPat.Y() else BitPat.N()
-    }
+    def toBitPat: BitPat = if (this.boolean) BitPat.Y() else BitPat.N()
   }
 
   implicit def BooleanToExt(boolean: Boolean): BooleanExt = new BooleanExt(boolean)

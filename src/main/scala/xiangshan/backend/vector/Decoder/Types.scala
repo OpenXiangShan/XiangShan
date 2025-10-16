@@ -21,9 +21,35 @@ object Types {
     def apply(): DecodeSrcType = new DecodeSrcType()
 
     def IMM = b"00"
+    def NO  = b"00"
     def GP  = b"01"
     def FP  = b"10"
     def VP  = b"11"
+  }
+
+  class SelImm extends Bundle {
+    val value = UInt(SelImm.width.W)
+  }
+
+  object SelImm {
+    def width = 4
+
+    def apply(): SelImm = new SelImm()
+
+    def S  = b"0000"
+    def SB = b"0001"
+    def U  = b"0010"
+    def UJ = b"0011"
+    def I  = b"0100"
+    def Z  = b"0101"
+    def B6 = b"0110"
+    def LUI32     = b"0111"
+    def OPIVIS    = b"1000"
+    def OPIVIU    = b"1001"
+    def VSETVLI   = b"1010"
+    def VSETIVLI  = b"1011"
+    def VRORVI    = b"1100"
+    def FI        = b"1111" // used by fli and it's fusion
   }
 
   class SplitSrcInfo(implicit val p: P) extends VecBundle {

@@ -7,7 +7,7 @@ import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import scala.beans.BeanProperty
 import scala.collection.mutable.ArrayBuffer
 
-sealed abstract class InstPattern extends DecodePattern {
+sealed trait InstPattern extends DecodePattern {
   implicit val rawInst: BitPat
 
   override def bitPat: BitPat = rawInst
@@ -115,7 +115,7 @@ case class FpR4TypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
 case class FpSTypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
-case class VecMemInstPattern()(
+abstract class VecMemInstPattern(
   implicit rawInst: BitPat,
 ) extends VecInstPattern() {
   def nf    : BitPat = rawInst(31, 29)
@@ -150,12 +150,38 @@ case class VecMemInstPattern()(
   }
 }
 
+trait UnitStride extends VecMemInstPattern
+trait Strided extends VecMemInstPattern
+trait OrderIndex extends VecMemInstPattern
+trait UnorderIndex extends VecMemInstPattern
+trait VecLoadInstPattern extends VecMemInstPattern
+trait VecStoreInstPattern extends VecMemInstPattern
+
+abstract class VecUnitStrideLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with UnitStride
+case class VecUnitStrideNormalLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
+case class VecWholeLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
+case class VecMaskLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
+case class VecUnitStrideFFLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
+
+case class VecStridedLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with Strided
+case class VecOrderLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with OrderIndex
+case class VecUnorderLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with UnorderIndex
+
+abstract class VecUnitStrideStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with UnitStride
+case class VecUnitStrideNormalStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
+case class VecWholeStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
+case class VecMaskStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
+
+case class VecStridedStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with Strided
+case class VecOrderStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with OrderIndex
+case class VecUnorderStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with UnorderIndex
+
 case class VecArithInstPattern()(
   implicit rawInst: BitPat,
 ) extends VecInstPattern() {
   def func6 : BitPat = rawInst(31, 26)
   def vm    : BitPat = rawInst(25)
-  def func3 : BitPat = rawInst(14, 12)
+  def category : BitPat = rawInst(14, 12)
 
   override def bitPat: BitPat = genPattern
 
@@ -175,6 +201,59 @@ case class VecConfigInstPattern()(
   override def bitPat: BitPat = genPattern
 
   val genPattern = rawInst.ensuring(_.getWidth == 32)
+}
+
+object VecLoadInstPattern {
+  def apply()(implicit rawInst: BitPat): VecMemInstPattern = {
+    val mew = rawInst(28)
+    val mop = rawInst(27, 26)
+    val lumop = rawInst(24, 20)
+
+    mew.rawString match {
+      case "0" =>
+        mop.rawString match {
+          case "00" =>
+            lumop.rawString match {
+              case "00000" => VecUnitStrideNormalLoad()
+              case "01000" => VecWholeLoad()
+              case "01011" => VecMaskLoad()
+              case "10000" => VecUnitStrideFFLoad()
+              case _ => null
+            }
+          case "01" => VecUnorderLoad()
+          case "10" => VecStridedLoad()
+          case "11" => VecOrderLoad()
+          case _ => null
+        }
+      case "1" => null
+    }
+  }
+}
+
+object VecStoreInstPattern {
+  def apply()(implicit rawInst: BitPat): VecMemInstPattern = {
+    val mew = rawInst(28)
+    val mop = rawInst(27, 26)
+    val lumop = rawInst(24, 20)
+
+    mew.rawString match {
+      case "0" =>
+        mop.rawString match {
+          case "00" =>
+            lumop.rawString match {
+              case "00000" => VecUnitStrideNormalStore()
+              case "01000" => VecWholeStore()
+              case "01011" => VecMaskStore()
+              case _ => null
+            }
+          case "01" => VecUnorderStore()
+          case "10" => VecStridedStore()
+          case "11" => VecOrderStore()
+          case _ => null
+        }
+      case "1" => null
+    }
+  }
 }
 
 object InstPattern {
@@ -206,7 +285,7 @@ object InstPattern {
       case LOAD => IntITypePattern()
       case LOAD_FP =>
         width.rawString match {
-          case "000" | "101" | "110" | "111" => VecMemInstPattern()
+          case "000" | "101" | "110" | "111" => VecLoadInstPattern()
           case "001" | "010" | "011" => FpITypeLoadInstPattern()
           case _ => null
         }
@@ -227,7 +306,7 @@ object InstPattern {
       case STORE => IntSTypePattern()
       case STORE_FP =>
         width.rawString match {
-          case "000" | "101" | "110" | "111" => VecMemInstPattern()
+          case "000" | "101" | "110" | "111" => VecStoreInstPattern()
           case "001" | "010" | "011" => FpSTypeInstPattern()
           case _ => null
         }
@@ -374,14 +453,9 @@ object VecInstPattern {
             case "111" => VecConfigInstPattern()
             case _ => VecArithInstPattern()
           }
-        case LOAD_FP | STORE_FP =>
-          if (Seq("000", "101", "110", "111").contains(width.rawString) && mew.rawString == "0") {
-            VecMemInstPattern()
-          } else {
-            null
-          }
-        case _ =>
-          null
+        case LOAD_FP if Seq("000", "101", "110", "111").contains(width.rawString) => VecLoadInstPattern()
+        case STORE_FP if Seq("000", "101", "110", "111").contains(width.rawString) => VecStoreInstPattern()
+        case _ => throw new IllegalArgumentException(s"Unsupported opcode5(${opcode5.rawString})")
       }
     )
   }
@@ -415,6 +489,25 @@ object VecInstPattern {
 
   lazy val set: Seq[VecConfigInstPattern] = {
     this.all.collect { case x: VecConfigInstPattern => x }
+  }
+
+  object Category extends Enumeration {
+    case class CategoryStr(str: String) extends super.Val
+
+    import scala.language.implicitConversions
+    implicit def valueToPlanetVal(x: Value): CategoryStr = x.asInstanceOf[CategoryStr]
+    implicit def valueToString(x: Value): String = x.str
+
+    val OPIVV = CategoryStr("000")
+    val OPFVV = CategoryStr("001")
+    val OPMVV = CategoryStr("010")
+    val OPIVI = CategoryStr("011")
+    val OPIVX = CategoryStr("100")
+    val OPFVF = CategoryStr("101")
+    val OPMVX = CategoryStr("110")
+    val OPCFG = CategoryStr("111")
+
+    val arithValueSet = ValueSet(OPIVV, OPFVV, OPMVV, OPIVI, OPIVX, OPFVF, OPMVX)
   }
 }
 

@@ -405,7 +405,7 @@ object DecoderMain extends App {
 
 object SplitCtlDecoderMain extends App {
   val instPatterns = VecInstPattern.all.filter(x => x.isInstanceOf[VecArithInstPattern] &&
-    Seq("011" ,"000", "100", "001", "101", "010", "110").contains(x.asInstanceOf[VecArithInstPattern].func3.rawString))
+    Seq("011" ,"000", "100", "001", "101", "010", "110").contains(x.asInstanceOf[VecArithInstPattern].category.rawString))
 
   Verilog.emitVerilog(
     new SplitCtlDecoder(instPatterns)

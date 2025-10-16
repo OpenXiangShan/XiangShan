@@ -29,13 +29,13 @@ import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
   object SrcType {
-    def imm = "b0000".U
-    def pc  = "b0000".U
-    def xp  = "b0001".U
-    def fp  = "b0010".U
-    def vp  = "b0100".U
-    def v0  = "b1000".U
-    def no  = "b0000".U // this src read no reg but cannot be Any value
+    def imm = "b0000".U(4.W)
+    def pc  = "b0000".U(4.W)
+    def xp  = "b0001".U(4.W)
+    def fp  = "b0010".U(4.W)
+    def vp  = "b0100".U(4.W)
+    def v0  = "b1000".U(4.W)
+    def no  = "b0000".U(4.W) // this src read no reg but cannot be Any value
 
     // alias
     def reg = this.xp
