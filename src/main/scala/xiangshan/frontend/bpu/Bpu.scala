@@ -79,7 +79,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
-  sc.io.enable          := false.B
+  sc.io.enable          := ctrl.scEnable
   ittage.io.enable      := ctrl.ittageEnable
   ras.io.enable         := false.B
 
@@ -214,6 +214,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.foldedPathHist      := phr.io.s1_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.train.valid         := train.valid
+  private val scTakenMask = sc.io.takenMask
+  dontTouch(scTakenMask)
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
@@ -330,7 +332,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_ittageMeta = ittage.io.meta
 
   // sc meta
-  private val s3_scMeta = 0.U.asTypeOf(sc.io.meta)
+  private val s3_scMeta = sc.io.meta
 
   // ras meta
   private val s3_rasMeta = ras.io.specMeta

@@ -24,28 +24,17 @@ import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class ScEntry(implicit p: Parameters) extends ScBundle {
-  val ctrs: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
+  val ctr: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
 }
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
-  val ctr: SaturateCounter = new SaturateCounter(thresholdCtrWidth)
-  val thres = UInt(thresholdThresWidth.W)
-  def satPos(ctr: UInt = this.ctr.value): Bool = ctr === ((1.U << thresholdCtrWidth) - 1.U)
-  def satNeg(ctr: UInt = this.ctr.value): Bool = ctr === 0.U
-  def neutralVal: UInt = (1 << (thresholdCtrWidth - 1)).U
-  def initVal:    UInt = 6.U
-  def minThres:   UInt = 6.U
-  def maxThres:   UInt = 31.U
+  val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
+
+  def initVal: UInt = 6.U
+
   def update(cause: Bool): ScThreshold = {
-    val res    = Wire(new ScThreshold())
-    val newCtr = this.ctr.getUpdate(cause)
-    val newThres = Mux(
-      res.satPos(newCtr) && this.thres <= maxThres,
-      this.thres + 2.U,
-      Mux(res.satNeg(newCtr) && this.thres >= minThres, this.thres - 2.U, this.thres)
-    )
-    res.thres     := newThres
-    res.ctr.value := Mux(res.satPos(newCtr) || res.satNeg(newCtr), res.neutralVal, newCtr)
+    val res = Wire(new ScThreshold())
+    res.thres.value := this.thres.getUpdate(cause)
     res
   }
 }
@@ -53,23 +42,22 @@ class ScThreshold(implicit p: Parameters) extends ScBundle {
 object ScThreshold {
   def apply(implicit p: Parameters): ScThreshold = {
     val t = Wire(new ScThreshold())
-    t.ctr.value := t.neutralVal
-    t.thres     := t.initVal
+    t.thres.value := t.initVal
     t
   }
 }
 
 class PathTableSramWriteReq(val numSets: Int)(implicit p: Parameters) extends WriteReqBundle with HasScParameters {
-  val setIdx:    UInt         = UInt(log2Ceil(numSets).W)
-  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
+  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
+  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
 }
 
 class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle {
-  val valid:     Bool         = Bool()
-  val setIdx:    UInt         = UInt(log2Ceil(numSets / NumBanks).W)
-  val wayIdxVec: Vec[UInt]    = Vec(ResolveEntryBranchNumber, UInt(log2Ceil(NumWays).W))
-  val entryVec:  Vec[ScEntry] = Vec(ResolveEntryBranchNumber, new ScEntry())
+  val valid:    Bool         = Bool()
+  val setIdx:   UInt         = UInt(log2Ceil(numSets / NumBanks).W)
+  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
