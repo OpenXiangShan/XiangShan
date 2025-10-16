@@ -158,7 +158,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s0_flush        := s1_flush || s0_flushFromBpu(0)
 
   fromFtq.req.ready := s1_ready && io.fromICache.fetchReady
-  private val s0_fetchBlock = VecInit.tabulate(FetchPorts)(i => Wire(new FetchBlockInfo).fromFtqRequest(s0_ftqFetch(i)))
+  private val s0_fetchBlock = VecInit.tabulate(FetchPorts)(i =>
+    Wire(new FetchBlockInfo).fromFtqRequest(s0_ftqFetch(i), s0_flush || s0_flushFromBpu(i))
+  )
 
   /* *****************************************************************************
    * IFU Stage 1

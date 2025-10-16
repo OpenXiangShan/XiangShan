@@ -82,12 +82,12 @@ class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
     (byteOffset - instBytes.U)(FetchBlockInstOffsetWidth, instOffsetBits)
   }
 
-  def fromFtqRequest(ftqFetch: FetchRequestBundle): FetchBlockInfo = {
+  def fromFtqRequest(ftqFetch: FetchRequestBundle, flush: Bool): FetchBlockInfo = {
     val cfiOffset      = ftqFetch.takenCfiOffset.bits
     val taken          = ftqFetch.takenCfiOffset.valid
     val calcInstrRange = Fill(FetchBlockInstNum, 1.U(1.W)) >> (~cfiOffset).asUInt
     val calcFetchSize  = cfiOffset + 1.U(log2Ceil(FetchBlockInstNum + 1).W)
-    when(ftqFetch.valid && !taken) {
+    when(ftqFetch.valid && !taken && !flush) {
       assert(
         cfiOffset === getBasicBlockIdx(ftqFetch.nextStartVAddr, ftqFetch.startVAddr),
         "when not taken, cfiOffset must match fetch block range."
