@@ -13,7 +13,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
 import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.FuConfig._
 
 case class IssueBlockParams(
   // top down
@@ -308,6 +308,8 @@ case class IssueBlockParams(
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   def deqFuCfgs: Seq[Seq[FuConfig]] = exuBlockParams.map(_.fuConfigs)
+
+  def aluDeqNeedPickJump = (deqFuCfgs.size == 2) && deqFuCfgs.flatten.contains(AluCfg) && deqFuCfgs.flatten.contains(JmpCfg)
 
   def deqFuInterSect: Seq[FuConfig] = if (numDeq == 2) deqFuCfgs(0).intersect(deqFuCfgs(1)) else Seq()
 

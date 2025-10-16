@@ -259,11 +259,9 @@ package object xiangshan {
 
   // jump
   object JumpOpType {
-    def jal  = "b00".U
-    def jalr = "b01".U
-    def auipc = "b10".U
-//    def call = "b11_011".U
-//    def ret  = "b11_100".U
+    def jal  = ALUOpType.jal
+    def jalr = ALUOpType.jalr
+    def auipc = ALUOpType.auipc
     def jumpOpisJalr(op: UInt) = op(0)
     def jumpOpisAuipc(op: UInt) = op(1)
   }
@@ -343,8 +341,9 @@ package object xiangshan {
     def czero_nez  = "b111_0110".U
 
     // auipc/jal/jalr
-    def auipc      = "b111_1000".U
+    def jal        = "b111_1000".U
     def jalr       = "b111_1001".U
+    def auipc      = "b111_1010".U
 
     // misc optype
     def and        = "b100_0000".U

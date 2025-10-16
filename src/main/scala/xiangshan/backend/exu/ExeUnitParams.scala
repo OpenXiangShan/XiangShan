@@ -10,8 +10,9 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
-import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, FpScheduler, VecScheduler}
+import xiangshan.backend.fu.FuConfig.{BrhCfg, JmpCfg, needUncertainWakeupFuConfigs}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchedulerType, VecScheduler}
+
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -85,10 +86,10 @@ case class ExeUnitParams(
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
-  val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && name.contains("ALU")
+  val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && (name.contains("ALU") || name.contains("BJU"))
   val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VecScheduler] && name.contains("VFEX")
-  val isMemExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && !name.contains("ALU") || schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
+  val isMemExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && !name.contains("ALU") && !name.contains("BJU") || schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
 
   def needDataFromI2F: Boolean = {
     val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
@@ -183,14 +184,16 @@ case class ExeUnitParams(
     *
     * @return Map[ [[BigInt]], Latency]
     */
-  def fuLatencyMap: Map[FuType.OHType, Int] = {
+  def fuLatencyMap(addBJU: Boolean = false): Map[FuType.OHType, Int] = {
+    val addBJUFuConfigs = if (addBJU) fuConfigs :+ BrhCfg :+ JmpCfg else fuConfigs
     if (latencyCertain)
-      if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if(needOg2) addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
-      fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
+      addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
-      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigs")
-      latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      val latencyCertainFuConfigsAddBJU = if (addBJU) latencyCertainFuConfigs :+ BrhCfg :+ JmpCfg else latencyCertainFuConfigs
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddBJU")
+      latencyCertainFuConfigsAddBJU.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
@@ -208,7 +211,7 @@ case class ExeUnitParams(
     *
     * @return Set[Latency]
     */
-  def fuLatancySet: Set[Int] = fuLatencyMap.values.toSet
+  def fuLatancySet: Set[Int] = fuLatencyMap().values.toSet
 
   def wakeUpFuLatancySet: Set[Int] = wakeUpFuLatencyMap.values.toSet
 
