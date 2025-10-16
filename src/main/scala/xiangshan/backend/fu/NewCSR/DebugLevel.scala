@@ -375,8 +375,8 @@ object TriggerUtil {
     val hasTriggerFire    = triggerCanFireVec.asUInt.orR
     val triggerFireOH     = PriorityEncoderOH(triggerCanFireVec)
     val triggerFireAction = PriorityMux(triggerFireOH, actionVec).asUInt
-    val actionIsBPExp     = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt)
-    val actionIsDmode     = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
+    val actionIsBPExp     = hasTriggerFire && (triggerFireAction === TriggerAction.BreakpointExp)
+    val actionIsDmode     = hasTriggerFire && (triggerFireAction === TriggerAction.DebugMode)
     val breakPointExp     = actionIsBPExp && triggerCanRaiseBpExp
 
     // todo: add more for trace
