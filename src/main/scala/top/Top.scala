@@ -500,7 +500,7 @@ object TopMain extends App {
 
     // generate difftest bundles (w/o DifftestTopIO)
     if (enableDifftest) {
-      DifftestModule.finish("XiangShan", false)
+      DifftestModule.collect("XiangShan")
     }
   }
 
