@@ -20,7 +20,7 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait Helpers extends HasScParameters {
   def sign(x: SInt): Bool = x(x.getWidth - 1)

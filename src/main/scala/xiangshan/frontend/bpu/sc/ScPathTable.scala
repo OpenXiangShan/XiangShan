@@ -23,7 +23,7 @@ import utility.sram.SRAMTemplate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.WriteBuffer
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {

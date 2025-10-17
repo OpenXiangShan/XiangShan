@@ -13,11 +13,11 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.phr
+package xiangshan.frontend.bpu.history.phr
 
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-abstract class PhrBundle(implicit p: Parameters) extends BpuBundle
+abstract class PhrBundle(implicit p: Parameters) extends BpuBundle with HasPhrParameters
 abstract class PhrModule(implicit p: Parameters) extends BpuModule with HasPhrParameters

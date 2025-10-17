@@ -36,15 +36,31 @@ case class FrontendParameters(
 ) {
   // according to style guide, this should be in `trait HasBpuParameters` and named `PhrHistoryLength`,
   // but, we need to use this value in `class PhrPtr` definition, so we cannot put it in a trait.
+  def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
   def getPhrHistoryLength: Int = {
-    def nextMultipleOf(number: Int, factor: Int): Int = (number + factor - 1) / factor * factor
 
     def MaxTableHistoryLength: Int = (
       bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
-        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
+        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength) ++
+        bpuParameters.scParameters.TableInfos.map(_.HistoryLength)
     ).max
 
     def Shamt:   Int = bpuParameters.phrParameters.Shamt
+    def FtqSize: Int = ftqParameters.FtqSize
+
+    // when ftq is full, Phr can overflow, so we need some extra bits to save Phr overflow bits for error-recovery
+    // magic, don't touch
+    def FtqFullFix:   Int = 4
+    def HistoryAlign: Int = bpuParameters.phrParameters.HistoryAlign
+
+    nextMultipleOf(MaxTableHistoryLength + Shamt * FtqSize + FtqFullFix, HistoryAlign)
+  }
+
+  def getGhrHistoryLength: Int = {
+    def MaxTableHistoryLength: Int =
+      bpuParameters.scParameters.TableInfos.map(_.HistoryLength).max
+
+    def Shamt:   Int = bpuParameters.NumBtbResultEntries
     def FtqSize: Int = ftqParameters.FtqSize
 
     // when ftq is full, Phr can overflow, so we need some extra bits to save Phr overflow bits for error-recovery

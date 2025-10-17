@@ -18,9 +18,9 @@ package xiangshan.frontend.bpu
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
+import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
-import xiangshan.frontend.bpu.phr.PhrParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
@@ -43,7 +43,9 @@ case class BpuParameters(
     scParameters:     ScParameters = ScParameters(),
     ittageParameters: IttageParameters = IttageParameters(),
     rasParameters:    RasParameters = RasParameters()
-) {}
+) {
+  def NumBtbResultEntries: Int = mbtbParameters.NumWay * mbtbParameters.NumAlignBanks
+}
 
 trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
@@ -58,7 +60,9 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
-  def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * bpuParameters.mbtbParameters.NumAlignBanks
+  def GhrHistoryLength: Int = frontendParameters.getGhrHistoryLength
+
+  def NumBtbResultEntries: Int = bpuParameters.NumBtbResultEntries
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =

@@ -27,10 +27,11 @@ import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.history.ghr.Ghr
+import xiangshan.frontend.bpu.history.phr.Phr
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
-import xiangshan.frontend.bpu.phr.Phr
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
@@ -56,6 +57,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
+  private val ghr         = Module(new Ghr)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -328,8 +330,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
+  // ghr meta
+  private val s3_ghrMeta = ghr.io.ghrPtr
+
   private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
   s3_speculationMeta.phrHistPtr := s3_phrMeta
+  s3_speculationMeta.ghrHistPtr := s3_ghrMeta
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
@@ -337,6 +343,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.tage   := s3_tageMeta
   s3_meta.ras    := s3_rasMeta
   s3_meta.phr    := s3_phrMeta
+  s3_meta.ghr    := s3_ghrMeta
   s3_meta.ittage := s3_ittageMeta
   s3_meta.sc     := s3_scMeta
 
@@ -399,6 +406,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(trainFoldedPhr)
   dontTouch(phrsWireValue)
   dontTouch(redirectPhrValue)
+
+  // ghr update
+  ghr.io.update.valid        := s3_fire
+  ghr.io.update.taken        := s3_taken
+  ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
+  ghr.io.update.position     := s3_mbtbResult.positions
+  ghr.io.redirect.valid      := redirect.valid
+  ghr.io.redirect.ghrPtr     := redirect.bits.speculationMeta.ghrHistPtr
+  private val ghist = ghr.io.ghist
+  private val redirectGhist =
+    (Cat(ghr.io.ghist, ghr.io.ghist) >> (redirect.bits.speculationMeta.ghrHistPtr.value + 1.U))(GhrHistoryLength - 1, 0)
+  dontTouch(redirectGhist)
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)
