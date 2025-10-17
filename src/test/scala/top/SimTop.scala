@@ -30,13 +30,13 @@ import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
 import system.SoCParamsKey
 
-class SimTop(implicit p: Parameters) extends Module {
+class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
   // Don't allow the top-level signals to be optimized out,
-  // so that we can re-use this SimTop for any generated Verilog RTL.
+  // so that we can re-use this XiangShanSim for any generated Verilog RTL.
   dontTouch(soc.io)
 
   if (!l_soc.module.dma.isEmpty) {
@@ -88,23 +88,28 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
-  val difftest = DifftestModule.finish("XiangShan")
+  override def cpuName: Option[String] = Some("XiangShan")
 
-  simMMIO.io.uart <> difftest.uart
+  val uart = IO(new UARTIO)
+  simMMIO.io.uart <> uart
 
-  val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
-  val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
-  val hasPerfLog = hasPerf || hasLog
-  val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
-  val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
-  val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
-  val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
+  override def connectTopIOs(difftest: DifftestTopIO): Unit = {
+    difftest.uart <> uart
 
-  XSLog.collect(timer, logEnable, clean, dump)
+    val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+    val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+    val hasPerfLog = hasPerf || hasLog
+    val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
+    val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
+    val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
+    val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
+
+    XSLog.collect(timer, logEnable, clean, dump)
+  }
 }
 
-object SimTop extends App {
-  // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+object XiangShanSim extends App {
+  // Keep this the same as TopMain except that XiangShanSim is used here instead of XSTop
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   // tools: init to close dpi-c when in fpga
@@ -116,7 +121,7 @@ object SimTop extends App {
 
   Generator.execute(
     firrtlOpts,
-    DisableMonitors(p => new SimTop()(p))(config),
+    DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
     firtoolOpts
   )
 
