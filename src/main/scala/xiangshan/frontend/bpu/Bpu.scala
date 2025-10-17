@@ -300,8 +300,36 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
 
-  private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
-  private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
+  private val (s1_useFallThrough, s1_useABTB, s1_useUBTB) = {
+    val chiselType = MuxCase(
+      Cat(true.B, false.B, false.B),
+      Seq(
+        ubtb.io.prediction.taken -> Cat(false.B, false.B, true.B)
+//        abtb.io.prediction.taken -> Cat(false.B, true.B, false.B)
+      )
+    )
+    (chiselType(2), chiselType(1), chiselType(0))
+  }
+  private val (s3_useFallThrough, s3_useMBTB, s3_useITTAGE, s3_useRAS) = {
+    val chiselType = MuxCase(
+      Cat(true.B, false.B, false.B, false.B),
+      Seq(
+        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit)
+          -> Cat(false.B, false.B, true.B, false.B),
+        s3_taken -> Cat(false.B, true.B, false.B, false.B)
+      )
+    )
+    (chiselType(3), chiselType(2), chiselType(1), chiselType(0))
+  }
+
+  private val s2_s1UseFallThrough = RegEnable(s1_useFallThrough, s1_fire)
+  private val s2_s1UseABTB        = RegEnable(s1_useABTB, s1_fire)
+  private val s2_s1UseUBTB        = RegEnable(s1_useUBTB, s1_fire)
+  private val s2_s1Prediction     = RegEnable(s1_prediction, s1_fire)
+  private val s3_s1UseFallThrough = RegEnable(s2_s1UseFallThrough, s2_fire)
+  private val s3_s1UseABTB        = RegEnable(s2_s1UseABTB, s2_fire)
+  private val s3_s1UseUBTB        = RegEnable(s2_s1UseUBTB, s2_fire)
+  private val s3_s1Prediction     = RegEnable(s2_s1Prediction, s2_fire)
 
   s3_override := s3_valid && !s3_prediction.isIdentical(s3_s1Prediction)
 
@@ -486,7 +514,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     ),
     io.toFtq.prediction.fire,
     0,
-    FetchBlockInstNum
+    FetchBlockInstNum + 1
   )
   XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
@@ -498,8 +526,125 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s3_use_ittage",
     s3_fire && s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit && !s3_firstTakenBranchIsReturn
   )
+  XSPerfAccumulate(
+    "s3_use_mbtb_tage",
+    s3_fire && s3_taken && s3_prediction.attribute.isConditional
+  )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
+
+  // taken mismatch
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3Tage_s1fallThrough",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && !s3_s1Prediction.taken &&
+      s3_takenBranchAttribute === BranchAttribute.Conditional
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3nonCond_s1fallThrough",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && !s3_s1Prediction.taken &&
+      !(s3_takenBranchAttribute === BranchAttribute.Conditional)
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fallThrough_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      !s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fallThrough_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      !s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_s1UseABTB
+  )
+  // position mismatch
+  XSPerfAccumulate(
+    "s3Override_positionMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_positionMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
+      s3_s1UseABTB
+  )
+  // attribute mismatch
+  XSPerfAccumulate(
+    "s3Override_attributeMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_attributeMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken === s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
+      s3_s1UseABTB
+  )
+  // target mismatch
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_useMBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3ITTage_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_useITTAGE
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3RAS_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_useRAS
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_useMBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3ITTage_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_useITTAGE
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3RAS_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_useRAS
+  )
 
   /* *** perf train *** */
   private val t0_mispredictBranch = train.bits.mispredictBranch

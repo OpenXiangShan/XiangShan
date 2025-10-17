@@ -27,6 +27,8 @@ import xiangshan.frontend.bpu.BranchInfo
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  // used for perf counters
+  val predBranchInfo: Option[BranchInfo] = if (!env.FPGAPlatform) Some(new BranchInfo) else None
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {

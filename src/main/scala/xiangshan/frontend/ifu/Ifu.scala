@@ -839,6 +839,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.checkPerfInfo.misPred          := checkerRedirect.valid
   perfAnalyzer.io.perfInfo.checkPerfInfo.selectBlock      := checkerRedirect.bits.selectBlock
   perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset     := checkerRedirect.bits.endOffset
+  perfAnalyzer.io.perfInfo.checkPerfInfo.uncacheBubble    := s4_reqIsUncache && !s4_uncacheCanGo
 
   perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := io.toIBuffer.fire
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
