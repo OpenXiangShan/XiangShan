@@ -21,6 +21,7 @@ import math.pow
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
 import utility.ParallelPriorityEncoder
+import utility.XSPerfAccumulate
 import xiangshan.ValidUndirectioned
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
@@ -91,7 +92,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val shiftNum              = io.req.bits.shiftNum
   private val (pds, pc, jumpOffset) = (io.req.bits.instrPds, io.req.bits.instrPc, io.req.bits.instrJumpOffset)
 
-  private val jalFaultVec, jalrFaultVec, retFaultVec, notCfiTaken = Wire(Vec(IBufferEnqueueWidth, Bool()))
+  private val jalFaultVec, jalrFaultVec, retFaultVec, notCfiTaken, targetFaultVec =
+    Wire(Vec(IBufferEnqueueWidth, Bool()))
 
   /** Remask faults can occur alongside other faults, whereas other faults are mutually exclusive.
     * Therefore, for non-remask faults, a fixed fault mask must be used to ensure that only one fault
@@ -113,6 +115,17 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   notCfiTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
     instrValid(i) && pd.notCFI && isPredTaken(i) && !ignore(i)
   })
+  targetFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    pd.brAttribute.isDirect && instrValid(i) && isPredTaken(i) && !ignore(i) && (
+      (firstPredTaken && (i.U === firstTakenIdx) && (firstPredTarget =/= (pc(i) + jumpOffset(i)).asTypeOf(
+        PrunedAddr(VAddrBits)
+      ))) ||
+        (secondPredTaken && (i.U === secondTakenIdx) && (secondPredTarget =/= (pc(i) + jumpOffset(i)).asTypeOf(
+          PrunedAddr(VAddrBits)
+        )))
+    )
+  })
+
   private val remaskFault =
     VecInit((0 until IBufferEnqueueWidth).map(i =>
       jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i) || notCfiTaken(i)
@@ -220,19 +233,21 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.checkerRedirect.bits.endOffset := endOffsetNext
 
   // --------- These registers are only for performance debugging purposes ---------------------/
-  private val jalFaultVecNext  = RegEnable(jalFaultVec, io.req.valid)
-  private val jalrFaultVecNext = RegEnable(jalrFaultVec, io.req.valid)
-  private val retFaultVecNext  = RegEnable(retFaultVec, io.req.valid)
-  private val notCFITakenNext  = RegEnable(notCfiTaken, io.req.valid)
+  private val jalFaultVecNext    = RegEnable(jalFaultVec, io.req.valid)
+  private val jalrFaultVecNext   = RegEnable(jalrFaultVec, io.req.valid)
+  private val retFaultVecNext    = RegEnable(retFaultVec, io.req.valid)
+  private val notCFITakenNext    = RegEnable(notCfiTaken, io.req.valid)
+  private val targetFaultVecNext = RegEnable(targetFaultVec, io.req.valid)
 
   private val faultType = MuxCase(
     PreDecodeFaultType.NoFault,
     Seq(
-      jalFaultVecNext(mispredIdxNext.bits)  -> PreDecodeFaultType.JalFault,
-      jalrFaultVecNext(mispredIdxNext.bits) -> PreDecodeFaultType.JalrFault,
-      retFaultVecNext(mispredIdxNext.bits)  -> PreDecodeFaultType.RetFault,
-      notCFITakenNext(mispredIdxNext.bits)  -> PreDecodeFaultType.NotCfiFault,
-      invalidTakenNext(mispredIdxNext.bits) -> PreDecodeFaultType.InvalidTaken
+      jalFaultVecNext(mispredIdxNext.bits)    -> PreDecodeFaultType.JalFault,
+      jalrFaultVecNext(mispredIdxNext.bits)   -> PreDecodeFaultType.JalrFault,
+      retFaultVecNext(mispredIdxNext.bits)    -> PreDecodeFaultType.RetFault,
+      notCFITakenNext(mispredIdxNext.bits)    -> PreDecodeFaultType.NotCfiFault,
+      targetFaultVecNext(mispredIdxNext.bits) -> PreDecodeFaultType.TargetFault,
+      invalidTakenNext(mispredIdxNext.bits)   -> PreDecodeFaultType.InvalidTaken
     )
   )
 

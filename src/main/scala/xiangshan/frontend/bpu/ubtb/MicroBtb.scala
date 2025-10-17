@@ -218,6 +218,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   replacer.io.trainTouch.bits  := t1_updateIdx
 
   /* *** perf *** */
+  XSPerfAccumulate("predHit", s1_hit && s1_fire)
+  XSPerfAccumulate("predMiss", !s1_hit && s1_fire)
+
   XSPerfAccumulate("trainHitEntries", t0_valid && t0_realHit)
   XSPerfAccumulate("trainHitT1Update", t0_valid && t0_hitT1Update)
   XSPerfAccumulate("trainHitT1Victim", t0_valid && t0_hitT1Victim)
