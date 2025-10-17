@@ -456,4 +456,86 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
         sig.ram_ctl := dft.ram_ctl
       }
   }
+
+  // XSPerfCounters: Frontend Total
+  XSPerfAccumulate(
+    "numCycles",
+    true.B
+  )
+  XSPerfAccumulate(
+    "validCycles",
+    ibuffer.io.out.map(_.valid && io.backend.canAccept).reduce(_ || _)
+  )
+  XSPerfAccumulate(
+    "validInstrs",
+    PopCount(ibuffer.io.out.map(_.valid && io.backend.canAccept))
+  )
+  XSPerfHistogram(
+    "validInstrsDist",
+    PopCount(ibuffer.io.out.map(_.valid)),
+    io.backend.canAccept,
+    0,
+    DecodeWidth + 1
+  )
+  XSPerfAccumulate(
+    "branchMispredicts",
+    io.backend.toFtq.redirect.valid &&
+      io.backend.toFtq.redirect.bits.isMisPred
+  )
+  // TODO: doubleLine
+  XSPerfAccumulate(
+    "fetchedCacheLines",
+    Mux(
+      icache.io.toIfu.fetchResp.fire,
+      Mux(icache.io.toIfu.fetchResp.bits.doubleline, 2.U, 1.U),
+      0.U
+    )
+  )
+
+  // XSPerfCounters: Frontend Invalid
+  XSPerfAccumulate(
+    "stallCycles_fetch",
+    !ftq.io.toIfu.req.fire
+  )
+  XSPerfAccumulate(
+    "stallCycles_fetch_ftqNotvalid",
+    !ftq.io.toIfu.req.valid
+  )
+  XSPerfAccumulate(
+    "stallCycles_fetch_ifuNotReady",
+    !ifu.io.fromFtq.req.ready
+  )
+  XSPerfAccumulate(
+    "stallCycles_decodeFull",
+    !io.backend.canAccept
+  )
+  XSPerfAccumulate(
+    "stallCycles_ibufferFull",
+    ibuffer.io.full
+  )
+  XSPerfAccumulate(
+    "squashCycles",
+    io.backend.toFtq.redirect.valid ||
+      ifu.io.toFtq.wbRedirect.valid
+  )
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_preDecode",
+    ifu.io.toFtq.wbRedirect.valid
+  )
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect",
+    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.isMisPred
+  )
+  XSPerfAccumulate(
+    "squashCycles_memVio",
+    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.debugIsMemVio
+  )
+  XSPerfAccumulate(
+    "squashCycles_interrupt",
+    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.interrupt
+  )
+  XSPerfAccumulate(
+    "squashCycles_backendException",
+    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.hasBackendFault
+  )
 }

@@ -43,6 +43,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val selectBlock:   Bool      = Bool()
       val misPred:       Bool      = Bool()
       val misEndOffset:  UInt      = UInt(log2Ceil(FetchBlockInstNum).W)
+      val uncacheBubble: Bool      = Bool()
     }
 
     class IfuTopdownIn(implicit p: Parameters) extends IfuBundle {
@@ -129,7 +130,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)
-  XSPerfAccumulate("fetch_flush_wb_redirect", io.ifuPerfCtrl.backendRedirect)
+  XSPerfAccumulate("fetch_flush_backend_redirect", io.ifuPerfCtrl.backendRedirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", io.ifuPerfCtrl.ifuWbRedirect)
   XSPerfAccumulate("fetch_flush_from_bpu", io.ifuPerfCtrl.fromBpuFlush)
   XSPerfAccumulate("fetch_bubble_icache_not_resp", io.ifuPerfCtrl.fromICacheBubble)
@@ -155,12 +156,12 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   }
 
   for (i <- 0 until FetchPorts) {
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_jalFault", checkJalFault(i))
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_jalrFault", checkJalrFault(i))
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_retFault", checkRetFault(i))
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_targetFault", checkTargetFault(i))
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_notCFIFault", checkNotCFIFault(i))
-    XSPerfAccumulate(f"fetch${i}_predecode_flush_invalidTakenFault", checkInvalidTaken(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_jalFault_fetchPort_${i}", checkJalFault(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_jalrFault_fetchPort_${i}", checkJalrFault(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_retFault_fetchPort_${i}", checkRetFault(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_targetFault_fetchPort_${i}", checkTargetFault(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_notCFIFault_fetchPort_${i}", checkNotCFIFault(i))
+    XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_invalidTakenFault_fetchPort_${i}", checkInvalidTaken(i))
 
     XSDebug(
       checkRetFault(i),
@@ -197,6 +198,8 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     FetchBlockInstNum + 1,
     1
   )
+
+  XSPerfAccumulate("stallCycles_fetch_uncache", io.perfInfo.checkPerfInfo.uncacheBubble)
 
   // DB
   private val hartId                     = p(XSCoreParamsKey).HartId

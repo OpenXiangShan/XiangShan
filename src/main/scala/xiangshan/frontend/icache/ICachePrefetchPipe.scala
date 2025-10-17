@@ -500,8 +500,24 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // the number of prefetch request sent to missUnit
   XSPerfAccumulate("hwMiss", toMiss.fire && !s2_isSoftPrefetch)
   XSPerfAccumulate("swMiss", toMiss.fire && s2_isSoftPrefetch)
-  XSPerfAccumulate("missUnitStall", toMiss.valid && !toMiss.ready)
+  XSPerfAccumulate("stallCycles_fetch_icachePrefetch_missUnit", toMiss.valid && !toMiss.ready)
 
   // itlb miss bubble
-  XSPerfAccumulate("itlbMissBubble", s1_valid && !tlbFinish)
+  XSPerfAccumulate(
+    "stallCycles_fetch_icachePrefetch_metaArray",
+    s0_valid && !toMeta.ready
+  )
+  XSPerfAccumulate(
+    "stallCycles_fetch_icachePrefetch_itlbNotReady",
+    s0_valid && !toItlb.ready
+  )
+  XSPerfAccumulate(
+    "stallCycles_fetch_icachePrefetch_itlbMiss",
+    s1_valid && !tlbFinish
+  )
+  XSPerfAccumulate(
+    "stallCycles_fetch_icachePrefetch_metaResend",
+    s1_valid && tlbFinish && !toMeta.ready &&
+      (s1_state === S1FsmState.ItlbResend || s1_state === S1FsmState.MetaResend)
+  )
 }

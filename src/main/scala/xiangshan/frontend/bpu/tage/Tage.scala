@@ -20,6 +20,8 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
+import utility.ParallelSelectTwo
+import utility.SelectTwoInterRes
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -140,19 +142,47 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
           (hit, takenCtr)
       }
       val hitTableMask = result.map(_._1)
-      val hasProvider  = hitTableMask.reduce(_ || _)
-      val pred         = Mux1H(PriorityEncoderOH(hitTableMask.reverse), result.map(_._2)).isPositive
-      (hasProvider, pred)
+//      val hasProvider  = hitTableMask.reduce(_ || _)
+//      val pred         = Mux1H(PriorityEncoderOH(hitTableMask.reverse), result.map(_._2)).isPositive
+      val selectFirstTwo = ParallelSelectTwo(hitTableMask.reverse.zipWithIndex.map { case (hit, index) =>
+        SelectTwoInterRes(hit, (hitTableMask.length - index - 1).U)
+      })
+      val hasProvider    = selectFirstTwo.hasOne
+      val hasAlter       = selectFirstTwo.hasTwo
+      val providerOffset = selectFirstTwo.first
+      val alterOffset    = selectFirstTwo.second
+      val providerPred   = Mux1H(UIntToOH(providerOffset), result.map(_._2)).isPositive
+      val alterPred      = Mux1H(UIntToOH(alterOffset), result.map(_._2)).isPositive
+      (hasProvider, providerPred, hasAlter, alterPred, hitTableMask)
   }
 
-  private val s2_condTakenMask = s2_mbtbHitCondMask.zip(s2_mbtbPositions).zip(s2_tableResult).map {
-    case ((hit, position), result) =>
-      val hasProvider = result._1
-      val pred        = result._2
-      val altPred     = s2_baseTableCtrs(position).isPositive
-//      hit && Mux(hasProvider, pred, altPred)
-      hit && altPred // temporarily only use base table prediction
-  }
+  private val s2_condZippedInfo =
+    s2_mbtbHitCondMask.zip(s2_mbtbPositions).zip(s2_tableResult).map {
+      // FIXME: temporarily only use base table prediction
+      // TODO: useAltOnNA
+      case ((hit, position), result) =>
+        val hasProvider  = false.B
+        val providerPred = result._2
+        val hasAlter     = false.B
+        val alterPred    = result._4
+        val basePred     = s2_baseTableCtrs(position).isPositive
+        val providerWeak = false.B
+        val useAlt       = !hasProvider || providerWeak
+        ( // takenMask
+          hit && Mux1H(Seq(
+            (!useAlt && hasProvider) -> providerPred,
+            (useAlt && hasAlter)     -> alterPred,
+            (useAlt && !hasAlter)    -> basePred
+          )),
+          // used for XSPerf
+          useAlt,
+          hasProvider,
+          hasAlter
+        )
+    }
+
+  private val (s2_condTakenMask, s2_condUseAlt, s2_condHasProvider, s2_condHasAlt) =
+    (s2_condZippedInfo.map(_._1), s2_condZippedInfo.map(_._2), s2_condZippedInfo.map(_._3), s2_condZippedInfo.map(_._4))
 
   io.condTakenMask := s2_condTakenMask
 
@@ -368,7 +398,53 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  XSPerfAccumulate("total_train", t0_valid)
+  XSPerfAccumulate("tageTable_train", t0_valid)
   XSPerfAccumulate("read_conflict", t0_readBankConflict)
+
+  XSPerfAccumulate(
+    "pred_useProvider",
+    Mux(
+      RegNext(s1_fire),
+      PopCount(s2_condUseAlt.zip(s2_condHasProvider).map { case (a, b) => !a && b }),
+      0.U
+    )
+  )
+  XSPerfAccumulate(
+    "pred_useAlt",
+    Mux(
+      RegNext(s1_fire),
+      PopCount(s2_condUseAlt.zip(s2_condHasAlt).map { case (a, b) => a && b }),
+      0.U
+    )
+  )
+  XSPerfAccumulate(
+    "pred_useBase",
+    Mux(
+      RegNext(s1_fire),
+      PopCount(s2_mbtbHitCondMask.zip(s2_condUseAlt).zip(s2_condHasAlt).map { case ((hit, p), a) =>
+        hit && !p && !a
+      }),
+      0.U
+    )
+  )
+  XSPerfAccumulate(
+    "pred_mbtb_cond_miss",
+    RegNext(s1_fire) && s2_mbtbHitCondMask.reduce(!_ && !_)
+  )
+
+  TableInfos.indices.foreach { index =>
+    val tableHitCount = VecInit.tabulate(NumBtbResultEntries) { index =>
+      PopCount(s2_tableResult.map(_._5).map(_(index)))
+    }
+    XSPerfAccumulate(
+      s"pred_hit_table_${index}",
+      Mux(
+        RegNext(s1_fire),
+        tableHitCount(index),
+        0.U
+      )
+    )
+  }
+
   // TODO: add more
 }
