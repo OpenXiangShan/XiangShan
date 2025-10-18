@@ -824,7 +824,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
-  val pf_ctrl = Output(new PrefetchControlBundle)
+  val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
@@ -1179,8 +1179,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && extra_flag_access
-    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && !extra_flag_access
+    prefetcherMonitor.io.validity.valid := extra_flag_valid
+    prefetcherMonitor.io.validity.bits.access := extra_flag_access
+    prefetcherMonitor.io.validity.bits.pf_source := extra_flag_prefetch
   }
 
   // write extra meta
@@ -1374,10 +1375,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
-  prefetcherMonitor.io.timely.total_prefetch := ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _)
-  prefetcherMonitor.io.timely.late_hit_prefetch := ldu.map(_.io.prefetch_info.naive.late_hit_prefetch).reduce(_ || _)
-  prefetcherMonitor.io.timely.late_miss_prefetch := missQueue.io.prefetch_info.naive.late_miss_prefetch
-  prefetcherMonitor.io.timely.prefetch_hit := PopCount(ldu.map(_.io.prefetch_info.naive.prefetch_hit))
+  for (w <- 0 until LoadPipelineWidth) {
+    prefetcherMonitor.io.timely(w).total_prefetch := ldu(w).io.prefetch_info.naive.total_prefetch
+    prefetcherMonitor.io.timely(w).late_hit_prefetch := ldu(w).io.prefetch_info.naive.late_hit_prefetch
+    prefetcherMonitor.io.timely(w).pf_source := ldu(w).io.prefetch_info.naive.pf_source
+    prefetcherMonitor.io.timely(w).prefetch_hit := ldu(w).io.prefetch_info.naive.prefetch_hit
+    prefetcherMonitor.io.timely(w).hit_source := ldu(w).io.prefetch_info.naive.hit_source
+    prefetcherMonitor.io.timely(w).late_miss_prefetch := missQueue.io.prefetch_info.naive.late_miss_prefetch
+    prefetcherMonitor.io.timely(w).miss_source := missQueue.io.prefetch_info.naive.pf_source
+  }
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
   XSPerfAccumulate("useless_prefetch", ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _) && !(ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _)))
   XSPerfAccumulate("useful_prefetch", ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _))
