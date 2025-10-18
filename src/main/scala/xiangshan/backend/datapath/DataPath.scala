@@ -704,7 +704,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)
         sinkData.pc.get := pcRdata(index)
         val aluSinkData = toExu(i)(0).bits
-        aluSinkData.pc.get := pcRdata(index)
+        aluSinkData.pc.foreach(_ := pcRdata(index))
       }
       if (sinkData.params.needTarget) {
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)

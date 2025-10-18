@@ -84,6 +84,7 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
 
   for ((iqCfg, i) <- params.allIssueParams.zipWithIndex) {
     iqCfg.bindBackendParam(params)
+    iqCfg.exuBlockParams.map(_.bindIssueBlockParam(iqCfg))
   }
 
   for ((exuCfg, i) <- params.allExuParams.zipWithIndex) {
