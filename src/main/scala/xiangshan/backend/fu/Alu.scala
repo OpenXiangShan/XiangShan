@@ -172,7 +172,7 @@ class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   io.condRes := Mux(use_zero, 0.U, io.value)
 }
 
-class AluDataModule(implicit p: Parameters) extends XSModule {
+class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val pc = Input(UInt(XLEN.W))
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -348,7 +348,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val isRolw = isWiden &  func(3) &  func(2) & !func(0)
   val isRorw = isWiden &  func(3) &  func(2) &  func(0)
   val isZicond = ALUOpType.isZicond(func)
-  val isJmp = ALUOpType.isJmp(func)
+  val isJmp = if (aluNeedPc) ALUOpType.isJmp(func) else false.B
 
   val aluRes = Mux1H(Seq(
     isAdd -> add,

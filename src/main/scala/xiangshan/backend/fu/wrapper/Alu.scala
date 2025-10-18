@@ -7,7 +7,7 @@ import xiangshan.backend.fu.FuConfig
 import utility.{SignExt, ZeroExt}
 
 class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
-  private val aluModule = Module(new AluDataModule)
+  private val aluModule = Module(new AluDataModule(cfg.aluNeedPc))
 
   private val flushed = io.in.bits.ctrl.robIdx.needFlush(io.flush)
 
@@ -20,9 +20,12 @@ class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
     sink := source
   }
   aluModule.io.func := in.ctrl.fuOpType
-  aluModule.io.pc := Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(in.data.pc.get, cfg.destDataBits),
-    ZeroExt(in.data.pc.get, cfg.destDataBits)
+  aluModule.io.pc := (if (cfg.aluNeedPc) {
+    Mux(io.instrAddrTransType.get.shouldBeSext,
+      SignExt(in.data.pc.get, cfg.destDataBits),
+      ZeroExt(in.data.pc.get, cfg.destDataBits))
+  }
+  else 0.U
   )
   out.res.data := aluModule.io.result
 }

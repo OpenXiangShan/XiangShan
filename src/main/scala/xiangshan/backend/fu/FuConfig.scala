@@ -154,7 +154,7 @@ case class FuConfig (
 
   def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
 
-  def aluNeedPc: Boolean = Seq(FuType.alu).contains(fuType)
+  var aluNeedPc: Boolean = false
 
   def needFPUCtrl: Boolean = {
     import FuType._

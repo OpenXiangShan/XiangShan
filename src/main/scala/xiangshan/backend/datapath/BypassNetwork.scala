@@ -176,7 +176,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       println(s"[BypassNetWork] srcIdx = ${srcIdx}")
       val immALU = Wire(UInt(XLEN.W))
       immALU := imm
-      if (exuParm.hasAluFu && srcIdx == 1) {
+      if (exuParm.aluNeedPc && srcIdx == 1) {
         val isJmp = ALUOpType.isJmp(fuOpType)
         when(isAlu && isJmp) {
           // jalr's fuOpType(1) == 0

@@ -34,6 +34,7 @@ case class ExeUnitParams(
   // used in bypass to select data of exu output
   var exuIdx: Int = -1
   var backendParam: BackendParams = null
+  var issueBlockParam: IssueBlockParams = null
 
   val numIntSrc: Int = fuConfigs.map(_.numIntSrc).max
   val numFpSrc: Int = fuConfigs.map(_.numFpSrc).max
@@ -74,7 +75,7 @@ case class ExeUnitParams(
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
-  val aluNeedPc: Boolean = fuConfigs.map(_.aluNeedPc).reduce(_ || _)
+  def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
@@ -350,6 +351,10 @@ case class ExeUnitParams(
 
   def bindBackendParam(param: BackendParams): Unit = {
     backendParam = param
+  }
+
+  def bindIssueBlockParam(param: IssueBlockParams): Unit = {
+    issueBlockParam = param
   }
 
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {

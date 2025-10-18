@@ -29,7 +29,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.backend.fu.FuConfig.{I2fCfg, needUncertainWakeupFuConfigs}
+import xiangshan.backend.fu.FuConfig.{AluCfg, I2fCfg, needUncertainWakeupFuConfigs}
 import xiangshan.backend.issue.WakeupQueue
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -59,7 +59,12 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   val funcUnits = fuCfgs.map(cfg => {
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
+    if (exuParams.aluNeedPc && cfg.isAlu) {
+      AluCfg.aluNeedPc = true
+      println(s"[ExeUnit] ${exuParams.name}'s alu need pc")
+    }
     val module = cfg.fuGen(p, cfg)
+    AluCfg.aluNeedPc = false
     module
   })
 
