@@ -95,7 +95,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
         val late_load_hit = Output(Bool())
         val useless_prefetch = Output(Bool())
         val useful_prefetch = Output(Bool())
+        val pf_source = Output(UInt(L1PfSourceBits.W))
         val prefetch_hit = Output(Bool())
+        val hit_source = Output(UInt(L1PfSourceBits.W))
       }
 
       val fdp = new Bundle {
@@ -136,6 +138,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s0_valid = io.lsu.req.fire
   val s0_req = WireInit(io.lsu.req.bits)
+  val s0_pf_source = io.lsu.pf_source
   s0_req.vaddr := Mux(io.load128Req, Cat(io.lsu.req.bits.vaddr(io.lsu.req.bits.vaddr.getWidth - 1, 4), 0.U(4.W)), io.lsu.req.bits.vaddr)
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.vaddr
@@ -178,6 +181,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
+  val s1_pf_source = RegEnable(s0_pf_source, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
@@ -328,6 +332,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_valid = RegInit(false.B)
   val s2_valid_dup = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_pf_source = RegEnable(s1_pf_source, s1_fire)
   val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
@@ -504,6 +509,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
 
   val prefetch_hit = Wire(Bool()) // assigned in s3 for filtering
+  val hit_source = Wire(UInt(L1PfSourceBits.W))
 
   io.prefetch_info.naive.total_prefetch := total_prefetch
   io.prefetch_info.naive.late_hit_prefetch := late_hit_prefetch
@@ -511,7 +517,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_info.naive.late_prefetch_hit := late_prefetch_hit
   io.prefetch_info.naive.useless_prefetch := useless_prefetch
   io.prefetch_info.naive.useful_prefetch := useful_prefetch
+  io.prefetch_info.naive.pf_source := s2_pf_source
   io.prefetch_info.naive.prefetch_hit := prefetch_hit
+  io.prefetch_info.naive.hit_source := hit_source
 
   io.prefetch_info.fdp.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
   io.prefetch_info.fdp.pollution := io.prefetch_info.fdp.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
@@ -581,7 +589,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
-  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
+  io.prefetch_flag_write.bits.source := Mux(isPrefetchClear(s3_hit_prefetch), s3_hit_prefetch, ~s3_hit_prefetch)
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
   io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
@@ -593,6 +601,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   prefetch_hit := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  hit_source := s3_hit_prefetch
 
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
   XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)

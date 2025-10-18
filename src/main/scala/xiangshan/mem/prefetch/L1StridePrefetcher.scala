@@ -115,6 +115,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
+    val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
@@ -202,6 +203,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     decr_mode = false.B,
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
+    confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
     t_pc = 0xdeadbeefL.U,
     t_va = 0xdeadbeefL.U
@@ -213,6 +215,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     decr_mode = false.B,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
+    confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
     t_pc = 0xdeadbeefL.U,
     t_va = 0xdeadbeefL.U

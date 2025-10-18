@@ -115,16 +115,18 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val sink = UInt(SINK_BITS.W)
   val source = new L1PrefetchSource()
+  val confidence = UInt(1.W)
   // debug usage
   val trigger_pc = UInt(VAddrBits.W)
   val trigger_va = UInt(VAddrBits.W)
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
     res.region := get_region_tag(vaddr)
     res.sink := sink
     res.source.value := source
+    res.confidence := confidence
 
     res.trigger_pc := t_pc
     res.trigger_va := t_va
@@ -166,6 +168,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(DEPTH_BITS.W))
+    val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
@@ -349,6 +352,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     decr_mode = s2_decr_mode,
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STREAM,
+    confidence = io.confidence,
     t_pc = s2_pc,
     t_va = s2_vaddr
     )
@@ -359,6 +363,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     decr_mode = s2_decr_mode,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STREAM,
+    confidence = io.confidence,
     t_pc = s2_pc,
     t_va = s2_vaddr
     )
@@ -369,6 +374,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     decr_mode = s2_decr_mode,
     sink = SINK_L3,
     source = L1_HW_PREFETCH_STREAM,
+    confidence = io.confidence,
     t_pc = s2_pc,
     t_va = s2_vaddr
     )
