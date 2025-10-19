@@ -101,6 +101,9 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
+# Run on FPGA boards
+To run XiangShan nanhu-G core on FPGA boards, please see the NEXST project. The repository is available at: https://github.com/NEXST-TOOL/nexst.
+
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
