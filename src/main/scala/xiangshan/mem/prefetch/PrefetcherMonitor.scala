@@ -110,8 +110,8 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
   late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + late_miss_prefetch)
   prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + prefetch_hit)
 
-  val good_prefetch = io.validity.valid && io.validity.bits.access && Param.isMyType(io.validity.bits.pf_source)
-  val bad_prefetch = io.validity.valid && !io.validity.bits.access && Param.isMyType(io.validity.bits.pf_source)
+  val good_prefetch = io.validity.valid && io.validity.bits.access && (Param.isMyType(io.validity.bits.pf_source) || Param.isMyClearType(io.validity.bits.pf_source))
+  val bad_prefetch = io.validity.valid && !io.validity.bits.access && (Param.isMyType(io.validity.bits.pf_source) || Param.isMyClearType(io.validity.bits.pf_source))
   good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + good_prefetch)
   bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + bad_prefetch)
 
@@ -172,6 +172,9 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
     XSPerfAccumulate(s"${Param.name}_depth${t}", depth === t.U)
   }
   XSPerfAccumulate(s"${Param.name}_trigger_disable", trigger_disable)
+  XSPerfAccumulate(s"${Param.name}_trigger_late_hit", trigger_late_hit)
+  XSPerfAccumulate(s"${Param.name}_trigger_late_miss", trigger_late_miss)
+  XSPerfAccumulate(s"${Param.name}_trigger_bad_prefetch", trigger_bad_prefetch)
   XSPerfAccumulate(s"${Param.name}_prefetch_hit", prefetch_hit)
   XSPerfAccumulate(s"${Param.name}_disable_time", !enable)
 
@@ -215,4 +218,7 @@ class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSource
   override val name: String = "Stride"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_STRIDE
   override def isMyClearType(value: UInt) = value === L1_HW_PREFETCH_STRIDE_CLEAR
+
+  override val VALIDITY_CHECK_INTERVAL = 800
+  override val DISABLE_THRESHOLD = 700
 }
