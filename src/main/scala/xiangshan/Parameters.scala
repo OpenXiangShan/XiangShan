@@ -114,8 +114,8 @@ case class XSCoreParameters
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 224,
-  RabSize: Int = 256,
+  RobSize: Int = 352,
+  RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
@@ -125,7 +125,7 @@ case class XSCoreParameters
     numWrite = None,
   ),
   fpPreg: PregParams = FpPregParams(
-    numEntries = 192,
+    numEntries = 256,
     numRead = None,
     numWrite = None,
   ),
