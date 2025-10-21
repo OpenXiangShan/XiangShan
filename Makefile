@@ -76,7 +76,7 @@ MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
 
 # common chisel args
 MFC_ARGS = --target $(CHISEL_TARGET) \
-           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none --default-layer-specialization=enable"
+           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
@@ -196,9 +196,9 @@ endif
 
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
-DEBUG_ARGS   += --enable-difftest
-override PLDM_ARGS += --enable-difftest
+RELEASE_ARGS += --fpga-platform --disable-all --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
+DEBUG_ARGS   += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
+override PLDM_ARGS += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
