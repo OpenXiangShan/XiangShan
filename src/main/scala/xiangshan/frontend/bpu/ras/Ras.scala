@@ -53,7 +53,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
-  private val stack = Module(new RasStack(StackSize, SpecQueueSize)).io
+  private val stack = Module(new RasStack).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
   // io.specIn.valid = s3_fire
   private val stackNearOverflow = stack.specNearOverflow
@@ -124,7 +124,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     XSDebug(specFire, "\n")
   }
   XSDebug(specFire, "  index       addr           ctr   (committed part)\n")
-  for (i <- 0 until StackSize) {
+  for (i <- 0 until CommitStackSize) {
     XSDebug(
       specFire,
       "  (%d)   0x%x      %d",

@@ -131,8 +131,8 @@ class MinimalConfig(n: Int = 1) extends Config(
               TagWidth = 7
             ),
             rasParameters = RasParameters(
-              StackSize = 8,
-              SpecSize = 16
+              CommitStackSize = 8,
+              SpecQueueSize = 16
             ),
           ),
           ftqParameters = FtqParameters(
