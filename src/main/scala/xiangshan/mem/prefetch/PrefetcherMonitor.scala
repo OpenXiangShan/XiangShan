@@ -88,7 +88,7 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val total_prefetch_cnt = RegInit(0.U((log2Up(Param.TIMELY_CHECK_INTERVAL) + 1).W))
   val late_hit_prefetch_cnt = RegInit(0.U((log2Up(Param.TIMELY_CHECK_INTERVAL) + 1).W))
   val late_miss_prefetch_cnt = RegInit(0.U((log2Up(Param.TIMELY_CHECK_INTERVAL) + 1).W))
-  val prefetch_hit_cnt = RegInit(0.U(32.W))
+  // val prefetch_hit_cnt = RegInit(0.U(32.W))
 
   val good_prefetch_cnt = RegInit(0.U((log2Up(Param.VALIDITY_CHECK_INTERVAL) + 1).W))
   val bad_prefetch_cnt = RegInit(0.U((log2Up(Param.VALIDITY_CHECK_INTERVAL) + 1).W))
@@ -104,14 +104,14 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val total_prefetch = io.timely.map(t => t.total_prefetch && Param.isMyType(t.pf_source)).reduce(_ || _)
   val late_hit_prefetch = io.timely.map(t => t.late_hit_prefetch && Param.isMyType(t.hit_source)).reduce(_ || _)
   val late_miss_prefetch = io.timely.map(t => t.late_miss_prefetch && Param.isMyType(t.miss_source)).reduce(_ || _)
-  val prefetch_hit = io.timely.map(t => t.prefetch_hit && (Param.isMyType(t.hit_source) || Param.isMyClearType(t.hit_source))).reduce(_ || _)
+  // val prefetch_hit = io.timely.map(t => t.prefetch_hit && (Param.isMyType(t.hit_source) || Param.isMyClearType(t.hit_source))).reduce(_ || _)
   total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
   late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + late_hit_prefetch)
   late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + late_miss_prefetch)
-  prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + prefetch_hit)
+  // prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + prefetch_hit)
 
-  val good_prefetch = io.validity.valid && io.validity.bits.access && (Param.isMyType(io.validity.bits.pf_source) || Param.isMyClearType(io.validity.bits.pf_source))
-  val bad_prefetch = io.validity.valid && !io.validity.bits.access && (Param.isMyType(io.validity.bits.pf_source) || Param.isMyClearType(io.validity.bits.pf_source))
+  val good_prefetch = io.timely.map(t => t.prefetch_hit && Param.isMyType(t.hit_source)).reduce(_ || _)
+  val bad_prefetch = io.validity.valid && !io.validity.bits.access && Param.isMyType(io.validity.bits.pf_source)
   good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + good_prefetch)
   bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + bad_prefetch)
 
@@ -175,7 +175,7 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
   XSPerfAccumulate(s"${Param.name}_trigger_late_hit", trigger_late_hit)
   XSPerfAccumulate(s"${Param.name}_trigger_late_miss", trigger_late_miss)
   XSPerfAccumulate(s"${Param.name}_trigger_bad_prefetch", trigger_bad_prefetch)
-  XSPerfAccumulate(s"${Param.name}_prefetch_hit", prefetch_hit)
+  // XSPerfAccumulate(s"${Param.name}_prefetch_hit", prefetch_hit)
   XSPerfAccumulate(s"${Param.name}_disable_time", !enable)
 
   assert(depth =/= 0.U, s"${Param.name}_depth should not be zero")
@@ -184,7 +184,6 @@ class L1PrefetchMonitor(Param : PrefetcherMonitorParam)(implicit p: Parameters) 
 abstract class PrefetcherMonitorParam {
   val name: String
   def isMyType(value: UInt): Bool
-  def isMyClearType(value: UInt): Bool
 
   val TIMELY_CHECK_INTERVAL = 1000
   val VALIDITY_CHECK_INTERVAL = 1000
@@ -211,13 +210,11 @@ object PrefetcherMonitorParam {
 class StreamMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
   override val name: String = "Stream"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_STREAM
-  override def isMyClearType(value: UInt) = value === L1_HW_PREFETCH_STREAM_CLEAR
 }
 
 class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
   override val name: String = "Stride"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_STRIDE
-  override def isMyClearType(value: UInt) = value === L1_HW_PREFETCH_STRIDE_CLEAR
 
   override val VALIDITY_CHECK_INTERVAL = 800
   override val DISABLE_THRESHOLD = 700
