@@ -32,21 +32,19 @@ trait HasL1PrefetchSourceParameter {
   def L1PfSourceBits = 3
   // Stream 0, Stride 1
   def L1PrefetcherNum = 2
-  def L1_HW_PREFETCH_NULL = "b000".U
-  def L1_HW_PREFETCH_STORE  = "b111".U
-  def L1_HW_PREFETCH_STREAM = "b100".U
-  def L1_HW_PREFETCH_STRIDE = "b101".U
-  // used to be a prefetch, clear by demand request, reverse source
-  def L1_HW_PREFETCH_STREAM_CLEAR = "b011".U
-  def L1_HW_PREFETCH_STRIDE_CLEAR = "b010".U
+  def L1_HW_PREFETCH_NULL = 0.U
+  def L1_HW_PREFETCH_CLEAR = 1.U // used to be a prefetch, clear by demand request
+  def L1_HW_PREFETCH_STRIDE = 2.U
+  def L1_HW_PREFETCH_STREAM = 3.U
+  def L1_HW_PREFETCH_STORE  = 4.U
   
   // ------------------------------------------------------------------------------------------------------------------------
-  // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_STREAM_CLEAR
+  // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
   // ------------------------------------------------------------------------------------------------------------------------
 
-  def isPrefetchRelated(value: UInt) = value.andR === (~value).andR
-  def isFromL1Prefetch(value: UInt)  = value.andR === (~value).andR && value >= L1_HW_PREFETCH_STREAM
-  def isPrefetchClear(value: UInt)   = value.andR === (~value).andR && value < L1_HW_PREFETCH_STREAM
+  def isPrefetchRelated(value: UInt) = value >= L1_HW_PREFETCH_CLEAR
+  def isFromL1Prefetch(value: UInt)  = value > L1_HW_PREFETCH_CLEAR
+  def isPrefetchClear(value: UInt)   = value === L1_HW_PREFETCH_CLEAR
   def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
   def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
 }

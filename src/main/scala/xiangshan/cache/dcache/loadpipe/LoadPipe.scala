@@ -585,11 +585,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.access_flag_write.bits.flag := true.B
 
   // clear prefetch source when prefetch hit
+  // so that next load to the same line won't be considered as prefetch hit
+  // A prefetch block will only be counted once
   val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
-  io.prefetch_flag_write.bits.source := Mux(isPrefetchClear(s3_hit_prefetch), s3_hit_prefetch, ~s3_hit_prefetch)
+  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
   io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
