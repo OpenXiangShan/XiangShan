@@ -36,11 +36,10 @@ object XSTester {
           VerilogPreprocessorDefine("RANDOMIZE_GARBAGE_ASSIGN")
         )
       ),
-      verilatorSettings = svsim.verilator.Backend.CompilationSettings(
-        traceStyle = Some(TraceStyle(TraceKind.Vcd)),
-        outputSplit = Some(30000),
-        outputSplitCFuncs = Some(30000),
-        disabledWarnings = Seq("STMTDLY", "WIDTH")
-      )
+      verilatorSettings = svsim.verilator.Backend.CompilationSettings.default
+        .withTraceStyle(Some(TraceStyle(TraceKind.Vcd)))
+        .withOutputSplit(Some(30000))
+        .withOutputSplitCFuncs(Some(30000))
+        .withDisabledWarnings(Seq("STMTDLY", "WIDTH"))
     )
 }

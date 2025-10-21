@@ -59,7 +59,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
           sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
           sink.bits.pdest := source.bits.pdest
           // int i2f wakeup fstore from fpRegion, so there is not need bypass fp data in int region
-          sink.bits.data := source.bits.data(source.bits.params.getForwardIndex)
+          sink.bits.data := source.bits.data(source.bits.params.getForwardIndex())
         }
       }
     }
