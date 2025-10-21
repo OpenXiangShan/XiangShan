@@ -666,7 +666,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val pc   = s3_alignPc(i).toUInt
     val code = io.toIBuffer.bits.instrs(i)
     val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s3_fire & enqVec(i), clock, reset)
-    val res  = 0.U.asTypeOf(new InstSeqNum)
+    val res  = WireDefault(0.U.asTypeOf(new InstSeqNum))
     res.seqNum := seq
     // leave uopIdx to 0.U
     res

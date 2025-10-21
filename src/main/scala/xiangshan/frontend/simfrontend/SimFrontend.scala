@@ -191,9 +191,9 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
 class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) {
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  icache.io <> 0.U.asTypeOf(icache.io)
-  instrUncache.io <> 0.U.asTypeOf(instrUncache.io)
-  io <> 0.U.asTypeOf(io.cloneType)
+  icache.io <> WireDefault(0.U.asTypeOf(icache.io))
+  instrUncache.io <> WireDefault(0.U.asTypeOf(instrUncache.io))
+  io <> WireDefault(0.U.asTypeOf(io))
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
