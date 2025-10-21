@@ -321,6 +321,12 @@ class CSREnumType(
     this
   }
 
+  override def _fromUInt(that: UInt)(implicit sourceInfo: experimental.SourceInfo): Data = {
+    val result = Wire(factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type].setRwType(this.rwType))
+    result := that
+    result
+  }
+
   // override cloneType to make ValidIO etc function return CSREnumType not EnumType
   override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type].setRwType(this.rwType)
 }
