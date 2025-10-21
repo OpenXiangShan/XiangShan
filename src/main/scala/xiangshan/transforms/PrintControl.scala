@@ -61,18 +61,6 @@ object DisableAllPrintAnnotation extends firrtl.options.HasShellOptions {
   )
 }
 
-case class RemoveAssertAnnotation() extends firrtl.annotations.NoTargetAnnotation
-object RemoveAssertAnnotation extends firrtl.options.HasShellOptions{
-  val options = Seq(
-    new firrtl.options.ShellOption[Unit](
-      longOption = "remove-assert",
-      toAnnotationSeq = _ => Seq(RemoveAssertAnnotation()),
-      helpText = "All the 'assert' will be removed\n",
-      shortOption = None
-    )
-  )
-}
-
 import scala.collection.mutable
 
 class PrintControl extends firrtl.options.Phase {
@@ -91,9 +79,6 @@ class PrintControl extends firrtl.options.Phase {
     }
     val disableAll = annotations.collectFirst {
       case DisableAllPrintAnnotation() => true
-    }.nonEmpty
-    val removeAssert = annotations.collectFirst{
-      case RemoveAssertAnnotation() => true
     }.nonEmpty
 
     assert(!(enableList.nonEmpty && (disableAll || disableList.nonEmpty)))
@@ -138,8 +123,6 @@ class PrintControl extends firrtl.options.Phase {
         val disable = disableAll || inRange(disableList) || !enable
         def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
           case _: firrtl.ir.Print if disable => firrtl.ir.EmptyStmt
-          case _: firrtl.ir.Stop if removeAssert => firrtl.ir.EmptyStmt
-          case _: firrtl.ir.Verification if removeAssert => firrtl.ir.EmptyStmt
           case other => other.mapStmt(onStmt)
         }
         m.mapStmt(onStmt)

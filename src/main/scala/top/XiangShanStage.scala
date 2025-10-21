@@ -35,7 +35,6 @@ class XiangShanStage extends ChiselStage {
     DisablePrintfAnnotation.addOptions(parser)
     EnablePrintfAnnotation.addOptions(parser)
     DisableAllPrintAnnotation.addOptions(parser)
-    RemoveAssertAnnotation.addOptions(parser)
   }
 
   override def run(annotations: firrtl.AnnotationSeq): firrtl.AnnotationSeq = {
