@@ -141,27 +141,23 @@ case class BackendParams(
   }
 
   def genIntWriteBackBundle(implicit p: Parameters) = {
-    Seq.fill(this.getIntRfWriteSize)(new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))
+    Vec(this.getIntRfWriteSize, new RfWritePortBundle(intPregParams))
   }
 
   def genFpWriteBackBundle(implicit p: Parameters) = {
-    Seq.fill(this.getFpRfWriteSize)(new RfWritePortWithConfig(FpData(), fpPregParams.addrWidth))
+    Vec(this.getFpRfWriteSize, new RfWritePortBundle(fpPregParams))
   }
 
   def genVfWriteBackBundle(implicit p: Parameters) = {
-    Seq.fill(this.getVfRfWriteSize)(new RfWritePortWithConfig(VecData(), vfPregParams.addrWidth))
+    Vec(this.getVfRfWriteSize, new RfWritePortBundle(vfPregParams))
   }
 
   def genV0WriteBackBundle(implicit p: Parameters) = {
-    Seq.fill(this.getV0RfWriteSize)(new RfWritePortWithConfig(V0Data(), v0PregParams.addrWidth))
+    Vec(this.getV0RfWriteSize, new RfWritePortBundle(v0PregParams))
   }
 
   def genVlWriteBackBundle(implicit p: Parameters) = {
-    Seq.fill(this.getVlRfWriteSize)(new RfWritePortWithConfig(VlData(), vlPregParams.addrWidth))
-  }
-
-  def genWriteBackBundles(implicit p: Parameters): Seq[RfWritePortWithConfig] = {
-    genIntWriteBackBundle ++ genVfWriteBackBundle
+    Vec(this.getVlRfWriteSize, new RfWritePortBundle(vlPregParams))
   }
 
   def genWrite2CtrlBundles(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {

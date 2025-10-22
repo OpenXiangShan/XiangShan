@@ -2,12 +2,17 @@ package xiangshan.backend.issue
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
-import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.PregWB
-import xiangshan.backend.fu.FuConfig.I2fCfg
+
+sealed trait SchedulerType
+
+case class IntScheduler() extends SchedulerType
+case class FpScheduler() extends SchedulerType
+case class VecScheduler() extends SchedulerType
+case class NoScheduler() extends SchedulerType
 
 case class SchdBlockParams(
   issueBlockParams: Seq[IssueBlockParams],
@@ -174,16 +179,6 @@ case class SchdBlockParams(
       .distinctBy(_.name)
   }
 
-  def genIQWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
-    MixedVec(this.wakeUpInExuSources.map(x => {
-      val param = x.getExuParam(backendParam.allExuParams)
-      val isCopyPdest = param.copyWakeupOut
-      val copyNum = param.copyNum
-      ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam, isCopyPdest, copyNum))
-      })
-    )
-  }
-
   def genIQWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
     MixedVec(this.wakeUpOutExuSources.map(x => {
       val param = x.getExuParam(backendParam.allExuParams)
@@ -228,32 +223,6 @@ case class SchdBlockParams(
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
   }
 
-  def genIntWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
-    MixedVec(backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
-  }
-
-  def genFpWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
-    MixedVec(backendParam.getFpWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
-  }
-
-  def genVfWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
-    MixedVec(backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
-  }
-
-  def genV0WBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
-    MixedVec(backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
-  }
-
-  def genVlWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
-    MixedVec(backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
-  }
-
-  def genWriteBackBundle(implicit p: Parameters) =  schdType match {
-    case IntScheduler() => backendParam.genIntWriteBackBundle
-    case FpScheduler() => backendParam.genFpWriteBackBundle
-    case VecScheduler() => backendParam.genVfWriteBackBundle
-
-  }
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)
   def getWbCfgs: Seq[Seq[Set[PregWB]]] = {
     this.issueBlockParams.map(_.getWbCfgs)

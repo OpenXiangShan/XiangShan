@@ -26,7 +26,6 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility._
@@ -35,23 +34,18 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
-import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
+import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
-import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.issue.Region
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.{PreDecodeInfo}
-import xiangshan.frontend.ftq.{FtqPtr, FtqRead}
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
-import scala.collection.mutable
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
@@ -218,8 +212,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
 
   io.mem.wfi <> ctrlBlock.io.toMem.wfi
-  io.mem.loadFastMatch := 0.U.asTypeOf(io.mem.loadFastMatch)
-  io.mem.loadFastImm := 0.U.asTypeOf(io.mem.loadFastImm)
 
   io.mem.lsqEnqIO <> ctrlBlock.io.toMem.lsqEnqIO
   ctrlBlock.io.fromMemToDispatch.scommit := io.mem.sqDeq
@@ -236,24 +228,24 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val og0Cancel = (intRegion.io.og0Cancel.asUInt | fpRegion.io.og0Cancel.asUInt | vecRegion.io.og0Cancel.asUInt).asBools
   ctrlBlock.io.toDispatch.og0Cancel := og0Cancel
   ctrlBlock.io.toDispatch.wbPregsInt.zip(intRegion.io.toIntPreg).map(x => {
-    x._1.valid := x._2.wen && x._2.intWen
-    x._1.bits := x._2.addr
+    x._1.valid := x._2.wen && x._2.rfWen
+    x._1.bits := x._2.pdest
   })
   ctrlBlock.io.toDispatch.wbPregsFp.zip(fpRegion.io.toFpPreg).map(x => {
     x._1.valid := x._2.wen && x._2.fpWen
-    x._1.bits := x._2.addr
+    x._1.bits := x._2.pdest
   })
   ctrlBlock.io.toDispatch.wbPregsVec.zip(vecRegion.io.toVfPreg).map(x => {
     x._1.valid := x._2.wen && x._2.vecWen
-    x._1.bits := x._2.addr
+    x._1.bits := x._2.pdest
   })
   ctrlBlock.io.toDispatch.wbPregsV0.zip(vecRegion.io.toV0Preg).map(x => {
     x._1.valid := x._2.wen && x._2.v0Wen
-    x._1.bits := x._2.addr
+    x._1.bits := x._2.pdest
   })
   ctrlBlock.io.toDispatch.wbPregsVl.zip(vecRegion.io.toVlPreg).map(x => {
     x._1.valid := x._2.wen && x._2.vlWen
-    x._1.bits := x._2.addr
+    x._1.bits := x._2.pdest
   })
   ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsZero := vlFromIntIsZero
   ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
@@ -353,7 +345,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.io.fromIntExu.get := intRegion.io.exuOut
   vecRegion.io.fromFpExu.get := fpRegion.io.exuOut
   // for fast wakeup data
-  intRegion.io.formFpExuBlockOut.get <> fpRegion.io.fpExuBlockOut.get
+  intRegion.io.fromFpExuBlockOut.get <> fpRegion.io.fpExuBlockOut.get
   intRegion.io.intSchdBusyTable := intRegion.io.wbFuBusyTableWriteOut
   intRegion.io.fpSchdBusyTable := fpRegion.io.wbFuBusyTableWriteOut
   intRegion.io.vfSchdBusyTable := vecRegion.io.wbFuBusyTableWriteOut
@@ -656,9 +648,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val issueHylda = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
   val issueHysta = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
   val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
-
-  val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
-  val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
 
   val tlbCsr = Output(new TlbCsrBundle)
   val csrCtrl = Output(new CustomCSRCtrlIO)

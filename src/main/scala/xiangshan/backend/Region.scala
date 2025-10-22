@@ -1,28 +1,37 @@
-package xiangshan.backend.issue
+/***************************************************************************************
+ * Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
+
+package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.HasPerfEvents
-import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.{BackendMemIO, ExcpModToVprf, PcToDataPathIO, VprfToExcpMod}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType}
-import xiangshan.backend.regfile.{RfWritePortBundle, RfWritePortWithConfig, VlPregParams}
-import xiangshan.backend.datapath.WbConfig.V0WB
+import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.exu.ExuBlock
-import xiangshan.backend.regcache.RegCacheTagTable
-import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr}
-import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
+import xiangshan.mem._
 import utility._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.backend.issue.EntryBundles.RespType
+import xiangshan.backend.issue._
 
 
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
@@ -190,24 +199,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     case _ =>
   }
   // other wakeup, int vec need WB wakeup
-  def connectWakeupWB(sink: ValidIO[IssueQueueWBWakeUpBundle], source: RfWritePortWithConfig): Unit = {
+  def connectWakeupWB(sink: ValidIO[IssueQueueWBWakeUpBundle], source: RfWritePortBundle): Unit = {
     sink.valid := source.wen
-    sink.bits.rfWen := source.intWen
+    sink.bits.rfWen := source.rfWen
     sink.bits.fpWen := source.fpWen
     sink.bits.vecWen := source.vecWen
     sink.bits.v0Wen := source.v0Wen
     sink.bits.vlWen := source.vlWen
-    sink.bits.pdest := source.addr
-  }
-
-  def connectWakeupWBDelay(sink: ValidIO[IssueQueueWBWakeUpBundle], source: ValidIO[RfWritePortBundle]): Unit = {
-    sink.valid := source.valid
-    sink.bits.rfWen := source.bits.rfWen
-    sink.bits.fpWen := source.bits.fpWen
-    sink.bits.vecWen := source.bits.vecWen
-    sink.bits.v0Wen := source.bits.v0Wen
-    sink.bits.vlWen := source.bits.vlWen
-    sink.bits.pdest := source.bits.pdest
+    sink.bits.pdest := source.pdest
   }
 
   if (params.isIntSchd) {
@@ -215,17 +214,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val idxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeIntRf).map(_.wbPortConfigs.filter(_.isInstanceOf[IntWB]).head.port)
     println(s"[Region] vec write int port = ${idxes}")
     val wakeupFromWB = MixedVecInit(idxes.map(x => io.fromIntWb(x)))
-    val wakeupFromWBDelayed = Reg(MixedVec(Vec(wakeupFromWB.size,
-      Valid(new RfWritePortBundle(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))))
-    wakeupFromWBDelayed.zip(wakeupFromWB).map{case (sink, source) =>
-      sink.valid := source.wen
-      sink.bits.rfWen := source.intWen
-      sink.bits.fpWen := source.fpWen
-      sink.bits.vecWen := source.vecWen
-      sink.bits.v0Wen := source.v0Wen
-      sink.bits.vlWen := source.vlWen
-      sink.bits.pdest := source.addr
-    }
+    val wakeupFromWBDelayed = RegNext(wakeupFromWB)
     issueQueues.map { case iq =>
       val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
       println(s"[Region_int] vecExuIndices = ${vecExuIndices}")
@@ -233,7 +222,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       println(s"[Region_int] vecWBIndices = ${vecWBIndices}")
       vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
         connectWakeupWB(iq.io.wakeupFromWB(i), source1)
-        connectWakeupWBDelay(iq.io.wakeupFromWBDelayed(i), source2)
+        connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromF2I.foreach(_ := io.wakeupFromF2I.get)
       println(s"[Region_int] wakeupFromWB.size = ${wakeupFromWB.size}")
@@ -245,17 +234,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val idxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeFpRf).map(_.wbPortConfigs.filter(_.isInstanceOf[FpWB]).head.port)
     println(s"[Region] vec write fp port = ${idxes}")
     val wakeupFromWB = MixedVecInit(idxes.map(x => io.fromFpWb(x)))
-    val wakeupFromWBDelayed = Reg(MixedVec(Vec(wakeupFromWB.size,
-      Valid(new RfWritePortBundle(backendParams.fpPregParams.dataCfg, backendParams.fpPregParams.addrWidth)))))
-    wakeupFromWBDelayed.zip(wakeupFromWB).map { case (sink, source) =>
-      sink.valid := source.wen
-      sink.bits.rfWen := source.intWen
-      sink.bits.fpWen := source.fpWen
-      sink.bits.vecWen := source.vecWen
-      sink.bits.v0Wen := source.v0Wen
-      sink.bits.vlWen := source.vlWen
-      sink.bits.pdest := source.addr
-    }
+    val wakeupFromWBDelayed = RegNext(wakeupFromWB)
     issueQueues.map { case iq =>
       val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
       println(s"[Region_fp] vecExuIndices = ${vecExuIndices}")
@@ -263,52 +242,22 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       println(s"[Region_fp] vecWBIndices = ${vecWBIndices}")
       vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
         connectWakeupWB(iq.io.wakeupFromWB(i), source1)
-        connectWakeupWBDelay(iq.io.wakeupFromWBDelayed(i), source2)
+        connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromI2F.foreach(_ := io.wakeupFromI2F.get)
     }
   }
   else if (params.isVecSchd) {
     val wakeupFromWB = io.fromVfWb ++ io.fromV0Wb ++ io.fromVlWb
-    val wakeupFromWBDelayedVf = Reg((Vec(io.fromVfWb.size,
-      Valid(new RfWritePortBundle(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))))
-    val wakeupFromWBDelayedV0 = Reg((Vec(io.fromV0Wb.size,
-      Valid(new RfWritePortBundle(backendParams.v0PregParams.dataCfg, backendParams.v0PregParams.addrWidth)))))
-    val wakeupFromWBDelayedVl = Reg((Vec(io.fromVlWb.size,
-      Valid(new RfWritePortBundle(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth)))))
-    wakeupFromWBDelayedVf.zip(io.fromVfWb).map { case (sink, source) =>
-      sink.valid := source.wen
-      sink.bits.rfWen := source.intWen
-      sink.bits.fpWen := source.fpWen
-      sink.bits.vecWen := source.vecWen
-      sink.bits.v0Wen := source.v0Wen
-      sink.bits.vlWen := source.vlWen
-      sink.bits.pdest := source.addr
-    }
-    wakeupFromWBDelayedV0.zip(io.fromV0Wb).map { case (sink, source) =>
-      sink.valid := source.wen
-      sink.bits.rfWen := source.intWen
-      sink.bits.fpWen := source.fpWen
-      sink.bits.vecWen := source.vecWen
-      sink.bits.v0Wen := source.v0Wen
-      sink.bits.vlWen := source.vlWen
-      sink.bits.pdest := source.addr
-    }
-    wakeupFromWBDelayedVl.zip(io.fromVlWb).map { case (sink, source) =>
-      sink.valid := source.wen
-      sink.bits.rfWen := source.intWen
-      sink.bits.fpWen := source.fpWen
-      sink.bits.vecWen := source.vecWen
-      sink.bits.v0Wen := source.v0Wen
-      sink.bits.vlWen := source.vlWen
-      sink.bits.pdest := source.addr
-    }
+    val wakeupFromWBDelayedVf = RegNext(io.fromVfWb)
+    val wakeupFromWBDelayedV0 = RegNext(io.fromV0Wb)
+    val wakeupFromWBDelayedVl = RegNext(io.fromVlWb)
     issueQueues.map { case iq =>
       println(s"[Region_vec] wakeupFromWB.size = ${wakeupFromWB.size}")
       println(s"[Region_vec] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
       println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromVfWBPort = ${iq.param.needWakeupFromVfWBPort.map(x => (x._1, x._2.map(_.name)))}")
       iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
-      iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl).map(x => connectWakeupWBDelay(x._1, x._2))
+      iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl).map(x => connectWakeupWB(x._1, x._2))
     }
   }
   // std dispatch
@@ -375,11 +324,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     x.ready := false.B
   })
   dataPath.io.ldCancel := 0.U.asTypeOf(dataPath.io.ldCancel)
-  dataPath.io.fromIntWb := 0.U.asTypeOf(dataPath.io.fromIntWb)
-  dataPath.io.fromFpWb := 0.U.asTypeOf(dataPath.io.fromFpWb)
-  dataPath.io.fromVfWb := 0.U.asTypeOf(dataPath.io.fromVfWb)
-  dataPath.io.fromV0Wb := 0.U.asTypeOf(dataPath.io.fromV0Wb)
-  dataPath.io.fromVlWb := 0.U.asTypeOf(dataPath.io.fromVlWb)
   dataPath.io.wbConfictRead := 0.U.asTypeOf(dataPath.io.wbConfictRead)
   dataPath.io.fromBypassNetwork := 0.U.asTypeOf(dataPath.io.fromBypassNetwork)
   dataPath.io.fromPcTargetMem.toDataPathTargetPC := 0.U.asTypeOf(dataPath.io.fromPcTargetMem.toDataPathTargetPC)
@@ -530,7 +474,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink <> source
     }
     io.intToFpIQResp.get := dataPath.io.toFpIQ
-    dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
+    dataPath.io.fromIntWb.get := wbDataPath.io.toIntPreg
     dataPath.io.fromPcTargetMem <> io.fromPcTargetMem.get
     dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
     dataPath.io.diffIntRat.foreach(_ := io.diffIntRat.get)
@@ -539,9 +483,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
     bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
     bypassNetwork.io.fromExus.connectExuOutput(_.int)(exuBlock.io.out)
-    bypassNetwork.io.fromExus.connectExuOutput(_.fp)(io.formFpExuBlockOut.get)
+    bypassNetwork.io.fromExus.connectExuOutput(_.fp)(io.fromFpExuBlockOut.get)
     // no use
-    io.formFpExuBlockOut.get.flatten.map(_.ready := true.B)
+    io.fromFpExuBlockOut.get.flatten.map(_.ready := true.B)
     val intLoadWB = bypassNetwork.io.fromExus.int.flatten.filter(_.bits.params.hasLoadExu)
     intLoadWB.zip(io.fromMemExuOutput.take(intLoadWB.size)).foreach { case (sink, source) =>
       sink.valid := source.valid
@@ -654,7 +598,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink <> source
     }
     io.fpToIntIQResp.get := dataPath.io.toIntIQ
-    dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
+    dataPath.io.fromFpWb.get := wbDataPath.io.toFpPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
     dataPath.io.diffFpRat.foreach(_ := io.diffFpRat.get)
     io.toFpPreg := wbDataPath.io.toFpPreg
@@ -770,9 +714,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromVfIQ.zip(issueQueues).map { case (sink, source) =>
       sink <> source.io.deqDelay
     }
-    dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
-    dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
-    dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
+    dataPath.io.fromVfWb.get := wbDataPath.io.toVfPreg
+    dataPath.io.fromV0Wb.get := wbDataPath.io.toV0Preg
+    dataPath.io.fromVlWb.get := wbDataPath.io.toVlPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
     dataPath.io.diffVecRat.foreach(_ := io.diffVecRat.get)
     dataPath.io.diffV0Rat.foreach(_ := io.diffV0Rat.get)
@@ -871,116 +815,45 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   // perf counter
   if (params.isIntSchd) {
     val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.AluCnt > 0) && (issueQueues(j).param.AluCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isAlu(f)
+    case class FUConfig(filter: UInt => Bool, name: String, paramCheck: IssueBlockParams => Boolean)
+    val fuConfigs = Seq(
+      FUConfig(FuType.isAlu, "ALU", _.AluCnt > 0),
+      FUConfig(FuType.isBJU, "BJU", _.BrhCnt > 0),
+      FUConfig(FuType.isLoad, "LDU", _.LduCnt > 0)
+    )
+    def generatePerfCounters(fuConfig: FUConfig, checkSrcReady: Boolean): Unit = {
+      for (i <- 0 until iqNum) {
+        for (j <- 0 until iqNum) {
+          if ((i != j) && fuConfig.paramCheck(issueQueues(i).param) && fuConfig.paramCheck(issueQueues(j).param)) {
+
+            def getIssueSignals(iq: IssueQueueIO): Seq[Bool] = {
+              val baseSignals = iq.validVec.zip(iq.issuedVec).zip(iq.canIssueVec).zip(iq.fuTypeVec).map {
+                case (((v, issued), canIssue), fuType) =>
+                  (v, !issued, canIssue, fuConfig.filter(fuType))
+              }
+              if (checkSrcReady) {
+                baseSignals.zip(iq.srcReadyVec).map {
+                  case ((v, notIssued, canIssue, fuMatch), srcReady) =>
+                    v && notIssued && canIssue && fuMatch && srcReady
+                }
+              } else {
+                baseSignals.map { case (v, notIssued, canIssue, fuMatch) =>
+                  v && notIssued && canIssue && fuMatch
+                }
+              }
+            }
+            val iqiSignals = getIssueSignals(issueQueues(i).io)
+            val iqjSignals = getIssueSignals(issueQueues(j).io)
+            val cond = (PopCount(iqiSignals) > 1.U) && (PopCount(iqjSignals) === 0.U)
+            val suffix = if (checkSrcReady) "SrcReady" else "CanIssue"
+            XSPerfAccumulate(s"${fuConfig.name}_${suffix}_IQ${i}_more1_IQ${j}_none", PopCount(cond))
           }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isAlu(f)
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"ALU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
         }
       }
     }
-  }
-  if (params.isIntSchd) {
-    val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.AluCnt > 0) && (issueQueues(j).param.AluCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isAlu(f) && s
-          }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqi.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isAlu(f) && s
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"ALU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
-        }
-      }
-    }
-  }
-  if (params.isIntSchd) {
-    val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.BrhCnt > 0) && (issueQueues(j).param.BrhCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isBJU(f)
-          }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isBJU(f)
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"BJU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
-        }
-      }
-    }
-  }
-  if (params.isIntSchd) {
-    val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.BrhCnt > 0) && (issueQueues(j).param.BrhCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isBJU(f) && s
-          }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqi.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isBJU(f) && s
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"BJU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
-        }
-      }
-    }
-  }
-  if (params.isIntSchd) {
-    val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.LduCnt > 0) && (issueQueues(j).param.LduCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isLoad(f)
-          }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).map {
-            case (((v, i), c), f) => v && !i && c && FuType.isLoad(f)
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"LDU_CanIssue_IQ${i}_more1_IQ${j}_none", PopCount(cond))
-        }
-      }
-    }
-  }
-  if (params.isIntSchd) {
-    val iqNum = issueQueues.size
-    for (i <- 0 until iqNum) {
-      for (j <- 0 until iqNum) {
-        if ((i != j) && (issueQueues(i).param.LduCnt > 0) && (issueQueues(j).param.LduCnt > 0)) {
-          val iqi = issueQueues(i).io
-          val iqiSeq = iqi.validVec.zip(iqi.issuedVec).zip(iqi.canIssueVec).zip(iqi.fuTypeVec).zip(iqi.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isLoad(f) && s
-          }
-          val iqj = issueQueues(j).io
-          val iqjSeq = iqj.validVec.zip(iqj.issuedVec).zip(iqj.canIssueVec).zip(iqj.fuTypeVec).zip(iqj.srcReadyVec).map {
-            case ((((v, i), c), f), s) => v && !i && c && FuType.isLoad(f) && s
-          }
-          val cond = (PopCount(iqiSeq) > 1.U) && (PopCount(iqjSeq) === 0.U)
-          XSPerfAccumulate(s"LDU_SrcReady_IQ${i}_more1_IQ${j}_none", PopCount(cond))
-        }
-      }
+    fuConfigs.foreach { config =>
+      generatePerfCounters(config, checkSrcReady = false)
+      generatePerfCounters(config, checkSrcReady = true)
     }
   }
 }
@@ -1045,26 +918,16 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val IssueQueueDeqSum = allIssueParams.map(_.numDeq).sum
   val maxIQSize = allIssueParams.map(_.numEntries).max
   val IQValidNumVec = Output(Vec(IssueQueueDeqSum, UInt((maxIQSize).U.getWidth.W)))
-  val toIntPreg = Flipped(MixedVec(Vec(backendParams.numPregWb(IntData()),
-    new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth))))
-  val toFpPreg = Flipped(MixedVec(Vec(backendParams.numPregWb(FpData()),
-    new RfWritePortWithConfig(backendParams.fpPregParams.dataCfg, backendParams.fpPregParams.addrWidth))))
-  val toVfPreg = Flipped(MixedVec(Vec(backendParams.numPregWb(VecData()),
-    new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth))))
-  val toV0Preg = Flipped(MixedVec(Vec(backendParams.numPregWb(V0Data()),
-    new RfWritePortWithConfig(backendParams.v0PregParams.dataCfg, backendParams.v0PregParams.addrWidth))))
-  val toVlPreg = Flipped(MixedVec(Vec(backendParams.numPregWb(VlData()),
-    new RfWritePortWithConfig(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth))))
-  val fromIntWb = MixedVec(Vec(backendParams.numPregWb(IntData()),
-    new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
-  val fromFpWb = MixedVec(Vec(backendParams.numPregWb(FpData()),
-    new RfWritePortWithConfig(backendParams.fpPregParams.dataCfg, backendParams.fpPregParams.addrWidth)))
-  val fromVfWb = MixedVec(Vec(backendParams.numPregWb(VecData()),
-    new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
-  val fromV0Wb = MixedVec(Vec(backendParams.numPregWb(V0Data()),
-    new RfWritePortWithConfig(backendParams.v0PregParams.dataCfg, backendParams.v0PregParams.addrWidth)))
-  val fromVlWb = MixedVec(Vec(backendParams.numPregWb(VlData()),
-    new RfWritePortWithConfig(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth)))
+  val toIntPreg = Output(backendParams.genIntWriteBackBundle)
+  val toFpPreg = Output(backendParams.genFpWriteBackBundle)
+  val toVfPreg = Output(backendParams.genVfWriteBackBundle)
+  val toV0Preg = Output(backendParams.genV0WriteBackBundle)
+  val toVlPreg = Output(backendParams.genVlWriteBackBundle)
+  val fromIntWb = Input(backendParams.genIntWriteBackBundle)
+  val fromFpWb = Input(backendParams.genFpWriteBackBundle)
+  val fromVfWb = Input(backendParams.genVfWriteBackBundle)
+  val fromV0Wb = Input(backendParams.genV0WriteBackBundle)
+  val fromVlWb = Input(backendParams.genVlWriteBackBundle)
   val I2FWakeupIn = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val F2IWakeupIn = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val og0Cancel = Output(ExuVec())
@@ -1083,7 +946,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wbFuBusyTableWriteOut = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fpExuBlockOut = Option.when(params.isFpSchd)(params.genExuOutputDecoupledBundle)
-  val formFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(fpSchdParam.genExuOutputDecoupledBundle))
+  val fromFpExuBlockOut = Option.when(params.isIntSchd)(Flipped(fpSchdParam.genExuOutputDecoupledBundle))
   // to read fp regfile
   val intIQOut  = Option.when(params.isIntSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromIntIQ = Option.when(params.isFpSchd)(Flipped(MixedVec(intSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))

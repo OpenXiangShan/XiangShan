@@ -185,16 +185,16 @@ case class ExeUnitParams(
     *
     * @return Map[ [[BigInt]], Latency]
     */
-  def fuLatencyMap(addBJU: Boolean = false): Map[FuType.OHType, Int] = {
-    val addBJUFuConfigs = if (addBJU) fuConfigs :+ BrhCfg :+ JmpCfg else fuConfigs
+  def fuLatencyMap(addJump: Boolean = false): Map[FuType.OHType, Int] = {
+    val addBJUFuConfigs = if (addJump) fuConfigs :+ JmpCfg else fuConfigs
     if (latencyCertain)
       if(needOg2) addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
       addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
-      val latencyCertainFuConfigsAddBJU = if (addBJU) latencyCertainFuConfigs :+ BrhCfg :+ JmpCfg else latencyCertainFuConfigs
-      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddBJU")
-      latencyCertainFuConfigsAddBJU.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      val latencyCertainFuConfigsAddJump = if (addJump) latencyCertainFuConfigs :+ JmpCfg else latencyCertainFuConfigs
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
+      latencyCertainFuConfigsAddJump.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
