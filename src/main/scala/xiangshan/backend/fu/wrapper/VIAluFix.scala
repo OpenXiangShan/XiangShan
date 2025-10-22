@@ -6,7 +6,7 @@ import chisel3.util.experimental.decode.TruthTable
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.{Mgtu, Mgu, VecPipedFuncUnit}
+import xiangshan.backend.fu.vector.{DstMgu, Mgtu, Mgu, NewMgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
@@ -29,7 +29,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new VIAluFixPoint(XLEN)))
-  private val mgu = Module(new Mgu(dataWidth))
+  private val mgu = Module(new NewMgu(dataWidth))
   private val mgtu = Module(new Mgtu(dataWidth))
 
   private val opcode = VialuFixType.getOpcode(fuOpType).asTypeOf(vIAluFixPoints.head.io.in.opcode)
@@ -94,82 +94,90 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
       mod.io.in.data.vxrm := vxrm
   }
 
+  private val maskToMgu = Mux(isAddCarry, allMaskTrue, srcMask)
+  private val vdWiden = (VialuFixType.fmtIsVVW(fuOpType) || VialuFixType.fmtIsWVW(fuOpType)) & !isExt & !isDstMask
+  private val eew = Mux(vdWiden, vsew + 1.U, vsew)
+  private val vdIdx = Mux(isNarrow, vuopIdx(2, 1), vuopIdx)
+
+  mgu.io.in.mask := maskToMgu
+  mgu.io.in.info.ta := vta
+  mgu.io.in.info.ma := vma
+  mgu.io.in.info.vstart := 0.U
+  mgu.io.in.info.vl := vl
+  mgu.io.in.info.eew := eew
+  mgu.io.in.info.vsew := vsew
+  mgu.io.in.info.vdIdx := vdIdx
+  mgu.io.in.isIndexedVls := false.B
 
   private val maxUopIdx = VLEN / 8
-  private val maskVd = Wire(Vec(16, Bool()))
-  private val outVsewOH = SewOH(outVecCtrl.vsew).oneHot
+  private val numBytes = maxUopIdx
+  
+  private val activeEn = Wire(UInt(numBytes.W))
+  private val agnosticEn = Wire(UInt(numBytes.W))
+  activeEn := mgu.io.out.activeEn
+  agnosticEn := mgu.io.out.agnosticEn
+
+  private val byte1s: UInt = (~0.U(8.W)).asUInt
+  private val agnosticVecByte = Wire(Vec(numBytes, UInt(8.W)))
+  private val oldVdVecByte = oldVd.asTypeOf(agnosticVecByte)
+  for (i <- 0 until numBytes) {
+    agnosticVecByte(i) := Mux(agnosticEn(i), byte1s, oldVdVecByte(i))
+  }
+
+  private val activeEnS1 = RegEnable(activeEn, valid)
+  private val agnosticVecByteS1 = RegEnable(agnosticVecByte, valid)
+
+  private val vlIsZero = !vl.orR
+  private val vlIsZeroS1 = RegEnable(vlIsZero, valid)
 
   private val vd = Cat(vIAluFixPoints.map(_.io.out.vd).reverse)
+  private val outNarrow = outVecCtrl.isNarrow
+  private val outVuopIdx0 = outVecCtrl.vuopIdx(0).asBool
+  private val narrowVd = Cat(vIAluFixPoints.map(_.io.out.narrowVd).reverse)
+  private val outNarrowVd = Mux(outVuopIdx0,
+    Cat(narrowVd, outOldVd(dataWidth / 2 - 1, 0)),
+    Cat(outOldVd(dataWidth - 1, dataWidth / 2), narrowVd))
+  
+  private val outVd = Mux(outNarrow, outNarrowVd, vd)
+
+  private val resVecByte = Wire(Vec(numBytes, UInt(8.W)))
+  private val vdVecByte = outVd.asTypeOf(resVecByte)
+
+  for (i <- 0 until numBytes) {
+    resVecByte(i) := Mux(activeEnS1(i), vdVecByte(i), agnosticVecByteS1(i))
+  }
+
+  private val vsewOH = SewOH(vsew).oneHot
+  private val outVsewOH = RegEnable(vsewOH, valid)
+
   private val addCarryCmpMask = Mux1H(outVsewOH, Seq(8, 4, 2, 1).map(i =>
-    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)
+    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)  
   ))
 
-  private val addCarryCmpMaskVec = addCarryCmpMask.asTypeOf(maskVd)
-
-  private val elementStartIdx = Mux1H(outVsewOH, Seq(4, 3, 2, 1).map(i =>
-    outVecCtrl.vuopIdx(2, 0) << i.U
-  )).asUInt
-
-  for (i <- 0 until maxUopIdx) {
-    when (elementStartIdx +& i.U >= outVl) {
-      maskVd(i) := 1.U
-    }.otherwise {
-      maskVd(i) := addCarryCmpMaskVec(i)
-    }
-  }
+  private val dstMgu = Module(new DstMgu(dataWidth))
+  dstMgu.io.in.valid := valid
+  dstMgu.io.in.oldVd := oldVd
+  dstMgu.io.in.mask := maskToMgu
+  dstMgu.io.in.ma := vma
+  dstMgu.io.in.eew := vsew
+  dstMgu.io.in.vdIdx := vuopIdx(2, 0)
+  dstMgu.io.in.toS1.vd := addCarryCmpMask
+  dstMgu.io.in.toS1.oldVdS1 := outOldVd
+  dstMgu.io.in.toS1.eewS1 := outVecCtrl.vsew
+  dstMgu.io.in.toS1.vdIdxS1 := outVecCtrl.vuopIdx(2, 0)
 
   private val outDstMask = outVecCtrl.isDstMask
   private val outOpMask = outVecCtrl.isOpMask
 
-  private val needNoMask = VialuFixType.needNoMask(outCtrl.fuOpType)
-  private val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
-
-  private val outVdWiden = (VialuFixType.fmtIsVVW(outCtrl.fuOpType) || VialuFixType.fmtIsWVW(outCtrl.fuOpType)) &
-    !outVecCtrl.isExt & !outDstMask
-
-  private val outEew = Mux(outVdWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
-  private val vstartGeVl = outVecCtrl.vstart >= outVl
-
-  private val outNarrow = outVecCtrl.isNarrow
-  private val outVuopIdx = outVecCtrl.vuopIdx
-  private val narrowVd = Cat(vIAluFixPoints.map(_.io.out.narrowVd).reverse)
-  private val outNarrowVd = Mux(outVuopIdx(0).asBool,
-    Cat(narrowVd, outOldVd(dataWidth / 2 - 1, 0)), Cat(outOldVd(dataWidth - 1, dataWidth / 2), narrowVd))
-
-  private val vxsat = Mux(outNarrow,
-    Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), Cat(vIAluFixPoints.map(_.io.out.vxsat).reverse))
-  private val outVxsat = Mux(outNarrow & outVuopIdx(0).asBool, Cat(vxsat(7, 0), 0.U(8.W)), vxsat)
-
-  mgu.io.in.vd := MuxCase(vd, Seq(
-    outDstMask -> maskVd.asUInt,
-    outNarrow -> outNarrowVd,
+  private val outVxsat = Mux1H(Seq(
+    (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U(8.W)),
+    (outNarrow & !outVuopIdx0) -> Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse),
+    !outNarrow -> Cat(vIAluFixPoints.map(_.io.out.vxsat).reverse),
   ))
-  mgu.io.in.oldVd := outOldVd
-  mgu.io.in.mask := maskToMgu
-  mgu.io.in.info.ta := outVecCtrl.vta
-  mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := outVl
-  mgu.io.in.info.vlmul := outVecCtrl.vlmul
-  mgu.io.in.info.valid := validVec.last
-  mgu.io.in.info.vstart := outVecCtrl.vstart
-  mgu.io.in.info.eew := outEew
-  mgu.io.in.info.vsew := outVecCtrl.vsew
-  mgu.io.in.info.vdIdx := outVuopIdx
-  mgu.io.in.info.narrow := outNarrow
-  mgu.io.in.info.dstMask := outDstMask
-  mgu.io.in.isIndexedVls := false.B
 
-
-  mgtu.io.in.vd := Mux(outDstMask & outOpMask, vd, mgu.io.out.vd)
+  mgtu.io.in.vd := Mux(outOpMask, vd, dstMgu.io.out.vd)
   mgtu.io.in.vl := outVl
 
-  io.out.bits.res.data := Mux(vstartGeVl, outOldVd, Mux(outVecCtrl.isDstMask, mgtu.io.out.vd, mgu.io.out.vd))
-  io.out.bits.res.vxsat.get := Mux(vstartGeVl, false.B, (outVxsat & mgu.io.out.active).orR)
-
-  dontTouch(vxsat)
-  dontTouch(outVxsat)
-  dontTouch(addCarryCmpMask)
-  dontTouch(addCarryCmpMaskVec)
-  dontTouch(elementStartIdx)
-  dontTouch(maskVd)
+  io.out.bits.res.data := Mux(vlIsZeroS1, outOldVd, Mux(outDstMask, mgtu.io.out.vd, resVecByte.asUInt))
+  io.out.bits.res.vxsat.get := Mux(vlIsZeroS1, false.B, (outVxsat & activeEnS1).orR)
 }
