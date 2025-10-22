@@ -180,13 +180,13 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   io.uncache.resp.ready := true.B
 
-  /* uncahce resp */
+  /* uncache resp */
   when (io.uncache.resp.fire) {
     uncacheData := io.uncache.resp.bits.data
     nderr := io.uncache.resp.bits.nderr
   }
 
-  /* uncahce writeback */
+  /* uncache writeback */
   io.mmioOut.valid := false.B
   io.mmioOut.bits := DontCare
   io.mmioRawData := DontCare

@@ -477,16 +477,10 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   // send data to sq
   val vstd = io.vstd.get
   vstd.valid := io.out.valid
-  vstd.bits.uop := issueUop
-  vstd.bits.uop.sqIdx := sqIdx
-  vstd.bits.uop.fuType := FuType.vstu.U
+  vstd.bits.sqIdx := sqIdx
+  vstd.bits.fuType := FuType.vstu.U
+  vstd.bits.fuOpType := issueUop.fuOpType
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
-  vstd.bits.debug := DontCare
-  vstd.bits.vecDebug.get := DontCare // maybe assign later
-  vstd.bits.vdIdx.get := DontCare
-  vstd.bits.vdIdxInField.get := DontCare
-  vstd.bits.isFromLoadUnit   := DontCare
-  vstd.bits.mask.get := Mux(!issuePreIsSplit, usSplitMask, mask)
 
   if(env.EnableDifftest){
     val usVaddrOffset   = LookupTree(issueEew, List(
@@ -496,8 +490,8 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
       "b11".U -> vaddr(2, 0)
     ))
 
-    vstd.bits.vecDebug.get.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
-    vstd.bits.vecDebug.get.offset := usVaddrOffset
+    vstd.bits.vecDebug.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
+    vstd.bits.vecDebug.offset := usVaddrOffset
   }
 
 }

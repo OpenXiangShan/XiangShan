@@ -233,7 +233,7 @@ class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parame
   val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
-  val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
+  val vstd                = OptionWrapper(isVStore, Valid(new StoreQueueDataWrite))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
   val threshold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
 }
@@ -249,7 +249,7 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new VLSBundle()))
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
-  val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
+  val vstd                = OptionWrapper(isVStore, ValidIO(new StoreQueueDataWrite))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
 }
 
@@ -257,7 +257,11 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val redirect            = Flipped(ValidIO(new Redirect))
   val fromPipeline        = if(isVStore) Vec(StorePipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(LoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
   val fromSplit           = if(isVStore) Vec(VecStorePipelineWidth, new FromSplitIO) else Vec(VecLoadPipelineWidth, new FromSplitIO) // req mergebuffer entry, inactive elem issue
-  val uopWriteback        = if(isVStore) Vec(VSUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true))) else Vec(VLUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
+  val uopWriteback        = if(isVStore)  {
+    Vec(VSUopWritebackWidth, DecoupledIO(new ExuOutput(vstuParams.head))) 
+  } else {
+    Vec(VLUopWritebackWidth, DecoupledIO(new ExuOutput(vlduParams.head)))
+  }
   val toSplit             = OptionWrapper(!isVStore, new FeedbackToSplitIO())
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
@@ -267,7 +271,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 
 class VSegmentUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
   val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
-  val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
+  val uopwriteback        = DecoupledIO(new ExuOutput(param)) // writeback data
   val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
@@ -287,5 +291,5 @@ class VfofDataBuffIO(val param: ExeUnitParams)(implicit p: Parameters) extends V
   val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))))
   val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new FeedbackToLsqIO)))
 
-  val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
+  val uopWriteback        = DecoupledIO(new ExuOutput(param))
 }

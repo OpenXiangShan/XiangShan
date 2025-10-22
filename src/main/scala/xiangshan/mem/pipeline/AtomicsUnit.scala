@@ -24,8 +24,9 @@ import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.FuConfig.MouCfg
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DynInst, ExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, ExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
@@ -40,13 +41,12 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   with HasDCacheParameters
   with SdtrigExt{
 
-  val StdCnt  = backendParams.StdCnt
-
   val io = IO(new Bundle() {
     val hartId        = Input(UInt(hartIdLen.W))
     val in            = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
-    val storeDataIn   = Flipped(Vec(StdCnt, Valid(new MemExuOutput)))
-    val out           = Decoupled(new MemExuOutput)
+    val storeDataIn   = Flipped(Vec(StdCnt, Valid(new ExuInput(moudParam))))
+    // AtomicsUnit re-uses lda port to write back
+    val out           = Decoupled(new ExuOutput(ldaParams.head))
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
@@ -131,7 +131,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
   // therefore the MSBs are reused to identify uopIdx
-  val stdUopIdxs = io.storeDataIn.map(_.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth)
+  val stdUopIdxs = io.storeDataIn.map(_.bits.fuOpType >> LSUOpType.AMOFuOpWidth)
   val staUopIdx = io.in.bits.fuOpType >> LSUOpType.AMOFuOpWidth
 
   // assign default value to output signals
@@ -172,7 +172,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   stds.zipWithIndex.foreach { case (data, i) =>
     val sels = io.storeDataIn.zip(stdUopIdxs).map { case (in, uopIdx) =>
       val sel = in.fire && uopIdx === i.U
-      when (sel) { data := in.bits.data }
+      when (sel) { data := in.bits.src(0) }
       sel
     }
     OneHot.checkOneHot(sels)
@@ -278,7 +278,6 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       trigger                  := triggerAction
 
       when (!io.dtlb.resp.bits.miss) {
-        io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
           // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
@@ -492,7 +491,6 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dtlb.req.bits.debug.pc := uop.pc
   io.dtlb.req.bits.debug.robIdx := uop.robIdx
   io.dtlb.req.bits.debug.isFirstIssue := false.B
-  io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
   // send req to sbuffer to flush it if it is not empty
   io.flush_sbuffer.valid := !sbuffer_empty && (
@@ -506,16 +504,19 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // (2) For AMOCAS.Q, the second uop with the pdest of the higher bits of rd is not received yet
   io.in.ready := state === s_invalid || LSUOpType.isAMOCASQ(uop.fuOpType) && (!pdest2Valid || !pdest1Valid)
 
+  val state_sta_wb = state === s_finish || state === s_finish2
+  val state_std_wb = state === s_extra_wb || state === s_extra_wb2
   io.out.valid := out_valid && Mux(state === s_finish2, pdest2Valid, pdest1Valid)
-  assert(!out_valid || state === s_finish || state === s_finish2 || state === s_extra_wb || state === s_extra_wb2, "out_valid reg error\n")
-  io.out.bits := DontCare
-  io.out.bits.uop := uop
-  io.out.bits.uop.fuType := FuType.mou.U
-  io.out.bits.uop.rfWen := state === s_finish || state === s_finish2
-  io.out.bits.uop.pdest := Mux(state === s_finish2, pdest2, pdest1)
-  io.out.bits.uop.exceptionVec := exceptionVec
-  io.out.bits.uop.trigger := trigger
-  io.out.bits.data := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
+  assert(!out_valid || state_sta_wb || state_std_wb, "out_valid reg error\n")
+  io.out.bits := 0.U.asTypeOf(io.out.bits)
+  io.out.bits.data := VecInit(Seq.fill(param.wbPathNum)(Mux(state === s_finish2, resp_data >> XLEN, resp_data)))
+  io.out.bits.pdest := Mux(state === s_finish2, pdest2, pdest1)
+  io.out.bits.robIdx := uop.robIdx
+  io.out.bits.intWen.foreach(_ := state_sta_wb)
+  io.out.bits.redirect.foreach(_ := 0.U.asTypeOf(Valid(new Redirect)))
+  io.out.bits.exceptionVec.foreach(_ := exceptionVec)
+  io.out.bits.trigger.foreach(_ := trigger)
+  io.out.bits.predecodeInfo.foreach(_ := uop.preDecodeInfo)
   io.out.bits.debug.isMMIO := is_mmio
   io.out.bits.debug.paddr := paddr
 
@@ -582,7 +583,6 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    val uop = io.out.bits.uop
     val difftest = DifftestModule(new DiffLrScEvent)
     difftest.coreid := io.hartId
     difftest.valid := io.out.fire && state === s_finish && isSc

@@ -157,16 +157,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
   backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
   backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.wakeup.zip(memBlock.io.mem_to_ooo.wakeup).map{ case (sink, source) => {
-    sink.valid := source.valid
-    connectSamePort(sink.bits, source.bits)
-  }}
-  backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
-  backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
-  backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
-  backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
-  backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
-  backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
+  backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
+  backend.io.mem.intWriteback <> memBlock.io.mem_to_ooo.intWriteback
+  backend.io.mem.vecWriteback <> memBlock.io.mem_to_ooo.vecWriteback
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
@@ -200,16 +193,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
-  // memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
-  // memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
-  // memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
-  // memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
-  // backend.io.mem.issueHysta.foreach(_.ready := false.B) // this fake port should not be used
-  // memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
-  memBlock.io.ooo_to_mem.issue <> backend.io.mem.issue
+  memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
+  memBlock.io.ooo_to_mem.vecIssue <> backend.io.mem.vecIssue
 
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.ooo_to_mem.issue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
+  memBlock.io.ooo_to_mem.intIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
+  memBlock.io.ooo_to_mem.vecIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb

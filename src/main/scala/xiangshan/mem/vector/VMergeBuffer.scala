@@ -61,6 +61,8 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VMergeBufferIO(isVStore))
 
+  val param = if (isVStore) vstuParams.head else vlduParams.head
+
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
   // | 0 | 1 |      ......  | n-2 | n-1 |
@@ -89,18 +91,39 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.vaddr        := source.vaddr
     sink.vstart       := 0.U
   }
-  def DeqConnect(source: MBufferBundle): MemExuOutput = {
-    val sink               = WireInit(0.U.asTypeOf(new MemExuOutput(isVector = true)))
-    sink.data             := source.data
-    sink.mask.get         := source.mask
-    sink.uop              := source.uop
-    sink.uop.exceptionVec := ExceptionNO.selectByFu(source.exceptionVec, fuCfg)
-    sink.uop.vpu.vmask    := source.mask
-    sink.debug            := 0.U.asTypeOf(new DebugBundle)
-    sink.vdIdxInField.get := source.vdIdx // Mgu needs to use this.
-    sink.vdIdx.get        := source.vdIdx
-    sink.uop.vpu.vstart   := source.vstart
-    sink.uop.vpu.vl       := source.originVl
+  def DeqConnect(source: MBufferBundle): ExuOutput = {
+    val sink = WireInit(0.U.asTypeOf(new ExuOutput(param)))
+    sink.data := VecInit(Seq.fill(param.wbPathNum)(source.data))
+    sink.pdest := source.uop.pdest
+    sink.robIdx := source.uop.robIdx
+    sink.intWen.foreach(_ := source.uop.rfWen)
+    sink.fpWen.foreach(_ := source.uop.fpWen)
+    sink.vecWen.foreach(_ := source.uop.vecWen)
+    sink.v0Wen.foreach(_ := source.uop.v0Wen)
+    sink.vlWen.foreach(_ := source.uop.vlWen)
+    sink.exceptionVec.foreach(_ := ExceptionNO.selectByFu(source.exceptionVec, fuCfg))
+    sink.flushPipe.foreach(_ := source.uop.flushPipe)
+    sink.replay.foreach(_ := source.uop.replayInst)
+    sink.lqIdx.foreach(_ := source.uop.lqIdx)
+    sink.sqIdx.foreach(_ := source.uop.sqIdx)
+    sink.trigger.foreach(_ := source.uop.trigger)
+    sink.vls.foreach(vls => {
+      vls.vpu := source.uop.vpu
+      vls.vpu.vmask := source.mask
+      vls.vpu.vstart := source.vstart
+      vls.vpu.vl := source.originVl
+      vls.oldVdPsrc := source.uop.psrc(2)
+      vls.vdIdx := source.vdIdx
+      vls.vdIdxInField := source.vdIdx // Mgu needs to use this.
+      vls.isIndexed := VlduType.isIndexed(source.uop.fuOpType)
+      vls.isMasked := VlduType.isMasked(source.uop.fuOpType)
+      vls.isStrided := VlduType.isStrided(source.uop.fuOpType)
+      vls.isWhole := VlduType.isWhole(source.uop.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(source.uop.fuOpType)
+      vls.isVlm := VlduType.isMasked(source.uop.fuOpType) && VlduType.isVecLd(source.uop.fuOpType)
+    })
+    sink.debugInfo := source.uop.debugInfo
+    sink.debug_seqNum := source.uop.debug_seqNum
     sink
   }
   def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
@@ -327,9 +350,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
   }
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
-   private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
+   private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new ExuOutput(param))))
+   private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new ExuOutput(param))))
+   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.exceptionVec.get)
    for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
@@ -367,11 +390,11 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       port, writeBackOut(i), writeBackOut(i).fire,
       Mux(port.fire,
         selEntry.uop.robIdx.needFlush(io.redirect),
-        writeBackOut(i).bits.uop.robIdx.needFlush(io.redirect)),
+        writeBackOut(i).bits.robIdx.needFlush(io.redirect)),
       Option(s"VMergebufferPipelineConnect${i}")
     )
      io.uopWriteback(i)                  <> writeBackOut(i)
-     io.uopWriteback(i).bits.uop.exceptionVec := ExceptionNO.selectByFu(writeBackOutExceptionVec(i), fuCfg)
+     io.uopWriteback(i).bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(writeBackOutExceptionVec(i), fuCfg))
    }
 
   QueuePerf(uopSize, freeList.io.validCount, freeList.io.validCount === 0.U)
@@ -464,18 +487,35 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     enablePreAlloc = false,
     moduleName = "VStore MergeBuffer freelist"
   ))
-  override def DeqConnect(source: MBufferBundle): MemExuOutput = {
-    val sink               = Wire(new MemExuOutput(isVector = true))
-    sink.data             := DontCare
-    sink.mask.get         := DontCare
-    sink.uop              := source.uop
-    sink.uop.exceptionVec := source.exceptionVec
-    sink.debug            := 0.U.asTypeOf(new DebugBundle)
-    sink.vdIdxInField.get := DontCare
-    sink.vdIdx.get        := DontCare
-    sink.isFromLoadUnit   := DontCare
-    sink.uop.vpu.vstart   := source.vstart
-    sink.vecDebug.get     := DontCare
+  // TODO: It seems that override of DeqConnect is not necessary
+  override def DeqConnect(source: MBufferBundle): ExuOutput = {
+    val sink = Wire(new ExuOutput(param))
+    sink := DontCare
+    sink.pdest := source.uop.pdest
+    sink.robIdx := source.uop.robIdx
+    sink.intWen.foreach(_ := source.uop.rfWen)
+    sink.fpWen.foreach(_ := source.uop.fpWen)
+    sink.vecWen.foreach(_ := source.uop.vecWen)
+    sink.v0Wen.foreach(_ := source.uop.v0Wen)
+    sink.vlWen.foreach(_ := source.uop.vlWen)
+    sink.exceptionVec.foreach(_ := ExceptionNO.selectByFu(source.exceptionVec, fuCfg))
+    sink.flushPipe.foreach(_ := source.uop.flushPipe)
+    sink.replay.foreach(_ := source.uop.replayInst)
+    sink.lqIdx.foreach(_ := source.uop.lqIdx)
+    sink.sqIdx.foreach(_ := source.uop.sqIdx)
+    sink.trigger.foreach(_ := source.uop.trigger)
+    sink.vls.foreach(vls => {
+      vls.vpu := source.uop.vpu
+      vls.oldVdPsrc := source.uop.psrc(2)
+      vls.isIndexed := VlduType.isIndexed(source.uop.fuOpType)
+      vls.isMasked := VlduType.isMasked(source.uop.fuOpType)
+      vls.isStrided := VlduType.isStrided(source.uop.fuOpType)
+      vls.isWhole := VlduType.isWhole(source.uop.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(source.uop.fuOpType)
+      vls.isVlm := VlduType.isMasked(source.uop.fuOpType) && VlduType.isVecLd(source.uop.fuOpType)
+    })
+    sink.debugInfo := source.uop.debugInfo
+    sink.debug_seqNum := source.uop.debug_seqNum
     sink
   }
 }

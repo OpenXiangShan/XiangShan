@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.Bundles.{ExuOutput, MemExuOutput}
+import xiangshan.backend.Bundles.ExuOutput
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.vector.{ByteMaskTailGen, Mgu, VldMgu, VecInfo}
 import xiangshan.mem.GenUSMaskRegVL
