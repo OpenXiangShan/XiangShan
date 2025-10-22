@@ -136,14 +136,26 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
     entries.hasException          := wbHasException
   }
 
-  //Deq
-  io.uopWriteback.bits                  := 0.U.asTypeOf(new MemExuOutput(isVector = true))
-  io.uopWriteback.bits.uop              := entries.uop
-  io.uopWriteback.bits.uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-  io.uopWriteback.bits.data             := entries.vl
-  io.uopWriteback.bits.uop.vpu.vl       := entries.vl
-  io.uopWriteback.bits.mask.get         := Fill(VLEN, 1.U)
-  io.uopWriteback.bits.uop.vpu.vmask    := Fill(VLEN, 1.U)
-  io.uopWriteback.valid                 := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
+  // Deq
+  io.uopWriteback.valid := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
+  io.uopWriteback.bits := 0.U.asTypeOf(new ExuOutput(param))
+  io.uopWriteback.bits.data := VecInit(Seq.fill(param.wbPathNum)(entries.vl))
+  io.uopWriteback.bits.pdest := entries.uop.pdest
+  io.uopWriteback.bits.robIdx := entries.uop.robIdx
+  io.uopWriteback.bits.intWen.foreach(_ := entries.uop.rfWen)
+  io.uopWriteback.bits.fpWen.foreach(_ := entries.uop.fpWen)
+  io.uopWriteback.bits.vecWen.foreach(_ := entries.uop.vecWen)
+  io.uopWriteback.bits.v0Wen.foreach(_ := entries.uop.v0Wen)
+  io.uopWriteback.bits.vlWen.foreach(_ := entries.uop.vlWen)
+  io.uopWriteback.bits.exceptionVec.foreach(_ := 0.U.asTypeOf(ExceptionVec()))
+  io.uopWriteback.bits.lqIdx.foreach(_ := entries.uop.lqIdx)
+  io.uopWriteback.bits.sqIdx.foreach(_ := entries.uop.sqIdx)
+  io.uopWriteback.bits.vls.foreach(vls => {
+    vls.vpu := entries.uop.vpu
+    vls.vpu.vl := entries.vl
+    vls.vpu.vmask := Fill(VLEN, 1.U)
+  })
+  io.uopWriteback.bits.debugInfo := entries.uop.debugInfo
+  io.uopWriteback.bits.debug_seqNum := entries.uop.debug_seqNum
 
 }

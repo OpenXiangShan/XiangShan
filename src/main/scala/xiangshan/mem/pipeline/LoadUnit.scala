@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{DynInst, ExuInput, MemExuOutput, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, ExuOutput, MemExuOutput, MemWakeUpBundle, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
@@ -125,7 +125,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
     // int issue path
     val ldin          = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
-    val ldout         = Decoupled(new MemExuOutput)
+    val ldout         = Decoupled(new ExuOutput(param))
 
     // vec issue path
     val vecldin = Flipped(Decoupled(new VecPipeBundle))
@@ -164,7 +164,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     val ifetchPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
 
     // rs feedback
-    val wakeup = ValidIO(new DynInst)
+    val wakeup = ValidIO(new MemWakeUpBundle)
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
     val ldCancel = Output(new LoadCancelIO()) // use to cancel the uops waked by this load, and cancel load
 
@@ -831,7 +831,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     (s0_src_valid_vec(int_iss_idx) && !s0_sel_src.prf &&
     !s0_src_valid_vec(vec_iss_idx) && !s0_src_valid_vec(high_pf_idx))
   ) || s0_mmio_fire || s0_nc_fire || s0_misalign_wakeup_fire
-  io.wakeup.bits := s0_wakeup_uop
+  connectSamePort(io.wakeup.bits, s0_wakeup_uop)
 
   // prefetch.i(Zicbop)
   io.ifetchPrefetch.valid := RegNext(s0_src_select_vec(int_iss_idx) && s0_sel_src.prf_i)
@@ -1069,9 +1069,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_nc_with_data = RegNext(s1_nc_with_data)
-  val s2_mmio_req = Wire(Valid(new MemExuOutput))
+  val s2_mmio_req = Wire(Valid(new ExuOutput(param)))
   s2_mmio_req.valid := RegNextN(io.lsq.uncache.fire, 2, Some(false.B))
-  s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits, 2)
+  s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits.toExuOutput(param), 2)
 
   val s3_misalign_wakeup_req = Wire(Valid(new LqWriteBundle))
   val s3_misalign_wakeup_req_bits = WireInit(0.U.asTypeOf(new LqWriteBundle))
@@ -1381,7 +1381,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // writeback and update load queue
   val s3_valid        = GatedValidRegNext(s2_valid && !s2_out.isHWPrefetch && !s2_out.uop.robIdx.needFlush(io.redirect))
   val s3_in           = RegEnable(s2_out, s2_fire)
-  val s3_out          = Wire(Valid(new MemExuOutput))
+  val s3_out          = Wire(Valid(new LqWriteBundle))
+  val s3_wb           = Wire(new ExuOutput(param))
   val s3_dcache_rep   = RegEnable(s2_dcache_fast_rep && s2_troublem, false.B, s2_fire)
   val s3_ld_valid_dup = RegEnable(s2_ld_valid_dup, s2_fire)
   val s3_fast_rep     = Wire(Bool())
@@ -1395,9 +1396,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_frm_mabuf       = s3_in.isFrmMisAlignBuf
   val s3_mmio_req     = RegNext(s2_mmio_req)
-  val s3_pdest        = RegNext(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest))
-  val s3_rfWen        = RegEnable(Mux(s2_valid, s2_out.uop.rfWen, s2_mmio_req.bits.uop.rfWen), s2_valid || s2_mmio_req.valid)
-  val s3_fpWen        = RegEnable(Mux(s2_valid, s2_out.uop.fpWen, s2_mmio_req.bits.uop.fpWen), s2_valid || s2_mmio_req.valid)
+  val s3_pdest        = RegNext(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.pdest))
+  val s3_rfWen        = RegEnable(Mux(s2_valid, s2_out.uop.rfWen, s2_mmio_req.bits.intWen.get), s2_valid || s2_mmio_req.valid)
+  val s3_fpWen        = RegEnable(Mux(s2_valid, s2_out.uop.fpWen, s2_mmio_req.bits.fpWen.get), s2_valid || s2_mmio_req.valid)
   val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
   val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
   val s3_hw_err   =
@@ -1474,22 +1475,13 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   }
   io.lsq.ldin.bits.rep_info.cause := s3_replayqueue_rep_cause
 
-
   // Int load, if hit, will be writebacked at s3
-  s3_out.valid                := s3_valid && s3_safe_writeback && !toMisalignBufferValid
-  s3_out.bits.uop             := s3_in.uop
-  s3_out.bits.uop.fpWen       := s3_in.uop.fpWen
+  s3_out.valid := s3_valid && s3_safe_writeback && !toMisalignBufferValid
+  s3_out.bits := s3_in
   s3_out.bits.uop.exceptionVec(loadAccessFault) := s3_in.uop.exceptionVec(loadAccessFault) && s3_vecActive
   s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
-  s3_out.bits.data            := s3_in.data
-  s3_out.bits.isFromLoadUnit  := true.B
-  s3_out.bits.debug.isMMIO    := s3_in.mmio
-  s3_out.bits.debug.isNCIO    := s3_in.nc && !s3_in.memBackTypeMM
-  s3_out.bits.debug.isPerfCnt := false.B
-  s3_out.bits.debug.paddr     := s3_in.paddr
-  s3_out.bits.debug.vaddr     := s3_in.vaddr
 
   // Vector load, writeback to merge buffer
   // TODO: Add assertion in merge buffer, merge buffer must accept vec load writeback
@@ -1555,7 +1547,43 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // TODO: vector wakeup?
   io.ldCancel.ld2Cancel := s3_valid && !s3_safe_wakeup && !s3_isvec
 
-  val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio_req.bits)
+  // LqWriteBundle -> ExuOutput
+  s3_wb.pdest := s3_out.bits.uop.pdest
+  s3_wb.robIdx := s3_out.bits.uop.robIdx
+  s3_wb.intWen.foreach(_ := s3_out.bits.uop.rfWen)
+  s3_wb.fpWen.foreach(_ := s3_out.bits.uop.fpWen)
+  s3_wb.vecWen.foreach(_ := s3_out.bits.uop.vecWen)
+  s3_wb.v0Wen.foreach(_ := s3_out.bits.uop.v0Wen)
+  s3_wb.vlWen.foreach(_ := s3_out.bits.uop.vlWen)
+  s3_wb.redirect.foreach(_ := 0.U.asTypeOf(ValidIO(new Redirect)))
+  s3_wb.exceptionVec.foreach(_ := s3_out.bits.uop.exceptionVec)
+  s3_wb.flushPipe.foreach(_ := s3_out.bits.uop.flushPipe)
+  s3_wb.replay.foreach(_ := s3_out.bits.uop.replayInst)
+  s3_wb.lqIdx.foreach(_ := s3_out.bits.uop.lqIdx)
+  s3_wb.sqIdx.foreach(_ := s3_out.bits.uop.sqIdx)
+  s3_wb.trigger.foreach(_ := s3_out.bits.uop.trigger)
+  s3_wb.predecodeInfo.foreach(_ := s3_out.bits.uop.preDecodeInfo)
+  s3_wb.vls.foreach(x => {
+    x.vpu := s3_out.bits.uop.vpu
+    x.oldVdPsrc := s3_out.bits.uop.psrc(2)
+    x.vdIdx := DontCare
+    x.vdIdxInField := DontCare
+    x.isIndexed := VlduType.isIndexed(s3_out.bits.uop.fuOpType)
+    x.isMasked := VlduType.isMasked(s3_out.bits.uop.fuOpType)
+    x.isStrided := VlduType.isStrided(s3_out.bits.uop.fuOpType)
+    x.isWhole := VlduType.isWhole(s3_out.bits.uop.fuOpType)
+    x.isVecLoad := VlduType.isVecLd(s3_out.bits.uop.fuOpType)
+    x.isVlm := VlduType.isMasked(s3_out.bits.uop.fuOpType) && VlduType.isVecLd(s3_out.bits.uop.fuOpType)
+  })
+  s3_wb.debug.isMMIO := s3_in.mmio
+  s3_wb.debug.isNCIO := s3_in.nc && !s3_in.memBackTypeMM
+  s3_wb.debug.isPerfCnt := false.B
+  s3_wb.debug.paddr := s3_in.paddr
+  s3_wb.debug.vaddr := s3_in.vaddr
+  s3_wb.debugInfo := s3_out.bits.uop.debugInfo
+  s3_wb.debug_seqNum := s3_out.bits.uop.debug_seqNum
+
+  val s3_ld_wb_meta = Mux(s3_valid, s3_wb, s3_mmio_req.bits)
 
   // data from load queue refill
   val s3_ld_raw_data_frm_mmio = RegNextN(io.lsq.ld_raw_data, 3)
@@ -1630,20 +1658,11 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // io.lsq.uncache.ready := !s3_valid
   val s3_ldout_valid  = s3_mmio_req.valid ||
                         s3_out.valid && RegNext(!s2_out.isvec && !s2_out.isFrmMisAlignBuf)
-  val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
+  s3_wb.data := VecInit(Seq.fill(param.wbPathNum)(s3_ld_data_frm_pipe(0)))
+  s3_mmio_req.bits.data := VecInit(Seq.fill(param.wbPathNum)(s3_ld_data_frm_mmio))
+
   io.ldout.valid       := s3_ldout_valid
   io.ldout.bits        := s3_ld_wb_meta
-  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
-  io.ldout.bits.uop.rfWen := s3_rfWen
-  io.ldout.bits.uop.fpWen := s3_fpWen
-  io.ldout.bits.uop.pdest := s3_pdest
-  io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
-  io.ldout.bits.isFromLoadUnit := true.B
-  io.ldout.bits.uop.fuType := Mux(
-                                  s3_valid && s3_isvec,
-                                  FuType.vldu.U,
-                                  FuType.ldu.U
-  )
 
   XSError(s3_valid && s3_vecout.isvec && s3_in.vecActive && !s3_vecout.mask.orR, "In vecActive, mask complement should not be 0")
   // TODO: check this --hx
@@ -1827,6 +1846,5 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s3_picked_data_frm_pipe.map(x=> dontTouch(x))
   }
 
-  XSDebug(io.ldout.fire, "ldout %x\n", io.ldout.bits.uop.pc)
   // end
 }

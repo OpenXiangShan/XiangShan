@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, MemExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
@@ -60,7 +60,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryBundle)
-    val stout           = DecoupledIO(new MemExuOutput) // writeback store
+    val stout           = DecoupledIO(new ExuOutput(param)) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
@@ -567,7 +567,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // store write back
   val s3_valid  = RegInit(false.B)
   val s3_in     = RegEnable(s2_out, s2_fire)
-  val s3_out    = Wire(new MemExuOutput(isVector = true))
+  val s3_out    = Wire(new ExuOutput(param))
   val s3_kill   = s3_in.uop.robIdx.needFlush(io.redirect)
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
@@ -580,15 +580,30 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   .elsewhen (s3_kill) { s3_valid := false.B }
 
   // wb: writeback
-
-  s3_out                 := DontCare
-  s3_out.uop             := s3_in.uop
-  s3_out.data            := DontCare
-  s3_out.debug.isMMIO    := s3_in.mmio
-  s3_out.debug.isNCIO    := s3_in.nc && !s3_in.memBackTypeMM
-  s3_out.debug.paddr     := s3_in.paddr
-  s3_out.debug.vaddr     := s3_in.vaddr
+  s3_out := DontCare
+  s3_out.data := DontCare
+  s3_out.pdest := s3_in.uop.pdest
+  s3_out.robIdx := s3_in.uop.robIdx
+  s3_out.intWen.foreach(_ := s3_in.uop.rfWen)
+  s3_out.fpWen.foreach(_ := s3_in.uop.fpWen)
+  s3_out.vecWen.foreach(_ := s3_in.uop.vecWen)
+  s3_out.v0Wen.foreach(_ := s3_in.uop.v0Wen)
+  s3_out.vlWen.foreach(_ := s3_in.uop.vlWen)
+  s3_out.redirect.foreach(_ := 0.U.asTypeOf(ValidIO(new Redirect)))
+  s3_out.exceptionVec.foreach(_ := s3_in.uop.exceptionVec)
+  s3_out.flushPipe.foreach(_ := s3_in.uop.flushPipe)
+  s3_out.replay.foreach(_ := s3_in.uop.replayInst)
+  s3_out.lqIdx.foreach(_ := s3_in.uop.lqIdx)
+  s3_out.sqIdx.foreach(_ := s3_in.uop.sqIdx)
+  s3_out.trigger.foreach(_ := s3_in.uop.trigger)
+  s3_out.predecodeInfo.foreach(_ := s3_in.uop.preDecodeInfo)
+  s3_out.debug.isMMIO := s3_in.mmio
+  s3_out.debug.isNCIO := s3_in.nc
   s3_out.debug.isPerfCnt := false.B
+  s3_out.debug.paddr := s3_in.paddr
+  s3_out.debug.vaddr := s3_in.vaddr
+  s3_out.debugInfo := s3_in.uop.debugInfo
+  s3_out.debug_seqNum := s3_in.uop.debug_seqNum
 
   XSError(s3_valid && s3_in.isvec && s3_in.vecActive && !s3_in.mask.orR, "In vecActive, mask complement should not be 0")
   // Pipeline
@@ -597,8 +612,9 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // --------------------------------------------------------------------------------
   val sx_valid = Wire(Vec(RAWTotalDelayCycles + 1, Bool()))
   val sx_ready = Wire(Vec(RAWTotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(RAWTotalDelayCycles + 1, new VecMemExuOutput(isVector = true)))
+  val sx_in    = Wire(Vec(RAWTotalDelayCycles + 1, new VecMemExuOutput(param)))
   val sx_in_vec = Wire(Vec(RAWTotalDelayCycles +1, Bool()))
+  val sx_in_vls = Wire(Vec(RAWTotalDelayCycles + 1, (new ExuOutput(vstuParams.head)).vls.get.cloneType))
 
   // backward ready signal
   s3_ready := sx_ready.head
@@ -621,42 +637,54 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_in(i).hasException := s3_exception
       sx_in_vec(i)         := s3_in.isvec
-      sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
+      sx_in_vls(i).vpu := s3_in.uop.vpu
+      sx_in_vls(i).oldVdPsrc := s3_in.uop.psrc(2)
+      sx_in_vls(i).vdIdx := DontCare
+      sx_in_vls(i).vdIdxInField := DontCare
+      sx_in_vls(i).isIndexed := VlduType.isIndexed(s3_in.uop.fuOpType)
+      sx_in_vls(i).isMasked := VlduType.isMasked(s3_in.uop.fuOpType)
+      sx_in_vls(i).isStrided := VlduType.isStrided(s3_in.uop.fuOpType)
+      sx_in_vls(i).isWhole := VlduType.isWhole(s3_in.uop.fuOpType)
+      sx_in_vls(i).isVecLoad := VlduType.isVecLd(s3_in.uop.fuOpType)
+      sx_in_vls(i).isVlm := VlduType.isMasked(s3_in.uop.fuOpType) && VlduType.isVecLd(s3_in.uop.fuOpType)
+      sx_ready(i) := !s3_valid(i) || sx_in(i).output.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
-      val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
+      val cur_kill   = sx_in(i).output.robIdx.needFlush(io.redirect)
       val cur_can_go = (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
-      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).output.uop.robIdx.needFlush(io.redirect) && sx_ready(i)
+      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).output.robIdx.needFlush(io.redirect) && sx_ready(i)
 
       sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
       sx_in_vec(i) := RegEnable(sx_in_vec(i-1), prev_fire)
+      sx_in_vls(i) := RegEnable(sx_in_vls(i-1), prev_fire)
     }
   }
   val sx_last_valid = sx_valid.takeRight(1).head
   val sx_last_ready = sx_ready.takeRight(1).head
   val sx_last_in    = sx_in.takeRight(1).head
   val sx_last_in_vec = sx_in_vec.takeRight(1).head
-  sx_last_ready := !sx_last_valid || sx_last_in.output.uop.robIdx.needFlush(io.redirect) || io.stout.ready
+  val sx_last_in_vls = sx_in_vls.takeRight(1).head
+  sx_last_ready := !sx_last_valid || sx_last_in.output.robIdx.needFlush(io.redirect) || io.stout.ready
 
   // write back: normal store, nc store
-  io.stout.valid := sx_last_valid && !sx_last_in_vec //isStore(sx_last_in.output.uop.fuType)
+  io.stout.valid := sx_last_valid && !sx_last_in_vec
   io.stout.bits := sx_last_in.output
-  io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
+  io.stout.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg))
 
-  io.vecstout.valid := sx_last_valid && sx_last_in_vec //isVStore(sx_last_in.output.uop.fuType)
+  io.vecstout.valid := sx_last_valid && sx_last_in_vec
   // TODO: implement it!
   io.vecstout.bits.mBIndex := sx_last_in.mbIndex
   io.vecstout.bits.hit := sx_last_in.vecFeedback
   io.vecstout.bits.isvec := true.B
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
-  io.vecstout.bits.trigger    := sx_last_in.output.uop.trigger
+  io.vecstout.bits.trigger    := sx_last_in.output.trigger.get
   io.vecstout.bits.nc := sx_last_in.nc
   io.vecstout.bits.mmio := sx_last_in.mmio
-  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
+  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, VstuCfg)
   io.vecstout.bits.hasException := sx_last_in.hasException
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
@@ -667,14 +695,8 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.vecstout.bits.vaNeedExt   := sx_last_in.vaNeedExt
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
-  io.vecstout.bits.vstart      := sx_last_in.output.uop.vpu.vstart
+  io.vecstout.bits.vstart      := sx_last_in_vls.vpu.vstart
   io.vecstout.bits.vecTriggerMask := sx_last_in.vecTriggerMask
-  // io.vecstout.bits.reg_offset.map(_ := DontCare)
-  // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
-  // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)
-  // io.vecstout.bits.vecdata.map(_ := DontCare)
-  // io.vecstout.bits.mask.map(_ := DontCare)
-  // io.vecstout.bits.alignedType.map(_ := sx_last_in.alignedType)
 
   io.debug_ls := DontCare
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value

@@ -76,7 +76,7 @@ trait VLSUConstants {
   def getDoubleDoubleWord(data: UInt, i: Int = 0) = getSlice(data, i, 128)
 }
 
-trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
+trait HasVLSUParameters extends HasMemBlockParameters with VLSUConstants {
   override val VLEN = coreParams.VLEN
   override lazy val vlmBindexBits = log2Up(coreParams.VlMergeBufferSize)
   override lazy val vsmBindexBits = log2Up(coreParams.VsMergeBufferSize)
@@ -247,13 +247,6 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   // val flowPtr = new VlflowPtr
 }
 
-class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
-  val vec = new OnlyVecExuOutput
-  val alignedType       = UInt(alignTypeBits.W)
-   // feedback
-  val vecFeedback       = Bool()
-}
-
 class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val flowMask       = UInt(VLENB.W) // each bit for a flow
   val byteMask       = UInt(VLENB.W) // each bit for a byte
@@ -296,8 +289,8 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val originAlignedType = UInt(alignTypeBits.W)
 }
 
-class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle{
-  val output = new MemExuOutput(isVector)
+class VecMemExuOutput(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
+  val output = new ExuOutput(param)
   val vecFeedback = Bool()
   val nc = Bool()
   val mmio = Bool()

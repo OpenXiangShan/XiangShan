@@ -78,7 +78,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val io               = IO(new VSegmentUnitIO(param))
 
   val maxSize          = VSegmentBufferSize
-  implicit val vsegParam: ExeUnitParams = param
+  override implicit val vsegParam: ExeUnitParams = param
 
   class VSegUPtr(implicit p: Parameters) extends CircularQueuePtr[VSegUPtr](maxSize){
   }
@@ -908,27 +908,64 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val writebackValid                   = (state === s_finish) && !isEmpty(enqPtr, deqPtr) || fofFixVlValid
 
   when(fofFixVlValid) {
-    writebackOut.uop                    := fofBuffer
-    writebackOut.uop.vpu.vl             := instMicroOp.exceptionVl.bits
-    writebackOut.data                   := instMicroOp.exceptionVl.bits
-    writebackOut.mask.get               := Fill(VLEN, 1.U)
-    writebackOut.uop.vpu.vmask          := Fill(VLEN, 1.U)
+    writebackOut.data := VecInit(Seq.fill(param.wbPathNum)(instMicroOp.exceptionVl.bits))
+    writebackOut.pdest := fofBuffer.pdest
+    writebackOut.robIdx := fofBuffer.robIdx
+    writebackOut.intWen.foreach(_ := fofBuffer.rfWen)
+    writebackOut.fpWen.foreach(_ := fofBuffer.fpWen)
+    writebackOut.vecWen.foreach(_ := fofBuffer.vecWen)
+    writebackOut.v0Wen.foreach(_ := fofBuffer.v0Wen)
+    writebackOut.vlWen.foreach(_ := fofBuffer.vlWen)
+    writebackOut.exceptionVec.foreach(_ := fofBuffer.exceptionVec)
+    writebackOut.flushPipe.foreach(_ := false.B)
+    writebackOut.replay.foreach(_ := false.B)
+    writebackOut.trigger.foreach(_ := fofBuffer.trigger)
+    writebackOut.vls.foreach(vls => {
+      vls.vpu := fofBuffer.vpu
+      vls.vpu.vl := instMicroOp.exceptionVl.bits
+      vls.vpu.vmask := Fill(VLEN, 1.U)
+      vls.oldVdPsrc := fofBuffer.psrc(2)
+      vls.isIndexed := VlduType.isIndexed(fofBuffer.fuOpType)
+      vls.isMasked := VlduType.isMasked(fofBuffer.fuOpType)
+      vls.isStrided := VlduType.isStrided(fofBuffer.fuOpType)
+      vls.isWhole := VlduType.isWhole(fofBuffer.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(fofBuffer.fuOpType)
+      vls.isVlm := VlduType.isMasked(fofBuffer.fuOpType) && VlduType.isVecLd(fofBuffer.fuOpType)
+    })
+    writebackOut.debugInfo := fofBuffer.debugInfo
+    writebackOut.debug_seqNum := fofBuffer.debug_seqNum
   }.otherwise{
-    writebackOut.uop                    := uopq(deqPtr.value).uop
-    writebackOut.uop.vpu                := instMicroOp.uop.vpu
-    writebackOut.uop.trigger            := instMicroOp.uop.trigger
-    writebackOut.uop.exceptionVec       := instMicroOp.uop.exceptionVec
-    writebackOut.mask.get               := instMicroOp.mask
-    writebackOut.data                   := data(deqPtr.value)
-    writebackOut.vdIdx.get              := vdIdxInField
-    writebackOut.uop.vpu.vl             := instMicroOp.vl
-    writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
-    writebackOut.uop.vpu.vmask          := maskUsed
-    writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
-    writebackOut.debug                  := DontCare
-    writebackOut.vdIdxInField.get       := vdIdxInField
-    writebackOut.uop.robIdx             := instMicroOp.uop.robIdx
-    writebackOut.uop.fuOpType           := instMicroOp.uop.fuOpType
+    writebackOut.data := VecInit(Seq.fill(param.wbPathNum)(data(deqPtr.value)))
+    writebackOut.pdest := uopq(deqPtr.value).uop.pdest
+    writebackOut.robIdx := instMicroOp.uop.robIdx
+    writebackOut.intWen.foreach(_ := uopq(deqPtr.value).uop.rfWen)
+    writebackOut.fpWen.foreach(_ := uopq(deqPtr.value).uop.fpWen)
+    writebackOut.vecWen.foreach(_ := uopq(deqPtr.value).uop.vecWen)
+    writebackOut.v0Wen.foreach(_ := uopq(deqPtr.value).uop.v0Wen)
+    writebackOut.vlWen.foreach(_ := uopq(deqPtr.value).uop.vlWen)
+    writebackOut.exceptionVec.foreach(_ := instMicroOp.uop.exceptionVec)
+    writebackOut.flushPipe.foreach(_ := false.B)
+    writebackOut.replay.foreach(_ := false.B)
+    writebackOut.trigger.foreach(_ := instMicroOp.uop.trigger)
+    writebackOut.vls.foreach(vls => {
+      vls.vpu := instMicroOp.uop.vpu
+      vls.vpu.vl := instMicroOp.vl
+      vls.vpu.vstart := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
+      vls.vpu.vmask := maskUsed
+      vls.vpu.vuopIdx := uopq(deqPtr.value).uop.vpu.vuopIdx
+      vls.oldVdPsrc := uopq(deqPtr.value).uop.psrc(2)
+      vls.vdIdx := vdIdxInField
+      vls.vdIdxInField := vdIdxInField
+      vls.isIndexed := VlduType.isIndexed(instMicroOp.uop.fuOpType)
+      vls.isMasked := VlduType.isMasked(instMicroOp.uop.fuOpType)
+      vls.isStrided := VlduType.isStrided(instMicroOp.uop.fuOpType)
+      vls.isWhole := VlduType.isWhole(instMicroOp.uop.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(instMicroOp.uop.fuOpType)
+      vls.isVlm := VlduType.isMasked(instMicroOp.uop.fuOpType) && VlduType.isVecLd(instMicroOp.uop.fuOpType)
+    })
+    writebackOut.debug := DontCare
+    writebackOut.debugInfo := uopq(deqPtr.value).uop.debugInfo
+    writebackOut.debug_seqNum := uopq(deqPtr.value).uop.debug_seqNum
   }
 
   io.uopwriteback.valid               := RegNext(writebackValid)

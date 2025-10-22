@@ -26,7 +26,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput}
 import xiangshan.mem.Bundles._
 import xiangshan.mem.mdp._
 import xiangshan.cache._
@@ -169,6 +169,7 @@ object AgeDetector {
 
 class LoadQueueReplay(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
+  with HasMemBlockParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
   with HasTlbConst
@@ -186,7 +187,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // from std s1
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true))))
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite)))
 
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
@@ -318,7 +319,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // store data execute
     storeDataInSameCycleVec(i) := VecInit((0 until StorePipelineWidth).map(w => {
       io.storeDataIn(w).valid &&
-      blockSqIdx(i) === io.storeDataIn(w).bits.uop.sqIdx
+      blockSqIdx(i) === io.storeDataIn(w).bits.sqIdx
     })).asUInt.orR // for better timing
 
   }

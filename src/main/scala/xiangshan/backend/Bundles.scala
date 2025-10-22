@@ -1208,21 +1208,6 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
   }
 
-  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
-    val uop = new DynInst
-    val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
-    val iqIdx = UInt(log2Up(MemIQSizeMax).W)
-    val isFirstIssue = Bool()
-    val flowNum      = OptionWrapper(isVector, NumLsElem())
-
-    def src_rs1 = src(0)
-    def src_rs2 = src(1)
-    def src_stride = src(1)
-    def src_vs3 = src(2)
-    def src_mask = if (isVector) src(3) else 0.U
-    def src_vl = if (isVector) src(4) else 0.U
-  }
-
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
@@ -1234,6 +1219,42 @@ object Bundles {
     val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     def isVls = FuType.isVls(uop.fuType)
+
+    // TODO: delete this after MemExuOutput is thoroughly removed
+    def toExuOutput(param: ExeUnitParams): ExuOutput = {
+      val output = Wire(new ExuOutput(param))
+      output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
+      output.pdest  := this.uop.pdest
+      output.robIdx := this.uop.robIdx
+      output.intWen.foreach(_ := this.uop.rfWen)
+      output.fpWen.foreach(_ := this.uop.fpWen)
+      output.vecWen.foreach(_ := this.uop.vecWen)
+      output.v0Wen.foreach(_ := this.uop.v0Wen)
+      output.vlWen.foreach(_ := this.uop.vlWen)
+      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.flushPipe.foreach(_ := this.uop.flushPipe)
+      output.replay.foreach(_ := this.uop.replayInst)
+      output.debug := this.debug
+      output.debugInfo := this.uop.debugInfo
+      output.debug_seqNum := this.uop.debug_seqNum
+      output.lqIdx.foreach(_ := this.uop.lqIdx)
+      output.sqIdx.foreach(_ := this.uop.sqIdx)
+      output.predecodeInfo.foreach(_ := this.uop.preDecodeInfo)
+      output.vls.foreach(x => {
+        x.vdIdx := this.vdIdx.get
+        x.vdIdxInField := this.vdIdxInField.get
+        x.vpu   := this.uop.vpu
+        x.oldVdPsrc := this.uop.psrc(2)
+        x.isIndexed := VlduType.isIndexed(this.uop.fuOpType)
+        x.isMasked := VlduType.isMasked(this.uop.fuOpType)
+        x.isStrided := VlduType.isStrided(this.uop.fuOpType)
+        x.isWhole := VlduType.isWhole(this.uop.fuOpType)
+        x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
+        x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
+      })
+      output.trigger.foreach(_ := this.uop.trigger)
+      output
+    }
   }
 
   object LoadShouldCancel {
