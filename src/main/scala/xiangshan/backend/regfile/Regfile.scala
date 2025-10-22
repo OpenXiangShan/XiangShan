@@ -45,26 +45,12 @@ class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extend
   def readVf : Boolean = VecRegSrcDataSet .contains(rfReadDataCfg)
 }
 
-class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {
-  val wen = Input(Bool())
-  val addr = Input(UInt(addrWidth.W))
-  val data = Input(UInt(rfWriteDataCfg.dataWidth.W))
-  val intWen = Input(Bool())
-  val fpWen = Input(Bool())
-  val vecWen = Input(Bool())
-  val v0Wen = Input(Bool())
-  val vlWen = Input(Bool())
-  def writeInt: Boolean = rfWriteDataCfg.isInstanceOf[IntData]
-  def writeFp : Boolean = rfWriteDataCfg.isInstanceOf[FpData]
-  def writeVec: Boolean = rfWriteDataCfg.isInstanceOf[VecData]
-  def writeV0 : Boolean = rfWriteDataCfg.isInstanceOf[V0Data]
-  def writeVl : Boolean = rfWriteDataCfg.isInstanceOf[VlData]
-}
-
-class RfWritePortBundle(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {
+class RfWritePortBundle(val pregParams: PregParams) extends Bundle {
+  val dataWidth = pregParams.dataCfg.dataWidth
+  val addrWidth = pregParams.addrWidth
   val wen = Bool()
   val pdest = UInt(addrWidth.W)
-  val data = UInt(rfWriteDataCfg.dataWidth.W)
+  val data = UInt(dataWidth.W)
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
