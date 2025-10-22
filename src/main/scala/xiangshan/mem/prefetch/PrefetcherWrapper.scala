@@ -87,7 +87,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     // prefetch control
     val pfCtrlFromTile = Input(new PrefetchCtrlFromTile)
     val pfCtrlFromCSR = Flipped(new PrefetchCtrl)
-    val pfCtrlFromDCache = Flipped(new PrefetchControlBundle)
+    val pfCtrlFromDCache = Input(Vec(L1PrefetcherNum, new PrefetchControlBundle))
     // replenish information
     val fromDCache = Flipped(new DCacheToPrefetchIO)
     val fromOOO = Flipped(new OOOToPrefetchIO)
