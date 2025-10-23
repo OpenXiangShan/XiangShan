@@ -448,11 +448,15 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     }
 
     def setStatus(): Unit = {
-      when(counter >= thresholdOfReset.U){
+      // when(counter >= thresholdOfReset){
+      //   counter := 0.U
+      //   deltaList.map(x => x.newCycle())
+      // }.elsewhen(counter >= thresholdOfUpdate){
+      //   deltaList.map(x => x.newStatus())
+      // }
+      when(counter >= thresholdOfUpdate){
         counter := 0.U
         deltaList.map(x => x.newCycle())
-      }.elsewhen(counter >= thresholdOfUpdate.U){
-        deltaList.map(x => x.newStatus())
       }
     }
 
