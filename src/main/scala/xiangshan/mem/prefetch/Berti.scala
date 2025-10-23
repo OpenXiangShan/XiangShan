@@ -736,17 +736,14 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   val e0_srcValid = io.srcReq.valid
   val e0_src = io.srcReq.bits
   val e0_selIdx = Wire(UInt(BufferIndexWidth.W))
-  val e1_srcValid = RegNext(io.srcReq.valid)
+  val e1_fire = RegNext(e0_fire)
   val e1_src = RegEnable(io.srcReq.bits, io.srcReq.valid)
   val e1_selIdx = RegEnable(e0_selIdx, e0_fire)
   // e0
-  val e0_matchPrev = e1_srcValid && e0_srcValid && getLine(e1_src.prefetchVA) === getLine(e0_src.prefetchVA)
+  val e0_matchPrev = e1_fire && e0_srcValid && getLine(e1_src.prefetchVA) === getLine(e0_src.prefetchVA)
   val e0_matchVec = sizeMap(i => e0_srcValid && valids(i) && entries(i).vline === getLine(e0_src.prefetchVA))
   assert(PopCount(e0_matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
-  val e0_allocIdx = UIntToOH(replacer.way)
-
-  e0_fire := e0_srcValid
-  val e0_update = e0_srcValid && (e0_matchPrev || e0_matchVec.orR)
+  val e0_allocIdx = replacer.way
   when(e0_matchPrev){
     e0_selIdx := e1_selIdx
   }.elsewhen(e0_matchVec.orR){
@@ -754,12 +751,18 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   }.otherwise{
     e0_selIdx := e0_allocIdx
   }
-  
+  val e0_update =  e0_matchPrev || e0_matchVec.orR
+  e0_fire := e0_srcValid
+  when(e0_fire){
+    replacer.access(e0_selIdx)
+  }
+
   // e1
-  val e1_update = RegNext(e0_update)
+  val e1_update = RegNext(e0_fire && e0_update)
+  val e1_alloc = RegNext(e0_fire && !e0_update)
   when(e1_update){
     entries(e1_selIdx).updateEntryMerge(e1_src.prefetchTarget)
-  }.otherwise{
+  }.elsewhen(e1_alloc){
     entries(e1_selIdx).fromSourcePrefetchReq(e1_src)
     valids(e1_selIdx) := true.B
   }
@@ -804,16 +807,19 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   // tlb req
   val s1_tlbReqValid = RegNext(tlbReqArb.io.out.valid)
   val s1_tlbReqBits = RegEnable(tlbReqArb.io.out.bits, tlbReqArb.io.out.valid)
+  val s1_vaddr = RegEnable(tlbReqArb.io.out.bits.vaddr, tlbReqArb.io.out.valid)
   io.tlbReq.req.valid := s1_tlbReqValid
   io.tlbReq.req.bits := s1_tlbReqBits
   io.tlbReq.req_kill := false.B
   // tlb resp
   val s2_tlbRespValid = io.tlbReq.resp.valid
   val s2_tlbRespBits = io.tlbReq.resp.bits
+  val s2_vaddr = RegEnable(s1_vaddr, s1_tlbReqValid)
   io.tlbReq.resp.ready := true.B
   // pmp resp
   val s3_tlbRespValid = RegNext(s2_tlbRespValid)
   val s3_tlbRespBits = RegEnable(s2_tlbRespBits, s2_tlbRespValid)
+  val s3_vaddr = RegEnable(s2_vaddr, s2_tlbRespValid)
   val s3_pmpResp = io.pmpResp
   val s3_updateValid = s3_tlbRespValid && !s3_tlbRespBits.miss
   val s3_updateIndex = OHToUInt(s3_tlbFireOH.asUInt)
@@ -826,9 +832,12 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
     // pmp access fault
     s3_pmpResp.ld
   )
+  val s3_quit = entries(s3_updateIndex).getPrefetchVA =/= s3_vaddr // overwrite by new req
   // update
-  when(s3_drop1 || s3_drop2){
-    valids(s3_updateIndex) := false.B
+  when(s3_drop1 || s3_drop2 || s3_quit){
+    when(s3_drop1 || s3_drop2){
+      valids(s3_updateIndex) := false.B
+    }
   }.elsewhen(s3_updateValid){
     entries(s3_updateIndex).updateTlbResp(s3_tlbRespBits.paddr.head)
   }
@@ -836,7 +845,8 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   XSPerfAccumulate("tlb_resp_fire", io.tlbReq.resp.fire)
   XSPerfAccumulate("tlb_drop_miss", s3_drop1)
   XSPerfAccumulate("tlb_drop_fault", s3_drop2)
-  XSPerfAccumulate("tlb_succ_update", !(s3_drop1 || s3_drop2) && s3_updateValid)
+  XSPerfAccumulate("tlb_quit_overwrite", s3_quit)
+  XSPerfAccumulate("tlb_succ_update", !(s3_drop1 || s3_drop2 || s3_quit) && s3_updateValid)
 
   /******************************************************************
    * prefetch
