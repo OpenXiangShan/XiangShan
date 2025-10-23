@@ -369,24 +369,29 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   val stat_update_evictDelta = WireInit(0.S(DeltaWidth.W)) // TODO lyq: have no idea how to output this
   val stat_prefetch_isEntryHit = WireInit(false.B)
   /*** built-in function */
-  // def thresholdOfMax: Int = (1 << DtCntWidth) - 1
-  // def thresholdOfHalf: Int = (1 << (DtCntWidth - 1)) - 1
-  def thresholdOfReset: Int = 16 // thresholdOfMax
-  def thresholdOfUpdate: Int = 6 // thresholdOfHalf
-  def thresholdOfL1PF: Int = 4 // ((1 << DtCntWidth) * 0.65).toInt
-  def thresholdOfL2PF: Int = 2 // ((1 << DtCntWidth) * 0.5).toInt
-  def thresholdOfL2PFR: Int = 1 // ((1 << DtCntWidth) * 0.35).toInt
+  // def thresholdOfMax: UInt = (1 << DtCntWidth) - 1
+  // def thresholdOfHalf: UInt = (1 << (DtCntWidth - 1)) - 1
+  // def thresholdOfReset: UInt = 16.U 
+  // def thresholdOfUpdate: UInt = 10.U 
+  // def thresholdOfL1PF: UInt = 8.U 
+  // def thresholdOfL2PF: UInt = 5.U 
+  // def thresholdOfL2PFR: UInt = 2.U 
+  val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 16)   // thresholdOfMax
+  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 6)  // thresholdOfHalf
+  val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 4)      // ((1 << DtCntWidth) * 0.65).toInt
+  val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 2)      // ((1 << DtCntWidth) * 0.5).toInt
+  val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 1)    // ((1 << DtCntWidth) * 0.35).toInt
   def getPcTag(pc: UInt): UInt = {
     val res = getPCHash(pc)
     res(DtPcTagWidth - 1, 0)
   }
   def getStatus(conf: UInt): DeltaStatus.Type = {
     val res = Wire(DeltaStatus())
-    when(conf >= thresholdOfL1PF.U){
+    when(conf >= thresholdOfL1PF){
       res := DeltaStatus.L1_PREF
-    }.elsewhen(conf > thresholdOfL2PF.U){
+    }.elsewhen(conf > thresholdOfL2PF){
       res := DeltaStatus.L2_PREF
-    }.elsewhen(conf > thresholdOfL2PFR.U) {
+    }.elsewhen(conf > thresholdOfL2PFR) {
       res := DeltaStatus.L2_PREF_REPL
     }.otherwise{
       res := DeltaStatus.NO_PREF
@@ -455,10 +460,10 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     // Because that way you don't lose that value from the latest update?
     // But it's a little hard to record the nextDeltaCnt
     def setStatus(nextCnt: UInt, nextDeltaCnt: Seq[UInt]): Unit = {
-      when(nextCnt >= thresholdOfReset.U){
+      when(nextCnt >= thresholdOfReset){
         counter := 0.U
         deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newCycle(cnt)}
-      }.elsewhen(counter >= thresholdOfUpdate.U){
+      }.elsewhen(counter >= thresholdOfUpdate){
         deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newStatus(cnt)}
       }
     }
@@ -523,7 +528,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       }
 
       // // method 1: check here, low power but how about performance?
-      // when(nextCounter  === thresholdOfReset.U){
+      // when(nextCounter  === thresholdOfReset){
       //   deltaList.map(x => x.reset())
       // }
     }
@@ -884,6 +889,17 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   srcTable.log(
     data = e0_src,
     en = e0_fire,
+    clock = clock,
+    reset = reset
+  )
+
+  val sendTable = ChiselDB.createTable(
+    "berti_send_pf_req" + p(XSCoreParamsKey).HartId.toString,
+    new Entry, basicDB = true
+  )
+  sendTable.log(
+    data = entries(pfIdx),
+    en = pfIdxArb.io.out.valid,
     clock = clock,
     reset = reset
   )
