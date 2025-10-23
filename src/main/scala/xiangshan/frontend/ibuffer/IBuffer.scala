@@ -29,6 +29,7 @@ import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
+import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 
@@ -92,17 +93,40 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Between Bank
   private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
-  private val deqBankPtr:    IBufBankPtr      = deqBankPtrVec(0)
-  private val deqBankPtrVecNext = Wire(deqBankPtrVec.cloneType)
+  private val deqBankPtrVecNext: Vec[IBufBankPtr] = Wire(deqBankPtrVec.cloneType)
+  private val deqBankPtr:        IBufBankPtr      = deqBankPtrVec(0)
   // Inside Bank
-  private val deqInBankPtr: Vec[IBufInBankPtr] = RegInit(VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr)))
-  private val deqInBankPtrNext = Wire(deqInBankPtr.cloneType)
+  private val deqInBankPtr:     Vec[IBufInBankPtr] = RegInit(VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr)))
+  private val deqInBankPtrNext: Vec[IBufInBankPtr] = Wire(deqInBankPtr.cloneType)
 
-  private val deqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
-  private val deqPtrNext = Wire(deqPtr.cloneType)
+  private val deqPtrVec:     Vec[IBufPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufPtr)))
+  private val deqPtrVecNext: Vec[IBufPtr] = Wire(deqPtrVec.cloneType)
+  private val deqPtr:        IBufPtr      = deqPtrVec(0)
 
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
   private val enqPtr    = enqPtrVec(0)
+
+  // Only one exception (excluding rvcIll) is stored at a time.
+  // The rvcIll exception is stored in IBufEntry instead,
+  // because calculating the first rvcIll introduces latency.
+  private val firstHasExceptionExcludingRVCII: Bool = RegInit(false.B)
+  // First Exception Register
+  private val firstExceptionType:    ExceptionType = RegInit(ExceptionType.None)
+  private val firstBackendException: Bool          = RegInit(false.B)
+  private val firstCrossPageIPFFix:  Bool          = RegInit(false.B)
+  private val firstExceptionIBufIdx: IBufPtr       = RegInit(0.U.asTypeOf(new IBufPtr))
+  private val deqHasException:       Bool          = Wire(Bool())
+  private val deqExceptionOffset:    UInt          = Wire(UInt(log2Ceil(DecodeWidth).W))
+
+  // Current Exception Wire
+  private val currentExceptionType    = io.in.bits.exceptionType
+  private val currentCrossPageIPFFix  = io.in.bits.crossPageIPFFix
+  private val currentBackendException = io.in.bits.backendException
+
+  private val bypassHasExceptionExcludingRVCII: Bool          = Wire(Bool())
+  private val bypassExceptionType:              ExceptionType = Wire(new ExceptionType)
+  private val bypassBackendException:           Bool          = Wire(Bool())
+  private val bypassCrossPageIPFFix:            Bool          = Wire(Bool())
 
   XSError(
     io.in.valid && io.in.bits.prevIBufEnqPtr =/= enqPtr,
@@ -198,17 +222,45 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     when(decodeCanAccept) {
       when(useBypass && io.in.valid) {
         out.valid := bypass.valid
-        out.bits  := bypass.bits.toIBufOutEntry
+        out.bits := {
+          if (i == 0) // Exceptions excluding rvcIll can only happen at offset 0
+            bypass.bits.toIBufOutEntry(
+              bypassExceptionType,
+              bypassBackendException,
+              bypassCrossPageIPFFix
+            )
+          else bypass.bits.toIBufOutEntry(ExceptionType.None, false.B, false.B)
+        }
       }.otherwise {
         out.valid := deqEntries(i).valid
-        out.bits  := deqEntries(i).bits.toIBufOutEntry
+        out.bits := Mux(
+          deqHasException && i.U === deqExceptionOffset,
+          deqEntries(i).bits.toIBufOutEntry(
+            firstExceptionType,
+            firstBackendException,
+            firstCrossPageIPFFix
+          ),
+          deqEntries(i).bits.toIBufOutEntry(ExceptionType.None, false.B, false.B)
+        )
       }
     }.elsewhen(outputEntriesIsNotFull) {
       out.valid := deqEntries(i).valid
       out.bits := Mux(
         i.U < outputEntriesValidNum,
         out.bits,
-        VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry
+        Mux(
+          deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
+          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
+            firstExceptionType,
+            firstBackendException,
+            firstCrossPageIPFFix
+          ),
+          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
+            ExceptionType.None,
+            false.B,
+            false.B
+          )
+        )
       )
     }
   }
@@ -267,7 +319,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
   // Pointer maintenance
   deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
-  deqPtrNext        := deqPtr + numDeq
+  deqPtrVecNext     := VecInit(deqPtrVec.map(_ + numDeq))
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach { case ((ptrNext, ptr), idx) =>
     // validVec[k] == bankValid[deqBankPtr + k]
     // So bankValid[n] == validVec[n - deqBankPtr]
@@ -280,16 +332,68 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
   }
 
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Exception
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  // Bypass the first encountered exceptions to outputEntries.
+  bypassExceptionType    := currentExceptionType
+  bypassBackendException := currentBackendException
+  bypassCrossPageIPFFix  := currentCrossPageIPFFix
+  bypassHasExceptionExcludingRVCII :=
+    bypassExceptionType.hasException ||
+      bypassBackendException ||
+      bypassCrossPageIPFFix
+
+  // Register the first encountered exceptions into the IBuffer.
+  private val receiveExceptionFire = io.in.fire && !io.flush && !firstHasExceptionExcludingRVCII
+  private val nextFirstHasExceptionExcludingRVCII =
+    bypassHasExceptionExcludingRVCII && !useBypass
+
+  // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
+  when(receiveExceptionFire && nextFirstHasExceptionExcludingRVCII) {
+    firstHasExceptionExcludingRVCII := true.B
+  }
+
+  when(!firstHasExceptionExcludingRVCII) {
+    firstExceptionType    := currentExceptionType
+    firstBackendException := currentBackendException
+    firstCrossPageIPFFix  := currentCrossPageIPFFix
+    firstExceptionIBufIdx := enqPtrVec(0)
+  }
+
+  // Dequeue the first encountered exceptions to outputEntries.
+  private val deqExceptionMatchOH = VecInit((0 until DecodeWidth).map(i =>
+    deqPtrVec(i) === firstExceptionIBufIdx && firstHasExceptionExcludingRVCII
+  ))
+  private val deqHasExceptionOH = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchOH.asUInt
+  deqHasException    := deqHasExceptionOH.orR
+  deqExceptionOffset := OHToUInt(deqHasExceptionOH)
+
+  // When exceptions are dequeued, clear firstHasExceptionExcludingRVCII.
+  // Dequeue has higher priority, because once an exception has been processed,
+  // later exceptions are no longer relevant.
+  when(deqHasException && (decodeCanAccept || outputEntriesIsNotFull)) {
+    firstHasExceptionExcludingRVCII := false.B
+  }
+
+  XSError(
+    deqHasException && decodeCanAccept && useBypass,
+    "exception not dequeue, cannot use bypass"
+  )
+  XSError(PopCount(deqHasExceptionOH) > 1.U, "exception cannot multiHit")
+
   // Flush
   when(io.flush) {
     allowEnq      := true.B
     enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
     deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
-    deqPtr        := 0.U.asTypeOf(new IBufPtr())
+    deqPtrVec     := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     outputEntries.foreach(_.valid := false.B)
+    firstHasExceptionExcludingRVCII := false.B
   }.otherwise {
-    deqPtr        := deqPtrNext
+    deqPtrVec     := deqPtrVecNext
     deqInBankPtr  := deqInBankPtrNext
     deqBankPtrVec := deqBankPtrVecNext
   }

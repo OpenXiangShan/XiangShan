@@ -288,12 +288,12 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val foldpc:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufferEnqueueWidth, new InstrEndOffset)
   // val ftqPcOffset:      Vec[Valid[FtqPcOffset]] = Vec(IBufferEnqueueWidth, Valid(new FtqPcOffset))
-  val backendException: Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
-  val exceptionType:    Vec[ExceptionType] = Vec(IBufferEnqueueWidth, new ExceptionType)
-  val crossPageIPFFix:  Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
-  val illegalInstr:     Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
-  val triggered:        Vec[UInt]          = Vec(IBufferEnqueueWidth, TriggerAction())
-  val isLastInFtqEntry: Vec[Bool]          = Vec(IBufferEnqueueWidth, Bool())
+  val backendException: Bool          = Bool()
+  val exceptionType:    ExceptionType = new ExceptionType
+  val crossPageIPFFix:  Bool          = Bool()
+  val illegalInstr:     Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
+  val triggered:        Vec[UInt]     = Vec(IBufferEnqueueWidth, TriggerAction())
+  val isLastInFtqEntry: Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
 
   val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
