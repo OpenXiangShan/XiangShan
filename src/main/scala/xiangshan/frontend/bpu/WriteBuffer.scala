@@ -136,11 +136,11 @@ class WriteBuffer[T <: WriteReqBundle](
       val victim       = Mux(notUseful, notUsefulIdx, replacerWay(portIdx))
       // if this wirte port !hit need to write a new entry
       when(!hit) {
-        entries(portIdx)(victim)    := io.write(portIdx).bits
-        valids(portIdx)(victim)     := true.B
-        needWrite(portIdx)(victim)  := true.B
-        writeTouchVec(victim).valid := true.B
-        writeTouchVec(victim).bits  := victim
+        entries(portIdx)(victim)     := io.write(portIdx).bits
+        valids(portIdx)(victim)      := true.B
+        needWrite(portIdx)(victim)   := true.B
+        writeTouchVec(portIdx).valid := true.B
+        writeTouchVec(portIdx).bits  := victim
       }
 
       // if hit need to update the entry
