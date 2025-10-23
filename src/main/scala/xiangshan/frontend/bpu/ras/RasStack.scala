@@ -24,7 +24,7 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
-class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends RasModule
+class RasStack(implicit p: Parameters) extends RasModule
     with HasCircularQueuePtrHelper
     with Helpers {
   class RasStackIO extends Bundle {
@@ -43,7 +43,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
       val pushAddr:  PrunedAddr = Input(PrunedAddr(VAddrBits))
       val metaTosw:  RasPtr     = Input(new RasPtr)
       // for debug purpose only
-      val metaSsp: UInt = Input(UInt(log2Up(StackSize).W))
+      val metaSsp: UInt = Input(UInt(log2Up(CommitStackSize).W))
     }
 
     class RasRedirectIO extends Bundle {
@@ -64,12 +64,12 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
   }
   val io: RasStackIO = IO(new RasStackIO)
 
-  private val commitStack = RegInit(VecInit(Seq.fill(StackSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
-  private val specQueue   = RegInit(VecInit(Seq.fill(rasSpecSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
-  private val specNos     = RegInit(VecInit(Seq.fill(rasSpecSize)(RasPtr(false.B, 0.U))))
+  private val commitStack = RegInit(VecInit(Seq.fill(CommitStackSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
+  private val specQueue   = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
+  private val specNos     = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasPtr(false.B, 0.U))))
 
-  private val nsp = RegInit(0.U(log2Up(rasSize).W))
-  private val ssp = RegInit(0.U(log2Up(rasSize).W))
+  private val nsp = RegInit(0.U(log2Up(CommitStackSize).W))
+  private val ssp = RegInit(0.U(log2Up(CommitStackSize).W))
 
   private val sctr = RegInit(0.U(StackCounterWidth.W))
   private val tosr = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
@@ -230,7 +230,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
     }
   }.elsewhen(io.redirect.valid && io.redirect.isRet) {
     // getTop using redirect Nos as tosr
-    val popRedSsp  = Wire(UInt(log2Up(rasSize).W))
+    val popRedSsp  = Wire(UInt(log2Up(CommitStackSize).W))
     val popRedSctr = Wire(UInt(StackCounterWidth.W))
     val popRedTosr = io.redirect.meta.nos
     val popRedTosw = io.redirect.meta.tosw
@@ -257,7 +257,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
     timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false)
   }.elsewhen(io.spec.popValid) {
     // getTop using current Nos as tosr
-    val popSsp  = Wire(UInt(log2Up(rasSize).W))
+    val popSsp  = Wire(UInt(log2Up(CommitStackSize).W))
     val popSctr = Wire(UInt(StackCounterWidth.W))
     val popTosr = topNos
     val popTosw = tosw
@@ -331,7 +331,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
   private val commitTop = commitStack(nsp)
 
   when(io.commit.popValid) {
-    val nspUpdate = Wire(UInt(log2Up(rasSize).W))
+    val nspUpdate = Wire(UInt(log2Up(CommitStackSize).W))
     when(io.commit.metaSsp =/= nsp) {
       // force set nsp to commit ssp to avoid permanent errors
       nspUpdate := io.commit.metaSsp
@@ -352,7 +352,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
   private val commitPushAddr = specQueue(io.commit.metaTosw.value).retAddr
 
   when(io.commit.pushValid) {
-    val nspUpdate = Wire(UInt(log2Up(rasSize).W))
+    val nspUpdate = Wire(UInt(log2Up(CommitStackSize).W))
     when(io.commit.metaSsp =/= nsp) {
       // force set nsp to commit ssp to avoid permanent errors
       nspUpdate := io.commit.metaSsp
@@ -411,7 +411,7 @@ class RasStack(rasSize: Int, rasSpecSize: Int)(implicit p: Parameters) extends R
     }
   }
 
-  when(distanceBetween(tosw, bos) > (rasSpecSize - 2).U) {
+  when(distanceBetween(tosw, bos) > (SpecQueueSize - 2).U) {
     specNearOverflowed := true.B
   }.otherwise {
     specNearOverflowed := false.B

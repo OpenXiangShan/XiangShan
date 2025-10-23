@@ -39,7 +39,7 @@ object RasEntry {
 }
 
 class RasPtr(implicit p: Parameters) extends CircularQueuePtr[RasPtr](p =>
-      p(XSCoreParamsKey).frontendParameters.bpuParameters.rasParameters.StackSize
+      p(XSCoreParamsKey).frontendParameters.bpuParameters.rasParameters.SpecQueueSize
     ) {}
 
 object RasPtr {
@@ -54,7 +54,7 @@ object RasPtr {
 }
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:  UInt   = UInt(log2Up(StackSize).W)
+  val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
   val sctr: UInt   = UInt(StackCounterWidth.W)
   val tosw: RasPtr = new RasPtr
   val tosr: RasPtr = new RasPtr
@@ -74,7 +74,7 @@ object RasInternalMeta {
 }
 
 class RasMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:  UInt   = UInt(log2Up(StackSize).W)
+  val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
   val tosw: RasPtr = new RasPtr
 }
 
@@ -90,7 +90,7 @@ object RasMeta {
 class RasDebug(implicit p: Parameters) extends RasBundle {
   val specQueue:   Vec[RasEntry] = Output(Vec(SpecQueueSize, new RasEntry))
   val specNos:     Vec[RasPtr]   = Output(Vec(SpecQueueSize, new RasPtr))
-  val commitStack: Vec[RasEntry] = Output(Vec(StackSize, new RasEntry))
+  val commitStack: Vec[RasEntry] = Output(Vec(CommitStackSize, new RasEntry))
   val bos:         RasPtr        = Output(new RasPtr)
 }
 
