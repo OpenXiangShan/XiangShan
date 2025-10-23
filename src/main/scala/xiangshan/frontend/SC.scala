@@ -38,7 +38,10 @@ import utility.sram.SRAMConflictBehavior
 import utility.sram.SRAMTemplate
 import xiangshan._
 
-trait HasSCParameter extends TageParams {}
+trait HasSCParameter extends TageParams {
+  val nBanks       = 2
+  def bankIdxWidth = log2Ceil(nBanks)
+}
 
 class SCReq(implicit p: Parameters) extends TageReq
 
@@ -74,19 +77,21 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
 
+  def get_bank_mask(idx: UInt): Vec[Bool] = VecInit((0 until nBanks).map(idx(bankIdxWidth - 1, 0) === _.U))
+  def get_bank_idx(idx:  UInt): UInt      = idx >> bankIdxWidth
+
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(
+  val table = Seq.fill(nBanks)(Module(new SRAMTemplate(
     SInt(ctrBits.W),
-    set = nRows,
+    set = nRows / nBanks,
     way = 2 * TageBanks,
     shouldReset = true,
     holdRead = true,
-    singlePort = false,
-    conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
+    singlePort = true,
     withClockGate = true,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl
-  ))
+  )))
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSc", hasMbist)
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
@@ -107,16 +112,27 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
-  val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
-  val s1_idx = RegEnable(s0_idx, io.req.valid)
+  val s0_idx                 = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
+  val s0_bank_idx            = get_bank_idx(s0_idx)
+  val s0_bank_mask           = get_bank_mask(s0_idx)
+  val s0_invalid_by_conflict = Mux1H(s0_bank_mask, table.map(_.io.w.req.valid))
+
+  val s1_idx                      = RegEnable(s0_idx, io.req.valid)
+  val s1_bank_idx                 = get_bank_idx(s1_idx)
+  val s1_bank_mask                = get_bank_mask(s1_idx)
+  val s1_resp_invalid_by_conflict = RegEnable(s0_invalid_by_conflict, io.req.valid)
 
   val s1_pc           = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_unhashed_idx = s1_pc >> instOffsetBits
 
-  table.io.r.req.valid       := io.req.valid
-  table.io.r.req.bits.setIdx := s0_idx
+  table.zip(s0_bank_mask).foreach { case (bank, bankEnable) =>
+    bank.io.r.req.valid       := io.req.valid && bankEnable
+    bank.io.r.req.bits.setIdx := s0_bank_idx
+  }
 
-  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2, 2).toSeq.map(VecInit(_))
+  val table_resp = Mux1H(s1_bank_mask, table.map(_.io.r.resp))
+
+  val per_br_ctrs_unshuffled = table_resp.data.sliding(2, 2).toSeq.map(VecInit(_))
   val per_br_ctrs = VecInit((0 until numBr).map(i =>
     Mux1H(
       UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
@@ -124,7 +140,9 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     )
   ))
 
-  io.resp.ctrs := per_br_ctrs
+  io.resp.ctrs := Mux(s1_resp_invalid_by_conflict, 0.U.asTypeOf(per_br_ctrs), per_br_ctrs)
+
+  XSPerfAccumulate("sc_table_conflict", io.req.valid && s0_invalid_by_conflict)
 
   val update_wdata        = Wire(Vec(numBr, SInt(ctrBits.W))) // correspond to physical bridx
   val update_wdata_packed = VecInit(update_wdata.map(Seq.fill(2)(_)).reduce(_ ++ _))
@@ -144,14 +162,18 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   if (histLen > 0) {
     update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
   }
-  val update_idx = getIdx(io.update.pc, update_folded_hist)
+  val update_idx       = getIdx(io.update.pc, update_folded_hist)
+  val update_bank_idx  = get_bank_idx(update_idx)
+  val update_bank_mask = get_bank_mask(update_idx)
 
-  table.io.w.apply(
-    valid = io.update.mask.reduce(_ || _),
-    data = update_wdata_packed,
-    setIdx = update_idx,
-    waymask = updateWayMask.asUInt
-  )
+  table.zip(update_bank_mask).foreach { case (bank, bankEnable) =>
+    bank.io.w.apply(
+      valid = io.update.mask.reduce(_ || _) && bankEnable,
+      data = update_wdata_packed,
+      setIdx = update_bank_idx,
+      waymask = updateWayMask.asUInt
+    )
+  }
 
   val wrBypassEntries = 16
 
