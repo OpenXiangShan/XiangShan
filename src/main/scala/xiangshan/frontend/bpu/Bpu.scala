@@ -98,12 +98,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_flush = Wire(Bool())
   private val s2_flush = Wire(Bool())
   private val s3_flush = Wire(Bool())
-  private val s4_flush = Wire(Bool()) // for abtb fast train
+  private val s4_flush = Wire(Bool()) // only used for abtb fast train
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
-  private val s4_valid = RegInit(false.B) // for abtb fast train
+  private val s4_valid = RegInit(false.B) // only used for abtb fast train
 
   private val s3_override = WireDefault(false.B)
 
@@ -125,7 +125,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_pc = RegEnable(s0_pc, s0_fire)
   private val s2_pc = RegEnable(s1_pc, s1_fire)
   private val s3_pc = RegEnable(s2_pc, s2_fire)
-  private val s4_pc = RegEnable(s3_pc, s3_fire) // for abtb fast train
+  private val s4_pc = RegEnable(s3_pc, s3_fire) // only used for abtb fast train
+
+  // abtb meta won't be sent to ftq, used for abtb fast train
+  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
+  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -178,10 +182,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid       := redirect.valid
-  abtb.io.overrideValid       := s3_override
-  abtb.io.t0_previousPc.valid := s4_valid // for fast train
-  abtb.io.t0_previousPc.bits  := s4_pc    // for fast train
+  abtb.io.redirectValid                  := redirect.valid
+  abtb.io.overrideValid                  := s3_override
+  abtb.io.previousVAddr.valid            := s4_valid
+  abtb.io.previousVAddr.bits             := s4_pc
+  abtb.io.fastTrain.valid                := s3_valid
+  abtb.io.fastTrain.bits.startVAddr      := s3_pc
+  abtb.io.fastTrain.bits.finalPrediction := s3_prediction
+  abtb.io.fastTrain.bits.abtbMeta        := s3_abtbMeta
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -318,10 +326,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // tell ftq s3 ftqPtr for meta enqueue and s3 override
   io.toFtq.s3FtqPtr := s3_ftqPtr
 
-  // abtb meta
-  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
-  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
-
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)
 
@@ -346,7 +350,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
-  s3_meta.abtb   := s3_abtbMeta
   s3_meta.mbtb   := s3_mbtbMeta
   s3_meta.tage   := s3_tageMeta
   s3_meta.ras    := s3_rasMeta
