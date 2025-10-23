@@ -19,9 +19,11 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.RotateHelper
 
-trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper {
+trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper with HalfAlignHelper {
   def getBaseTableSetIndex(pc: PrunedAddr): UInt =
     pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
 
@@ -41,4 +43,20 @@ trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper {
 
   def getBankIndex(pc: PrunedAddr): UInt =
     pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
+
+  def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
+    PriorityEncoderOH(hitTableMask.reverse).reverse
+
+  def getUseAltIndex(pc: PrunedAddr): UInt = {
+    val useAltIdxWidth = log2Ceil(NumUseAltCtrs)
+    pc(useAltIdxWidth - 1 + instOffsetBits, instOffsetBits)
+  }
+
+  def getBranchVAddr(startVAddr: PrunedAddr, position: UInt): PrunedAddr = {
+    // FIXME: only support mainBtb 2 align
+    val positionMSB          = position(CfiPositionWidth - 1)
+    val positionLowerBits    = position(CfiPositionWidth - 2, 0)
+    val branchVAddrUpperBits = startVAddr(VAddrBits - 1, FetchBlockAlignWidth) + positionMSB
+    PrunedAddrInit(Cat(branchVAddrUpperBits, positionLowerBits, 0.U))
+  }
 }

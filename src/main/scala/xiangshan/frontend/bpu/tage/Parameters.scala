@@ -34,14 +34,16 @@ case class TageParameters(
       new TageTableInfo(1024, 211),
       new TageTableInfo(1024, 407)
     ),
-    NumWays:            Int = 3,
-    NumBanks:           Int = 4, // to alleviate read-write conflicts in single-port SRAM
-    TagWidth:           Int = 13,
-    TakenCtrWidth:      Int = 3,
-    UsefulCtrWidth:     Int = 2,
-    UsefulCtrInitValue: Int = 0,
-    WriteBufferSize:    Int = 4,
-    AllocFailCtrWidth:  Int = 6  // TODO
+    NumWays:             Int = 3,
+    NumBanks:            Int = 4, // to alleviate read-write conflicts in single-port SRAM
+    TagWidth:            Int = 13,
+    TakenCtrWidth:       Int = 3,
+    UsefulCtrWidth:      Int = 2,
+    UsefulCtrInitValue:  Int = 0,
+    WriteBufferSize:     Int = 4,
+    UsefulResetCtrWidth: Int = 7,
+    UseAltCtrWidth:      Int = 7,
+    NumUseAltCtrs:       Int = 64
 ) {}
 
 trait HasTageParameters extends HasBpuParameters {
@@ -52,15 +54,17 @@ trait HasTageParameters extends HasBpuParameters {
   def BaseTableNumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
   def BaseTableTakenCtrWidth: Int = tageParameters.BaseTableTakenCtrWidth
 
-  def NumWays:            Int = tageParameters.NumWays
-  def NumBanks:           Int = tageParameters.NumBanks
-  def BankIdxWidth:       Int = log2Ceil(NumBanks)
-  def TagWidth:           Int = tageParameters.TagWidth
-  def TakenCtrWidth:      Int = tageParameters.TakenCtrWidth
-  def UsefulCtrWidth:     Int = tageParameters.UsefulCtrWidth
-  def UsefulCtrInitValue: Int = tageParameters.UsefulCtrInitValue
-  def WriteBufferSize:    Int = tageParameters.WriteBufferSize
-  def AllocFailCtrWidth:  Int = tageParameters.AllocFailCtrWidth
+  def NumWays:             Int = tageParameters.NumWays
+  def NumBanks:            Int = tageParameters.NumBanks
+  def BankIdxWidth:        Int = log2Ceil(NumBanks)
+  def TagWidth:            Int = tageParameters.TagWidth
+  def TakenCtrWidth:       Int = tageParameters.TakenCtrWidth
+  def UsefulCtrWidth:      Int = tageParameters.UsefulCtrWidth
+  def UsefulCtrInitValue:  Int = tageParameters.UsefulCtrInitValue
+  def WriteBufferSize:     Int = tageParameters.WriteBufferSize
+  def UsefulResetCtrWidth: Int = tageParameters.UsefulResetCtrWidth
+  def UseAltCtrWidth:      Int = tageParameters.UseAltCtrWidth
+  def NumUseAltCtrs:       Int = tageParameters.NumUseAltCtrs
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
   def NumTables:  Int                = TableInfos.length

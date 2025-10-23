@@ -229,6 +229,9 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   // used for BpTrace
   val debug_bpId:       UInt       = UInt(XLEN.W)
   val debug_startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
+  // tage debug
+  val debug_tageUseTable: Bool = Bool()
+  val debug_tageTableOH:  UInt = UInt(8.W)
 }
 
 /* *** internal const & type *** */

@@ -32,7 +32,7 @@ case class BpuParameters(
     // general
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // debug
-    EnableBpTrace: Boolean = false,
+    EnableBpTrace: Boolean = true,
     // history
     phrParameters: PhrParameters = PhrParameters(),
     // sub predictors

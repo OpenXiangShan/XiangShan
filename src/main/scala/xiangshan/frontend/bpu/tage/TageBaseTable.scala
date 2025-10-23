@@ -78,8 +78,9 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
 
   private val s0_alignBankIdx = getBaseTableAlignBankIndex(s0_startPc)
   private val s0_rawSetIdx    = getBaseTableSetIndex(s0_startPc)
+  private val s0_nextSetIdx   = getBaseTableSetIndex(getAlignedAddr(s0_startPc) + 1.U)
   private val s0_setIdx =
-    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_rawSetIdx + 1.U, s0_rawSetIdx))
+    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_nextSetIdx, s0_rawSetIdx))
 
   private val s0_bankIdx  = getBaseTableBankIndex(s0_startPc)
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
@@ -135,8 +136,9 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
 
   private val t1_alignBankIdx = getBaseTableAlignBankIndex(t1_startVAddr)
   private val t1_rawSetIdx    = getBaseTableSetIndex(t1_startVAddr)
+  private val t1_nextSetIdx   = getBaseTableSetIndex(getAlignedAddr(t1_startVAddr) + 1.U)
   private val t1_setIdx = VecInit.tabulate(BaseTableNumAlignBanks)(bankIdx =>
-    Mux(bankIdx.U < t1_alignBankIdx, t1_rawSetIdx + 1.U, t1_rawSetIdx)
+    Mux(bankIdx.U < t1_alignBankIdx, t1_nextSetIdx, t1_rawSetIdx)
   )
   private val t1_bankIdx  = getBankIndex(t1_startVAddr)
   private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)

@@ -24,15 +24,13 @@ import xiangshan.frontend.bpu.WriteBuffer
 
 class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule with Helpers {
   class TageTableIO extends TageBundle {
-    val readReq:                  Valid[TableReadReq]          = Flipped(Valid(new TableReadReq(numSets)))
-    val readResp:                 TableReadResp                = Output(new TableReadResp)
-    val writeSetIdx:              UInt                         = Input(UInt(log2Ceil(numSets / NumBanks).W))
-    val writeBankMask:            UInt                         = Input(UInt(NumBanks.W))
-    val updateReq:                Valid[TableUpdateEntriesReq] = Flipped(Valid(new TableUpdateEntriesReq))
-    val needResetUsefulCtr:       Bool                         = Input(Bool())
-    val needIncreaseAllocFailCtr: Bool                         = Input(Bool())
-    val oldAllocFailCtr:          SaturateCounter              = Input(new SaturateCounter(AllocFailCtrWidth))
-    val resetDone:                Bool                         = Output(Bool())
+    val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
+    val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
+    val predictReadResp: TableReadResp        = Output(new TableReadResp)
+    val trainReadResp:   TableReadResp        = Output(new TableReadResp)
+    val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq(numSets)))
+    val resetUseful:     Bool                 = Input(Bool())
+    val resetDone:       Bool                 = Output(Bool())
   }
   val io: TageTableIO = IO(new TageTableIO)
 
@@ -50,20 +48,16 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
       )).suggestName(s"tage_entry_sram_bank${bankIdx}_way${wayIdx}")
     }
 
-  // count allocation failure times for each set
-  private val allocFailCtrSram =
-    Seq.fill(NumBanks)(
-      Module(new SRAMTemplate(
-        new SaturateCounter(AllocFailCtrWidth),
-        set = numSets / NumBanks,
-        way = 1,
-        singlePort = true,
-        shouldReset = true,
-        withClockGate = true,
-        hasMbist = hasMbist,
-        hasSramCtl = hasSramCtl
-      ))
+  // TODO: use SRAM to implement it
+  private val usefulCtrs = RegInit(
+    VecInit.fill(NumBanks)(
+      VecInit.fill(NumWays)(
+        VecInit.fill(numSets / NumBanks)(
+          0.U.asTypeOf(new SaturateCounter(UsefulCtrWidth))
+        )
+      )
     )
+  )
 
   // use a write buffer to store a entrySram write request
   // TODO: add writeBuffer multi port simultaneous writing
@@ -76,80 +70,69 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         hasCnt = true
       )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
     }
-  private val allocFailCtrWriteBuffers =
-    Seq.fill(NumBanks)(
-      Module(new WriteBuffer(
-        new AllocFailCtrSramWriteReq(numSets),
-        WriteBufferSize,
-        numPorts = 1
-      ))
-    )
 
-  // read and write srams
-  entrySram.zip(allocFailCtrSram).zipWithIndex.foreach {
-    case ((bank, allocFailCtr), bankIdx) =>
-      bank.foreach { way =>
-        way.io.r.req.valid       := io.readReq.valid && io.readReq.bits.bankMask(bankIdx)
-        way.io.r.req.bits.setIdx := io.readReq.bits.setIdx
-      }
-      allocFailCtr.io.r.req.valid       := io.readReq.valid && io.readReq.bits.bankMask(bankIdx)
-      allocFailCtr.io.r.req.bits.setIdx := io.readReq.bits.setIdx
-  }
-
-  entrySram.zip(entryWriteBuffers).foreach {
-    case (ways, buffer) =>
-      ways zip buffer.io.read foreach {
-        case (way, readPort) =>
-          val valid  = readPort.valid && !way.io.r.req.valid
-          val setIdx = readPort.bits.setIdx
-          val entry  = readPort.bits.entry
-          way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
-          readPort.ready := way.io.w.req.ready && !way.io.r.req.valid
-      }
-  }
-
-  allocFailCtrSram.zip(allocFailCtrWriteBuffers).foreach {
-    case (allocFailCtr, buffer) =>
-      val valid  = buffer.io.read.head.valid && !allocFailCtr.io.r.req.valid
-      val setIdx = buffer.io.read.head.bits.setIdx
-      val data   = buffer.io.read.head.bits.allocFailCtr
-      allocFailCtr.io.w.apply(valid, data, setIdx, 1.U(1.W))
-      buffer.io.read.head.ready := allocFailCtr.io.w.req.ready && !allocFailCtr.io.r.req.valid
+  // read sram
+  entrySram.zipWithIndex.foreach { case (bank, bankIdx) =>
+    val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
+    val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
+    bank.foreach { way =>
+      way.io.r.req.valid       := predictReadValid || trainReadValid
+      way.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
+    }
   }
 
   // write to write buffer
-  private val wayMask:      Vec[Bool]      = WireInit(VecInit(Seq.fill(NumWays)(false.B)))
-  private val writeEntries: Vec[TageEntry] = WireInit(VecInit(Seq.fill(NumWays)(0.U.asTypeOf(new TageEntry))))
-  writeEntries := io.updateReq.bits.entries
-  wayMask      := io.updateReq.bits.wayMask.asBools
-
-  entryWriteBuffers.zip(allocFailCtrWriteBuffers).zip(io.writeBankMask.asBools).foreach {
-    case ((wayBuffers, allocFailCtrBuffer), bankEnable) =>
-      val writeValid = (io.updateReq.valid) && bankEnable
-      // write to allocFailCtrBuffer
-      allocFailCtrBuffer.io.write.head.valid       := writeValid
-      allocFailCtrBuffer.io.write.head.bits.setIdx := io.writeSetIdx
-      allocFailCtrBuffer.io.write.head.bits.allocFailCtr.value := Mux(
-        io.needResetUsefulCtr,
-        0.U,
-        io.oldAllocFailCtr.getIncrease
-      )
-      wayBuffers.io.write.zip(wayMask).zip(writeEntries).foreach {
-        case ((writePort, mask), entry) =>
-          writePort.valid       := writeValid && mask
-          writePort.bits.setIdx := io.writeSetIdx
-          writePort.bits.entry  := entry
-      }
+  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
+    buffer.io.write.zipWithIndex.foreach { case (writePort, wayIdx) =>
+      writePort.valid := io.writeReq.valid && io.writeReq.bits.bankMask(bankIdx) && io.writeReq.bits.wayMask(wayIdx)
+      writePort.bits.setIdx    := io.writeReq.bits.setIdx
+      writePort.bits.entry     := io.writeReq.bits.entries(wayIdx)
+      writePort.bits.usefulCtr := io.writeReq.bits.usefulCtrs(wayIdx)
+    }
   }
 
-  io.resetDone :=
-    entrySram.flatten.map(_.io.r.req.ready).reduce(_ && _) && allocFailCtrSram.map(_.io.r.req.ready).reduce(_ && _)
+  // write to sram from write buffer
+  entrySram.zip(usefulCtrs).zip(entryWriteBuffers) foreach { case ((bank, ctrsPerBank), buffer) =>
+    bank.zip(ctrsPerBank).zip(buffer.io.read).foreach { case ((way, ctrsPerWay), readPort) =>
+      val valid  = readPort.valid && !way.io.r.req.valid
+      val setIdx = readPort.bits.setIdx
+      val entry  = readPort.bits.entry
+      way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
+      readPort.ready := way.io.w.req.ready && !way.io.r.req.valid
 
-  private val readBankMaskNext = RegEnable(io.readReq.bits.bankMask, io.readReq.valid)
-  io.readResp.entries :=
-    Mux1H(
-      readBankMaskNext,
-      entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+      when(io.resetUseful) {
+        ctrsPerWay.foreach(_.resetZero())
+      }.elsewhen(readPort.fire) {
+        ctrsPerWay(setIdx).value := readPort.bits.usefulCtr.value
+      }
+    }
+  }
+
+  private val predictReadSetIdxNext   = RegEnable(io.predictReadReq.bits.setIdx, io.predictReadReq.valid)
+  private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
+  io.predictReadResp.entries := Mux1H(
+    predictReadBankMaskNext,
+    entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+  )
+  io.predictReadResp.usefulCtrs := Mux1H(
+    predictReadBankMaskNext,
+    usefulCtrs.map(ctrsPerBank =>
+      VecInit(ctrsPerBank.map(ctrsPerWay => ctrsPerWay(predictReadSetIdxNext)))
     )
-  io.readResp.allocFailCtr := Mux1H(readBankMaskNext, allocFailCtrSram.map(_.io.r.resp.data.head))
+  )
+
+  private val trainReadSetIdxNext   = RegEnable(io.trainReadReq.bits.setIdx, io.trainReadReq.valid)
+  private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
+  io.trainReadResp.entries := Mux1H(
+    trainReadBankMaskNext,
+    entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+  )
+  io.trainReadResp.usefulCtrs := Mux1H(
+    trainReadBankMaskNext,
+    usefulCtrs.map(ctrsPerBank =>
+      VecInit(ctrsPerBank.map(ctrsPerWay => ctrsPerWay(trainReadSetIdxNext)))
+    )
+  )
+
+  io.resetDone := entrySram.flatten.map(_.io.r.req.ready).reduce(_ && _)
 }

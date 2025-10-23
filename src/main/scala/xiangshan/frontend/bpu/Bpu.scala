@@ -147,11 +147,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     VecInit(io.fromFtq.train.bits.branches.map(b => b.valid && b.bits.mispredict))
   )
 
-  private val train = Wire(Valid(new BpuTrain))
-  train := io.fromFtq.train
-  train.bits.branches.zipWithIndex.foreach { case (b, i) =>
+  private val trainBuffer = Module(new Queue(new BpuTrain, 16, pipe = true, flow = true))
+  trainBuffer.io.enq.valid := io.fromFtq.train.valid
+  trainBuffer.io.enq.bits  := io.fromFtq.train.bits
+  trainBuffer.io.enq.bits.branches.zipWithIndex.foreach { case (b, i) =>
     b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
   }
+  private val train = trainBuffer.io.deq
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -174,9 +176,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       p.io.train.bits.branches.head.bits.mispredict  := s3_override
     } else {
       // train: from Ftq + selected (first mispredict)
-      p.io.train := train
+      p.io.train.valid := train.fire
+      p.io.train.bits  := train.bits
     }
   }
+  tage.io.train.valid      := train.valid
+  trainBuffer.io.deq.ready := tage.io.trainReady
 
   /* *** predictor specific inputs *** */
   // FIXME: should use s3_prediction to train ubtb
@@ -304,8 +309,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_fallThroughPrediction.target,
       Seq(
 //        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
-        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
-        s3_taken                                                                -> s3_mbtbTarget
+//        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
+        s3_taken -> s3_mbtbTarget
       )
     )
 
@@ -360,6 +365,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.debug_startVAddr := s3_pc
   s3_meta.debug_bpId       := debug_bpId
 
+  s3_meta.debug_tageUseTable := Mux1H(s3_firstTakenBranchOH, s3_tageMeta.debug_useTable)
+  s3_meta.debug_tageTableOH  := Mux1H(s3_firstTakenBranchOH, s3_tageMeta.debug_useTableOH)
+
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
 
@@ -392,7 +400,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s1_prediction := s1_prediction
   phr.io.train.s1_pc         := s1_pc
 
-  phr.io.commit.valid := train.valid
+  phr.io.commit.valid := train.fire
   phr.io.commit.bits  := train.bits
 
   s0_foldedPhr   := phr.io.s0_foldedPhr
@@ -468,13 +476,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   trainTable.log(
     data = trainTrace,
-    en = io.fromFtq.train.valid,
+    en = train.fire,
     clock = clock,
     reset = reset
   )
 
   /* *** perf pred *** */
   XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
+  XSPerfAccumulate("ftq_full", io.toFtq.prediction.valid && !io.toFtq.prediction.ready)
   XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
   XSPerfHistogram(
     "fetchBlockSize",
@@ -500,6 +509,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
+  for (i <- 0 until 8) {
+    XSPerfAccumulate(s"pred_tage_use_table_${i}", s3_fire && s3_meta.debug_tageUseTable && s3_meta.debug_tageTableOH(i))
+  }
+
+  for (i <- 0 until 8) {
+    XSPerfAccumulate(
+      s"train_tage_use_table_${i}",
+      train.fire && s3_meta.debug_tageUseTable && train.bits.meta.debug_tageTableOH(i)
+    )
+  }
+
   /* *** perf train *** */
 
   private val t0_mispredictBranch = train.bits.mispredictBranch
@@ -512,37 +532,37 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     }.reduce(_ || _)
 
   private val perf_conditionalMispredict =
-    train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional
+    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional
   private val perf_directMispredict =
-    train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isDirect
+    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isDirect
   private val perf_indirectMispredict =
-    train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isOtherIndirect
+    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isOtherIndirect
   private val perf_callMispredict =
-    train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isCall
+    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isCall
   private val perf_returnMispredict =
-    train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isReturn
+    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isReturn
 
-  XSPerfAccumulate("train", train.valid)
-  XSPerfAccumulate("train_total_branch", Mux(train.valid, PopCount(t0_branches.map(_.valid)), 0.U))
+  XSPerfAccumulate("train", train.fire)
+  XSPerfAccumulate("train_total_branch", Mux(train.fire, PopCount(t0_branches.map(_.valid)), 0.U))
   XSPerfAccumulate(
     "train_total_conditional",
-    Mux(train.valid, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)), 0.U)
+    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)), 0.U)
   )
   XSPerfAccumulate(
     "train_total_direct",
-    Mux(train.valid, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect)), 0.U)
+    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect)), 0.U)
   )
   XSPerfAccumulate(
     "train_total_indirect",
-    Mux(train.valid, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect)), 0.U)
+    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect)), 0.U)
   )
   XSPerfAccumulate(
     "train_total_call",
-    Mux(train.valid, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isCall)), 0.U)
+    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isCall)), 0.U)
   )
   XSPerfAccumulate(
     "train_total_return",
-    Mux(train.valid, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isReturn)), 0.U)
+    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isReturn)), 0.U)
   )
   XSPerfAccumulate("train_conditional_mispredict", perf_conditionalMispredict)
   XSPerfAccumulate("train_direct_mispredict", perf_directMispredict)
@@ -550,4 +570,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("train_call_mispredict", perf_callMispredict)
   XSPerfAccumulate("train_return_mispredict", perf_returnMispredict)
   XSPerfAccumulate("train_conditional_mispredict_because_mbtb_miss", perf_conditionalMispredict && !t0_mbtbHit)
+
+  XSPerfAccumulate("train_buffer_enq", io.fromFtq.train.valid)
+  XSPerfAccumulate("train_buffer_deq", trainBuffer.io.deq.fire)
+  XSPerfAccumulate("train_buffer_drop_train", io.fromFtq.train.valid && !trainBuffer.io.enq.ready)
 }
