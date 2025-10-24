@@ -58,11 +58,11 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:        Valid[BpuRedirect] = Valid(new BpuRedirect)
-  val train:           Valid[BpuTrain]    = Valid(new BpuTrain)
-  val commit:          Valid[BpuCommit]   = Valid(new BpuCommit)
-  val bpuPtr:          FtqPtr             = Output(new FtqPtr)
-  val redirectFromIFU: Bool               = Output(Bool())
+  val redirect:        Valid[BpuRedirect]    = Valid(new BpuRedirect)
+  val train:           DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
+  val commit:          Valid[BpuCommit]      = Valid(new BpuCommit)
+  val bpuPtr:          FtqPtr                = Output(new FtqPtr)
+  val redirectFromIFU: Bool                  = Output(Bool())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
