@@ -29,10 +29,12 @@ import xiangshan.frontend.FrontendParameters
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.IttageTableInfo
+import xiangshan.frontend.bpu.MicroTageInfo
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
+import xiangshan.frontend.bpu.utage.MicroTageParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
@@ -114,6 +116,13 @@ class MinimalConfig(n: Int = 1) extends Config(
                 new TageTableInfo(512, 4),
                 new TageTableInfo(512, 9),
                 new TageTableInfo(512, 17)
+              ),
+            ),
+            utageParameters = MicroTageParameters(
+              TableInfos = Seq(
+                new MicroTageInfo(64, 4),
+                new MicroTageInfo(32, 8),
+                new MicroTageInfo(32,13)
               ),
             ),
             // FIXME: these are from V2 SC, we don't have equivalent parameters now
