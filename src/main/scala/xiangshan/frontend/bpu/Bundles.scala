@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
+import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -254,6 +255,7 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
+  val utage:  MicroTageMeta = new MicroTageMeta
   val mbtb:   MainBtbMeta  = new MainBtbMeta
   val tage:   TageMeta     = new TageMeta
   val ras:    RasMeta      = new RasMeta
