@@ -39,12 +39,15 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
   val io: PhrIO = IO(new PhrIO)
 
-  private val phr = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
+
+  private def getPhr(ptr: PhrPtr): UInt =
+    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   /*
    * PHR train from redirct/s2_prediction/s3_prediction
    */
-  private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
 
   private val s0_stall = io.train.s0_stall
   private val s1_valid = io.train.s1_valid
@@ -70,21 +73,22 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s2_phrPtr    = RegEnable(s1_phrPtr, 0.U.asTypeOf(new PhrPtr), s1_fire)
   private val s3_phrPtr    = RegEnable(s2_phrPtr, 0.U.asTypeOf(new PhrPtr), s2_fire)
 
+  private val s0_phrValue = getPhr(s0_phrPtr) // debug use it
+  private val phrValue    = getPhr(phrPtr)
+
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s1_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s3_override     = WireInit(false.B)
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
 
-  private val updateData     = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val updatePc       = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val updateOverride = WireInit(false.B)
-  private val redirctPhr     = WireInit(0.U(PhrHistoryLength.W))
+  private val updateData = WireInit(0.U.asTypeOf(new PhrUpdateData))
+  private val updatePc   = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val redirctPhr = WireInit(0.U(PhrHistoryLength.W))
 
   redirectData.valid  := io.train.redirect.valid
   redirectData.taken  := io.train.redirect.bits.taken
   redirectData.pc     := io.train.redirect.bits.startVAddr
   redirectData.phrPtr := io.train.redirect.bits.speculationMeta.phrHistPtr
-  // redirectData.phrPtr := io.train.redirect.bits.speculationMeta.phrHistPtr
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
@@ -99,9 +103,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   s1_overrideData.phrPtr    := s1_phrPtr
   s1_overrideData.foldedPhr := s1_foldedPhrReg
 
-  updatePc       := updateData.pc
-  updateOverride := redirectData.valid || s3_override
-
   updateData := MuxCase(
     0.U.asTypeOf(new PhrUpdateData),
     Seq(
@@ -110,11 +111,11 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       s1_valid           -> s1_overrideData
     )
   )
+
+  updatePc := updateData.pc
+
   private val shiftBits =
     (((updatePc >> 1) ^ (updatePc >> 3)) ^ ((updatePc >> 5) ^ (updatePc >> 7)))(Shamt - 1, 0)
-
-  private def getPhr(ptr: PhrPtr): UInt =
-    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   when(updateData.valid) {
     phrPtr    := updateData.phrPtr
@@ -134,7 +135,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
    */
   AllFoldedHistoryInfo.foreach { info =>
     s0_foldedPhr.getHistWithInfo(info).foldedHist :=
-      computeFoldedHist(phr.asUInt, info.FoldedLength)(info.HistoryLength)
+      computeFoldedHist(phrValue, info.FoldedLength)(info.HistoryLength)
   }
 
   when(redirectData.valid) {
@@ -161,8 +162,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     s0_foldedPhr := s0_foldedPhrReg
   }
 
-  private val phrValue = getPhr(phrPtr)
-
   AllFoldedHistoryInfo.foreach { info =>
     histFoldedPhr.getHistWithInfo(info).foldedHist :=
       computeFoldedHist(phrValue, info.FoldedLength)(info.HistoryLength)
@@ -180,7 +179,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       computeFoldedHist(predictHist, info.FoldedLength)(info.HistoryLength)
   }
 
-  io.phrPtr         := phrPtr
+  io.phrPtr         := s1_phrPtr
   io.phrs           := phr
   io.s0_foldedPhr   := s0_foldedPhr
   io.s1_foldedPhr   := s1_foldedPhrReg
@@ -249,6 +248,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
   dontTouch(s2_foldedPhrReg)
+  dontTouch(s0_phrValue)
   dontTouch(phrValue)
   dontTouch(histFoldedPhr)
   dontTouch(redirctPhr)
