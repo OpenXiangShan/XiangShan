@@ -30,6 +30,8 @@ import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 trait HasL1PrefetchSourceParameter {
   // l1 prefetch source related
   def L1PfSourceBits = 3
+  // Stream 0, Stride 1
+  def L1PrefetcherNum = 2
   def L1_HW_PREFETCH_NULL = 0.U
   def L1_HW_PREFETCH_CLEAR = 1.U // used to be a prefetch, clear by demand request
   def L1_HW_PREFETCH_STRIDE = 2.U
@@ -41,7 +43,8 @@ trait HasL1PrefetchSourceParameter {
   // ------------------------------------------------------------------------------------------------------------------------
 
   def isPrefetchRelated(value: UInt) = value >= L1_HW_PREFETCH_CLEAR
-  def isFromL1Prefetch(value: UInt)  = value >  L1_HW_PREFETCH_CLEAR
+  def isFromL1Prefetch(value: UInt)  = value > L1_HW_PREFETCH_CLEAR
+  def isPrefetchClear(value: UInt)   = value === L1_HW_PREFETCH_CLEAR
   def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
   def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
 }

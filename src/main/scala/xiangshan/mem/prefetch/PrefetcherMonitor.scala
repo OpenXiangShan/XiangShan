@@ -8,21 +8,7 @@ import utility._
 import xiangshan._
 import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle
-
-trait HasPrefetcherMonitorHelper {
-  val TIMELY_CHECK_INTERVAL = 1000
-  val VALIDITY_CHECK_INTERVAL = 1000
-
-  val BAD_THRESHOLD = 400
-  val DISABLE_THRESHOLD = 900
-  val LATE_HIT_THRESHOLD = 900
-  val LATE_MISS_THRESHOLD = 200
-
-  val BACK_OFF_INTERVAL = 100000
-  val LOW_CONF_INTERVAL = 200000
-
-  // val enableDynamicPrefetcher = false
-}
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
   val dynamic_depth = UInt(DEPTH_BITS.W)
@@ -31,29 +17,73 @@ class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasS
   val confidence = UInt(1.W)
 }
 
-class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
-  val timely = new XSBundle {
-    val total_prefetch = Input(Bool())
-    val late_hit_prefetch = Input(Bool())
-    val late_miss_prefetch = Input(Bool())
-    val prefetch_hit = Input(UInt(2.W))
-  }
+class PrefetchValidityBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+  val access = Bool()
+  val pf_source = UInt(L1PfSourceBits.W)
+}
 
-  val validity = new XSBundle {
-    val good_prefetch = Input(Bool())
-    val bad_prefetch = Input(Bool())
-  }
+class PrefetchTimelyBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+  val total_prefetch = Bool()
+  val late_hit_prefetch = Bool()
+  val pf_source = UInt(L1PfSourceBits.W)
+  // prefetch_hit is s3
+  val prefetch_hit = Bool()
+  val hit_source = UInt(L1PfSourceBits.W)
+  // late_miss_prefetch is s2
+  val late_miss_prefetch = Bool()
+  val miss_source = UInt(L1PfSourceBits.W)
+}
+
+class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+  val timely = Input(Vec(LoadPipelineWidth, new PrefetchTimelyBundle))
+
+  val validity = Flipped(ValidIO(new PrefetchValidityBundle))
+
+  val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
+}
+
+class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+  val io = IO(new PrefetcherMonitorBundle)
+
+  val StreamMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stream")))
+  val StrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stride")))
+
+  StreamMonitor.io.timely := io.timely
+  StrideMonitor.io.timely := io.timely
+  StreamMonitor.io.validity := io.validity
+  StrideMonitor.io.validity := io.validity
+  // stream 0, stride 1
+  io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
+  io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
+
+  val total_prefetch = io.timely.map(t => t.total_prefetch).reduce(_ || _)
+  val late_hit_prefetch = io.timely.map(t => t.late_hit_prefetch).reduce(_ || _)
+  val late_miss_prefetch = io.timely.map(t => t.late_miss_prefetch).reduce(_ || _)
+  val good_prefetch = io.timely.map(t => t.prefetch_hit ).reduce(_ || _)
+  val bad_prefetch = io.validity.valid && !io.validity.bits.access
+  
+  XSPerfAccumulate("total_prefetch", total_prefetch)
+  XSPerfAccumulate("late_hit_prefetch", late_hit_prefetch)
+  XSPerfAccumulate("late_miss_prefetch", late_miss_prefetch)
+  XSPerfAccumulate("good_prefetch", good_prefetch)
+  XSPerfAccumulate("bad_prefetch", bad_prefetch)
+}
+
+class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {
+  val timely = Input(Vec(LoadPipelineWidth, new PrefetchTimelyBundle))
+
+  val validity = Flipped(ValidIO(new PrefetchValidityBundle))
 
   val pf_ctrl = Output(new PrefetchControlBundle)
 }
 
-class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefetcherMonitorHelper with HasStreamPrefetchHelper {
-  val io = IO(new PrefetcherMonitorBundle)
+class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+  val io = IO(new L1PrefetchMonitorBundle)
 
   val depth = Reg(UInt(DEPTH_BITS.W))
   val flush = RegInit(false.B)
   val enable = RegInit(true.B)
-  val confidence = RegInit(1.U(1.W))
+  val confidence = RegInit(param.confidence.U(1.W))
 
   // TODO: mshr number
   // mshr full && load miss && load send mshr req && !load match,  -> decr nmax prefetch
@@ -65,39 +95,45 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord(s"depth${p(XSCoreParamsKey).HartId}", initValue = 32)
+  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
 
-  val total_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
-  val late_hit_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
-  val late_miss_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
-  val prefetch_hit_cnt = RegInit(0.U(32.W))
+  val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
+  val late_hit_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
+  val late_miss_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
+  // val prefetch_hit_cnt = RegInit(0.U(32.W))
 
-  val good_prefetch_cnt = RegInit(0.U((log2Up(VALIDITY_CHECK_INTERVAL) + 1).W))
-  val bad_prefetch_cnt = RegInit(0.U((log2Up(VALIDITY_CHECK_INTERVAL) + 1).W))
+  val good_prefetch_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
+  val bad_prefetch_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
 
-  val back_off_cnt = RegInit(0.U((log2Up(BACK_OFF_INTERVAL) + 1).W))
-  val low_conf_cnt = RegInit(0.U((log2Up(LOW_CONF_INTERVAL) + 1).W))
+  val back_off_cnt = RegInit(0.U((log2Up(param.BACK_OFF_INTERVAL) + 1).W))
+  val low_conf_cnt = RegInit(0.U((log2Up(param.LOW_CONF_INTERVAL) + 1).W))
 
-  val timely_reset = (total_prefetch_cnt === TIMELY_CHECK_INTERVAL.U) || (late_hit_prefetch_cnt >= TIMELY_CHECK_INTERVAL.U)
-  val validity_reset = (good_prefetch_cnt + bad_prefetch_cnt) === VALIDITY_CHECK_INTERVAL.U
-  val back_off_reset = back_off_cnt === BACK_OFF_INTERVAL.U
-  val conf_reset = low_conf_cnt === LOW_CONF_INTERVAL.U
+  val timely_reset = (total_prefetch_cnt === param.TIMELY_CHECK_INTERVAL.U) || (late_hit_prefetch_cnt >= param.TIMELY_CHECK_INTERVAL.U)
+  val validity_reset = (good_prefetch_cnt + bad_prefetch_cnt) === param.VALIDITY_CHECK_INTERVAL.U
+  val back_off_reset = back_off_cnt === param.BACK_OFF_INTERVAL.U
+  val conf_reset = low_conf_cnt === param.LOW_CONF_INTERVAL.U
 
-  total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + io.timely.total_prefetch)
-  late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + io.timely.late_hit_prefetch)
-  late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + io.timely.late_miss_prefetch)
-  prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + io.timely.prefetch_hit)
+  val total_prefetch = io.timely.map(t => t.total_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
+  val late_hit_prefetch = io.timely.map(t => t.late_hit_prefetch && param.isMyType(t.hit_source)).reduce(_ || _)
+  val late_miss_prefetch = io.timely.map(t => t.late_miss_prefetch && param.isMyType(t.miss_source)).reduce(_ || _)
+  // val prefetch_hit = io.timely.map(t => t.prefetch_hit && (param.isMyType(t.hit_source) || param.isMyClearType(t.hit_source))).reduce(_ || _)
+  total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
+  late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + late_hit_prefetch)
+  late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + late_miss_prefetch)
+  // prefetch_hit_cnt := Mux(timely_reset, 0.U, prefetch_hit_cnt + prefetch_hit)
 
-  good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + io.validity.good_prefetch)
-  bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + io.validity.bad_prefetch)
+  val good_prefetch = io.timely.map(t => t.prefetch_hit && param.isMyType(t.hit_source)).reduce(_ || _)
+  val bad_prefetch = io.validity.valid && !io.validity.bits.access && param.isMyType(io.validity.bits.pf_source)
+  good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + good_prefetch)
+  bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + bad_prefetch)
 
   back_off_cnt := Mux(back_off_reset, 0.U, back_off_cnt + !enable)
   low_conf_cnt := Mux(conf_reset, 0.U, low_conf_cnt + !confidence.asBool)
 
-  val trigger_late_hit = timely_reset && (late_hit_prefetch_cnt >= LATE_HIT_THRESHOLD.U)
-  val trigger_late_miss = timely_reset && (late_miss_prefetch_cnt >= LATE_MISS_THRESHOLD.U)
-  val trigger_bad_prefetch = validity_reset && (bad_prefetch_cnt >= BAD_THRESHOLD.U)
-  val trigger_disable = validity_reset && (bad_prefetch_cnt >= DISABLE_THRESHOLD.U)
+  val trigger_late_hit = timely_reset && (late_hit_prefetch_cnt >= param.LATE_HIT_THRESHOLD.U)
+  val trigger_late_miss = timely_reset && (late_miss_prefetch_cnt >= param.LATE_MISS_THRESHOLD.U)
+  val trigger_bad_prefetch = validity_reset && (bad_prefetch_cnt >= param.BAD_THRESHOLD.U)
+  val trigger_disable = validity_reset && (bad_prefetch_cnt >= param.DISABLE_THRESHOLD.U)
 
   flush := Mux(flush, false.B, flush)
   enable := Mux(back_off_reset, true.B, enable)
@@ -120,7 +156,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     enable := false.B
   }
 
-  val enableDynamicPrefetcher_const = Constantin.createRecord(s"enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 1)
+  val enableDynamicPrefetcher_const = Constantin.createRecord(s"${param.name}_enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 1)
   val enableDynamicPrefetcher = enableDynamicPrefetcher_const === 1.U
 
   when(!enableDynamicPrefetcher) {
@@ -138,18 +174,60 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     depth := depth_const
   }
 
-  XSPerfAccumulate("total_prefetch", io.timely.total_prefetch)
-  XSPerfAccumulate("late_hit_prefetch", io.timely.late_hit_prefetch)
-  XSPerfAccumulate("late_miss_prefetch", io.timely.late_miss_prefetch)
-  XSPerfAccumulate("good_prefetch", io.validity.good_prefetch)
-  XSPerfAccumulate("bad_prefetch", io.validity.bad_prefetch)
+  XSPerfAccumulate(s"${param.name}_total_prefetch", total_prefetch)
+  XSPerfAccumulate(s"${param.name}_late_hit_prefetch", late_hit_prefetch)
+  XSPerfAccumulate(s"${param.name}_late_miss_prefetch", late_miss_prefetch)
+  XSPerfAccumulate(s"${param.name}_good_prefetch", good_prefetch)
+  XSPerfAccumulate(s"${param.name}_bad_prefetch", bad_prefetch)
   for(i <- (0 until DEPTH_BITS)) {
     val t = (1 << i)
-    XSPerfAccumulate(s"depth${t}", depth === t.U)
+    XSPerfAccumulate(s"${param.name}_depth${t}", depth === t.U)
   }
-  XSPerfAccumulate("trigger_disable", trigger_disable)
-  XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
-  XSPerfAccumulate("disable_time", !enable)
+  XSPerfAccumulate(s"${param.name}_trigger_disable", trigger_disable)
+  XSPerfAccumulate(s"${param.name}_trigger_late_hit", trigger_late_hit)
+  XSPerfAccumulate(s"${param.name}_trigger_late_miss", trigger_late_miss)
+  XSPerfAccumulate(s"${param.name}_trigger_bad_prefetch", trigger_bad_prefetch)
+  // XSPerfAccumulate(s"${param.name}_prefetch_hit", prefetch_hit)
+  XSPerfAccumulate(s"${param.name}_disable_time", !enable)
 
-  assert(depth =/= 0.U, "depth should not be zero")
+  assert(depth =/= 0.U, s"${param.name}_depth should not be zero")
+}
+
+abstract class PrefetcherMonitorParam {
+  val name: String
+  def isMyType(value: UInt): Bool
+
+  val TIMELY_CHECK_INTERVAL = 1000
+  val VALIDITY_CHECK_INTERVAL = 1000
+
+  val BAD_THRESHOLD = 400
+  val DISABLE_THRESHOLD = 900
+  val LATE_HIT_THRESHOLD = 900
+  val LATE_MISS_THRESHOLD = 200
+
+  val BACK_OFF_INTERVAL = 100000
+  val LOW_CONF_INTERVAL = 200000
+
+  val confidence = 1
+}
+
+object PrefetcherMonitorParam {
+  def fromString(s: String): PrefetcherMonitorParam = s.toLowerCase match {
+    case "stream" => new StreamMonitorParam()
+    case "stride" => new StrideMonitorParam()
+    case t => throw new IllegalArgumentException(s"unknown Prefetcher type $t")
+  }
+}
+
+class StreamMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "Stream"
+  override def isMyType(value: UInt) = value === L1_HW_PREFETCH_STREAM
+}
+
+class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "Stride"
+  override def isMyType(value: UInt) = value === L1_HW_PREFETCH_STRIDE
+
+  override val VALIDITY_CHECK_INTERVAL = 800
+  override val DISABLE_THRESHOLD = 700
 }
