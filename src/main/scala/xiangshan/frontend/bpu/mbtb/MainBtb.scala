@@ -38,6 +38,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 
+  io.train.ready := true.B
+
   private val s0_fire, s1_fire, s2_fire = Wire(Bool())
   alignBanks.foreach { b =>
     b.io.stageCtrl.s0_fire := s0_fire
@@ -90,7 +92,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t0 ***
    * receive training data and latch
    */
-  private val t0_valid = io.train.valid && io.enable
+  private val t0_valid = io.train.fire && io.enable
   private val t0_train = io.train.bits
 
   /* *** t1 ***

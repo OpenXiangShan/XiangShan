@@ -37,6 +37,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   io.resetDone := true.B
 
+  io.train.ready := true.B
+
   /* *** submodules *** */
   private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))
 
@@ -99,7 +101,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?
-    t0_valid       := io.train.valid && io.train.bits.mispredictBranch.valid && io.enable
+    t0_valid       := io.train.fire && io.train.bits.mispredictBranch.valid && io.enable
     t0_startVAddr  := io.train.bits.startVAddr
     t0_actualTaken := io.train.bits.mispredictBranch.bits.taken
     t0_position    := io.train.bits.mispredictBranch.bits.cfiPosition
