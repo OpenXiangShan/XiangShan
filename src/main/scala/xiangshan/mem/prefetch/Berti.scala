@@ -376,8 +376,8 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   // def thresholdOfL1PF: UInt = 8.U 
   // def thresholdOfL2PF: UInt = 5.U 
   // def thresholdOfL2PFR: UInt = 2.U 
-  val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 16)   // thresholdOfMax
-  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 6)  // thresholdOfHalf
+  val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 6)   // thresholdOfMax
+  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 2)  // thresholdOfHalf
   val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 4)      // ((1 << DtCntWidth) * 0.65).toInt
   val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 2)      // ((1 << DtCntWidth) * 0.5).toInt
   val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 1)    // ((1 << DtCntWidth) * 0.35).toInt
@@ -448,16 +448,16 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     }
 
     def setStatus(): Unit = {
-      // when(counter >= thresholdOfReset){
-      //   counter := 0.U
-      //   deltaList.map(x => x.newCycle())
-      // }.elsewhen(counter >= thresholdOfUpdate){
-      //   deltaList.map(x => x.newStatus())
-      // }
-      when(counter >= thresholdOfUpdate){
+      when(counter >= thresholdOfReset){
         counter := 0.U
         deltaList.map(x => x.newCycle())
+      }.elsewhen(counter >= thresholdOfUpdate){
+        deltaList.map(x => x.newStatus())
       }
+      // when(counter >= thresholdOfUpdate){
+      //   counter := 0.U
+      //   deltaList.map(x => x.newCycle())
+      // }
     }
 
     // TODO: use next value to set status
