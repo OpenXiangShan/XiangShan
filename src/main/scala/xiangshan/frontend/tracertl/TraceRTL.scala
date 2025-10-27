@@ -97,7 +97,7 @@ if (env.TraceRTLMode) {
   val traceFakeICacheWrapper = Module(new TraceFakeICacheWrapper)
 
   val traceWrongPathEmu = RegInit(false.B)
-  val fastSimInst = traceReader.io.traceInsts(0).isFastSim
+  val fastSimInst = traceReader.io.traceInsts.bits(0).isFastSim
   if (TraceEnableWrongPathEmu) {
     // bpu wrong that can only be checked by backend
     // 1. branch taken wrong
@@ -196,7 +196,7 @@ if (env.TraceRTLMode) {
     _.req.bits.addr := io.fromIFU.f2_ftq_req.startAddr,
   )
   traceFakeICacheWrapper.io.specifyField(
-    _.traceInsts := traceReader.io.traceInsts,
+    _.traceInsts := traceReader.io.traceInsts.bits,
     _.icacheDataIn := traceFakeICache.io.resp,
   )
   traceAligner.io.specifyField(

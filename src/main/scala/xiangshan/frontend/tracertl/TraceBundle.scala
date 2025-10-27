@@ -41,8 +41,9 @@ class TraceInstrOuterBundle extends Bundle {
   val branchType = UInt(8.W)
   val branchTaken = UInt(8.W)
   val exception = UInt(8.W)
-  val InstID = UInt(64.W)
 
+  val fastSimulation = UInt(8.W)
+  val InstID = UInt(64.W)
 
   def toInnerBundle: TraceInstrInnerBundle = {
     val inner = Wire(new TraceInstrInnerBundle)
@@ -92,13 +93,22 @@ class TraceInstrInnerBundle extends Bundle {
   val branchTaken = UInt(8.W)
   val exception = UInt(8.W)
 
+  val fastSimulation = UInt(8.W)
   val InstID = UInt(64.W)
 
+  def isFastSim = fastSimulation(0) === 1.U
   def arthiSrc0 = memoryAddrVA
   def arthiSrc1 = memoryAddrPA
   def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
+  def isTaken = branchTaken(0) === 1.U
+  def isException = exception =/= 0.U
+  def isBranch = branchType =/= 0.U
+
+  def seqPC = pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U)
+  def targeEqSeq = target === seqPC
   def nextPC = Mux((exception =/= 0.U) || branchTaken(0), target,
                Mux(inst(1,0) === 3.U, pcVA + 4.U, pcVA + 2.U))
+  def nextEqSeq = nextPC === seqPC
 }
 
 

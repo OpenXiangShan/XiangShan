@@ -90,24 +90,30 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.version := 0.U(4.W)
 
   // TODO: mv the parameter to trait param
-  val axis_h2c = Module(new TraceRTLAXISMaster)
-  val axis_c2h = Module(new TraceRTLAXISSlave)
-  val axis_unpackage = Module(new TraceAXISUnpackage(
-    // 200 * 16, 512, 16
-    1 * 16, 512, 16
-  ))
-  val axis_package = Module(new TraceAXISPackage(128, 512))
-  axis_h2c.io.axis <> axis_unpackage.io.axis
-  soc.io.gateWay.in <> axis_unpackage.io.data
-  soc.io.gateWay.out <> axis_package.io.in
-  axis_c2h.io.axis <> axis_package.io.axis
+  if (p(DebugOptionsKey).TraceRTLMode && p(DebugOptionsKey).TraceRTLOnFPGA) {
+    // NOTE: attention, axis_h2c/c2h will call dpi-c, which may change emu-difftest's state
+    val axis_h2c = Module(new TraceRTLAXISMaster)
+    val axis_c2h = Module(new TraceRTLAXISSlave)
+    val axis_unpackage = Module(new TraceAXISUnpackage(
+      // 200 * 16, 512, 16
+      1 * 16, 512, 16
+    ))
+    val axis_package = Module(new TraceAXISPackage(128, 512))
+    axis_h2c.io.axis <> axis_unpackage.io.axis
+    soc.io.gateWay.in <> axis_unpackage.io.data
+    soc.io.gateWay.out <> axis_package.io.in
+    axis_c2h.io.axis <> axis_package.io.axis
 
-  require(soc.io.gateWay.in.bits.getWidth == axis_unpackage.io.data.bits.getWidth,
-    s"ERROR in TraceRTLSimTop, soc.io.gateWay.in.bits.getWidth ${soc.io.gateWay.in.bits.getWidth} != axis_unpackage.io.data.bits.getWidth ${axis_unpackage.io.data.bits.getWidth}")
-  require(soc.io.gateWay.out.bits.getWidth == axis_package.io.in.bits.getWidth,
-      s"ERROR in TraceRTLSimTop, soc.io.gateWay.out.bits.getWidth ${soc.io.gateWay.out.bits.getWidth} != axis_package.io.in.bits.getWidth ${axis_package.io.in.bits.getWidth}")
-  dontTouch(soc.io.gateWay.in)
-  dontTouch(soc.io.gateWay.out)
+    require(soc.io.gateWay.in.bits.getWidth == axis_unpackage.io.data.bits.getWidth,
+      s"ERROR in TraceRTLSimTop, soc.io.gateWay.in.bits.getWidth ${soc.io.gateWay.in.bits.getWidth} != axis_unpackage.io.data.bits.getWidth ${axis_unpackage.io.data.bits.getWidth}")
+    require(soc.io.gateWay.out.bits.getWidth == axis_package.io.in.bits.getWidth,
+        s"ERROR in TraceRTLSimTop, soc.io.gateWay.out.bits.getWidth ${soc.io.gateWay.out.bits.getWidth} != axis_package.io.in.bits.getWidth ${axis_package.io.in.bits.getWidth}")
+    dontTouch(soc.io.gateWay.in)
+    dontTouch(soc.io.gateWay.out)
+  } else {
+    soc.io.gateWay.in <> DontCare
+    soc.io.gateWay.out <> DontCare
+  }
 
   val difftest = DifftestModule.finish("XiangShan")
 

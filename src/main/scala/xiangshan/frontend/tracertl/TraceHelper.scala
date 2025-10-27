@@ -21,60 +21,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util.Annotated.resetVector
 
-class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
-  val pcVA = UInt(VAddrBits.W)
-  val pcPA = UInt(PAddrBits.W)
-  val memoryAddrVA = UInt(XLEN.W)
-  val memoryAddrPA = UInt(XLEN.W)
-  val target = UInt(VAddrBits.W)
-  val inst = UInt(TraceInstrWidth.W)
-  val memoryType = UInt(8.W)
-  val memorySize = UInt(8.W)
-  val branchType = UInt(8.W)
-  val branchTaken = UInt(8.W)
-  val exception = UInt(8.W)
-
-  val fastSimulation = UInt(8.W)
-  val InstID = UInt(64.W)
-
-  def isFastSim = fastSimulation(0) === 1.U
-  def arthiSrc0 = memoryAddrVA
-  def arthiSrc1 = memoryAddrPA
-  def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
-  def isTaken = branchTaken(0) === 1.U
-  def isException = exception =/= 0.U
-  def isBranch = branchType =/= 0.U
-
-  def seqPC = pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U)
-  def targeEqSeq = target === seqPC
-  def nextPC = Mux(((isBranch && isTaken) || isException), target,
-                  pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U))
-  def nextEqSeq = nextPC === seqPC
-}
-
-
-object TraceInstrInnerBundle {
-  def apply(pcVA: UInt, pcPA: UInt, memoryAddrVA: UInt, memoryAddrPA: UInt,
-    target: UInt, inst: UInt, memoryType: UInt, memorySize: UInt,
-    branchType: UInt, branchTaken: UInt,
-    InstID: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
-
-    val bundle = Wire(new TraceInstrInnerBundle)
-    bundle.pcVA := pcVA
-    bundle.pcPA := pcPA
-    bundle.memoryAddrVA := memoryAddrVA
-    bundle.memoryAddrPA := memoryAddrPA
-    bundle.target := target
-    bundle.inst := inst
-    bundle.memoryType := memoryType
-    bundle.memorySize := memorySize
-    bundle.branchType := branchType
-    bundle.branchTaken := branchTaken
-    bundle.InstID := InstID
-    bundle
-  }
-}
-
 class TraceRTL_FileReader()
   extends ExtModule {
   val clock = IO(Input(Clock()))
