@@ -29,8 +29,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
-import utility.mbist.MbistPipeline
-import utility.sram.SplittedSRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
@@ -63,38 +61,6 @@ object FtqPtr {
   }
   def inverse(ptr: FtqPtr)(implicit p: Parameters): FtqPtr =
     apply(!ptr.flag, ptr.value)
-}
-
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
-
-  val io = IO(new Bundle() {
-    val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
-    val ren   = Input(Vec(numRead, Bool()))
-    val rdata = Output(Vec(numRead, gen))
-    val waddr = Input(UInt(log2Up(FtqSize).W))
-    val wen   = Input(Bool())
-    val wdata = Input(gen)
-  })
-
-  for (i <- 0 until numRead) {
-    val sram = Module(new SplittedSRAMTemplate(
-      gen,
-      set = FtqSize,
-      way = 1,
-      dataSplit = 4,
-      singlePort = false,
-      withClockGate = true,
-      hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl
-    ))
-    sram.io.r.req.valid       := io.ren(i)
-    sram.io.r.req.bits.setIdx := io.raddr(i)
-    io.rdata(i)               := sram.io.r.resp.data(0)
-    sram.io.w.req.valid       := io.wen
-    sram.io.w.req.bits.setIdx := io.waddr
-    sram.io.w.req.bits.data   := VecInit(io.wdata)
-  }
-
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
@@ -173,7 +139,7 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {
   val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
 }
 
-class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
+class MetaEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val meta      = UInt(MaxMetaLength.W)
   val ftb_entry = new FTBEntry
 }
@@ -652,12 +618,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
-  val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
+  val ftq_meta_mem = Module(new SyncDataModuleTemplate(
+    gen = new MetaEntry,
+    numEntries = FtqSize,
+    numRead = 1,
+    numWrite = 1,
+    hasRen = true
+  ))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.lastStage.valid(3)
-  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.resp.bits.last_stage_meta
-  ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
+  ftq_meta_mem.io.wen(0)             := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_meta_mem.io.waddr(0)           := io.fromBpu.resp.bits.lastStage.ftq_idx.value
+  ftq_meta_mem.io.wdata(0).meta      := io.fromBpu.resp.bits.last_stage_meta
+  ftq_meta_mem.io.wdata(0).ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
   //                                                            ifuRedirect + backendRedirect (commit moved to ftq_meta_1r_sram)
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(
     new FTBEntry_FtqMem,
@@ -669,7 +641,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid(3)
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
-  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
 
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
@@ -1421,10 +1392,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_mem.io.ren.get.last := canCommit
   ftq_redirect_mem.io.raddr.last   := commPtr.value
   val commit_spec_meta = ftq_redirect_mem.io.rdata.last
-  ftq_meta_1r_sram.io.ren(0)   := canCommit
-  ftq_meta_1r_sram.io.raddr(0) := commPtr.value
-  val commit_meta      = ftq_meta_1r_sram.io.rdata(0).meta
-  val commit_ftb_entry = ftq_meta_1r_sram.io.rdata(0).ftb_entry
+  ftq_meta_mem.io.ren.get(0) := canCommit
+  ftq_meta_mem.io.raddr(0)   := commPtr.value
+  val commit_meta      = ftq_meta_mem.io.rdata(0).meta
+  val commit_ftb_entry = ftq_meta_mem.io.rdata(0).ftb_entry
 
   // need one cycle to read mem and srams
   val do_commit_ptr = RegEnable(commPtr, canCommit)
