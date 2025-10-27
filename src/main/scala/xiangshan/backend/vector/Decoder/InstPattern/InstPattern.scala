@@ -498,7 +498,7 @@ object VecInstPattern {
     case class CategoryStr(str: String) extends super.Val
 
     import scala.language.implicitConversions
-    implicit def valueToPlanetVal(x: Value): CategoryStr = x.asInstanceOf[CategoryStr]
+    implicit def valueToCategoryStr(x: Value): CategoryStr = x.asInstanceOf[CategoryStr]
     implicit def valueToString(x: Value): String = x.str
 
     val OPIVV = CategoryStr("000")
