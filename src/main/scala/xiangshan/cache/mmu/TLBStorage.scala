@@ -101,6 +101,8 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
+  entries.foreach(dontTouch(_))
+
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)

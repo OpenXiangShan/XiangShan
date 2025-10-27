@@ -117,6 +117,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
+
   // pre fault: check fault before real do translate
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -126,6 +127,24 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
   )
   val pres2xlateEnable = (0 until Width).map(i => (virt_in || req_in(i).bits.hyperinst) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
+
+  dontTouch(virt_in)
+  (0 until Width).foreach{ case i =>
+    // dontTouch(virt_in(i))
+    dontTouch(mode(i))
+    dontTouch(virt_out(i))
+    dontTouch(req_in_s2xlate(i))
+    dontTouch(req_out_s2xlate(i))
+    dontTouch(vmEnable(i))
+    dontTouch(s2xlateEnable(i))
+    dontTouch(portTranslateEnable(i))
+    dontTouch(prepf(i))
+    dontTouch(pregpf(i))
+    dontTouch(preaf(i))
+    dontTouch(prevmEnable(i))
+    dontTouch(pres2xlateEnable(i))
+  }
+
   (0 until Width).foreach{i =>
     val pf48 = SignExt(req(i).bits.fullva(47, 0), XLEN) =/= req(i).bits.fullva
     val pf39 = SignExt(req(i).bits.fullva(38, 0), XLEN) =/= req(i).bits.fullva
@@ -204,6 +223,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     else handle_nonblock(i)
   }
   io.ptw.resp.ready := true.B
+  dontTouch(io.ptw)
 
   if (env.TraceRTLMode && !(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
     (0 until Width).foreach { case idx: Int =>
@@ -218,6 +238,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       } else {
         (ats.io.paddr, ats.io.hit)
       }
+      resp(idx).bits.paddr.foreach { _ := ats_paddr }
+      resp(idx).bits.gpaddr.foreach { _ := ats_paddr }
       // val paddr = ats_paddr
       // val hit = ats_hit
       if (TraceSoftL1TLB) {

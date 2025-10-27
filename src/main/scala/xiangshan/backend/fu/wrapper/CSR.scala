@@ -16,7 +16,7 @@ import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.tracertl.{TraceSatp}
+import xiangshan.frontend.tracertl.{TraceSatp, TraceHgatp}
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCircularQueuePtrHelper
@@ -260,10 +260,27 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       tlb.satp.mode     := 0.U
     }
 
-    tlb.satp.changed  := false.B
-    tlb.satp.asid     := 0.U
-    tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
-    tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
+    if (Trace2StageMMU) {
+      tlb.satp := 0.U.asTypeOf(tlb.satp)
+      tlb.vsatp.changed := false.B
+      tlb.vsatp.mode     := 8.U
+      tlb.vsatp.asid     := 0.U
+      tlb.vsatp.ppn      := traceSatp
+
+      val traceHgatpMod = Module(new TraceHgatp())
+      val traceHgatp = RegEnable(traceHgatpMod.io.ppn.bits, 0.U, traceHgatpMod.io.ppn.valid)
+      tlb.hgatp.changed := false.B
+      tlb.hgatp.mode    := 8.U
+      tlb.hgatp.vmid    := 0.U
+      tlb.hgatp.ppn     := traceHgatp
+    } else {
+      tlb.satp.changed  := false.B
+      tlb.satp.mode     := 8.U
+      tlb.satp.asid     := 0.U
+      tlb.satp.ppn      := traceSatp
+      tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
+      tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
+    }
   }
 
   // expose several csr bits for tlb
@@ -279,6 +296,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     // already enable translate by set ModeU
     tlb.priv.imode := ModeU
     tlb.priv.dmode := ModeU
+    if (Trace2StageMMU) {
+      tlb.priv.virt := true.B
+    } else {
+      tlb.priv.virt := false.B
+    }
   }
 
   // Svpbmt extension enable

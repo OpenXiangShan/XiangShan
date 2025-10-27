@@ -756,6 +756,48 @@ class TraceSatpHelper() extends ExtModule
   setInline(s"$desiredName.v", getVerilog)
 }
 
+class TraceHgatpHelper() extends ExtModule
+  with HasExtModuleInline {
+
+  val clock = IO(Input(Clock()))
+  val enable = IO(Input(Bool()))
+  val ppn = IO(Output(UInt(64.W)))
+
+  def getVerilog: String = {
+    s"""
+       |import "DPI-C" function longint trace_get_hgatp_ppn();
+       |
+       |module TraceHgatpHelper(
+       |  input clock,
+       |  input enable,
+       |  output reg [63:0] ppn
+       |);
+       |
+       |logic [63:0] logic_ppn;
+       |
+       |always @(negedge clock) begin
+       |  if (enable) begin
+       |    logic_ppn <= trace_get_hgatp_ppn();
+       |  end
+       |  else begin
+       |    logic_ppn <= 64'b0;
+       |  end
+       |end
+       |
+       |always @(posedge clock) begin
+       |  if (enable) begin
+       |    ppn <= logic_ppn;
+       |  end
+       |end
+       |
+       |endmodule
+       |
+       |""".stripMargin
+  }
+
+  setInline(s"$desiredName.v", getVerilog)
+}
+
 class TraceSatp()(implicit p: Parameters) extends TraceModule {
   val io = IO(new Bundle {
     val satp_ppn = ValidIO(UInt((PAddrBits - 12).W))
@@ -828,4 +870,27 @@ object TraceFastSim {
     val fastSim = Module(new TraceFastSim())
     fastSim.io.fastSimEnable
   }
+}
+
+class TraceHgatp()(implicit p: Parameters) extends TraceModule {
+  val io = IO(new Bundle {
+    val ppn = ValidIO(UInt((PAddrBits - 12).W))
+  })
+
+  val helper = Module(new TraceHgatpHelper())
+  helper.clock := clock
+  // helper.reset := reset
+
+  val workingState = WireInit(false.B)
+  val startCount = RegInit(0.U(4.W))
+  when (startCount < 10.U) {
+    startCount := startCount + 1.U
+  }
+  when (startCount === 5.U) {
+    workingState := true.B
+  }
+
+  helper.enable := workingState
+  io.ppn.valid := RegNext(helper.enable)
+  io.ppn.bits := helper.ppn
 }
