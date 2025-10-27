@@ -53,7 +53,7 @@ object UopInfoRename {
     val v0R = booleanToString(v0Ren)
     val intRmR = booleanToString(intRmRen)
     val rdAsSrc = booleanToString(readVdAsSrc)
-    val maskTy = maskType.toChiselEnum.toBitPat.rawString
+    val maskTy = maskType.chiselEnum.toBitPat.rawString
     val gpW = booleanToString(gpWen)
     val fpW = booleanToString(fpWen)
     val vpW = booleanToString(vpWen)

@@ -1,292 +1,425 @@
 package xiangshan.backend.vector.Decoder.Uop
 
-import xiangshan.backend.vector.Decoder.Uop.UopType._
+import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.vector.Decoder.Types.Sign
+import xiangshan.backend.vector.Decoder.Uop.UopTrait._
 
 object VecUopDefines {
-  // vsetvl
-  val vset_vtypex_vlx   = UopVecSet_VTYPEX_VLX()
-  val vset_vtypex_vlmax = UopVecSet_VTYPEX_VLMAX()
-  val vset_vtypex_vll   = UopVecSet_VTYPEX_VLL()
-  // legal vsetvli
-  val vset_vtypei_vlx   = UopVecSet_VTYPEI_VLX()
-  val vset_vtypei_vlmax = UopVecSet_VTYPEI_VLMAX()
-  val vset_vtypei_nop   = UopVecSet_VTYPEI_NOP()
-  // legal vsetivli
-  val vset_vtypei_vli   = UopVecSet_VTYPEI_VLI()
-  // illegal vsetvli or vsetivli
-  val vset_vtypei_ill   = UopVecSet_VTYPEI_ILL()
+  /**
+   * [[vset_vtypex_vlx]] is used for [[VSETVL]] when rs1 != x0
+   */
+  def vset_vtypex_vlx = VecConfigUop(GpWen, VlWen, Src2Gp, Src1Gp)
 
-  // VI_VV_ULOOP_AVG
-  // VI_VX_ULOOP_AVG
-  // VI_VV_LOOP_AVG
-  // VI_VX_LOOP_AVG
-  val vaaddu = UopInt_S2UV_S1UVXI_DUV()
-  val vasubu = UopInt_S2UV_S1UVXI_DUV()
-  val vaadd  = UopInt_S2SV_S1SVXI_DSV()
-  val vasub  = UopInt_S2SV_S1SVXI_DSV()
+  /**
+   * [[vset_vtypex_vlmax]] is used for [[VSETVL]] when rs1 == x0 and rd != x0
+   */
+  def vset_vtypex_vlmax = VecConfigUop(GpWen, VlWen, Src2Gp)
 
-  // VI_VV_ULOOP
-  val vandn = UopInt_S2UV_S1UVXI_DUV()
-  val vand  = UopInt_S2UV_S1UVXI_DUV()
-  val vor   = UopInt_S2UV_S1UVXI_DUV()
-  val vxor  = UopInt_S2UV_S1UVXI_DUV()
-  val vclmulh = UopInt_S2UV_S1UVXI_DUV()
-  val vclmul  = UopInt_S2UV_S1UVXI_DUV()
-  val vdivu = UopInt_S2UV_S1UVXI_DUV()
-  val vremu = UopInt_S2UV_S1UVXI_DUV()
-  val vmaxu = UopInt_S2UV_S1UVXI_DUV()
-  val vminu = UopInt_S2UV_S1UVXI_DUV()
-  val vmulhu = UopInt_S2UV_S1UVXI_DUV()
-  val vrol = UopInt_S2UV_S1UVXI_DUV()
-  val vror = UopInt_S2UV_S1UVXI_DUV()
-  val vsll  = UopInt_S2SV_S1SVXI_DSV()
-  val vsrl = UopInt_S2UV_S1UVXI_DUV()
-  val vsaddu = UopInt_S2UV_S1UVXI_DUV().setOverflow
-  val vssubu = UopInt_S2UV_S1UVXI_DUV().setOverflow
-  val vssrl = UopInt_S2UV_S1UVXI_DUV().needIntRound
-  // VI_VV_SU_LOOP
-  // VI_VX_SU_LOOP
-  val vmulhsu = UopInt_S2UV_S1SV_DSV()
-  // VI_VI_MERGE_LOOP
-  val vmerge = UopInt_S2UV_S1UVXI_DUV()
-  // other to vector
-  val vmvO2V = UopInt_S1UVXI_DV()
-  val vmvX2S = UopInt_S1X_DA()
-  val vmvS2X = UopInt_S2A_DX()
+  /**
+   * [[vset_vtypex_vll]] is used for [[VSETVL]] when rs1 == x0 and rd == x0
+   */
+  def vset_vtypex_vll = VecConfigUop(VlWen, Src2Gp, VlRen)
 
-  // VI_VV_LOOP
-  val vadd  = UopInt_S2SV_S1SVXI_DSV()
-  val vsub  = UopInt_S2SV_S1SVXI_DSV()
-  val vmulh = UopInt_S2SV_S1SVXI_DSV()
-  val vmul  = UopInt_S2SV_S1SVXI_DSV()
-  val vdiv  = UopInt_S2SV_S1SVXI_DSV()
-  val vrem  = UopInt_S2SV_S1SVXI_DSV()
-  val vmax  = UopInt_S2SV_S1SVXI_DSV()
-  val vmin  = UopInt_S2SV_S1SVXI_DSV()
-  val vmacc = UopInt_S2SV_S1SVXI_DSV().needAlwaysReadVd
-  val vmadd = UopInt_S2SV_S1SVXI_DSV().needAlwaysReadVd
-  val vnmsac= UopInt_S2SV_S1SVXI_DSV().needAlwaysReadVd
-  val vnmsub= UopInt_S2SV_S1SVXI_DSV().needAlwaysReadVd
-  val vsra  = UopInt_S2SV_S1SVXI_DSV()
-  val vsadd = UopInt_S2SV_S1SVXI_DSV().setOverflow
-  val vssub = UopInt_S2SV_S1SVXI_DSV().setOverflow
-  val vsmul = UopInt_S2SV_S1SVXI_DSV().needIntRound.setOverflow
-  val vssra = UopInt_S2SV_S1SVXI_DSV().needIntRound
+  /**
+   * [[vset_vtypei_vlx]] is used for [[VSETVLI]] when rs1 != x0
+   */
+  def vset_vtypei_vlx = new VecConfigUop(GpWen, VlWen, Src1Gp)
 
-  // VI_VV_LOOP_WIDEN
-  // VI_VX_LOOP_WIDEN
-  // 15 inst
-  val vwaddu    = UopInt_S2UV_S1UV_DUW()
-  val vwsubu    = UopInt_S2UV_S1UV_DUW()
-  val vwsub     = UopInt_S2SV_S1SV_DSW()
-  val vwadd     = UopInt_S2SV_S1SV_DSW()
+  /**
+   * [[vset_vtypei_vlmax]] is used for [[VSETVLI]] when rs1 == x0
+   */
+  def vset_vtypei_vlmax = new VecConfigUop(GpWen, VlWen)
 
-  val vwmaccu   = UopInt_S2UV_S1UV_DUW().needAlwaysReadVd
-  val vwmacc    = UopInt_S2SV_S1SV_DSW().needAlwaysReadVd
-  val vwmulu    = UopInt_S2UV_S1UV_DUW()
-  val vwmul     = UopInt_S2SV_S1SV_DSW()
+  /**
+   * [[vset_vtypei_nop]] is used for [[VSETVLI]] when rs1 == x0 and rd == x0
+   * This uop does not change vl but modifies vtype.
+   * if vlmax shrink, [[vset_vtypei_ill]] should be used to set vill
+   */
+  def vset_vtypei_nop = VecConfigUop()
 
-  val vwmaccsu  = UopInt_S2UV_S1SV_DSW().needAlwaysReadVd
-  val vwmaccus  = UopInt_S2SV_S1UV_DSW().needAlwaysReadVd
-  val vwmulsu   = UopInt_S2UV_S1SV_DSW()
+  /**
+   * [[vset_vtypei_vli]] is used for [[VSETIVLI]]
+   */
+  def vset_vtypei_vli = VecConfigUop(GpWen, VlWen)
 
-  val vwaddu_w  = UopInt_S2UW_S1UV_DUW()
-  val vwsubu_w  = UopInt_S2UW_S1UV_DUW()
-  val vwadd_w   = UopInt_S2SW_S1SV_DSW()
-  val vwsub_w   = UopInt_S2SW_S1SV_DSW()
+  /**
+   * [[vset_vtypei_ill]] is used for illegal [[VSETVLI]] and [[VSETIVLI]] when rs1 == x0 and rd == x0.
+   * When rs1 == x0, rd == x0 and SEW/LMUL ratio is changed, the instruction is reserved.
+   * This uop will set vill = 1 and vl = 0.
+   */
+  def vset_vtypei_ill = VecConfigUop(GpWen, VlWen)
 
-  // VI_VI_LOOP_NARROW
-  // VI_VI_LOOP_NSHIFT
-  val vnclipu   = UopInt_S2UW_S1UVXI_DUV().needIntRound.setOverflow
-  val vnclip    = UopInt_S2SW_S1UVXI_DSV().needIntRound.setOverflow
-  val vnsrl     = UopInt_S2UW_S1UVXI_DUV()
-  val vnsra     = UopInt_S2SW_S1UVXI_DSV()
+  // 11.1. Vector Single-Width Integer Add and Subtract
+  def vadd = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vsub = VecIntUopVV_DV().set(_.sgn, Sign.S)
 
-  // VI_VV_LOOP_WITH_CARRY
-  // VI_XI_LOOP_WITH_CARRY
-  // VI_VV_LOOP_CARRY
-  // VI_XI_LOOP_CARRY
-  val vadc   = UopIntCarry_S2V_S1VXI_V0C_DV()
-  val vsbc   = UopIntCarry_S2V_S1VXI_V0C_DV()
-  val vmadc_vvm = UopIntCarry_S2V_S1VXI_V0C_DM()
-  val vmadc_vv  = UopIntCarry_S2V_S1VXI_V0N_DM()
-  val vmsbc_vvm = UopIntCarry_S2V_S1VXI_V0C_DM()
-  val vmsbc_vv  = UopIntCarry_S2V_S1VXI_V0N_DM()
+  // 11.2. Vector Widening Integer Add/Subtract
+  def vwaddu   = VecIntUopVV_DW().set(_.sgn, Sign.U)
+  def vwsubu   = VecIntUopVV_DW().set(_.sgn, Sign.U)
+  def vwadd    = VecIntUopVV_DW().set(_.sgn, Sign.S)
+  def vwsub    = VecIntUopVV_DW().set(_.sgn, Sign.S)
+  def vwaddu_w = VecIntUopWV_DW().set(_.sgn, Sign.U)
+  def vwsubu_w = VecIntUopWV_DW().set(_.sgn, Sign.U)
+  def vwadd_w  = VecIntUopWV_DW().set(_.sgn, Sign.S)
+  def vwsub_w  = VecIntUopWV_DW().set(_.sgn, Sign.S)
 
-  // VI_VV_LOOP_CMP
-  // VI_VX_LOOP_CMP
-  // VI_VI_LOOP_CMP
-  val vmseq = UopIntCmp_S2SV_S1SVXI_DM() // ==
-  val vmsgt = UopIntCmp_S2SV_S1SVXI_DM() // >
-  val vmsle = UopIntCmp_S2SV_S1SVXI_DM() // <=
-  val vmslt = UopIntCmp_S2SV_S1SVXI_DM() // <
-  val vmsne = UopIntCmp_S2SV_S1SVXI_DM() // !=
+  // 11.3. Vector Integer Extension
+  def vzext2 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.U)
+  def vzext4 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.U)
+  def vzext8 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.U)
+  def vsext2 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.S)
+  def vsext4 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.S)
+  def vsext8 = VecIntUopS2V_DV().set(_.src2Sgn, Sign.S)
 
-  val vmsgtu = UopIntCmp_S2UV_S1UVXI_DM() // >
-  val vmsleu = UopIntCmp_S2UV_S1UVXI_DM() // <=
-  val vmsltu = UopIntCmp_S2UV_S1UVXI_DM() // <
+  // 11.4. Vector Integer Add-with-Carry / Subtract-with-Borrow Instructions
+  def vadc  = VecIntUopVVM_DV()
+  def vmadc = VecIntUopVVM_DM()
+  def vsbc  = VecIntUopVVM_DV()
+  def vmsbc = VecIntUopVVM_DM()
 
-  // VI_LOOP_MASK
-  val vmand  = UopInt_S2M_S1M_DM()
-  val vmandn = UopInt_S2M_S1M_DM()
-  val vmnand = UopInt_S2M_S1M_DM()
-  val vmnor  = UopInt_S2M_S1M_DM()
-  val vmor   = UopInt_S2M_S1M_DM()
-  val vmorn  = UopInt_S2M_S1M_DM()
-  val vmxnor = UopInt_S2M_S1M_DM()
-  val vmxor  = UopInt_S2M_S1M_DM()
+  // 11.5. Vector Bitwise Logical Instructions
+  def vand = VecIntUopVV_DV()
+  def vor  = VecIntUopVV_DV()
+  def vxor = VecIntUopVV_DV()
 
-  // Shuffle
-  val vrgather_vv = UopShuffle()
-  val vrgather_xi = UopShuffle()
-  val vslide1up   = UopShuffle()
-  val vslide1down = UopShuffle()
-  val vslideup    = UopShuffle()
-  val vslidedown  = UopShuffle()
-  val vcompress   = UopShuffle()
+  // 11.6. Vector Single-Width Shift Instructions
+  def vsll = VecIntUopVV_DV()
+  def vsrl = VecIntUopVV_DV().set(_.sgn, Sign.U)
+  def vsra = VecIntUopVV_DV().set(_.sgn, Sign.S)
+
+  // 11.7. Vector Narrowing Integer Right Shift Instructions
+  def vnsrl = VecIntUopWV_DV().set(_.sgn, Sign.U)
+  def vnsra = VecIntUopWV_DV().set(_.sgn, Sign.S)
+
+  // 11.8. Vector Integer Compare Instructions
+  def vmseq = VecIntUopVV_DM()                     // ==
+  def vmsne = VecIntUopVV_DM()                     // !=
+  def vmsgt = VecIntUopVV_DM().set(_.sgn, Sign.S)  //  >
+  def vmsle = VecIntUopVV_DM().set(_.sgn, Sign.S)  //  <=
+  def vmslt = VecIntUopVV_DM().set(_.sgn, Sign.S)  //  <
+  def vmsgtu = VecIntUopVV_DM().set(_.sgn, Sign.U) //  >
+  def vmsleu = VecIntUopVV_DM().set(_.sgn, Sign.U) //  <=
+  def vmsltu = VecIntUopVV_DM().set(_.sgn, Sign.U) //  <
+
+  // 11.9. Vector Integer Min/Max Instructions
+  def vmaxu = VecIntUopVV_DV().set(_.sgn, Sign.U)
+  def vminu = VecIntUopVV_DV().set(_.sgn, Sign.U)
+  def vmax  = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vmin  = VecIntUopVV_DV().set(_.sgn, Sign.S)
+
+  // 11.10. Vector Single-Width Integer Multiply Instructions
+  def vmulh   = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vmul    = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vmulhu  = VecIntUopVV_DV().set(_.sgn, Sign.U)
+  def vmulhsu = VecIntUopVV_DV().set(_.src1Sgn, Sign.U).set(_.src2Sgn, Sign.S).set(_.destSgn, Sign.S)
+
+  // 11.11. Vector Integer Divide Instructions
+  def vdiv  = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vrem  = VecIntUopVV_DV().set(_.sgn, Sign.S)
+  def vdivu = VecIntUopVV_DV().set(_.sgn, Sign.U)
+  def vremu = VecIntUopVV_DV().set(_.sgn, Sign.U)
+
+  // 11.12. Vector Widening Integer Multiply Instructions
+  def vwmulu  = VecIntUopVV_DW().set(_.sgn, Sign.U)
+  def vwmul   = VecIntUopVV_DW().set(_.sgn, Sign.S)
+  def vwmulsu = VecIntUopVV_DW().set(_.src1Sgn, Sign.U).set(_.src2Sgn, Sign.S)
+
+  // 11.13. Vector Single-Width Integer Multiply-Add Instructions
+  def vmacc  = VecIntUopVVV_DV()
+  def vmadd  = VecIntUopVVV_DV()
+  def vnmsac = VecIntUopVVV_DV()
+  def vnmsub = VecIntUopVVV_DV()
+
+  // 11.14. Vector Widening Integer Multiply-Add Instructions
+  def vwmaccu  = VecIntUopVVW_DW().set(_.sgn, Sign.U)
+  def vwmacc   = VecIntUopVVW_DW().set(_.sgn, Sign.S)
+  def vwmaccsu = VecIntUopVVW_DW().set(_.src1Sgn, Sign.S).set(_.src2Sgn, Sign.U)
+  def vwmaccus = VecIntUopVVW_DW().set(_.src1Sgn, Sign.U).set(_.src2Sgn, Sign.S)
+
+  // 11.15. Vector Integer Merge Instructions
+  def vmerge = VecIntUopVV_DV()
+
+  // 11.16. Vector Integer Move Instructions
+  def vmvInt2Vec = VecIntUopS1(Src1Gp, VpWen)
+  def vmvVec2Vec = VecIntUopS1(Src1Vp, VpWen)
+  def vmvImm2Vec = VecIntUopS1(Src1Imm, VpWen)
+
+  // 12.1. Vector Single-Width Saturating Add and Subtract
+  def vsaddu = VecIntFixUopVV_DV(VxsatWen).set(_.sgn, Sign.U)
+  def vssubu = VecIntFixUopVV_DV(VxsatWen).set(_.sgn, Sign.U)
+  def vsadd  = VecIntFixUopVV_DV(VxsatWen).set(_.sgn, Sign.S)
+  def vssub  = VecIntFixUopVV_DV(VxsatWen).set(_.sgn, Sign.S)
+
+  // 12.2. Vector Single-Width Averaging
+  def vaaddu = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.U)
+  def vasubu = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.U)
+  def vaadd  = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.U)
+  def vasub  = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.U)
+
+  // 12.3. Vector Single-Width Fractional Multiply with Rounding and Saturation
+  def vsmul = VecIntFixUopVV_DV(VxsatWen, VxrmRen).set(_.sgn, Sign.S)
+
+  // 12.4. Vector Single-Width Scaling Shift Instructions
+  def vssrl = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.U)
+  def vssra = VecIntFixUopVV_DV(VxrmRen).set(_.sgn, Sign.S)
+
+  // 12.5. Vector Narrowing Fixed-Point Clip Instructions
+  def vnclipu = VecIntFixUopWV_DV(VxsatWen, VxrmRen).set(_.sgn, Sign.U)
+  def vnclip  = VecIntFixUopWV_DV(VxsatWen, VxrmRen).set(_.sgn, Sign.S)
+
+  // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
+  def vfadd = VecFpUopVV_DV()
+  def vfsub = VecFpUopVV_DV()
+
+  // 13.3. Vector Widening Floating-Point Add/Subtract Instructions
+  def vfwadd   = VecFpUopVV_DW()
+  def vfwsub   = VecFpUopVV_DW()
+  def vfwadd_w = VecFpUopWV_DW()
+  def vfwsub_w = VecFpUopWV_DW()
+
+  // 13.4. Vector Single-Width Floating-Point Multiply/Divide Instructions
+  def vfmul = VecFpUopVV_DV()
+  def vfdiv = VecFpUopVV_DV()
+
+  // 13.5. Vector Widening Floating-Point Multiply
+  def vfwmul = VecFpUopVV_DW()
+
+  // 13.6. Vector Single-Width Floating-Point Fused Multiply-Add Instructions
+  def vfmacc  = VecFpUopVVV_DV()
+  def vfnmacc = VecFpUopVVV_DV()
+  def vfmsac  = VecFpUopVVV_DV()
+  def vfnmsac = VecFpUopVVV_DV()
+  def vfmadd  = VecFpUopVVV_DV()
+  def vfnmadd = VecFpUopVVV_DV()
+  def vfmsub  = VecFpUopVVV_DV()
+  def vfnmsub = VecFpUopVVV_DV()
+
+  // 13.7. Vector Widening Floating-Point Fused Multiply-Add Instructions
+  def vfwmacc  = VecFpUopVVW_DW()
+  def vfwnmacc = VecFpUopVVW_DW()
+  def vfwmsac  = VecFpUopVVW_DW()
+  def vfwnmsac = VecFpUopVVW_DW()
+
+  // 13.8. Vector Floating-Point Square-Root Instruction
+  // 13.9. Vector Floating-Point Reciprocal Square-Root Estimate Instruction
+  // 13.10. Vector Floating-Point Reciprocal Estimate Instruction
+  def vfsqrt   = VecFpUopS2V_DV()
+  def vfrsqrt7 = VecFpUopS2V_DV()
+  def vfrec7   = VecFpUopS2V_DV()
+
+  // 13.11. Vector Floating-Point MIN/MAX Instructions
+  def vfmin = VecFpUopVV_DV()
+  def vfmax = VecFpUopVV_DV()
+
+  // 13.12. Vector Floating-Point Sign-Injection Instructions
+  def vfsgnj  = VecFpUopVV_DV()
+  def vfsgnjn = VecFpUopVV_DV()
+  def vfsgnjx = VecFpUopVV_DV()
+
+  // 13.13. Vector Floating-Point Compare Instructions
+  def vmfeq = VecFpUopVV_DM()
+  def vmfne = VecFpUopVV_DM()
+  def vmfle = VecFpUopVV_DM()
+  def vmflt = VecFpUopVV_DM()
+  def vmfge = VecFpUopVV_DM()
+  def vmfgt = VecFpUopVV_DM()
+
+  // 13.14. Vector Floating-Point Classify Instruction
+  def vfclass = VecFpUopS2V_DV()
+
+  // 13.15. Vector Floating-Point Merge Instruction
+  def vfmerge = VecFpUopVV_DV()
+
+  // 13.16. Vector Floating-Point Move Instruction
+  def vmvFp2Vec = VecFpUopS1(Src1Fp, VpWen)
+
+  // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
+  def vfcvt_xu_f     = VecFpUopS2V_DV()
+  def vfcvt_xu_f_rtz = VecFpUopS2V_DV()
+  def vfcvt_f_xu     = VecFpUopS2V_DV()
+  def vfcvt_x_f      = VecFpUopS2V_DV()
+  def vfcvt_x_f_rtz  = VecFpUopS2V_DV()
+  def vfcvt_f_x      = VecFpUopS2V_DV()
+
+  // 13.18. Widening Floating-Point/Integer Type-Convert Instructions
+  def vfwcvt_xu_f     = VecFpUopS2V_DW()
+  def vfwcvt_xu_f_rtz = VecFpUopS2V_DW()
+  def vfwcvt_f_x      = VecFpUopS2V_DW()
+  def vfwcvt_x_f      = VecFpUopS2V_DW()
+  def vfwcvt_x_f_rtz  = VecFpUopS2V_DW()
+  def vfwcvt_f_xu     = VecFpUopS2V_DW()
+  def vfwcvt_f_f      = VecFpUopS2V_DW()
+
+  // 13.19. Narrowing Floating-Point/Integer Type-Convert Instructions
+  def vfncvt_xu_f     = VecFpUopS2W_DV()
+  def vfncvt_xu_f_rtz = VecFpUopS2W_DV()
+  def vfncvt_f_xu     = VecFpUopS2W_DV()
+  def vfncvt_x_f      = VecFpUopS2W_DV()
+  def vfncvt_x_f_rtz  = VecFpUopS2W_DV()
+  def vfncvt_f_x      = VecFpUopS2W_DV()
+  def vfncvt_f_f      = VecFpUopS2W_DV()
+  def vfncvt_f_f_rod  = VecFpUopS2W_DV()
+
+  // 14.1. Vector Single-Width Integer Reduction Instructions
+  // reduction
+  def vredand  = VecIntRedUopVA_DA()
+  def vredor   = VecIntRedUopVA_DA()
+  def vredxor  = VecIntRedUopVA_DA()
+  def vredmaxu = VecIntRedUopVA_DA().set(_.sgn, Sign.U)
+  def vredminu = VecIntRedUopVA_DA().set(_.sgn, Sign.U)
+  def vredmax  = VecIntRedUopVA_DA().set(_.sgn, Sign.S)
+  def vredmin  = VecIntRedUopVA_DA().set(_.sgn, Sign.S)
+  def vredsum  = VecIntRedUopVA_DA().set(_.sgn, Sign.S)
+
+  // 14.2. Vector Widening Integer Reduction Instructions
+  def vwredsumu = VecIntWRedUopVA_DA().set(_.sgn, Sign.U)
+  def vwredsum  = VecIntWRedUopVA_DA().set(_.sgn, Sign.S)
+
+  // 14.3. Vector Single-Width Floating-Point Reduction Instructions
+  def vfredosum = VecFpRedUopVA_DA()
+  def vfredusum = VecFpRedUopVA_DA()
+  def vfredmin = VecFpRedUopVA_DA()
+  def vfredmax = VecFpRedUopVA_DA()
+
+  // 14.4. Vector Widening Floating-Point Reduction Instructions
+  def vfwredosum = VecFpWRedUopVA_DA()
+  def vfwredusum = VecFpWRedUopVA_DA()
+
+  // 15.1. Vector Mask-Register Logical Instructions
+  def vmand  = VecIntUopMM_DM()
+  def vmnand = VecIntUopMM_DM()
+  def vmandn = VecIntUopMM_DM()
+  def vmor   = VecIntUopMM_DM()
+  def vmnor  = VecIntUopMM_DM()
+  def vmorn  = VecIntUopMM_DM()
+  def vmxor  = VecIntUopMM_DM()
+  def vmxnor = VecIntUopMM_DM()
+
+  // 15.2. Vector count population in mask vcpop.m
+  // 15.3. vfirst find-first-set mask bit
+  // 15.4. vmsbf.m set-before-first mask bit
+  // 15.5. vmsif.m set-including-first mask bit
+  // 15.6. vmsof.m set-only-first mask bit
+  def vcpop_m = VecIntUopS2M_DX()
+  def vfirst = VecIntUopS2M_DX()
+  def vmsbf = VecIntUopS2M_DM()
+  def vmsif = VecIntUopS2M_DM()
+  def vmsof = VecIntUopS2M_DM()
+
+  // 15.8. Vector Iota Instruction
+  def viota = VecIntUopS2M_DV()
+
+  // 15.9. Vector Element Index Instruction
+  def vid = VecIntUop_DV()
+
+  // 16.1. Integer Scalar Move Instructions
+  /**
+   * vmv.x.s performs its operation even if vstart >= vl or vl=0
+   */
+  def vmvVecScala2Int = VecUopS2A(GpWen)
+
+  def vmvInt2VecScala = VecUopS1_DA(Src1Gp)
+
+  // 16.2. Floating-Point Scalar Move Instructions
+  /**
+   * vfmv.f.s performs its operation even if vstart >= vl or vl=0
+   */
+  def vmvVecScala2Fp = VecUopS2A(FpWen)
+
+  def vmvFp2VecScala = VecUopS1_DA(Src1Fp)
+
+  // 16.3. Vector Slide Instructions
+  def vslideup_x   = new VecIntUop(Src2Vp, Src1Gp, VpWen, VlRen, V0RenAsMask){}
+  def vslideup_i   = new VecIntUop(Src2Vp, Src1Imm, VpWen, VlRen, V0RenAsMask){}
+  def vslidedown_x = new VecIntUop(Src2Vp, Src1Gp, VpWen, VlRen, V0RenAsMask){}
+  def vslidedown_i = new VecIntUop(Src2Vp, Src1Imm, VpWen, VlRen, V0RenAsMask){}
+  def vslide1up  = new VecIntUop(Src2Vp, VpWen, VlRen, V0RenAsMask){
+    override def allowedTraits: Set[UopTrait] = Set(Src1Gp, Src1Fp)
+  }
+  def vslide1down= new VecIntUop(Src2Vp, VpWen, VlRen, V0RenAsMask){
+    override def allowedTraits: Set[UopTrait] = Set(Src1Gp, Src1Fp)
+  }
+  def vfslide1up   = new VecFpUop (Src2Vp, Src1Fp, VpWen, VlRen, V0RenAsMask){}
+  def vfslide1down = new VecFpUop (Src2Vp, Src1Fp, VpWen, VlRen, V0RenAsMask){}
+
+  // 16.4. Vector Register Gather Instructions
+  def vrgather_v   = new VecIntUop(Src2Vp, Src1Vp, VpWen, VlRen, V0RenAsMask) {}
+  def vrgatherei16_v = new VecIntUop(Src2Vp, Src1Vp, VpWen, VlRen, V0RenAsMask) {}
+
+  def vrgather_x = new VecIntUop(Src2Vp, Src1Gp, VpWen, VlRen, V0RenAsMask) {}
+  def vrgather_i = new VecIntUop(Src2Vp, Src1Imm, VpWen, VlRen, V0RenAsMask) {}
+
+  // 16.5. Vector Compress Instruction
+  def vcompress_m   = VecIntUopVM_DV()
+
+  // 16.6. Whole Vector Register Move
+  def vmvnr = VecIntUopS2V_DV()
+
+  //
+  def vle   = new VecLoadUop(Src1Gp, VpWen, VlRen)
+  def vleff = new VecLoadUop(Src1Gp, VpWen, VlRen)
+  def vlm   = new VecLoadUop(Src1Gp, VmWen, VlRen)
+  def vlnr  = new VecLoadUop(Src1Gp, VpWen)
+  def vlse  = new VecLoadUop(Src1Gp, VpWen, VlRen, Src2Gp)
+  def vluxe = new VecLoadUop(Src1Gp, VpWen, VlRen, Src2Vp)
+  def vloxe = new VecLoadUop(Src1Gp, VpWen, VlRen, Src2Vp, Order)
+
+  def vse   = new VecStoreUop(Src1Gp, Src3Vp, VlRen)
+  def vsnr  = new VecStoreUop(Src1Gp, Src3Vp)
+  def vsm   = new VecStoreUop(Src1Gp, Src3Vp, VlRen)
+  def vsse  = new VecStoreUop(Src1Gp, Src3Vp, VlRen, Src2Gp)
+  def vsuxe = new VecStoreUop(Src1Gp, Src3Vp, VlRen, Src2Vp)
+  def vsoxe = new VecStoreUop(Src1Gp, Src3Vp, VlRen, Src2Vp, Order)
 
   // 1 src op
-  val vbrev8  = UopInt_S2UV_DV()
-  val vbrev   = UopInt_S2UV_DV()
-  val vclz    = UopInt_S2UV_DV()
-  val vctz    = UopInt_S2UV_DV()
-  val vcpop_v = UopInt_S2UV_DV()
-  val vrev8   = UopInt_S2UV_DV()
+  def vbrev8  = VecIntUopS2V_DV()
+  def vbrev   = VecIntUopS2V_DV()
+  def vclz    = VecIntUopS2V_DV()
+  def vctz    = VecIntUopS2V_DV()
+  def vcpop_v = VecIntUopS2V_DV()
+  def vrev8   = VecIntUopS2V_DV()
 
-  val vzext2  = UopInt_S2UV_DV()
-  val vzext4  = UopInt_S2UV_DV()
-  val vzext8  = UopInt_S2UV_DV()
+  def vandn = new VecIntUopVV_DV
+  def vclmulh = new VecIntUopVV_DV
+  def vclmul = new VecIntUopVV_DV
 
-  val vsext2  = UopInt_S2SV_DV()
-  val vsext4  = UopInt_S2SV_DV()
-  val vsext8  = UopInt_S2SV_DV()
-  // 1 src op mask operation
-  val vmsbf   = UopInt_S2M_DM()
-  val vmsif   = UopInt_S2M_DM()
-  val vmsof   = UopInt_S2M_DM()
-
-  val viota   = UopInt_S2M_DV()
-
-  val vcpop_m = UopInt_S2M_DX()
-  val vfirst  = UopInt_S2M_DX()
-  // mov
-  val vmvnr   = UopInt_S2UV_DV()
-
-  // 0 src op
-  val vid     = UopInt_DV()
-
-  // reduction
-  val vredand   = UopIntRed_S1UA_S2UV_DUA()
-  val vredor    = UopIntRed_S1UA_S2UV_DUA()
-  val vredxor   = UopIntRed_S1UA_S2UV_DUA()
-  val vredmaxu  = UopIntRed_S1UA_S2UV_DUA()
-  val vredminu  = UopIntRed_S1UA_S2UV_DUA()
-  val vredmax   = UopIntRed_S1SA_S2SV_DSA()
-  val vredmin   = UopIntRed_S1SA_S2SV_DSA()
-  val vredsum   = UopIntRed_S1SA_S2SV_DSA()
-
-  val vwredsum  = UopIntWRed_S1SA_S2SV_DSA()
-  val vwredsumu = UopIntWRed_S1UA_S2UV_DUA()
-
-  val vmvS2F = UopFp_S2A_DF()
-
-  val vmvF2S = UopFp_S1F_DA()
-
-  val vmvF2V = UopFp_S1F_DV()
-
-  val vfclass = UopFp_S2V_DV()
-
-  val vfcvt_f_x = UopFp_S2V_DV()
-  val vfcvt_f_xu = UopFp_S2V_DV()
-  val vfcvt_x_f = UopFp_S2V_DV()
-  val vfcvt_x_f_rtz = UopFp_S2V_DV()
-  val vfcvt_xu_f = UopFp_S2V_DV()
-  val vfcvt_xu_f_rtz = UopFp_S2V_DV()
-
-  val vfrec7 = UopFp_S2V_DV()
-  val vfrsqrt7 = UopFp_S2V_DV()
-  val vfsqrt = UopFp_S2V_DV()
-
-  val vfwcvt_f_f      = UopFp_S2V_DW()
-  val vfwcvt_f_x      = UopFp_S2V_DW()
-  val vfwcvt_f_xu     = UopFp_S2V_DW()
-  val vfwcvt_x_f      = UopFp_S2V_DW()
-  val vfwcvt_x_f_rtz  = UopFp_S2V_DW()
-  val vfwcvt_xu_f     = UopFp_S2V_DW()
-  val vfwcvt_xu_f_rtz = UopFp_S2V_DW()
-
-  val vfncvt_f_f      = UopFp_S2W_DV()
-  val vfncvt_f_x      = UopFp_S2W_DV()
-  val vfncvt_f_xu     = UopFp_S2W_DV()
-  val vfncvt_f_f_rod  = UopFp_S2W_DV()
-  val vfncvt_x_f_rtz  = UopFp_S2W_DV()
-  val vfncvt_x_f      = UopFp_S2W_DV()
-  val vfncvt_xu_f_rtz = UopFp_S2W_DV()
-  val vfncvt_xu_f     = UopFp_S2W_DV()
-
-  val vfadd = UopFp_S2V_S1VF_DV()
-  val vfsub = UopFp_S2V_S1VF_DV()
-  val vfmin = UopFp_S2V_S1VF_DV()
-  val vfmax = UopFp_S2V_S1VF_DV()
-  val vfsgnj = UopFp_S2V_S1VF_DV()
-  val vfsgnjn = UopFp_S2V_S1VF_DV()
-  val vfsgnjx = UopFp_S2V_S1VF_DV()
-  val vfmerge = UopFp_S2V_S1VF_DV()
-
-  val vfdiv   = UopFp_S2V_S1VF_DV()
-  val vfmul   = UopFp_S2V_S1VF_DV()
-  val vfmadd  = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfnmadd = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfmsub  = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfnmsub = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfmacc  = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfnmacc = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfmsac  = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-  val vfnmsac = UopFp_S2V_S1VF_DV().needAlwaysReadVd
-
-  val vfwadd  = UopFp_S2V_S1V_DW()
-  val vfwsub  = UopFp_S2V_S1V_DW()
-  val vfwmul  = UopFp_S2V_S1V_DW()
-
-  val vfwadd_w = UopFp_S2W_S1V_DW()
-  val vfwsub_w = UopFp_S2W_S1V_DW()
-
-  val vfwmacc  = UopFp_S2V_S1V_DW().needAlwaysReadVd
-  val vfwmsac  = UopFp_S2V_S1V_DW().needAlwaysReadVd
-  val vfwnmacc = UopFp_S2V_S1V_DW().needAlwaysReadVd
-  val vfwnmsac = UopFp_S2V_S1V_DW().needAlwaysReadVd
-
-  val vmfeq = UopFp_S2V_S1V_DM()
-  val vmfle = UopFp_S2V_S1V_DM()
-  val vmflt = UopFp_S2V_S1V_DM()
-  val vmfne = UopFp_S2V_S1V_DM()
-  val vmfgt = UopFp_S2V_S1V_DM()
-  val vmfge = UopFp_S2V_S1V_DM()
-
-  val vfredosum = UopFpRed_S2V_S1A_DA()
-  val vfredmin = UopFpRed_S2V_S1A_DA()
-  val vfredmax = UopFpRed_S2V_S1A_DA()
-
-  val vfwredosum = UopFpWRed_S2V_S1A_DA()
-
-  val vle = UopUnitStrideLoad()
-  val vleWhole = UopWholeRegisterLoad()
-  val vlm = UopMaskLoad()
-  val vlse = UopStridedLoad()
-  val vlxe = UopIndexLoad()
-  val vleff = UopUnitStrideLoad()
-
-  val vse = UopUnitStrideStore()
-  val vseWhole = UopWholeRegisterStore()
-  val vsm = UopMaskStore()
-  val vsse = UopStridedStore()
-  val vsxe = UopIndexStore()
-
-  // internal uops
+  def vrol = new VecIntUopVV_DV
+  def vror = new VecIntUopVV_DV
 
   /**
    * This uop is used to fill tail of Vector Registers
    * E.g.
    */
-  val vtail = UopInt_DV()
+  def vtail = VecIntUop_DV()
+
+  lazy val allUops: Iterable[UopBase] = {
+    import scala.reflect.runtime.currentMirror
+    import scala.reflect.runtime.universe._
+    val objectType = typeOf[this.type]
+    val uopSymbols: Iterable[MethodSymbol] = objectType.decls.collect {
+      case m: MethodSymbol if m.returnType <:< typeOf[UopBase] => m
+    }
+    val instanceMirror = currentMirror.reflect(this)
+
+    val uops: Iterable[UopBase] = uopSymbols.map { uopSymbol: MethodSymbol =>
+      val methodMirror: MethodMirror = instanceMirror.reflectMethod(uopSymbol)
+      println(s"calling ${uopSymbol.name}")
+      methodMirror().asInstanceOf[UopBase]
+    }
+
+    uops
+  }
+
+  lazy val allNames: Iterable[String] = {
+    import scala.reflect.runtime.universe._
+    val objectType = typeOf[this.type]
+    val uopSymbols: Iterable[String] = objectType.decls.collect {
+      case m: MethodSymbol if m.returnType <:< typeOf[UopBase] => m.name.toString
+    }
+    uopSymbols
+  }
+
+  def main(arg: Array[String]): Unit = {
+    (allUops zip allNames).foreach{ case (uop, name) => println( f"${name}%-20s - ${uop.uopInfoRenameString}") }
+  }
 }

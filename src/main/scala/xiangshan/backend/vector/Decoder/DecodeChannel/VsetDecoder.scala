@@ -7,7 +7,7 @@ import freechips.rocketchip.rocket.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
-import xiangshan.backend.vector.Decoder.Uop.UopType.UopBase
+import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, VecUopDefines}
 import xiangshan.backend.vector.Decoder.{Lmuls, Sews}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
@@ -192,11 +192,11 @@ object VsetDecoderUtil {
       if (instP.isVSETVL) {
         Some((
           if (rdZero.get && rs1Zero.get)
-            VecUopDefines.vset_vtypex_vll.x
+            VecUopDefines.vset_vtypex_vll
           else if (rs1Zero.get)
-            VecUopDefines.vset_vtypex_vlmax.x
+            VecUopDefines.vset_vtypex_vlmax
           else
-            VecUopDefines.vset_vtypex_vlx.xx
+            VecUopDefines.vset_vtypex_vlx
         ).asInstanceOf[UopBase])
       }
       else if (instP.isVSETVLI) {
@@ -208,7 +208,7 @@ object VsetDecoderUtil {
           else if (rs1Zero.get)
             VecUopDefines.vset_vtypei_vlmax
           else
-            VecUopDefines.vset_vtypei_vlx.x
+            VecUopDefines.vset_vtypei_vlx
         ).asInstanceOf[UopBase])
       }
       else if (instP.isVSETIVLI) {
@@ -332,7 +332,8 @@ object VsetDecoderMain extends App {
     uop.foreach(
       uop => println(
         s"${pattern.p1.p1.rawInst}, " +
-        s"ill: ${pattern.p1.p2.p1.zimm11bHead3Zero.exists(!_) || pattern.p1.p2.p2.zimm10bHead2Zero.exists(!_)}, rdZero:${pattern.p2.p1.rdZero.get}, rs1Zero:${pattern.p2.p2.rs1Zero.get}: ${uop.uopInfoRenameString}"))
+        s"ill: ${pattern.p1.p2.p1.zimm11bHead3Zero.exists(!_) || pattern.p1.p2.p2.zimm10bHead2Zero.exists(!_)}, " +
+          s"rdZero:${pattern.p2.p1.rdZero.get}, rs1Zero:${pattern.p2.p2.rs1Zero.get}: ${uop.uopInfoRenameString}"))
   }
 
   Verilog.emitVerilog(new VsetDecoder)

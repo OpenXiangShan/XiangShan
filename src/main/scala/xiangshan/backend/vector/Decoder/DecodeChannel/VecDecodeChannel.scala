@@ -8,6 +8,7 @@ import freechips.rocketchip.rocket.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.InstNfLmulSewPattern
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{EewField, FpWenField, GpWenField, Src12RevField, VpWenField, VxsatWenField}
 import xiangshan.backend.vector.Decoder.DecodeFields._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
@@ -65,6 +66,7 @@ class VecDecodeChannel(
 
   println(s"The length of decodeTable in VecDecodeChannel: ${allInPatterns.length}")
   println(s"The length of splitTypeTable in VecDecodeChannel: ${allInPatterns.length}")
+
   val decodeTable = new DecodeTable(allInPatterns, allFields)
   val splitTypeTable = new DecodeTable(allInstWithConfig, Seq(SplitTypeField))
   val splitTypeOHTable = new DecodeTable(allInstWithConfig, Seq(SplitTypeOHField))
@@ -77,20 +79,18 @@ class VecDecodeChannel(
   splitTypeOH := splitTypeOHResult(SplitTypeOHField)
 
   val instPatterns: Seq[VecInstPattern] = instSeq.collect {
-    case x: VecArithInstPattern =>
-      x
-    case x: VecMemInstPattern =>
-      x
+    case x: VecArithInstPattern => x
+    case x: VecMemInstPattern => x
   }
 
-  val splitCtlDecoder = Module(new SplitCtlDecoder(instPatterns))
+  val splitCtrlDecoder = Module(new SplitCtlDecoder(instPatterns))
   val uopNumDecoder = Module(new UopNumDecoder(splitTypeOneHot = true))
   val vsetDecoder = Module(new VsetDecoder)
 
-  splitCtlDecoder.in.splitTypeOH := splitTypeOH
-  splitCtlDecoder.in.inst := in.rawInst
-  splitCtlDecoder.in.lmul := in.lmul
-  splitCtlDecoder.in.sew := in.sew
+  splitCtrlDecoder.in.splitTypeOH := splitTypeOH
+  splitCtrlDecoder.in.inst := in.rawInst
+  splitCtrlDecoder.in.lmul := in.lmul
+  splitCtrlDecoder.in.sew := in.sew
 
   val eew: UInt = new DecodeTable(VecInstPattern.mem, Seq(EewField)).decode(in.rawInst)(EewField)
   uopNumDecoder.in.splitType := splitType
@@ -103,13 +103,13 @@ class VecDecodeChannel(
   vsetDecoder.in.rawInst := in.rawInst
 
   for (i <- 0 until numUopOut) {
-    out.uop(i).valid := vsetDecoder.out.renameInfo.valid || splitCtlDecoder.out.uopInfoRename(i).valid
-    out.uop(i).bits.renameInfo.uop := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.renameInfo.bits, splitCtlDecoder.out.uopInfoRename(i).bits.uop)
-    out.uop(i).bits.renameInfo.illegal := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtlDecoder.out.uopInfoRename(i).bits.illegal)
+    out.uop(i).valid := vsetDecoder.out.renameInfo.valid || splitCtrlDecoder.out.uopInfoRename(i).valid
+    out.uop(i).bits.renameInfo.uop := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.renameInfo.bits, splitCtrlDecoder.out.uopInfoRename(i).bits.uop)
+    out.uop(i).bits.renameInfo.illegal := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtrlDecoder.out.uopInfoRename(i).bits.illegal)
 
-    out.uop(i).bits.src        := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.src, splitCtlDecoder.out.uopSrc(i))
-    out.uop(i).bits.uopDepend  := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtlDecoder.out.uopDepend(i))
-    out.uop(i).bits.vdAlloc    := splitCtlDecoder.out.vdAlloc(i)
+    out.uop(i).bits.src        := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.src, splitCtrlDecoder.out.uopSrc(i))
+    out.uop(i).bits.uopDepend  := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtrlDecoder.out.uopDepend(i))
+    out.uop(i).bits.vdAlloc    := splitCtrlDecoder.out.vdAlloc(i)
     out.uop(i).bits.src12Rev   := Mux(vsetDecoder.out.renameInfo.valid, false.B, decodeResult(Src12RevField))
     out.uop(i).bits.vdEew1b    := decodeResult(VdEew1bField)
     out.uop(i).bits.uopIdx     := i.U
@@ -208,20 +208,26 @@ class SplitCtlDecoder(
   }
 
   val memWholeInstPattern = for {
-    inst <- instSeq.collect { case x: VecMemInstPattern if x.isUnitStrideWhole => x }
+    inst <- instSeq.collect {
+      case x: VecMemWhole => x
+    }
   } yield {
     InstNfLmulSewPattern(inst, NfPattern.dontCare, LmulPattern.dontCare, SewPattern.dontCare)
   }
 
   val memMaskInstPattern = for {
-    inst <- instSeq.collect { case x: VecMemInstPattern if x.isUnitStrideMask => x}
+    inst <- instSeq.collect {
+      case x: VecMemMask => x
+    }
   } yield {
     InstNfLmulSewPattern(inst, NfPattern.dontCare, LmulPattern.dontCare, SewPattern.dontCare)
   }
 
   val memSegInstPattern: Seq[InstNfLmulSewPattern] = (
     for {
-      inst <- instSeq.collect { case x: VecMemInstPattern if !x.isUnitStrideWhole && !x.isUnitStrideMask => x }
+      inst <- instSeq.collect {
+        case x: VecMemInstPattern if !x.isInstanceOf[VecMemWhole] && !x.isInstanceOf[VecMemMask] => x
+      }
       nf: BitPat <- nfSeq
       lmul: Double <- Seq(1, 2, 4, 8, 0.125, 0.25, 0.5)
       sew: Int <- Seq(8, 16, 32, 64)
@@ -229,7 +235,7 @@ class SplitCtlDecoder(
       val seg = nf.value.toInt + 1
       val eew = inst.eewValue
       val emul = lmul * eew / sew
-      if (inst.isIndexedUnorder || inst.isIndexedOrder) {
+      if (inst.isInstanceOf[VecMemIndex]) {
         val dEmul = lmul
         val iEmul = emul
         val uopNum = (1.0 max iEmul max dEmul).toInt * seg
@@ -373,16 +379,18 @@ class UopSrcBundle extends Bundle {
   val dest = UInt(5.W)
 }
 
-object DecoderMain extends App {
-  Verilog.emitVerilog(
-    new VecDecodeChannel(VecInstPattern.all, enableM2M4M8 = (true, true, true))
-  )
+object VecDecoderChannel {
+  def main(args: Array[String]): Unit = {
+    Verilog.emitVerilog(
+      new VecDecodeChannel(VecInstPattern.all, enableM2M4M8 = (true, true, true))
+    )
 
-  val inst = VecInstPattern(Instructions.VNCLIPU_WI).get
-  inst.setName("VNCLIPU_WI")
-  checkFieldsOfInst(inst)
+    val inst = VecInstPattern(Instructions.VNCLIPU_WI).get
+    inst.setName("VNCLIPU_WI")
+    checkFieldsOfInst(inst)
+  }
 
-  def checkFieldsOfInst(inst: VecInstPattern) = {
+  def checkFieldsOfInst(inst: VecInstPattern): Unit = {
     val fields = Seq(
       GpWenField,
       FpWenField,

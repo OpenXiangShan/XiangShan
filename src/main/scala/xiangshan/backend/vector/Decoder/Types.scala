@@ -117,19 +117,14 @@ object Types {
     val maskSel = UInt(2.W)
   }
 
-  abstract class MaskType {
-    def toChiselEnum: MaskTypeChiselEnum.Type = {
-      this match {
-        case DestMask  => MaskTypeChiselEnum.DestMask
-        case Src2Mask  => MaskTypeChiselEnum.Src2Mask
-        case Src12Mask => MaskTypeChiselEnum.Src12Mask
-      }
-    }
+  abstract class MaskType(val chiselEnum: MaskTypeChiselEnum.Type) {
+
   }
 
-  case object DestMask extends MaskType
-  case object Src2Mask extends MaskType
-  case object Src12Mask extends MaskType
+  case object DestMask extends MaskType(MaskTypeChiselEnum.DestMask)
+  case object Src2Mask extends MaskType(MaskTypeChiselEnum.Src2Mask)
+  case object Src12Mask extends MaskType(MaskTypeChiselEnum.Src12Mask)
+  case object NoMask extends MaskType(MaskTypeChiselEnum.DestMask)
 
   object MaskTypeChiselEnum extends ChiselEnum {
     val DestMask  = Value(b"00") // normal situation

@@ -128,19 +128,19 @@ abstract class VecMemInstPattern(
 
   def vs3   : BitPat = vd
 
-  def isLoad: Boolean = this.opcode7.rawString == InstPattern.Opcode5.LOAD_FP
-
-  def isStore: Boolean = this.opcode7.rawString == InstPattern.Opcode5.STORE_FP
-
-  def isUnitStrideNormal: Boolean = isUnitStride && this.lumop.rawString == "00000"
-  def isUnitStrideWhole : Boolean = isUnitStride && this.lumop.rawString == "01000"
-  def isUnitStrideMask  : Boolean = isUnitStride && this.lumop.rawString == "01011"
-  def isUnitStrideFF    : Boolean = isUnitStride && this.lumop.rawString == "10000"
-
-  def isUnitStride    : Boolean = this.mop.rawString == "00"
-  def isIndexedUnorder: Boolean = this.mop.rawString == "01"
-  def isStrided       : Boolean = this.mop.rawString == "10"
-  def isIndexedOrder  : Boolean = this.mop.rawString == "11"
+//  def isLoad: Boolean = this.opcode7.rawString == InstPattern.Opcode5.LOAD_FP
+//
+//  def isStore: Boolean = this.opcode7.rawString == InstPattern.Opcode5.STORE_FP
+//
+//  def isUnitStrideNormal: Boolean = isUnitStride && this.lumop.rawString == "00000"
+//  def isUnitStrideWhole : Boolean = isUnitStride && this.lumop.rawString == "01000"
+//  def isUnitStrideMask  : Boolean = isUnitStride && this.lumop.rawString == "01011"
+//  def isUnitStrideFF    : Boolean = isUnitStride && this.lumop.rawString == "10000"
+//
+//  def isUnitStride    : Boolean = this.mop.rawString == "00"
+//  def isIndexedUnorder: Boolean = this.mop.rawString == "01"
+//  def isStrided       : Boolean = this.mop.rawString == "10"
+//  def isIndexedOrder  : Boolean = this.mop.rawString == "11"
 
   def eewValue: Int = this.width.rawString match {
     case "000" => 8
@@ -150,31 +150,34 @@ abstract class VecMemInstPattern(
   }
 }
 
-trait UnitStride extends VecMemInstPattern
-trait Strided extends VecMemInstPattern
-trait OrderIndex extends VecMemInstPattern
-trait UnorderIndex extends VecMemInstPattern
+trait VecMemUnitStride extends VecMemInstPattern
+trait VecMemStrided extends VecMemInstPattern
+trait VecMemIndex extends VecMemInstPattern
+trait VecMemOrderIndex extends VecMemIndex
+trait VecMemUnorderIndex extends VecMemIndex
+trait VecMemWhole extends VecMemInstPattern
+trait VecMemMask extends VecMemInstPattern
 trait VecLoadInstPattern extends VecMemInstPattern
 trait VecStoreInstPattern extends VecMemInstPattern
 
-abstract class VecUnitStrideLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with UnitStride
-case class VecUnitStrideNormalLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
-case class VecWholeLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
-case class VecMaskLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
-case class VecUnitStrideFFLoad()(implicit rawInst: BitPat) extends VecUnitStrideLoad
+abstract class VecLoadUnitStride()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnitStride
+case class VecLoadUnitStrideNormal()(implicit rawInst: BitPat) extends VecLoadUnitStride
+case class VecLoadWhole()(implicit rawInst: BitPat) extends VecLoadUnitStride with VecMemWhole
+case class VecLoadMask()(implicit rawInst: BitPat) extends VecLoadUnitStride with VecMemMask
+case class VecLoadUnitStrideFF()(implicit rawInst: BitPat) extends VecLoadUnitStride
 
-case class VecStridedLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with Strided
-case class VecOrderLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with OrderIndex
-case class VecUnorderLoad()(implicit rawInst: BitPat) extends VecLoadInstPattern with UnorderIndex
+case class VecLoadStrided()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemStrided
+case class VecLoadOrderIndex()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemOrderIndex
+case class VecLoadUnorderIndex()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnorderIndex
 
-abstract class VecUnitStrideStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with UnitStride
-case class VecUnitStrideNormalStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
-case class VecWholeStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
-case class VecMaskStore()(implicit rawInst: BitPat) extends VecUnitStrideStore
+abstract class VecStoreUnitStride()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemUnitStride
+case class VecStoreUnitStrideNormal()(implicit rawInst: BitPat) extends VecStoreUnitStride
+case class VecStoreWhole()(implicit rawInst: BitPat) extends VecStoreUnitStride with VecMemWhole
+case class VecStoreMask()(implicit rawInst: BitPat) extends VecStoreUnitStride with VecMemMask
 
-case class VecStridedStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with Strided
-case class VecOrderStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with OrderIndex
-case class VecUnorderStore()(implicit rawInst: BitPat) extends VecStoreInstPattern with UnorderIndex
+case class VecStoreStrided()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemStrided
+case class VecStoreOrderIndex()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemOrderIndex
+case class VecStoreUnorderIndex()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemUnorderIndex
 
 case class VecArithInstPattern()(
   implicit rawInst: BitPat,
@@ -214,15 +217,15 @@ object VecLoadInstPattern {
         mop.rawString match {
           case "00" =>
             lumop.rawString match {
-              case "00000" => VecUnitStrideNormalLoad()
-              case "01000" => VecWholeLoad()
-              case "01011" => VecMaskLoad()
-              case "10000" => VecUnitStrideFFLoad()
+              case "00000" => VecLoadUnitStrideNormal()
+              case "01000" => VecLoadWhole()
+              case "01011" => VecLoadMask()
+              case "10000" => VecLoadUnitStrideFF()
               case _ => null
             }
-          case "01" => VecUnorderLoad()
-          case "10" => VecStridedLoad()
-          case "11" => VecOrderLoad()
+          case "01" => VecLoadUnorderIndex()
+          case "10" => VecLoadStrided()
+          case "11" => VecLoadOrderIndex()
           case _ => null
         }
       case "1" => null
@@ -241,14 +244,14 @@ object VecStoreInstPattern {
         mop.rawString match {
           case "00" =>
             lumop.rawString match {
-              case "00000" => VecUnitStrideNormalStore()
-              case "01000" => VecWholeStore()
-              case "01011" => VecMaskStore()
+              case "00000" => VecStoreUnitStrideNormal()
+              case "01000" => VecStoreWhole()
+              case "01011" => VecStoreMask()
               case _ => null
             }
-          case "01" => VecUnorderStore()
-          case "10" => VecStridedStore()
-          case "11" => VecOrderStore()
+          case "01" => VecStoreUnorderIndex()
+          case "10" => VecStoreStrided()
+          case "11" => VecStoreOrderIndex()
           case _ => null
         }
       case "1" => null
@@ -455,7 +458,7 @@ object VecInstPattern {
           }
         case LOAD_FP if Seq("000", "101", "110", "111").contains(width.rawString) => VecLoadInstPattern()
         case STORE_FP if Seq("000", "101", "110", "111").contains(width.rawString) => VecStoreInstPattern()
-        case _ => throw new IllegalArgumentException(s"Unsupported opcode5(${opcode5.rawString})")
+        case _ => null
       }
     )
   }
