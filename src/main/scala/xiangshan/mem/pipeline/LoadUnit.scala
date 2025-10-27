@@ -648,9 +648,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
-  if (env.TraceRTLMode) {
-    XSError(s0_src_valid_vec(vec_iss_idx), "TraceRTL does not support vector now")
-  }
+  // NOTE: workload not having v, but gcpt restore may having v
+  // if (env.TraceRTLMode) {
+  //   XSError(s0_src_valid_vec(vec_iss_idx), "TraceRTL does not support vector now")
+  // }
+
   // fast replay and hardware prefetch don't need to query tlb
   val int_issue_vaddr = TraceRTLChoose(
     io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits),
