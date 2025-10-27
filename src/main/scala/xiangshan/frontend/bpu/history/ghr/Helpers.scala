@@ -17,11 +17,11 @@ package xiangshan.frontend.bpu.history.ghr
 
 import chisel3._
 import chisel3.util._
+import xiangshan.frontend.bpu.HalfAlignHelper
 
-trait Helpers extends HasGhrParameters {
-  def getGhr(ghr: UInt, ptr: GhrPtr): UInt = {
-    require(ghr.getWidth == GhrHistoryLength)
-    (Cat(ghr, ghr) >> (ptr.value + 1.U))(GhrHistoryLength - 1, 0)
+trait Helpers extends HasGhrParameters with HalfAlignHelper {
+  def getNewGhr(oldGhr: Vec[Bool], shiftBits: Vec[Bool], takenPtr: UInt): Vec[Bool] = {
+    val catBits = Cat(oldGhr ++ shiftBits)
+    VecInit(Seq.tabulate(GhrHistoryLength)(i => catBits(takenPtr + i.U)))
   }
-
 }

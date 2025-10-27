@@ -25,15 +25,15 @@ import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
+class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
-  class ScPathTableIO extends ScBundle {
+  class ScTableIO extends ScBundle {
     val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / NumWays).W)))
     val resp:   Vec[ScEntry]      = Output(Vec(NumWays, new ScEntry()))
     val update: PathTableTrain    = Input(new PathTableTrain(numSets))
   }
 
-  val io = IO(new ScPathTableIO())
+  val io = IO(new ScTableIO())
 
   def numRows: Int = numSets / NumBanks / NumWays
 
@@ -44,6 +44,7 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       way = NumWays,
       shouldReset = true,
       singlePort = true,
+      holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl

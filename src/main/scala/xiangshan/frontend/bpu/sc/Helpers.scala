@@ -28,13 +28,17 @@ trait Helpers extends HasScParameters {
   def neg(x:  SInt): Bool = sign(x)
 
   // get pc ^ foldedHist for index
-  def getIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
+  def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
       val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
-      ((pc >> instOffsetBits) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
+      ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
     } else {
-      (pc >> instOffsetBits)(log2Ceil(numSets) - 1, 0)
+      (pc >> (BankWidth + FetchBlockSizeWidth))(log2Ceil(numSets) - 1, 0)
     }
+
+  // get pc ^ ghr for index
+  def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int): UInt =
+    ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ ghr)(log2Ceil(numSets) - 1, 0)
 
   def getPercsum(arr: SInt): SInt =
     (arr * 2.S) +& 1.S

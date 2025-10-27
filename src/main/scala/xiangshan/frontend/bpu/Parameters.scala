@@ -43,9 +43,7 @@ case class BpuParameters(
     scParameters:     ScParameters = ScParameters(),
     ittageParameters: IttageParameters = IttageParameters(),
     rasParameters:    RasParameters = RasParameters()
-) {
-  def NumBtbResultEntries: Int = mbtbParameters.NumWay * mbtbParameters.NumAlignBanks
-}
+) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
@@ -60,9 +58,10 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
-  def GhrHistoryLength: Int = frontendParameters.getGhrHistoryLength
+  def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * bpuParameters.mbtbParameters.NumAlignBanks
 
-  def NumBtbResultEntries: Int = bpuParameters.NumBtbResultEntries
+  def GhrShamt:         Int = NumBtbResultEntries
+  def GhrHistoryLength: Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =

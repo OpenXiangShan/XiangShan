@@ -19,24 +19,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
-import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.PrunedAddr
 
-// circular global history pointer
-class GhrPtr(implicit p: Parameters) extends CircularQueuePtr[GhrPtr](p =>
-      p(XSCoreParamsKey).frontendParameters.getGhrHistoryLength
-    ) {}
-
-object GhrPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): GhrPtr = {
-    val ptr = Wire(new GhrPtr)
-    ptr.flag  := f
-    ptr.value := v
-    ptr
-  }
-  def inverse(ptr: GhrPtr)(implicit p: Parameters): GhrPtr =
-    apply(!ptr.flag, ptr.value)
+class GhrEntry(implicit p: Parameters) extends GhrBundle {
+  val valid: Bool      = Bool()
+  val value: Vec[Bool] = Vec(GhrHistoryLength, Bool())
 }
-
 class GhrUpdate(implicit p: Parameters) extends GhrBundle {
   val valid:        Bool      = Bool()
   val taken:        Bool      = Bool()
@@ -44,7 +32,14 @@ class GhrUpdate(implicit p: Parameters) extends GhrBundle {
   val firstTakenOH: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
 }
 
+class GhrMeta(implicit p: Parameters) extends GhrBundle {
+  val ghr:      Vec[Bool] = Vec(GhrHistoryLength, Bool())
+  val position: Vec[UInt] = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+}
+
 class GhrRedirect(implicit p: Parameters) extends GhrBundle {
-  val valid:  Bool   = Bool()
-  val ghrPtr: GhrPtr = new GhrPtr
+  val valid:      Bool       = Bool()
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:      Bool       = Bool()
+  val meta:       GhrMeta    = new GhrMeta
 }

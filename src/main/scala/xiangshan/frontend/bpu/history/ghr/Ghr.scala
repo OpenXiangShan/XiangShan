@@ -20,27 +20,36 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.StageCtrl
 
 class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   class GhrIO extends GhrBundle {
-    val update:   GhrUpdate   = Input(new GhrUpdate)
-    val redirect: GhrRedirect = Input(new GhrRedirect)
-    val ghist:    UInt        = Output(UInt(GhrHistoryLength.W))
-    val ghrPtr:   GhrPtr      = Output(new GhrPtr)
+    val stageCtrl: StageCtrl   = Input(new StageCtrl)
+    val update:    GhrUpdate   = Input(new GhrUpdate)
+    val redirect:  GhrRedirect = Input(new GhrRedirect)
+    val s0_ghist:  GhrEntry    = Output(new GhrEntry)
+    val ghist:     GhrEntry    = Output(new GhrEntry)
   }
-  val io          = IO(new GhrIO)
-  private val ghr = RegInit(0.U.asTypeOf(Vec(GhrHistoryLength, Bool())))
+  val io = IO(new GhrIO)
+
+  // stage ctrl
+  private val s0_fire = io.stageCtrl.s0_fire
+  private val s1_fire = io.stageCtrl.s1_fire
+  private val s2_fire = io.stageCtrl.s2_fire
+  private val s3_fire = io.stageCtrl.s3_fire
+
+  // global history
+  private val s0_ghr = WireInit(0.U.asTypeOf(new GhrEntry))
+  private val ghr    = RegInit(0.U.asTypeOf(new GhrEntry))
 
   /*
    * GHR train from redirct/s3_prediction
    */
-  private val ghrPtr = RegInit(0.U.asTypeOf(new GhrPtr))
-
-  io.ghist  := getGhr(ghr.asUInt, ghrPtr)
-  io.ghrPtr := ghrPtr
+  io.s0_ghist := s0_ghr
+  io.ghist    := ghr
 
   // update GHR
-  private val update        = io.update
+  private val update        = io.update // bp pipeline s3 level update
   private val taken         = update.taken
   private val updateValid   = update.valid
   private val firstTakenIdx = OHToUInt(update.firstTakenOH)
@@ -48,35 +57,42 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
 
   private val lessThanFirstTaken = update.position.map(_ < firstTakenPos)
   private val numLess            = PopCount(lessThanFirstTaken)
+  // FIXME: if numLess = GhrShamt maybe takenPtr error
+  private val takenPtr = Mux(taken, ~numLess(log2Ceil(GhrShamt) - 1, 0), 0.U)
+  require(isPow2(GhrShamt), "GhrShamt must be pow2")
 
-  private val resultBits = Wire(Vec(NumBtbResultEntries, Bool()))
-  for (i <- 0 until NumBtbResultEntries) {
-    resultBits(i) := Mux(i.U === numLess, taken, false.B)
+  // Set High numLess bits to 0, the numLess bit is taken
+  private val resultBits = VecInit(Seq.tabulate(GhrShamt)(i => Mux(i.U === takenPtr, taken, false.B)))
+  private val shiftBits  = Mux(taken, resultBits, 0.U.asTypeOf(resultBits))
+  private val catBits    = Cat(ghr.value.asUInt, shiftBits.asUInt)
+  private val updateGhr  = VecInit(Seq.tabulate(GhrHistoryLength)(i => catBits(takenPtr + i.U)))
+
+  // redirect ghr update
+  private val oldPositions     = io.redirect.meta.position
+  private val newTaken         = io.redirect.taken
+  private val takenPosition    = getAlignedInstOffset(io.redirect.startVAddr) // FIXME: position calculate maybe wrong
+  private val newLessThanStart = oldPositions.map(_ < takenPosition)
+  private val newNumLess       = PopCount(newLessThanStart)
+  private val newTakenPtr      = Mux(newTaken, ~newNumLess(log2Ceil(GhrShamt) - 1, 0), 0.U)
+
+  // update from redirect or update
+  when(io.redirect.valid) {
+    ghr.valid := false.B
+    ghr.value := io.redirect.meta.ghr // TODO: caclulate the new ghr based on redirect info
+  }.elsewhen(updateValid) {
+    ghr.valid := true.B
+    ghr.value := updateGhr
   }
-  private val shiftBits = Mux(taken, resultBits, 0.U.asTypeOf(resultBits))
+  s0_ghr.valid := Mux(io.redirect.valid, false.B, ghr.valid)
+  s0_ghr.value := ghr.value
 
-  private val updateGhr = WireInit(ghr)
-  for (i <- 0 until NumBtbResultEntries) {
-    updateGhr(ghrPtr.value - i.U) := shiftBits(i)
-  }
-
-  // redirect handling
-  private val redirect = io.redirect
-  when(redirect.valid) {
-    // ghr    := getGhr(ghr.asUInt, redirect.bits.speculationMeta.ghrHistPtr)
-    ghrPtr := redirect.ghrPtr
-  }.elsewhen(updateValid && taken) {
-    ghr    := updateGhr
-    ghrPtr := ghrPtr - numLess - 1.U
-  }.elsewhen(updateValid && !taken) {
-    ghr    := updateGhr
-    ghrPtr := ghrPtr - NumBtbResultEntries.U
-  }
-
+  private val resultBitsUInt         = resultBits.asUInt
   private val shiftBitsUInt          = shiftBits.asUInt
   private val updateGhrUInt          = updateGhr.asUInt
-  private val ghrUInt                = ghr.asUInt
+  private val ghrUInt                = ghr.value.asUInt
   private val lessThanFirstTakenUInt = lessThanFirstTaken.asUInt
+  dontTouch(resultBitsUInt)
+  dontTouch(numLess)
   dontTouch(shiftBitsUInt)
   dontTouch(updateGhrUInt)
   dontTouch(ghrUInt)
