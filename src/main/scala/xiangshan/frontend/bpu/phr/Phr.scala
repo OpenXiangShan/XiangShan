@@ -81,9 +81,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s3_override     = WireInit(false.B)
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
 
-  private val updateData = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val updatePc   = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val redirctPhr = WireInit(0.U(PhrHistoryLength.W))
+  private val updateData  = WireInit(0.U.asTypeOf(new PhrUpdateData))
+  private val updatePc    = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val redirectPhr = WireInit(0.U(PhrHistoryLength.W))
 
   redirectData.valid  := io.train.redirect.valid
   redirectData.taken  := io.train.redirect.bits.taken
@@ -139,14 +139,14 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   when(redirectData.valid) {
-    redirctPhr := getPhr(redirectData.phrPtr)
+    redirectPhr := getPhr(redirectData.phrPtr)
     AllFoldedHistoryInfo.foreach { info =>
       redirectData.foldedPhr.getHistWithInfo(info).foldedHist :=
-        computeFoldedHist(redirctPhr, info.FoldedLength)(info.HistoryLength)
+        computeFoldedHist(redirectPhr, info.FoldedLength)(info.HistoryLength)
     }
     s0_foldedPhr := redirectData.foldedPhr
     when(redirectData.taken) {
-      s0_foldedPhr := redirectData.foldedPhr.update(VecInit(redirctPhr.asBools), redirectData.phrPtr, Shamt, shiftBits)
+      s0_foldedPhr := redirectData.foldedPhr.update(VecInit(redirectPhr.asBools), redirectData.phrPtr, Shamt, shiftBits)
     }
   }.elsewhen(s3_override) {
     s0_foldedPhr := s3_foldedPhrReg
@@ -251,7 +251,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   dontTouch(s0_phrValue)
   dontTouch(phrValue)
   dontTouch(histFoldedPhr)
-  dontTouch(redirctPhr)
+  dontTouch(redirectPhr)
   dontTouch(diffFoldedPhr)
   dontTouch(s0_phrPtr)
   dontTouch(s1_phrPtr)

@@ -36,7 +36,7 @@ import xiangshan.XSModule
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
- * @param hasFlush Whether the write buffer has a flush signal, used to reset the write bufferq
+ * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
 */
 class WriteBuffer[T <: WriteReqBundle](
     gen:            T,
@@ -134,7 +134,7 @@ class WriteBuffer[T <: WriteReqBundle](
       val notUseful    = notUsefulVec.reduce(_ || _)
       val notUsefulIdx = PriorityEncoder(notUsefulVec)
       val victim       = Mux(notUseful, notUsefulIdx, replacerWay(portIdx))
-      // if this wirte port !hit need to write a new entry
+      // if this write port !hit need to write a new entry
       when(!hit) {
         entries(portIdx)(victim)     := io.write(portIdx).bits
         valids(portIdx)(victim)      := true.B
@@ -160,7 +160,7 @@ class WriteBuffer[T <: WriteReqBundle](
         }
       }
 
-      // If the write request has conuter need update counter
+      // If the write request has counter need update counter
       val temporarily = WireInit(io.write(portIdx).bits)
       if (hasCnt) {
         when(hit) {
