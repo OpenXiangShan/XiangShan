@@ -70,7 +70,4 @@ trait HasIttageParameters extends HasBpuParameters {
 
   /* *** testing *** */
   def debug: Boolean = !env.FPGAPlatform && env.EnablePerfDebug
-
-  // ittage cannot be fast-trained, this is required by abstract class BasePredictor
-  def EnableFastTrain: Boolean = false
 }

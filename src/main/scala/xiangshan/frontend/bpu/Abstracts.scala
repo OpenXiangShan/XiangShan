@@ -28,8 +28,6 @@ abstract class BpuModule(implicit p: Parameters) extends XSModule with HasBpuPar
 
 abstract class BasePredictor(implicit p: Parameters) extends BpuModule {
   val io: BasePredictorIO
-
-  def EnableFastTrain: Boolean
 }
 
 abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
@@ -39,10 +37,16 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   val stageCtrl: StageCtrl = Input(new StageCtrl)
   // predict request
   val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
-  // train
+  // resolve train
   val train: Valid[BpuTrain] = Input(Valid(new BpuTrain))
+  // fast train for s1 predictors
+  val fastTrain: Option[Valid[BpuFastTrain]] = None
 
   val resetDone: Bool = Output(Bool())
+}
+
+trait HasFastTrainIO extends BasePredictorIO {
+  override val fastTrain: Option[Valid[BpuFastTrain]] = Option(Input(Valid(new BpuFastTrain)))
 }
 
 // The abstract class is used to abstract the setIdx and tag from write requests for updating write buffer entries

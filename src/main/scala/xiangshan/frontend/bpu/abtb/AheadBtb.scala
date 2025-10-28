@@ -22,8 +22,8 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BpuFastTrain
 import xiangshan.frontend.bpu.CompareMatrix
+import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 
@@ -31,14 +31,13 @@ import xiangshan.frontend.bpu.SaturateCounter
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
-  class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val redirectValid:    Bool                = Input(Bool())
-    val overrideValid:    Bool                = Input(Bool())
-    val previousVAddr:    Valid[PrunedAddr]   = Flipped(Valid(PrunedAddr(VAddrBits)))
-    val fastTrain:        Valid[BpuFastTrain] = Input(Valid(new BpuFastTrain))
-    val prediction:       Prediction          = Output(new Prediction)
-    val meta:             AheadBtbMeta        = Output(new AheadBtbMeta)
-    val debug_startVAddr: PrunedAddr          = Output(PrunedAddr(VAddrBits))
+  class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
+    val redirectValid:    Bool              = Input(Bool())
+    val overrideValid:    Bool              = Input(Bool())
+    val previousVAddr:    Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
+    val prediction:       Prediction        = Output(new Prediction)
+    val meta:             AheadBtbMeta      = Output(new AheadBtbMeta)
+    val debug_startVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -193,8 +192,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - receive train request
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t0_valid = io.enable && io.fastTrain.valid && io.fastTrain.bits.abtbMeta.valid && io.previousVAddr.valid
-  private val t0_train = io.fastTrain.bits
+  private val t0_train = io.fastTrain.get.bits
+
+  private val t0_valid = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousVAddr.valid
   private val t0_previousVAddr = io.previousVAddr.bits
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -352,7 +352,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   XSPerfAccumulate("predict_not_taken", s2_valid && s2_hit && !s2_taken)
   XSPerfAccumulate("predict_multi_hit", s2_valid && s2_multiHit)
 
-  XSPerfAccumulate("train_req_num", io.fastTrain.valid)
+  XSPerfAccumulate("train_req_num", io.fastTrain.get.valid)
   XSPerfAccumulate("train_num", t1_valid)
   XSPerfAccumulate("train_hit_path", t1_valid && t1_meta.hitMask.reduce(_ || _))
   XSPerfAccumulate("train_hit_taken_branch", t1_valid && t1_hitTakenBranch)

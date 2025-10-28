@@ -53,7 +53,4 @@ trait HasScParameters extends HasBpuParameters {
   def WriteBufferSize:     Int              = scParameters.WriteBufferSize
   def TagWidth:            Int              = scParameters.TagWidth
   // TODO
-
-  // sc cannot be fast-trained, this is required by abstract class BasePredictor
-  def EnableFastTrain: Boolean = false
 }
