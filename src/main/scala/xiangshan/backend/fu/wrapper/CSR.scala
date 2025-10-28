@@ -253,33 +253,31 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     if (!(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
       val traceSatpMod = Module(new TraceSatp())
       val traceSatp = RegEnable(traceSatpMod.io.satp_ppn.bits, 0.U, traceSatpMod.io.satp_ppn.valid)
-      tlb.satp.ppn      := traceSatp
-      tlb.satp.mode     := 8.U
+
+      if (Trace2StageMMU) {
+        tlb.satp := 0.U.asTypeOf(tlb.satp)
+        tlb.vsatp.changed := false.B
+        tlb.vsatp.mode     := 8.U
+        tlb.vsatp.asid     := 0.U
+        tlb.vsatp.ppn      := traceSatp
+
+        val traceHgatpMod = Module(new TraceHgatp())
+        val traceHgatp = RegEnable(traceHgatpMod.io.ppn.bits, 0.U, traceHgatpMod.io.ppn.valid)
+        tlb.hgatp.changed := false.B
+        tlb.hgatp.mode    := 8.U
+        tlb.hgatp.vmid    := 0.U
+        tlb.hgatp.ppn     := traceHgatp
+      } else {
+        tlb.satp.changed  := false.B
+        tlb.satp.mode     := 8.U
+        tlb.satp.asid     := 0.U
+        tlb.satp.ppn      := traceSatp
+        tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
+        tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
+      }
     } else {
       tlb.satp.ppn      := 0.U
       tlb.satp.mode     := 0.U
-    }
-
-    if (Trace2StageMMU) {
-      tlb.satp := 0.U.asTypeOf(tlb.satp)
-      tlb.vsatp.changed := false.B
-      tlb.vsatp.mode     := 8.U
-      tlb.vsatp.asid     := 0.U
-      tlb.vsatp.ppn      := traceSatp
-
-      val traceHgatpMod = Module(new TraceHgatp())
-      val traceHgatp = RegEnable(traceHgatpMod.io.ppn.bits, 0.U, traceHgatpMod.io.ppn.valid)
-      tlb.hgatp.changed := false.B
-      tlb.hgatp.mode    := 8.U
-      tlb.hgatp.vmid    := 0.U
-      tlb.hgatp.ppn     := traceHgatp
-    } else {
-      tlb.satp.changed  := false.B
-      tlb.satp.mode     := 8.U
-      tlb.satp.asid     := 0.U
-      tlb.satp.ppn      := traceSatp
-      tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
-      tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
     }
   }
 
