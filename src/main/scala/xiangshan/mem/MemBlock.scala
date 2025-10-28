@@ -691,23 +691,25 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   /** prefetch to l1 req */
   // Stream's confidence is always 1
-  // (LduCnt + HyuCnt) l1_pf_reqs ?
-  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+  // NOTE lx:
+  // loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
   // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
-  /** NOTE lyq:
-   * Both bank confilct and miss queue arb priority are belong to replay channel.
-   * And the priority of retransmission is higher than prefetch.
-   * So there is no need to distinguish between 0, 1, and 2.
-   * */
-//  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
-//  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
-//  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
+  // NOTE lyq:
+  // Because all the unfairness between ldu0 and ldu1/2, such as bank conflicts and lower entry priority in MissQueue,
+  // belong to the replay channel, whose priority is higher than prefetch channel in loadunit.
+  // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
   val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
                                   hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch) ++
                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
     Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+    /* // if it needs to distinguish ldu0 with others, use the code below
+    if (LduCnt > 1 && i == 0) {
+      Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+    } else {
+      canAcceptLowConfPrefetch(i)
+    } */
   }
   l1_pf_req.ready := canAcceptPrefetch.reduce(_ || _)
 

@@ -296,7 +296,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
-    io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U,
+    io.prefetch_req.valid, // lower confidence prefetch or lower prefetch-priority ldu
   )))
   // load flow source ready
   val s0_src_ready_vec = Wire(Vec(SRC_NUM, Bool()))
