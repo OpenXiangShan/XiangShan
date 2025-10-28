@@ -306,9 +306,10 @@ class CtrlBlockImp(
     io.fromCSR.traceCSR.lastPriv,
     io.fromCSR.traceCSR.currentPriv
   )
-  io.traceCoreInterface.toEncoder.trap.cause := io.fromCSR.traceCSR.cause.asUInt
-  io.traceCoreInterface.toEncoder.trap.tval  := io.fromCSR.traceCSR.tval.asUInt
+  io.traceCoreInterface.toEncoder.trap.cause := io.fromCSR.traceCSR.cause
+  io.traceCoreInterface.toEncoder.trap.tval  := io.fromCSR.traceCSR.tval
   io.traceCoreInterface.toEncoder.priv       := tracePriv
+  io.traceCoreInterface.toEncoder.mstatus    := io.fromCSR.traceCSR.mstatus
   (0 until TraceGroupNum).foreach(i => {
     io.traceCoreInterface.toEncoder.groups(i).valid := trace.io.out.toEncoder.blocks(i).valid
     io.traceCoreInterface.toEncoder.groups(i).bits.iaddr := tracePcStart(i)
