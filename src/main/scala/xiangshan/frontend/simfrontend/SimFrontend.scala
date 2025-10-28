@@ -27,6 +27,8 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import utility._
+import utility.InstSeqNum
+import utility.PerfCCT
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.frontend.bpu.BranchAttribute
@@ -232,7 +234,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   fetchHelper.io.robCommitFtqFlag  := robCommitBits.ftqIdx.flag
   fetchHelper.io.robCommitFtqValue := robCommitBits.ftqIdx.value
 
-  io.backend.cfVec.zip(fetchHelper.io.out).map { case (cfVec, fetchOut) =>
+  io.backend.cfVec.zip(fetchHelper.io.out).zipWithIndex.map { case ((cfVec, fetchOut), idx) =>
     val rvcExpanders = Module(new RvcExpander)
 
     rvcExpanders.io.in      := fetchOut.instr
@@ -261,6 +263,16 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
     cfVec.bits.isLastInFtqEntry := fetchOut.preDecode(14)
     cfVec.bits.ftqOffset        := fetchOut.preDecode(18, 15)
+
+    cfVec.bits.debug_seqNum := 0.U.asTypeOf(new InstSeqNum)
+    cfVec.bits.debug_seqNum.seqNum := PerfCCT.createInstMetaAtFetch(
+      (idx + 1).U,
+      fetchOut.pc,
+      fetchOut.instr,
+      io.backend.canAccept && cfVec.fire,
+      clock,
+      reset
+    )
   }
 
   io.backend.fromFtq.wen        := fetchHelper.io.out_ftqPackData(6)
