@@ -92,28 +92,14 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   }
 
   // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
-  // we use a fsm-like way to track the exception status
-  private object ExceptionStatus extends EnumUInt(3) {
-    // no exception encountered since last flush (or power-on/reset)
-    // allow read/write/bypass
-    def None: UInt = 0.U(width.W)
-    // prefetchPipe has written an exception entry, waiting for mainPipe to read it
-    // allow read, not write/bypass (to save power)
-    def Written: UInt = 1.U(width.W)
-    // mainPipe has read the exception entry, waiting for flush
-    // disallow read/write/bypass
-    def Read: UInt = 2.U(width.W)
-  }
-
-  private val exceptionStatus = RegInit(ExceptionStatus.None)
-  private val exceptionEntry  = RegInit(0.U.asTypeOf(new WayLookupExceptionEntry))
-  private val exceptionPtr    = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val exceptionHit    = exceptionPtr === readPtr && exceptionStatus === ExceptionStatus.Written
+  private val exceptionEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupExceptionEntry)))
+  private val exceptionPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
+  private val exceptionHit   = exceptionPtr === readPtr && exceptionEntry.valid
 
   when(io.flush || bpuS3FlushValid && exceptionPtr === bpuS3FlushPtr) {
     // When flushed by bp3
     // we don't need to reset exceptionEntry/Ptr to save power
-    exceptionStatus := ExceptionStatus.None
+    exceptionEntry.valid := false.B
   }
 
   /* *** update *** */
@@ -140,17 +126,14 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   /* *** read *** */
   // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
-  private val canBypass = empty && io.write.valid && exceptionStatus === ExceptionStatus.None
-  private val canRead   = !empty && !updateStall && exceptionStatus =/= ExceptionStatus.Read
+  private val canBypass = empty && io.write.valid && !exceptionEntry.valid
+  private val canRead   = !empty && !updateStall
   io.read.valid := canRead || canBypass
   when(canBypass) {
     io.read.bits := io.write.bits
   }.otherwise {
     io.read.bits.entry          := entries(readPtr.value)
-    io.read.bits.exceptionEntry := Mux(exceptionHit, exceptionEntry, 0.U.asTypeOf(new WayLookupExceptionEntry))
-    when(io.read.fire && exceptionHit) {
-      exceptionStatus := ExceptionStatus.Read
-    }
+    io.read.bits.exceptionEntry := Mux(exceptionHit, exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
   }
 
   /**
@@ -160,14 +143,13 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     */
   // stall write if there is an exceptions to save power (i.e. wait for flush)
   // this will stall the prefetch pipe
-  io.write.ready := !full && exceptionStatus === ExceptionStatus.None
+  io.write.ready := !full && !exceptionEntry.valid
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
     when(io.write.bits.itlbException.hasException) {
-      // if is bypassed, goto ExceptionStatus.Read straight, otherwise goto ExceptionStatus.Written
-      exceptionStatus := Mux(canBypass && io.read.fire, ExceptionStatus.Read, ExceptionStatus.Written)
-      exceptionEntry  := io.write.bits.exceptionEntry
-      exceptionPtr    := writePtr
+      exceptionEntry.valid := true.B
+      exceptionEntry.bits  := io.write.bits.exceptionEntry
+      exceptionPtr         := writePtr
     }
   }
 
@@ -185,6 +167,6 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     WayLookupSize
   )
   // exception stall cycles
-  XSPerfAccumulate("waitingForExceptionRead", exceptionStatus === ExceptionStatus.Written)
-  XSPerfAccumulate("waitingForExceptionFlush", exceptionStatus === ExceptionStatus.Read)
+  XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
+  XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
 }
