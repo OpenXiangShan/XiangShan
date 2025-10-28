@@ -1253,6 +1253,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     Seq(privState.isModeM, privState.isModeHS, privState.isModeVS),
     Seq(mtval.rdata,       stval.rdata,        vstval.rdata)
   )
+  io.status.traceCSR.mstatus  := mstatus.regOut.asUInt
   
   /**
    * perf_begin

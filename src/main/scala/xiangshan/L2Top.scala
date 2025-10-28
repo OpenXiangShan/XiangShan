@@ -260,6 +260,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       traceFromCore.toEncoder.priv,
       traceFromCore.toEncoder.groups(0).valid
     )
+    traceToTile.toEncoder.mstatus := RegNext(traceFromCore.toEncoder.mstatus)
     (0 until TraceGroupNum).foreach{ i =>
       traceToTile.toEncoder.groups(i).valid := RegNext(traceFromCore.toEncoder.groups(i).valid)
       traceToTile.toEncoder.groups(i).bits.iretire := RegNext(traceFromCore.toEncoder.groups(i).bits.iretire)
