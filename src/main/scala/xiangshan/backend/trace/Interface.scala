@@ -10,6 +10,7 @@ import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
   val tval  = UInt(TvalWidth.W)
+  val mstatus = UInt(XLEN.W)
   val lastPriv    = Priv()
   val currentPriv = Priv()
 }
@@ -43,6 +44,7 @@ class TraceCoreInterface(hasOffset: Boolean = false)(implicit val p: Parameters)
   })
   val toEncoder = Output(new Bundle {
     val priv   = Priv()
+    val mstatus = UInt(XLEN.W) // not for trace
     val trap   = new Bundle{
       val cause = UInt(CauseWidth.W)
       val tval  = UInt(TvalWidth.W)
