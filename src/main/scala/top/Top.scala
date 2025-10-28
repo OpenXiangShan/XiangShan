@@ -105,6 +105,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   )
 
+  // DSE Ctrl Module
+  val dseCtrl = LazyModule(new DSECtrlUnit(DSEParams())(p.alter((site, here, up) => {
+    case XSCoreParamsKey => tiles.head
+  })))
+
+  dseCtrl.ctrlnode := misc.peripheralXbar.get
+
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param.copy(
@@ -298,9 +305,23 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
         })
       })
+      // DSE Signals
+      val instrCnt = Output(UInt(64.W))
+      val dse_rst = Input(Reset())
+      val reset_vector = Input(UInt(36.W))
+      val dse_reset_valid = Output(Bool())
+      val dse_reset_vec = Output(UInt(36.W))
+      val dse_max_epoch = Output(UInt(64.W))
+      val dse_epoch = Output(UInt(64.W))
+      val dse_max_instr = Output(UInt(64.W))
     })
 
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
+    // DSECtrl reset signals
+    val dse_core_reset = withClockAndReset(io.clock, dseCtrl.module.io.core_reset.asAsyncReset) { ResetGen() }
+    val dse_core_reset_delayed = withClock(io.clock) { RegNext(dseCtrl.module.io.core_reset) }
+    val dse_reset_sync = withClockAndReset(io.clock, dse_core_reset_delayed.asAsyncReset) { ResetGen() }
+    val true_reset_sync = (reset_sync.asBool || dse_reset_sync.asBool).asAsyncReset
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
     val chi_openllc_opt = Option.when(enableCHI)(
       withClockAndReset(io.clock, io.reset) {
@@ -315,10 +336,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock
-    childReset := reset_sync
+    childReset := true_reset_sync
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
+
+    // DSE output
+    io.dse_reset_valid := dse_core_reset.asBool
+    io.dse_reset_vec := dseCtrl.module.io.reset_vector
+    io.dse_max_epoch := dseCtrl.module.io.max_epoch
+    io.dse_epoch := dseCtrl.module.io.epoch
+    io.dse_max_instr := dseCtrl.module.io.max_instr_cnt
 
     // input
     dontTouch(io)
@@ -332,6 +360,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
 
+    val true_reset_vector = withClock(io.clock) {
+      RegNext(RegNext(Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)))
+      // RegNextN(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector), 20)
+    }
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
@@ -352,7 +384,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
       core.module.io.dft.foreach(dontTouch(_) := DontCare)
       core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
-      core.module.io.reset_vector := io.riscv_rst_vec(i)
+      core.module.io.reset_vector := true_reset_vector
     }
 
     withClockAndReset(io.clock, io.reset) {
@@ -444,11 +476,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock, reset_sync) {
+    withClockAndReset(io.clock, true_reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
+      ResetGen(resetChain, true_reset_sync, !debugOpts.ResetGen)
       // Ensure that cores could be reset when DM disable `hartReset` or l3cacheOpt.isEmpty.
       val dmResetReqVec = misc.module.debug_module_io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(Vec(core_with_l2.map(_.module).length, Bool())))
       val syncResetCores = if(l3cacheOpt.nonEmpty) l3cacheOpt.map(_.module).get.reset.asBool else misc.module.reset.asBool
@@ -459,7 +491,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
   }
 
-  lazy val module = new XSTopImp(this)
+lazy val module = new XSTopImp(this)
 }
 
 class XSTileDiffTop(implicit p: Parameters) extends Module {

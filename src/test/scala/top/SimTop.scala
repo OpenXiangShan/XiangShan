@@ -88,9 +88,29 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
+  val io = IO(new Bundle(){
+    val dse_rst = Input(Bool())
+    val instrCnt = Output(UInt(64.W))
+    val reset_vector = Input(UInt(36.W))
+    val dse_reset_valid = Output(Bool())
+    val dse_reset_vec = Output(UInt(36.W))
+    val dse_max_epoch = Output(UInt(64.W))
+    val dse_epoch = Output(UInt(64.W))
+    val dse_max_instr = Output(UInt(64.W))
+  })
+
   val difftest = DifftestModule.finish("XiangShan")
 
   simMMIO.io.uart <> difftest.uart
+
+  // DSE Ctrl Signals
+  io.instrCnt := soc.io.instrCnt
+  soc.io.reset_vector := io.reset_vector
+  io.dse_reset_valid := soc.io.dse_reset_valid
+  io.dse_reset_vec := soc.io.dse_reset_vec
+  io.dse_max_epoch := soc.io.dse_max_epoch
+  io.dse_epoch := soc.io.dse_epoch
+  io.dse_max_instr := soc.io.dse_max_instr
 
   val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
   val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
