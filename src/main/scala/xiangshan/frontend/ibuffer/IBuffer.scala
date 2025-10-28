@@ -351,7 +351,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     bypassHasExceptionExcludingRVCII && !useBypass
 
   // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
-  when(receiveExceptionFire && nextFirstHasExceptionExcludingRVCII) {
+  // We require numEnq to be non-zero to avoid the case when io.in.fire and numEnq is zero,
+  // i.e. current last instruction is half RVI
+  when(receiveExceptionFire && nextFirstHasExceptionExcludingRVCII && numEnq =/= 0.U) {
     firstHasExceptionExcludingRVCII := true.B
   }
 
