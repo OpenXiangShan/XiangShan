@@ -153,43 +153,28 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
   }
 
+  private val fastTrain = Wire(Valid(new BpuFastTrain))
+  fastTrain.valid                := s3_valid
+  fastTrain.bits.startVAddr      := s3_pc
+  fastTrain.bits.finalPrediction := s3_prediction
+  fastTrain.bits.abtbMeta        := s3_abtbMeta
+
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
     p.io.startVAddr := s0_pc
     p.io.stageCtrl  := stageCtrl
-
-    if (p.EnableFastTrain) {
-      // fast train: from s3 override
-      println(s"[Bpu] use fast train for ${p.getClass.getSimpleName}")
-      p.io.train.valid           := s3_fire
-      p.io.train.bits.meta       := s3_meta
-      p.io.train.bits.startVAddr := s3_pc
-      // FIXME: use all mbtb identified branches?
-      p.io.train.bits.branches                       := 0.U.asTypeOf(train.bits.branches)
-      p.io.train.bits.branches.head.valid            := true.B
-      p.io.train.bits.branches.head.bits.target      := s3_prediction.target
-      p.io.train.bits.branches.head.bits.taken       := s3_prediction.taken
-      p.io.train.bits.branches.head.bits.cfiPosition := s3_prediction.cfiPosition
-      p.io.train.bits.branches.head.bits.attribute   := s3_prediction.attribute
-      p.io.train.bits.branches.head.bits.mispredict  := s3_override
-    } else {
-      // train: from Ftq + selected (first mispredict)
-      p.io.train := train
-    }
+    p.io.train      := train
+    p.io.fastTrain.foreach(_ := fastTrain) // fastTrain is an Option[Valid[BpuFastTrain]]
   }
 
   /* *** predictor specific inputs *** */
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid                  := redirect.valid
-  abtb.io.overrideValid                  := s3_override
-  abtb.io.previousVAddr.valid            := s4_valid
-  abtb.io.previousVAddr.bits             := s4_pc
-  abtb.io.fastTrain.valid                := s3_valid
-  abtb.io.fastTrain.bits.startVAddr      := s3_pc
-  abtb.io.fastTrain.bits.finalPrediction := s3_prediction
-  abtb.io.fastTrain.bits.abtbMeta        := s3_abtbMeta
+  abtb.io.redirectValid       := redirect.valid
+  abtb.io.overrideValid       := s3_override
+  abtb.io.previousVAddr.valid := s4_valid
+  abtb.io.previousVAddr.bits  := s4_pc
 
   // ras
   ras.io.redirect.valid          := redirect.valid

@@ -18,7 +18,6 @@ package xiangshan.frontend.bpu.ubtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TargetCarry

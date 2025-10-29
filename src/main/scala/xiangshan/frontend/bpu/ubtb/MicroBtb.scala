@@ -19,13 +19,16 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
 
 // TODO: 2-taken
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
-  class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO {
+  class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
     val prediction: Prediction = Output(new Prediction)
   }
@@ -82,18 +85,33 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - check if hits t1 stage
    * - calculate hit flags
    */
-  private val t0_branchInfo = io.train.bits.mispredictBranch
+  private val t0_valid       = Wire(Bool())
+  private val t0_startVAddr  = Wire(PrunedAddr(VAddrBits))
+  private val t0_actualTaken = Wire(Bool())
+  private val t0_position    = Wire(UInt(CfiPositionWidth.W))
+  private val t0_fullTarget  = Wire(PrunedAddr(VAddrBits))
+  private val t0_attribute   = Wire(new BranchAttribute)
 
-  private val t0_valid = io.train.valid && t0_branchInfo.valid && io.enable
+  if (UseFastTrain) {
+    t0_valid       := io.fastTrain.get.valid && io.enable
+    t0_startVAddr  := io.fastTrain.get.bits.startVAddr
+    t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
+    t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
+    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target
+    t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
+  } else {
+    // FIXME: not sure if first mispredict is the best, maybe first taken?
+    t0_valid       := io.train.valid && io.train.bits.mispredictBranch.valid && io.enable
+    t0_startVAddr  := io.train.bits.startVAddr
+    t0_actualTaken := io.train.bits.mispredictBranch.bits.taken
+    t0_position    := io.train.bits.mispredictBranch.bits.cfiPosition
+    t0_fullTarget  := io.train.bits.mispredictBranch.bits.target
+    t0_attribute   := io.train.bits.mispredictBranch.bits.attribute
+  }
 
-  private val t0_startVAddr  = io.train.bits.startVAddr
   private val t0_tag         = getTag(t0_startVAddr)
-  private val t0_actualTaken = t0_branchInfo.bits.taken
-  private val t0_position    = t0_branchInfo.bits.cfiPosition
-  private val t0_target      = getEntryTarget(t0_branchInfo.bits.target)
-  private val t0_attribute   = t0_branchInfo.bits.attribute
-  private val t0_targetCarry =
-    if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, t0_branchInfo.bits.target)) else None
+  private val t0_target      = getEntryTarget(t0_fullTarget)
+  private val t0_targetCarry = if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, t0_fullTarget)) else None
 
   private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
   // t0 may hit t1, so we add a "real" prefix for entries hit

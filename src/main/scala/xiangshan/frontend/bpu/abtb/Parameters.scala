@@ -47,7 +47,4 @@ trait HasAheadBtbParameters extends HasBpuParameters {
   def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
 
   def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
-
-  // abtb can only be fast-trained, we don't have continous predict block on resolve
-  def EnableFastTrain: Boolean = true
 }

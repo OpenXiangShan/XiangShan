@@ -66,7 +66,4 @@ trait HasTageParameters extends HasBpuParameters {
   def NumTables:  Int                = TableInfos.length
 
   def TageEntryWidth: Int = (new TageEntry).getWidth
-
-  // tage cannot be fast-trained, this is required by abstract class BasePredictor
-  def EnableFastTrain: Boolean = false
 }
