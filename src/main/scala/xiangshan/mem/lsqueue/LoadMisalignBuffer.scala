@@ -123,7 +123,6 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val writeBack       = Decoupled(new MemExuOutput)
     val vecWriteBack    = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
     val loadOutValid    = Input(Bool())
-    val loadVecOutValid = Input(Bool())
     val overwriteExpBuf = Output(new XSBundle {
       val valid  = Bool()
       val vaddr  = UInt(XLEN.W)
@@ -569,7 +568,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
 
   // vector output
-  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isvec
+  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && req.isvec
 
   io.vecWriteBack.bits.alignedType          := req.alignedType
   io.vecWriteBack.bits.vecFeedback          := true.B
