@@ -268,7 +268,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     set = l2tlbParams.l1nSets,
     way = l2tlbParams.l1nWays,
     waySplit = 1,
-    dataSplit = 1,
+    dataSplit = 4,
     singlePort = sramSinglePort,
     readMCP2 = false,
     hasMbist = hasMbist,
