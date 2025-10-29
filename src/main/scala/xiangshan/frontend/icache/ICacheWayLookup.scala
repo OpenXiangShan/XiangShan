@@ -20,7 +20,9 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.HasCircularQueuePtrHelper
+import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utils.EnumUInt
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqPtr
 
@@ -89,15 +91,15 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     tailFtqIdx := io.write.bits.ftqIdx
   }
 
-  private val gpfEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupGpfEntry)))
-  private val gpfPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val gpfHit   = gpfPtr === readPtr && gpfEntry.valid
+  // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
+  private val exceptionEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupExceptionEntry)))
+  private val exceptionPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
+  private val exceptionHit   = exceptionPtr === readPtr && exceptionEntry.valid
 
-  when(io.flush || bpuS3FlushValid && gpfPtr === bpuS3FlushPtr) {
+  when(io.flush || bpuS3FlushValid && exceptionPtr === bpuS3FlushPtr) {
     // When flushed by bp3
-    // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
-    gpfEntry.valid := false.B
-    gpfEntry.bits  := 0.U.asTypeOf(new WayLookupGpfEntry)
+    // we don't need to reset exceptionEntry/Ptr to save power
+    exceptionEntry.valid := false.B
   }
 
   /* *** update *** */
@@ -124,22 +126,14 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   /* *** read *** */
   // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
-  private val canBypass = empty && io.write.valid
+  private val canBypass = empty && io.write.valid && !exceptionEntry.valid
   private val canRead   = !empty && !updateStall
   io.read.valid := canRead || canBypass
   when(canBypass) {
     io.read.bits := io.write.bits
-  }.otherwise { // can't bypass
-    io.read.bits.entry := entries(readPtr.value)
-    when(gpfHit) { // ptr match && entry valid
-      io.read.bits.gpf := gpfEntry.bits
-      // also clear gpfEntry.valid when it's read, note this will be overridden by write (L175)
-      when(io.read.fire) {
-        gpfEntry.valid := false.B
-      }
-    }.otherwise { // gpf not hit
-      io.read.bits.gpf := 0.U.asTypeOf(new WayLookupGpfEntry)
-    }
+  }.otherwise {
+    io.read.bits.entry          := entries(readPtr.value)
+    io.read.bits.exceptionEntry := Mux(exceptionHit, exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
   }
 
   /**
@@ -147,17 +141,15 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     * write
     ******************************************************************************
     */
-  // if there is a valid gpf to be read, we should stall write
-  private val gpfStall = gpfEntry.valid && !(io.read.fire && gpfHit)
-  io.write.ready := !full && !gpfStall
+  // stall write if there is an exceptions to save power (i.e. wait for flush)
+  // this will stall the prefetch pipe
+  io.write.ready := !full && !exceptionEntry.valid
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
-    when(io.write.bits.itlbException.isGpf) {
-      // if gpfEntry is bypassed, we don't need to save it
-      // note this will override the read (L156)
-      gpfEntry.valid := !(canBypass && io.read.fire)
-      gpfEntry.bits  := io.write.bits.gpf
-      gpfPtr         := writePtr
+    when(io.write.bits.itlbException.hasException) {
+      exceptionEntry.valid := true.B
+      exceptionEntry.bits  := io.write.bits.exceptionEntry
+      exceptionPtr         := writePtr
     }
   }
 
@@ -174,4 +166,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     0,
     WayLookupSize
   )
+  // exception stall cycles
+  XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
+  XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
 }
