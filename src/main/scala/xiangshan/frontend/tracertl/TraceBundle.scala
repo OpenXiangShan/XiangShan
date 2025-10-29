@@ -76,7 +76,7 @@ object TraceInstrOuterBundle {
 }
 
 class TraceInstrInnerBundle extends Bundle {
-  def VAddrBits = 39
+  def VAddrBits = 50
   def PAddrBits = 48
   def XLEN = 64
   def TraceInstrWidth = 32
