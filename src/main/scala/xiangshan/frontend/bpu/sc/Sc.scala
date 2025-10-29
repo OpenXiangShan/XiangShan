@@ -61,8 +61,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
   private val s0_fire       = Wire(Bool())
   private val s0_startVAddr = io.startVAddr
-  // using s3_ghr in s0 stage to read SC tables
-  private val s0_ghr = io.ghr // TODO: ghr invalid handling
+  // when s3_fire, using ghr generated index
+  private val s0_ghr = io.ghr
   s0_fire := io.stageCtrl.s0_fire && io.enable
 
   private val s0_pathIdx: Seq[UInt] = PathTableInfos.map(info =>
@@ -74,7 +74,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     )
   )
 
-  private val s0_gIdx: Seq[UInt] = GlobalTableInfos.map(info =>
+  private val s0_globalIdx: Seq[UInt] = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
       s0_startVAddr,
       s0_ghr.value.asUInt,
@@ -87,8 +87,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     table.io.req.bits  := idx
   }
 
-  globalTable.zip(s0_gIdx).foreach { case (table, idx) =>
-    table.io.req.valid := s0_fire && s0_ghr.valid
+  globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
+    table.io.req.valid := s0_fire && s0_ghr.valid // if ghr invalid not request global table
     table.io.req.bits  := idx
   }
 
@@ -99,7 +99,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_fire       = io.stageCtrl.s1_fire && io.enable
   private val s1_startVAddr = RegEnable(io.startVAddr, s0_fire)
   private val s1_ghr        = RegEnable(s0_ghr, s0_fire)
-  // private val s1_idx        = s0_pathIdx.map(RegEnable(_, s0_fire))
   private val s1_pathResp:   Seq[Vec[ScEntry]] = pathTable.map(_.io.resp)
   private val s1_globalResp: Seq[Vec[ScEntry]] = globalTable.map(_.io.resp)
   private val s1_allResp:    Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
@@ -207,10 +206,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_branchesWayIdxVec = VecInit(t1_branches.map(b => b.bits.cfiPosition(log2Ceil(NumWays) - 1, 0)))
   require(
     t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumWays),
-    s"t1_branchesWayIdxVec entry width: ${t1_branchesWayIdxVec(0).getWidth} should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
+    s"t1_branchesWayIdxVec entry width: ${t1_branchesWayIdxVec(0).getWidth} " +
+      s"should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
   )
 
-  // Use the update method to repeatedly calculate the updated information of several branches mapped to the same way to obtain a new Entry
+  // Accumulate update information for multiple branches using update methods
   private val t1_mismatchMask = WireInit(VecInit.fill(NumWays)(false.B))
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
     val updated = t1_branchesWayIdxVec.zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
@@ -273,7 +273,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
             nextCtr.value := nextValue
             Mux(needUpdate, nextCtr, prevCtr)
         }
-        dontTouch(newCtr)
         newEntry.ctr := WireInit(newCtr)
       }
   }
@@ -290,8 +289,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     scThreshold := t1_writeThresVec
   }
 
-  dontTouch(t1_writePathEntryVec)
-  dontTouch(t1_writeGlobalEntryVec)
   XSPerfAccumulate("sc_pred_wrong", t1_writeValid && t1_mismatchMask.reduce(_ || _))
   // TODO: add more performance counters
 }

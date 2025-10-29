@@ -369,7 +369,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // phr train
-  private val phrsWire       = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phrWire        = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s1_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s2_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -393,21 +393,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_foldedPhr   := phr.io.s2_foldedPhr
   s3_foldedPhr   := phr.io.s3_foldedPhr
   trainFoldedPhr := phr.io.trainFoldedPhr
-  phrsWire       := phr.io.phrs
+  phrWire        := phr.io.phrs
 
-  private val phrsWireValue = phrsWire.asUInt
+  private val phrWireValue = phrWire.asUInt
   private val redirectPhrValue =
-    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
+    (Cat(phrWire.asUInt, phrWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
       PhrHistoryLength - 1,
       0
     )
 
-  dontTouch(s0_foldedPhr)
-  dontTouch(s1_foldedPhr)
-  dontTouch(s2_foldedPhr)
-  dontTouch(s3_foldedPhr)
-  dontTouch(trainFoldedPhr)
-  dontTouch(phrsWireValue)
+  dontTouch(phrWireValue)
   dontTouch(redirectPhrValue)
 
   // ghr update
