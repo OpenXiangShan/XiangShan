@@ -529,7 +529,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ldaExeWbReqs(MisalignWBPort).bits     := misalignWritebackOverride
   loadMisalignBuffer.io.writeBack.ready := ldaExeWbReqs(MisalignWBPort).ready && !loadUnits(MisalignWBPort).io.ldout.valid
   loadMisalignBuffer.io.loadOutValid    := loadUnits(MisalignWBPort).io.ldout.valid
-  loadMisalignBuffer.io.loadVecOutValid := loadUnits(MisalignWBPort).io.vecldout.valid
   loadUnits(MisalignWBPort).io.ldout.ready := ldaExeWbReqs(MisalignWBPort).ready
   ldaExeWbReqs(MisalignWBPort).bits.isFromLoadUnit := loadUnits(MisalignWBPort).io.ldout.bits.isFromLoadUnit || loadMisalignBuffer.io.writeBack.valid
 
