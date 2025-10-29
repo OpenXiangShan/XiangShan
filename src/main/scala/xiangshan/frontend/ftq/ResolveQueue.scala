@@ -18,17 +18,19 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.HasCircularQueuePtrHelper
 import utility.XSError
+import utility.XSPerfAccumulate
 import xiangshan.Resolve
 import xiangshan.frontend.bpu.HalfAlignHelper
 
-class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
+class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
 
   class ResolveQueueIO extends Bundle {
-    val backendResolve:     Vec[Valid[Resolve]] = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
-    val backendRedirect:    Bool                = Input(Bool())
-    val backendRedirectPtr: FtqPtr              = Input(new FtqPtr)
-    val bpuTrain:           Valid[ResolveEntry] = Output(Valid(new ResolveEntry))
+    val backendResolve:     Vec[Valid[Resolve]]       = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
+    val backendRedirect:    Bool                      = Input(Bool())
+    val backendRedirectPtr: FtqPtr                    = Input(new FtqPtr)
+    val bpuTrain:           DecoupledIO[ResolveEntry] = Decoupled(new ResolveEntry)
   }
 
   val io: ResolveQueueIO = IO(new ResolveQueueIO)
@@ -37,6 +39,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   private val enqPtr = RegInit(ResolveQueuePtr(false.B, 0.U))
   private val deqPtr = RegInit(ResolveQueuePtr(false.B, 0.U))
+
+  private val full = distanceBetween(enqPtr, deqPtr) >= (ResolveQueueSize - 4).U
 
   private val hit = io.backendResolve.map { branch =>
     mem.map(entry =>
@@ -66,10 +70,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
     Mux(hit(i), hitIndex(i), newIndex)
   })
-  enqPtr := enqPtr + PopCount(needNewEntry)
+  when(!full)(enqPtr := enqPtr + PopCount(needNewEntry))
 
   io.backendResolve.zipWithIndex.foreach { case (branch, i) =>
-    when(branch.valid) {
+    when(branch.valid && !full) {
       mem(enqIndex(i)).valid           := true.B
       mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
       mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
@@ -95,10 +99,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     branch.valid && branch.bits.ftqIdx === mem(deqPtr.value).bits.ftqIdx
   ).reduce(_ || _)
 
-  io.bpuTrain.valid := deqValid
+  io.bpuTrain.valid := deqValid && !mem(deqPtr.value).bits.flushed
   io.bpuTrain.bits  := mem(deqPtr.value).bits
 
-  when(deqValid) {
+  when(io.bpuTrain.fire || mem(deqPtr.value).valid && mem(deqPtr.value).bits.flushed) {
     deqPtr := deqPtr + 1.U
 
     mem(deqPtr.value).valid        := false.B
@@ -107,4 +111,9 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   }
 
   XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in Resolve Queue")
+
+  // We currently do not want resolve queue to be full as it has already been unacceptably large. Now it can be full
+  // because it is a sequential queue, which results in multiple flushed entries staying in the queue and blocking new
+  // entries from being enqueued. More sophisticated designs should be considered.
+  XSPerfAccumulate("resolveQueueFull", full)
 }

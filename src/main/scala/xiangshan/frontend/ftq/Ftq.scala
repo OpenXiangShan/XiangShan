@@ -28,7 +28,6 @@ import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.ParallelPriorityMux
 import utility.XSError
-import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
@@ -38,10 +37,9 @@ import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuSpeculationMeta
-import xiangshan.frontend.bpu.ras.RasMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
@@ -97,7 +95,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
 
   // metaQueue stores information needed to train BPU.
-  private val metaQueue = Module(new MetaQueue)
+  private val metaQueue = Reg(Vec(FtqSize, new BpuMeta))
 
   // resolveQueue stores branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
@@ -130,7 +128,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Interaction with BPU
   // --------------------------------------------------------------------------------
-  io.fromBpu.prediction.ready      := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U
+  // We limit the distance between BP and IF so that branch update can be written back to BPU
+  io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
+    distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U
   io.fromBpu.meta.ready            := true.B
   io.fromBpu.speculationMeta.ready := true.B
 
@@ -161,11 +161,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
 
-  metaQueue.io.wen        := io.fromBpu.meta.valid
-  metaQueue.io.waddr      := io.fromBpu.s3FtqPtr.value
-  metaQueue.io.wdata.meta := io.fromBpu.meta.bits
-  if (metaQueue.io.wdata.paddingBits.isDefined) {
-    metaQueue.io.wdata.paddingBits.get := 0.U
+  when(io.fromBpu.meta.valid) {
+    metaQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
   }
 
   // --------------------------------------------------------------------------------
@@ -294,13 +291,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   resolveQueue.io.backendResolve := io.fromBackend.resolve
 
-  metaQueue.io.ren   := resolveQueue.io.bpuTrain.valid && !resolveQueue.io.bpuTrain.bits.flushed
-  metaQueue.io.raddr := resolveQueue.io.bpuTrain.bits.ftqIdx.value
-
-  io.toBpu.train.valid           := RegNext(resolveQueue.io.bpuTrain.valid && !resolveQueue.io.bpuTrain.bits.flushed)
-  io.toBpu.train.bits.meta       := metaQueue.io.rdata.meta
-  io.toBpu.train.bits.startVAddr := RegEnable(resolveQueue.io.bpuTrain.bits.startVAddr, resolveQueue.io.bpuTrain.valid)
-  io.toBpu.train.bits.branches   := RegEnable(resolveQueue.io.bpuTrain.bits.branches, resolveQueue.io.bpuTrain.valid)
+  io.toBpu.train.valid           := resolveQueue.io.bpuTrain.valid
+  resolveQueue.io.bpuTrain.ready := io.toBpu.train.ready
+  io.toBpu.train.bits.meta       := metaQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
+  io.toBpu.train.bits.startVAddr := resolveQueue.io.bpuTrain.bits.startVAddr
+  io.toBpu.train.bits.branches   := resolveQueue.io.bpuTrain.bits.branches
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
