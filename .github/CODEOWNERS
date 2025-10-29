@@ -1,21 +1,10 @@
 src/main/scala/xiangshan/frontend/ @Gao-Zeyu
-src/main/scala/xiangshan/frontend/bpu/ @eastonman
-src/main/scala/xiangshan/frontend/bpu/abtb/ @TheKiteRunner24
-src/main/scala/xiangshan/frontend/bpu/ittage/ @Gao-Zeyu
-src/main/scala/xiangshan/frontend/bpu/mbtb/ @eastonman
-src/main/scala/xiangshan/frontend/bpu/phr/ @sleep-zzz
-src/main/scala/xiangshan/frontend/bpu/ras/ @my-mayfly
-src/main/scala/xiangshan/frontend/bpu/sc/ @eastonman
-src/main/scala/xiangshan/frontend/bpu/tage/ @eastonman
-src/main/scala/xiangshan/frontend/bpu/ubtb/ @ngc7331
-src/main/scala/xiangshan/frontend/bpu/WriteBuffer.scala @sleep-zzz
-src/main/scala/xiangshan/frontend/ftq/ @Yan-Muzi
-src/main/scala/xiangshan/frontend/icache/ @ngc7331
-src/main/scala/xiangshan/frontend/ifu/ @ngc7331 @my-mayfly
-src/main/scala/xiangshan/frontend/instruncache/ @ngc7331
-src/main/scala/xiangshan/frontend/Frontend.scala @eastonman
-src/main/scala/xiangshan/frontend/FrontendBundle.scala @eastonman
-src/main/scala/xiangshan/frontend/IBuffer.scala @eastonman
+src/main/scala/xiangshan/frontend/bpu/ @eastonman @Gao-Zeyu
+src/main/scala/xiangshan/frontend/ftq/ @Yan-Muzi @Gao-Zeyu
+src/main/scala/xiangshan/frontend/ibuffer/ @Gao-Zeyu
+src/main/scala/xiangshan/frontend/icache/ @ngc7331 @Gao-Zeyu
+src/main/scala/xiangshan/frontend/ifu/ @ngc7331 @my-mayfly @Gao-Zeyu
+src/main/scala/xiangshan/frontend/instruncache/ @ngc7331 @Gao-Zeyu
 
 src/main/scala/xiangshan/cache/ @linjuanZ
 src/main/scala/xiangshan/cache/dcache/ @linjuanZ
