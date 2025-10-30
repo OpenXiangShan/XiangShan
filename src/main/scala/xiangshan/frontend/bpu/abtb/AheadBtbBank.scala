@@ -40,6 +40,7 @@ class AheadBtbBank(implicit p: Parameters) extends AheadBtbModule {
     way = NumWays,
     singlePort = true,
     shouldReset = true,
+    holdRead = true,
     withClockGate = true,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl
