@@ -526,13 +526,25 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s3_use_ittage",
     s3_fire && s3_taken &&
       s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit &&
-      !s3_firstTakenBranchIsReturn && s3_override
+      !s3_firstTakenBranchIsReturn
   )
   XSPerfAccumulate(
     "s3_use_mbtb_tage",
-    s3_fire && s3_taken &&
-      s3_prediction.attribute.isConditional && s3_override
+    s3_fire &&
+      s3_prediction.attribute.isConditional
   )
+
+  XSPerfAccumulate("finalPred_s1_fall", s3_fire && !s3_override && s3_s1UseFallThrough)
+  XSPerfAccumulate("finalPred_s1_ubtb", s3_fire && !s3_override && s3_s1UseUBTB)
+  XSPerfAccumulate("finalPred_s1_abtb", s3_fire && !s3_override && s3_s1UseABTB)
+  XSPerfAccumulate("finalPred_s3_mbtb_tage", s3_fire && s3_override && s3_prediction.attribute.isConditional)
+  XSPerfAccumulate(
+    "finalPred_s3_ittage",
+    s3_fire && s3_taken &&
+      s3_override && s3_firstTakenBranchIsIndirect &&
+      ittage.io.prediction.hit && !s3_firstTakenBranchIsReturn
+  )
+  XSPerfAccumulate("finalPred_s3_ras", false.B)
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
