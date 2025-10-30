@@ -92,7 +92,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s0_fire             = io.stageCtrl.s0_fire && io.enable
   private val s0_startVAddr       = io.startVAddr
   private val s0_thisSetIdx       = getSetIndex(s0_startVAddr)
-  private val s0_nextSetIdx       = s0_thisSetIdx + 1.U
+  private val s0_nextSetIdx       = getNextSetIndex(s0_startVAddr)
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx) & Fill(NumInternalBanks, s0_fire)
   private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
@@ -180,7 +180,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     ) // FIXME: parameterize target carry
 
   private val s2_thisReplacerSetIdx = getReplacerSetIndex(s2_startVAddr)
-  private val s2_nextReplacerSetIdx = s2_thisReplacerSetIdx + 2.U
+  private val s2_nextReplacerSetIdx = getNextReplacerSetIndex(s2_startVAddr)
   private val s2_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     Mux(bankIdx.U < s2_alignBankIdx, s2_nextReplacerSetIdx, s2_thisReplacerSetIdx)
   )
@@ -232,7 +232,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_internalBankIdx  = getInternalBankIndex(t1_train.startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx)
   private val t1_thisSetIdx       = getSetIndex(t1_train.startVAddr)
-  private val t1_nextSetIdx       = t1_thisSetIdx + 1.U
+  private val t1_nextSetIdx       = getNextSetIndex(t1_train.startVAddr)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_setIdxVec =
@@ -263,7 +263,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeAlignBankMask    = vecRotateRight(t1_rawWriteAlignBankMask, t1_alignBankIdx)
 
   private val t1_thisReplacerSetIdx = getReplacerSetIndex(t1_train.startVAddr)
-  private val t1_nextReplacerSetIdx = t1_thisReplacerSetIdx + 2.U
+  private val t1_nextReplacerSetIdx = getNextReplacerSetIndex(t1_train.startVAddr)
   private val t1_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
     Mux(bankIdx.U < t1_alignBankIdx, t1_nextReplacerSetIdx, t1_thisReplacerSetIdx)
   )
