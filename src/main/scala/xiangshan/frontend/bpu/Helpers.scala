@@ -32,6 +32,11 @@ trait HalfAlignHelper extends HasBpuParameters {
       0.U(FetchBlockAlignWidth.W)
     ))
 
+  def getNextAlignedAddr(startVAddr: PrunedAddr): PrunedAddr = {
+    val nextAlignedVAddrUpperBits = getAlignedAddrUpper(startVAddr) + 1.U
+    PrunedAddrInit(Cat(nextAlignedVAddrUpperBits, 0.U(FetchBlockAlignWidth.W)))
+  }
+
   def getAlignedInstOffset(addr: PrunedAddr): UInt =
     // given an instruction address, return the offset of the instruction in the fetch block
     // example:
