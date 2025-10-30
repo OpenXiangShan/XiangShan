@@ -147,8 +147,9 @@ trait HasSoCParameter {
   val EnableILA = soc.EnableILA
 
   // Parameters for trace extension
-  val TraceTraceGroupNum          = tiles.head.traceParams.TraceGroupNum
+  val TraceGrpNum                 = tiles.head.traceParams.TraceGroupNum
   val TraceCauseWidth             = tiles.head.XLEN
+  val TraceStatusWidth            = tiles.head.XLEN
   val TraceTvalWidth              = tiles.head.traceParams.IaddrWidth
   val TracePrivWidth              = tiles.head.traceParams.PrivWidth
   val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
