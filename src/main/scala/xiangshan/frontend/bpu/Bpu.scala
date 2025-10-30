@@ -593,7 +593,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s3Override_attributeMismatch_s3mBTB_s1uBTB",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
       s3_s1UseUBTB
   )
@@ -601,7 +601,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s3Override_attributeMismatch_s3mBTB_s1aBTB",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken === s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
       s3_s1UseABTB
   )
