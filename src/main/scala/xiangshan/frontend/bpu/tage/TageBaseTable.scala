@@ -76,10 +76,12 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   private val s0_fire    = io.readReqValid
   private val s0_startPc = io.startPc
 
-  private val s0_alignBankIdx = getBaseTableAlignBankIndex(s0_startPc)
-  private val s0_rawSetIdx    = getBaseTableSetIndex(s0_startPc)
-  private val s0_setIdx =
-    Seq.tabulate(BaseTableNumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_rawSetIdx + 1.U, s0_rawSetIdx))
+  private val s0_firstAlignBankIdx = getBaseTableAlignBankIndex(s0_startPc)
+  private val s0_setIdx            = getBaseTableSetIndex(s0_startPc)
+  private val s0_nextSetIdx        = getBaseTableSetIndex(getNextAlignedAddr(s0_startPc))
+  private val s0_setIdxVec = VecInit.tabulate(BaseTableNumAlignBanks)(idx =>
+    Mux(idx.U < s0_firstAlignBankIdx, s0_nextSetIdx, s0_setIdx)
+  )
 
   private val s0_bankIdx  = getBaseTableBankIndex(s0_startPc)
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
@@ -87,7 +89,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   sramBanks.zipWithIndex.foreach { case (alignBank, alignBankIdx) =>
     alignBank.zipWithIndex.foreach { case (bank, bankIdx) =>
       bank.io.r.req.valid       := s0_fire && s0_bankMask(bankIdx)
-      bank.io.r.req.bits.setIdx := s0_setIdx(alignBankIdx)
+      bank.io.r.req.bits.setIdx := s0_setIdxVec(alignBankIdx)
     }
   }
 
@@ -97,8 +99,8 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
      - rotate ctrs
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s1_alignBankIdx = RegEnable(s0_alignBankIdx, s0_fire)
-  private val s1_bankMask     = RegEnable(s0_bankMask, s0_fire)
+  private val s1_firstAlignBankIdx = RegEnable(s0_firstAlignBankIdx, s0_fire)
+  private val s1_bankMask          = RegEnable(s0_bankMask, s0_fire)
 
   private val s1_rawCtrs = VecInit(sramBanks.map(alignBank =>
     Mux1H(s1_bankMask, alignBank.map(_.io.r.resp.data))
@@ -111,7 +113,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
    * if BaseTableNumAlignBanks = 4, alignBankIdx = 1,
    * then io.ctrs := s1_rawCtrs(1) ++ s1_rawCtrs(2) ++ s1_rawCtrs(3) ++ s1_rawCtrs(0)
    */
-  io.takenCtrs := vecRotateRight(s1_rawCtrs, s1_alignBankIdx).flatten
+  io.takenCtrs := vecRotateRight(s1_rawCtrs, s1_firstAlignBankIdx).flatten
 
   /* --------------------------------------------------------------------------------------------------------------
    train stage 0
@@ -133,10 +135,11 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   private val t1_branches   = t1_train.branches
   private val t1_oldCtrs    = t1_train.meta.tage.baseTableCtrs
 
-  private val t1_alignBankIdx = getBaseTableAlignBankIndex(t1_startVAddr)
-  private val t1_rawSetIdx    = getBaseTableSetIndex(t1_startVAddr)
-  private val t1_setIdx = VecInit.tabulate(BaseTableNumAlignBanks)(bankIdx =>
-    Mux(bankIdx.U < t1_alignBankIdx, t1_rawSetIdx + 1.U, t1_rawSetIdx)
+  private val t1_firstAlignBankIdx = getBaseTableAlignBankIndex(t1_startVAddr)
+  private val t1_setIdx            = getBaseTableSetIndex(t1_startVAddr)
+  private val t1_nextSetIdx        = getBaseTableSetIndex(getNextAlignedAddr(t1_startVAddr))
+  private val t1_setIdxVec = VecInit.tabulate(BaseTableNumAlignBanks)(idx =>
+    Mux(idx.U < t1_firstAlignBankIdx, t1_nextSetIdx, t1_setIdx)
   )
   private val t1_bankIdx  = getBankIndex(t1_startVAddr)
   private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)
@@ -154,15 +157,15 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
     newCtr.value := t1_oldCtrs(position).getUpdate(taken)
   }
 
-  private val t1_rotatedNewCtrs    = vecRotateRight(t1_newCtrs, t1_alignBankIdx)
-  private val t1_rotatedUpdateMask = vecRotateRight(t1_updateMask, t1_alignBankIdx)
+  private val t1_rotatedNewCtrs    = vecRotateRight(t1_newCtrs, t1_firstAlignBankIdx)
+  private val t1_rotatedUpdateMask = vecRotateRight(t1_updateMask, t1_firstAlignBankIdx)
 
-  writeBuffers.zipWithIndex.foreach { case (alignBuffers, alignIdx) =>
-    alignBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
+  writeBuffers.zipWithIndex.foreach { case (buffersPerAlignBank, alignBankIdx) =>
+    buffersPerAlignBank.zipWithIndex.foreach { case (buffer, bankIdx) =>
       buffer.io.enq.valid          := t1_valid && t1_bankMask(bankIdx)
-      buffer.io.enq.bits.setIdx    := t1_setIdx(alignIdx)
-      buffer.io.enq.bits.takenCtrs := t1_rotatedNewCtrs(alignIdx)
-      buffer.io.enq.bits.wayMask   := t1_rotatedUpdateMask(alignIdx).asUInt
+      buffer.io.enq.bits.setIdx    := t1_setIdxVec(alignBankIdx)
+      buffer.io.enq.bits.takenCtrs := t1_rotatedNewCtrs(alignBankIdx)
+      buffer.io.enq.bits.wayMask   := t1_rotatedUpdateMask(alignBankIdx).asUInt
     }
   }
 
