@@ -40,51 +40,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   /* *** submodules *** */
   private val sramBanks =
-    Seq.tabulate(NumAlignBanks, NumInternalBanks, NumWay) { (alignIdx, bankIdx, wayIdx) =>
-      Module(
-        new SRAMTemplate(
-          new MainBtbEntry,
-          set = NumSets,
-          way = 1, // Not using way in the template, preparing for future skewed assoc
-          singlePort = true,
-          shouldReset = true,
-          holdRead = true,
-          withClockGate = true,
-          hasMbist = hasMbist,
-          hasSramCtl = hasSramCtl
-        )
-      ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
+    Seq.tabulate(NumAlignBanks, NumInternalBanks) { (alignIdx, bankIdx) =>
+      Module(new MainBtbInternalBank(alignIdx, bankIdx))
     }
-  private val writeBuffers = Seq.tabulate(NumAlignBanks, NumInternalBanks) { (_, _) =>
-    Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay))
-  }
 
-  private val resetDone = RegInit(false.B)
-  when(sramBanks.flatMap(_.flatMap(_.map(_.io.r.req.ready))).reduce(_ && _)) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.resetDone := sramBanks.flatMap(_.map(_.io.resetDone)).reduce(_ && _)
 
   private val replacer = Module(new MainBtbReplacer)
-
-  sramBanks.map(_.map(_.map { m =>
-    m.io.r.req.valid       := false.B
-    m.io.r.req.bits.setIdx := 0.U
-    m.io.w.req.valid       := false.B
-    m.io.w.req.bits.setIdx := 0.U
-    m.io.w.req.bits.data   := DontCare
-  })) // Default closed, addrs are pulled to 0 to reduce power.
-
-  sramBanks.flatten.zip(writeBuffers.flatten).foreach {
-    case (ways, buffer) =>
-      ways zip buffer.io.read foreach {
-        case (way: SRAMTemplate[MainBtbEntry], buf: DecoupledIO[MainBtbSramWriteReq]) =>
-          way.io.w.req.valid        := buf.valid && !way.io.r.req.valid
-          way.io.w.req.bits.data(0) := buf.bits.entry
-          way.io.w.req.bits.setIdx  := buf.bits.setIdx
-          buf.ready                 := way.io.w.req.ready && !way.io.r.req.valid
-      }
-  }
 
   /* predict stage 0
    * setup SRAM
@@ -105,18 +67,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   )
   sramBanks zip s0_setIdxVec foreach { case (alignmentBank, setIdx) =>
     alignmentBank zip s0_internalBankMask.asBools foreach { case (internalBank, bankEnable) =>
-      when(bankEnable) {
-        internalBank.foreach { way =>
-          way.io.r.req.valid       := true.B
-          way.io.r.req.bits.setIdx := setIdx
-        }
-      }.otherwise {
-        // pull to 0 when not firing to reduce power.
-        internalBank.foreach { way =>
-          way.io.r.req.valid       := false.B
-          way.io.r.req.bits.setIdx := 0.U
-        }
-      }
+      internalBank.io.read.req.valid       := bankEnable
+      internalBank.io.read.req.bits.setIdx := setIdx
     }
   }
 
@@ -135,7 +87,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s1_posHigherBits             = VecInit(s1_posHigherBitsPerAlignBank.flatMap(Seq.fill(NumWay)(_)))
 
   private val s1_rawBtbEntries = VecInit(sramBanks.flatMap { alignBank =>
-    Mux1H(s1_internalBankMask, alignBank.map(bank => VecInit(bank.flatMap(_.io.r.resp.data))))
+    Mux1H(s1_internalBankMask, alignBank.map(bank => bank.io.read.resp.entries))
   })
 
   private val s1_alignBankCrossPageMask = (0 until NumAlignBanks).map { i =>
@@ -284,22 +236,20 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     (s2_internalBankMask.asBools zip t1_internalBankMask.asBools map { case (a, b) => a && b }).reduce(_ || _)
 
   // Write to SRAM
-  writeBuffers zip t1_setIdxVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
+  sramBanks zip t1_setIdxVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
     case (((alignmentBank, setIdx), alignBankEnable), multiAlignBankEnable) =>
       alignmentBank zip t1_internalBankMask.asBools zip s2_internalBankMask.asBools foreach {
-        case ((buffer, bankEnable), multiBankEnable) =>
-          buffer.io.write zip t1_writeWayMask.asBools zip s2_multiWayIdxMask.asBools foreach {
-            case ((port, wayEnable), multiWayEnable) =>
-              val multiWriteEnable = s2_multihit && s2_fire && multiAlignBankEnable && multiBankEnable && multiWayEnable
-              val writeEnable      = t1_writeValid && wayEnable && alignBankEnable && bankEnable
-              port.valid := writeEnable || (multiWriteEnable && !multiWriteConflict)
-              port.bits.setIdx := Mux(
-                writeEnable,
-                setIdx,
-                Mux(multiWriteEnable && !multiWriteConflict, s2_multiSetIdx, 0.U)
-              ) // pull to 0 when not firing to reduce power
-              port.bits.entry := Mux(writeEnable, t1_writeEntry, 0.U.asTypeOf(new MainBtbEntry))
-          }
+        case ((bank, bankEnable), multiBankEnable) =>
+          bank.io.write.req.valid        := t1_writeValid && alignBankEnable && bankEnable
+          bank.io.write.req.bits.wayMask := t1_writeWayMask
+          bank.io.write.req.bits.setIdx  := setIdx
+          bank.io.write.req.bits.entry   := t1_writeEntry
+
+          // flush
+          bank.io.flush.req.valid :=
+            s2_multihit && s2_fire && multiAlignBankEnable && multiBankEnable && !multiWriteConflict
+          bank.io.flush.req.bits.wayMask := s2_multiWayIdxMask
+          bank.io.flush.req.bits.setIdx  := s2_multiSetIdx
       }
   }
 
