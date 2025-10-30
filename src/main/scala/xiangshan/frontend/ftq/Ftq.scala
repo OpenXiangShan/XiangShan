@@ -389,8 +389,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
         entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+//      (redirectCfiOffset ===
+//        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
       !(redirect.bits.attribute ===
         entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute)
   )
