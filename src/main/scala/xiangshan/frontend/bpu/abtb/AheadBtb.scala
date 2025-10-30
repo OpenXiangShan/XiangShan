@@ -257,7 +257,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     case ((hit, position), attribute) =>
       hit && position === t1_trainPosition && attribute === t1_trainAttribute
   }.reduce(_ || _) && t1_trainTaken
-  private val t1_needWriteNewEntry = !t1_hitTakenBranch
+  private val t1_needWriteNewEntry = !t1_hitTakenBranch && t1_trainTaken
 
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
