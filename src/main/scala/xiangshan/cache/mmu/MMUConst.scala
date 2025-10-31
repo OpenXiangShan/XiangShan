@@ -53,14 +53,14 @@ case class L2TLBParameters
   l2Associative: String = "fa",
   l2Replacer: Option[String] = Some("plru"),
   // l1
-  l1nSets: Int = 8,
+  l1nSets: Int = 4,
   l1nWays: Int = 2,
-  l1ReservedBits: Int = 10,
+  l1ReservedBits: Int = 2,
   l1Replacer: Option[String] = Some("setplru"),
   // l0
-  l0nSets: Int = 32,
+  l0nSets: Int = 64,
   l0nWays: Int = 4,
-  l0ReservedBits: Int = 3,
+  l0ReservedBits: Int = 4,
   l0Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
