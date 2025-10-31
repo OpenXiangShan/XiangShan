@@ -85,9 +85,27 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     }
   }
 
-  when(io.backendRedirect) {
+  // Branches that have been issued to functional units cannot be flushed by redirects. Therefore, these branches will
+  // be resolved. However, the meta of these branches may already be overwritten by new branches, which means they
+  // cannot be updated by BPU. To handle this case, backend redirect will be propagated for several cycles to make sure
+  // newly resolved branches can be flushed correctly.
+  // 3 cycles may be enough, we'll see in practice.
+  private def RedirectDelay   = 3
+  private val backendRedirect = WireDefault(VecInit.fill(RedirectDelay)(false.B))
+  backendRedirect := VecInit((0 until RedirectDelay).map(i =>
+    if (i == 0) io.backendRedirect else RegNext(backendRedirect(i - 1))
+  ))
+  private val backendRedirectPtr = RegEnable(io.backendRedirectPtr, FtqPtr(false.B, 0.U), io.backendRedirect)
+  XSError(
+    RegNext(backendRedirect(RedirectDelay - 1)) && !backendRedirect.reduce(_ || _) && io.backendResolve.map(branch =>
+      branch.valid && branch.bits.ftqIdx > backendRedirectPtr
+    ).reduce(_ || _),
+    "Backend resolves branches that should have been flushed\n"
+  )
+
+  when(backendRedirect.reduce(_ || _)) {
     mem.foreach(entry =>
-      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > io.backendRedirectPtr)
+      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > backendRedirectPtr)
     )
   }
 
@@ -95,10 +113,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     branch.valid && branch.bits.ftqIdx === mem(deqPtr.value).bits.ftqIdx
   ).reduce(_ || _)
 
-  io.bpuTrain.valid := deqValid
+  io.bpuTrain.valid := deqValid && !mem(deqPtr.value).bits.flushed
   io.bpuTrain.bits  := mem(deqPtr.value).bits
 
-  when(deqValid) {
+  when(io.bpuTrain.fire || mem(deqPtr.value).valid && mem(deqPtr.value).bits.flushed) {
     deqPtr := deqPtr + 1.U
 
     mem(deqPtr.value).valid        := false.B
