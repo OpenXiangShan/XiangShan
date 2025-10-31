@@ -27,6 +27,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import chisel3.experimental.SourceInfo
 import xiangshan._
+import xiangshan.backend.datapath.NewPipelineConnect
 
 case class L1CacheCtrlParams (
   address: AddressSet,
@@ -83,15 +84,15 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
     val delayRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
     val maskRegs  = RegInit(VecInit(Seq.fill(DCacheBanks)(0.U(DCacheSRAMRowBits.W))))
     val counterRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
-
-    io_pseudoError.zipWithIndex.foreach {
+    val pseudoError_gen = Wire(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
+    pseudoError_gen.zipWithIndex.foreach {
       case (inj, i) =>
         val ctrlReg = ctrlRegs.head
         val ctrlRegBundle = ctrlRegs.head.asTypeOf(new CtrlUnitCtrlBundle)
         val delayReg = delayRegs.head
         val counterReg = counterRegs.head
 
-        require(log2Up(io_pseudoError.length) == ctrlRegBundle.comp.getWidth, "io_pseudoError must equal number of components!")
+        require(log2Up(pseudoError_gen.length) == ctrlRegBundle.comp.getWidth, "pseudoError_gen must equal number of components!")
         inj.valid := ctrlRegBundle.ese && (ctrlRegBundle.comp === i.U) && (!ctrlRegBundle.ede || counterReg === 0.U)
         inj.bits.zip(ctrlRegBundle.bank.asBools).zip(maskRegs).map {
           case ((bankOut, bankEnable), mask) =>
@@ -116,6 +117,13 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
         when (ctl.ese && ctl.ede && cnt =/= 0.U) {
           cnt := cnt - 1.U
         }
+    }
+
+    for (i <- 0 until params.nSignalComps) {
+      NewPipelineConnect(
+        pseudoError_gen(i), io_pseudoError(i), io_pseudoError(i).fire, false.B,
+        Option(s"CtrlUnitPseudoErrorPipelineConnect${i}")
+      )
     }
 
     def ctrlRegDesc(i: Int) =

@@ -778,7 +778,7 @@ class Sbuffer(implicit p: Parameters)
     // ptag_matches uses paddr from dtlb, which is far from sbuffer
     val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), forward.valid) === RegEnable(getPTag(forward.paddr), forward.valid)))
     val tag_matches = vtag_matches
-    val tag_mismatch = GatedValidRegNext(forward.valid) && VecInit(widthMap(w =>
+    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
       GatedValidRegNext(vtag_matches(w)) =/= ptag_matches(w) && GatedValidRegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
