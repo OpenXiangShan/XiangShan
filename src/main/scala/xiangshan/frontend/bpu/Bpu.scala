@@ -260,37 +260,35 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
-  private val s2_jumpMask = VecInit(s2_mbtbResult.hitMask.zip(s2_mbtbResult.attributes).map { case (hit, attribute) =>
-    hit && (attribute.isDirect || attribute.isIndirect)
+  private val s2_jumpMask = VecInit(s2_mbtbResult.map { e =>
+    e.valid && (e.bits.attribute.isDirect || e.bits.attribute.isIndirect)
   })
   private val s2_takenMask = VecInit(s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b })
   private val s2_taken     = s2_takenMask.reduce(_ || _)
 
-  private val s2_compareMatrix      = CompareMatrix(s2_mbtbResult.positions)
+  private val s2_compareMatrix      = CompareMatrix(VecInit(s2_mbtbResult.map(_.bits.cfiPosition)))
   private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
 
   private val s3_taken                      = RegEnable(s2_taken, s2_fire)
   private val s3_mbtbResult                 = RegEnable(s2_mbtbResult, s2_fire)
   private val s3_firstTakenBranchOH         = RegEnable(s2_firstTakenBranchOH, s2_fire)
-  private val s3_takenBranchPosition        = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.positions)
-  private val s3_takenBranchAttribute       = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.attributes)
-  private val s3_mbtbTarget                 = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult.targets)
-  private val s3_firstTakenBranchIsReturn   = s3_takenBranchAttribute.isReturn
-  private val s3_firstTakenBranchIsIndirect = s3_takenBranchAttribute.isOtherIndirect
+  private val s3_firstTakenBranch           = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
+  private val s3_firstTakenBranchIsReturn   = s3_firstTakenBranch.bits.attribute.isReturn
+  private val s3_firstTakenBranchIsIndirect = s3_firstTakenBranch.bits.attribute.isOtherIndirect
 
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
   s3_prediction.taken       := s3_taken
-  s3_prediction.cfiPosition := Mux(s3_taken, s3_takenBranchPosition, s3_fallThroughPrediction.cfiPosition)
-  s3_prediction.attribute   := Mux(s3_taken, s3_takenBranchAttribute, s3_fallThroughPrediction.attribute)
+  s3_prediction.cfiPosition := Mux(s3_taken, s3_firstTakenBranch.bits.cfiPosition, s3_fallThroughPrediction.cfiPosition)
+  s3_prediction.attribute   := Mux(s3_taken, s3_firstTakenBranch.bits.attribute, s3_fallThroughPrediction.attribute)
   s3_prediction.target :=
     MuxCase(
       s3_fallThroughPrediction.target,
       Seq(
 //        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
         (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
-        s3_taken                                                                -> s3_mbtbTarget
+        s3_taken                                                                -> s3_firstTakenBranch.bits.target
       )
     )
 
@@ -486,15 +484,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
   /* *** perf train *** */
-
   private val t0_mispredictBranch = train.bits.mispredictBranch
   private val t0_mbtbMeta         = train.bits.meta.mbtb
   private val t0_branches         = train.bits.branches
-  private val t0_mbtbHit =
-    t0_mbtbMeta.hitMask.zip(t0_mbtbMeta.positions).zip(t0_mbtbMeta.attributes).map {
-      case ((hit, position), attribute) =>
-        hit && position === t0_mispredictBranch.bits.cfiPosition && attribute === t0_mispredictBranch.bits.attribute
-    }.reduce(_ || _)
+  private val t0_mbtbHit = t0_mbtbMeta.entries.map { e =>
+    e.rawHit &&
+      e.position === t0_mispredictBranch.bits.cfiPosition &&
+      e.attribute === t0_mispredictBranch.bits.attribute
+  }.reduce(_ || _)
 
   private val perf_conditionalMispredict =
     train.valid && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional

@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.StageCtrl
 
 class MainBtbAlignBank(
@@ -37,17 +37,14 @@ class MainBtbAlignBank(
       }
 
       class Resp extends Bundle {
-        val rawHit:    Bool            = Bool() // for training
-        val hit:       Bool            = Bool()
-        val position:  UInt            = UInt(CfiPositionWidth.W)
-        val target:    PrunedAddr      = PrunedAddr(VAddrBits)
-        val attribute: BranchAttribute = new BranchAttribute
+        val info: Valid[BtbInfo]   = Valid(new BtbInfo)
+        val meta: MainBtbMetaEntry = new MainBtbMetaEntry
       }
 
       // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
       val req: Req = Input(new Req)
 
-      val resp: Vec[Resp] = Vec(NumWay, new Resp)
+      val resp: Vec[Resp] = Output(Vec(NumWay, new Resp))
     }
 
     class Write extends Bundle {
@@ -148,15 +145,18 @@ class MainBtbAlignBank(
     // filter out branches before alignedInstOffset
     // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
-    resp.rawHit    := rawHit
-    resp.hit       := hit
-    resp.position  := Cat(s2_posHigherBits, e.position)
-    resp.target    := getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
-    resp.attribute := e.attribute
+    resp.info.valid            := hit
+    resp.info.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
+    resp.info.bits.target      := getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
+    resp.info.bits.attribute   := e.attribute
+
+    resp.meta.rawHit    := rawHit
+    resp.meta.attribute := e.attribute
+    resp.meta.position  := Cat(s2_posHigherBits, e.position)
   }
 
   // add an alias for hitMask for later use & debug purpose
-  private val s2_hitMask = VecInit(r.resp.map(_.hit))
+  private val s2_hitMask = VecInit(r.resp.map(_.info.valid))
   dontTouch(s2_hitMask)
 
   // update replacer

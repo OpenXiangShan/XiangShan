@@ -18,7 +18,6 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
@@ -33,7 +32,7 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // Whether a branch is bias toward a single target
   // For conditional branch, this means bias toward same direction
   // For indirect branch, this means bias toward single target
-  val stronglyBiased: Bool = Bool()
+//  val stronglyBiased: Bool = Bool() // TODO
 
   // Relative position to the aligned start addr
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
@@ -42,7 +41,7 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val targetCarry:     TargetCarry = new TargetCarry
   val targetLowerBits: UInt        = UInt(TargetWidth.W)
 
-  val replaceCnt: UInt = UInt(2.W) // FIXME: not used for now
+//  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
 }
 
 class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
@@ -51,16 +50,12 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
 }
 
-class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val hitMask            = Vec(NumBtbResultEntries, Bool())
-  val stronglyBiasedMask = Vec(NumBtbResultEntries, Bool())
-  val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val attributes         = Vec(NumBtbResultEntries, new BranchAttribute)
+class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
+  val rawHit:    Bool            = Bool()
+  val position:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute: BranchAttribute = new BranchAttribute
 }
 
-class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
-  val hitMask    = Vec(NumBtbResultEntries, Bool())
-  val positions  = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val targets    = Vec(NumBtbResultEntries, PrunedAddr(VAddrBits))
-  val attributes = Vec(NumBtbResultEntries, new BranchAttribute)
+class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
+  val entries: Vec[MainBtbMetaEntry] = Vec(NumBtbResultEntries, new MainBtbMetaEntry)
 }

@@ -22,12 +22,13 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BtbInfo
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // prediction specific bundle
-    val result: MainBtbResult = Output(new MainBtbResult)
-    val meta:   MainBtbMeta   = Output(new MainBtbMeta)
+    val result: Vec[Valid[BtbInfo]] = Output(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
+    val meta:   MainBtbMeta         = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -83,21 +84,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    */
   s2_fire := io.stageCtrl.s2_fire && io.enable
 
-  private val s2_rawHitMask = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.rawHit)))
-  private val s2_hitMask    = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.hit)))
-  private val s2_positions  = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.position)))
-  private val s2_targets    = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.target)))
-  private val s2_attributes = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.attribute)))
-
-  io.result.hitMask    := s2_hitMask
-  io.result.positions  := s2_positions
-  io.result.targets    := s2_targets
-  io.result.attributes := s2_attributes
-
-  io.meta.hitMask            := s2_rawHitMask
-  io.meta.positions          := s2_positions
-  io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
-  io.meta.attributes         := s2_attributes
+  io.result       := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info)))
+  io.meta.entries := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.meta)))
 
   /* *** t0 ***
    * receive training data and latch
@@ -120,9 +108,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_mispredictBranch = t1_train.mispredictBranch
 
-  private val t1_hitMispredictBranch = t1_meta.hitMask.zip(t1_meta.positions).zip(t1_meta.attributes).map {
-    case ((hit, position), attribute) =>
-      hit && position === t1_mispredictBranch.bits.cfiPosition && attribute === t1_mispredictBranch.bits.attribute
+  private val t1_hitMispredictBranch = t1_meta.entries.map { e =>
+    e.rawHit &&
+    e.position === t1_mispredictBranch.bits.cfiPosition &&
+    e.attribute === t1_mispredictBranch.bits.attribute
   }.reduce(_ || _)
 
   private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
@@ -134,8 +123,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_mispredictBranch.bits.target)
   t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_mispredictBranch.bits.target)
   t1_writeEntry.attribute       := t1_mispredictBranch.bits.attribute
-  t1_writeEntry.stronglyBiased  := false.B  // FIXME
-  t1_writeEntry.replaceCnt      := DontCare // FIXME:
 
   private val t1_writeAlignBankIdx = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
   private val t1_writeAlignBankMask = vecRotateRight(
@@ -150,9 +137,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
 
   /* *** statistics *** */
+  private val perf_s2HitMask = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info.valid)))
   XSPerfAccumulate("total_train", t1_valid)
-  XSPerfAccumulate("pred_hit", s2_fire && s2_hitMask.reduce(_ || _))
-  XSPerfHistogram("pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
+  XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
+  XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks)
   XSPerfAccumulate("train_write_new_entry", t1_writeValid)
   XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
   XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && t1_hitMispredictBranch)
