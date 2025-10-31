@@ -568,6 +568,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
     replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
+    replay_req(i).bits.tlbMiss      := s2_replayCauses(LoadReplayCauses.C_TM)
 
     XSError(replay_req(i).fire && !allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
   }

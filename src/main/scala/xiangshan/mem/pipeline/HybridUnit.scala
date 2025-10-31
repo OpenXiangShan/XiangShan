@@ -218,7 +218,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     io.lsin.valid, // int flow first issue or software prefetch
     io.vec_stu_io.in.valid,
     io.ldu_io.l2l_fwd_in.valid && io.ldu_io.ld_fast_match,
-    io.ldu_io.prefetch_req.valid && io.ldu_io.prefetch_req.bits.confidence === 0.U,
+    io.ldu_io.prefetch_req.valid  // lower confidence prefetch or lower prefetch-priority ldu
   )))
   // load flow source ready
   val s0_src_ready_vec = Wire(Vec(SRC_NUM, Bool()))

@@ -16,16 +16,14 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 trait HasL1PrefetchSourceParameter {
   // l1 prefetch source related
@@ -37,16 +35,21 @@ trait HasL1PrefetchSourceParameter {
   def L1_HW_PREFETCH_STRIDE = 2.U
   def L1_HW_PREFETCH_STREAM = 3.U
   def L1_HW_PREFETCH_STORE  = 4.U
+  def L1_HW_PREFETCH_BERTI = 5.U
   
   // ------------------------------------------------------------------------------------------------------------------------
   // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
   // ------------------------------------------------------------------------------------------------------------------------
 
+  def isDemand(value: UInt) = value <= L1_HW_PREFETCH_CLEAR
   def isPrefetchRelated(value: UInt) = value >= L1_HW_PREFETCH_CLEAR
   def isFromL1Prefetch(value: UInt)  = value > L1_HW_PREFETCH_CLEAR
   def isPrefetchClear(value: UInt)   = value === L1_HW_PREFETCH_CLEAR
   def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
   def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
+  def isFromBerti(value: UInt) = value === L1_HW_PREFETCH_BERTI
+
+  private val source2string = scala.collection.mutable.Map[String, BigInt]()
 }
 
 class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {

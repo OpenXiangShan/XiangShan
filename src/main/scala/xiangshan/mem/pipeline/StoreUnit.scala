@@ -544,6 +544,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
   io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_in.isHWPrefetch)
+  io.prefetch_train.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
   io.prefetch_train.bits.isFinalSplit := false.B
   io.prefetch_train.bits.misalignWith16Byte := false.B
   io.prefetch_train.bits.isMisalign := false.B

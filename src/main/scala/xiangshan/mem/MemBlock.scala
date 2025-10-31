@@ -16,44 +16,35 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import coupledL2.PrefetchRecv
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import utils._
+import org.chipsalliance.cde.config.Parameters
+import system.{HasSoCParameter, SoCParamsKey}
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.{HasSoCParameter, SoCParamsKey}
+import utils._
 import xiangshan._
-import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
-import xiangshan.backend.exu.MemExeUnit
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, PFEvent, TriggerUtil}
-import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
-import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
-import xiangshan.backend.rob.{RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.exu.MemExeUnit
+import xiangshan.backend.fu.FuType._
+import xiangshan.backend.fu.NewCSR.PFEvent
+import xiangshan.backend.fu._
+import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-import xiangshan.backend.Bundles._
-import xiangshan.mem._
-import xiangshan.mem.mdp._
-import xiangshan.mem.Bundles._
-import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher, TLBPlace}
+import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
-import coupledL2.PrefetchRecv
-import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.HasSoCParameter
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
+import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -578,7 +569,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
-      val replace_pf = Module(new TlbReplace(2, pftlbParams))
+      val replace_pf = Module(new TlbReplace(TlbSubSizeVec(dtlb_pf_idx), pftlbParams))
       replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
@@ -661,6 +652,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
+  prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
   prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
   prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
@@ -699,34 +691,41 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   /** prefetch to l1 req */
   // Stream's confidence is always 1
-  // (LduCnt + HyuCnt) l1_pf_reqs ?
-  loadUnits.foreach(load_unit => {
-    load_unit.io.prefetch_req.valid <> l1_pf_req.valid
-    load_unit.io.prefetch_req.bits <> l1_pf_req.bits
-  })
-  hybridUnits.foreach(hybrid_unit => {
-    hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
-    hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
-  })
-  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+  // NOTE lx:
+  // loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
   // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
-  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
-  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
-
+  // NOTE lyq:
+  // Because all the unfairness between ldu0 and ldu1/2, such as bank conflicts and lower entry priority in MissQueue,
+  // belong to the replay channel, whose priority is higher than prefetch channel in loadunit.
+  // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
   val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
                                   hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch) ++
                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
-  l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
-    case i => {
-      if (LowConfPorts.contains(i)) {
-        loadUnits(i).io.canAcceptLowConfPrefetch
-      } else {
-        Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
-      }
-    }
-  }.reduce(_ || _)
+  val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
+    Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+    /* // if it needs to distinguish ldu0 with others, use the code below
+    if (LduCnt > 1 && i == 0) {
+      Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+    } else {
+      canAcceptLowConfPrefetch(i)
+    } */
+  }
+  l1_pf_req.ready := canAcceptPrefetch.reduce(_ || _)
+
+  val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
+    if(i==0) l1_pf_req.valid
+    else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
+  }
+  loadUnits.zipWithIndex.foreach { case(u, i) => {
+    u.io.prefetch_req.valid <> toPrefetchValidVec(i)
+    u.io.prefetch_req.bits <> l1_pf_req.bits
+  }}
+  hybridUnits.zipWithIndex.foreach { case (u, i) => {
+    u.io.ldu_io.prefetch_req.valid <> toPrefetchValidVec(i + LduCnt)
+    u.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
+  }}
+
   /** l1 pf fuzzer interface */
   val DebugEnableL1PFFuzzer = false
   if (DebugEnableL1PFFuzzer) {
