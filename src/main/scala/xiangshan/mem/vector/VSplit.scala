@@ -262,7 +262,7 @@ class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p
 //    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
 //  }
   // out connect
-  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid && (activeNum =/= 0.U) // if activeNum == 0, this uop do nothing, can be killed.
+  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid // if activeNum == 0, this uop do nothing, can be killed.
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
   io.out.bits.uopAddr   := s1_in.baseAddr + uopOffset
