@@ -26,7 +26,7 @@ case class MicroBtbParameters(
     TakenCntWidth:  Int = 2,
     Replacer:       String = "plru",
     // use s3 prediction to train ubtb
-    UseFastTrain: Boolean = false,
+    UseFastTrain: Boolean = true,
     // enable carry and borrow fix for target, so jumps around 2^(TargetWidth+1) boundary will not cause misprediction
     // mainBtb should handle this case, so performance affect should be slight, and, bad for timing
     EnableTargetFix: Boolean = false
