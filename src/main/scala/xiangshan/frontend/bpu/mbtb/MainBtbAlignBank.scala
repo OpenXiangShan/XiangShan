@@ -18,6 +18,9 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.StageCtrl
 
 class MainBtbAlignBank(
     alignIdx: Int
@@ -25,24 +28,33 @@ class MainBtbAlignBank(
   class MainBtbAlignBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
-        val setIdx:           UInt = UInt(SetIdxLen.W)
-        val internalBankMask: UInt = UInt(NumInternalBanks.W)
+        // NOTE: this startVAddr is not from Bpu top, it's calculated in MainBtb top
+        // i.e. vecRotateRight(VecInit.tabulate(NumAlignBanks)(startVAddr + _ * alignSize), startAlignIdx)(alignIdx)
+        val startVAddr:    PrunedAddr = new PrunedAddr(VAddrBits)
+        val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
+        val crossPage:     Bool       = Bool()
       }
 
       class Resp extends Bundle {
-        val entries: Vec[MainBtbEntry] = Vec(NumWay, new MainBtbEntry)
+        val rawHit:    Bool            = Bool() // for training
+        val hit:       Bool            = Bool()
+        val position:  UInt            = UInt(CfiPositionWidth.W)
+        val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+        val attribute: BranchAttribute = new BranchAttribute
       }
 
-      val req:  Valid[Req] = Flipped(Valid(new Req))
-      val resp: Resp       = Output(new Resp)
+      // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
+      val req: Req = Input(new Req)
+
+      val resp: Vec[Resp] = Vec(NumWay, new Resp)
     }
 
     class Write extends Bundle {
       class Req extends Bundle {
-        val setIdx:           UInt         = UInt(SetIdxLen.W)
-        val internalBankMask: UInt         = UInt(NumInternalBanks.W)
-        val wayMask:          UInt         = UInt(NumWay.W)
-        val entry:            MainBtbEntry = new MainBtbEntry
+        // similar to Read.Req.startVAddr, calculated in MainBtb top
+        val startVAddr: PrunedAddr   = new PrunedAddr(VAddrBits)
+        val wayMask:    UInt         = UInt(NumWay.W)
+        val entry:      MainBtbEntry = new MainBtbEntry
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -50,7 +62,6 @@ class MainBtbAlignBank(
 
     class Flush extends Bundle {
       class Req extends Bundle {
-        val setIdx:           UInt = UInt(SetIdxLen.W)
         val internalBankMask: UInt = UInt(NumInternalBanks.W)
         val wayMask:          UInt = UInt(NumWay.W)
       }
@@ -58,7 +69,8 @@ class MainBtbAlignBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
-    val resetDone: Bool = Output(Bool())
+    val resetDone: Bool      = Output(Bool())
+    val stageCtrl: StageCtrl = Input(new StageCtrl)
 
     val read:  Read  = new Read
     val write: Write = new Write
@@ -78,25 +90,108 @@ class MainBtbAlignBank(
 
   io.resetDone := internalBanks.map(_.io.resetDone).reduce(_ && _)
 
-  // bank -> io
+  /* *** s0 ***
+   * send read req to internal banks (srams)
+   */
+  private val s0_fire             = io.stageCtrl.s0_fire
+  private val s0_startVAddr       = r.req.startVAddr
+  private val s0_posHigherBits    = r.req.posHigherBits
+  private val s0_crossPage        = r.req.crossPage
+  private val s0_setIdx           = getSetIndex(s0_startVAddr)
+  private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
+  private val s0_internalBankMask = UIntToOH(s0_internalBankIdx, NumInternalBanks)
+  private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
+
+  // mainBtb top is responsible for sending the correct startVAddr to alignBanks,
+  // so here we should always see getAlignBankIndex(s0_startVAddr) == physical alignIdx.
+  assert(s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
+
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := r.req.valid && r.req.bits.internalBankMask(i)
-    b.io.read.req.bits.setIdx := r.req.bits.setIdx
+    // NOTE: if crossPage, we need to drop the entries to satisfy Ifu/ICache's requirement,
+    //       so we also can drop read req to save power.
+    // FIXME: but this might be timing critical, need to be verified.
+    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i) && !s0_crossPage
+    b.io.read.req.bits.setIdx := s0_setIdx
   }
-  r.resp.entries := Mux1H(
-    RegEnable(r.req.bits.internalBankMask, r.req.valid),
+
+  /* *** s1 ***
+   * receive read resp from internal banks
+   * select 1 internal bank's resp
+   */
+  private val s1_fire             = io.stageCtrl.s1_fire
+  private val s1_startVAddr       = RegEnable(s0_startVAddr, s0_fire)
+  private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
+  private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
+  private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
+
+  private val s1_rawEntries = Mux1H(
+    s1_internalBankMask,
     internalBanks.map(_.io.read.resp.entries)
   )
 
-  // io -> bank
-  internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid        := w.req.valid && w.req.bits.internalBankMask(i)
-    b.io.write.req.bits.setIdx  := w.req.bits.setIdx
-    b.io.write.req.bits.wayMask := w.req.bits.wayMask
-    b.io.write.req.bits.entry   := w.req.bits.entry
+  /* *** s2 ***
+   * check entries hit
+   * filter-out unneeded entries
+   * send resp to top
+   */
+  private val s2_fire          = io.stageCtrl.s2_fire
+  private val s2_startVAddr    = RegEnable(s1_startVAddr, s1_fire)
+  private val s2_posHigherBits = RegEnable(s1_posHigherBits, s1_fire)
+  private val s2_crossPage     = RegEnable(s1_crossPage, s1_fire)
+  private val s2_rawEntries    = RegEnable(s1_rawEntries, s1_fire)
 
+  private val s2_setIdx = getSetIndex(s2_startVAddr)
+  private val s2_tag    = getTag(s2_startVAddr)
+
+  // NOTE: when we calculate startVAddr in MainBtb top, we have selected whether lower bits should be masked
+  //       (see s0_startVAddrVec)
+  //       so here, if this alignBank is not the first alignBank of the fetch block, we'll get s2_alignedInstOffset = 0
+  //       and, we'll do a (e.position >= 0) check later, which is always true
+  private val s2_alignedInstOffset = getAlignedInstOffset(s2_startVAddr)
+
+  private val s2_rawHitMask = VecInit(s2_rawEntries.map(e => e.valid && e.tag === s2_tag))
+
+  // filter out branches before alignedInstOffset
+  // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
+  private val s2_hitMask = VecInit((s2_rawHitMask zip s2_rawEntries).map { case (hit, e) =>
+    hit && e.position >= s2_alignedInstOffset && !s2_crossPage
+  })
+
+  (r.resp zip s2_rawEntries zip s2_rawHitMask zip s2_hitMask).foreach { case (((resp, e), rawHit), hit) =>
+    resp.rawHit    := rawHit
+    resp.hit       := hit
+    resp.position  := Cat(s2_posHigherBits, e.position)
+    resp.target    := getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
+    resp.attribute := e.attribute
+  }
+
+  /* *** t1 ***
+   * send write req to internal banks (srams)
+   */
+  private val t1_valid            = w.req.valid
+  private val t1_startVAddr       = w.req.bits.startVAddr
+  private val t1_wayMask          = w.req.bits.wayMask
+  private val t1_entry            = w.req.bits.entry
+  private val t1_setIdx           = getSetIndex(t1_startVAddr)
+  private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
+  private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
+  private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
+
+  // similar to s0 case
+  assert(t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
+
+  internalBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.write.req.valid        := t1_valid && t1_internalBankMask(i)
+    b.io.write.req.bits.setIdx  := t1_setIdx
+    b.io.write.req.bits.wayMask := t1_wayMask
+    b.io.write.req.bits.entry   := t1_entry
+  }
+
+  /* *** multi-hit detection & flush ***
+   */
+  internalBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.flush.req.valid        := flush.req.valid && flush.req.bits.internalBankMask(i)
-    b.io.flush.req.bits.setIdx  := flush.req.bits.setIdx
+    b.io.flush.req.bits.setIdx  := s2_setIdx
     b.io.flush.req.bits.wayMask := flush.req.bits.wayMask
   }
 }

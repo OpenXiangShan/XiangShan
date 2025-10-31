@@ -69,13 +69,13 @@ class ReplacerIO(implicit p: Parameters) extends MainBtbBundle {
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val hitMask            = Vec(NumBtbResultEntries, Bool())
   val stronglyBiasedMask = Vec(NumBtbResultEntries, Bool())
-  val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
   val attributes         = Vec(NumBtbResultEntries, new BranchAttribute)
 }
 
 class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
   val hitMask    = Vec(NumBtbResultEntries, Bool())
-  val positions  = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
+  val positions  = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
   val targets    = Vec(NumBtbResultEntries, PrunedAddr(VAddrBits))
   val attributes = Vec(NumBtbResultEntries, new BranchAttribute)
 }
