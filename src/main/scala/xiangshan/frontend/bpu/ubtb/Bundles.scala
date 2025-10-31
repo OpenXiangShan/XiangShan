@@ -36,8 +36,6 @@ class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   }
 
   class Slot1 extends SlotBase {
-    // saturate counter indicating taken bias of branch in slot 1
-    val takenCnt: SaturateCounter = new SaturateCounter(TakenCntWidth)
     // whether branch in slot 1 has a static target
     val isStaticTarget: Bool = Bool()
   }
@@ -49,8 +47,8 @@ class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
     val taken: Bool = Bool()
   }
 
-  // whether the whole entry is valid
-  val valid: Bool = Bool()
+  // we consider an entry is valid if it has usefulCnt > 0
+  def valid: Bool = !usefulCnt.isSaturateNegative
   // partial vTag = fetchBlockVAddr(TagWidth, 1)
   val tag: UInt = UInt(TagWidth.W)
   // saturate counter indicating how useful is this entry
