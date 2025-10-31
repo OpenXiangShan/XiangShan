@@ -118,14 +118,14 @@ class MainBtbInternalBank(
     val flushValid = flush.req.valid && flush.req.bits.wayMask(i)
     bufWrite.valid := writeValid || flushValid
     bufWrite.bits.setIdx := Mux(
-      flushValid,
-      flush.req.bits.setIdx,
-      w.req.bits.setIdx
+      writeValid,
+      w.req.bits.setIdx,
+      flush.req.bits.setIdx
     )
     bufWrite.bits.entry := Mux(
-      flushValid,
-      0.U.asTypeOf(new MainBtbEntry),
-      w.req.bits.entry
+      writeValid,
+      w.req.bits.entry,
+      0.U.asTypeOf(new MainBtbEntry)
     )
   }
 }
