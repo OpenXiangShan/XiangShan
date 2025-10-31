@@ -21,10 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
@@ -39,20 +37,19 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val Alignment = FetchBlockSize / NumAlignBanks
 
   /* *** submodules *** */
-  private val sramBanks =
-    Seq.tabulate(NumAlignBanks, NumInternalBanks) { (alignIdx, bankIdx) =>
-      Module(new MainBtbInternalBank(alignIdx, bankIdx))
-    }
+  private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
-  io.resetDone := sramBanks.flatMap(_.map(_.io.resetDone)).reduce(_ && _)
+  io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 
+  // TODO: move replacer to AlignBank
   private val replacer = Module(new MainBtbReplacer)
 
   /* predict stage 0
    * setup SRAM
    */
-  private val s0_fire             = io.stageCtrl.s0_fire && io.enable
-  private val s0_startVAddr       = io.startVAddr
+  private val s0_fire       = io.stageCtrl.s0_fire && io.enable
+  private val s0_startVAddr = io.startVAddr
+  // TODO: move set index calculation to AlignBank
   private val s0_thisSetIdx       = getSetIndex(s0_startVAddr)
   private val s0_nextSetIdx       = getNextSetIndex(s0_startVAddr)
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
@@ -60,16 +57,17 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
   private val s0_setIdxVec: Vec[UInt] =
     VecInit.tabulate(NumAlignBanks)(bankIdx => Mux(bankIdx.U < s0_alignBankIdx, s0_nextSetIdx, s0_thisSetIdx))
+
   require(s0_thisSetIdx.getWidth == SetIdxLen, s"Set index width mismatch: ${s0_thisSetIdx.getWidth} != $SetIdxLen")
   XSError(
     s0_internalBankIdx >= NumInternalBanks.U,
     s"Invalid internal bank index: $s0_internalBankIdx, max: ${NumInternalBanks - 1}"
   )
-  sramBanks zip s0_setIdxVec foreach { case (alignmentBank, setIdx) =>
-    alignmentBank zip s0_internalBankMask.asBools foreach { case (internalBank, bankEnable) =>
-      internalBank.io.read.req.valid       := bankEnable
-      internalBank.io.read.req.bits.setIdx := setIdx
-    }
+
+  (alignBanks zip s0_setIdxVec).foreach { case (alignBank, setIdx) =>
+    alignBank.io.read.req.valid                 := s0_fire
+    alignBank.io.read.req.bits.setIdx           := setIdx
+    alignBank.io.read.req.bits.internalBankMask := s0_internalBankMask
   }
 
   /* predict stage 1
@@ -86,9 +84,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s1_posHigherBitsPerAlignBank = vecRotateRight(VecInit.tabulate(NumAlignBanks)(i => i.U), s1_alignBankIdx)
   private val s1_posHigherBits             = VecInit(s1_posHigherBitsPerAlignBank.flatMap(Seq.fill(NumWay)(_)))
 
-  private val s1_rawBtbEntries = VecInit(sramBanks.flatMap { alignBank =>
-    Mux1H(s1_internalBankMask, alignBank.map(bank => bank.io.read.resp.entries))
-  })
+  private val s1_rawBtbEntries = VecInit(alignBanks.flatMap(_.io.read.resp.entries))
 
   private val s1_alignBankCrossPageMask = (0 until NumAlignBanks).map { i =>
     val currentAlignStartVAddr = getAlignedAddr(s1_startVAddr + (i * FetchBlockAlignSize).U)
@@ -236,21 +232,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     (s2_internalBankMask.asBools zip t1_internalBankMask.asBools map { case (a, b) => a && b }).reduce(_ || _)
 
   // Write to SRAM
-  sramBanks zip t1_setIdxVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
-    case (((alignmentBank, setIdx), alignBankEnable), multiAlignBankEnable) =>
-      alignmentBank zip t1_internalBankMask.asBools zip s2_internalBankMask.asBools foreach {
-        case ((bank, bankEnable), multiBankEnable) =>
-          bank.io.write.req.valid        := t1_writeValid && alignBankEnable && bankEnable
-          bank.io.write.req.bits.wayMask := t1_writeWayMask
-          bank.io.write.req.bits.setIdx  := setIdx
-          bank.io.write.req.bits.entry   := t1_writeEntry
+  alignBanks zip t1_setIdxVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
+    case (((alignBank, setIdx), alignBankEnable), multiAlignBankEnable) =>
+      alignBank.io.write.req.valid                 := t1_writeValid && alignBankEnable
+      alignBank.io.write.req.bits.internalBankMask := t1_internalBankMask
+      alignBank.io.write.req.bits.wayMask          := t1_writeWayMask
+      alignBank.io.write.req.bits.setIdx           := setIdx
+      alignBank.io.write.req.bits.entry            := t1_writeEntry
 
-          // flush
-          bank.io.flush.req.valid :=
-            s2_multihit && s2_fire && multiAlignBankEnable && multiBankEnable && !multiWriteConflict
-          bank.io.flush.req.bits.wayMask := s2_multiWayIdxMask
-          bank.io.flush.req.bits.setIdx  := s2_multiSetIdx
-      }
+      alignBank.io.flush.req.valid := s2_multihit && s2_fire && multiAlignBankEnable && !multiWriteConflict
+      alignBank.io.flush.req.bits.internalBankMask := s2_internalBankMask
+      alignBank.io.flush.req.bits.wayMask          := s2_multiWayIdxMask
+      alignBank.io.flush.req.bits.setIdx           := s2_multiSetIdx
   }
 
   dontTouch(t1_writeValid)
