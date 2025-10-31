@@ -62,11 +62,10 @@ class SaturateCounter(width: Int) extends Bundle {
     value := ((1 << width) - 1).U
 
   // for TAGE taken ctr
-  def isConfident: Bool = {
+  def isWeak: Bool = {
     require(width >= 2)
     val weakNotTaken = !value(width - 1) && value(width - 2, 0).andR
     val weakTaken    = value(width - 1) && !value(width - 2, 0).orR
-    val isWeak       = weakNotTaken || weakTaken // for 3 bit ctr: 011 || 100
-    !isWeak
+    weakNotTaken || weakTaken // for 3 bit ctr: 011 || 100
   }
 }

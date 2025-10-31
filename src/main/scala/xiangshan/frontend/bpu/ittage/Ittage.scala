@@ -55,6 +55,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   io.resetDone := true.B // FIXME: sram read ready
 
+  io.train.ready := true.B
+
   private val s0_pc   = io.startVAddr
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
@@ -111,7 +113,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   io.meta := ittageMeta
 
   private val t1_train = Wire(new BpuTrain)
-  t1_train := RegEnable(io.train.bits, 0.U.asTypeOf(new BpuTrain), io.train.valid)
+  t1_train := RegEnable(io.train.bits, 0.U.asTypeOf(new BpuTrain), io.train.fire)
 
   private val t1_meta = Wire(new IttageMeta)
   t1_train.meta.ittage := t1_meta
@@ -123,28 +125,28 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // To improve Clock Gating Efficiency
   private val t0_meta = io.train.bits.meta.ittage
-  t1_meta := RegEnable(t0_meta, io.train.valid)
+  t1_meta := RegEnable(t0_meta, io.train.fire)
   t1_meta.provider.bits := RegEnable(
     t0_meta.provider.bits,
-    io.train.valid && t0_meta.provider.valid
+    io.train.fire && t0_meta.provider.valid
   )
   t1_meta.providerTarget := RegEnable(
     t0_meta.providerTarget,
     0.U.asTypeOf(t0_meta.providerTarget),
-    io.train.valid && t0_meta.provider.valid
+    io.train.fire && t0_meta.provider.valid
   )
   t1_meta.allocate.bits := RegEnable(
     t0_meta.allocate.bits,
-    io.train.valid && t0_meta.allocate.valid
+    io.train.fire && t0_meta.allocate.valid
   )
   t1_meta.altProvider.bits := RegEnable(
     t0_meta.altProvider.bits,
-    io.train.valid && t0_meta.altProvider.valid
+    io.train.fire && t0_meta.altProvider.valid
   )
   t1_meta.altProviderTarget := RegEnable(
     t0_meta.altProviderTarget,
     0.U.asTypeOf(t0_meta.altProviderTarget),
-    io.train.valid && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
+    io.train.fire && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
   )
 
   // Select the branch needed for training
@@ -159,7 +161,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   val hasTrainBranch: Bool = trainBranchIdxOH.asUInt.orR
 
   // Update condition for ittage
-  private val updateValid = hasTrainBranch && RegNext(io.train.valid, init = false.B)
+  private val updateValid = hasTrainBranch && RegNext(io.train.fire, init = false.B)
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))

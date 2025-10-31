@@ -65,6 +65,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
   io.resetDone := resetDone
 
+  io.train.ready := true.B
+
   private val replacer = Module(new MainBtbReplacer)
 
   sramBanks.map(_.map(_.map { m =>
@@ -92,7 +94,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s0_fire             = io.stageCtrl.s0_fire && io.enable
   private val s0_startVAddr       = io.startVAddr
   private val s0_thisSetIdx       = getSetIndex(s0_startVAddr)
-  private val s0_nextSetIdx       = s0_thisSetIdx + 1.U
+  private val s0_nextSetIdx       = getSetIndex(getNextAlignedAddr(s0_startVAddr))
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx) & Fill(NumInternalBanks, s0_fire)
   private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
@@ -222,7 +224,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.meta.attributes         := s2_rawBtbEntries.map(_.attribute)
 
   /* training stage 0 */
-  private val t0_valid = io.train.valid && io.enable
+  private val t0_valid = io.train.fire && io.enable
   private val t0_train = io.train.bits
 
   /* training stage 1 */
@@ -232,7 +234,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_internalBankIdx  = getInternalBankIndex(t1_train.startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx)
   private val t1_thisSetIdx       = getSetIndex(t1_train.startVAddr)
-  private val t1_nextSetIdx       = t1_thisSetIdx + 1.U
+  private val t1_nextSetIdx       = getSetIndex(getNextAlignedAddr(t1_train.startVAddr))
   private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_setIdxVec =

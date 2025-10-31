@@ -170,8 +170,8 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   /*
    * bpu training folded phr compute
    */
-  private val commitValid   = RegNext(io.commit.valid)
-  private val commit        = RegEnable(io.commit.bits, io.commit.valid)
+  private val commitValid   = io.commit.valid
+  private val commit        = io.commit.bits
   private val predictHist   = getPhr(commit.meta.phr)
   private val metaPhrFolded = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   AllFoldedHistoryInfo.foreach { info =>

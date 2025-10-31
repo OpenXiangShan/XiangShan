@@ -32,6 +32,17 @@ trait HalfAlignHelper extends HasBpuParameters {
       0.U(FetchBlockAlignWidth.W)
     ))
 
+  def getNextAlignedAddr(startVAddr: PrunedAddr): PrunedAddr = {
+    val nextAlignedVAddrUpperBits = getAlignedAddrUpper(startVAddr) + 1.U
+    PrunedAddrInit(Cat(nextAlignedVAddrUpperBits, 0.U(FetchBlockAlignWidth.W)))
+  }
+
+  def getBranchVAddr(startVAddr: PrunedAddr, position: UInt): PrunedAddr = {
+    // FIXME: only support mainBtb 2 align
+    val branchVAddrUpperBits = getAlignedAddrUpper(startVAddr) + position(CfiPositionWidth - 1)
+    PrunedAddrInit(Cat(branchVAddrUpperBits, position(CfiPositionWidth - 2, 0), 0.U))
+  }
+
   def getAlignedInstOffset(addr: PrunedAddr): UInt =
     // given an instruction address, return the offset of the instruction in the fetch block
     // example:
