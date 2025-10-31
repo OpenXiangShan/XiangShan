@@ -1195,6 +1195,8 @@ class IssueQueueVfImp(implicit p: Parameters, params: IssueBlockParams) extends 
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.maskVecGen := 0.U)
+    deq.bits.common.vialuCtrl.foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
   }}
 }
 
@@ -1205,6 +1207,8 @@ class IssueQueueFpImp(implicit p: Parameters, params: IssueBlockParams) extends 
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.maskVecGen := 0.U)
+    deq.bits.common.vialuCtrl.foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
   }}
 }
 
@@ -1365,6 +1369,8 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.maskVecGen := 0.U)
+    deq.bits.common.vialuCtrl.foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
   }
 
   io.vecLoadIssueResp.foreach(dontTouch(_))
