@@ -33,9 +33,6 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   val io = IO(new GhrIO)
 
   // stage ctrl
-  private val s0_fire = io.stageCtrl.s0_fire
-  private val s1_fire = io.stageCtrl.s1_fire
-  private val s2_fire = io.stageCtrl.s2_fire
   private val s3_fire = io.stageCtrl.s3_fire
 
   // global history

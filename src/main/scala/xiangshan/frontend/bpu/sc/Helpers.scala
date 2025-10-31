@@ -40,6 +40,10 @@ trait Helpers extends HasScParameters {
   def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int): UInt =
     ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ ghr)(log2Ceil(numSets) - 1, 0)
 
+  // get pc ^ ghr for index
+  def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
+    (pc >> (BankWidth + FetchBlockSizeWidth))(log2Ceil(numSets) - 1, 0)
+
   def getPercsum(arr: SInt): SInt =
     (arr * 2.S) +& 1.S
 
