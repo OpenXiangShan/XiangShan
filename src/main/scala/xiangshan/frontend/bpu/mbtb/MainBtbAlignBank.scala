@@ -92,7 +92,7 @@ class MainBtbAlignBank(
 
   // mainBtb top is responsible for sending the correct startVAddr to alignBanks,
   // so here we should always see getAlignBankIndex(s0_startVAddr) == physical alignIdx.
-  assert(s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
+  assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
     // NOTE: if crossPage, we need to drop the entries to satisfy Ifu/ICache's requirement,
@@ -177,7 +177,7 @@ class MainBtbAlignBank(
   private val t1_wayMask          = replacer.io.victim.wayMask
 
   // similar to s0 case
-  assert(t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
+  assert(!t1_valid || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid        := t1_valid && t1_internalBankMask(i)
