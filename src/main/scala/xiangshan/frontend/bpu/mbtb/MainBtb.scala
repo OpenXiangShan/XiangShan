@@ -48,6 +48,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
           way = 1, // Not using way in the template, preparing for future skewed assoc
           singlePort = true,
           shouldReset = true,
+          holdRead = true,
           withClockGate = true,
           hasMbist = hasMbist,
           hasSramCtl = hasSramCtl
