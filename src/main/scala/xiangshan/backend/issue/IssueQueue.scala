@@ -112,7 +112,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
-  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap()))) }
+  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
   val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
   val intWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(x.intFuLatencyMap))) }
@@ -1216,7 +1216,6 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
     val stIssuePtr = Input(new SqPtr)
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }
-  val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 
   // load wakeup
   val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new MemWakeUpBundle)))
@@ -1240,8 +1239,6 @@ class IssueQueueMemAddrImp(implicit p: Parameters, params: IssueBlockParams)
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
   private val memIO = io.memIO.get
-
-  memIO.loadFastMatch := 0.U.asTypeOf(memIO.loadFastMatch) // TODO: is still needed?
 
   entries.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
     slowResp.valid       := memIO.feedbackIO(i).feedbackSlow.valid

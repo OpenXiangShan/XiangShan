@@ -23,20 +23,6 @@ import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.backend.fu.FuType.isUncertain
 import xiangshan.mem.{LqPtr, SqPtr}
 
-//class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
-//  override def shouldBeInlined: Boolean = false
-//
-//  private implicit val dpParams: BackendParams = params
-//  lazy val module = new DataPathImp(this)
-//
-//  println(s"[DataPath] Preg Params: ")
-//  println(s"[DataPath]   Int R(${params.getRfReadSize(IntData())}), W(${params.getRfWriteSize(IntData())}) ")
-//  println(s"[DataPath]   Fp R(${params.getRfReadSize(FpData())}), W(${params.getRfWriteSize(FpData())}) ")
-//  println(s"[DataPath]   Vf R(${params.getRfReadSize(VecData())}), W(${params.getRfWriteSize(VecData())}) ")
-//  println(s"[DataPath]   V0 R(${params.getRfReadSize(V0Data())}), W(${params.getRfWriteSize(V0Data())}) ")
-//  println(s"[DataPath]   Vl R(${params.getRfReadSize(VlData())}), W(${params.getRfWriteSize(VlData())}) ")
-//}
-
 class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockParams)
   extends XSModule with HasXSParameter with HasPerfEvents {
 
@@ -224,37 +210,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val pcReadFtqOffset = Wire(chiselTypeOf(io.fromPcTargetMem.fromDataPathFtqOffset))
   private val targetPCRdata = io.fromPcTargetMem.toDataPathTargetPC
   private val pcRdata = io.fromPcTargetMem.toDataPathPC
-  private val intRfRaddr = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfRdata = Option.when(param.isIntSchd)(Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.rfDataWidth.W))))
-  private val intRfWen = Wire(Vec(io.fromIntWb.length, Bool()))
-  private val intRfWaddr = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.pregIdxWidth.W)))
-  private val intRfWdata = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.rfDataWidth.W)))
-
-  private val fpRfRaddr = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.pregIdxWidth.W)))
   private val fpRfRdata = Option.when(param.isFpSchd)(Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
-  private val fpRfWen = Wire(Vec(io.fromFpWb.length, Bool()))
-  private val fpRfWaddr = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.pregIdxWidth.W)))
-  private val fpRfWdata = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.rfDataWidth.W)))
-
-  private val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vecSchdParams.pregIdxWidth.W)))
   private val vfRfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(VecData()), UInt(vecSchdParams.rfDataWidth.W))))
-  val splitNum = if (backendParams.debugEn) 1 else 4
-  private val vfRfWen = Wire(Vec(splitNum, Vec(io.fromVfWb.length, Bool())))
-  private val vfRfWaddr = Wire(Vec(io.fromVfWb.length, UInt(vecSchdParams.pregIdxWidth.W)))
-  private val vfRfWdata = Wire(Vec(io.fromVfWb.length, UInt(vecSchdParams.rfDataWidth.W)))
-
-  private val v0RfSplitNum = VLEN / XLEN
-  private val v0RfRaddr = Wire(Vec(params.numPregRd(V0Data()), UInt(log2Up(V0PhyRegs).W)))
   private val v0RfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(V0Data()), UInt(V0Data().dataWidth.W))))
-  private val v0RfWen = Wire(Vec(v0RfSplitNum, Vec(io.fromV0Wb.length, Bool())))
-  private val v0RfWaddr = Wire(Vec(io.fromV0Wb.length, UInt(log2Up(V0PhyRegs).W)))
-  private val v0RfWdata = Wire(Vec(io.fromV0Wb.length, UInt(V0Data().dataWidth.W)))
-
-  private val vlRfRaddr = Wire(Vec(params.numPregRd(VlData()), UInt(log2Up(VlPhyRegs).W)))
   private val vlRfRdata = Option.when(param.isVecSchd)(Wire(Vec(params.numPregRd(VlData()), UInt(VlData().dataWidth.W))))
-  private val vlRfWen = Wire(Vec(io.fromVlWb.length, Bool()))
-  private val vlRfWaddr = Wire(Vec(io.fromVlWb.length, UInt(log2Up(VlPhyRegs).W)))
-  private val vlRfWdata = Wire(Vec(io.fromVlWb.length, UInt(VlData().dataWidth.W)))
 
   val pcReadFtqPtrFormIQ = fromIntIQ.flatten.filter(x => x.bits.exuParams.needPc)
   assert(pcReadFtqPtrFormIQ.size == pcReadFtqPtr.size, s"pcReadFtqPtrFormIQ.size ${pcReadFtqPtrFormIQ.size} not equal pcReadFtqPtr.size ${pcReadFtqPtr.size}")
@@ -304,21 +264,123 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   )
 
   io.diffVl.foreach(_ := vlDiffReadData.get)
+
+  io.toWakeupQueueRCIdx := 0.U.asTypeOf(io.toWakeupQueueRCIdx)
+  io.toBypassNetworkRCData := 0.U.asTypeOf(io.toBypassNetworkRCData)
+  val splitNum = if (backendParams.debugEn) 1 else 4
   if (param.isIntSchd) {
+    val intRfRaddr = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.pregIdxWidth.W)))
+    val intRfWen = Wire(Vec(io.fromIntWb.get.length, Bool()))
+    val intRfWaddr = Wire(Vec(io.fromIntWb.get.length, UInt(intSchdParams.pregIdxWidth.W)))
+    val intRfWdata = Wire(Vec(io.fromIntWb.get.length, UInt(intSchdParams.rfDataWidth.W)))
     IntRegFileSplit("IntRegFile", intSchdParams.numPregs, splitNum, intRfRaddr, intRfRdata.get, intRfWen, intRfWaddr, intRfWdata,
       bankNum = 1,
       debugReadAddr = intDiffRead.map(_._1),
       debugReadData = intDiffRead.map(_._2)
     )
+    intRfWaddr := io.fromIntWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
+    intRfWdata := io.fromIntWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
+    intRfWen := RegNext(VecInit(io.fromIntWb.get.map(_.wen).toSeq))
+    for (portIdx <- intRfRaddr.indices) {
+      if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
+        intRfRaddr(portIdx) := intRFReadArbiter.io.out(portIdx).bits.addr
+      else
+        intRfRaddr(portIdx) := 0.U
+    }
+    // regcache
+    val regCache = Module(new RegCache())
+    def IssueBundle2RCReadPort(issue: DecoupledIO[IssueQueueIssueBundle]): Vec[RCReadPort] = {
+      val readPorts = Wire(Vec(issue.bits.exuParams.numIntSrc, new RCReadPort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth)))
+      readPorts.zipWithIndex.foreach { case (r, idx) =>
+        r.ren := issue.valid && issue.bits.common.dataSources(idx).readRegCache
+        r.addr := issue.bits.rcIdx.get(idx)
+        r.data := DontCare
+      }
+      readPorts
+    }
+    val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
+    val regCacheReadData = regCache.io.readPorts.map(_.data)
+    println(s"[${param.getName}DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
+    require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
+    regCache.io.readPorts.zip(regCacheReadReq).foreach { case (r, req) =>
+      r.ren := req.ren
+      r.addr := req.addr
+    }
+    val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
+    s1_RCReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
+    s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten
+      .zip(regCacheReadData.take(params.getIntExuRCReadSize)).foreach { case (s1_data, rdata) =>
+      s1_data := rdata
+    }
+    s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten
+      .zip(regCacheReadData.takeRight(params.getMemExuRCReadSize)).foreach { case (s1_data, rdata) =>
+      s1_data := rdata
+    }
+    println(s"[${param.getName}DataPath] s1_RCReadData.int.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.int.size: ${params.getIntExuRCReadSize}")
+    println(s"[${param.getName}DataPath] s1_RCReadData.mem.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.mem.size: ${params.getMemExuRCReadSize}")
+    io.toWakeupQueueRCIdx := regCache.io.toWakeupQueueRCIdx
+    io.toBypassNetworkRCData := s1_RCReadData
+    regCache.io.writePorts := io.fromBypassNetwork
+    // perf counter
+    val int_regcache_size = 48
+    val int_regcache_tag = RegInit(VecInit(Seq.fill(int_regcache_size)(0.U(intSchdParams.pregIdxWidth.W))))
+    val int_regcache_enqPtr = RegInit(0.U(log2Up(int_regcache_size).W))
+    int_regcache_enqPtr := int_regcache_enqPtr + PopCount(intRfWen)
+    for (i <- intRfWen.indices) {
+      when(intRfWen(i)) {
+        int_regcache_tag(int_regcache_enqPtr + PopCount(intRfWen.take(i))) := intRfWaddr(i)
+      }
+    }
+    val int_regcache_part32 = (1 until 33).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
+    val int_regcache_part24 = (1 until 24).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
+    val int_regcache_part16 = (1 until 17).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
+    val int_regcache_part8 = (1 until 9).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
+    val int_regcache_48_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_tag.map(_ === x.bits.addr).reduce(_ || _))
+    val int_regcache_8_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part8.map(_ === x.bits.addr).reduce(_ || _))
+    val int_regcache_16_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part16.map(_ === x.bits.addr).reduce(_ || _))
+    val int_regcache_24_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part24.map(_ === x.bits.addr).reduce(_ || _))
+    val int_regcache_32_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part32.map(_ === x.bits.addr).reduce(_ || _))
+    XSPerfAccumulate("IntRegCache48Hit", PopCount(int_regcache_48_hit_vec))
+    XSPerfAccumulate("IntRegCache8Hit", PopCount(int_regcache_8_hit_vec))
+    XSPerfAccumulate("IntRegCache16Hit", PopCount(int_regcache_16_hit_vec))
+    XSPerfAccumulate("IntRegCache24Hit", PopCount(int_regcache_24_hit_vec))
+    XSPerfAccumulate("IntRegCache32Hit", PopCount(int_regcache_32_hit_vec))
+    XSPerfHistogram("IntRegCache48Hit_hist", PopCount(int_regcache_48_hit_vec), true.B, 0, 16, 2)
   }
   else if (param.isFpSchd) {
+    val fpRfRaddr = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.pregIdxWidth.W)))
+    val fpRfWen = Wire(Vec(io.fromFpWb.get.length, Bool()))
+    val fpRfWaddr = Wire(Vec(io.fromFpWb.get.length, UInt(fpSchdParams.pregIdxWidth.W)))
+    val fpRfWdata = Wire(Vec(io.fromFpWb.get.length, UInt(fpSchdParams.rfDataWidth.W)))
     FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum, fpRfRaddr, fpRfRdata.get, fpRfWen, fpRfWaddr, fpRfWdata,
       bankNum = 1,
       debugReadAddr = fpDiffRead.map(_._1),
       debugReadData = fpDiffRead.map(_._2)
     )
+    fpRfWaddr := io.fromFpWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
+    fpRfWdata := io.fromFpWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
+    fpRfWen := RegNext(VecInit(io.fromFpWb.get.map(_.wen).toSeq))
+    for (portIdx <- fpRfRaddr.indices) {
+      if (fpRFReadArbiter.io.out.isDefinedAt(portIdx))
+        fpRfRaddr(portIdx) := fpRFReadArbiter.io.out(portIdx).bits.addr
+      else
+        fpRfRaddr(portIdx) := 0.U
+    }
   }
   else {
+    val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vecSchdParams.pregIdxWidth.W)))
+    val vfRfWen = Wire(Vec(splitNum, Vec(io.fromVfWb.get.length, Bool())))
+    val vfRfWaddr = Wire(Vec(io.fromVfWb.get.length, UInt(vecSchdParams.pregIdxWidth.W)))
+    val vfRfWdata = Wire(Vec(io.fromVfWb.get.length, UInt(vecSchdParams.rfDataWidth.W)))
+    val v0RfSplitNum = VLEN / XLEN
+    val v0RfRaddr = Wire(Vec(params.numPregRd(V0Data()), UInt(log2Up(V0PhyRegs).W)))
+    val v0RfWen = Wire(Vec(v0RfSplitNum, Vec(io.fromV0Wb.get.length, Bool())))
+    val v0RfWaddr = Wire(Vec(io.fromV0Wb.get.length, UInt(log2Up(V0PhyRegs).W)))
+    val v0RfWdata = Wire(Vec(io.fromV0Wb.get.length, UInt(V0Data().dataWidth.W)))
+    val vlRfRaddr = Wire(Vec(params.numPregRd(VlData()), UInt(log2Up(VlPhyRegs).W)))
+    val vlRfWen = Wire(Vec(io.fromVlWb.get.length, Bool()))
+    val vlRfWaddr = Wire(Vec(io.fromVlWb.get.length, UInt(log2Up(VlPhyRegs).W)))
+    val vlRfWdata = Wire(Vec(io.fromVlWb.get.length, UInt(VlData().dataWidth.W)))
     VfRegFile("VfRegFile", vecSchdParams.numPregs, splitNum, vfRfRaddr, vfRfRdata.get, vfRfWen, vfRfWaddr, vfRfWdata,
       debugReadAddr = vfDiffRead.map(_._1),
       debugReadData = vfDiffRead.map(_._2)
@@ -333,71 +395,78 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       debugReadAddr = vlDiffRead.map(_._1),
       debugReadData = vlDiffRead.map(_._2)
     )
+    vfRfWaddr := io.fromVfWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
+    vfRfWdata := io.fromVfWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
+    vfRfWen.foreach(_.zip(io.fromVfWb.get.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource })
+    for (portIdx <- vfRfRaddr.indices) {
+      if (vfRFReadArbiter.io.out.isDefinedAt(portIdx))
+        vfRfRaddr(portIdx) := vfRFReadArbiter.io.out(portIdx).bits.addr
+      else
+        vfRfRaddr(portIdx) := 0.U
+    }
+    v0RfWaddr := io.fromV0Wb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
+    v0RfWdata := io.fromV0Wb.get.map(x => RegEnable(x.data, x.wen)).toSeq
+    v0RfWen.foreach(_.zip(io.fromV0Wb.get.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource })
+    for (portIdx <- v0RfRaddr.indices) {
+      if (v0RFReadArbiter.io.out.isDefinedAt(portIdx))
+        v0RfRaddr(portIdx) := v0RFReadArbiter.io.out(portIdx).bits.addr
+      else
+        v0RfRaddr(portIdx) := 0.U
+    }
+    vlRfWaddr := io.fromVlWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
+    vlRfWdata := io.fromVlWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
+    vlRfWen := io.fromVlWb.get.map(x => RegNext(x.wen)).toSeq
+    for (portIdx <- vlRfRaddr.indices) {
+      if (vlRFReadArbiter.io.out.isDefinedAt(portIdx))
+        vlRfRaddr(portIdx) := vlRFReadArbiter.io.out(portIdx).bits.addr
+      else
+        vlRfRaddr(portIdx) := 0.U
+    }
+
+    val vecExcpUseVecRdPorts = Seq(6, 7, 8, 9, 10, 11, 0, 1)
+    val vecExcpUseVecWrPorts = Seq(0, 1, 2, 3)
+    val vecExcpUseV0RdPorts = Seq(2, 3)
+    val vecExcpUsev0WrPorts = Seq(0)
+    var v0RdPortsIter: Iterator[Int] = vecExcpUseV0RdPorts.iterator
+    val v0WrPortsIter: Iterator[Int] = vecExcpUsev0WrPorts.iterator
+    val (fromVecExcp, toVecExcp) = (io.fromVecExcpMod.get, io.toVecExcpMod.get)
+    for (i <- fromVecExcp.r.indices) {
+      when(fromVecExcp.r(i).valid && !fromVecExcp.r(i).bits.isV0) {
+        vfRfRaddr(vecExcpUseVecRdPorts(i)) := fromVecExcp.r(i).bits.addr
+      }
+      if (i % maxMergeNumPerCycle == 0) {
+        val v0RdPort = v0RdPortsIter.next()
+        when(fromVecExcp.r(i).valid && fromVecExcp.r(i).bits.isV0) {
+          v0RfRaddr(v0RdPort) := fromVecExcp.r(i).bits.addr
+        }
+      }
+    }
+    for (i <- fromVecExcp.w.indices) {
+      when(fromVecExcp.w(i).valid && !fromVecExcp.w(i).bits.isV0) {
+        val vecWrPort = vecExcpUseVecWrPorts(i)
+        vfRfWen.foreach(_(vecWrPort) := true.B)
+        vfRfWaddr(vecWrPort) := fromVecExcp.w(i).bits.newVdAddr
+        vfRfWdata(vecWrPort) := fromVecExcp.w(i).bits.newVdData
+      }
+      if (i % maxMergeNumPerCycle == 0) {
+        when(fromVecExcp.w(i).valid && fromVecExcp.w(i).bits.isV0) {
+          val v0WrPort = v0WrPortsIter.next()
+          v0RfWen.foreach(_(v0WrPort) := true.B)
+          v0RfWaddr(v0WrPort) := fromVecExcp.w(i).bits.newVdAddr
+          v0RfWdata(v0WrPort) := fromVecExcp.w(i).bits.newVdData
+        }
+      }
+    }
+    v0RdPortsIter = vecExcpUseV0RdPorts.iterator
+    for (i <- toVecExcp.rdata.indices) {
+      toVecExcp.rdata(i).valid := RegNext(fromVecExcp.r(i).valid)
+      toVecExcp.rdata(i).bits := Mux(
+        RegEnable(!fromVecExcp.r(i).bits.isV0, fromVecExcp.r(i).valid),
+        vfRfRdata.get(vecExcpUseVecRdPorts(i)),
+        if (i % maxMergeNumPerCycle == 0) v0RfRdata.get(v0RdPortsIter.next()) else 0.U,
+      )
+    }
   }
-
-  intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
-  intRfWdata := io.fromIntWb.map(x => RegEnable(x.data, x.wen)).toSeq
-  intRfWen := RegNext(VecInit(io.fromIntWb.map(_.wen).toSeq))
-
-  for (portIdx <- intRfRaddr.indices) {
-    if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
-      intRfRaddr(portIdx) := intRFReadArbiter.io.out(portIdx).bits.addr
-    else
-      intRfRaddr(portIdx) := 0.U
-  }
-
-  fpRfWaddr := io.fromFpWb.map(x => RegEnable(x.addr, x.wen)).toSeq
-  fpRfWdata := io.fromFpWb.map(x => RegEnable(x.data, x.wen)).toSeq
-  fpRfWen := RegNext(VecInit(io.fromFpWb.map(_.wen).toSeq))
-
-  for (portIdx <- fpRfRaddr.indices) {
-    if (fpRFReadArbiter.io.out.isDefinedAt(portIdx))
-      fpRfRaddr(portIdx) := fpRFReadArbiter.io.out(portIdx).bits.addr
-    else
-      fpRfRaddr(portIdx) := 0.U
-  }
-
-  vfRfWaddr := io.fromVfWb.map(x => RegEnable(x.addr, x.wen)).toSeq
-  vfRfWdata := io.fromVfWb.map(x => RegEnable(x.data, x.wen)).toSeq
-  vfRfWen.foreach(_.zip(io.fromVfWb.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource } )
-
-  for (portIdx <- vfRfRaddr.indices) {
-    if (vfRFReadArbiter.io.out.isDefinedAt(portIdx))
-      vfRfRaddr(portIdx) := vfRFReadArbiter.io.out(portIdx).bits.addr
-    else
-      vfRfRaddr(portIdx) := 0.U
-  }
-
-  v0RfWaddr := io.fromV0Wb.map(x => RegEnable(x.addr, x.wen)).toSeq
-  v0RfWdata := io.fromV0Wb.map(x => RegEnable(x.data, x.wen)).toSeq
-  v0RfWen.foreach(_.zip(io.fromV0Wb.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource } )
-
-  for (portIdx <- v0RfRaddr.indices) {
-    if (v0RFReadArbiter.io.out.isDefinedAt(portIdx))
-      v0RfRaddr(portIdx) := v0RFReadArbiter.io.out(portIdx).bits.addr
-    else
-      v0RfRaddr(portIdx) := 0.U
-  }
-
-  private val vecExcpUseVecRdPorts = Seq(6, 7, 8, 9, 10, 11, 0, 1)
-  private val vecExcpUseVecWrPorts = Seq(0, 1, 2, 3)
-  private val vecExcpUseV0RdPorts = Seq(2, 3)
-  private val vecExcpUsev0WrPorts = Seq(0)
-
-  private var v0RdPortsIter: Iterator[Int] = vecExcpUseV0RdPorts.iterator
-  private val v0WrPortsIter: Iterator[Int] = vecExcpUsev0WrPorts.iterator
-
-  vlRfWaddr := io.fromVlWb.map(x => RegEnable(x.addr, x.wen)).toSeq
-  vlRfWdata := io.fromVlWb.map(x => RegEnable(x.data, x.wen)).toSeq
-  vlRfWen := io.fromVlWb.map(x => RegNext(x.wen)).toSeq
-
-  for (portIdx <- vlRfRaddr.indices) {
-    if (vlRFReadArbiter.io.out.isDefinedAt(portIdx))
-      vlRfRaddr(portIdx) := vlRFReadArbiter.io.out(portIdx).bits.addr
-    else
-      vlRfRaddr(portIdx) := 0.U
-  }
-
 
   intDiffRead.foreach { case (addr, _) =>
     addr := io.diffIntRat.get
@@ -417,61 +486,12 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     addr := io.diffVlRat.get
   }
 
-  println(s"[DataPath] " +
+  println(s"[${param.getName}DataPath] " +
     s"has intDiffRead: ${intDiffRead.nonEmpty}, " +
     s"has fpDiffRead: ${fpDiffRead.nonEmpty}, " +
     s"has vecDiffRead: ${vfDiffRead.nonEmpty}, " +
     s"has v0DiffRead: ${v0DiffRead.nonEmpty}, " +
     s"has vlDiffRead: ${vlDiffRead.nonEmpty}")
-
-  // regcache
-  private val regCache = Module(new RegCache())
-
-  def IssueBundle2RCReadPort(issue: DecoupledIO[IssueQueueIssueBundle]): Vec[RCReadPort] = {
-    val readPorts = Wire(Vec(issue.bits.exuParams.numIntSrc, new RCReadPort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth)))
-    readPorts.zipWithIndex.foreach{ case (r, idx) =>
-      r.ren  := issue.valid && issue.bits.common.dataSources(idx).readRegCache
-      r.addr := issue.bits.rcIdx.get(idx)
-      r.data := DontCare
-    }
-    readPorts
-  }
-
-  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
-  private val regCacheReadData = regCache.io.readPorts.map(_.data)
-
-  println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
-  require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
-  if (param.isIntSchd){
-    regCache.io.readPorts.zip(regCacheReadReq).foreach { case (r, req) =>
-      r.ren := req.ren
-      r.addr := req.addr
-    }
-  }
-  else {
-    regCache.io.readPorts.map{ case x =>
-      x.ren := false.B
-      x.addr := 0.U
-    }
-  }
-
-  val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
-  s1_RCReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten
-    .zip(regCacheReadData.take(params.getIntExuRCReadSize)).foreach{ case (s1_data, rdata) => 
-      s1_data := rdata
-    }
-  s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten
-    .zip(regCacheReadData.takeRight(params.getMemExuRCReadSize)).foreach{ case (s1_data, rdata) => 
-      s1_data := rdata
-    }
-
-  println(s"[DataPath] s1_RCReadData.int.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.int.size: ${params.getIntExuRCReadSize}")
-  println(s"[DataPath] s1_RCReadData.mem.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.mem.size: ${params.getMemExuRCReadSize}")
-
-  io.toWakeupQueueRCIdx := regCache.io.toWakeupQueueRCIdx
-  io.toBypassNetworkRCData := s1_RCReadData
-  regCache.io.writePorts := io.fromBypassNetwork
 
   val s1_addrOHs = Reg(MixedVec(
     fromIQ.map(x => MixedVec(x.map(_.bits.addrOH.cloneType).toSeq)).toSeq
@@ -732,89 +752,12 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     }
   }
 
-  val int_regcache_size = 48
-  val int_regcache_tag = RegInit(VecInit(Seq.fill(int_regcache_size)(0.U(intSchdParams.pregIdxWidth.W))))
-  val int_regcache_enqPtr = RegInit(0.U(log2Up(int_regcache_size).W))
-  int_regcache_enqPtr := int_regcache_enqPtr + PopCount(intRfWen)
-  for (i <- intRfWen.indices) {
-    when (intRfWen(i)) {
-      int_regcache_tag(int_regcache_enqPtr + PopCount(intRfWen.take(i))) := intRfWaddr(i)
-    }
-  }
-
-  val vf_regcache_size = 48
-  val vf_regcache_tag = RegInit(VecInit(Seq.fill(vf_regcache_size)(0.U(vecSchdParams.pregIdxWidth.W))))
-  val vf_regcache_enqPtr = RegInit(0.U(log2Up(vf_regcache_size).W))
-  vf_regcache_enqPtr := vf_regcache_enqPtr + PopCount(vfRfWen.head)
-  for (i <- vfRfWen.indices) {
-    when (vfRfWen.head(i)) {
-      vf_regcache_tag(vf_regcache_enqPtr + PopCount(vfRfWen.head.take(i))) := vfRfWaddr(i)
-    }
-  }
-
-  if (param.isVecSchd) {
-    val (fromVecExcp, toVecExcp) = (io.fromVecExcpMod.get, io.toVecExcpMod.get)
-    for (i <- fromVecExcp.r.indices) {
-      when(fromVecExcp.r(i).valid && !fromVecExcp.r(i).bits.isV0) {
-        vfRfRaddr(vecExcpUseVecRdPorts(i)) := fromVecExcp.r(i).bits.addr
-      }
-      if (i % maxMergeNumPerCycle == 0) {
-        val v0RdPort = v0RdPortsIter.next()
-        when(fromVecExcp.r(i).valid && fromVecExcp.r(i).bits.isV0) {
-          v0RfRaddr(v0RdPort) := fromVecExcp.r(i).bits.addr
-        }
-      }
-    }
-    for (i <- fromVecExcp.w.indices) {
-      when(fromVecExcp.w(i).valid && !fromVecExcp.w(i).bits.isV0) {
-        val vecWrPort = vecExcpUseVecWrPorts(i)
-        vfRfWen.foreach(_(vecWrPort) := true.B)
-        vfRfWaddr(vecWrPort) := fromVecExcp.w(i).bits.newVdAddr
-        vfRfWdata(vecWrPort) := fromVecExcp.w(i).bits.newVdData
-      }
-      if (i % maxMergeNumPerCycle == 0) {
-        when(fromVecExcp.w(i).valid && fromVecExcp.w(i).bits.isV0) {
-          val v0WrPort = v0WrPortsIter.next()
-          v0RfWen.foreach(_(v0WrPort) := true.B)
-          v0RfWaddr(v0WrPort) := fromVecExcp.w(i).bits.newVdAddr
-          v0RfWdata(v0WrPort) := fromVecExcp.w(i).bits.newVdData
-        }
-      }
-    }
-    v0RdPortsIter = vecExcpUseV0RdPorts.iterator
-    for (i <- toVecExcp.rdata.indices) {
-      toVecExcp.rdata(i).valid := RegNext(fromVecExcp.r(i).valid)
-      toVecExcp.rdata(i).bits := Mux(
-        RegEnable(!fromVecExcp.r(i).bits.isV0, fromVecExcp.r(i).valid),
-        vfRfRdata.get(vecExcpUseVecRdPorts(i)),
-        if (i % maxMergeNumPerCycle == 0) v0RfRdata.get(v0RdPortsIter.next()) else 0.U,
-      )
-    }
-  }
-
   XSPerfHistogram(s"IntRegFileRead_hist", PopCount(intRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
   XSPerfHistogram(s"FpRegFileRead_hist", PopCount(fpRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
   XSPerfHistogram(s"VfRegFileRead_hist", PopCount(vfRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
   XSPerfHistogram(s"IntRegFileWrite_hist", PopCount(intRFWriteReq.flatten), true.B, 0, 20, 1)
   XSPerfHistogram(s"FpRegFileWrite_hist", PopCount(fpRFWriteReq.flatten), true.B, 0, 20, 1)
   XSPerfHistogram(s"VfRegFileWrite_hist", PopCount(vfRFWriteReq.flatten), true.B, 0, 20, 1)
-
-  val int_regcache_part32 = (1 until 33).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-  val int_regcache_part24 = (1 until 24).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-  val int_regcache_part16 = (1 until 17).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-  val int_regcache_part8 = (1 until 9).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-
-  val int_regcache_48_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_tag.map(_ === x.bits.addr).reduce(_ || _))
-  val int_regcache_8_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part8.map(_ === x.bits.addr).reduce(_ || _))
-  val int_regcache_16_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part16.map(_ === x.bits.addr).reduce(_ || _))
-  val int_regcache_24_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part24.map(_ === x.bits.addr).reduce(_ || _))
-  val int_regcache_32_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part32.map(_ === x.bits.addr).reduce(_ || _))
-  XSPerfAccumulate("IntRegCache48Hit", PopCount(int_regcache_48_hit_vec))
-  XSPerfAccumulate("IntRegCache8Hit", PopCount(int_regcache_8_hit_vec))
-  XSPerfAccumulate("IntRegCache16Hit", PopCount(int_regcache_16_hit_vec))
-  XSPerfAccumulate("IntRegCache24Hit", PopCount(int_regcache_24_hit_vec))
-  XSPerfAccumulate("IntRegCache32Hit", PopCount(int_regcache_32_hit_vec))
-  XSPerfHistogram("IntRegCache48Hit_hist", PopCount(int_regcache_48_hit_vec), true.B, 0, 16, 2)
 
   XSPerfAccumulate(s"IntRFReadBeforeArb", PopCount(intRFReadArbiter.io.in.flatten.flatten.map(_.valid)))
   XSPerfAccumulate(s"IntRFReadAfterArb", PopCount(intRFReadArbiter.io.out.map(_.valid)))
@@ -954,15 +897,15 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val og1ImmInfo: Vec[ImmInfo] = Output(Vec(params.allExuParams.size, new ImmInfo))
 
-  val fromIntWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genIntWriteBackBundle)
+  val fromIntWb = Option.when(param.isIntSchd)(Input(params.genIntWriteBackBundle))
 
-  val fromFpWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genFpWriteBackBundle)
+  val fromFpWb = Option.when(param.isFpSchd)(Input(params.genFpWriteBackBundle))
 
-  val fromVfWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genVfWriteBackBundle)
+  val fromVfWb = Option.when(param.isVecSchd)(Input(params.genVfWriteBackBundle))
 
-  val fromV0Wb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genV0WriteBackBundle)
+  val fromV0Wb = Option.when(param.isVecSchd)(Input(params.genV0WriteBackBundle))
 
-  val fromVlWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genVlWriteBackBundle)
+  val fromVlWb = Option.when(param.isVecSchd)(Input(params.genVlWriteBackBundle))
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 

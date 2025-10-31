@@ -8,9 +8,8 @@ import utility.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.regfile.RfWritePortWithConfig
+import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.{Redirect, XSBundle, XSModule}
-import xiangshan.SrcType.v0
 import xiangshan.backend.fu.vector.Bundles.Vstart
 import xiangshan.backend.issue.SchdBlockParams
 
@@ -100,20 +99,11 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
     val vstart = Vstart()
   })
 
-  val toIntPreg = Flipped(MixedVec(Vec(params.numPregWb(IntData()),
-    new RfWritePortWithConfig(params.intPregParams.dataCfg, params.intPregParams.addrWidth))))
-
-  val toFpPreg = Flipped(MixedVec(Vec(params.numPregWb(FpData()),
-    new RfWritePortWithConfig(params.fpPregParams.dataCfg, params.fpPregParams.addrWidth))))
-
-  val toVfPreg = Flipped(MixedVec(Vec(params.numPregWb(VecData()),
-    new RfWritePortWithConfig(params.vfPregParams.dataCfg, params.vfPregParams.addrWidth))))
-
-  val toV0Preg = Flipped(MixedVec(Vec(params.numPregWb(V0Data()),
-    new RfWritePortWithConfig(params.v0PregParams.dataCfg, params.v0PregParams.addrWidth))))
-
-  val toVlPreg = Flipped(MixedVec(Vec(params.numPregWb(VlData()),
-    new RfWritePortWithConfig(params.vlPregParams.dataCfg, params.vlPregParams.addrWidth))))
+  val toIntPreg = Output(backendParams.genIntWriteBackBundle)
+  val toFpPreg = Output(backendParams.genFpWriteBackBundle)
+  val toVfPreg = Output(backendParams.genVfWriteBackBundle)
+  val toV0Preg = Output(backendParams.genV0WriteBackBundle)
+  val toVlPreg = Output(backendParams.genVlWriteBackBundle)
 
   val toCtrlBlock = new Bundle {
     val writeback: MixedVec[ValidIO[ExuOutput]] = MixedVec(schdParams.genExuOutputValidBundle.flatten)
@@ -376,11 +366,11 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   (vfExuWBs zip vfExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
 
   // io assign
-  private val toIntPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(intWbArbiterOut.map(x => x.bits.asIntRfWriteBundle(x.fire)).toSeq)
-  private val toFpPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(fpWbArbiterOut.map(x => x.bits.asFpRfWriteBundle(x.fire)).toSeq)
-  private val toVfPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(vfWbArbiterOut.map(x => x.bits.asVfRfWriteBundle(x.fire)).toSeq)
-  private val toV0Preg: MixedVec[RfWritePortWithConfig] = MixedVecInit(v0WbArbiterOut.map(x => x.bits.asV0RfWriteBundle(x.fire)).toSeq)
-  private val toVlPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(vlWbArbiterOut.map(x => x.bits.asVlRfWriteBundle(x.fire)).toSeq)
+  private val toIntPreg: MixedVec[RfWritePortBundle] = MixedVecInit(intWbArbiterOut.map(x => x.bits.asIntRfWriteBundle(x.fire)).toSeq)
+  private val toFpPreg: MixedVec[RfWritePortBundle] = MixedVecInit(fpWbArbiterOut.map(x => x.bits.asFpRfWriteBundle(x.fire)).toSeq)
+  private val toVfPreg: MixedVec[RfWritePortBundle] = MixedVecInit(vfWbArbiterOut.map(x => x.bits.asVfRfWriteBundle(x.fire)).toSeq)
+  private val toV0Preg: MixedVec[RfWritePortBundle] = MixedVecInit(v0WbArbiterOut.map(x => x.bits.asV0RfWriteBundle(x.fire)).toSeq)
+  private val toVlPreg: MixedVec[RfWritePortBundle] = MixedVecInit(vlWbArbiterOut.map(x => x.bits.asVlRfWriteBundle(x.fire)).toSeq)
 
   private val wb2Ctrl = if (schdParams.isIntSchd) intExuWBs
                         else if (schdParams.isFpSchd) fpExuWBs
