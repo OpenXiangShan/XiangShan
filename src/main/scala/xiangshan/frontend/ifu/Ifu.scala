@@ -483,7 +483,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_alignExpdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
     Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
-  private val s3_alignIll        = VecInit(rvcExpanders.map(_.io.ill))
+  private val s3_alignRvcIll     = VecInit(rvcExpanders.map(_.io.ill))
   private val s3_alignPds        = RegEnable(s2_alignPd, s2_fire)
   private val s3_alignJumpOffset = RegEnable(s2_alignJumpOffset, s2_fire)
 
@@ -639,6 +639,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // Find the last entry based on the boundaries of compacted valid signals.
   private val select = s3_alignCompactInfo.selectBlock
   private val enq    = io.toIBuffer.bits.enqEnable
+
+  private val s3_rvcException       = ExceptionType.fromRvcExpander((enq & s3_alignRvcIll.asUInt).orR, s3_valid)
+  private val s3_rvcExceptionOffset = PriorityEncoder(enq & s3_alignRvcIll.asUInt)
+
   io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
     if (i == IBufferEnqueueWidth - 1) enq(i)
     else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
@@ -650,15 +654,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
   io.toIBuffer.bits.foldpc := s3_alignFoldPc
   // mark the exception only on first instruction
-  io.toIBuffer.bits.exceptionType := s3_icacheMeta(0).exception
+  io.toIBuffer.bits.exceptionType := s3_icacheMeta(0).exception || s3_rvcException
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := s3_icacheMeta(0).isBackendException
+  io.toIBuffer.bits.isBackendException := s3_icacheMeta(0).isBackendException
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
-  io.toIBuffer.bits.crossPageIPFFix := s3_icacheMeta(0).exception.hasException && s3_prevLastIsHalfRvi
-  io.toIBuffer.bits.illegalInstr    := s3_alignIll
-  io.toIBuffer.bits.triggered       := s3_alignTriggered
+  io.toIBuffer.bits.exceptionCrossPage := s3_icacheMeta(0).exception.hasException && s3_prevLastIsHalfRvi
+  // if icache respond with exception, it's marked on entire cacheline,
+  // so the first enqueued instr should be marked with exception
+  // otherwise, we only have rvcException, so select its offset
+  io.toIBuffer.bits.exceptionOffset := Mux(
+    s3_icacheMeta(0).exception.hasException,
+    0.U,
+    s3_rvcExceptionOffset
+  )
+
+  io.toIBuffer.bits.triggered := s3_alignTriggered
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
@@ -712,6 +724,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   when(s3_reqIsUncache) {
     val inst        = s3_uncacheData
     val brAttribute = BranchAttribute.decode(inst)
+
+    val uncacheRvcException = ExceptionType.fromRvcExpander(uncacheRvcExpander.io.ill)
     io.toIBuffer.bits.instrs(s3_shiftNum) := Mux(
       uncacheRvcExpander.io.ill,
       uncacheRvcExpander.io.in,
@@ -723,11 +737,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(s3_shiftNum).isRVC              := uncacheIsRvc
     io.toIBuffer.bits.pd(s3_shiftNum).brAttribute        := brAttribute
     io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
-    io.toIBuffer.bits.illegalInstr(s3_shiftNum)          := uncacheRvcExpander.io.ill
 
-    io.toIBuffer.bits.exceptionType := uncacheException
+    io.toIBuffer.bits.exceptionType := uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.
-    io.toIBuffer.bits.crossPageIPFFix := prevUncacheCrossPage && uncacheException.hasException
+    io.toIBuffer.bits.exceptionCrossPage := prevUncacheCrossPage && uncacheException.hasException
+    io.toIBuffer.bits.exceptionOffset    := 0.U
+
     // The s3_alignBlockStartPos vector marks the position of the first instruction.
     // In uncache scenarios, only a single instruction is allowed for execution,
     // so the valid signal enqueued into the IBuffer must align with s3_alignBlockStartPos.

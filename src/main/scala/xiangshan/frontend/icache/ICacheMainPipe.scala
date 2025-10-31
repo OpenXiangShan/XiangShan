@@ -251,9 +251,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     )
   })
 
-  private val s1_l2Corrupt = VecInit((0 until PortNumber).map { i =>
+  private val s1_tlCorrupt = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(
       s1_mshrHits(i) && fromMiss.bits.corrupt,
+      s1_mshrHits(i) || RegNext(s0_fire)
+    )
+  })
+
+  private val s1_tlDenied = VecInit((0 until PortNumber).map { i =>
+    DataHoldBypass(
+      s1_mshrHits(i) && fromMiss.bits.denied,
       s1_mshrHits(i) || RegNext(s0_fire)
     )
   })
@@ -383,11 +390,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_fetchFinish = !s1_shouldFetch.reduce(_ || _)
 
   // also raise af if l2 corrupt is detected
-  private val s1_l2Exception = ExceptionType(hasAf = s1_l2Corrupt.reduce(_ || _))
+  private val s1_tlException = (s1_tlCorrupt zip s1_tlDenied).map { case (corrupt, denied) =>
+    ExceptionType.fromTileLink(corrupt, denied, s1_valid) // s1_valid used only for assertion
+  }.reduce(_ || _)
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb/pmp has the highest priority, then l2
-  private val s1_exceptionOut = s1_exception || s1_l2Exception
+  private val s1_exceptionOut = s1_exception || s1_tlException
 
   /* *** send response to IFU *** */
   toIfu.valid                   := s1_fire

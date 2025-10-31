@@ -281,6 +281,7 @@ class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
   val data:        UInt = UInt(blockBits.W)
   val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
   val corrupt:     Bool = Bool()
+  val denied:      Bool = Bool()
 }
 
 /* ***** Mshr ***** */

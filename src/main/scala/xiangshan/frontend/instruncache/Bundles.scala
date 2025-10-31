@@ -26,7 +26,9 @@ class InstrUncacheReq(implicit p: Parameters) extends InstrUncacheBundle {
 }
 
 class InstrUncacheResp(implicit p: Parameters) extends InstrUncacheBundle {
-  val data:    UInt = UInt(32.W) // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo
-  val corrupt: Bool = Bool()
+  // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo, remove magic number 32
+  val data:       UInt = UInt(32.W)
+  val corrupt:    Bool = Bool()
+  val denied:     Bool = Bool()
   val incomplete: Bool = Bool() // whether this.data is incomplete (e.g. crossing a page boundary)
 }
