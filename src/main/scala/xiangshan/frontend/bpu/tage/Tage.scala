@@ -176,10 +176,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_bankIdx  = getBankIndex(t0_startVAddr)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
 
-  // TODO: should block resolveQueue when bank conflict
   private val t0_readBankConflict = t0_trainValid && s0_fire && t0_bankMask === s0_bankMask
+  io.train.ready := !t0_readBankConflict
 
-  private val t0_valid = t0_trainValid && !t0_readBankConflict && io.enable
+  private val t0_valid = io.train.fire && t0_hasConditionalBranch && io.enable
 
   private val t0_foldedHistForIdx = histInfoForIdx.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)
   private val t0_foldedHistForTag = histInfoForTag.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist)

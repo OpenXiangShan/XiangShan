@@ -50,6 +50,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
   io.resetDone := resetDone
 
+  io.train.ready := true.B
+
   private val takenCounter = RegInit(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumSets)(

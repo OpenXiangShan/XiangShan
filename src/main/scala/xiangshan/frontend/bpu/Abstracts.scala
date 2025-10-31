@@ -38,7 +38,7 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict request
   val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
   // resolve train
-  val train: Valid[BpuTrain] = Input(Valid(new BpuTrain))
+  val train: DecoupledIO[BpuTrain] = Flipped(Decoupled(new BpuTrain))
   // fast train for s1 predictors
   val fastTrain: Option[Valid[BpuFastTrain]] = None
 

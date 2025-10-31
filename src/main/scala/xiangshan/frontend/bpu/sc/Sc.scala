@@ -51,6 +51,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   io.resetDone := resetDone
 
+  io.train.ready := true.B
+
   /*
    *  predict pipeline stage 0
    */
@@ -135,8 +137,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 1
    */
-  private val t1_trainValid = RegNext(io.train.valid, init = false.B)
-  private val t1_train      = RegEnable(io.train.bits, io.train.valid)
+  private val t1_trainValid = RegNext(io.train.fire, init = false.B)
+  private val t1_train      = RegEnable(io.train.bits, io.train.fire)
   private val t1_branches   = t1_train.branches
   private val t1_setIdx = PathTableInfos.map(info =>
     getIdx(

@@ -51,6 +51,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   io.resetDone := true.B
 
+  io.train.ready := true.B
+
   def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
   private val stack = Module(new RasStack).io
