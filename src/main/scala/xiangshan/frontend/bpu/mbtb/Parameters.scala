@@ -48,8 +48,9 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def TargetWidth:        Int = mbtbParameters.TargetWidth
   def SetIdxLen:          Int = log2Ceil(NumSets)
   def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)
+  def AlignBankIdxLen:    Int = log2Ceil(NumAlignBanks)
   def WriteBufferSize:    Int = mbtbParameters.WriteBufferSize
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
-  def CfiAlignedPositionWidth: Int = CfiPositionWidth - log2Ceil(NumAlignBanks)
+  def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
 }

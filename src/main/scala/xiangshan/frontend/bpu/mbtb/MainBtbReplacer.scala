@@ -22,86 +22,74 @@ import xiangshan.frontend.bpu.PlruStateGen
 import xiangshan.frontend.bpu.ReplacerState
 
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
-  val io: ReplacerIO = IO(new ReplacerIO)
+  class MainBtbReplacerIO extends Bundle {
+    class PredictTouch extends Bundle {
+      val setIdx:  UInt = UInt(SetIdxLen.W)
+      val wayMask: UInt = UInt(NumWay.W)
+    }
 
-  private val statesBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new ReplacerState(NumSets, NumWay)))
+    class TrainTouch extends Bundle {
+      val setIdx: UInt = UInt(SetIdxLen.W)
+    }
 
-  private val predictSetIndexVec = io.predictionSetIndxVec
-  private val predictStateEntries: Vec[UInt] =
-    WireInit(VecInit(Seq.fill(NumAlignBanks)(0.U((NumWay - 1).W))))
-  predictSetIndexVec zip statesBanks zip predictStateEntries foreach { case ((setIdx, states), state) =>
-    states.io.predictReadSetIdx := setIdx
-    state                       := states.io.predictReadState
-  }
-  require(
-    predictSetIndexVec(0).getWidth == SetIdxLen,
-    s"S2 stage set index width mismatch: ${predictSetIndexVec(0).getWidth} != $SetIdxLen"
-  )
-  require(
-    predictSetIndexVec.length == NumAlignBanks,
-    s"predictSetIndexVec width mismatch: ${predictSetIndexVec.length} != $NumAlignBanks"
-  )
-  private val predictStateTouchs: Vec[Vec[Valid[UInt]]] = io.predictionTouchWays
-  private val predictNextState: Vec[UInt] =
-    WireInit(VecInit(Seq.fill(NumAlignBanks)(0.U((NumWay - 1).W))))
+    class Victim extends Bundle {
+      val wayMask: UInt = UInt(NumWay.W)
+    }
 
-  private val plruStateGen = Seq.tabulate(NumAlignBanks) { alignIdx =>
-    Module(new PlruStateGen(NumWay, accessSize = NumWay))
-  }
-  private val hits = io.predictionHitMask
-  plruStateGen zip predictStateEntries zip predictStateTouchs zip predictNextState zip hits foreach {
-    case ((((gen, state), touchs), nextState), hit) =>
-      gen.io.stateIn   := state
-      gen.io.touchWays := touchs
-      nextState        := Mux(hit, gen.io.nextState, state)
-  }
-  predictSetIndexVec zip predictNextState zip statesBanks zip hits foreach {
-    case (((setIdx, nextState), states), hit) =>
-      states.io.predictWriteValid  := hit
-      states.io.predictWriteSetIdx := setIdx
-      states.io.predictWriteState  := nextState
+    val predictTouch: Valid[PredictTouch] = Flipped(Valid(new PredictTouch))
+    val trainTouch:   Valid[TrainTouch]   = Flipped(Valid(new TrainTouch))
+    val victim:       Victim              = Output(new Victim)
   }
 
-  private val trainSetIdx = io.trainSetIndx
-  private val trainValid  = io.trainWriteValid
-  require(
-    trainSetIdx.getWidth == SetIdxLen,
-    s"train set index width mismatch: ${trainSetIdx.getWidth} != $SetIdxLen"
-  )
-  private val trainAlignBankMask: Vec[Bool] = io.trainAlignBankMask
-  private val trainStateEntries: Vec[UInt] =
-    WireInit(VecInit(Seq.fill(NumAlignBanks)(0.U((NumWay - 1).W))))
-  trainAlignBankMask zip statesBanks zip trainStateEntries foreach { case ((bankEnable, states), state) =>
-    states.io.trainReadSetIdx := trainSetIdx
-    state                     := states.io.trainReadState
-  }
+  val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
-  private val trainStateEntry: UInt = Mux1H(trainAlignBankMask, trainStateEntries)
-  private val writeReplacerGen = Module(new PlruStateGen(NumWay, accessSize = 1))
-  private val trainTouchWay    = Wire(Valid(UInt(log2Up(NumWay).W)))
-  private val trainVictimWay   = Wire(UInt(log2Up(NumWay).W))
-  private val trainNextState: UInt = WireInit(0.U((NumWay - 1).W))
-  writeReplacerGen.io.stateIn   := trainStateEntry
-  trainVictimWay                := writeReplacerGen.io.replaceWay
-  trainNextState                := Mux(trainValid, writeReplacerGen.io.nextState, trainStateEntry)
-  trainTouchWay.valid           := trainValid
-  trainTouchWay.bits            := trainVictimWay
-  writeReplacerGen.io.touchWays := Seq(trainTouchWay)
+  private val stateBank       = Module(new ReplacerState(NumSets, NumWay))
+  private val predictStateGen = Module(new PlruStateGen(NumWay, accessSize = NumWay))
+  private val trainStateGen   = Module(new PlruStateGen(NumWay, accessSize = 1))
 
-  statesBanks zip trainAlignBankMask foreach { case (states, alignBankEnable) =>
-    states.io.trainWriteValid  := trainValid && alignBankEnable
-    states.io.trainWriteSetIdx := trainSetIdx
-    states.io.trainWriteState  := trainNextState
-  }
-  require(
-    trainVictimWay.getWidth == log2Ceil(NumWay),
-    s"Replace way width mismatch: ${trainVictimWay.getWidth} != ${log2Ceil(NumWay)}"
-  )
+  /* *** predict *** */
+  // read current state
+  stateBank.io.predictReadSetIdx := io.predictTouch.bits.setIdx
+  private val predictState = stateBank.io.predictReadState
 
-  io.victimWayIdx := trainVictimWay
-  require(
-    io.victimWayIdx.getWidth == log2Up(NumWay),
-    s"Write way mask width mismatch: ${io.victimWayIdx.getWidth} != $log2Up(NumWay)"
-  )
+  // compose touch way vec
+  private val predictTouchWay = VecInit((0 until NumWay).map { i =>
+    val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
+    wayValid.valid := io.predictTouch.valid && io.predictTouch.bits.wayMask(i)
+    wayValid.bits  := i.U
+    wayValid
+  })
 
+  // generate next state
+  predictStateGen.io.stateIn   := predictState
+  predictStateGen.io.touchWays := predictTouchWay
+  private val predictNextState = Mux(io.predictTouch.valid, predictStateGen.io.nextState, predictState)
+
+  // write back next state
+  stateBank.io.predictWriteValid  := io.predictTouch.valid
+  stateBank.io.predictWriteSetIdx := io.predictTouch.bits.setIdx
+  stateBank.io.predictWriteState  := predictNextState
+
+  /* *** train *** */
+  // read current state
+  stateBank.io.trainReadSetIdx := io.trainTouch.bits.setIdx
+  private val trainState = stateBank.io.trainReadState
+
+  // compose touch way vec
+  private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
+  trainTouchWay.valid := io.trainTouch.valid
+  trainTouchWay.bits  := trainStateGen.io.replaceWay
+
+  // generate next state
+  trainStateGen.io.stateIn   := trainState
+  trainStateGen.io.touchWays := VecInit(Seq(trainTouchWay))
+  private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
+
+  // write back next state
+  stateBank.io.trainWriteValid  := io.trainTouch.valid
+  stateBank.io.trainWriteSetIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainWriteState  := trainNextState
+
+  /* *** victim *** */
+  io.victim.wayMask := UIntToOH(trainStateGen.io.replaceWay)
 }
