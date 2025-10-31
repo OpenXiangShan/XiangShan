@@ -32,8 +32,14 @@ trait Helpers extends HasMainBtbParameters
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
+  def getNextSetIndex(pc: PrunedAddr): UInt =
+    getSetIndex(getNextAlignedAddr(pc))
+
   def getReplacerSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + FetchBlockAlignWidth - 1, FetchBlockAlignWidth)
+
+  def getNextReplacerSetIndex(pc: PrunedAddr): UInt =
+    getReplacerSetIndex(pc) + 1.U
 
   def getAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
