@@ -20,8 +20,8 @@ import chisel3.util._
 import xiangshan.frontend.bpu.HalfAlignHelper
 
 trait Helpers extends HasGhrParameters with HalfAlignHelper {
-  def getNewGhr(oldGhr: Vec[Bool], shiftBits: Vec[Bool], takenPtr: UInt): Vec[Bool] = {
-    val catBits = Cat(oldGhr.asUInt, shiftBits.asUInt)
-    VecInit(Seq.tabulate(GhrHistoryLength)(i => catBits(takenPtr +& i.U)))
+  def getNewGhr(oldGhr: UInt, numLess: UInt, taken: Bool): UInt = {
+    val numShift = Mux(taken, numLess, (GhrShamt - 1).U)
+    Cat(oldGhr << numShift, taken)(GhrHistoryLength - 1, 0)
   }
 }

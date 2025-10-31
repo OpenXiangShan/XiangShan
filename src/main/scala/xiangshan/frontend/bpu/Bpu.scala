@@ -210,6 +210,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.foldedPathHist      := phr.io.s1_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.train.valid         := train.valid
+  sc.io.s3_override         := s3_override
   sc.io.ghr                 := ghr.io.s0_ghist
   private val scTakenMask = sc.io.takenMask
   dontTouch(scTakenMask)
@@ -407,7 +408,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // ghr update
   ghr.io.stageCtrl           := stageCtrl
-  ghr.io.update.valid        := s3_fire
   ghr.io.update.taken        := s3_taken
   ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
   ghr.io.update.position     := s3_mbtbResult.positions

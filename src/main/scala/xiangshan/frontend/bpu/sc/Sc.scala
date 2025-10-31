@@ -35,12 +35,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult:          Vec[Valid[BtbInfo]]   = Input(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s3_override:         Bool                  = Input(Bool())
     val ghr:                 GhrEntry              = Input(new GhrEntry())
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val takenMask:           Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val meta:                ScMeta                = Output(new ScMeta())
   }
   val io: ScIO = IO(new ScIO)
+
+  /*
+   * stage control signals
+   */
+  private val s0_fire = io.stageCtrl.s0_fire && io.enable
+  private val s1_fire = io.stageCtrl.s1_fire && io.enable
+  private val s2_fire = io.stageCtrl.s2_fire && io.enable
+  private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
   private val pathTable =
     PathTableInfos.map(tableInfo => Module(new ScTable(tableInfo.Size, tableInfo.HistoryLength)))
@@ -57,14 +66,66 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.resetDone := resetDone
 
   /*
+   * ghr stage ctrl signals
+   */
+  private val s0_ghr      = WireInit(0.U.asTypeOf(io.ghr))
+  private val s1_ghr      = RegEnable(s0_ghr, s0_fire)
+  private val s2_ghr      = RegEnable(s1_ghr, s1_fire)
+  private val s3_override = io.s3_override && io.enable
+
+  /*
+   * Only available when an bp-override occurs in s3
+   * if s3_override,  the current s0 should use s2,
+   * the next cycle should use the current s1,
+   * and the next cycle should use the current io.ghr
+   * The state machine is used to store the above two historical records
+   */
+  private val idle :: stage1 :: stage2 :: stage3 :: Nil = Enum(4)
+
+  private val ghrStateReg = RegInit(idle)
+  private val stage2Ghr: GhrEntry = RegInit(0.U.asTypeOf(io.ghr))
+  private val stage3Ghr: GhrEntry = RegInit(0.U.asTypeOf(io.ghr))
+  switch(ghrStateReg) {
+    is(idle) {
+      when(!s3_override) {
+        ghrStateReg := idle
+        s0_ghr      := io.ghr
+      }.elsewhen(s3_override) {
+        ghrStateReg := stage1
+        s0_ghr      := s2_ghr
+        stage2Ghr   := s1_ghr
+        stage3Ghr   := io.ghr
+      }
+    }
+    is(stage1) {
+      when(s0_fire) {
+        ghrStateReg := stage2
+        s0_ghr      := stage2Ghr
+      }
+    }
+    is(stage2) {
+      when(s0_fire) {
+        ghrStateReg := stage3
+        s0_ghr      := stage3Ghr
+      }
+    }
+    is(stage3) {
+      when(s0_fire && !s3_override) {
+        ghrStateReg := idle
+        s0_ghr      := io.ghr
+      }.elsewhen(s3_override) {
+        ghrStateReg := stage1
+        s0_ghr      := s2_ghr
+        stage2Ghr   := s1_ghr
+        stage3Ghr   := io.ghr
+      }
+    }
+  }
+
+  /*
    *  predict pipeline stage 0
    */
-  private val s0_fire       = Wire(Bool())
   private val s0_startVAddr = io.startVAddr
-  // when s3_fire, using ghr generated index
-  private val s0_ghr = io.ghr
-  s0_fire := io.stageCtrl.s0_fire && io.enable
-
   private val s0_pathIdx: Seq[UInt] = PathTableInfos.map(info =>
     getPathTableIdx(
       s0_startVAddr,
@@ -96,9 +157,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 1
    *  calculate each ctr's percsum
    */
-  private val s1_fire       = io.stageCtrl.s1_fire && io.enable
   private val s1_startVAddr = RegEnable(io.startVAddr, s0_fire)
-  private val s1_ghr        = RegEnable(s0_ghr, s0_fire)
   private val s1_pathResp:   Seq[Vec[ScEntry]] = pathTable.map(_.io.resp)
   private val s1_globalResp: Seq[Vec[ScEntry]] = globalTable.map(_.io.resp)
   private val s1_allResp:    Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
@@ -122,9 +181,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
    */
-  private val s2_fire       = io.stageCtrl.s2_fire && io.enable
   private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
-  private val s2_ghr        = RegEnable(s1_ghr, s1_fire)
   private val s2_pathResp   = s1_pathResp.map(entries => VecInit(entries.map(RegEnable(_, s1_fire))))
   private val s2_globalResp = s1_globalResp.map(entries => VecInit(entries.map(RegEnable(_, s1_fire))))
   private val s2_sumPercsum: Vec[SInt] = VecInit(s1_sumPercsum.map(RegEnable(_, s1_fire)))

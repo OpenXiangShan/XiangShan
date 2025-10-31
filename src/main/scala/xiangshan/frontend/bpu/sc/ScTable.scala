@@ -71,8 +71,10 @@ class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
 
   io.req.ready := sram.map(_.io.r.req.ready).reduce(_ && _)
 
+  private val respValid    = RegNext(io.req.valid)
   private val respBankMask = RegEnable(reqBankMask, io.req.valid)
-  io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
+  private val sramResp     = Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
+  io.resp := Mux(respValid, sramResp, VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
 
   // update path table
   private val updateValid    = io.update.valid
