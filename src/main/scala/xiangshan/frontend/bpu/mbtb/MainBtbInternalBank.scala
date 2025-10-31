@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.WriteBuffer
 
@@ -128,4 +129,10 @@ class MainBtbInternalBank(
       0.U.asTypeOf(new MainBtbEntry)
     )
   }
+
+  XSPerfAccumulate(
+    "multihit_write_conflict",
+    w.req.valid && flush.req.valid && w.req.bits.setIdx === flush.req.bits.setIdx &&
+      (w.req.bits.wayMask & flush.req.bits.wayMask).orR
+  )
 }

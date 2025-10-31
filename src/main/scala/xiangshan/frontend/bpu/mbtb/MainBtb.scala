@@ -95,8 +95,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   s2_fire := io.stageCtrl.s2_fire && io.enable
   private val s2_startVAddr   = RegEnable(s1_startVAddr, s1_fire)
   private val s2_alignBankIdx = getAlignBankIndex(s2_startVAddr)
-  // FIXME
-  private val s2_internalBankMask = UIntToOH(getInternalBankIndex(s2_startVAddr))
 
   private val s2_rawHitMask = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.rawHit)))
   private val s2_hitMask    = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.hit)))
@@ -124,15 +122,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   dontTouch(s2_replacerSetIdxVec)
   dontTouch(s2_stateTouchs)
   // dontTouch(s2_nextState)
-
-  private val (s2_multihit, s2_isHigherAlignBank, s2_multiHitWayIdx, s2_multiHitMask) =
-    detectMultiHit(s2_hitMask, s2_positions)
-  private val s2_multiWriteAlignBankMask: Seq[Bool] = UIntToOH(s2_isHigherAlignBank).asBools
-  private val s2_multiWayIdxMask:         UInt      = UIntToOH(s2_multiHitWayIdx)
-
-  dontTouch(s2_multihit)
-  dontTouch(s2_isHigherAlignBank)
-  dontTouch(s2_multiHitWayIdx)
 
   io.result.hitMask    := s2_hitMask
   io.result.positions  := s2_positions
@@ -202,21 +191,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
   require(t1_writeWayMask.getWidth == NumWay, s"Write way mask width mismatch: ${t1_writeWayMask.getWidth} != $NumWay")
 
-  private val multiWriteConflict = s2_multihit && s2_fire && t1_writeValid &&
-    (s2_multiWriteAlignBankMask zip t1_writeAlignBankMask map { case (a, b) => a && b }).reduce(_ || _) &&
-    (s2_internalBankMask.asBools zip t1_internalBankMask.asBools map { case (a, b) => a && b }).reduce(_ || _)
-
   // Write to SRAM
-  alignBanks zip t1_startVAddrVec zip t1_writeAlignBankMask zip s2_multiWriteAlignBankMask foreach {
-    case (((alignBank, startVAddr), alignBankEnable), multiAlignBankEnable) =>
+  alignBanks zip t1_startVAddrVec zip t1_writeAlignBankMask foreach {
+    case ((alignBank, startVAddr), alignBankEnable) =>
       alignBank.io.write.req.valid           := t1_writeValid && alignBankEnable
       alignBank.io.write.req.bits.startVAddr := startVAddr
       alignBank.io.write.req.bits.wayMask    := t1_writeWayMask
       alignBank.io.write.req.bits.entry      := t1_writeEntry
-
-      alignBank.io.flush.req.valid := s2_multihit && s2_fire && multiAlignBankEnable && !multiWriteConflict
-      alignBank.io.flush.req.bits.internalBankMask := s2_internalBankMask
-      alignBank.io.flush.req.bits.wayMask          := s2_multiWayIdxMask
   }
 
   dontTouch(t1_writeValid)
@@ -232,6 +213,4 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   XSPerfAccumulate("train_write_new_entry", t1_writeValid)
   XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
   XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && t1_hitMispredictBranch)
-  XSPerfAccumulate("multihit_write_conflict", multiWriteConflict)
-  XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay * NumAlignBanks)
 }

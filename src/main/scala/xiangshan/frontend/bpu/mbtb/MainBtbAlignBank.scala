@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.StageCtrl
@@ -60,29 +61,18 @@ class MainBtbAlignBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
-    class Flush extends Bundle {
-      class Req extends Bundle {
-        val internalBankMask: UInt = UInt(NumInternalBanks.W)
-        val wayMask:          UInt = UInt(NumWay.W)
-      }
-
-      val req: Valid[Req] = Flipped(Valid(new Req))
-    }
-
     val resetDone: Bool      = Output(Bool())
     val stageCtrl: StageCtrl = Input(new StageCtrl)
 
     val read:  Read  = new Read
     val write: Write = new Write
-    val flush: Flush = new Flush
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
 
   // alias
-  private val r     = io.read
-  private val w     = io.write
-  private val flush = io.flush
+  private val r = io.read
+  private val w = io.write
 
   private val internalBanks = Seq.tabulate(NumInternalBanks) { bankIdx =>
     Module(new MainBtbInternalBank(alignIdx, bankIdx))
@@ -134,11 +124,12 @@ class MainBtbAlignBank(
    * filter-out unneeded entries
    * send resp to top
    */
-  private val s2_fire          = io.stageCtrl.s2_fire
-  private val s2_startVAddr    = RegEnable(s1_startVAddr, s1_fire)
-  private val s2_posHigherBits = RegEnable(s1_posHigherBits, s1_fire)
-  private val s2_crossPage     = RegEnable(s1_crossPage, s1_fire)
-  private val s2_rawEntries    = RegEnable(s1_rawEntries, s1_fire)
+  private val s2_fire             = io.stageCtrl.s2_fire
+  private val s2_startVAddr       = RegEnable(s1_startVAddr, s1_fire)
+  private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
+  private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
+  private val s2_internalBankMask = RegEnable(s1_internalBankMask, s0_fire)
+  private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startVAddr)
   private val s2_tag    = getTag(s2_startVAddr)
@@ -189,9 +180,15 @@ class MainBtbAlignBank(
 
   /* *** multi-hit detection & flush ***
    */
+  private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
+
+  dontTouch(s2_multiHitMask)
+
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.flush.req.valid        := flush.req.valid && flush.req.bits.internalBankMask(i)
+    b.io.flush.req.valid        := s2_fire && s2_multiHitMask.orR && s2_internalBankMask(i)
     b.io.flush.req.bits.setIdx  := s2_setIdx
-    b.io.flush.req.bits.wayMask := flush.req.bits.wayMask
+    b.io.flush.req.bits.wayMask := s2_multiHitMask
   }
+
+  XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)
 }
