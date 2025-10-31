@@ -101,7 +101,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     fixedRange(i) && pds(i).valid &&
       (pds(i).isJal || pds(i).isBr) &&
       (takenIdx === i.U) && predTaken &&
-      (jumpTargets(i) =/= predTarget)
+      (jumpTargets(i) =/= predTarget) && io.traceInsts(i).valid
   })
 
   val stage2Out = Wire(chiselTypeOf(io.out.stage2Out))

@@ -888,7 +888,7 @@ trait HasXSParameter {
   def TraceDummyFixCycleIntDiv = false
   def TraceEliminateArthi = coreParams.TraceEliminateArthi
   def TraceEliminateMemory = coreParams.TraceEliminateMemory
-  def TraceOverrideTarget = false // currently, still perf bug
+  def TraceOverrideTarget = true
   def Trace2StageMMU = false
 
   def PCntIncrStep: Int = 6
