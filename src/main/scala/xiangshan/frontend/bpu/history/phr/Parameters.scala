@@ -13,7 +13,7 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.phr
+package xiangshan.frontend.bpu.history.phr
 
 import xiangshan.frontend.bpu.HasBpuParameters
 
