@@ -28,6 +28,8 @@ case class ScParameters(
       new ScTableInfo(1024, 8),
       new ScTableInfo(1024, 16)
     ),
+    biasTableSize:       Int = 1024,
+    biasUseTageBitWidth: Int = 4, // use tage_taken and tage_low_conf bits as index bits
     ctrWidth:            Int = 6,
     weightCtrWidth:      Int = 6,
     thresholdThresWidth: Int = 8,
@@ -39,7 +41,11 @@ case class ScParameters(
 
 trait HasScParameters extends HasBpuParameters {
   def scParameters:        ScParameters     = bpuParameters.scParameters
+  def tageTakenCtrWidth:   Int              = bpuParameters.tageParameters.TakenCtrWidth
   def ctrWidth:            Int              = scParameters.ctrWidth
+  def NumWays:             Int              = NumBtbResultEntries
+  def NumBanks:            Int              = scParameters.NumBanks
+  def BankWidth:           Int              = log2Ceil(NumBanks)
   def weightCtrWidth:      Int              = scParameters.weightCtrWidth
   def thresholdThresWidth: Int              = scParameters.thresholdThresWidth
   def PathTableInfos:      Seq[ScTableInfo] = scParameters.PathTableInfos
@@ -47,10 +53,10 @@ trait HasScParameters extends HasBpuParameters {
   def NumPathTables:       Int              = PathTableInfos.length
   def GlobalTableInfos:    Seq[ScTableInfo] = scParameters.GlobalTableInfos
   def GlobalTableSize:     Int              = GlobalTableInfos.length
-  def NumWays:             Int              = NumBtbResultEntries
-  def NumBanks:            Int              = scParameters.NumBanks
-  def BankWidth:           Int              = log2Ceil(NumBanks)
-  def WriteBufferSize:     Int              = scParameters.WriteBufferSize
-  def TagWidth:            Int              = scParameters.TagWidth
-  // TODO
+  def BiasTableSize:       Int              = scParameters.biasTableSize
+  def BiasUseTageBitWidth: Int              = scParameters.biasUseTageBitWidth
+  def BiasTableNumWays: Int =
+    NumWays * BiasUseTageBitWidth // add tage_taken and tage_low_conf bits as wayIdx
+  def WriteBufferSize: Int = scParameters.WriteBufferSize
+  def TagWidth:        Int = scParameters.TagWidth
 }

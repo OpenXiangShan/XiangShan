@@ -27,26 +27,26 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class ScTable(
     numSets:   Int,
-    histLen:   Int,
+    numWays:   Int,
     tableType: String,
     tableIdx:  Int
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / NumWays).W)))
-    val resp:   Vec[ScEntry]      = Output(Vec(NumWays, new ScEntry()))
-    val update: PathTableTrain    = Input(new PathTableTrain(numSets))
+    val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / numWays).W)))
+    val resp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update: ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
   }
 
   val io = IO(new ScTableIO())
 
-  def numRows: Int = numSets / NumBanks / NumWays
+  def numRows: Int = numSets / NumBanks / numWays
 
   private val sram = Seq.fill(NumBanks)(
     Module(new SRAMTemplate(
       new ScEntry(),
       set = numRows,
-      way = NumWays,
+      way = numWays,
       singlePort = true,
       shouldReset = true,
       holdRead = true,
@@ -59,7 +59,7 @@ class ScTable(
 
   private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
     Module(new WriteBuffer(
-      new PathTableSramWriteReq(numRows),
+      new ScTableSramWriteReq(numRows, numWays),
       WriteBufferSize,
       numPorts = 1,
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
@@ -96,12 +96,12 @@ class ScTable(
       buffer.io.write.head.bits.wayMask := Mux(
         writeValid,
         updateWayMask,
-        VecInit.fill(NumWays)(false.B)
+        VecInit.fill(numWays)(false.B)
       )
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
-        VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
+        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
       )
   }
 
