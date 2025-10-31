@@ -422,6 +422,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // load prefetch to l1 Dcache
+  // TODO: beautify  the below code: minimize tracertl's modification
   val l1PfReqArb = Module(new Arbiter(new L1PrefetchReq, 2))
   l1_pf_req <> l1PfReqArb.io.out
   val L1PfReqArbTracePort = 0

@@ -656,7 +656,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
-  val fastSimMode = TraceFastSimMemory()
+  val fastSimMode = if (env.TraceRTLMode) TraceFastSimMemory() else false.B
   val pftEntryFull = GatedValidRegNext(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry))
   when(pftEntryFull || fastSimMode) {
     // can accept prefetch req
@@ -905,8 +905,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   // TODO: repalce addSource with tapAndRead
-  val mshrPrimaryFull = WireInit(!Cat(primary_ready_vec).orR)
-  BoringUtils.addSource(mshrPrimaryFull, "MSHRFullBlockTracePrf")
+  if (env.TraceRTLMode) {
+    val mshrPrimaryFull = WireInit(!Cat(primary_ready_vec).orR)
+    BoringUtils.addSource(mshrPrimaryFull, "MSHRFullBlockTracePrf")
+  }
 
   val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
@@ -1145,8 +1147,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
   XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
 
-  val fastSimMode = TraceFastSimMemory()
-  XSPerfAccumulate("FastSimAcceptReqNum", io.req.fire && !io.req.bits.cancel && fastSimMode)
+  if (env.TraceRTLMode) {
+    val fastSimMode = TraceFastSimMemory()
+    XSPerfAccumulate("FastSimAcceptReqNum", io.req.fire && !io.req.bits.cancel && fastSimMode)
+  }
 
   val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
 
