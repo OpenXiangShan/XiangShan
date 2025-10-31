@@ -54,7 +54,6 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         // similar to Read.Req.startVAddr, calculated in MainBtb top
         val startVAddr: PrunedAddr   = new PrunedAddr(VAddrBits)
-        val wayMask:    UInt         = UInt(NumWay.W)
         val entry:      MainBtbEntry = new MainBtbEntry
       }
 
@@ -77,6 +76,8 @@ class MainBtbAlignBank(
   private val internalBanks = Seq.tabulate(NumInternalBanks) { bankIdx =>
     Module(new MainBtbInternalBank(alignIdx, bankIdx))
   }
+
+  private val replacer = Module(new MainBtbReplacer)
 
   io.resetDone := internalBanks.map(_.io.resetDone).reduce(_ && _)
 
@@ -140,15 +141,13 @@ class MainBtbAlignBank(
   //       and, we'll do a (e.position >= 0) check later, which is always true
   private val s2_alignedInstOffset = getAlignedInstOffset(s2_startVAddr)
 
-  private val s2_rawHitMask = VecInit(s2_rawEntries.map(e => e.valid && e.tag === s2_tag))
-
-  // filter out branches before alignedInstOffset
-  // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
-  private val s2_hitMask = VecInit((s2_rawHitMask zip s2_rawEntries).map { case (hit, e) =>
-    hit && e.position >= s2_alignedInstOffset && !s2_crossPage
-  })
-
-  (r.resp zip s2_rawEntries zip s2_rawHitMask zip s2_hitMask).foreach { case (((resp, e), rawHit), hit) =>
+  // send resp
+  (r.resp zip s2_rawEntries).foreach { case (resp, e) =>
+    // send rawHit for training
+    val rawHit = e.valid && e.tag === s2_tag
+    // filter out branches before alignedInstOffset
+    // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
+    val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
     resp.rawHit    := rawHit
     resp.hit       := hit
     resp.position  := Cat(s2_posHigherBits, e.position)
@@ -156,17 +155,26 @@ class MainBtbAlignBank(
     resp.attribute := e.attribute
   }
 
+  // add an alias for hitMask for later use & debug purpose
+  private val s2_hitMask = VecInit(r.resp.map(_.hit))
+  dontTouch(s2_hitMask)
+
+  // update replacer
+  replacer.io.predictTouch.valid        := s2_fire && s2_hitMask.reduce(_ || _)
+  replacer.io.predictTouch.bits.setIdx  := getReplacerSetIndex(s2_startVAddr)
+  replacer.io.predictTouch.bits.wayMask := s2_hitMask.asUInt
+
   /* *** t1 ***
    * send write req to internal banks (srams)
    */
   private val t1_valid            = w.req.valid
   private val t1_startVAddr       = w.req.bits.startVAddr
-  private val t1_wayMask          = w.req.bits.wayMask
   private val t1_entry            = w.req.bits.entry
   private val t1_setIdx           = getSetIndex(t1_startVAddr)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
+  private val t1_wayMask          = replacer.io.victim.wayMask
 
   // similar to s0 case
   assert(t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
@@ -178,11 +186,12 @@ class MainBtbAlignBank(
     b.io.write.req.bits.entry   := t1_entry
   }
 
-  /* *** multi-hit detection & flush ***
-   */
-  private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
+  // update replacer
+  replacer.io.trainTouch.valid       := t1_valid
+  replacer.io.trainTouch.bits.setIdx := getReplacerSetIndex(t1_startVAddr)
 
-  dontTouch(s2_multiHitMask)
+  /* *** multi-hit detection & flush *** */
+  private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.flush.req.valid        := s2_fire && s2_multiHitMask.orR && s2_internalBankMask(i)

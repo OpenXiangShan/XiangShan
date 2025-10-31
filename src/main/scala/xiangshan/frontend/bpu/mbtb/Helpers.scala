@@ -16,10 +16,6 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
-import chisel3.util.MuxLookup
-import chisel3.util.isPow2
-import chisel3.util.log2Ceil
-import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CrossPageHelper
@@ -32,17 +28,14 @@ trait Helpers extends HasMainBtbParameters
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
-  def getNextSetIndex(pc: PrunedAddr): UInt =
-    getSetIndex(getNextAlignedAddr(pc))
-
   def getReplacerSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + FetchBlockAlignWidth - 1, FetchBlockAlignWidth)
 
-  def getNextReplacerSetIndex(pc: PrunedAddr): UInt =
-    getReplacerSetIndex(pc) + 1.U
-
   def getAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+
+  def getAlignBankIndexFromPosition(cfiPosition: UInt): UInt =
+    cfiPosition(CfiPositionWidth - 1, CfiPositionWidth - AlignBankIdxLen)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
     pc(VAddrBits - 1, TargetWidth + instOffsetBits)

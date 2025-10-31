@@ -24,7 +24,6 @@ import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
-
   // whether the entry is valid
   val valid: Bool = Bool()
 
@@ -50,20 +49,6 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
   val setIdx:       UInt         = UInt(SetIdxLen.W)
   val entry:        MainBtbEntry = new MainBtbEntry
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
-}
-
-class ReplacerIO(implicit p: Parameters) extends MainBtbBundle {
-  // prediction hit update Replacer
-  val predictionSetIndxVec: Vec[UInt] = Input(Vec(NumAlignBanks, UInt(SetIdxLen.W)))
-  val predictionHitMask:    Vec[Bool] = Input(Vec(NumAlignBanks, Bool()))
-  val predictionTouchWays: Vec[Vec[Valid[UInt]]] =
-    Input(Vec(NumAlignBanks, Vec(NumWay, Valid(UInt(log2Up(NumWay).W)))))
-
-  // training hit update Replacer
-  val trainWriteValid:    Bool      = Input(Bool())
-  val trainSetIndx:       UInt      = Input(UInt(SetIdxLen.W))
-  val trainAlignBankMask: Vec[Bool] = Input(Vec(NumAlignBanks, Bool()))
-  val victimWayIdx:       UInt      = Output(UInt(log2Up(NumWay).W))
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {

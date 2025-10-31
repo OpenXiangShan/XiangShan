@@ -32,9 +32,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   val io: MainBtbIO = IO(new MainBtbIO)
 
-  /* *** internal parameters *** */
-  private val Alignment = FetchBlockSize / NumAlignBanks
-
   /* *** submodules *** */
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
@@ -48,11 +45,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     b.io.stageCtrl.s3_fire := false.B
   }
 
-  // TODO: move replacer to AlignBank
-  private val replacer = Module(new MainBtbReplacer)
-
-  /* predict stage 0
-   * setup SRAM
+  /* *** s0 ***
+   * calculate per-bank startVAddr and posHigherBits
+   * send read request to alignBanks
    */
   s0_fire := io.stageCtrl.s0_fire && io.enable
   private val s0_startVAddr        = io.startVAddr
@@ -77,51 +72,22 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     b.io.read.req.crossPage     := isCrossPage(s0_startVAddrVec(i), s0_startVAddr)
   }
 
-  /* predict stage 1
-   *
-   * get result from SRAM
-   * rotate SRAM result
+  /* *** s1 ***
+   * just wait alignBanks
    */
   s1_fire := io.stageCtrl.s1_fire && io.enable
-  private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
 
-  /* predict stage 2
-   *
-   * do tag compare and position compare
-   * calculate target
-   * map results into a per-slot vec
-   * resolve multi-hit
+  /* *** s2 ***
+   * receive read response from alignBanks
+   * send out prediction result and meta info
    */
   s2_fire := io.stageCtrl.s2_fire && io.enable
-  private val s2_startVAddr   = RegEnable(s1_startVAddr, s1_fire)
-  private val s2_alignBankIdx = getAlignBankIndex(s2_startVAddr)
 
   private val s2_rawHitMask = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.rawHit)))
   private val s2_hitMask    = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.hit)))
   private val s2_positions  = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.position)))
   private val s2_targets    = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.target)))
   private val s2_attributes = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.attribute)))
-
-  private val s2_thisReplacerSetIdx = getReplacerSetIndex(s2_startVAddr)
-  private val s2_nextReplacerSetIdx = getNextReplacerSetIndex(s2_startVAddr)
-  private val s2_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
-    Mux(bankIdx.U < s2_alignBankIdx, s2_nextReplacerSetIdx, s2_thisReplacerSetIdx)
-  )
-
-  private val s2_stateTouchs: Vec[Vec[Valid[UInt]]] =
-    Wire(Vec(NumAlignBanks, Vec(NumWay, Valid(UInt(log2Up(NumWay).W)))))
-  // FIXME: this is not a good way to do this, but it works for now
-  for (alignIdx <- 0 until NumAlignBanks; wayIdx <- 0 until NumWay) {
-    s2_stateTouchs(alignIdx)(wayIdx).valid := s2_fire && s2_hitMask(alignIdx * NumWay + wayIdx)
-    s2_stateTouchs(alignIdx)(wayIdx).bits  := wayIdx.U
-  }
-  replacer.io.predictionSetIndxVec := s2_replacerSetIdxVec
-  replacer.io.predictionTouchWays  := s2_stateTouchs
-  replacer.io.predictionHitMask    := VecInit(s2_stateTouchs.map(_.map(_.valid).reduce(_ || _) && s2_fire))
-
-  dontTouch(s2_replacerSetIdxVec)
-  dontTouch(s2_stateTouchs)
-  // dontTouch(s2_nextState)
 
   io.result.hitMask    := s2_hitMask
   io.result.positions  := s2_positions
@@ -133,23 +99,25 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.meta.stronglyBiasedMask := DontCare // FIXME: add bias logic
   io.meta.attributes         := s2_attributes
 
-  /* training stage 0 */
+  /* *** t0 ***
+   * receive training data and latch
+   */
   private val t0_valid = io.train.valid && io.enable
   private val t0_train = io.train.bits
 
-  /* training stage 1 */
+  /* *** t1 ***
+   * calculate write data and write to alignBanks
+   */
   private val t1_valid = RegNext(t0_valid) && io.enable
   private val t1_train = RegEnable(t0_train, t0_valid)
+
+  private val t1_startVAddr        = t1_train.startVAddr
+  private val t1_firstAlignBankIdx = getAlignBankIndex(t1_startVAddr)
   private val t1_startVAddrVec = vecRotateRight(
-    VecInit.tabulate(NumAlignBanks)(i => getAlignedAddr(t1_train.startVAddr + (i << FetchBlockAlignWidth).U)),
-    getAlignBankIndex(t1_train.startVAddr)
+    VecInit.tabulate(NumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U)),
+    t1_firstAlignBankIdx
   )
-
-  private val t1_internalBankIdx  = getInternalBankIndex(t1_train.startVAddr)
-  private val t1_internalBankMask = UIntToOH(t1_internalBankIdx)
-  private val t1_alignBankIdx     = getAlignBankIndex(t1_train.startVAddr)
   private val t1_meta             = t1_train.meta.mbtb
-
   private val t1_mispredictBranch = t1_train.mispredictBranch
 
   private val t1_hitMispredictBranch = t1_meta.hitMask.zip(t1_meta.positions).zip(t1_meta.attributes).map {
@@ -160,7 +128,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
 
   private val t1_writeEntry = Wire(new MainBtbEntry)
-  t1_writeEntry.valid           := true.B   // FIXME: invalidate
+  t1_writeEntry.valid           := true.B
   t1_writeEntry.tag             := getTag(t1_train.startVAddr)
   t1_writeEntry.position        := t1_mispredictBranch.bits.cfiPosition
   t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_mispredictBranch.bits.target)
@@ -169,44 +137,19 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   t1_writeEntry.stronglyBiased  := false.B  // FIXME
   t1_writeEntry.replaceCnt      := DontCare // FIXME:
 
-  private val t1_writeAlignBankIdx =
-    t1_mispredictBranch.bits.cfiPosition(CfiPositionWidth - 1, CfiPositionWidth - log2Ceil(NumAlignBanks))
-  private val t1_rawWriteAlignBankMask = VecInit(UIntToOH(t1_writeAlignBankIdx).asBools)
-  private val t1_writeAlignBankMask    = vecRotateRight(t1_rawWriteAlignBankMask, t1_alignBankIdx)
-
-  private val t1_thisReplacerSetIdx = getReplacerSetIndex(t1_train.startVAddr)
-  private val t1_nextReplacerSetIdx = getNextReplacerSetIndex(t1_train.startVAddr)
-  private val t1_replacerSetIdxVec: Vec[UInt] = VecInit.tabulate(NumAlignBanks)(bankIdx =>
-    Mux(bankIdx.U < t1_alignBankIdx, t1_nextReplacerSetIdx, t1_thisReplacerSetIdx)
+  private val t1_writeAlignBankIdx = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
+  private val t1_writeAlignBankMask = vecRotateRight(
+    VecInit(UIntToOH(t1_writeAlignBankIdx).asBools),
+    t1_firstAlignBankIdx
   )
-  private val t1_replacerSetIdx = Mux1H(t1_writeAlignBankMask, t1_replacerSetIdxVec)
-  private val t1_replacerBankMask: Vec[Bool] = t1_writeAlignBankMask
-  replacer.io.trainWriteValid    := t1_writeValid
-  replacer.io.trainSetIndx       := t1_replacerSetIdx
-  replacer.io.trainAlignBankMask := t1_writeAlignBankMask
 
-  dontTouch(t1_replacerSetIdxVec)
-  dontTouch(t1_replacerSetIdx)
-  dontTouch(t1_writeAlignBankMask)
-  private val t1_writeWayMask = UIntToOH(replacer.io.victimWayIdx)
-  require(t1_writeWayMask.getWidth == NumWay, s"Write way mask width mismatch: ${t1_writeWayMask.getWidth} != $NumWay")
-
-  // Write to SRAM
-  alignBanks zip t1_startVAddrVec zip t1_writeAlignBankMask foreach {
-    case ((alignBank, startVAddr), alignBankEnable) =>
-      alignBank.io.write.req.valid           := t1_writeValid && alignBankEnable
-      alignBank.io.write.req.bits.startVAddr := startVAddr
-      alignBank.io.write.req.bits.wayMask    := t1_writeWayMask
-      alignBank.io.write.req.bits.entry      := t1_writeEntry
+  alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)
+    b.io.write.req.bits.startVAddr := t1_startVAddrVec(i)
+    b.io.write.req.bits.entry      := t1_writeEntry
   }
 
-  dontTouch(t1_writeValid)
-  dontTouch(t1_writeAlignBankMask)
-  dontTouch(t1_internalBankMask)
-  dontTouch(t1_writeWayMask)
-
-  /* ** statistics ** */
-
+  /* *** statistics *** */
   XSPerfAccumulate("total_train", t1_valid)
   XSPerfAccumulate("pred_hit", s2_fire && s2_hitMask.reduce(_ || _))
   XSPerfHistogram("pred_hit_count", PopCount(s2_hitMask), s2_fire, 0, NumWay * NumAlignBanks)
