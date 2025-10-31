@@ -23,6 +23,7 @@ import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.Constantin
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
@@ -77,15 +78,24 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
-  fallThrough.io.enable := true.B // fallThrough is always enabled
-  ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := ctrl.abtbEnable
-  mbtb.io.enable        := ctrl.mbtbEnable
-  tage.io.enable        := ctrl.tageEnable
-  sc.io.enable          := ctrl.scEnable
-  ittage.io.enable      := ctrl.ittageEnable
-  ras.io.enable         := false.B
+  private val constCtrl = Wire(UInt(8.W))
 
+  constCtrl := Constantin.createRecord("constCtrl")
+  fallThrough.io.enable := true.B // fallThrough is always enabled
+//  ubtb.io.enable        := ctrl.ubtbEnable
+//  abtb.io.enable        := ctrl.abtbEnable
+//  mbtb.io.enable        := ctrl.mbtbEnable
+//  tage.io.enable        := ctrl.tageEnable
+//  sc.io.enable          := ctrl.scEnable
+//  ittage.io.enable      := ctrl.ittageEnable
+//  ras.io.enable         := false.B
+  ubtb.io.enable        := constCtrl(0)
+  abtb.io.enable        := constCtrl(1)
+  mbtb.io.enable        := constCtrl(2)
+  tage.io.enable        := constCtrl(3)
+  sc.io.enable          := constCtrl(4)
+  ittage.io.enable      := constCtrl(5)
+  ras.io.enable         := constCtrl(6)
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
