@@ -22,8 +22,8 @@ import scala.math.min
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.mbtb.MainBtbResult
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
 /**
@@ -32,7 +32,7 @@ import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with Helpers {
 
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
-    val mbtbResult:          MainBtbResult         = Input(new MainBtbResult)
+    val mbtbResult:          Vec[Valid[BtbInfo]]   = Input(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val takenMask:           Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
@@ -94,9 +94,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_resp       = VecInit(s1_resp.map(entries => VecInit(entries.map(RegEnable(_, s1_fire)))))
   private val s2_pathPercsum: Vec[Vec[SInt]] = VecInit(s1_pathPercsum.map(ps => VecInit(ps.map(RegEnable(_, s1_fire)))))
 
-  private val s2_mbtbHitMask    = io.mbtbResult.hitMask
-  private val s2_mbtbPositions  = io.mbtbResult.positions
-  private val s2_mbtbAttributes = io.mbtbResult.attributes
+  private val s2_mbtbHitMask    = VecInit(io.mbtbResult.map(_.valid))
+  private val s2_mbtbPositions  = VecInit(io.mbtbResult.map(_.bits.cfiPosition))
+  private val s2_mbtbAttributes = VecInit(io.mbtbResult.map(_.bits.attribute))
   private val s2_totalPercsum: Vec[SInt] = WireInit(VecInit.fill(NumWays)(0.S(ctrWidth.W)))
   private val s2_hitMask:      Vec[Bool] = WireInit(VecInit.fill(NumWays)(false.B))
   require(NumWays == s2_mbtbHitMask.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbHitMask.length}")

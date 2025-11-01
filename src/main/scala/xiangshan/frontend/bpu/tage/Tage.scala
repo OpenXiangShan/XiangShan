@@ -23,9 +23,9 @@ import scala.math.min
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.mbtb.MainBtbResult
 import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 
 /**
@@ -33,7 +33,7 @@ import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with Helpers {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
-    val mbtbResult:             MainBtbResult         = Input(new MainBtbResult)
+    val mbtbResult:             Vec[Valid[BtbInfo]]   = Input(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
     val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val condTakenMask:          Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
@@ -85,7 +85,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   baseTable.io.readReqValid := s0_fire
-  baseTable.io.startPc      := s0_startVAddr
+  baseTable.io.startVAddr   := s0_startVAddr
 
   // to stall resolveQueue when bank conflict
   io.readBankIdx := s0_bankIdx
@@ -121,9 +121,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val s2_tempTag = s1_tempTag.map(RegEnable(_, s1_fire))
 
-  private val s2_mbtbHitMask    = io.mbtbResult.hitMask
-  private val s2_mbtbPositions  = io.mbtbResult.positions
-  private val s2_mbtbAttributes = io.mbtbResult.attributes
+  private val s2_mbtbHitMask    = VecInit(io.mbtbResult.map(_.valid))
+  private val s2_mbtbPositions  = VecInit(io.mbtbResult.map(_.bits.cfiPosition))
+  private val s2_mbtbAttributes = VecInit(io.mbtbResult.map(_.bits.attribute))
 
   private val s2_mbtbHitCondMask = s2_mbtbHitMask.zip(s2_mbtbAttributes).map {
     case (hit, attribute) => hit && attribute.isConditional
