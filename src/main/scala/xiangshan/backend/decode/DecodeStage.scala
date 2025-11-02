@@ -328,13 +328,17 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val fusionValid = VecInit(io.fusion.map(x => GatedValidRegNext(x)))
   val inValidNotReady = io.in.map(in => GatedValidRegNext(in.valid && !in.ready))
+  val frontendStall = GatedValidRegNext(!io.in.head.valid && io.in.head.ready)
+  val backendStall  = GatedValidRegNext(io.in.head.valid && !io.in.head.ready)
   val perfEvents = Seq(
-    ("decoder_fused_instr", PopCount(fusionValid)       ),
-    ("decoder_waitInstr",   PopCount(inValidNotReady)   ),
-    ("decoder_stall_cycle", hasValid && !io.out(0).ready),
-    ("decoder_utilization", PopCount(io.in.map(_.valid))),
-    ("INST_SPEC",           PopCount(io.in.map(_.fire))),
-    ("RECOVERY_BUBBLE",     recoveryFlag)
+    ("decoder_fused_instr",  PopCount(fusionValid)       ),
+    ("decoder_waitInstr",    PopCount(inValidNotReady)   ),
+    ("decoder_stall_cycle",  hasValid && !io.out(0).ready),
+    ("decoder_utilization",  PopCount(io.in.map(_.valid))),
+    ("frontend_stall_cycle", frontendStall),
+    ("backend_stall_cycle",  backendStall),
+    ("INST_SPEC",            PopCount(io.in.map(_.fire))),
+    ("RECOVERY_BUBBLE",      recoveryFlag)
   )
   generatePerfEvent()
 
