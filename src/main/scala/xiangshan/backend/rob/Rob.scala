@@ -1598,6 +1598,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val brhMispred = PopCount(branchWBs.map(wb => wb.valid & wb.bits.redirect.get.valid))
   val jmpMispred = PopCount(jmpWBs.map(wb => wb.valid && wb.bits.redirect.get.valid))
+  val brhJump    = PopCount((branchWBs ++ jmpWBs).map(wb => wb.valid))
   val misPred = brhMispred +& jmpMispred
 
   XSPerfAccumulate("br_mis_pred", misPred)
@@ -1622,6 +1623,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_2_4_valid          ", numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U),
     ("rob_3_4_valid          ", numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U),
     ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
+    ("BRANCH_JUMP            ", brhJump),
     ("BR_MIS_PRED            ", misPred),
     ("TOTAL_FLUSH            ", io.flushOut.valid)
   )
