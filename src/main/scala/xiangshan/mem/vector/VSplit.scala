@@ -481,6 +481,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   vstd.bits.fuType := FuType.vstu.U
   vstd.bits.fuOpType := issueUop.fuOpType
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
+  vstd.bits.vecDebug := DontCare
 
   if(env.EnableDifftest){
     val usVaddrOffset   = LookupTree(issueEew, List(
