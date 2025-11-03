@@ -127,7 +127,7 @@ class MainBtbAlignBank(
   private val s2_startVAddr       = RegEnable(s1_startVAddr, s1_fire)
   private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
   private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
-  private val s2_internalBankMask = RegEnable(s1_internalBankMask, s0_fire)
+  private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startVAddr)
