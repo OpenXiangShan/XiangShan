@@ -30,24 +30,42 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
-import ftq.Ftq
-import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.ClockGate
+import utility.DelayN
+import utility.DFTResetSignals
+import utility.HasPerfEvents
+import utility.HPerfMonitor
+import utility.ModuleNode
+import utility.PerfEvent
+import utility.ResetGen
+import utility.ResetGenNode
+import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import utility.mbist.MbistInterface
 import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
 import utility.sram.SramHelper
-import xiangshan._
+import xiangshan.CustomCSRCtrlIO
+import xiangshan.DebugOptionsKey
+import xiangshan.FrontendToCtrlIO
+import xiangshan.L1BusErrorUnitInfo
+import xiangshan.SfenceBundle
+import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
-import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu._
+import xiangshan.cache.mmu.PTWFilter
+import xiangshan.cache.mmu.PTWRepeaterNB
+import xiangshan.cache.mmu.TLB
+import xiangshan.cache.mmu.TlbPtwIO
+import xiangshan.cache.mmu.VectorTlbPtwIO
 import xiangshan.frontend.bpu.Bpu
+import xiangshan.frontend.ftq.Ftq
 import xiangshan.frontend.ibuffer.IBuffer
-import xiangshan.frontend.icache._
-import xiangshan.frontend.ifu._
+import xiangshan.frontend.icache.ICache
+import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
 import xiangshan.frontend.simfrontend.SimFrontendInlinedImp
 
@@ -301,7 +319,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     cg.cgen := false.B
   }
 
-  sigFromSrams.foreach { case sig => sig := DontCare }
+  sigFromSrams.foreach(_ := DontCare)
   sigFromSrams.zip(io.dft).foreach {
     case (sig, dft) =>
       if (hasMbist) {
