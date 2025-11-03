@@ -30,7 +30,9 @@ import utility.ParallelPriorityMux
 import utility.XSError
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.BpuPerfInfo
 import xiangshan.frontend.BpuToFtqIO
+import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -59,17 +61,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
 
-    val bpuInfo = new Bundle {
-      val bpRight: UInt = Output(UInt(XLEN.W))
-      val bpWrong: UInt = Output(UInt(XLEN.W))
-    }
+    val bpuInfo: BpuPerfInfo = Output(new BpuPerfInfo)
 
     // for perf
-    val ControlBTBMissBubble: Bool = Output(Bool())
-    val TAGEMissBubble:       Bool = Output(Bool())
-    val SCMissBubble:         Bool = Output(Bool())
-    val ITTAGEMissBubble:     Bool = Output(Bool())
-    val RASMissBubble:        Bool = Output(Bool())
+    val bpuTopDownInfo: BpuTopDownInfo = Output(new BpuTopDownInfo)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -344,14 +339,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
-  io.bpuInfo                    := DontCare
-  io.toIfu.req.bits.topdownInfo := DontCare
-  io.toIfu.topdownRedirect      := DontCare
-  io.ControlBTBMissBubble       := DontCare
-  io.TAGEMissBubble             := DontCare
-  io.SCMissBubble               := DontCare
-  io.ITTAGEMissBubble           := DontCare
-  io.RASMissBubble              := DontCare
+  io.bpuInfo                         := DontCare
+  io.toIfu.req.bits.topdownInfo      := DontCare
+  io.toIfu.topdownRedirect           := DontCare
+  io.bpuTopDownInfo.btbMissBubble    := DontCare
+  io.bpuTopDownInfo.tageMissBubble   := DontCare
+  io.bpuTopDownInfo.scMissBubble     := DontCare
+  io.bpuTopDownInfo.ittageMissBubble := DontCare
+  io.bpuTopDownInfo.rasMissBubble    := DontCare
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()

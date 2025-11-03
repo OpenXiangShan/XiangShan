@@ -29,7 +29,7 @@ import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
-import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 
@@ -41,15 +41,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val full:            Bool                        = Output(Bool())
     val decodeCanAccept: Bool                        = Input(Bool())
 
-    // FIXME: topdown, why not use a bundle?
-    val ControlRedirect:      Bool          = Input(Bool())
-    val ControlBTBMissBubble: Bool          = Input(Bool())
-    val TAGEMissBubble:       Bool          = Input(Bool())
-    val SCMissBubble:         Bool          = Input(Bool())
-    val ITTAGEMissBubble:     Bool          = Input(Bool())
-    val RASMissBubble:        Bool          = Input(Bool())
-    val MemVioRedirect:       Bool          = Input(Bool())
-    val stallReason:          StallReasonIO = new StallReasonIO(DecodeWidth)
+    // top-down
+    val bpuTopDownInfo:  BpuTopDownInfo = Input(new BpuTopDownInfo)
+    val controlRedirect: Bool           = Input(Bool())
+    val memVioRedirect:  Bool           = Input(Bool())
+    val stallReason:     StallReasonIO  = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -374,19 +370,19 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   topdownStage := io.in.bits.topdownInfo
   when(io.flush) {
-    when(io.ControlRedirect) {
-      when(io.ControlBTBMissBubble) {
+    when(io.controlRedirect) {
+      when(io.bpuTopDownInfo.btbMissBubble) {
         topdownStage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      }.elsewhen(io.TAGEMissBubble) {
+      }.elsewhen(io.bpuTopDownInfo.tageMissBubble) {
         topdownStage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      }.elsewhen(io.SCMissBubble) {
+      }.elsewhen(io.bpuTopDownInfo.scMissBubble) {
         topdownStage.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      }.elsewhen(io.ITTAGEMissBubble) {
+      }.elsewhen(io.bpuTopDownInfo.ittageMissBubble) {
         topdownStage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      }.elsewhen(io.RASMissBubble) {
+      }.elsewhen(io.bpuTopDownInfo.rasMissBubble) {
         topdownStage.reasons(TopDownCounters.RASMissBubble.id) := true.B
       }
-    }.elsewhen(io.MemVioRedirect) {
+    }.elsewhen(io.memVioRedirect) {
       topdownStage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
     }.otherwise {
       topdownStage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
