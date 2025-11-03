@@ -67,10 +67,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_hitIdx   = OHToUInt(s1_hitOH)
   private val s1_hitEntry = entries(s1_hitIdx)
 
-  // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
-  // and for those jumps, takenCnt will remain unchanged during training,
-  // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
-  io.prediction.taken       := s1_hit && s1_hitEntry.slot1.takenCnt.isPositive
+  // we do always-taken prediction in ubtb
+  io.prediction.taken       := s1_hit
   io.prediction.cfiPosition := s1_hitEntry.slot1.position
   io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.attribute   := s1_hitEntry.slot1.attribute
@@ -142,12 +140,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   // calculate hit flags, valid only when t0_hit
   private val t0_hitNotUseful     = t0_hitEntry.usefulCnt.isSaturateNegative
-  private val t0_hitPositionLow   = t0_hitEntry.slot1.position > t0_position
-  private val t0_hitPositionHigh  = t0_hitEntry.slot1.position < t0_position
   private val t0_hitPositionSame  = t0_hitEntry.slot1.position === t0_position
   private val t0_hitAttributeSame = t0_hitEntry.slot1.attribute === t0_attribute
   private val t0_hitTargetSame    = t0_hitEntry.slot1.target === t0_target
-  private val t0_hitTaken         = t0_hitEntry.slot1.takenCnt.isPositive
 
   /* *** train stage 1 ***
    * - select victim
@@ -169,24 +164,19 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   // hit states (flags), valid only when t1_hit
   private val t1_hitNotUseful     = RegEnable(t0_hitNotUseful, t0_valid)
-  private val t1_hitPositionLow   = RegEnable(t0_hitPositionLow, t0_valid)
-  private val t1_hitPositionHigh  = RegEnable(t0_hitPositionHigh, t0_valid)
   private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_valid)
   private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_valid)
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_valid)
-  private val t1_hitTaken         = RegEnable(t0_hitTaken, t0_valid)
 
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
     when(notUseful) {
-      t1_updatedEntry.valid := true.B
-      t1_updatedEntry.tag   := t1_tag
+      t1_updatedEntry.tag := t1_tag
       t1_updatedEntry.usefulCnt.resetPositive() // usefulCnt inits at strong positive, in/decrease by policy
       // slot1
-      t1_updatedEntry.slot1.position  := t1_position
-      t1_updatedEntry.slot1.attribute := t1_attribute
-      t1_updatedEntry.slot1.target    := t1_target
-      t1_updatedEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
+      t1_updatedEntry.slot1.position       := t1_position
+      t1_updatedEntry.slot1.attribute      := t1_attribute
+      t1_updatedEntry.slot1.target         := t1_target
       t1_updatedEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
       t1_updatedEntry.slot1.targetCarry.foreach(_ := t1_targetCarry.get) // if (EnableTargetFix)
       // TODO: 2-taken train
@@ -198,63 +188,20 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   when(t1_valid) {
     when(!t1_hit) {
       // not hit
-      // simply init a new entry
+      // init a new entry if actually taken
       initEntryIfNotUseful(true.B)
-    }.elsewhen(!t1_hitAttributeSame) {
-      // hit, but attribute mismatch
-      // if already not useful, init a new entry, otherwise decrease usefulCnt
+    }.elsewhen(!t1_hitAttributeSame || !t1_hitPositionSame || !t1_hitTargetSame || !t1_actualTaken) {
+      // hit, but attribute/position mismatch, or actually not taken
+      // if already not useful and actually taken, init a new entry, otherwise decrease usefulCnt
       initEntryIfNotUseful(t1_hitNotUseful)
-    }.elsewhen(t1_attribute.isConditional) {
-      // attribute match, and is conditional (branch)
-      when(
-        // branch position match, and actual taken
-        t1_hitPositionSame && t1_actualTaken
-      ) {
-        // increase takenCnt
-        t1_updatedEntry.slot1.takenCnt.value := t1_hitEntry.slot1.takenCnt.getIncrease
-      }.elsewhen(
-        // branch position match, and actual not taken
-        t1_hitPositionSame && !t1_actualTaken ||
-          // an actual taken branch is at higher address -> the predicted position is actual not taken
-          t1_hitPositionHigh && t1_actualTaken ||
-          // actual not taken, but predicted taken -> no matter position, the predicted position is actual not taken
-          !t1_actualTaken && t1_hitTaken
-      ) {
-        // decrease takenCnt
-        t1_updatedEntry.slot1.takenCnt.value := t1_hitEntry.slot1.takenCnt.getDecrease
-      }
-      when(
-        // branch position match, and both actual & predicted taken -> prediction correct, useful
-        t1_hitPositionSame && t1_actualTaken && t1_hitTaken
-      ) {
-        // increase usefulCnt
-        t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getIncrease
-      }.elsewhen(
-        // position mismatch -> not useful
-        !t1_hitPositionSame ||
-          // actual not taken -> fall through, not useful
-          !t1_actualTaken
-      ) {
-        // decrease usefulCnt
-        t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getDecrease
-      }
-    }.otherwise {
-      // attribute match, and is direct / indirect jump
-      when(!t1_hitPositionSame) {
-        // position mismatch
-        // if already not useful, init a new entry, otherwise decrease usefulCnt
-        initEntryIfNotUseful(t1_hitNotUseful)
-      }.elsewhen(t1_hitTargetSame) {
-        // position match, and target match
-        // increase usefulCnt
-        t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getIncrease
-      }.otherwise {
-        // position match, but target mismatch (should not happen for direct jumps unless self-modifies)
-        // decrease usefulCnt
-        t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getDecrease
-        // and, since we've seen a different target, target is not static anymore
+      // and, if we've seen a different target, mark target as not static
+      when(!t1_hitTargetSame) {
         t1_updatedEntry.slot1.isStaticTarget := false.B
       }
+    }.otherwise {
+      // everything matches, and actually taken
+      // increase usefulCnt
+      t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getIncrease
     }
   }
 
@@ -282,33 +229,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t1_valid && t1_hit && (
       !t1_hitAttributeSame && t1_hitNotUseful ||
         t1_hitAttributeSame && !t1_hitPositionSame && t1_hitNotUseful
-    )
-  )
-
-  XSPerfAccumulate("mispredictAttribute", t1_valid && t1_hit && !t1_hitAttributeSame)
-
-  XSPerfAccumulate(
-    "mispredictConditional",
-    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isConditional && (
-      t1_hitPositionSame && t1_actualTaken && !t1_hitTaken ||
-        t1_hitPositionHigh && t1_actualTaken ||
-        !t1_actualTaken && t1_hitTaken
-    )
-  )
-
-  XSPerfAccumulate(
-    "mispredictDirect",
-    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isDirect && (
-      !t1_hitPositionSame ||
-        !t1_hitTargetSame // should not happen unless self-modifies
-    )
-  )
-
-  XSPerfAccumulate(
-    "mispredictIndirect",
-    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isIndirect && (
-      !t1_hitPositionSame ||
-        !t1_hitTargetSame
     )
   )
 }
