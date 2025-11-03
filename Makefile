@@ -36,7 +36,9 @@ endif
 TOP = $(XSTOP_PREFIX)XSTop
 SIM_TOP = SimTop
 
-FPGATOP = top.TopMain
+#FPGATOP = top.TopMain
+#FPGATOP = aia.AXI4AIA
+FPGATOP = aia.PbusGen
 SIMTOP  = top.SimTop
 
 RTL_SUFFIX ?= sv

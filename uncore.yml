@@ -1,0 +1,85 @@
+PmemRanges:
+  - { lower: 0x80000000, upper: 0x80000000000 }
+
+PMAConfigs:
+  - { base_addr: 0x0, range: 0x1000000000000, a: 3 }
+  - { base_addr: 0x80000000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
+  - { base_addr: 0x80000000, a: 1, w: true, r: true }
+  - { base_addr: 0x3A000000, a: 1 }
+  - { base_addr: 0x39002000, a: 1, w: true, r: true }
+  - { base_addr: 0x39000000, a: 1, w: true, r: true }
+  - { base_addr: 0x38022000, a: 1, w: true, r: true }
+  - { base_addr: 0x38021000, a: 1, x: true, w: true, r: true }
+  - { base_addr: 0x38020000, a: 1, w: true, r: true }
+  - { base_addr: 0x20000000, a: 1, x: true, w: true, r: true }
+  - { base_addr: 0x10000000, a: 1, w: true, r: true }
+  - { base_addr: 0 }
+
+EnableCHIAsyncBridge: true
+
+L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true, enableFlush: false }
+
+L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
+
+HartIDBits: 6
+
+DebugAttachProtocals: [JTAG]
+
+DebugModuleParams:
+  nAbstractDataWords: 2
+  maxSupportedSBAccess: 64
+  hasBusMaster: true
+  baseAddress: 0x38020000
+  nScratch: 2
+  crossingHasSafeReset: false
+  hasHartResets: true
+
+WFIResume: true
+
+SeperateDM: false
+
+SeperateBus: NONE
+
+SeperateBusRanges:
+  - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
+
+EnableSeperateBusAsyncBridge: true
+
+IMSICBusType: AXI
+
+IMSICParams:
+  imsicIntSrcWidth: 8
+  mAddr: 0x3A800000
+  sgAddr: 0x3B000000
+  geilen: 5
+  vgeinWidth: 6
+  iselectWidth: 12
+  EnableImsicAsyncBridge: true
+  HasTEEIMSIC: false
+
+CHIIssue: E.b
+
+WFIClockGate: false
+
+EnablePowerDown: false
+
+XSTopPrefix: ""
+
+EnableDFX: true
+
+EnableSramCtl: false
+
+EnableCHINS: false
+
+CHIAddrWidth: 48
+
+CVMParams:
+  MEMENCRange: { base: 0x38030000, mask: 0xFFF }
+  KeyIDBits: 0
+  MemencPipes: 4
+  HasMEMencryption: false
+  HasDelayNoencryption: false
+
+EnableBitmapCheck: true
+
+EnableBitmapCheckDefault: false

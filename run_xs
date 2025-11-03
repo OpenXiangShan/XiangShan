@@ -1,0 +1,1 @@
+make verilog CONFIG=XSNoCTopConfig YAML_CONFIG=/nfs/home/zhaohong/share/yaml/Eswin.yml

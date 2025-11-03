@@ -1,0 +1,2 @@
+ mill -i  xiangshan.runMain uncoreTest.uncoreTest
+mill -i xiangshan.runMain pbus.PbusGen
