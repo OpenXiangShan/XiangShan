@@ -65,13 +65,13 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // so the tailing 0 (already bypassed to if1) or 1 (if1 stall, stored here) entries might be flushed by bp3,
   // therefore, when shouldFlushByStage3, we need to move back writePtr by 0 (empty) or 1.
   // If in future we have bp4 (or even more) flush, this might not be enough.
-  private val bpuS3FlushValid = io.flushFromBpu.shouldFlushByStage3(tailFtqIdx, !empty)
+  private val bpuS3FlushValid = io.flushFromBpu.shouldFlushByStage3(tailFtqIdx, true.B)
   private val bpuS3FlushPtr   = writePtr - 1.U
 
   when(io.flush) {
     writePtr.value := 0.U
     writePtr.flag  := false.B
-  }.elsewhen(bpuS3FlushValid) {
+  }.elsewhen(bpuS3FlushValid && !empty) {
     writePtr := bpuS3FlushPtr
   }.elsewhen(io.write.fire) {
     writePtr := writePtr + 1.U
