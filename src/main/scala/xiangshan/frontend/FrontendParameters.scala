@@ -63,6 +63,15 @@ case class FrontendParameters(
 trait HasFrontendParameters extends HasXSParameter {
   def frontendParameters: FrontendParameters = coreParams.frontendParameters
 
+  // frontend-backend/memblock port delays
+  // these are highly coupled with pipeline design, so it's not parameterized for now
+  // we define them as constants here for better code readability, change with caution
+  def TlbCsrPortDelay:  Int = 1
+  def CsrCtrlPortDelay: Int = 2
+  def SfencePortDelay:  Int = 2
+  def WfiReqPortDelay:  Int = 1
+  def WfiSafePortDealy: Int = 1
+
   def FetchPorts: Int = frontendParameters.FetchPorts
 
   def FetchBlockSize:    Int = frontendParameters.FetchBlockSize
