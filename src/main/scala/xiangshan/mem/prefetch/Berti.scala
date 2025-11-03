@@ -829,6 +829,8 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   val s3_updateIndex = OHToUInt(s3_tlbFireOH.asUInt)
   val s3_drop1 = s3_tlbRespValid && s3_tlbRespBits.miss
   val s3_drop2 = s3_updateValid && (
+    // is region addr in pmem ranges
+    !PmemRanges.map(_.cover(s3_tlbRespBits.paddr.head)).reduce(_ || _) ||
     // page/access fault
     s3_tlbRespBits.excp.head.pf.ld || s3_tlbRespBits.excp.head.gpf.ld || s3_tlbRespBits.excp.head.af.ld ||
     // uncache
