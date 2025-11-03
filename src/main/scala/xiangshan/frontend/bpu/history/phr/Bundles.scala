@@ -46,9 +46,9 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
   val valid:     Bool                  = Bool()
   val taken:     Bool                  = Bool()
   val pc:        PrunedAddr            = PrunedAddr(VAddrBits)
+  val target:    PrunedAddr            = PrunedAddr(VAddrBits)
   val phrPtr:    PhrPtr                = new PhrPtr
   val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
-  // val target: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 class PhrUpdate(implicit p: Parameters) extends PhrBundle {

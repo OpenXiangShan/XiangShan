@@ -18,7 +18,7 @@ package xiangshan.frontend.bpu.history.phr
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class PhrParameters(
-    Shamt:          Int = 2,         // shift amount for Phr
+    Shamt:          Int = 3,         // shift amount for Phr
     EnableTwoTaken: Boolean = false, // enable two-taken support in Phr
     // ensure history length is a multiple of this value
     // default is 4, when history value is displayed in hexadecimal, it has better readability
