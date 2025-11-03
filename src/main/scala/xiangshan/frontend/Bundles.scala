@@ -414,3 +414,25 @@ object BlameBpuSource {
     blame
   }
 }
+
+class BpuPerfInfo(implicit p: Parameters) extends FrontendBundle {
+  val bpRight: UInt = UInt(XLEN.W)
+  val bpWrong: UInt = UInt(XLEN.W)
+}
+
+class BpuTopDownInfo(implicit p: Parameters) extends FrontendBundle {
+  val btbMissBubble:    Bool = Bool()
+  val tageMissBubble:   Bool = Bool()
+  val scMissBubble:     Bool = Bool()
+  val ittageMissBubble: Bool = Bool()
+  val rasMissBubble:    Bool = Bool()
+}
+
+class FrontendPerfInfo(implicit p: Parameters) extends FrontendBundle {
+  val ibufFull: Bool        = Bool()
+  val bpuInfo:  BpuPerfInfo = new BpuPerfInfo
+}
+
+class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {
+  val robHeadVaddr: Valid[PrunedAddr] = Valid(PrunedAddr(VAddrBits))
+}

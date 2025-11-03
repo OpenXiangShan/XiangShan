@@ -53,79 +53,78 @@ import xiangshan.frontend.ifu._
 import xiangshan.frontend.instruncache.InstrUncache
 import xiangshan.frontend.simfrontend.SimFrontendInlinedImp
 
-class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class FrontendIO(implicit p: Parameters) extends FrontendBundle {
+  val hartId:       UInt             = Input(UInt(hartIdLen.W))
+  val reset_vector: PrunedAddr       = Input(PrunedAddr(PAddrBits))
+  val sfence:       SfenceBundle     = Input(new SfenceBundle)
+  val fencei:       Bool             = Input(Bool())
+  val ptw:          TlbPtwIO         = new TlbPtwIO
+  val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
+  val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
+    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
+  val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
+
+  // ctrl
+  val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
+  val csrCtrl: CustomCSRCtrlIO = Input(new CustomCSRCtrlIO)
+
+  val resetInFrontend: Bool = Output(Bool())
+
+  // perf
+  val frontendInfo: FrontendPerfInfo         = Output(new FrontendPerfInfo)
+  val debugTopDown: FrontendDebugTopDownInfo = Flipped(new FrontendDebugTopDownInfo)
+
+  // mbist
+  val dft:       Option[SramBroadcastBundle] = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+  val dft_reset: Option[DFTResetSignals]     = Option.when(hasMbist)(Input(new DFTResetSignals))
+}
+
+class Frontend()(implicit p: Parameters) extends LazyModule with HasFrontendParameters {
   override def shouldBeInlined: Boolean = false
-  val inner       = LazyModule(new FrontendInlined)
-  lazy val module = new FrontendImp(this)
+
+  val inner:       FrontendInlined = LazyModule(new FrontendInlined)
+  lazy val module: FrontendImp     = new FrontendImp(this)
 }
 
 class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-  val io      = IO(wrapper.inner.module.io.cloneType)
-  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  val io:      FrontendIO     = IO(wrapper.inner.module.io.cloneType)
+  val io_perf: Vec[PerfEvent] = IO(wrapper.inner.module.io_perf.cloneType)
+
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
+
   if (p(DebugOptionsKey).ResetGen) {
     ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
-abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModuleImp(outer) with HasXSParameter
+abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModuleImp(outer)
+    with HasFrontendParameters
     with HasPerfEvents {
-  val io = IO(new Bundle() {
-    val hartId       = Input(UInt(hartIdLen.W))
-    val reset_vector = Input(PrunedAddr(PAddrBits))
-    val fencei       = Input(Bool())
-    val ptw          = new TlbPtwIO()
-    val backend      = new FrontendToCtrlIO
-    val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
-    val sfence       = Input(new SfenceBundle)
-    val tlbCsr       = Input(new TlbCsrBundle)
-    val csrCtrl      = Input(new CustomCSRCtrlIO)
-    val error        = Output(new L1BusErrorUnitInfo)
-    val frontendInfo = new Bundle {
-      val ibufFull = Output(Bool())
-      val bpuInfo = new Bundle {
-        val bpRight = Output(UInt(XLEN.W))
-        val bpWrong = Output(UInt(XLEN.W))
-      }
-    }
-    val resetInFrontend = Output(Bool())
-    val debugTopDown = new Bundle {
-      val robHeadVaddr = Flipped(Valid(PrunedAddr(VAddrBits)))
-    }
-    val dft       = Option.when(hasDFT)(Input(new SramBroadcastBundle))
-    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-  })
+  val io: FrontendIO = IO(new FrontendIO)
 }
 
-class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasFrontendParameters {
   override def shouldBeInlined: Boolean = true
 
-  val instrUncache = LazyModule(new InstrUncache())
-  val icache       = LazyModule(new ICache())
+  val instrUncache: InstrUncache = LazyModule(new InstrUncache)
+  val icache:       ICache       = LazyModule(new ICache)
 
   lazy val module: FrontendInlinedImpBase =
     if (env.EnableSimFrontend) new SimFrontendInlinedImp(this) else new FrontendInlinedImp(this)
 }
 
 class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) {
+  private val instrUncache = outer.instrUncache.module
+  private val icache       = outer.icache.module
+  private val bpu          = Module(new Bpu)
+  private val ifu          = Module(new Ifu)
+  private val ibuffer      = Module(new IBuffer)
+  private val ftq          = Module(new Ftq)
 
-  // decouped-frontend modules
-  val instrUncache = outer.instrUncache.module
-  val icache       = outer.icache.module
-  val bpu          = Module(new Bpu)
-  val ifu          = Module(new Ifu)
-  val ibuffer      = Module(new IBuffer)
-  val ftq          = Module(new Ftq)
-
-  val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
-  val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
-  val FlushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
-  val FlushControlBTBMiss  = Wire(Bool())
-  val FlushTAGEMiss        = Wire(Bool())
-  val FlushSCMiss          = Wire(Bool())
-  val FlushITTAGEMiss      = Wire(Bool())
-  val FlushRASMiss         = Wire(Bool())
+  private val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
+  private val flushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
+  private val flushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
 
   // TODO: what the fuck are these magic numbers?
   val tlbCsr  = DelayN(io.tlbCsr, 1)
@@ -233,21 +232,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  ibuffer.io.flush                := needFlush
-  ibuffer.io.ControlRedirect      := FlushControlRedirect
-  ibuffer.io.MemVioRedirect       := FlushMemVioRedirect
-  ibuffer.io.ControlBTBMissBubble := FlushControlBTBMiss
-  ibuffer.io.TAGEMissBubble       := FlushTAGEMiss
-  ibuffer.io.SCMissBubble         := FlushSCMiss
-  ibuffer.io.ITTAGEMissBubble     := FlushITTAGEMiss
-  ibuffer.io.RASMissBubble        := FlushRASMiss
-  ibuffer.io.decodeCanAccept      := io.backend.canAccept
-
-  FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
-  FlushTAGEMiss       := ftq.io.TAGEMissBubble
-  FlushSCMiss         := ftq.io.SCMissBubble
-  FlushITTAGEMiss     := ftq.io.ITTAGEMissBubble
-  FlushRASMiss        := ftq.io.RASMissBubble
+  ibuffer.io.flush           := needFlush
+  ibuffer.io.controlRedirect := flushControlRedirect
+  ibuffer.io.memVioRedirect  := flushMemVioRedirect
+  ibuffer.io.bpuTopDownInfo  := ftq.io.bpuTopDownInfo
+  ibuffer.io.decodeCanAccept := io.backend.canAccept
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
