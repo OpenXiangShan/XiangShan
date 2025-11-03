@@ -657,6 +657,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     ("load_replay_for_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data          ),
     ("load_replay_for_no_mshr  ", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr       ),
     ("load_replay_for_conflict ", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow ),
+    ("l1D_read_dcache_access   ", io.lsu.resp.fire                                              ),
+    ("l1D_read_dcache_miss     ", io.lsu.resp.fire && real_miss                                 )
   )
   generatePerfEvent()
 }

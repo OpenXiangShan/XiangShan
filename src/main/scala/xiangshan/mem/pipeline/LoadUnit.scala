@@ -1973,6 +1973,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     ("load_s1_tlb_miss        ", s1_fire && io.tlb.resp.bits.miss                               ),
     ("load_s2_in_fire         ", s1_fire                                                        ),
     ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
+    ("l1D_load_hw_prf_access  ", s2_fire && s2_hw_prf                                           ),// Only hw prf
+    ("l1D_load_hw_prf_miss    ", s2_fire && s2_hw_prf && io.dcache.resp.bits.miss               ) // Only hw prf
   )
   generatePerfEvent()
 
