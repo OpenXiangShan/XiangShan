@@ -51,14 +51,18 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   /*
    * s3_fire update GHR
    */
-  private val s3_update             = io.update // bp pipeline s3 level update
-  private val s3_taken              = s3_update.taken
-  private val s3_firstTakenIdx      = OHToUInt(s3_update.firstTakenOH)
-  private val s3_firstTakenPos      = s3_update.position(s3_firstTakenIdx)
-  private val s3_lessThanFirstTaken = s3_update.position.map(_ < s3_firstTakenPos)
+  private val s3_update        = io.update // bp pipeline s3 level update
+  private val s3_taken         = s3_update.taken
+  private val s3_hitMask       = s3_update.hitMask
+  private val s3_firstTakenIdx = OHToUInt(s3_update.firstTakenOH)
+  private val s3_firstTakenPos = s3_update.position(s3_firstTakenIdx)
+  private val s3_lessThanFirstTaken = s3_update.position.zip(s3_hitMask).map {
+    case (pos, hit) => hit && (pos < s3_firstTakenPos)
+  }
   // NOTE: GhrShamt is NumBtbResultEntries, but numLess may be 1 larger than GhrShamt
   private val s3_numLess   = PopCount(s3_lessThanFirstTaken)
-  private val s3_updateGhr = getNewGhr(ghr.value, s3_numLess, s3_taken)
+  private val s3_numHit    = PopCount(s3_hitMask)
+  private val s3_updateGhr = getNewGhr(ghr.value, s3_numLess, s3_numHit, s3_taken)
   require(isPow2(GhrShamt), "GhrShamt must be pow2")
 
   /*
@@ -67,12 +71,16 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   private val r0_valid         = io.redirect.valid
   private val r0_metaGhr       = io.redirect.meta.ghr
   private val r0_oldPositions  = io.redirect.meta.position
+  private val r0_oldHits       = io.redirect.meta.hitMask
   private val r0_taken         = io.redirect.taken
   private val r0_takenPosition = getAlignedInstOffset(io.redirect.startVAddr) // FIXME: position calculate maybe wrong
-  private val r0_lessThanPc    = r0_oldPositions.map(_ < r0_takenPosition)    // positions less than redirect branch pc
-  private val r0_numLess       = PopCount(r0_lessThanPc)
+  private val r0_lessThanPc = r0_oldPositions.zip(r0_oldHits).map {
+    case (pos, hit) => hit && (pos < r0_takenPosition)
+  } // positions less than redirect branch pc
+  private val r0_numLess = PopCount(r0_lessThanPc)
+  private val r0_numHit  = PopCount(r0_oldHits)
   // TODO: calculate the new ghr based on redirect info maybe need more cycles
-  private val r0_updateGhr = getNewGhr(r0_metaGhr, r0_numLess, r0_taken)
+  private val r0_updateGhr = getNewGhr(r0_metaGhr, r0_numLess, r0_numHit, r0_taken)
   // update from redirect or update
   s0_ghr.valid := s3_fire && ghr.valid // gTable prediction can only begin when s3_fire
   s0_ghr.value := ghr.value

@@ -158,9 +158,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  calculate each ctr's percsum
    */
   private val s1_startVAddr = RegEnable(io.startVAddr, s0_fire)
-  private val s1_pathResp:   Seq[Vec[ScEntry]] = pathTable.map(_.io.resp)
-  private val s1_globalResp: Seq[Vec[ScEntry]] = globalTable.map(_.io.resp)
-  private val s1_allResp:    Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
+  private val s1_pathResp: Vec[Vec[ScEntry]] = VecInit(pathTable.map(_.io.resp))
+  // if s0_ghr invalid, global table resp is also invalid
+  private val s1_globalResp: Vec[Vec[ScEntry]] =
+    Mux(
+      s1_ghr.valid,
+      VecInit(globalTable.map(_.io.resp)),
+      VecInit.fill(GlobalTableSize)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    )
+  private val s1_allResp: Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
 
   private val s1_allPercsum: Vec[Vec[SInt]] = VecInit(s1_allResp.map(entries =>
     VecInit(entries.map(entry => getPercsum(entry.ctr.value)))

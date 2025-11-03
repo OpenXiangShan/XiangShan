@@ -337,6 +337,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_ghrMeta = WireInit(0.U.asTypeOf(new GhrMeta))
   s3_ghrMeta.ghr      := ghr.io.ghist.value
   s3_ghrMeta.position := s3_mbtbResult.positions
+  s3_ghrMeta.hitMask  := s3_mbtbResult.hitMask
 
   private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
   s3_speculationMeta.phrHistPtr := s3_phrMeta
@@ -411,6 +412,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ghr.io.update.taken        := s3_taken
   ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
   ghr.io.update.position     := s3_mbtbResult.positions
+  ghr.io.update.hitMask      := s3_mbtbResult.hitMask
   ghr.io.redirect.valid      := redirect.valid
   ghr.io.redirect.startVAddr := redirect.bits.startVAddr
   ghr.io.redirect.taken      := redirect.bits.taken
