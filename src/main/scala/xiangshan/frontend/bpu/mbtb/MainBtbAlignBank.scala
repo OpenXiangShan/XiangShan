@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -50,8 +51,8 @@ class MainBtbAlignBank(
     class Write extends Bundle {
       class Req extends Bundle {
         // similar to Read.Req.startVAddr, calculated in MainBtb top
-        val startVAddr: PrunedAddr   = new PrunedAddr(VAddrBits)
-        val entry:      MainBtbEntry = new MainBtbEntry
+        val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
+        val branchInfo: BranchInfo = new BranchInfo
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -169,12 +170,20 @@ class MainBtbAlignBank(
    */
   private val t1_valid            = w.req.valid
   private val t1_startVAddr       = w.req.bits.startVAddr
-  private val t1_entry            = w.req.bits.entry
+  private val t1_branchInfo       = w.req.bits.branchInfo
   private val t1_setIdx           = getSetIndex(t1_startVAddr)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
   private val t1_wayMask          = replacer.io.victim.wayMask
+
+  private val t1_entry = Wire(new MainBtbEntry)
+  t1_entry.valid           := true.B
+  t1_entry.tag             := getTag(t1_startVAddr)
+  t1_entry.position        := t1_branchInfo.cfiPosition
+  t1_entry.targetLowerBits := getTargetLowerBits(t1_branchInfo.target)
+  t1_entry.targetCarry     := getTargetCarry(t1_startVAddr, t1_branchInfo.target)
+  t1_entry.attribute       := t1_branchInfo.attribute
 
   // similar to s0 case
   assert(!t1_valid || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")

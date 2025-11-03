@@ -116,14 +116,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
 
-  private val t1_writeEntry = Wire(new MainBtbEntry)
-  t1_writeEntry.valid           := true.B
-  t1_writeEntry.tag             := getTag(t1_train.startVAddr)
-  t1_writeEntry.position        := t1_mispredictBranch.bits.cfiPosition
-  t1_writeEntry.targetLowerBits := getTargetLowerBits(t1_mispredictBranch.bits.target)
-  t1_writeEntry.targetCarry     := getTargetCarry(t1_train.startVAddr, t1_mispredictBranch.bits.target)
-  t1_writeEntry.attribute       := t1_mispredictBranch.bits.attribute
-
   private val t1_writeAlignBankIdx = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
   private val t1_writeAlignBankMask = vecRotateRight(
     VecInit(UIntToOH(t1_writeAlignBankIdx).asBools),
@@ -133,7 +125,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)
     b.io.write.req.bits.startVAddr := t1_startVAddrVec(i)
-    b.io.write.req.bits.entry      := t1_writeEntry
+    b.io.write.req.bits.branchInfo := t1_mispredictBranch.bits
   }
 
   /* *** statistics *** */
