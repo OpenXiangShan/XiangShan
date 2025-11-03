@@ -124,10 +124,9 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val flushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
   private val flushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
 
-  // TODO: what the fuck are these magic numbers?
-  val tlbCsr  = DelayN(io.tlbCsr, 1)
-  val csrCtrl = DelayN(io.csrCtrl, 2)
-  val sfence  = DelayN(io.sfence, 2)
+  private val tlbCsr  = DelayN(io.tlbCsr, TlbCsrPortDelay)
+  private val csrCtrl = DelayN(io.csrCtrl, CsrCtrlPortDelay)
+  private val sfence  = DelayN(io.sfence, SfencePortDelay)
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
@@ -182,12 +181,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   icache.io.softPrefetchReq <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
-  // DelayN for better timing, FIXME: maybe 1 cycle is not enough, to be evaluated
-  private val wfiReq = DelayN(io.backend.wfi.wfiReq, 1)
+  private val wfiReq = DelayN(io.backend.wfi.wfiReq, WfiReqPortDelay)
   icache.io.wfi.wfiReq       := wfiReq
   instrUncache.io.wfi.wfiReq := wfiReq
   // return safe only when both icache & instrUncache are safe, also only when has wfiReq (like, safe := wfiReq.fire)
-  io.backend.wfi.wfiSafe := DelayN(wfiReq && icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe, 1)
+  io.backend.wfi.wfiSafe := DelayN(wfiReq && icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe, WfiSafePortDealy)
 
   // IFU-Ftq
   ifu.io.fromFtq <> ftq.io.toIfu
@@ -219,13 +217,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
+  private val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
   when(ftq.io.toBackend.wen) {
     checkPcMem(ftq.io.toBackend.ftqIdx) := ftq.io.toBackend.startVAddr
   }
 
-  val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
-  val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
+  private val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
+  private val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
 
   for (i <- 0 until DecodeWidth) {
     checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
@@ -375,7 +373,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.fromUncache <> instrUncache.io.toIfu
   instrUncache.io.flush := false.B
 
-  io.error <> RegNext(RegNext(icache.io.error))
+  io.error <> DelayN(icache.io.error, CacheErrorPortDelay)
 
   icache.io.hartId := io.hartId
 
@@ -385,15 +383,15 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.resetInFrontend       := reset.asBool
 
   // PFEvent
-  val pfevent = Module(new PFEvent)
+  private val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
-  val csrevents = pfevent.io.hpmevent.take(8)
+  private val csrevents = pfevent.io.hpmevent.take(8)
 
-  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
-  val perfFromIO    = Seq()
-  val perfBlock     = Seq()
+  private val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
+  private val perfFromIO    = Seq()
+  private val perfBlock     = Seq()
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+  private val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
@@ -401,8 +399,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     }
   }
 
-  val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  private val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  override val perfEvents: Seq[(String, UInt)] = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeFrontend", hasMbist)
