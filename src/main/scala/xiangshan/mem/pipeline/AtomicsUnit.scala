@@ -516,6 +516,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.out.bits.redirect.foreach(_ := 0.U.asTypeOf(Valid(new Redirect)))
   io.out.bits.exceptionVec.foreach(_ := exceptionVec)
   io.out.bits.trigger.foreach(_ := trigger)
+  io.out.bits.isFromLoadUnit.foreach(_ := false.B) // atomics are not issued from LoadUnit
   io.out.bits.predecodeInfo.foreach(_ := uop.preDecodeInfo)
   io.out.bits.debug.isMMIO := is_mmio
   io.out.bits.debug.paddr := paddr

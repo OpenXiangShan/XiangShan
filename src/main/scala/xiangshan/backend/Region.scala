@@ -562,7 +562,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val intLoadWB = bypassNetwork.io.fromExus.int.flatten.filter(_.bits.params.hasLoadExu)
     intLoadWB.zip(io.lduWriteback.get.flatten).foreach { case (sink, source) =>
       sink.valid := source.valid
-      sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
+      sink.bits.intWen := source.bits.intWen.getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
       sink.bits.pdest := source.bits.pdest
       sink.bits.data := source.bits.data(source.bits.params.getForwardIndex)
     }

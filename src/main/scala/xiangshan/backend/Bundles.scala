@@ -999,6 +999,9 @@ object Bundles {
       val isVecLoad = Bool()
       val isVlm = Bool()
     })
+    // LoadUnit only
+    // isFromLoadUnit indicates whether this ExuOutput is issued from LoadUnit (e.g., not so for atomics)
+    val isFromLoadUnit = if (params.hasLoadFu) Some(Bool()) else None
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
     val debug_seqNum = InstSeqNum()
@@ -1237,6 +1240,7 @@ object Bundles {
         x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
         x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
       })
+      output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
       output.trigger.foreach(_ := this.uop.trigger)
       output
     }

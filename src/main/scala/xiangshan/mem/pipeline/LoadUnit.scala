@@ -1575,6 +1575,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     x.isVecLoad := VlduType.isVecLd(s3_out.bits.uop.fuOpType)
     x.isVlm := VlduType.isMasked(s3_out.bits.uop.fuOpType) && VlduType.isVecLd(s3_out.bits.uop.fuOpType)
   })
+  s3_wb.isFromLoadUnit.foreach(_ := true.B)
   s3_wb.debug.isMMIO := s3_in.mmio
   s3_wb.debug.isNCIO := s3_in.nc && !s3_in.memBackTypeMM
   s3_wb.debug.isPerfCnt := false.B
@@ -1583,7 +1584,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s3_wb.debugInfo := s3_out.bits.uop.debugInfo
   s3_wb.debug_seqNum := s3_out.bits.uop.debug_seqNum
 
-  val s3_ld_wb_meta = Mux(s3_valid, s3_wb, s3_mmio_req.bits)
+  val s3_ld_wb_meta = Wire(new ExuOutput(param))
+  s3_ld_wb_meta := Mux(s3_valid, s3_wb, s3_mmio_req.bits)
 
   // data from load queue refill
   val s3_ld_raw_data_frm_mmio = RegNextN(io.lsq.ld_raw_data, 3)
@@ -1599,6 +1601,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     "b111".U -> s3_merged_data_frm_mmio(63, 56)
   ))
   val s3_ld_data_frm_mmio = rdataHelper(s3_ld_raw_data_frm_mmio.uop, s3_picked_data_frm_mmio)
+  s3_ld_wb_meta.data := Mux(s3_valid, s3_wb.data, VecInit(Seq.fill(param.wbPathNum)(s3_ld_data_frm_mmio)))
 
   /* data from pipe, which forward from respectively
    *  dcache hit: [D channel, mshr, sbuffer, sq]
@@ -1659,10 +1662,10 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s3_ldout_valid  = s3_mmio_req.valid ||
                         s3_out.valid && RegNext(!s2_out.isvec && !s2_out.isFrmMisAlignBuf)
   s3_wb.data := VecInit(Seq.fill(param.wbPathNum)(s3_ld_data_frm_pipe(0)))
-  s3_mmio_req.bits.data := VecInit(Seq.fill(param.wbPathNum)(s3_ld_data_frm_mmio))
 
   io.ldout.valid       := s3_ldout_valid
   io.ldout.bits        := s3_ld_wb_meta
+  io.ldout.bits.isFromLoadUnit.foreach(_ := true.B)
 
   XSError(s3_valid && s3_vecout.isvec && s3_in.vecActive && !s3_vecout.mask.orR, "In vecActive, mask complement should not be 0")
   // TODO: check this --hx
