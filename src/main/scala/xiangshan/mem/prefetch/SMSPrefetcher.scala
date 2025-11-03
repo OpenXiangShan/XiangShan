@@ -1058,7 +1058,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s3_update_valid = s3_tlb_resp_fire && !s3_tlb_resp.miss
   val s3_drop = s3_update_valid && (
     // is region addr in pmem ranges
-    PmemRanges.map(_.cover(s3_tlb_resp.paddr.head)).reduce(_ || _) ||
+    !PmemRanges.map(_.cover(s3_tlb_resp.paddr.head)).reduce(_ || _) ||
     // page/access fault
     s3_tlb_resp.excp.head.pf.ld || s3_tlb_resp.excp.head.gpf.ld || s3_tlb_resp.excp.head.af.ld ||
     // uncache
