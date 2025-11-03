@@ -196,8 +196,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   XSPerfAccumulate("store_miss_prefetch_not_fire", io.miss_req.valid && !io.miss_req.ready && !io.miss_req.bits.cancel)
 
   val perfEvents = Seq(
-    ("l1D_write_dcache_access", s2_valid && !io.lsu.s2_kill                         ),
-    ("l1D_write_dcache_miss  ", s2_valid && !s2_hit && !io.lsu.s2_kill              )
+    ("l1D_write_dcache_access", s2_valid && !s2_is_prefetch && !io.lsu.s2_kill                         ),
+    ("l1D_write_dcache_miss  ", s2_valid && !s2_is_prefetch && !s2_hit && !io.lsu.s2_kill              )
   )
   generatePerfEvent()
 }
