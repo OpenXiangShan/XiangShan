@@ -94,7 +94,7 @@ class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
-        VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(new ScEntry()))
+        VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
       )
   }
 
