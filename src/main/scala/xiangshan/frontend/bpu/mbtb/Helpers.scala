@@ -16,10 +16,6 @@
 package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
-import chisel3.util.MuxLookup
-import chisel3.util.isPow2
-import chisel3.util.log2Ceil
-import chisel3.util.log2Up
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CrossPageHelper
@@ -32,17 +28,14 @@ trait Helpers extends HasMainBtbParameters
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
-  def getNextSetIndex(pc: PrunedAddr): UInt =
-    getSetIndex(getNextAlignedAddr(pc))
-
   def getReplacerSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + FetchBlockAlignWidth - 1, FetchBlockAlignWidth)
 
-  def getNextReplacerSetIndex(pc: PrunedAddr): UInt =
-    getReplacerSetIndex(pc) + 1.U
-
   def getAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+
+  def getAlignBankIndexFromPosition(cfiPosition: UInt): UInt =
+    cfiPosition(CfiPositionWidth - 1, CfiPositionWidth - AlignBankIdxLen)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
     pc(VAddrBits - 1, TargetWidth + instOffsetBits)
@@ -59,26 +52,20 @@ trait Helpers extends HasMainBtbParameters
       InternalBankIdxLen + SetIdxLen + FetchBlockSizeWidth
     )
 
-  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, Bool, UInt, Vec[Bool]) = {
+  def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): UInt = {
     require(hitMask.length == position.length)
     require(hitMask.length >= 2)
-    val isMultiHit        = WireDefault(false.B)
-    val isHigherAlignBank = WireDefault(false.B)
-    val multiHitWayIdx    = WireDefault(0.U(log2Up(NumWay).W))
-    val multiHitMask      = VecInit(Seq.fill(NumWay * NumAlignBanks)(false.B))
+    val multiHitMask = VecInit(Seq.fill(NumWay)(false.B))
     for {
-      i <- 0 until NumWay * NumAlignBanks
-      j <- i + 1 until NumWay * NumAlignBanks
+      i <- 0 until NumWay
+      j <- i + 1 until NumWay
     } {
       val bothHit      = hitMask(i) && hitMask(j)
       val samePosition = position(i) === position(j)
       when(bothHit && samePosition) {
-        isMultiHit        := true.B
-        isHigherAlignBank := i.U >= NumWay.U
-        multiHitWayIdx    := (i % NumWay).U
-        multiHitMask(i)   := true.B
+        multiHitMask(i) := true.B
       }
     }
-    (isMultiHit, isHigherAlignBank, multiHitWayIdx, multiHitMask)
+    multiHitMask.asUInt
   }
 }

@@ -18,13 +18,11 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
-
   // whether the entry is valid
   val valid: Bool = Bool()
 
@@ -34,7 +32,7 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // Whether a branch is bias toward a single target
   // For conditional branch, this means bias toward same direction
   // For indirect branch, this means bias toward single target
-  val stronglyBiased: Bool = Bool()
+//  val stronglyBiased: Bool = Bool() // TODO
 
   // Relative position to the aligned start addr
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
@@ -43,7 +41,7 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val targetCarry:     TargetCarry = new TargetCarry
   val targetLowerBits: UInt        = UInt(TargetWidth.W)
 
-  val replaceCnt: UInt = UInt(2.W) // FIXME: not used for now
+//  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
 }
 
 class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
@@ -52,30 +50,12 @@ class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with Ha
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
 }
 
-class ReplacerIO(implicit p: Parameters) extends MainBtbBundle {
-  // prediction hit update Replacer
-  val predictionSetIndxVec: Vec[UInt] = Input(Vec(NumAlignBanks, UInt(SetIdxLen.W)))
-  val predictionHitMask:    Vec[Bool] = Input(Vec(NumAlignBanks, Bool()))
-  val predictionTouchWays: Vec[Vec[Valid[UInt]]] =
-    Input(Vec(NumAlignBanks, Vec(NumWay, Valid(UInt(log2Up(NumWay).W)))))
-
-  // training hit update Replacer
-  val trainWriteValid:    Bool      = Input(Bool())
-  val trainSetIndx:       UInt      = Input(UInt(SetIdxLen.W))
-  val trainAlignBankMask: Vec[Bool] = Input(Vec(NumAlignBanks, Bool()))
-  val victimWayIdx:       UInt      = Output(UInt(log2Up(NumWay).W))
+class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
+  val rawHit:    Bool            = Bool()
+  val position:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute: BranchAttribute = new BranchAttribute
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val hitMask            = Vec(NumBtbResultEntries, Bool())
-  val stronglyBiasedMask = Vec(NumBtbResultEntries, Bool())
-  val positions          = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
-  val attributes         = Vec(NumBtbResultEntries, new BranchAttribute)
-}
-
-class MainBtbResult(implicit p: Parameters) extends MainBtbBundle {
-  val hitMask    = Vec(NumBtbResultEntries, Bool())
-  val positions  = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)) // FIXME: use correct one
-  val targets    = Vec(NumBtbResultEntries, PrunedAddr(VAddrBits))
-  val attributes = Vec(NumBtbResultEntries, new BranchAttribute)
+  val entries: Vec[MainBtbMetaEntry] = Vec(NumBtbResultEntries, new MainBtbMetaEntry)
 }
