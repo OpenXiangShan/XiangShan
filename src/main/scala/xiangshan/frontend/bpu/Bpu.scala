@@ -19,11 +19,11 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
+import utility.Constantin
 import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import utility.Constantin
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
@@ -77,10 +77,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
-  private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
-  private val constCtrl = Wire(UInt(8.W))
+  private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
+  private val constCtrl = {
+    Constantin.init(true)
+    val ret = Constantin.createRecord("constCtrl")
+    Constantin.init(false)
+    ret
+  }
 
-  constCtrl := Constantin.createRecord("constCtrl")
   fallThrough.io.enable := true.B // fallThrough is always enabled
 //  ubtb.io.enable        := ctrl.ubtbEnable
 //  abtb.io.enable        := ctrl.abtbEnable
@@ -89,13 +93,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 //  sc.io.enable          := ctrl.scEnable
 //  ittage.io.enable      := ctrl.ittageEnable
 //  ras.io.enable         := false.B
-  ubtb.io.enable        := constCtrl(0)
-  abtb.io.enable        := constCtrl(1)
-  mbtb.io.enable        := constCtrl(2)
-  tage.io.enable        := constCtrl(3)
-  sc.io.enable          := constCtrl(4)
-  ittage.io.enable      := constCtrl(5)
-  ras.io.enable         := constCtrl(6)
+  ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
+  abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
+  mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
+  tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
+  sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
+  ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
+  ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
