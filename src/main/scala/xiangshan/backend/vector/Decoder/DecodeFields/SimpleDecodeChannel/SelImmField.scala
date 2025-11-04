@@ -1,5 +1,6 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
+import chisel3.UInt
 import chisel3.util.experimental.decode.DecodeField
 import chisel3.util.{BitPat, ValidIO}
 import freechips.rocketchip.rocket.Instructions._
@@ -10,11 +11,13 @@ import xiangshan.backend.vector.Decoder.Types.SelImm
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
-object SelImmField extends DecodeField[InstPattern, ValidIO[SelImm]] {
+import scala.language.implicitConversions
+
+object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
 
   override def name: String = "selImm"
 
-  override def chiselType: ValidIO[SelImm] = ValidIO(SelImm())
+  override def chiselType: ValidIO[UInt] = ValidIO(SelImm())
 
   override def genTable(inst: InstPattern): BitPat = {
     val imm = inst match {
@@ -42,7 +45,7 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[SelImm]] {
       case vec: VecInstPattern => vec match {
         case _: VecMemInstPattern => null
         case vecArith: VecArithInstPattern =>
-          if (Category.OPIVI.str == vecArith.category.rawString) {
+          if (vecArith.category.rawString == Category.OPIVI) {
             if (getVariableName(VROR_VI) == vecArith.name)
               SelImm.VRORVI
             else if (unsignedImmVecInst.contains(vecArith.name))

@@ -103,6 +103,9 @@ class NewUopNumNoSegDecoderOutput extends Bundle {
   val uopNumOH = UopNumOH()
 }
 
+/**
+ * input sew, eew, lmul
+ */
 class UopNumNoSegDecoder extends DecoderModule (
   inB = new NewUopNumNoSegDecoderInput,
   outB = new NewUopNumNoSegDecoderOutput,

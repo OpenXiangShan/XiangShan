@@ -13,7 +13,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 
 object RVVDecodeUtil {
-  class DecodePatternComb[
+  class DecodePatternComb2[
     P1 <: DecodePattern,
     P2 <: DecodePattern,
   ](
@@ -21,6 +21,114 @@ object RVVDecodeUtil {
     val p2: P2,
   ) extends DecodePattern {
     override def bitPat: BitPat = p1.bitPat ## p2.bitPat
+
+    def ##[T <: DecodePattern](that: T): DecodePatternComb3[P1, P2, T] = {
+      new DecodePatternComb3[P1, P2, T](p1, p2, that)
+    }
+  }
+
+  class DecodePatternComb3[
+    P1 <: DecodePattern,
+    P2 <: DecodePattern,
+    P3 <: DecodePattern,
+  ](
+    val p1: P1,
+    val p2: P2,
+    val p3: P3,
+  ) extends DecodePattern {
+    override def bitPat: BitPat = p1.bitPat ## p2.bitPat ## p3.bitPat
+
+    def ##[T <: DecodePattern](that: T): DecodePatternComb4[P1, P2, P3, T] = {
+      new DecodePatternComb4[P1, P2, P3, T](p1, p2, p3, that)
+    }
+  }
+
+  class DecodePatternComb4[
+    P1 <: DecodePattern,
+    P2 <: DecodePattern,
+    P3 <: DecodePattern,
+    P4 <: DecodePattern,
+  ](
+    val p1: P1,
+    val p2: P2,
+    val p3: P3,
+    val p4: P4,
+  ) extends DecodePattern {
+    override def bitPat: BitPat = p1.bitPat ## p2.bitPat ## p3.bitPat ## p4.bitPat
+    def ##[T <: DecodePattern](that: T): DecodePatternComb5[P1, P2, P3, P4, T] = {
+      new DecodePatternComb5[P1, P2, P3, P4, T](p1, p2, p3, p4, that)
+    }
+  }
+
+  class DecodePatternComb5[
+    P1 <: DecodePattern,
+    P2 <: DecodePattern,
+    P3 <: DecodePattern,
+    P4 <: DecodePattern,
+    P5 <: DecodePattern,
+  ](
+    val p1: P1,
+    val p2: P2,
+    val p3: P3,
+    val p4: P4,
+    val p5: P5,
+  ) extends DecodePattern {
+    override def bitPat: BitPat = p1.bitPat ## p2.bitPat ## p3.bitPat ## p4.bitPat ## p5.bitPat
+  }
+
+  object DecodePatternComb2 {
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+    ](arg: DecodePatternComb2[P1, P2]): Option[(P1, P2)] = Some((arg.p1, arg.p2))
+  }
+
+  object DecodePatternComb3 {
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+      P3 <: DecodePattern,
+    ](arg: DecodePatternComb3[P1, P2, P3]): Option[(P1, P2, P3)] = Some((arg.p1, arg.p2, arg.p3))
+  }
+
+  object DecodePatternComb4 {
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+      P3 <: DecodePattern,
+      P4 <: DecodePattern,
+    ](arg: DecodePatternComb4[P1, P2, P3, P4]): Option[(P1, P2, P3, P4)] = Some((arg.p1, arg.p2, arg.p3, arg.p4))
+  }
+
+  object DecodePatternComb5 {
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+      P3 <: DecodePattern,
+      P4 <: DecodePattern,
+      P5 <: DecodePattern,
+    ](arg: DecodePatternComb5[P1, P2, P3, P4, P5]): Option[(P1, P2, P3, P4, P5)] =
+      Some((arg.p1, arg.p2, arg.p3, arg.p4, arg.p5))
+  }
+
+  object DecodePatternComb {
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+    ](arg: DecodePatternComb2[P1, P2]): Option[(P1, P2)] = DecodePatternComb2.unapply(arg)
+
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+      P3 <: DecodePattern,
+    ](arg: DecodePatternComb3[P1, P2, P3]): Option[(P1, P2, P3)] = DecodePatternComb3.unapply(arg)
+
+    def unapply[
+      P1 <: DecodePattern,
+      P2 <: DecodePattern,
+      P3 <: DecodePattern,
+      P4 <: DecodePattern,
+    ](arg: DecodePatternComb4[P1, P2, P3, P4]): Option[(P1, P2, P3, P4)] = DecodePatternComb4.unapply(arg)
   }
 
   case class LmulPattern(
@@ -73,6 +181,10 @@ object RVVDecodeUtil {
     }
 
     def dontCare: LmulPattern = LmulPattern(BitPat.dontCare(3))
+
+    def all: Seq[LmulPattern] = {
+      Lmuls.all.map(LmulPattern.apply)
+    }
   }
 
   case class NfPattern(bitpat: BitPat) extends DecodePattern {
@@ -102,6 +214,17 @@ object RVVDecodeUtil {
     def apply(uint: UInt): NfPattern = NfPattern(uint.toBitPat)
 
     def dontCare: NfPattern = NfPattern(BitPat.dontCare(3))
+
+    def all: Seq[NfPattern] = Seq(
+      BitPat("b000"),
+      BitPat("b001"),
+      BitPat("b010"),
+      BitPat("b011"),
+      BitPat("b100"),
+      BitPat("b101"),
+      BitPat("b110"),
+      BitPat("b111"),
+    ).map(NfPattern.apply)
   }
 
   case class SewPattern(bitpat: BitPat) extends DecodePattern {
@@ -138,6 +261,8 @@ object RVVDecodeUtil {
     }
 
     def dontCare: SewPattern = SewPattern(BitPat.dontCare(3))
+
+    def all: Seq[SewPattern] = Sews.all.map(SewPattern.apply)
   }
 
   case class UopNumOHsPattern(

@@ -27,15 +27,7 @@ object Types {
     def VP  = b"11"
   }
 
-  class SelImm extends Bundle {
-    val value = UInt(SelImm.width.W)
-  }
-
-  object SelImm {
-    def width = 4
-
-    def apply(): SelImm = new SelImm()
-
+  object SelImm extends NamedUInt(4) {
     def S  = b"0000"
     def SB = b"0001"
     def U  = b"0010"

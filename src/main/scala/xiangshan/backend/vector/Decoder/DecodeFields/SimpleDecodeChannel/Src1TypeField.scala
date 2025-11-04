@@ -16,7 +16,7 @@ object Src1TypeField extends DecodeField[VecInstPattern, DecodeSrcType] {
 
   override def genTable(op: VecInstPattern): BitPat = {
     op match {
-      case VecArithInstPattern() => genTable(op.asInstanceOf[VecArithInstPattern])
+      case _: VecArithInstPattern => genTable(op.asInstanceOf[VecArithInstPattern])
       case VecConfigInstPattern() => genTable(op.asInstanceOf[VecConfigInstPattern])
       case _: VecMemInstPattern => genTable(op.asInstanceOf[VecMemInstPattern])
     }

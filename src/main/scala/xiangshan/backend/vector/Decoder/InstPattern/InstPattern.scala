@@ -2,6 +2,8 @@ package xiangshan.backend.vector.Decoder.InstPattern
 
 import chisel3.util.BitPat
 import chisel3.util.experimental.decode.DecodePattern
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, SewPattern}
+import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 
 import scala.beans.BeanProperty
@@ -33,7 +35,7 @@ sealed abstract class FpInstPattern(implicit val rawInst: BitPat) extends InstPa
   def rs3: BitPat = this.rawInst(31, 27)
 }
 
-sealed abstract class VecInstPattern(implicit val rawInst: BitPat) extends InstPattern {
+abstract class VecInstPattern(implicit val rawInst: BitPat) extends InstPattern {
   override def toString: String = {
     getName() + "@" + getClass.getSimpleName
   }
@@ -115,7 +117,7 @@ case class FpR4TypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
 case class FpSTypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
-abstract class VecMemInstPattern(
+sealed abstract class VecMemInstPattern(
   implicit rawInst: BitPat,
 ) extends VecInstPattern() {
   def nf    : BitPat = rawInst(31, 29)
@@ -150,46 +152,35 @@ abstract class VecMemInstPattern(
   }
 }
 
-trait VecMemUnitStride extends VecMemInstPattern
-trait VecMemStrided extends VecMemInstPattern
-trait VecMemIndex extends VecMemInstPattern
-trait VecMemOrderIndex extends VecMemIndex
-trait VecMemUnorderIndex extends VecMemIndex
-trait VecMemWhole extends VecMemInstPattern
-trait VecMemMask extends VecMemInstPattern
-trait VecLoadInstPattern extends VecMemInstPattern
-trait VecStoreInstPattern extends VecMemInstPattern
+sealed trait VecMemTrait
 
-abstract class VecLoadUnitStride()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnitStride
-case class VecLoadUnitStrideNormal()(implicit rawInst: BitPat) extends VecLoadUnitStride
-case class VecLoadWhole()(implicit rawInst: BitPat) extends VecLoadUnitStride with VecMemWhole
-case class VecLoadMask()(implicit rawInst: BitPat) extends VecLoadUnitStride with VecMemMask
-case class VecLoadUnitStrideFF()(implicit rawInst: BitPat) extends VecLoadUnitStride
+sealed trait VecMemUnitStride extends VecMemTrait
+sealed trait VecMemStrided extends VecMemTrait
+sealed trait VecMemIndex extends VecMemTrait
+sealed trait VecMemOrderIndex extends VecMemIndex
+sealed trait VecMemUnorderIndex extends VecMemIndex
+sealed trait VecMemWhole extends VecMemTrait
+sealed trait VecMemMask extends VecMemTrait
+sealed trait VecMemFF extends VecMemTrait
+sealed trait VecLoadInstPattern extends VecMemInstPattern
+sealed trait VecStoreInstPattern extends VecMemInstPattern
+
+case class VecLoadUnitStride()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnitStride
+case class VecLoadWhole()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemWhole
+case class VecLoadMask()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemMask
+case class VecLoadUnitStrideFF()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnitStride with VecMemFF
 
 case class VecLoadStrided()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemStrided
 case class VecLoadOrderIndex()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemOrderIndex
 case class VecLoadUnorderIndex()(implicit rawInst: BitPat) extends VecLoadInstPattern with VecMemUnorderIndex
 
-abstract class VecStoreUnitStride()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemUnitStride
-case class VecStoreUnitStrideNormal()(implicit rawInst: BitPat) extends VecStoreUnitStride
-case class VecStoreWhole()(implicit rawInst: BitPat) extends VecStoreUnitStride with VecMemWhole
-case class VecStoreMask()(implicit rawInst: BitPat) extends VecStoreUnitStride with VecMemMask
+case class VecStoreUnitStride()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemUnitStride
+case class VecStoreWhole()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemWhole
+case class VecStoreMask()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemMask
 
 case class VecStoreStrided()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemStrided
 case class VecStoreOrderIndex()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemOrderIndex
 case class VecStoreUnorderIndex()(implicit rawInst: BitPat) extends VecStoreInstPattern with VecMemUnorderIndex
-
-case class VecArithInstPattern()(
-  implicit rawInst: BitPat,
-) extends VecInstPattern() {
-  def func6 : BitPat = rawInst(31, 26)
-  def vm    : BitPat = rawInst(25)
-  def category : BitPat = rawInst(14, 12)
-
-  override def bitPat: BitPat = genPattern
-
-  val genPattern = rawInst.ensuring(_.getWidth == 32)
-}
 
 case class VecConfigInstPattern()(
   implicit rawInst: BitPat,
@@ -217,7 +208,7 @@ object VecLoadInstPattern {
         mop.rawString match {
           case "00" =>
             lumop.rawString match {
-              case "00000" => VecLoadUnitStrideNormal()
+              case "00000" => VecLoadUnitStride()
               case "01000" => VecLoadWhole()
               case "01011" => VecLoadMask()
               case "10000" => VecLoadUnitStrideFF()
@@ -244,7 +235,7 @@ object VecStoreInstPattern {
         mop.rawString match {
           case "00" =>
             lumop.rawString match {
-              case "00000" => VecStoreUnitStrideNormal()
+              case "00000" => VecStoreUnitStride()
               case "01000" => VecStoreWhole()
               case "01011" => VecStoreMask()
               case _ => null
@@ -463,7 +454,7 @@ object VecInstPattern {
     )
   }
 
-  lazy val all: Seq[VecInstPattern] = {
+  val all: Seq[VecInstPattern] = {
     import scala.reflect.runtime.currentMirror
     import scala.reflect.runtime.universe._
     val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
@@ -492,6 +483,28 @@ object VecInstPattern {
 
   lazy val set: Seq[VecConfigInstPattern] = {
     this.all.collect { case x: VecConfigInstPattern => x }
+  }
+
+  def withSew(insts: Seq[VecInstPattern]): Seq[DecodePatternComb2[VecInstPattern, SewPattern]] = {
+    val sewDependentInsts: Map[Boolean, Seq[VecInstPattern]] = insts.groupBy {
+      case x: VecArithInstPattern if !x.isInstanceOf[VecGatherEI16Pattern] => false
+      case _: VecConfigInstPattern => false
+      case x: VecMemInstPattern if !x.isInstanceOf[VecMemIndex] => false
+      case _ => true
+    }
+
+    val sewDepPats = Seq.tabulate(
+      sewDependentInsts(true).length,
+      Sews.all.length,
+    ){
+      case (i, j) => new DecodePatternComb2[VecInstPattern, SewPattern](sewDependentInsts(true)(i), SewPattern(Sews.all(j)))
+    }.flatten
+
+    val sewIndepPats = Seq.tabulate(sewDependentInsts(false).length) {
+      case i => new DecodePatternComb2[VecInstPattern, SewPattern](sewDependentInsts(false)(i), SewPattern.dontCare)
+    }
+
+    sewDepPats ++ sewIndepPats
   }
 
   object Category extends Enumeration {
@@ -530,6 +543,9 @@ object RVVInstPatternMain extends App {
   val results: Iterable[Option[VecInstPattern]] = methods.map { method =>
     val methodMirror: MethodMirror = instanceMirror.reflectMethod(method)
     val pattern: Option[VecInstPattern] = VecInstPattern(methodMirror().asInstanceOf[BitPat])
+    if (pattern.isEmpty) {
+      println(s"inst ${method.name.toString} has not been handled")
+    }
     if (pattern.nonEmpty) {
       vectorInstMethods += method
     }

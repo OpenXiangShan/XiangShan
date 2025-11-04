@@ -8,7 +8,7 @@ import freechips.rocketchip.rocket.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.InstNfLmulSewPattern
-import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{EewField, FpWenField, GpWenField, Src12RevField, VpWenField, VxsatWenField}
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{EewField, FpWenField, GpWenField, Src12RevField, VdAllocFieldDeprecated, VdEew1bField, VpWenField, VxsatWenField}
 import xiangshan.backend.vector.Decoder.DecodeFields._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
@@ -109,17 +109,11 @@ class VecDecodeChannel(
 
     out.uop(i).bits.src        := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.src, splitCtrlDecoder.out.uopSrc(i))
     out.uop(i).bits.uopDepend  := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtrlDecoder.out.uopDepend(i))
-    out.uop(i).bits.vdAlloc    := splitCtrlDecoder.out.vdAlloc(i)
+//    out.uop(i).bits.vdAlloc    := splitCtrlDecoder.out.vdAlloc(i)
     out.uop(i).bits.src12Rev   := Mux(vsetDecoder.out.renameInfo.valid, false.B, decodeResult(Src12RevField))
     out.uop(i).bits.vdEew1b    := decodeResult(VdEew1bField)
     out.uop(i).bits.uopIdx     := i.U
     out.uop(i).bits.isLastUop  := Mux(vsetDecoder.out.renameInfo.valid, true.B, (i + 1).U === uopNumDecoder.out.uopNumOH)
-    out.uop(i).bits.uopNumEncode := Mux1H(Seq(
-      (uopNumDecoder.out.uopNumOH(0) || vsetDecoder.out.renameInfo.valid) -> UopNumEncode.n1,
-      uopNumDecoder.out.uopNumOH(1) -> UopNumEncode.n2,
-      uopNumDecoder.out.uopNumOH(2) -> UopNumEncode.n4,
-      uopNumDecoder.out.uopNumOH(3) -> UopNumEncode.n8,
-    ))
   }
 
   out.uopNumOH := uopNumDecoder.out.uopNumOH
@@ -135,12 +129,10 @@ class VecDecodeChannelOutputUop extends Bundle with HasVectorSettings {
   val renameInfo = new UopInfoRenameWithIllegal
   val src = new UopSrcBundle
   val uopDepend = Bool()
-  val vdAlloc = Bool()
   val src12Rev = Bool()
   val vdEew1b = Bool()
   val uopIdx = UInt(3.W)
   val isLastUop = Bool()
-  val uopNumEncode = new UopNumEncode {}
 }
 
 class SplitCtlDecoder(
@@ -192,7 +184,7 @@ class SplitCtlDecoder(
     val allFields = Seq(
       SrcSplitSelectField,
       UopDependField,
-      VdAllocField,
+      VdAllocFieldDeprecated,
     )
 
     println(s"length of UopLmulNfSplitPattern in VecDecodeChannel: ${allInPatterns.length}")
@@ -287,7 +279,7 @@ class SplitCtlDecoder(
   }
   out.uopInfoRename := uopCtlResult(UopInfoField)
   out.uopDepend := decodeResult(UopDependField)
-  out.vdAlloc := decodeResult(VdAllocField)
+  out.vdAlloc := decodeResult(VdAllocFieldDeprecated)
 }
 
 object SplitCtlDecoderUtil {
@@ -309,36 +301,19 @@ object SplitCtlDecoderUtil {
     )
   }
   
-  type UopLmulNfSplitOHPattern =
-    DecodePatternComb[
-      DecodePatternComb[
-        LmulPattern,
-        NfPattern,
-      ],
-      SplitTypeOHPattern
-    ]
+  type UopLmulNfSplitOHPattern = DecodePatternComb3[LmulPattern, NfPattern, SplitTypeOHPattern]
 
   object UopLmulNfSplitOHPattern {
-    def apply(lmul: LmulPattern, nf: NfPattern, splitTypeOH: SplitTypeOHPattern): UopLmulNfSplitOHPattern = {
+    def apply(lmul: LmulPattern, nf: NfPattern, splitTypeOH: SplitTypeOHPattern): DecodePatternComb3[LmulPattern, NfPattern, SplitTypeOHPattern] = {
       lmul ## nf ## splitTypeOH
     }
 
     def unapply(arg: UopLmulNfSplitOHPattern): Option[Tuple3[LmulPattern, NfPattern, SplitTypeOHPattern]] = {
-      Some(Tuple3(arg.p1.p1, arg.p1.p2, arg.p2))
+      Some(Tuple3(arg.p1, arg.p2, arg.p3))
     }
   }
 
-  type InstNfLmulSewPattern =
-    DecodePatternComb[
-      DecodePatternComb[
-        VecInstPattern,
-        NfPattern,
-      ],
-      DecodePatternComb[
-        LmulPattern,
-        SewPattern,
-      ]
-    ]
+  type InstNfLmulSewPattern = DecodePatternComb4[VecInstPattern, NfPattern, LmulPattern, SewPattern]
 
   object InstNfLmulSewPattern {
     type Type = InstNfLmulSewPattern
@@ -348,29 +323,17 @@ object SplitCtlDecoderUtil {
       nf: NfPattern,
       lmul: LmulPattern,
       sew: SewPattern,
-    ): Type = (inst ## nf) ## (lmul ## sew)
+    ): DecodePatternComb4[VecInstPattern, NfPattern, LmulPattern, SewPattern] = inst ## nf ## lmul ## sew
 
     def unapply(arg: Type): Option[(VecInstPattern, NfPattern, LmulPattern, SewPattern)] = {
       Some((
-        arg.p1.p1,
-        arg.p1.p2,
-        arg.p2.p1,
-        arg.p2.p2,
+        arg.p1,
+        arg.p2,
+        arg.p3,
+        arg.p4,
       ))
     }
   }
-}
-
-class UopNumEncode extends Bundle {
-  val value = UInt(UopNumEncode.width.W)
-}
-
-object UopNumEncode {
-  def width = 2
-  def n1: UopNumEncode = 0.U.asTypeOf(new UopNumEncode)
-  def n2: UopNumEncode = 1.U.asTypeOf(new UopNumEncode)
-  def n4: UopNumEncode = 2.U.asTypeOf(new UopNumEncode)
-  def n8: UopNumEncode = 3.U.asTypeOf(new UopNumEncode)
 }
 
 class UopSrcBundle extends Bundle {

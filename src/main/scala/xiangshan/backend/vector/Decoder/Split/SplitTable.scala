@@ -2,12 +2,15 @@ package xiangshan.backend.vector.Decoder.Split
 
 import chisel3.util.BitPat
 import freechips.rocketchip.rocket.Instructions._
-import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
+import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecInstPattern, VecIntVVVPattern}
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil.LmulPattern
 import xiangshan.backend.vector.Decoder.Types.{NoMask, Src12Mask, Src2Mask}
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.{VecIntUop, VecUop}
 import xiangshan.backend.vector.Decoder.Uop.VecUopDefines._
 
+import scala.collection.immutable.SeqMap
 import scala.collection.mutable.ArrayBuffer
+import scala.reflect.runtime.universe._
 
 object SplitTable {
   def main(args: Array[String]): Unit = {
@@ -21,16 +24,592 @@ object SplitTable {
     }
     val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
 
-    methods.foreach { method: MethodSymbol =>
+    val insts = methods.map { method: MethodSymbol =>
       val methodMirror: MethodMirror = instanceMirror.reflectMethod(method)
-      val bitpat = methodMirror().asInstanceOf[BitPat]
-      val str = bitpat.rawString
-      hashMap(str) = method.name.toString
+      (method.name.toString, methodMirror().asInstanceOf[BitPat])
     }
 
-    for ((key, value) <- opiDupTable.toSeq.sortBy(_._1.rawString)) {
-      println(f"${hashMap(key.rawString)}%10s: ${value.uopInfoRenameString}")
+    for ((name, bp) <- insts) {
+      if (table.contains(bp)) {
+        println(f"$name%-16s: ${table(bp)}")
+      }
     }
+
+//    methods.foreach { method: MethodSymbol =>
+//      val methodMirror: MethodMirror = instanceMirror.reflectMethod(method)
+//      val bitpat = methodMirror().asInstanceOf[BitPat]
+//      val str = bitpat.rawString
+//      hashMap(str) = method.name.toString
+//    }
+//
+//    for ((key, value) <- opiDupTable.toSeq.sortBy(_._1.rawString)) {
+//      println(f"${hashMap(key.rawString)}%10s: ${value.uopInfoRenameString}")
+//    }
+  }
+
+  private val m8 = LmulPattern(8)
+  private val m4 = LmulPattern(4)
+  private val m2 = LmulPattern(2)
+  private val m1 = LmulPattern(1)
+  private val mf2 = LmulPattern(0.5)
+  private val mf4 = LmulPattern(0.25)
+  private val mf8 = LmulPattern(0.125)
+
+  private def dup(uop: => VecUop): SeqMap[LmulPattern, Seq[VecUop]] = {
+    SeqMap(
+      m8 -> Seq.fill(8)(uop),
+      m4 -> Seq.fill(4)(uop),
+      m2 -> Seq.fill(2)(uop),
+      m1 -> Seq.fill(1)(uop),
+      mf2 -> Seq.fill(1)(uop),
+      mf4 -> Seq.fill(1)(uop),
+      mf8 -> Seq.fill(1)(uop),
+    )
+  }
+
+  private def dupM(uop: => VecUop): SeqMap[LmulPattern, Seq[VecUop]] = {
+    SeqMap(
+      m8 -> (uop.set(_.vdAlloc, false) +: Seq.fill(7)(uop)),
+      m4 -> (uop.set(_.vdAlloc, false) +: Seq.fill(3)(uop)),
+      m2 -> (uop.set(_.vdAlloc, false) +: Seq.fill(1)(uop)),
+      m1 -> Seq.fill(1)(uop),
+      mf2 -> Seq.fill(1)(uop),
+      mf4 -> Seq.fill(1)(uop),
+      mf8 -> Seq.fill(1)(uop),
+    )
+  }
+
+  private def dupF2W(uop: => VecUop): SeqMap[LmulPattern, Seq[VecUop]] = {
+    SeqMap(
+      m8 -> Seq(),
+      m4 -> Seq.fill(8)(uop),
+      m2 -> Seq.fill(4)(uop),
+      m1 -> Seq.fill(2)(uop),
+      mf2 -> Seq.fill(1)(uop),
+      mf4 -> Seq.fill(1)(uop),
+      mf8 -> Seq.fill(1)(uop),
+    )
+  }
+
+  private def dupF2N(uop: => VecUop): SeqMap[LmulPattern, Seq[VecUop]] = {
+    SeqMap(
+      m8  -> Seq(),
+      m4  -> Seq.tabulate(8)(i => if (i % 2 == 0) uop else uop.set(_.vdAlloc, false)),
+      m2  -> Seq.tabulate(4)(i => if (i % 2 == 0) uop else uop.set(_.vdAlloc, false)),
+      m1  -> Seq.tabulate(2)(i => if (i % 2 == 0) uop else uop.set(_.vdAlloc, false)),
+      mf2 -> Seq.fill(1)(uop),
+      mf4 -> Seq.fill(1)(uop),
+      mf8 -> Seq.fill(1)(uop),
+    )
+  }
+
+  private def same(uopSeq: => Seq[VecUop]): SeqMap[LmulPattern, Seq[VecUop]] = {
+    SeqMap(
+      m8  -> uopSeq,
+      m4  -> uopSeq,
+      m2  -> uopSeq,
+      m1  -> uopSeq,
+      mf2 -> uopSeq,
+      mf4 -> uopSeq,
+      mf8 -> uopSeq,
+    )
+  }
+
+  private def redu(
+    reduop: => VecUop,
+    uopi: => VecUop,
+  ): SeqMap[LmulPattern, Seq[VecUop]] = SeqMap(
+    mf8 -> Seq(reduop.set(_.maskType, Src2Mask)),
+    mf4 -> Seq(reduop.set(_.maskType, Src2Mask)),
+    mf2 -> Seq(reduop.set(_.maskType, Src2Mask)),
+    m1  -> Seq(reduop.set(_.maskType, Src2Mask)),
+    m2  -> Seq(
+      uopi.set(_.maskType, Src12Mask),
+      reduop.set(_.maskType, NoMask),
+    ),
+    m4  -> Seq(
+      uopi.set(_.maskType, Src12Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      reduop.set(_.maskType, NoMask),
+    ),
+    m8  -> Seq(
+      uopi.set(_.maskType, Src12Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      uopi.set(_.maskType, Src2Mask),
+      reduop.set(_.maskType, NoMask),
+    ),
+  )
+
+  val table: SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]] = {
+
+    val opi00Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VADD_VV  -> dup(vadd.s1v),
+      VADD_VX  -> dup(vadd.s1x),
+      VADD_VI  -> dup(vadd.s1i),
+      // Todo: VANDN
+      VSUB_VV  -> dup(vsub.s1v),
+      VSUB_VX  -> dup(vsub.s1x),
+      VRSUB_VX -> dup(vsub.s1x.setSrc12Rev),
+      VRSUB_VI -> dup(vsub.s1i.setSrc12Rev),
+      VMINU_VV -> dup(vminu.s1v),
+      VMINU_VX -> dup(vminu.s1x),
+      VMIN_VV  -> dup(vmin.s1v),
+      VMIN_VX  -> dup(vmin.s1x),
+      VMAXU_VV -> dup(vmaxu.s1v),
+      VMAXU_VX -> dup(vmaxu.s1x),
+      VMAX_VV  -> dup(vmax.s1v),
+      VMAX_VX  -> dup(vmax.s1x),
+      VAND_VV  -> dup(vand.s1v),
+      VAND_VX  -> dup(vand.s1x),
+      VAND_VI  -> dup(vand.s1i),
+      VOR_VV   -> dup(vor.s1v),
+      VOR_VX   -> dup(vor.s1x),
+      VOR_VI   -> dup(vor.s1i),
+      VXOR_VV  -> dup(vxor.s1v),
+      VXOR_VX  -> dup(vxor.s1x),
+      VXOR_VI  -> dup(vxor.s1i),
+      VRGATHER_VV -> dup(vrgather_v),
+      VRGATHER_VX -> dup(vrgather_x),
+      VRGATHER_VI -> dup(vrgather_i),
+      VRGATHEREI16_VV -> dup(vrgatherei16_v),
+      VSLIDEUP_VX -> dup(vslideup_x),
+      VSLIDEUP_VI -> dup(vslideup_i),
+      VSLIDEDOWN_VX -> dup(vslidedown_x),
+      VSLIDEDOWN_VI -> dup(vslidedown_i),
+    )
+
+    val opi01Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VADC_VVM   -> dup(vadc.s1v),
+      VADC_VXM   -> dup(vadc.s1x),
+      VADC_VIM   -> dup(vadc.s1i),
+      VMADC_VV   -> dupM(vmadc.s1v),
+      VMADC_VX   -> dupM(vmadc.s1x),
+      VMADC_VI   -> dupM(vmadc.s1i),
+      VMADC_VVM  -> dupM(vmadc.s1v),
+      VMADC_VXM  -> dupM(vmadc.s1x),
+      VMADC_VIM  -> dupM(vmadc.s1i),
+      VSBC_VVM   -> dup(vsbc.s1v),
+      VSBC_VXM   -> dup(vsbc.s1x),
+      VMSBC_VV   -> dupM(vmsbc.s1v),
+      VMSBC_VX   -> dupM(vmsbc.s1x),
+      VMSBC_VVM  -> dupM(vmsbc.s1v),
+      VMSBC_VXM  -> dupM(vmsbc.s1x),
+      // Todo: vror, vrol
+      VMERGE_VVM -> dup(vmerge.s1v),
+      VMERGE_VXM -> dup(vmerge.s1x),
+      VMERGE_VIM -> dup(vmerge.s1i),
+      VMV_V_V    -> dup(vmvVec2Vec),
+      VMV_V_X    -> dup(vmvInt2Vec),
+      VMV_V_I    -> dup(vmvImm2Vec),
+      VMSEQ_VV   -> dupM(vmseq.s1v),
+      VMSEQ_VX   -> dupM(vmseq.s1x),
+      VMSEQ_VI   -> dupM(vmseq.s1i),
+      VMSNE_VV   -> dupM(vmsne.s1v),
+      VMSNE_VX   -> dupM(vmsne.s1x),
+      VMSNE_VI   -> dupM(vmsne.s1i),
+      VMSLTU_VV  -> dupM(vmsltu.s1v),
+      VMSLTU_VX  -> dupM(vmsltu.s1x),
+      VMSLT_VV   -> dupM(vmslt.s1v),
+      VMSLT_VX   -> dupM(vmslt.s1x),
+      VMSLEU_VV  -> dupM(vmsleu.s1v),
+      VMSLEU_VX  -> dupM(vmsleu.s1x),
+      VMSLEU_VI  -> dupM(vmsleu.s1i),
+      VMSLE_VV   -> dupM(vmsle.s1v),
+      VMSLE_VX   -> dupM(vmsle.s1x),
+      VMSLE_VI   -> dupM(vmsle.s1i),
+      VMSGTU_VX  -> dupM(vmsgtu.s1x),
+      VMSGTU_VI  -> dupM(vmsgtu.s1i),
+      VMSGT_VX   -> dupM(vmsgt.s1x),
+      VMSGT_VI   -> dupM(vmsgt.s1i),
+    )
+
+    val opi10Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VSADDU_VV  -> dup(vsaddu.s1v),
+      VSADDU_VX  -> dup(vsaddu.s1x),
+      VSADDU_VI  -> dup(vsaddu.s1i),
+      VSADD_VV   -> dup(vsadd.s1v),
+      VSADD_VX   -> dup(vsadd.s1x),
+      VSADD_VI   -> dup(vsadd.s1i),
+      VSSUBU_VV  -> dup(vssubu.s1v),
+      VSSUBU_VX  -> dup(vssubu.s1x),
+      VSSUB_VV   -> dup(vssub.s1v),
+      VSSUB_VX   -> dup(vssub.s1x),
+      VSLL_VV    -> dup(vsll.s1v),
+      VSLL_VX    -> dup(vsll.s1x),
+      VSLL_VI    -> dup(vsll.s1i),
+      VSMUL_VV   -> dup(vsmul.s1v),
+      VSMUL_VX   -> dup(vsmul.s1x),
+      VMV1R_V    -> same(Seq.fill(1)(vmvnr)),
+      VMV2R_V    -> same(Seq.fill(2)(vmvnr)),
+      VMV4R_V    -> same(Seq.fill(4)(vmvnr)),
+      VMV8R_V    -> same(Seq.fill(8)(vmvnr)),
+      VSRL_VV    -> dup(vsrl.s1v),
+      VSRL_VX    -> dup(vsrl.s1x),
+      VSRL_VI    -> dup(vsrl.s1i),
+      VSRA_VV    -> dup(vsra.s1v),
+      VSRA_VX    -> dup(vsra.s1x),
+      VSRA_VI    -> dup(vsra.s1i),
+      VSSRL_VV   -> dup(vssrl.s1v),
+      VSSRL_VX   -> dup(vssrl.s1x),
+      VSSRL_VI   -> dup(vssrl.s1i),
+      VSSRA_VV   -> dup(vssra.s1v),
+      VSSRA_VX   -> dup(vssra.s1x),
+      VSSRA_VI   -> dup(vssra.s1i),
+      VNSRL_WV   -> dupF2N(vnsrl.s1v),
+      VNSRL_WX   -> dupF2N(vnsrl.s1x),
+      VNSRL_WI   -> dupF2N(vnsrl.s1i),
+      VNSRA_WV   -> dupF2N(vnsra.s1v),
+      VNSRA_WX   -> dupF2N(vnsra.s1x),
+      VNSRA_WI   -> dupF2N(vnsra.s1i),
+      VNCLIPU_WV -> dupF2N(vnclipu.s1v),
+      VNCLIPU_WX -> dupF2N(vnclipu.s1x),
+      VNCLIPU_WI -> dupF2N(vnclipu.s1i),
+      VNCLIP_WV  -> dupF2N(vnclip.s1v),
+      VNCLIP_WX  -> dupF2N(vnclip.s1x),
+      VNCLIP_WI  -> dupF2N(vnclip.s1i),
+    )
+
+    val opi11Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VWREDSUMU_VS -> SeqMap(
+        mf8 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        mf4 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        mf2 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        m1 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        m2 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        m4 -> Seq(
+          vwaddu.s1v.set(_.maskType, Src12Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwaddu_w.s1v.set(_.maskType, Src2Mask),
+          vwredsumu.set(_.maskType, NoMask),
+        ),
+        m8 -> Seq(),
+      ),
+      VWREDSUM_VS -> SeqMap(
+        mf8 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        mf4 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        mf2 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        m1 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        m2 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        m4 -> Seq(
+          vwadd.s1v.set(_.maskType, Src12Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwadd_w.s1v.set(_.maskType, Src2Mask),
+          vwredsum.set(_.maskType, NoMask),
+        ),
+        m8 -> Seq(),
+      ),
+    )
+
+    val opm00Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VREDSUM_VS      -> redu(vredsum, vadd.s1v),
+      VREDAND_VS      -> redu(vredand, vand.s1v),
+      VREDOR_VS       -> redu(vredor, vor.s1v),
+      VREDXOR_VS      -> redu(vredxor, vxor.s1v),
+      VREDMINU_VS     -> redu(vredminu, vminu.s1v),
+      VREDMIN_VS      -> redu(vredmin, vmin.s1v),
+      VREDMAXU_VS     -> redu(vredmaxu, vmaxu.s1v),
+      VREDMAX_VS      -> redu(vredmax, vmax.s1v),
+
+      VAADDU_VV   -> dup(vaaddu.s1v),
+      VAADDU_VX   -> dup(vaaddu.s1x),
+      VAADD_VV    -> dup(vaadd.s1v),
+      VAADD_VX    -> dup(vaadd.s1x),
+      VASUBU_VV   -> dup(vasubu.s1v),
+      VASUBU_VX   -> dup(vasubu.s1x),
+      VASUB_VV    -> dup(vasub.s1v),
+      VASUB_VX    -> dup(vasub.s1x),
+
+      // Todo: vclmul, vclmulh
+
+      VSLIDE1UP_VX    -> dup(vslide1up.s1x),
+      VSLIDE1DOWN_VX  -> dup(vslide1down.s1x),
+    )
+
+    val opm01Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      // VWXUNARY0
+      VMV_X_S  -> same(Seq(vmvVecScala2Int)),
+      VCPOP_M  -> same(Seq(vcpop_m)),
+      VFIRST_M -> same(Seq(vfirst)),
+      // VRXUNARY0
+      VMV_S_X -> SeqMap(
+        mf8 -> Seq(vmvInt2VecScala),
+        mf4 -> Seq(vmvInt2VecScala),
+        mf2 -> Seq(vmvInt2VecScala),
+        m1  -> Seq(vmvInt2VecScala),
+        m2  -> (vmvInt2VecScala +: Seq.fill(1)(vtail)),
+        m4  -> (vmvInt2VecScala +: Seq.fill(3)(vtail)),
+        m8  -> (vmvInt2VecScala +: Seq.fill(7)(vtail)),
+      ),
+      // VXUNARY0
+      VZEXT_VF8   -> dup(vzext8),
+      VZEXT_VF4   -> dup(vzext4),
+      VZEXT_VF2   -> dup(vzext2),
+      VSEXT_VF8   -> dup(vsext8),
+      VSEXT_VF4   -> dup(vsext4),
+      VSEXT_VF2   -> dup(vsext2),
+      // Todo: vbrev8, vrev8, vbrev, vclz, vctz, vcpop
+      // VMUNARY0
+      VMSBF_M     -> same(Seq(vmsbf)),
+      VMSOF_M     -> same(Seq(vmsof)),
+      VMSIF_M     -> same(Seq(vmsif)),
+      VIOTA_M     -> dup(viota),
+      VID_V       -> dup(viota),
+
+      VCOMPRESS_VM -> dup(vcompress_m),
+
+      VMANDN_MM   -> same(Seq(vmandn)),
+      VMAND_MM    -> same(Seq(vmand)),
+      VMOR_MM     -> same(Seq(vmor)),
+      VMXOR_MM    -> same(Seq(vmxor)),
+      VMORN_MM    -> same(Seq(vmorn)),
+      VMNAND_MM   -> same(Seq(vmnand)),
+      VMNOR_MM    -> same(Seq(vmnor)),
+      VMXNOR_MM   -> same(Seq(vmxnor)),
+    )
+
+    val opm10Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VDIVU_VV    -> dup(vdivu.s1v),
+      VDIVU_VX    -> dup(vdivu.s1x),
+      VDIV_VV     -> dup(vdiv.s1v),
+      VDIV_VX     -> dup(vdiv.s1x),
+      VREMU_VV    -> dup(vremu.s1v),
+      VREMU_VX    -> dup(vremu.s1x),
+      VREM_VV     -> dup(vrem.s1v),
+      VREM_VX     -> dup(vrem.s1x),
+
+      VMULHU_VV   -> dup(vmulhu.s1v),
+      VMULHU_VX   -> dup(vmulhu.s1x),
+      VMUL_VV     -> dup(vmul.s1v),
+      VMUL_VX     -> dup(vmul.s1x),
+      VMULHSU_VV  -> dup(vmulhsu.s1v),
+      VMULHSU_VX  -> dup(vmulhsu.s1x),
+      VMULH_VV    -> dup(vmulh.s1v),
+      VMULH_VX    -> dup(vmulh.s1x),
+
+      VMADD_VV    -> dup(vmadd.s1v),
+      VMADD_VX    -> dup(vmadd.s1x),
+      VNMSUB_VV   -> dup(vnmsub.s1v),
+      VNMSUB_VX   -> dup(vnmsub.s1x),
+      VMACC_VV    -> dup(vmacc.s1v),
+      VMACC_VX    -> dup(vmacc.s1x),
+      VNMSAC_VV   -> dup(vnmsac.s1v),
+      VNMSAC_VX   -> dup(vnmsac.s1x),
+    )
+
+    val opm11Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VWADDU_VV   -> dupF2W(vwaddu.s1v),
+      VWADDU_VX   -> dupF2W(vwaddu.s1x),
+      VWADD_VV    -> dupF2W(vwadd.s1v),
+      VWADD_VX    -> dupF2W(vwadd.s1x),
+      VWSUBU_VV   -> dupF2W(vwsubu.s1v),
+      VWSUBU_VX   -> dupF2W(vwsubu.s1x),
+      VWSUB_VV    -> dupF2W(vwsub.s1v),
+      VWSUB_VX    -> dupF2W(vwsub.s1x),
+      VWADDU_WV   -> dupF2W(vwaddu_w.s1v),
+      VWADDU_WX   -> dupF2W(vwaddu_w.s1x),
+      VWADD_WV    -> dupF2W(vwadd_w.s1v),
+      VWADD_WX    -> dupF2W(vwadd_w.s1x),
+      VWSUBU_WV   -> dupF2W(vwsubu_w.s1v),
+      VWSUBU_WX   -> dupF2W(vwsubu_w.s1x),
+      VWSUB_WV    -> dupF2W(vwsub_w.s1v),
+      VWSUB_WX    -> dupF2W(vwsub_w.s1x),
+      VWMULU_VV   -> dupF2W(vwmulu.s1v),
+      VWMULU_VX   -> dupF2W(vwmulu.s1x),
+      VWMULSU_VV  -> dupF2W(vwmulsu.s1v),
+      VWMULSU_VX  -> dupF2W(vwmulsu.s1x),
+      VWMUL_VV    -> dupF2W(vwmul.s1v),
+      VWMUL_VX    -> dupF2W(vwmul.s1x),
+      VWMACCU_VV  -> dupF2W(vwmaccu.s1v),
+      VWMACCU_VX  -> dupF2W(vwmaccu.s1x),
+      VWMACC_VV   -> dupF2W(vwmacc.s1v),
+      VWMACC_VX   -> dupF2W(vwmacc.s1x),
+      VWMACCUS_VX -> dupF2W(vwmaccus.s1x),
+      VWMACCSU_VV -> dupF2W(vwmaccsu.s1v),
+      VWMACCSU_VX -> dupF2W(vwmaccsu.s1x),
+    )
+
+    val opf00Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VFADD_VV -> dup(vfadd.s1v),
+      VFADD_VF -> dup(vfadd.s1f),
+      VFSUB_VV -> dup(vfsub.s1v),
+      VFSUB_VF -> dup(vfsub.s1f),
+      VFMIN_VV -> dup(vfmin.s1v),
+      VFMIN_VF -> dup(vfmin.s1f),
+      VFMAX_VV -> dup(vfmax.s1v),
+      VFMAX_VF -> dup(vfmax.s1f),
+
+      VFREDUSUM_VS -> redu(vfredosum, vfadd.s1v),
+      VFREDOSUM_VS -> dup(vfredosum),
+      VFREDMIN_VS -> redu(vfredmin, vfmin.s1v),
+      VFREDMAX_VS -> redu(vfredmax, vfmax.s1v),
+
+      VFSGNJ_VV  -> dup(vfsgnj.s1v),
+      VFSGNJ_VF  -> dup(vfsgnj.s1f),
+      VFSGNJN_VV -> dup(vfsgnjn.s1v),
+      VFSGNJN_VF -> dup(vfsgnjn.s1f),
+      VFSGNJX_VV -> dup(vfsgnjx.s1v),
+      VFSGNJX_VF -> dup(vfsgnjx.s1f),
+
+      VFSLIDE1UP_VF    -> dup(vslide1up.s1f),
+      VFSLIDE1DOWN_VF  -> dup(vslide1down.s1f),
+    )
+
+    val opf01Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      // VWFUNARY0
+      VFMV_F_S -> same(Seq(vmvVecScala2Fp)),
+
+      // VRFUNARY0
+      VFMV_S_F -> SeqMap(
+        mf8 -> Seq(vmvFp2VecScala),
+        mf4 -> Seq(vmvFp2VecScala),
+        mf2 -> Seq(vmvFp2VecScala),
+        m1  -> Seq(vmvFp2VecScala),
+        m2  -> (vmvFp2VecScala +: Seq.fill(1)(vtail)),
+        m4  -> (vmvFp2VecScala +: Seq.fill(3)(vtail)),
+        m8  -> (vmvFp2VecScala +: Seq.fill(7)(vtail)),
+      ),
+
+      // VFUNARY0
+      VFCVT_XU_F_V      -> dup(vfcvt_xu_f),
+      VFCVT_X_F_V       -> dup(vfcvt_x_f),
+      VFCVT_F_XU_V      -> dup(vfcvt_f_xu),
+      VFCVT_F_X_V       -> dup(vfcvt_f_x),
+      VFCVT_RTZ_XU_F_V  -> dup(vfcvt_xu_f_rtz),
+      VFCVT_RTZ_X_F_V   -> dup(vfcvt_x_f_rtz),
+
+      VFWCVT_XU_F_V     -> dupF2W(vfwcvt_xu_f),
+      VFWCVT_X_F_V      -> dupF2W(vfwcvt_x_f),
+      VFWCVT_F_XU_V     -> dupF2W(vfwcvt_f_xu),
+      VFWCVT_F_X_V      -> dupF2W(vfwcvt_f_x),
+      VFWCVT_F_F_V      -> dupF2W(vfwcvt_f_f),
+      VFWCVT_RTZ_XU_F_V -> dupF2W(vfwcvt_xu_f_rtz),
+      VFWCVT_RTZ_X_F_V  -> dupF2W(vfwcvt_x_f_rtz),
+
+      VFNCVT_XU_F_W     -> dupF2N(vfncvt_xu_f),
+      VFNCVT_X_F_W      -> dupF2N(vfncvt_x_f),
+      VFNCVT_F_XU_W     -> dupF2N(vfncvt_f_xu),
+      VFNCVT_F_X_W      -> dupF2N(vfncvt_f_x),
+      VFNCVT_F_F_W      -> dupF2N(vfncvt_f_f),
+      VFNCVT_ROD_F_F_W  -> dupF2N(vfncvt_f_f_rod),
+      VFNCVT_RTZ_XU_F_W -> dupF2N(vfncvt_xu_f_rtz),
+      VFNCVT_RTZ_X_F_W  -> dupF2N(vfncvt_x_f_rtz),
+
+      // VFUNARY1
+      VFSQRT_V          -> dup(vfsqrt),
+      VFRSQRT7_V        -> dup(vfrsqrt7),
+      VFREC7_V          -> dup(vfrec7),
+      VFCLASS_V         -> dup(vfclass),
+      VFMERGE_VFM       -> dup(vfmerge.s1f),
+      VFMV_V_F          -> dup(vmvFp2Vec),
+
+      VMFEQ_VV          -> dup(vmfeq.s1v),
+      VMFEQ_VF          -> dup(vmfeq.s1f),
+      VMFLE_VV          -> dup(vmfle.s1v),
+      VMFLE_VF          -> dup(vmfle.s1f),
+      VMFLT_VV          -> dup(vmflt.s1v),
+      VMFLT_VF          -> dup(vmflt.s1f),
+      VMFNE_VV          -> dup(vmfne.s1v),
+      VMFNE_VF          -> dup(vmfne.s1f),
+      VMFGT_VF          -> dup(vmfgt.s1f),
+      VMFGE_VF          -> dup(vmfge.s1f),
+    )
+
+    val opf10Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VFDIV_VV          -> dup(vfdiv.s1v),
+      VFDIV_VF          -> dup(vfdiv.s1f),
+      VFRDIV_VF         -> dup(vfdiv.s1f.setSrc12Rev),
+      VFMUL_VV          -> dup(vfmul.s1v),
+      VFMUL_VF          -> dup(vfmul.s1f),
+
+      VFMADD_VV         -> dup(vfmadd.s1v),
+      VFMADD_VF         -> dup(vfmadd.s1f),
+      VFNMADD_VV        -> dup(vfnmadd.s1v),
+      VFNMADD_VF        -> dup(vfnmadd.s1f),
+      VFMSUB_VV         -> dup(vfmsub.s1v),
+      VFMSUB_VF         -> dup(vfmsub.s1f),
+      VFNMSUB_VV        -> dup(vfnmsub.s1v),
+      VFNMSUB_VF        -> dup(vfnmsub.s1f),
+      VFMACC_VV         -> dup(vfmacc.s1v),
+      VFMACC_VF         -> dup(vfmacc.s1f),
+      VFNMACC_VV        -> dup(vfnmacc.s1v),
+      VFNMACC_VF        -> dup(vfnmacc.s1f),
+      VFMSAC_VV         -> dup(vfmsac.s1v),
+      VFMSAC_VF         -> dup(vfmsac.s1f),
+      VFNMSAC_VV        -> dup(vfnmsac.s1v),
+      VFNMSAC_VF        -> dup(vfnmsac.s1f),
+    )
+
+    val opf11Table = SeqMap[BitPat, SeqMap[LmulPattern, Seq[VecUop]]](
+      VFWADD_VV         -> dupF2W(vfwadd.s1v),
+      VFWADD_VF         -> dupF2W(vfwadd.s1f),
+      VFWSUB_VV         -> dupF2W(vfwsub.s1v),
+      VFWSUB_VF         -> dupF2W(vfwsub.s1f),
+      VFWADD_WV         -> dupF2W(vfwadd_w.s1v),
+      VFWADD_WF         -> dupF2W(vfwadd_w.s1f),
+      VFWSUB_WV         -> dupF2W(vfwsub_w.s1v),
+      VFWSUB_WF         -> dupF2W(vfwsub_w.s1f),
+      VFWMUL_VV         -> dupF2W(vfwmul.s1v),
+      VFWMUL_VF         -> dupF2W(vfwmul.s1f),
+      VFWMACC_VV        -> dupF2W(vfwmacc.s1v),
+      VFWMACC_VF        -> dupF2W(vfwmacc.s1f),
+      VFWNMACC_VV       -> dupF2W(vfwnmacc.s1v),
+      VFWNMACC_VF       -> dupF2W(vfwnmacc.s1f),
+      VFWMSAC_VV        -> dupF2W(vfwmsac.s1v),
+      VFWMSAC_VF        -> dupF2W(vfwmsac.s1f),
+      VFWNMSAC_VV       -> dupF2W(vfwnmsac.s1v),
+      VFWNMSAC_VF       -> dupF2W(vfwnmsac.s1f),
+    )
+
+    opi00Table ++ opi01Table ++ opi10Table ++ opi11Table ++
+    opm00Table ++ opm01Table ++ opm10Table ++ opm11Table ++
+    opf00Table ++ opf01Table ++ opf10Table ++ opf11Table
   }
 
   val opiDupTable: Map[BitPat, VecIntUop] = Map(
@@ -931,6 +1510,10 @@ object SplitTable {
     VFWREDUSUM_VS -> Seq[VecUop](
       vfwadd.s1v.set(_.maskType, Src12Mask),
       vfwredosum.set(_.maskType, NoMask),
+    ),
+    VFWREDOSUM_VS -> Seq(
+      vfwredosum.set(_.maskType, Src2Mask),
+      vfwredosum.set(_.maskType, Src2Mask),
     ),
     VFWREDOSUM_VS -> Seq(
       vfwredosum.set(_.maskType, Src2Mask),

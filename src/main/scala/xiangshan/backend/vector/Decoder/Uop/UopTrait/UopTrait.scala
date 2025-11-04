@@ -93,6 +93,7 @@ abstract class UopBase(baseTraits: UopTrait*) {
       vpWen = vpWen,
       vlWen = vlWen,
       vxsatWen = vxsatWen,
+      vdAlloc = vdAlloc
     )
   }
 
@@ -134,7 +135,14 @@ abstract class UopBase(baseTraits: UopTrait*) {
 
   def vlWen: Boolean = this.getTraits.contains(VlWen)
 
-  def vxsatWen = this.getTraits.contains(VxsatWen)
+  def vxsatWen: Boolean = this.getTraits.contains(VxsatWen)
+
+  private def vdAlloc: Boolean = {
+    this match {
+      case uop: VecUop => uop.vdAlloc.value
+      case _ => false
+    }
+  }
 
   def s1v: this.type = {
     require(this.allowedTraits.contains(Src1Vp), s"${allowedTraits.mkString("allowedTraits: (", ",", ")")}")
@@ -185,12 +193,14 @@ abstract class UopBase(baseTraits: UopTrait*) {
 
 abstract class VecUop(baseTraits: UopTrait*) extends UopBase(baseTraits: _*) {
   var maskType: MutableRef[MaskType] = new MutableRef(DestMask)
+
+  var vdAlloc: MutableRef[Boolean] = new MutableRef[Boolean](true)
 }
 
 abstract class VecArithUop(baseTraits: UopTrait*) extends VecUop(baseTraits: _*) {
   var src12Rev: Boolean = false
 
-  def setSrc12Rev(): this.type = {
+  def setSrc12Rev: this.type = {
     this.src12Rev = true
     this
   }

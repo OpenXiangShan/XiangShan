@@ -13,6 +13,10 @@ package object Select {
   }
 
   object Mux1HLookUp {
+    def apply[T <: Data](key: UInt, mapping: Seq[(UInt, T)]): T = {
+      Mux1H(mapping.map { case (k, v) => (key === k) -> v})
+    }
+
     def apply[T <: Data](key: UInt, default: T)(mapping: Seq[(UInt, T)]): T = {
       Mux1HOrElse(
         mapping.map{ case (k, v) => noPrefix {

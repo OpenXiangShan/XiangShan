@@ -7,13 +7,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utils.BundleUtils.makeValid
-import xiangshan._
+import xiangshan.{ExceptionVec, TriggerAction, XSBundle, XSCoreParamsKey, XSTileKey}
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.vector.Decoder.DecodeChannel._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.Select.{BufferSelectModule, UopSelectModule}
 import xiangshan.backend.vector.Decoder.Split.VecUopSplitModule
-import xiangshan.backend.vector.Decoder.Types.{DecodeSrcType, MaskTypeChiselEnum, OperandType}
+import xiangshan.backend.vector.Decoder.Types.{DecodeSrcType, MaskTypeChiselEnum, OperandType, SelImm}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Verilog
@@ -62,23 +62,25 @@ class DecodeChannels(
   val vecInstPatterns = instSeq.collect{ case x: VecInstPattern => x }
   val nonVecInstPatterns = instSeq.filterNot(_.isInstanceOf[VecInstPattern])
 
-  lazy val vecDecodeChannelM8: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, true)))
-  lazy val vecDecodeChannelM4: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, false)))
-  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
-  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
+  val vecDecodeChannelM8: Definition[VectorDecodeChannel] = Definition(new VectorDecodeChannel(vecInstPatterns))
+
+//  lazy val vecDecodeChannelM8: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, true)))
+//  lazy val vecDecodeChannelM4: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, false)))
+//  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
+//  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
   val simpleDecodeChannel: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(nonVecInstPatterns))
 
-  val vecDecodeChannels: Seq[Instance[VecDecodeChannel]] = Seq.tabulate(mopWidth) {
-    i =>
-      if (i < MaxM8UopIdx)
-        Instance(vecDecodeChannelM8)
-      else if(i < MaxM4UopIdx)
-        Instance(vecDecodeChannelM8)
-      else if(i < MaxM4UopIdx)
-        Instance(vecDecodeChannelM8)
-      else
-        Instance(vecDecodeChannelM8)
+  val vecDecodeChannels: Seq[Instance[VectorDecodeChannel]] = Seq.tabulate(mopWidth) {
+    i => Instance(vecDecodeChannelM8)
+//      if (i < MaxM8UopIdx)
+//        Instance(vecDecodeChannelM8)
+//      else if(i < MaxM4UopIdx)
+//        Instance(vecDecodeChannelM8)
+//      else if(i < MaxM4UopIdx)
+//        Instance(vecDecodeChannelM8)
+//      else
+//        Instance(vecDecodeChannelM8)
   }
   val simpleDecodeChannels = Seq.fill(mopWidth)(Instance(simpleDecodeChannel))
 
@@ -244,7 +246,7 @@ class DecodeChannelOutput extends Bundle {
   val noSpec = Bool()
   val blockBack = Bool()
   val flushPipe = Bool()
-  val selImm = SelImm()
+  val selImm = ValidIO(SelImm())
 }
 
 object DecodeChannelOutput {
@@ -275,8 +277,8 @@ object DecodeChannelOutput {
     uop.noSpec := false.B
     uop.blockBack := false.B
     uop.flushPipe := false.B
-    uop.selImm := bitPatToUInt(SelImm.X)
-
+    uop.selImm.valid := false.B
+    uop.selImm.bits := SelImm.OPIVIU // Todo
     uop
   }
 
@@ -369,7 +371,10 @@ object DecodeChannelsMain extends App {
       instSeq = InstPattern.all,
       numM2M4M8Channel = (8, 8, 8),
     )(defaultConfig),
-    Array("--full-stacktrace"),
+    Array(
+      "--full-stacktrace",
+      "--target-dir", "build/decoder",
+    ),
   )
 }
 

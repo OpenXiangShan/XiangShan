@@ -3,7 +3,7 @@ package xiangshan.backend.vector.Decoder
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.{BoolDecodeField, DecodeField, DecodePattern, DecodeTable}
-import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, UopNumOHsPattern}
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, UopNumOHsPattern}
 import xiangshan.backend.vector.Decoder.Select.ChannelUopSelectUtil.{genDecodeOutPort2, genUopBufferPort2, genUopNumPatterns2}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ChiselTypeExt._
@@ -145,7 +145,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     override def bitPat: BitPat = new BitPat(value = num, mask = (1 << 3) - 1, width = 3)
   }
 
-  type UopNumWithChannelUopNum = DecodePatternComb[
+  type UopNumWithChannelUopNum = DecodePatternComb2[
     UopNumPattern,
     UopNumOHsPattern,
   ]

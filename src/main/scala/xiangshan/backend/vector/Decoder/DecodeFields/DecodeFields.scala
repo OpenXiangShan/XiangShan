@@ -20,7 +20,7 @@ import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
 import scala.collection.mutable.ArrayBuffer
 
-
+@deprecated
 object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
   override def name: String = "src1Type"
 
@@ -28,7 +28,7 @@ object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
 
   override def genTable(op: VecInstPattern): BitPat = {
     op match {
-      case VecArithInstPattern() => genTable(op.asInstanceOf[VecArithInstPattern])
+      case _: VecArithInstPattern => genTable(op.asInstanceOf[VecArithInstPattern])
       case VecConfigInstPattern() => genTable(op.asInstanceOf[VecConfigInstPattern])
       case _: VecMemInstPattern => genTable(op.asInstanceOf[VecMemInstPattern])
     }
@@ -135,6 +135,7 @@ object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
   )
 }
 
+@deprecated
 object Src2TypeField extends DecodeField[VecInstPattern, UInt] {
   override def name: String = "src2Type"
 
@@ -155,6 +156,7 @@ object Src2TypeField extends DecodeField[VecInstPattern, UInt] {
   )
 }
 
+@deprecated
 object AlwaysReadVdField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "alwaysReadVd"
 
@@ -178,30 +180,7 @@ object AlwaysReadVdField extends BoolDecodeField[VecInstPattern] {
   ).map(_.split('_').head)
 }
 
-object VdEew1bField extends BoolDecodeField[VecInstPattern] {
-  override def name: String = "vdEew1b"
-
-  override def genTable(op: VecInstPattern): BitPat = {
-    if (op.name.startsWithThese(prefixes) || op.name.endsWithThese(suffixes))
-      y
-    else
-      n
-  }
-
-  val prefixes: Seq[String] = getVariableNameSeq(
-    VMADC_VV, VMSBC_VV,
-    VMSEQ_VV, VMSNE_VV, VMSLE_VV, VMSLEU_VV, VMSGT_VX, VMSGTU_VX, VMSLT_VV, VMSLTU_VV,
-    VMSBF_M, VMSIF_M, VMSOF_M,
-    VLM_V,
-  ).map(_.split('_').head) ++ Seq(
-    "VMF",
-  )
-
-  val suffixes: Seq[String] = Seq(
-    "_MM",
-  )
-}
-
+@deprecated
 object VdWidenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vdWiden"
 
@@ -213,6 +192,7 @@ object VdWidenField extends BoolDecodeField[VecInstPattern] {
   }
 }
 
+@deprecated
 object Vs2WidenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vs2Widen"
 
@@ -225,6 +205,7 @@ object Vs2WidenField extends BoolDecodeField[VecInstPattern] {
   }
 }
 
+@deprecated
 object SplitTypeField extends DecodeField[RVVInstWithConfigPattern, SplitType.Type] {
   override def name: String = "splitType"
 
@@ -404,6 +385,7 @@ object SplitTypeField extends DecodeField[RVVInstWithConfigPattern, SplitType.Ty
   )
 }
 
+@deprecated
 object SplitTypeOHField extends DecodeField[RVVInstWithConfigPattern, SplitTypeOH.Type] {
   override def name: String = "splitTypeOH"
 
@@ -583,6 +565,7 @@ object SplitTypeOHField extends DecodeField[RVVInstWithConfigPattern, SplitTypeO
   )
 }
 
+@deprecated
 object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcDestSelect]] {
   override def name: String = "srcSplitSelect"
 
@@ -920,31 +903,6 @@ object UopDependField extends DecodeField[UopLmulNfSplitOHPattern, UInt] {
   }
 }
 
-object VdAllocField extends DecodeField[UopLmulNfSplitOHPattern, UInt] {
-  override def name: String = "vdAlloc"
-
-  override def chiselType: UInt = UInt(8.W)
-
-  override def genTable(op: UopLmulNfSplitOHPattern): BitPat = {
-    val UopLmulNfSplitOHPattern(lmulP, nfP, splitTypeOHP) = op
-    val splitTypeValue: Int = splitTypeOHP.value
-    var res = b"1111_1111"
-
-    if (splitTypeValue == SplitType.VVM.litValue)
-      res = b"0000_0001"
-    else if (splitTypeValue == SplitType.WVV.litValue)
-      res = b"0101_0101"
-    else if (Seq(
-      SplitType.VREDU, SplitType.VREDO,
-      SplitType.VWREDU, SplitType.VWREDO,
-    ).map(_.litValue).contains(splitTypeValue)) {
-      res = b"0000_0001"
-    }
-
-    res.toBitPat
-  }
-}
-
 object UopInfoField extends DecodeField[InstNfLmulSewPattern, Vec[ValidIO[UopInfoRenameWithIllegal]]] {
   import VecUopDefines._
 
@@ -1011,59 +969,61 @@ object UopInfoField extends DecodeField[InstNfLmulSewPattern, Vec[ValidIO[UopInf
       case cfg: VecConfigInstPattern =>
         throw new IllegalArgumentException(s"inst ${cfg} pattern is not supported in UopInfoField")
 
-      case mem: VecLoadWhole =>
-        val seg = NfPattern(mem.nf).segNum // will be 1,2,4,8
-        Seq.fill(seg)(vlnr)
+      case vmi: VecMemInstPattern =>
+        vmi match {
+          case mem: VecLoadWhole =>
+            val seg = NfPattern(mem.nf).segNum // will be 1,2,4,8
+            Seq.fill(seg)(vlnr)
 
-      case mem: VecStoreWhole =>
-        val seg = NfPattern(mem.nf).segNum
-        Seq.fill(seg)(vsnr)
+          case mem: VecStoreWhole =>
+            val seg = NfPattern(mem.nf).segNum
+            Seq.fill(seg)(vsnr)
 
-      case mem: VecLoadMask => Seq(vlm)
+          case mem: VecLoadMask => Seq(vlm)
 
-      case mem: VecStoreMask => Seq(vsm)
+          case mem: VecStoreMask => Seq(vsm)
 
-      case mem: VecMemIndex => {
-        val lmul: Double = lmulP.lmulValue
-        val sew: Int = sewP.sewValue
-        val eew: Int = mem.eewValue
-        val emul: Double = lmul * eew / sew
-        val seg = nfP.segNum
-        val dEmul = lmul
-        val iEmul = emul
-        val uopNum = (1.0 max iEmul max dEmul).toInt * seg
-        if (iEmul >= 0.125 && uopNum <= 8) {
-          mem match {
-            case _: VecLoadUnorderIndex  => Seq.fill(uopNum)(vluxe)
-            case _: VecLoadOrderIndex    => Seq.fill(uopNum)(vloxe)
-            case _: VecStoreUnorderIndex => Seq.fill(uopNum)(vsuxe)
-            case _: VecStoreOrderIndex   => Seq.fill(uopNum)(vsoxe)
-          }
-        } else {
-          Seq()
+          case mem: VecMemIndex =>
+            val lmul: Double = lmulP.lmulValue
+            val sew: Int = sewP.sewValue
+            val eew: Int = mem.eewValue
+            val emul: Double = lmul * eew / sew
+            val seg = nfP.segNum
+            val dEmul = lmul
+            val iEmul = emul
+            val uopNum = (1.0 max iEmul max dEmul).toInt * seg
+            if (iEmul >= 0.125 && uopNum <= 8) {
+              mem match {
+                case _: VecLoadUnorderIndex  => Seq.fill(uopNum)(vluxe)
+                case _: VecLoadOrderIndex    => Seq.fill(uopNum)(vloxe)
+                case _: VecStoreUnorderIndex => Seq.fill(uopNum)(vsuxe)
+                case _: VecStoreOrderIndex   => Seq.fill(uopNum)(vsoxe)
+              }
+            } else {
+              Seq()
+            }
+
+          case mem: VecMemInstPattern =>
+            val lmul: Double = lmulP.lmulValue
+            val sew: Int = sewP.sewValue
+            val eew: Int = mem.eewValue
+            val emul: Int = (lmul * eew / sew).max(1.0).toInt
+            val seg = nfP.segNum
+
+            if (seg * emul <= 8) {
+              mem match {
+                case _: VecLoadUnitStride => Seq.fill(seg * emul)(vle)
+                case _: VecLoadUnitStrideFF => Seq.fill(seg * emul)(vleff)
+                case _: VecLoadStrided => Seq.fill(seg * emul)(vlse)
+                case _: VecStoreUnitStride => Seq.fill(seg * emul)(vse)
+                case _: VecStoreStrided => Seq.fill(seg * emul)(vsse)
+                case _ => throw new IllegalArgumentException
+              }
+            } else {
+              Seq()
+            }
         }
-      }
 
-      case mem: VecMemInstPattern => {
-        val lmul: Double = lmulP.lmulValue
-        val sew: Int = sewP.sewValue
-        val eew: Int = mem.eewValue
-        val emul: Int = (lmul * eew / sew).max(1.0).toInt
-        val seg = nfP.segNum
-
-        if (seg * emul <= 8) {
-          mem match {
-            case _: VecLoadUnitStrideNormal => Seq.fill(seg * emul)(vle)
-            case _: VecLoadUnitStrideFF => Seq.fill(seg * emul)(vleff)
-            case _: VecLoadStrided => Seq.fill(seg * emul)(vlse)
-            case _: VecStoreUnitStrideNormal => Seq.fill(seg * emul)(vse)
-            case _: VecStoreStrided => Seq.fill(seg * emul)(vsse)
-            case _ => throw new IllegalArgumentException
-          }
-        } else {
-          Seq()
-        }
-      }
     }
   }
 }

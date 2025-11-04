@@ -1,12 +1,13 @@
 package xiangshan.backend.vector.Decoder.DecodeChannel
 
 import chisel3._
+import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.rocket.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.vector.Decoder.InstPattern._
-import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb2, DecodePatternComb5, LmulPattern, SewPattern}
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, VecUopDefines}
 import xiangshan.backend.vector.Decoder.{Lmuls, Sews}
@@ -27,33 +28,64 @@ class VsetDecoder extends Module {
     val isVSETVL = Bool()
   }))
 
-  val inst = in.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec)
+  val rawInst = in.rawInst
+  val instFields = rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec)
 
-  val allPatterns = vsetvlPattern ++ vsetvliPattern ++ vsetivliPattern
+  val isVSETVLI = rawInst(31) === b"0"
+  val isVSETIVLI = rawInst(31, 30) === b"11"
+  val isVSETVL = rawInst(31, 25) === b"1000000"
 
-  val allFields = Seq(
-    UopInfoField,
-  )
+  val vsetvliVill = instFields.ZIMM_VSETVLI.drop(8) =/= 0.U
+  val vsetivliVill = instFields.ZIMM_VSETIVLI.drop(8) =/= 0.U
 
-  val decodeTable: DecodeTable[InstPatternWithRdRs1Zero] = new DecodeTable(allPatterns, allFields)
-  println(s"length of decodeTable in VsetDecoder: ${decodeTable.table.table.length}")
+  val rs1IsZero = instFields.RS1 === 0.U
+  val rdIsZero = instFields.RD === 0.U
+
+  val sewLmulPatterns: Seq[DecodePatternComb2[SewPattern, LmulPattern]] = for {
+    sew <- SewPattern.all
+    lmul <- LmulPattern.all
+  } yield {
+    sew ## lmul
+  }
+
+  val sewLmulDecodeTable = new DecodeTable(sewLmulPatterns, Seq(SewLmulIllegalField))
+
+  val sewLmulDecodeBundle = sewLmulDecodeTable.decode(instFields.ZIMM_VSETVLI.take(6))
+
+  val sewLmulIllegal = sewLmulDecodeBundle(SewLmulIllegalField)
+
+  val uop = Wire(new UopInfoRename)
+
+  uop := Mux1H(Seq(
+    isVSETVL -> Mux1H(Seq(
+      (rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vll.genUopInfoRenameBitPat),
+      (!rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vlmax.genUopInfoRenameBitPat),
+      (!rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vlx.genUopInfoRenameBitPat),
+    )),
+    isVSETVLI -> Mux(
+      sewLmulIllegal || vsetvliVill,
+      bitPatToUInt(VecUopDefines.vset_vtypei_ill.genUopInfoRenameBitPat),
+      Mux1H(Seq(
+        (rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_nop.genUopInfoRenameBitPat),
+        (!rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_vlmax.genUopInfoRenameBitPat),
+        (!rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_vlx.genUopInfoRenameBitPat),
+      )),
+    ),
+    isVSETIVLI -> Mux(
+      sewLmulIllegal || vsetivliVill,
+      bitPatToUInt(VecUopDefines.vset_vtypei_ill.genUopInfoRenameBitPat),
+      bitPatToUInt(VecUopDefines.vset_vtypei_vli.genUopInfoRenameBitPat)
+    ),
+  )).asTypeOf(uop)
 
   val legalInst: Bool = new DecodeTable(VecInstPattern.set, Seq(IsLegalInstField)).decode(in.rawInst)(IsLegalInstField)
 
-  val vtypeiWidth = 8
-  val vsetvliLegal = inst.ZIMM_VSETVLI.drop(vtypeiWidth) === b"000"
-  val vsetivliLegal = inst.ZIMM_VSETIVLI.drop(vtypeiWidth) === b"00"
-  val rdZero = inst.RD === 0.U
-  val rs1Zero = inst.RS1 === 0.U
-
-  val decodeResult = decodeTable.decode(in.rawInst ## vsetvliLegal ## vsetivliLegal ## rdZero ## rs1Zero)
-
   out.renameInfo.valid := legalInst
-  out.renameInfo.bits := decodeResult(UopInfoField)
-  out.src.src1 := inst.RS1
-  out.src.src2 := inst.RS2
-  out.src.dest := inst.RD
-  out.isVSETVL := inst.ALL(31, 25) === b"1_000000"
+  out.renameInfo.bits := uop
+  out.src.src1 := instFields.RS1
+  out.src.src2 := instFields.RS2
+  out.src.dest := instFields.RD
+  out.isVSETVL := instFields.ALL(31, 25) === b"1_000000"
 }
 
 case class ConfigInstDetailPattern(
@@ -136,37 +168,13 @@ object VsetDecoderUtil {
     def vill: Boolean = zimm10bHead2Zero.exists(!_)
   }
 
-  type InstPatternWithRdRs1Zero = DecodePatternComb[
-    DecodePatternComb[
-      ConfigInstDetailPattern,
-      DecodePatternComb[
-        VsetvliVtypeiLegalHead,
-        VsetivliVtypeiLegalHead,
-      ],
-    ],
-    DecodePatternComb[
-      RdZeroPattern,
-      Rs1ZeroPattern,
-    ]
+  type InstPatternWithRdRs1Zero = DecodePatternComb5[
+    ConfigInstDetailPattern,
+    VsetvliVtypeiLegalHead,
+    VsetivliVtypeiLegalHead,
+    RdZeroPattern,
+    Rs1ZeroPattern,
   ]
-
-  object InstPatternWithRdRs1Zero {
-    def apply(
-      inst: BitPat,
-      vsetvliLegal: Option[Boolean],
-      vsetivliLegal: Option[Boolean],
-      rdZero: Option[Boolean],
-      rs1Zero: Option[Boolean],
-    ): InstPatternWithRdRs1Zero = {
-      ConfigInstDetailPattern(inst) ## (
-        VsetvliVtypeiLegalHead(vsetvliLegal) ##
-        VsetivliVtypeiLegalHead(vsetivliLegal)
-      ) ## (
-        RdZeroPattern(rdZero) ##
-        Rs1ZeroPattern(rs1Zero)
-      )
-    }
-  }
 
   object UopInfoField extends DecodeField[InstPatternWithRdRs1Zero, UopInfoRename] {
 
@@ -183,17 +191,19 @@ object VsetDecoderUtil {
     }
 
     def genUop(op: InstPatternWithRdRs1Zero): Option[UopBase] = {
-      val vsetvliVtypeiLegalHead: VsetvliVtypeiLegalHead = op.p1.p2.p1
-      val vsetivliVtypeiLegalHead: VsetivliVtypeiLegalHead = op.p1.p2.p2
-      val instP: ConfigInstDetailPattern = op.p1.p1
-      val rdZero = op.p2.p1.rdZero
-      val rs1Zero = op.p2.p2.rs1Zero
+      val DecodePatternComb5(
+        instP,
+        vsetvliVtypeiLegalHead,
+        vsetivliVtypeiLegalHead,
+        rdZero,
+        rs1Zero
+      ) = op
 
       if (instP.isVSETVL) {
         Some((
-          if (rdZero.get && rs1Zero.get)
+          if (rdZero.rdZero.get && rs1Zero.rs1Zero.get)
             VecUopDefines.vset_vtypex_vll
-          else if (rs1Zero.get)
+          else if (rs1Zero.rs1Zero.get)
             VecUopDefines.vset_vtypex_vlmax
           else
             VecUopDefines.vset_vtypex_vlx
@@ -203,9 +213,9 @@ object VsetDecoderUtil {
         Some((
           if (instP.isIllegalVSETVLI || !vsetvliVtypeiLegalHead.zimm11bHead3Zero.get)
             VecUopDefines.vset_vtypei_ill
-          else if (rdZero.get && rs1Zero.get)
+          else if (rdZero.rdZero.get && rs1Zero.rs1Zero.get)
             VecUopDefines.vset_vtypei_nop
-          else if (rs1Zero.get)
+          else if (rs1Zero.rs1Zero.get)
             VecUopDefines.vset_vtypei_vlmax
           else
             VecUopDefines.vset_vtypei_vlx
@@ -239,9 +249,13 @@ object VsetDecoderUtil {
     override def name: String = "vill"
 
     override def genTable(op: InstPatternWithRdRs1Zero): BitPat = {
-      val vsetvliVtypeiLegalHead: VsetvliVtypeiLegalHead = op.p1.p2.p1
-      val vsetivliVtypeiLegalHead: VsetivliVtypeiLegalHead = op.p1.p2.p2
-      val instP: ConfigInstDetailPattern = op.p1.p1
+      val DecodePatternComb5(
+        instP,
+        vsetvliVtypeiLegalHead,
+        vsetivliVtypeiLegalHead,
+        rdZero,
+        rs1Zero
+      ) = op
       if (instP.isVSETVLI)
         if (instP.isIllegalVSETVLI || vsetvliVtypeiLegalHead.vill)
           this.y
@@ -254,6 +268,21 @@ object VsetDecoderUtil {
           this.n
       else
         this.n
+    }
+  }
+
+  object SewLmulIllegalField extends BoolDecodeField[
+    DecodePatternComb2[SewPattern, LmulPattern]
+  ] {
+    override def name: String = "sewLmulIllegal"
+
+    override def genTable(op: DecodePatternComb2[SewPattern, LmulPattern]): BitPat = {
+      val DecodePatternComb(sewP, lmulP) = op
+
+      val sew = sewP.sewValue
+      val lmul = lmulP.lmulValue
+
+      if (sew > lmul.min(1) * 64) y else n
     }
   }
 
@@ -288,7 +317,11 @@ object VsetDecoderUtil {
     rdZero <- boolSeq
     rs1Zero <- boolSeq
   } yield {
-    InstPatternWithRdRs1Zero(inst, None, None, Some(rdZero), Some(rs1Zero))
+    ConfigInstDetailPattern(inst) ##
+      VsetvliVtypeiLegalHead(None) ##
+      VsetivliVtypeiLegalHead(None) ##
+      RdZeroPattern(Some(rdZero)) ##
+      Rs1ZeroPattern(Some(rs1Zero))
   }
 
   val vsetvliPattern: Seq[InstPatternWithRdRs1Zero] = for {
@@ -297,13 +330,11 @@ object VsetDecoderUtil {
     rs1Zero <- boolSeq
     legalHead <- boolSeq
   } yield {
-    InstPatternWithRdRs1Zero(
-      inst,
-      vsetvliLegal = Some(legalHead),
-      vsetivliLegal = None,
-      rdZero = Some(rdZero),
-      rs1Zero = Some(rs1Zero)
-    )
+    ConfigInstDetailPattern(inst) ##
+      VsetvliVtypeiLegalHead(Some(legalHead)) ##
+      VsetivliVtypeiLegalHead(None) ##
+      RdZeroPattern(Some(rdZero)) ##
+      Rs1ZeroPattern(Some(rs1Zero))
   }
 
   val vsetivliPattern: Seq[InstPatternWithRdRs1Zero] = for {
@@ -312,30 +343,37 @@ object VsetDecoderUtil {
     rs1Zero <- boolSeq
     legalHead <- boolSeq
   } yield {
-    InstPatternWithRdRs1Zero(
-      inst,
-      vsetvliLegal = None,
-      vsetivliLegal = Some(legalHead),
-      rdZero = Some(rdZero),
-      rs1Zero = Some(rs1Zero)
-    )
+    ConfigInstDetailPattern(inst) ##
+      VsetvliVtypeiLegalHead(None) ##
+      VsetivliVtypeiLegalHead(Some(legalHead)) ##
+      RdZeroPattern(Some(rdZero)) ##
+      Rs1ZeroPattern(Some(rs1Zero))
   }
 }
 
-object VsetDecoderMain extends App {
-  import VsetDecoderUtil._
+object VsetDecoderMain {
+  def main(args: Array[String]): Unit = {
+    import VsetDecoderUtil._
 
-  val patterns = vsetvlPattern ++ vsetvliPattern ++ vsetivliPattern
+//    val patterns = vsetvlPattern ++ vsetvliPattern ++ vsetivliPattern
+//
+//    for (pattern <- patterns) {
+//      val uop: Option[UopBase] = UopInfoField.genUop(pattern)
+//      uop.foreach(
+//        uop => println(
+//          s"${pattern.p1.rawInst}, " +
+//            s"ill: ${pattern.p2.zimm11bHead3Zero.exists(!_) || pattern.p3.zimm10bHead2Zero.exists(!_)}, " +
+//            s"rdZero:${pattern.p4.rdZero.get}, rs1Zero:${pattern.p5.rs1Zero.get}: ${uop.uopInfoRenameString}"))
+//    }
 
-  for (pattern <- patterns) {
-    val uop: Option[UopBase] = UopInfoField.genUop(pattern)
-    uop.foreach(
-      uop => println(
-        s"${pattern.p1.p1.rawInst}, " +
-        s"ill: ${pattern.p1.p2.p1.zimm11bHead3Zero.exists(!_) || pattern.p1.p2.p2.zimm10bHead2Zero.exists(!_)}, " +
-          s"rdZero:${pattern.p2.p1.rdZero.get}, rs1Zero:${pattern.p2.p2.rs1Zero.get}: ${uop.uopInfoRenameString}"))
+    Verilog.emitVerilog(
+      new VsetDecoder,
+      Array(
+        "--throw-on-first-error",
+        "--full-stacktrace",
+        "--target-dir", "build/decoder"
+      )
+    )
   }
-
-  Verilog.emitVerilog(new VsetDecoder)
 }
 

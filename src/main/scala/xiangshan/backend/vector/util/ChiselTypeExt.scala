@@ -3,7 +3,7 @@ package xiangshan.backend.vector.util
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
-import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb2
 
 import scala.language.implicitConversions
 
@@ -78,8 +78,8 @@ object ChiselTypeExt {
   }
 
   class DecodePatternExt[T <: DecodePattern](dp: T) {
-    def ##[T2 <: DecodePattern](that: T2): DecodePatternComb[T, T2] = {
-      new DecodePatternComb[T, T2](dp, that)
+    def ##[T2 <: DecodePattern](that: T2): DecodePatternComb2[T, T2] = {
+      new DecodePatternComb2[T, T2](dp, that)
     }
   }
 
