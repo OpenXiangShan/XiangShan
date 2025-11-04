@@ -49,6 +49,23 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   val io: DummyBpuIO = IO(new DummyBpuIO)
 
+  private val bpAlign = Module(new BpuAlign)
+  bpAlign.io.clock                    := clock.asBool
+  bpAlign.io.reset                    := reset.asBool
+  bpAlign.io.in.prediction_ready      := io.toFtq.prediction.ready
+  bpAlign.io.in.speculationMeta_ready := io.toFtq.speculationMeta.ready
+  bpAlign.io.in.meta_ready            := io.toFtq.meta.ready
+  bpAlign.io.in.redirect_valid        := io.fromFtq.redirect.valid
+  bpAlign.io.in.train_valid           := io.fromFtq.train.valid
+  bpAlign.io.in.commit_valid          := io.fromFtq.commit.valid
+  bpAlign.io.in.redirect              := io.fromFtq.redirect.bits
+  bpAlign.io.in.train                 := io.fromFtq.train.bits
+  bpAlign.io.in.commit                := io.fromFtq.commit.bits
+  bpAlign.io.in.bpuPtr                := io.fromFtq.bpuPtr
+  bpAlign.io.in.redirectFromIFU       := io.fromFtq.redirectFromIFU
+  bpAlign.io.in.ctrl                  := io.ctrl
+  bpAlign.io.in.resetVector           := io.resetVector
+
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
