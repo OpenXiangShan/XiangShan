@@ -28,11 +28,14 @@ import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, ChiselMap, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
-import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceRTLAXISMaster, TraceRTLAXISSlave}
+import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceRTLAXISMaster, TraceRTLAXISSlave, TraceRTLParamKey}
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
-  println(s"SimTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
+  val trtlOpts = p(TraceRTLParamKey)
+  if (debugOpts.TraceRTLMode) {
+    println(s"SimTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${trtlOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${trtl.TraceRTLOnPLDM}")
+  }
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -90,15 +93,19 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.version := 0.U(4.W)
 
   // TODO: mv the parameter to trait param
-  if (p(DebugOptionsKey).TraceRTLMode && p(DebugOptionsKey).TraceRTLOnFPGA) {
+  if (debugOpts.TraceRTLMode && trtlOpts.TraceRTLOnFPGA) {
     // NOTE: attention, axis_h2c/c2h will call dpi-c, which may change emu-difftest's state
     val axis_h2c = Module(new TraceRTLAXISMaster)
     val axis_c2h = Module(new TraceRTLAXISSlave)
     val axis_unpackage = Module(new TraceAXISUnpackage(
-      // 200 * 16, 512, 16
-      1 * 16, 512, 16
+      trtlOpts.TraceFpgaUnpackInstNum,
+      trtlOpts.TraceFpgaAxisWidth,
+      trtlOpts.TraceFpgaRecvWidth
     ))
-    val axis_package = Module(new TraceAXISPackage(128, 512))
+    val axis_package = Module(new TraceAXISPackage(
+      trtlOpts.TraceFpgaCollectWidth,
+      trtlOpts.TraceFpgaAxisWidth,
+    ))
     axis_h2c.io.axis <> axis_unpackage.io.axis
     soc.io.gateWay.in <> axis_unpackage.io.data
     soc.io.gateWay.out <> axis_package.io.in

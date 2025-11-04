@@ -364,7 +364,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem.d.ready := true.B
 
   val softPageRamResult = Reg(Vec(MemReqWidth, Vec(2, UInt(256.W))))
-  if (env.TraceRTLMode && !(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
+  if (env.TraceRTLMode && !(trtl.TraceRTLOnPLDM || trtl.TraceRTLOnFPGA)) {
     // fake page table ram
     val softPageRam = Module(new TraceFakeDynPageTable)
     softPageRam.io.req.valid := mem.a.fire

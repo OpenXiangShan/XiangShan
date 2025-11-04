@@ -462,7 +462,7 @@ class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
     val resp = Valid(new TraceFakeICacheRespBundle)
   })
 
-  if (env.TraceRTLOnPLDM || env.TraceRTLOnFPGA) {
+  if (trtl.TraceRTLOnPLDM || trtl.TraceRTLOnFPGA) {
     io.resp.valid := RegNext(io.req.valid)
     io.resp.bits.data(0) := 0.U // TODO: Fixme
     io.resp.bits.data(1) := 0.U

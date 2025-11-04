@@ -56,8 +56,7 @@ object TraceInstrBundle {
   }
 }
 
-class TraceReaderIO(implicit p: Parameters) extends TraceBundle
-  with HasTraceReaderFPGAParam {
+class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   // recv.valid from f3_fire, bits.instNum from range
   val recv = Flipped(Valid(new TraceRecvInfo()))
   // BranchPredictionRedirect === Redirect with some traits
@@ -74,18 +73,17 @@ class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr
 
 class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
   with TraceParams
-  with HasTraceReaderFPGAParam
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val enable = Input(Bool())
     val instsReady = Output(Bool())
-    val insts = Output(Vec(TraceFetchWidth, new TraceInstrInnerBundle()))
+    val insts = Output(Vec(trtl.TraceFetchWidth, new TraceInstrInnerBundle()))
     val redirect_valid = Input(Bool())
     val redirect_instID = Input(UInt(64.W))
     val workingState = Input(Bool())
   })
 
-  if (env.TraceRTLOnPLDM) {
+  if (trtl.TraceRTLOnPLDM) {
     val file_reader = Module(new TraceRTL_FileReader())
     file_reader.clock := clock
     file_reader.reset := reset
@@ -110,7 +108,7 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
     }
     io.instsReady := true.B
   }
-  else if (env.TraceRTLOnFPGA) {
+  else if (trtl.TraceRTLOnFPGA) {
     val helper = Module(new TraceReaderFPGA)
 
     // helper.io.enable := io.enable
@@ -122,7 +120,7 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
     io.insts := helper.io.instsToDut
     io.instsReady := helper.io.instsValid
   } else {
-    val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
+    val traceReaderHelper = Module(new TraceReaderHelper(trtl.TraceFetchWidth))
     val traceRedirecter = Module(new TraceRedirectHelper)
 
     traceRedirecter.clock := clock
@@ -150,13 +148,13 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     io <> DontCare
   } else {
     val redirect = WireInit(io.redirect)
-    val traceBuffer = RegInit(0.U.asTypeOf(Vec(TraceBufferSize, new TraceInstrBundle())))
+    val traceBuffer = RegInit(0.U.asTypeOf(Vec(trtl.TraceBufferSize, new TraceInstrBundle())))
     val trace_reader_helper = Module(new TraceReaderHelperWrapper())
     // val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
     // val traceRedirecter = Module(new TraceRedirectHelper)
-    val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
-    val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
-    val enqPtrVec = Wire(Vec(TraceFetchWidth, new TraceBufferPtr(TraceBufferSize)))
+    val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
+    val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
+    val enqPtrVec = Wire(Vec(trtl.TraceFetchWidth, new TraceBufferPtr(trtl.TraceBufferSize)))
 
     val workingState = RegInit(false.B)
     val startCount = RegInit(0.U(4.W))
@@ -168,7 +166,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     }
 
     val readTraceEnable = !isFull(enqPtr, deqPtr) &&
-      (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U) &&
+      (hasFreeEntries(enqPtr, deqPtr) >= trtl.TraceFetchWidth.U) &&
       workingState &&
       !redirect.valid
     val readTraceEnableForHelper = readTraceEnable
@@ -181,7 +179,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     }
 
     when (readTraceEnableForBuffer && readTraceReady) {
-      (0 until TraceFetchWidth).foreach { case i =>
+      (0 until trtl.TraceFetchWidth).foreach { case i =>
         traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(trace_reader_helper.io.insts(i))
       }
     }
@@ -203,13 +201,13 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       deqPtr := deqPtr + io.recv.bits.instNum
     }
     when (readTraceEnableForPtr && readTraceReady) {
-      enqPtr := enqPtr + TraceFetchWidth.U
+      enqPtr := enqPtr + trtl.TraceFetchWidth.U
     }
 
     // TODO: when redirect target instID is deqPtr, no need to flush
     when (redirect.valid) {
-      enqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
-      deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
+      enqPtr := 0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize))
+      deqPtr := 0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize))
       traceBuffer.map(_ := 0.U.asTypeOf(new TraceInstrBundle))
     }
 
@@ -246,7 +244,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       debugRedirectTarget := redirect.bits.cfiUpdate.target
     }
 
-    if (!TraceEnableDuplicateFlush) {
+    if (!trtl.TraceEnableDuplicateFlush) {
       when (redirect.valid) {
         XSError(redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
           "TraceEnableDuplicateFlush is false. Please check wrong path redirect")

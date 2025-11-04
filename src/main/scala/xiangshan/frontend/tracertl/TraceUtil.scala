@@ -83,12 +83,13 @@ object TraceFastSimOoO {
 object TraceFastSimMemory {
   def apply()(implicit p: Parameters): Bool = {
     val env = p(DebugOptionsKey)
-    val xsParam = p(XSTileKey).head
+    // val xsParam = p(XSTileKey).head
+    val trtlParam = p(TraceRTLParamKey)
 
     val fastSimFinish = WireInit(true.B)
     BoringUtils.addSink(fastSimFinish, "TraceFastSimMemoryFinish")
     if (env.TraceRTLMode) {
-      xsParam.TraceEliminateMemory.B && !fastSimFinish
+      trtlParam.TraceEliminateMemory.B && !fastSimFinish
       // TraceFastSim.fastSimEnable()
     } else {
       false.B

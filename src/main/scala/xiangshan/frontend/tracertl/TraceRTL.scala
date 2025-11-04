@@ -98,7 +98,7 @@ if (env.TraceRTLMode) {
 
   val traceWrongPathEmu = RegInit(false.B)
   val fastSimInst = traceReader.io.traceInsts.bits(0).isFastSim
-  if (TraceEnableWrongPathEmu) {
+  if (trtl.TraceEnableWrongPathEmu) {
     // bpu wrong that can only be checked by backend
     // 1. branch taken wrong
     // 2. jump reg target wrong
@@ -106,7 +106,7 @@ if (env.TraceRTLMode) {
     // The simple check:
     //   when stuck for pc-mismatch, and no ifu redirect, then go to wrongPathState
     val convergenceCheck =
-      if (TraceWrongPathEmuWhenConvergence) traceReader.io.pcMatch.found
+      if (trtl.TraceWrongPathEmuWhenConvergence) traceReader.io.pcMatch.found
       else true.B
     when (io.fromIFU.valid &&
       !Cat(traceAligner.io.cutInsts.map(_.valid)).orR &&

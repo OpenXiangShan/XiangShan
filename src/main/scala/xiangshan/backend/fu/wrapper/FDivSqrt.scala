@@ -37,7 +37,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   }
 
   val flush_i = thisRobIdx.needFlush(io.flush)
-  if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
+  if (env.TraceRTLMode && trtl.TraceDummyFixCycleDivSqrt) {
     fdiv.io <> DontCare
 
     dummyFdiv.io.start_valid_i  := io.in.valid
@@ -67,7 +67,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
       (outCtrl.vpu.get.vsew === VSew.e64) -> fdiv.io.fpdiv_res_o
     )
   ), 0.U)
-  if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
+  if (env.TraceRTLMode && trtl.TraceDummyFixCycleDivSqrt) {
     io.in.ready := dummyFdiv.io.start_ready_o
     io.out.valid := dummyFdiv.io.finish_valid_o
     io.out.bits.res.fflags.get := 0.U

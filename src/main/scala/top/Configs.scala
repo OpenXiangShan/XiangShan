@@ -36,6 +36,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import xiangshan.frontend.tracertl.{TraceRTLParamKey, TraceRTLParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
 import coupledL2._
@@ -53,6 +54,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
+  case TraceRTLParamKey => TraceRTLParameters()
 })
 
 // Synthesizable minimal XiangShan
@@ -447,13 +449,15 @@ class FpgaTraceRTLDefaultConfig(n: Int = 1) extends Config (
       AlwaysBasicDiff = false,
       AlwaysBasicDB = false,
       TraceRTLMode = true,
-      TraceRTLOnFPGA = true,
-      TraceRTLOnPLDM = false
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sramClkDivBy2 = false,
       )),
+    )
+    case TraceRTLParamKey => up(TraceRTLParamKey).copy(
+      TraceRTLOnFPGA = true,
+      TraceRTLOnPLDM = false
     )
   })
 )
@@ -464,13 +468,15 @@ class FpgaTraceRTLMinimalConfig(n: Int = 1) extends Config(
       AlwaysBasicDiff = false,
       AlwaysBasicDB = false,
       TraceRTLMode = true,
-      TraceRTLOnFPGA = true,
-      TraceRTLOnPLDM = false
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sramClkDivBy2 = false,
       )),
+    )
+    case TraceRTLParamKey => up(TraceRTLParamKey).copy(
+      TraceRTLOnFPGA = true,
+      TraceRTLOnPLDM = false
     )
   })
 )

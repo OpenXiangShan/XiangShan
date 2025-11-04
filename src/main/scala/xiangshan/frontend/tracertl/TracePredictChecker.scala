@@ -87,7 +87,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   //   (pcs(i) + io.preDecode.jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
   // })
   val jumpTargets = (0 until PredictWidth).map(i => {
-    if (TraceOverrideTarget) {
+    if (trtl.TraceOverrideTarget) {
       io.traceInsts(i).bits.target
     } else {
       (pcs(i) + io.preDecode.jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))

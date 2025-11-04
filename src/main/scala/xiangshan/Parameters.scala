@@ -32,6 +32,7 @@ import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.tracertl.{TraceRTLParamKey, TraceRTLParameters}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
@@ -354,10 +355,6 @@ case class XSCoreParameters
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
-
-  // TraceRTLMode
-  TraceEliminateArthi: Boolean = true,
-  TraceEliminateMemory: Boolean = true
 ){
   def vlWidth = log2Up(VLEN) + 1
 
@@ -560,15 +557,9 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   TraceRTLMode: Boolean = false,
-  TraceRTLOnPLDM: Boolean = false, // for pldm
-  TraceRTLOnFPGA: Boolean = false, // for fpga
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false
-) {
-  if (FPGAPlatform && TraceRTLMode) {
-    require(TraceRTLOnFPGA, "TraceRTLOnFPGA must be true on FPGA platform when enable TraceRTLMode")
-  }
-}
+)
 
 trait HasXSParameter {
 
@@ -583,6 +574,7 @@ trait HasXSParameter {
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
+  def trtl = p(TraceRTLParamKey)
 
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
@@ -872,24 +864,6 @@ trait HasXSParameter {
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 
-  // TraceRTL
-  require(TraceFetchWidth >= PredictWidth)
-  def TraceFetchWidth = 16
-  def TraceBufferSize = max(TraceFetchWidth * 4, RobSize) //
-  def TraceCollectorWidth = CommitWidth
-  def TraceRoBMergeNum = RenameWidth
-  def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
-  def TraceEnableDuplicateFlush = true
-  def TraceEnableWrongPathEmu = true
-  def TraceWrongPathEmuWhenConvergence = true
-  def TraceSoftL1TLB = false
-  def TraceSoftL1TLBCheck = false
-  def TraceDummyFixCycleDivSqrt = false
-  def TraceDummyFixCycleIntDiv = false
-  def TraceEliminateArthi = coreParams.TraceEliminateArthi
-  def TraceEliminateMemory = coreParams.TraceEliminateMemory
-  def TraceOverrideTarget = true
-  def Trace2StageMMU = false
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25

@@ -38,7 +38,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val kill_r = WireInit(!divDataModule.io.in_ready && robIdxReg.needFlush(io.flush))
 
   val debug_unity_kill = Mux(io.in.ready, kill_w, kill_r)
-  if (env.TraceRTLMode && TraceDummyFixCycleIntDiv) {
+  if (env.TraceRTLMode && trtl.TraceDummyFixCycleIntDiv) {
     divDataModule.io <> DontCare
     kill_r := !dummyDivDataMod.io.start_ready_o && robIdxReg.needFlush(io.flush)
 
@@ -64,7 +64,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   // val validNext = divDataModule.io.out_validNext // if high, io.valid will assert next cycle
 
-  if (env.TraceRTLMode && TraceDummyFixCycleIntDiv) {
+  if (env.TraceRTLMode && trtl.TraceDummyFixCycleIntDiv) {
     io.in.ready := dummyDivDataMod.io.start_ready_o
     io.out.valid := dummyDivDataMod.io.finish_valid_o
     io.out.bits.res.data := 0.U

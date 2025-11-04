@@ -225,7 +225,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   io.ptw.resp.ready := true.B
   dontTouch(io.ptw)
 
-  if (env.TraceRTLMode && !(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
+  if (env.TraceRTLMode && !(trtl.TraceRTLOnPLDM || trtl.TraceRTLOnFPGA)) {
     (0 until Width).foreach { case idx: Int =>
       val ats = Module(new TraceFakeMMU())
       ats.io.valid := req(idx).valid
@@ -242,7 +242,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.gpaddr.foreach { _ := ats_paddr }
       // val paddr = ats_paddr
       // val hit = ats_hit
-      if (TraceSoftL1TLB) {
+      if (trtl.TraceSoftL1TLB) {
         hitVec(idx) := true.B
         missVec(idx) := false.B
         pmp_addr(idx) := ats_paddr
@@ -258,7 +258,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
         io.ptw.req.map(_.valid := false.B)
         XSError(io.ptw.resp.valid, "When at TraceRTL mode, should not ptw resp")
-      } else if (TraceSoftL1TLBCheck) {
+      } else if (trtl.TraceSoftL1TLBCheck) {
         // Way 1: use the Dynamic Page Table's function and performance result
         // Way 2: just use the DPT's performance result, use SoftTLB's result
 

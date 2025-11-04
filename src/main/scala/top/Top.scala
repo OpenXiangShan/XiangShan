@@ -40,7 +40,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle}
+import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle, TraceRTLParamKey}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -78,7 +78,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
-  println(s"XSTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${debugOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${debugOpts.TraceRTLOnPLDM}")
+  // println(s"XSTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${trtl.TraceRTLOnFPGA} TraceRTLOnPLDM ${trtl.TraceRTLOnPLDM}")
 
   val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alter((site, here, up) => {
@@ -202,10 +202,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     // TODO: change the const to trait param
-    val gateWayInWidth = (new TraceInstrInnerBundle).getWidth * 16
-    val gateWayOutWidth = (new TraceFPGACollectBundle).getWidth * 128
+    val gateWayInWidth = (new TraceInstrInnerBundle).getWidth * p(TraceRTLParamKey).TraceFpgaRecvWidth
+    val gateWayOutWidth = (new TraceFPGACollectBundle).getWidth * p(TraceRTLParamKey).TraceFpgaCollectWidth
 
-    println(s"[XSTop] gateWayInWidth: $gateWayInWidth gateWayOutWidth: $gateWayOutWidth")
+    if (p(DebugOptionsKey).TraceRTLMode) {
+      println(s"[XSTop] gateWayInWidth: $gateWayInWidth gateWayOutWidth: $gateWayOutWidth")
+    }
 
     val io = IO(new Bundle {
       val clock = Input(Bool())
@@ -318,7 +320,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    if (p(DebugOptionsKey).TraceRTLMode && p(DebugOptionsKey).TraceRTLOnFPGA) {
+    if (p(DebugOptionsKey).TraceRTLMode && p(TraceRTLParamKey).TraceRTLOnFPGA) {
       // add Top Module IO for data connect
       // FIXME: rm ugly code
       // FIXME: update XSNoCTop TraceRTL modification
@@ -332,9 +334,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
       println("[XSTop] TraceRTLMode and TraceRTLOnFPGA")
     } else {
-      println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(DebugOptionsKey).TraceRTLOnFPGA}")
+      println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(TraceRTLParamKey).TraceRTLOnFPGA}")
       if (p(DebugOptionsKey).TraceRTLMode) {
-        require(!p(DebugOptionsKey).TraceRTLOnFPGA, "[XSTop] TraceRTLMode, dontCare gateway, require no FPGA mode")
+        require(!p(TraceRTLParamKey).TraceRTLOnFPGA, "[XSTop] TraceRTLMode, dontCare gateway, require no FPGA mode")
       }
 
       io.gateWay.in <> DontCare

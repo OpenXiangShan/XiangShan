@@ -250,11 +250,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
   if (env.TraceRTLMode) {
-    if (!(env.TraceRTLOnPLDM || env.TraceRTLOnFPGA)) {
+    if (!(trtl.TraceRTLOnPLDM || trtl.TraceRTLOnFPGA)) {
       val traceSatpMod = Module(new TraceSatp())
       val traceSatp = RegEnable(traceSatpMod.io.satp_ppn.bits, 0.U, traceSatpMod.io.satp_ppn.valid)
 
-      if (Trace2StageMMU) {
+      if (trtl.Trace2StageMMU) {
         tlb.satp := 0.U.asTypeOf(tlb.satp)
         tlb.vsatp.changed := false.B
         tlb.vsatp.mode     := 8.U
@@ -294,7 +294,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     // already enable translate by set ModeU
     tlb.priv.imode := ModeU
     tlb.priv.dmode := ModeU
-    if (Trace2StageMMU) {
+    if (trtl.Trace2StageMMU) {
       tlb.priv.virt := true.B
     } else {
       tlb.priv.virt := false.B

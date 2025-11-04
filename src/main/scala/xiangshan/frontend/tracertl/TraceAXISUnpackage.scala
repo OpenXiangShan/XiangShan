@@ -40,6 +40,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
 
   println(s"[TraceAXISUnpackage] PACKET_INST_NUM: $PACKET_INST_NUM AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH DUT_BUS_INST_NUM: $DUT_BUS_INST_NUM")
   println(s"BUS_CORE_DATA_WIDTH: $BUS_CORE_DATA_WIDTH PACKET_INST_WIDTH: $PACKET_INST_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
+  println(s"TRACE_INNER_INST_WIDTH $TRACE_INNER_INST_WIDTH TRACE_OUTER_INST_WIDTH $TRACE_OUTER_INST_WIDTH")
 
   val io = IO(new Bundle {
     val axis = Flipped(new TraceRTLAXISIO(AXIS_DATA_WIDTH))
@@ -71,7 +72,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
     bufferValid(recvIdx.value) := true.B
   }
   when (axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U)) {
-    assert(io.axis.tlast, "ERROR in TraceAXISUnpackage, not the last cycle but tlast is true")
+    assert(io.axis.tlast, "ERROR in TraceAXISUnpackage, last cycle but tlast is false")
   }
   assert(!(axis_fire && io.axis.tlast && (axis_cycle_index =/= (PACKET_CYCLE_NUM-1).U)),
     s"ERROR in TraceAXISUnpackage, counter not finish but encounter tlast PACKET_CYCLE_NUM ${PACKET_CYCLE_NUM}")

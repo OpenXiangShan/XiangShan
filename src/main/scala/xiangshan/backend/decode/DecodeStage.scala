@@ -198,7 +198,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
         inst.bits.exceptionVec(illegalInstr) := true.B
       }
 
-      if (TraceEliminateArthi) {
+      if (trtl.TraceEliminateArthi) {
         when (inst.bits.traceInfo.isFastSim) {
           inst.bits.lsrc.foreach(_ := 0.U)
           inst.bits.ldest := 0.U

@@ -20,6 +20,7 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.frontend.tracertl.TraceRTLParamKey
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -110,7 +111,7 @@ object ArgParser {
           }), tail)
         case "--trace-rtl-fpga" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(TraceRTLOnFPGA = true)
+            case TraceRTLParamKey => up(TraceRTLParamKey).copy(TraceRTLOnFPGA = true)
           }), tail)
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -118,10 +119,8 @@ object ArgParser {
           }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(
-              FPGAPlatform = true,
-              TraceRTLOnFPGA = true
-            )
+            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+            case TraceRTLParamKey => up(TraceRTLParamKey).copy(TraceRTLOnFPGA = true)
           }), tail)
         case "--reset-gen" :: tail =>
           nextOption(config.alter((site, here, up) => {

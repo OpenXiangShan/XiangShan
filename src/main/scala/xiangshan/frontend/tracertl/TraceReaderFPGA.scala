@@ -23,20 +23,14 @@ import xiangshan.RedirectLevel
 import xiangshan.XSModule
 import chisel3.util.experimental.BoringUtils
 
-trait HasTraceReaderFPGAParam {
-  val TraceFPGAHugeBufferSize = 1 * 1024 * 1024 // 1M
-  val TraceRecvWidth = 16 // set it same to TraceFetchWidth now
-}
-
-class TraceReaderFPGAIO(implicit p: Parameters) extends TraceBundle
-  with HasTraceReaderFPGAParam {
+class TraceReaderFPGAIO(implicit p: Parameters) extends TraceBundle {
   // fpga platform, from host, in trace format
   // val tracesFromHost = Flipped(DecoupledIO((Vec(TraceRecvWidth, new TraceInstrInnerBundle()))))
 
   // normal trace reader io
   val enable = Input(Bool())
   val instsValid = Output(Bool())
-  val instsToDut = Output(Vec(TraceFetchWidth, new TraceInstrInnerBundle))
+  val instsToDut = Output(Vec(trtl.TraceFetchWidth, new TraceInstrInnerBundle))
   val redirect = Input(Valid(UInt(64.W)))
   val workingState = Input(Bool())
 }
@@ -46,7 +40,6 @@ class TraceFPGAHugeBufferPtr(entries: Int) extends CircularQueuePtr[TraceFPGAHug
 
 class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
   with TraceParams
-  with HasTraceReaderFPGAParam
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderFPGAIO)
 
@@ -54,40 +47,40 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
 
   // TraceReader should maintain a very huge buffer, for:
   // maybe: (1) dual port(read/write); (2) two seperated mem
-  val hugeBuffer = Mem(TraceFPGAHugeBufferSize, new TraceInstrInnerBundle)
-  val writePtr = RegInit(0.U.asTypeOf(new TraceFPGAHugeBufferPtr(TraceFPGAHugeBufferSize)))
-  val readPtr = RegInit(0.U.asTypeOf(new TraceFPGAHugeBufferPtr(TraceFPGAHugeBufferSize)))
+  val hugeBuffer = Mem(trtl.TraceFpgaHugeBufferSize, new TraceInstrInnerBundle)
+  val writePtr = RegInit(0.U.asTypeOf(new TraceFPGAHugeBufferPtr(trtl.TraceFpgaHugeBufferSize)))
+  val readPtr = RegInit(0.U.asTypeOf(new TraceFPGAHugeBufferPtr(trtl.TraceFpgaHugeBufferSize)))
 
   // FIXME: ugly code, use raw BoringUtils.addSource/addSink, beautify me
-  val fpgaTraces = WireInit(0.U.asTypeOf(Vec(TraceRecvWidth, new TraceInstrInnerBundle)))
+  val fpgaTraces = WireInit(0.U.asTypeOf(Vec(trtl.TraceFpgaRecvWidth, new TraceInstrInnerBundle)))
   val fpgaTracesValid = WireInit(false.B)
   val fpgaTracesReady = Wire(Bool())
   val fpgaTraces_tmp = WireInit(0.U(fpgaTraces.getWidth.W))
   BoringUtils.addSink(fpgaTraces_tmp, "TraceRTLFPGATraces")
   BoringUtils.addSink(fpgaTracesValid, "TraceRTLFPGATracesValid")
   BoringUtils.addSource(fpgaTracesReady, "TraceRTLFPGATracesReady")
-  for (i <- 0 until TraceRecvWidth) {
+  for (i <- 0 until trtl.TraceFpgaRecvWidth) {
     fpgaTraces(i) := TraceInstrInnerBundle.readRaw(
       fpgaTraces_tmp((i + 1) * TraceInstWidth - 1, i * TraceInstWidth))
   }
 
   // FIXME: should concern redirect, change TraceRecvWidth to OOO windows size
-  fpgaTracesReady := hasFreeEntries(writePtr, readPtr) >= TraceRecvWidth.U
+  fpgaTracesReady := hasFreeEntries(writePtr, readPtr) >= trtl.TraceFpgaRecvWidth.U
   when (fpgaTracesValid && fpgaTracesReady) {
     // FIXME: may generate TraceRecvWidth ports, unsynthsis, optimize it
     //        maybe use SRAM, one line has TraceFetchWidth, need set TraceRecvWidth same with Recv or add one more input buffer
-    (0 until TraceRecvWidth).foreach{ i =>
+    (0 until trtl.TraceFpgaRecvWidth).foreach{ i =>
       hugeBuffer(writePtr.value + i.U) := fpgaTraces(i)
     }
-    writePtr := writePtr + TraceRecvWidth.U
+    writePtr := writePtr + trtl.TraceFpgaRecvWidth.U
   }
 
   io.instsValid := !isEmpty(writePtr, readPtr)
-  (0 until TraceFetchWidth).foreach{ i =>
+  (0 until trtl.TraceFetchWidth).foreach{ i =>
     io.instsToDut(i) := hugeBuffer(readPtr.value + i.U)
   }
   when (io.enable && io.instsValid) {
-    readPtr := readPtr + TraceFetchWidth.U
+    readPtr := readPtr + trtl.TraceFetchWidth.U
   }
   dontTouch(io.instsToDut)
   dontTouch(io.enable)
@@ -106,12 +99,12 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
     firstInstCheck := false.B
     XSError(io.instsValid && (io.instsToDut(0).pcVA =/= 0x80000000L.U),
       "Error in TraceReaderFPGA: the first inst's PC is not 0x80000000")
-    for (i <- 0 until (TraceFetchWidth - 1)) {
+    for (i <- 0 until (trtl.TraceFetchWidth - 1)) {
       XSError(io.instsToDut(i).InstID =/= (i + 1).U,
         s"Error in TraceReaderFPGA: the ${i}th inst's InstID is not ${(i + 1)}")
     }
   }
-  for (i <- 0 until (TraceFetchWidth - 1)) {
+  for (i <- 0 until (trtl.TraceFetchWidth - 1)) {
     XSError(io.instsValid && ((io.instsToDut(i).InstID + 1.U) =/= io.instsToDut(i + 1).InstID),
       s"Error in TraceReaderFPGA: the ${i}th and ${i+1}th inst's InstID are not consecutive")
     XSError(io.instsValid && ((io.instsToDut(i+1).pcVA =/= io.instsToDut(i).nextPC)),
