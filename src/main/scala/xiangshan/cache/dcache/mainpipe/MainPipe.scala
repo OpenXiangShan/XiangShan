@@ -859,6 +859,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     * In the case of `BtoT` fail, only requests from sbuffer are allowed to return replay response.
     */
   val s2_isStore = RegEnable(s1_isStore, s1_fire)
+  val s2_isAMO = RegEnable(s1_isAMO, s1_fire)
   io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore)
   io.store_replay_resp.bits.data := DontCare
   io.store_replay_resp.bits.miss := true.B // s2_can_go_to_mq && replay
@@ -1067,6 +1068,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.error.bits.opType.atom := RegEnable(s2_req.isAMO && !s2_req.probe, s2_fire)
 
   val perfEvents = Seq(
+    ("l1D_write_dcache_access", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd)))), // store_req (cacheline evited from Sbuffer to L1D) & amo write
+    ("l1D_write_dcache_miss  ", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd)) && !s2_hit)),
     ("dcache_mp_req          ", s0_fire                                                      ),
     ("dcache_mp_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
   )
