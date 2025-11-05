@@ -16,7 +16,7 @@
 
 package xiangshan.mem.mdp
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -369,7 +369,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val hitInDispatchBundle = hitInDispatchBundleVec.asUInt.orR
     // Check if store set is valid in LFST
     io.dispatch.resp(i).bits.shouldWait := (
-        (valid(io.dispatch.req(i).bits.ssid) || hitInDispatchBundle) && 
+        (valid(io.dispatch.req(i).bits.ssid) || hitInDispatchBundle) &&
         io.dispatch.req(i).valid &&
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
       ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
@@ -414,7 +414,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   })
 
   // recover robIdx after squash
-  // behavior model, to be refactored later 
+  // behavior model, to be refactored later
   when(RegNext(io.redirect.fire())) {
     (0 until LFSTSize).map(i => {
       (0 until LFSTWidth).map(j => {

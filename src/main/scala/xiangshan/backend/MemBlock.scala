@@ -16,13 +16,13 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import huancun.PrefetchRecv
-import huancun.utils.{RegNextN, ValidIODelay}
+import utility.{RegNextN, ValidIODelay}
 import utils._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit

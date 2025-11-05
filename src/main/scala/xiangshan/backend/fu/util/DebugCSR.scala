@@ -1,7 +1,7 @@
 package xiangshan.backend.fu.util
 
 import chisel3._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import CSRConst.ModeM
 
 trait DebugCSR {

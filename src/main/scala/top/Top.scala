@@ -20,10 +20,11 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import utility.FileRegisters
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -33,8 +34,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.tilelink
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
-import huancun.debug.TLLogger
+import utility.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
@@ -111,11 +111,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  lazy val module = new LazyRawModuleImp(this) {
-    ElaborationArtefacts.add("dts", dts)
-    ElaborationArtefacts.add("graphml", graphML)
-    ElaborationArtefacts.add("json", json)
-    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+  lazy val module = new Impl
+  class Impl extends LazyRawModuleImp(this) {
+    FileRegisters.add("dts", dts)
+    FileRegisters.add("graphml", graphML)
+    FileRegisters.add("json", json)
+    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = IO(Flipped(misc.dma.cloneType))
     val peripheral = IO(misc.peripheral.cloneType)
@@ -173,7 +174,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset()
+        node.out.head._1 := false.B.asAsyncReset
       }
     }
 
@@ -204,17 +205,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 }
 
-object TopMain extends App with HasRocketChipStageUtils {
-  override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        soc.module
-      })
-    ))
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
-  }
+object TopMain extends App {
+  val (config, firrtlOpts) = ArgParser.parse(args)
+  val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+  XiangShanStage.execute(firrtlOpts, Seq(
+    ChiselGeneratorAnnotation(() => {
+      soc.module
+    })
+  ))
+  FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

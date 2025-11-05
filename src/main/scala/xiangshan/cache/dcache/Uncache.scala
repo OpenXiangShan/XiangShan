@@ -19,7 +19,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 import xiangshan.{MicroOp, Redirect}

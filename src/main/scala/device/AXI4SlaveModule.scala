@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
 
 abstract class AXI4SlaveModule[T <: Data]
@@ -123,7 +123,7 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
 
   val fullMask = MaskExpand(in.w.bits.strb)
 
-  def genWdata(originData: UInt) = (originData & (~fullMask).asUInt()) | (in.w.bits.data & fullMask)
+  def genWdata(originData: UInt) = (originData & (~fullMask).asUInt) | (in.w.bits.data & fullMask)
 
   val raddr = Wire(UInt())
   val (readBeatCnt, rLast) = {

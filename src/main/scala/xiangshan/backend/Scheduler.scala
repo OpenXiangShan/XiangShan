@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
@@ -266,7 +266,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   }
 
-  val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
+  val numFma = outer.reservationStations.toSeq.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
 
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -321,6 +321,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     Some(busyTable)
   } else None
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
+  if (io.extra.fpStateReadIn.isDefined) {
+    io.extra.fpStateReadIn.get := DontCare
+  }
   val fpBusyTable = if (readFpState.nonEmpty) {
     // Some fp states are read from outside
     val numInFpStateRead = 0//io.extra.fpStateReadIn.getOrElse(Seq()).length
@@ -423,6 +426,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.io.jump.get.jalr_target := io.extra.jalr_target
     }
     if (rs.io.checkwait.isDefined) {
+      rs.io.checkwait.get.stIssue := DontCare
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
       rs.io.checkwait.get.memWaitUpdateReq <> io.extra.memWaitUpdateReq
     }
@@ -470,6 +474,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   var intReadPort = 0
   var fpReadPort = 0
+  rs_all.map(_.module.io.srcRegValue := DontCare)
   for ((dp, i) <- outer.dpPorts.zipWithIndex) {
     // dp connects only one rs: don't use arbiter
     if (dp.length == 1) {

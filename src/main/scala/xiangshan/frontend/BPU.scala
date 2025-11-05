@@ -16,9 +16,8 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import xiangshan._
 import utils._
@@ -217,7 +216,6 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val ctrl = Input(new BPUCtrl)
 }
 
-@chiselName
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
@@ -235,26 +233,26 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s0_pc_dup = dup(resetVector.U(VAddrBits.W))
 
-  val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x, init=resetVector.U))
+  val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x, resetVector.U))
   // for debug, would not appear in real RTL
   val s1_pc = RegEnable(s0_pc_dup(0), s0_fire_dup(0))
   val s2_pc = RegEnable(s1_pc, s1_fire_dup(0))
   val s3_pc = RegEnable(s2_pc, s2_fire_dup(0))
 
   val s0_folded_gh_dup = dup_wire(new AllFoldedHistories(foldedGHistInfos))
-  val s0_folded_gh_reg_dup = s0_folded_gh_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_folded_gh_dup(0))))
+  val s0_folded_gh_reg_dup = s0_folded_gh_dup.map(x => RegNext(x, 0.U.asTypeOf(s0_folded_gh_dup(0))))
   val s1_folded_gh_dup = RegEnable(s0_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s0_fire_dup(1))
   val s2_folded_gh_dup = RegEnable(s1_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s1_fire_dup(1))
   val s3_folded_gh_dup = RegEnable(s2_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s2_fire_dup(1))
 
   val s0_last_br_num_oh_dup = dup_wire(UInt((numBr+1).W))
-  val s0_last_br_num_oh_reg_dup = s0_last_br_num_oh_dup.map(x => RegNext(x, init=0.U))
+  val s0_last_br_num_oh_reg_dup = s0_last_br_num_oh_dup.map(x => RegNext(x, 0.U))
   val s1_last_br_num_oh_dup = RegEnable(s0_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s0_fire_dup(1))
   val s2_last_br_num_oh_dup = RegEnable(s1_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s1_fire_dup(1))
   val s3_last_br_num_oh_dup = RegEnable(s2_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s2_fire_dup(1))
 
   val s0_ahead_fh_oldest_bits_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
-  val s0_ahead_fh_oldest_bits_reg_dup = s0_ahead_fh_oldest_bits_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup(0))))
+  val s0_ahead_fh_oldest_bits_reg_dup = s0_ahead_fh_oldest_bits_dup.map(x => RegNext(x, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup(0))))
   val s1_ahead_fh_oldest_bits_dup = RegEnable(s0_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s0_fire_dup(1))
   val s2_ahead_fh_oldest_bits_dup = RegEnable(s1_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s1_fire_dup(1))
   val s3_ahead_fh_oldest_bits_dup = RegEnable(s2_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s2_fire_dup(1))
@@ -279,7 +277,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
 
   val s0_ghist_ptr_dup = dup_wire(new CGHPtr)
-  val s0_ghist_ptr_reg_dup = s0_ghist_ptr_dup.map(x => RegNext(x, init=0.U.asTypeOf(new CGHPtr)))
+  val s0_ghist_ptr_reg_dup = s0_ghist_ptr_dup.map(x => RegNext(x, 0.U.asTypeOf(new CGHPtr)))
   val s1_ghist_ptr_dup = RegEnable(s0_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s0_fire_dup(1))
   val s2_ghist_ptr_dup = RegEnable(s1_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s1_fire_dup(1))
   val s3_ghist_ptr_dup = RegEnable(s2_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s2_fire_dup(1))
@@ -307,7 +305,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
   val redirect_req = io.ftq_to_bpu.redirect
-  val do_redirect_dup = RegNext(dup(redirect_req), init=0.U.asTypeOf(dup(redirect_req)))
+  val do_redirect_dup = RegNext(dup(redirect_req), 0.U.asTypeOf(dup(redirect_req)))
   do_redirect_dup.foreach(dontTouch(_))
 
   // Pipeline logic
@@ -353,7 +351,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   for (s1_fire & s2_flush & s2_fire & s2_valid & s1_flush <-
     s1_fire_dup zip s2_flush_dup zip s2_fire_dup zip s2_valid_dup zip s1_flush_dup) {
-      
+
     when (s2_flush)      { s2_valid := false.B   }
       .elsewhen(s1_fire) { s2_valid := !s1_flush }
       .elsewhen(s2_fire) { s2_valid := false.B   }
@@ -367,7 +365,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   for (s2_fire & s3_flush & s3_fire & s3_valid & s2_flush <-
     s2_fire_dup zip s3_flush_dup zip s3_fire_dup zip s3_valid_dup zip s2_flush_dup) {
-      
+
     when (s3_flush)      { s3_valid := false.B   }
       .elsewhen(s2_fire) { s3_valid := !s2_flush }
       .elsewhen(s3_fire) { s3_valid := false.B   }
@@ -403,13 +401,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // s1
   val s1_possible_predicted_ghist_ptrs_dup = s1_ghist_ptr_dup.map(ptr => (0 to numBr).map(ptr - _.U))
   val s1_predicted_ghist_ptr_dup = s1_possible_predicted_ghist_ptrs_dup.zip(resp.s1.lastBrPosOH).map{ case (ptr, oh) => Mux1H(oh, ptr)}
-  val s1_possible_predicted_fhs_dup = 
+  val s1_possible_predicted_fhs_dup =
     for (fgh & afh & br_num_oh & t & br_pos_oh <-
       s1_folded_gh_dup zip s1_ahead_fh_oldest_bits_dup zip s1_last_br_num_oh_dup zip resp.s1.brTaken zip resp.s1.lastBrPosOH)
       yield (0 to numBr).map(i =>
         fgh.update(afh, br_num_oh, i, t & br_pos_oh(i))
       )
-  val s1_predicted_fh_dup = resp.s1.lastBrPosOH.zip(s1_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)} 
+  val s1_predicted_fh_dup = resp.s1.lastBrPosOH.zip(s1_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)}
 
   val s1_ahead_fh_ob_src_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s1_ahead_fh_ob_src_dup.zip(s1_ghist_ptr_dup).map{ case (src, ptr) => src.read(ghv, ptr)}
@@ -474,13 +472,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s2_possible_predicted_ghist_ptrs_dup = s2_ghist_ptr_dup.map(ptr => (0 to numBr).map(ptr - _.U))
   val s2_predicted_ghist_ptr_dup = s2_possible_predicted_ghist_ptrs_dup.zip(resp.s2.lastBrPosOH).map{ case (ptr, oh) => Mux1H(oh, ptr)}
 
-  val s2_possible_predicted_fhs_dup = 
+  val s2_possible_predicted_fhs_dup =
     for (fgh & afh & br_num_oh & full_pred <-
       s2_folded_gh_dup zip s2_ahead_fh_oldest_bits_dup zip s2_last_br_num_oh_dup zip resp.s2.full_pred)
       yield (0 to numBr).map(i =>
         fgh.update(afh, br_num_oh, i, if (i > 0) full_pred.br_taken_mask(i-1) else false.B)
       )
-  val s2_predicted_fh_dup = resp.s2.lastBrPosOH.zip(s2_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)} 
+  val s2_predicted_fh_dup = resp.s2.lastBrPosOH.zip(s2_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)}
 
   val s2_ahead_fh_ob_src_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s2_ahead_fh_ob_src_dup.zip(s2_ghist_ptr_dup).map{ case (src, ptr) => src.read(ghv, ptr)}
@@ -514,7 +512,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s1_pred_info.zip(resp.s1.taken).map(tp => tp._1.taken := tp._2)
   s1_pred_info.zip(resp.s1.cfiIndex).map(tp => tp._1.cfiIndex := tp._2.bits)
 
-  val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(s1_pred_info), s1_fire_dup(0))
+  val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(s1_pred_info), s1_fire_dup(0))
 
   val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
@@ -558,7 +556,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       yield (0 to numBr).map(i =>
         fgh.update(afh, br_num_oh, i, if (i > 0) full_pred.br_taken_mask(i-1) else false.B)
       )
-  val s3_predicted_fh_dup = resp.s3.lastBrPosOH.zip(s3_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)} 
+  val s3_predicted_fh_dup = resp.s3.lastBrPosOH.zip(s3_possible_predicted_fhs_dup).map{ case (oh, fh) => Mux1H(oh, fh)}
 
   val s3_ahead_fh_ob_src_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s3_ahead_fh_ob_src_dup.zip(s3_ghist_ptr_dup).map{ case (src, ptr) => src.read(ghv, ptr)}
@@ -586,7 +584,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s2_pred = RegEnable(resp.s2, init=0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+  val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
 
   val s3_redirect_on_br_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask().asUInt =/= fp2.real_br_taken_mask().asUInt}
   val s3_redirect_on_target_dup = resp.s3.target.zip(previous_s2_pred.target).map {case (t1, t2) => t1 =/= t2}
@@ -641,7 +639,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   predictors.io.update := RegNext(dup(io.ftq_to_bpu.update))
   predictors.io.update.map(_.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)))
-  
+
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
 
@@ -649,7 +647,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val shift_dup = redirect_dup.map(_.cfiUpdate.shift)
   val addIntoHist_dup = redirect_dup.map(_.cfiUpdate.addIntoHist)
   // TODO: remove these below
-  val shouldShiftVec_dup = shift_dup.map(shift => Mux(shift === 0.U, VecInit(0.U((1 << (log2Ceil(numBr) + 1)).W).asBools), VecInit((LowerMask(1.U << (shift-1.U))).asBools())))
+  val shouldShiftVec_dup = shift_dup.map(shift => Mux(shift === 0.U, VecInit(0.U((1 << (log2Ceil(numBr) + 1)).W).asBools), VecInit((LowerMask(1.U << (shift-1.U))).asBools)))
   // TODO end
   val afhob_dup = redirect_dup.map(_.cfiUpdate.afhob)
   val lastBrNumOH_dup = redirect_dup.map(_.cfiUpdate.lastBrNumOH)
@@ -664,7 +662,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val oldPtr_dup = redirect_dup.map(_.cfiUpdate.histPtr)
   val oldFh_dup = redirect_dup.map(_.cfiUpdate.folded_hist)
   val updated_ptr_dup = oldPtr_dup.zip(shift_dup).map {case (oldPtr, shift) => oldPtr - shift}
-  val updated_fh_dup = 
+  val updated_fh_dup =
     for (oldFh & afhob & lastBrNumOH & taken & addIntoHist & shift <-
       oldFh_dup zip afhob_dup zip lastBrNumOH_dup zip taken_dup zip addIntoHist_dup zip shift_dup)
     yield VecInit((0 to numBr).map(i => oldFh.update(afhob, lastBrNumOH, i, taken && addIntoHist)))(shift)

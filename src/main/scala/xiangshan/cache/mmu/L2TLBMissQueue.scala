@@ -16,10 +16,9 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -41,5 +40,5 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(MSHRSize >= (2 + l2tlbParams.filterSize))
   val io = IO(new L2TlbMQIO())
 
-  io.out <> Queue(io.in, MSHRSize, flush = Some(io.sfence.valid || io.csr.satp.changed)) 
+  io.out <> Queue(io.in, MSHRSize, flush = Some(io.sfence.valid || io.csr.satp.changed))
 }

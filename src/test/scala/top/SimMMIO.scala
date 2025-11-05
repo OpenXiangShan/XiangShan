@@ -17,13 +17,13 @@
 package top
 
 import chisel3._
-import chipsalliance.rocketchip.config
+import org.chipsalliance.cde.config.Parameters
 import device._
 import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import difftest._
 
-class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
+class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModule {
 
   val node = AXI4MasterNode(List(edge.master))
 
@@ -51,7 +51,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
     node.makeIOs()
   }
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle() {
       val uart = new UARTIO
       val interrupt = new IntrGenIO

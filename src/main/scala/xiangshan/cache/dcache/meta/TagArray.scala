@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.SRAMTemplate
@@ -68,7 +68,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   tag_array.io.w.req.bits.apply(
     setIdx = waddr,
     data = wdata,
-    waymask = VecInit(wmask).asUInt()
+    waymask = VecInit(wmask).asUInt
   )
 
   // val ecc_wen = rst || io.ecc_write.valid
@@ -79,7 +79,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   // ecc_array.io.w.req.bits.apply(
   //   setIdx = ecc_waddr,
   //   data = ecc_wdata,
-  //   waymask = VecInit(ecc_wmask).asUInt()
+  //   waymask = VecInit(ecc_wmask).asUInt
   // )
 
   // tag read
@@ -142,7 +142,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
 
   when (io.cacheOp.req.valid && isReadTag(io.cacheOp.req.bits.opCode)){
     for (i <- 0 until (readPorts / 3)) {
@@ -178,7 +178,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheM
   //   }
   //   cacheOpShouldResp := true.B
   // }
-  
+
 
   when (io.cacheOp_req_dup(3).valid && isReadTag(io.cacheOp_req_bits_opCode_dup(3))){
     for (i <- (readPorts / 3) until ((readPorts / 3) * 2)) {

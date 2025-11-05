@@ -16,13 +16,12 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
 
 import scala.math.min
 import scala.{Tuple2 => &}
@@ -35,7 +34,7 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20
 
-  
+
 
   val TAR_STAT_SZ = 2
   def TAR_FIT = 0.U(TAR_STAT_SZ.W)
@@ -122,12 +121,12 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
     this.valid := that.valid
     this.lower := ZeroExt(that.lower, this.offsetLen)
   }
-  
+
 }
 
 class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
-  
-  
+
+
   val valid       = Bool()
 
   val brSlots = Vec(numBrSlot, new FtbSlot(BR_OFFSET_LEN))
@@ -178,14 +177,14 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   def getBrMaskByOffset(offset: UInt) =
     brSlots.map{ s => s.valid && s.offset <= offset } :+
     (tailSlot.valid && tailSlot.offset <= offset && tailSlot.sharing)
-    
+
   def getBrRecordedVec(offset: UInt) = {
     VecInit(
       brSlots.map(s => s.valid && s.offset === offset) :+
       (tailSlot.valid && tailSlot.offset === offset && tailSlot.sharing)
     )
   }
-    
+
   def brIsSaved(offset: UInt) = getBrRecordedVec(offset).reduce(_||_)
 
   def brValids = {
@@ -414,7 +413,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val btb_enable_dup = RegNext(dup(io.ctrl.btb_enable))
   val s2_ftb_entry_dup = io.s1_fire.map(f => RegEnable(ftbBank.io.read_resp, f))
   val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
-  
+
   val s1_ftb_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
   val s1_uftb_hit_dup = io.in.bits.resp_in(0).s1.full_pred.map(_.hit)
   val s2_ftb_hit_dup = io.s1_fire.map(f => RegEnable(s1_ftb_hit, f))
@@ -450,14 +449,14 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       }
     }
 
-  // s3 
+  // s3
   val s3_full_pred = io.s2_fire.zip(io.out.s2.full_pred).map {case (f, fp) => RegEnable(fp, f)}
   // br_taken_mask from SC in stage3 is covered here, will be recovered in always taken logic
   io.out.s3.full_pred := s3_full_pred
 
   val s3_fauftb_hit_ftb_miss = RegEnable(!s2_ftb_hit_dup(dupForFtb) && s2_uftb_hit_dup(dupForFtb), io.s2_fire(dupForFtb))
   io.out.last_stage_ftb_entry := Mux(s3_fauftb_hit_ftb_miss, io.in.bits.resp_in(0).last_stage_ftb_entry, s3_ftb_entry_dup(dupForFtb))
-  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt(), io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
+  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt, s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt, io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
 
   // always taken logic
   for (i <- 0 until numBr) {
@@ -481,7 +480,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val delay2_pc = DelayN(update.pc, 2)
   val delay2_entry = DelayN(update.ftb_entry, 2)
 
-  
+
   val update_now = u_valid && u_meta.hit
   val update_need_read = u_valid && !u_meta.hit
   // stall one more cycle because we use a whole cycle to do update read tag hit

@@ -16,7 +16,7 @@
 
 package xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.IdRange
@@ -249,7 +249,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   io.data_write.valid := (state === s_write_back)
   val dataWriteEn = Wire(Vec(4, Bool()))
-  dataWriteEn.zipWithIndex.map{ case(wen,i) => 
+  dataWriteEn.zipWithIndex.map{ case(wen,i) =>
     wen := state_dup(i) === s_write_back
   }
   io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0), writeEn = dataWriteEn, paddr = req.paddr)
@@ -388,6 +388,3 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   }
 
 }
-
-
-

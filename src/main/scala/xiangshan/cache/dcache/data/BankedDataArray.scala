@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils._
 import chisel3.util._
@@ -95,7 +95,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
-    // customized cache op port 
+    // customized cache op port
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(11, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(11, UInt(XLEN.W)))
@@ -204,7 +204,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
     val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
 
-    val sel_low = r_way_en_reg.tail(half).orR()
+    val sel_low = r_way_en_reg.tail(half).orR
     val row_data = Mux(sel_low, data_left, data_right)
 
     io.r.data := row_data
@@ -364,13 +364,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     // read_bank_error_delayed(bank_index) := bank_result(bank_index).error_delayed
   }
 
-  // read result: expose banked read result 
+  // read result: expose banked read result
   io.resp := bank_result
 
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) && 
+    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
     //   read_bank_error_delayed(RegNext(RegNext(bank_addrs(rport_index)))) &&
     //   !RegNext(io.bank_conflict_slow(rport_index))
     io.read_error_delayed(rport_index) := 0.U.asTypeOf(io.read_error_delayed(rport_index).cloneType)
@@ -414,7 +414,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val cacheOpShouldResp = WireInit(false.B)
   // val eccReadResult = Wire(Vec(DCacheBanks, UInt(eccBits.W)))
 
-  when (io.cacheOp.req.valid && CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode)) { 
+  when (io.cacheOp.req.valid && CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode)) {
     for (bank_index <- 0 until (DCacheBanks / 3)) {
       val data_bank = data_banks(bank_index)
       data_bank.io.r.en := true.B
@@ -453,9 +453,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   //   }
   //   cacheOpShouldResp := true.B
   // }
-  
 
-  when (io.cacheOp_req_dup(3).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(3))) { 
+
+  when (io.cacheOp_req_dup(3).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(3))) {
     for (bank_index <- (DCacheBanks / 3) until ((DCacheBanks / 3) * 2)) {
       val data_bank = data_banks(bank_index)
       data_bank.io.r.en := true.B
@@ -495,7 +495,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   //   cacheOpShouldResp := true.B
   // }
 
-  when (io.cacheOp_req_dup(7).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(7))) { 
+  when (io.cacheOp_req_dup(7).valid && CacheInstrucion.isReadData(io.cacheOp_req_bits_opCode_dup(7))) {
     for (bank_index <- ((DCacheBanks / 3) * 2) until DCacheBanks) {
       val data_bank = data_banks(bank_index)
       data_bank.io.r.en := true.B
@@ -534,13 +534,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   //   }
   //   cacheOpShouldResp := true.B
   // }
-  
+
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   for (bank_index <- 0 until DCacheBanks) {
     io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(bank_index).raw_data
 	// eccReadResult(bank_index) := ecc_banks(bank_index).io.r.resp.data(RegNext(io.cacheOp.req.bits.wayNum(4, 0)))
   }
-  io.cacheOp.resp.bits.read_data_ecc :=  0.U//Mux(io.cacheOp.resp.valid, 
+  io.cacheOp.resp.bits.read_data_ecc :=  0.U//Mux(io.cacheOp.resp.valid,
   //   eccReadResult(RegNext(io.cacheOp.req.bits.bank_num)),
   //   0.U
   // )

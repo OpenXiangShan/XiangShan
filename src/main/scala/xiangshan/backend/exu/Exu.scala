@@ -16,7 +16,7 @@
 
 package xiangshan.backend.exu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
@@ -221,9 +221,9 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
       s.head._1
     } else {
       if (needArbiter) {
-        Cat(s.map(x => x._1 && x._2)).orR()
+        Cat(s.map(x => x._1 && x._2)).orR
       } else {
-        Cat(s.map(x => x._1)).andR()
+        Cat(s.map(x => x._1)).andR
       }
     }
   }

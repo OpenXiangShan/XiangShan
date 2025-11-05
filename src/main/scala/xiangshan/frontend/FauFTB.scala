@@ -16,12 +16,11 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import chisel3.experimental.chiselName
 import scala.{Tuple2 => &}
 
 trait FauFTBParams extends HasXSParameter with HasBPUConst {
@@ -72,7 +71,7 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
 
 
 class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
-  
+
   class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
     val pred_way = UInt(log2Ceil(numWays).W)
     val hit = Bool()
@@ -132,14 +131,14 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   // bank 1 for tage, bank 0 for others
   val banks = Seq.fill(numDup_local)(Module(new FauFTBBank))
   banks.foreach(b => dontTouch(b.io))
-  
+
   val replacer = Seq.fill(numDup_local)(ReplacementPolicy.fromString("plru", numWays))
   val replacer_touch_ways = Wire(Vec(numDup_local, Vec(2, Valid(UInt(log2Ceil(numWays).W)))))
 
   val s1_fire_dup = Wire(Vec(numDup_local, Bool()))
   s1_fire_dup(0) := io.s1_fire(dupForUbtb)
   s1_fire_dup(1) := io.s1_fire(special_idx_for_dup)
-  
+
   // pred req
   banks(0).io.req_tag := getTag(s1_pc_dup(dupForUbtb))
   banks(1).io.req_tag := getTag(s1_pc_dup(special_idx_for_dup))
@@ -149,7 +148,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_dup = s1_hit_oh_dup.map(_.orR)
   val s1_hit_way_dup = s1_hit_oh_dup.map(OHToUInt(_))
   val s1_possible_full_preds_dup = Wire(Vec(numDup_local, Vec(numWays, new FullBranchPrediction)))
-  
+
   val s1_all_entries_dup = VecInit(banks.map(_.io.resp_entries))
   for (b <- 0 until numDup_local) {
     for (w <- 0 until numWays) {
@@ -280,5 +279,5 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     ("fauftb_commit_miss      ", us(0).valid && !u_meta_dup(0).hit),
   )
   generatePerfEvent()
-  
+
 }

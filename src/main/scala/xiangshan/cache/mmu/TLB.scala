@@ -16,9 +16,8 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
@@ -28,7 +27,6 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
 
-@chiselName
 class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst with HasPerfEvents {
   val io = IO(new TlbIO(Width, nRespDups, q))
 

@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.{ExpandedInstruction, RVCDecoder}
 import chisel3.{util, _}
 import chisel3.util._
@@ -204,7 +204,7 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val stage2Out = new Bundle{
     val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
     val fixedMissPred = Vec(PredictWidth,  Bool())
-    val faultType   = Vec(PredictWidth, new CheckInfo) 
+    val faultType   = Vec(PredictWidth, new CheckInfo)
   }
 }
 
@@ -261,8 +261,8 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   io.out.stage2Out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
                                                                              Mux(retFaultVecNext(i), FaultType.retFault ,
-                                                                             Mux(targetFaultNext(i), FaultType.targetFault , 
-                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault, 
+                                                                             Mux(targetFaultNext(i), FaultType.targetFault ,
+                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault,
                                                                              Mux(invalidTakenNext(i), FaultType.invalidTaken,  FaultType.noFault)))))}
 
   io.out.stage2Out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFaultNext(i)}
@@ -277,7 +277,7 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
 
     val pds           = Input(Vec(PredictWidth, new PreDecodeInfo))
     val pc            = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
-    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W))) 
+    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
                         else Input(Vec(PredictWidth, UInt(32.W)))
   })
 

@@ -16,7 +16,7 @@
 
 package xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
@@ -110,7 +110,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
 
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req )
-  io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
+  io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData,
                             Mux(req.hasData,probeResponseData,probeResponse))
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
@@ -145,7 +145,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
   })
 
   //more than 1 release entries may cause bug
-  //TODO: support multiple concurrent Releases 
+  //TODO: support multiple concurrent Releases
   require(cacheParams.nReleaseEntries == 1)
 
   val req = io.req

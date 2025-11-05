@@ -18,9 +18,8 @@
 
 package xiangshan.backend.fu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
 import utils.MaskedRegMap.WritableMask
 import xiangshan._
@@ -37,7 +36,6 @@ abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPCons
 abstract class PMPModule(implicit val p: Parameters) extends Module with PMPConst
 abstract class PMPXSModule(implicit p: Parameters) extends XSModule with PMPConst
 
-@chiselName
 class PMPConfig(implicit p: Parameters) extends PMPBundle {
   val l = Bool()
   val c = Bool() // res(1), unuse in pmp
@@ -172,7 +170,6 @@ trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
 /** PMPBase for CSR unit
   * with only read and write logic
   */
-@chiselName
 class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod {
   val cfg = new PMPConfig
   val addr = UInt((PMPAddrBits - PMPOffBits).W)
@@ -262,7 +259,6 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   * with one more elements mask to help napot match
   * TODO: make mask an element, not an method, for timing opt
   */
-@chiselName
 class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
   val mask = UInt(PMPAddrBits.W) // help to match in napot
 
@@ -339,7 +335,6 @@ trait PMPMethod extends PMPConst {
   }
 }
 
-@chiselName
 class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
@@ -445,7 +440,7 @@ trait PMPCheckMethod extends PMPConst {
     cfg_vec(num) := pmpDefault
 
     if (leaveHitMux) {
-      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+      ParallelPriorityMux(match_vec.map(RegEnable(_, false.B, valid)), RegEnable(cfg_vec, valid))
     } else {
       ParallelPriorityMux(match_vec, cfg_vec)
     }
@@ -510,7 +505,6 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   }
 }
 
-@chiselName
 class PMPChecker
 (
   lgMaxSize: Int = 3,
@@ -541,7 +535,6 @@ class PMPChecker
 }
 
 /* get config with check */
-@chiselName
 class PMPCheckerv2
 (
   lgMaxSize: Int = 3,

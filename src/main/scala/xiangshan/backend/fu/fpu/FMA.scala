@@ -16,7 +16,7 @@
 
 package xiangshan.backend.fu.fpu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import fudian.utils.Multiplier
@@ -152,6 +152,7 @@ class FMAMidResult extends FMULToFADD(FPU.ftypes.last.expWidth, FPU.ftypes.last.
 
   def toFloat: FMULToFADD = {
     val floatMidResult = Wire(new FMULToFADD(FPU.ftypes.head.expWidth, FPU.ftypes.head.precision))
+    floatMidResult := DontCare
     floatMidResult.fp_prod.sign := fp_prod.sign
     floatMidResult.fp_prod.exp := fp_prod.exp
     floatMidResult.fp_prod.sig := fp_prod.sig

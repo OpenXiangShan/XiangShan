@@ -164,10 +164,10 @@ object GenMask {
   // generate w/r mask
   def apply(high: Int, low: Int) = {
     require(high > low)
-    (VecInit(List.fill(high+1)(true.B)).asUInt >> low << low).asUInt()
+    (VecInit(List.fill(high+1)(true.B)).asUInt >> low << low).asUInt
   }
   def apply(pos: Int) = {
-    (1.U << pos).asUInt()
+    (1.U << pos).asUInt
   }
 }
 
@@ -186,7 +186,7 @@ object GetEvenBits {
   }
   def reverse(input: UInt): UInt = {
     VecInit((0 until input.getWidth * 2).map(i => {
-      if(i % 2 == 0) input(i/2) else false.B 
+      if(i % 2 == 0) input(i/2) else false.B
     })).asUInt
   }
 }
@@ -198,7 +198,7 @@ object GetOddBits {
   }
   def reverse(input: UInt): UInt = {
     VecInit((0 until input.getWidth * 2).map(i => {
-      if(i % 2 == 0) false.B else input(i/2) 
+      if(i % 2 == 0) false.B else input(i/2)
     })).asUInt
   }
 }

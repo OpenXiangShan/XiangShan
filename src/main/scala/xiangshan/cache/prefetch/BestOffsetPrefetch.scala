@@ -16,7 +16,7 @@
 
 package xiangshan.cache.prefetch
 
-import chipsalliance.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import chisel3._
 import chisel3.util._
 import xiangshan._

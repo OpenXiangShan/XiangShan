@@ -16,18 +16,17 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
 import utils.GTimer
+import utility.FileRegisters
 import xiangshan.{DebugOptions, DebugOptionsKey}
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
-import freechips.rocketchip.util.ElaborationArtefacts
-import top.TopMain.writeOutputFile
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -79,15 +78,19 @@ class SimTop(implicit p: Parameters) extends Module {
   }
 
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+    val timer = WireInit(GTimer())
+    dontTouch(timer)
+    val logEnable = WireInit((timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end))
+    dontTouch(logEnable)
     ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
     ExcitingUtils.addSource(timer, "logTimestamp")
   }
 
   if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
-    val clean = io.perfInfo.clean
-    val dump = io.perfInfo.dump
+    val clean = WireInit(io.perfInfo.clean)
+    dontTouch(clean)
+    val dump = WireInit(io.perfInfo.dump)
+    dontTouch(dump)
     ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
     ExcitingUtils.addSource(dump, "XSPERF_DUMP")
   }
@@ -98,16 +101,12 @@ class SimTop(implicit p: Parameters) extends Module {
 }
 
 object SimTop extends App {
-  override def main(args: Array[String]): Unit = {
-    // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        DisableMonitors(p => new SimTop()(p))(config)
-      })
-    ))
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
-  }
+  // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+  val (config, firrtlOpts) = ArgParser.parse(args)
+  XiangShanStage.execute(firrtlOpts, Seq(
+    ChiselGeneratorAnnotation(() => {
+      DisableMonitors(p => new SimTop()(p))(config)
+    })
+  ))
+  FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

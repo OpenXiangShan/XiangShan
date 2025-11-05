@@ -15,17 +15,15 @@
 ***************************************************************************************/
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.chiselName
 import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
 import scala.math._
 import scala.{Tuple2 => &}
 
-@chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
   //fast path: Timing critical
@@ -160,7 +158,7 @@ class ShiftingGlobalHistory(implicit p: Parameters) extends GlobalHistory {
   }
 
   // static read
-  def read(n: Int): Bool = predHist.asBools()(n)
+  def read(n: Int): Bool = predHist.asBools(n)
 
   final def === (that: ShiftingGlobalHistory): Bool = {
     predHist === that.predHist
@@ -267,14 +265,14 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
       }
       // if a bit does not wrap around, it should not be xored when it exits
       val oldest_bits_set = (0 until max_update_num).filter(oldest_bit_wrap_around).map(i => (oldest_bit_pos_in_folded(i), oldest_bits_masked(i)))
-      
+
       // println(f"old bits pos ${oldest_bits_set.map(_._1)}")
-  
+
       // only the last bit could be 1, as we have at most one taken branch at a time
       val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && ((i+1) == num).B)).asUInt
       // if a bit does not wrap around, newest bits should not be xored onto it either
       val newest_bits_set = (0 until max_update_num).map(i => (compLen-1-i, newest_bits_masked(i)))
-  
+
       // println(f"new bits set ${newest_bits_set.map(_._1)}")
       //
       val original_bits_masked = VecInit(folded_hist.asBools.zipWithIndex.map{
@@ -401,7 +399,7 @@ trait BasicPrediction extends HasXSParameter {
   def shouldShiftVec: Vec[Bool]
   def fallThruError: Bool
 }
-@chiselName
+
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
@@ -443,7 +441,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def real_slot_taken_mask(): Vec[Bool] = {
     VecInit(taken_mask_on_slot.map(_ && hit))
   }
-  
+
   // len numBr
   def real_br_taken_mask(): Vec[Bool] = {
     VecInit(
@@ -480,7 +478,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
   def fallThruError: Bool = hit && fallThroughErr
 
-  def hit_taken_on_jmp = 
+  def hit_taken_on_jmp =
     !real_slot_taken_mask().init.reduce(_||_) &&
     real_slot_taken_mask().last && !is_br_sharing
   def hit_taken_on_call = hit_taken_on_jmp && is_call
@@ -510,7 +508,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_ret := entry.tailSlot.valid && entry.isRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
-    
+
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
     fallThroughErr := startLower >= endLowerwithCarry
@@ -532,7 +530,6 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val rasTop = new RASEntry
 }
 
-@chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
 
@@ -541,10 +538,10 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
   val full_pred    = Vec(numDup, new FullBranchPrediction)
   val hasRedirect  = Vec(numDup, Bool())
-  
+
   val ftq_idx = new FtqPtr
 
-  def getPredDupWithPC[T <: Data](f: BasicPrediction =>(UInt => T)) = 
+  def getPredDupWithPC[T <: Data](f: BasicPrediction =>(UInt => T)) =
     for (fp & p <- full_pred zip pc) yield {
       f(fp)(p)
     }
@@ -564,7 +561,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   }
 }
 
-@chiselName
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
   // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle

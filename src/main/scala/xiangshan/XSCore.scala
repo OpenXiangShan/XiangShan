@@ -16,8 +16,7 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
@@ -34,22 +33,9 @@ import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters {
-  def io: Record
-}
-
-//remove this trait after impl module logic
-trait NeedImpl {
-  this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
-    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
-    val io = chisel3.experimental.IO(iodef)
-    io <> DontCare
-    io
-  }
-}
+  with HasFPUParameters
 
 class WritebackSourceParams(
   var exuConfigs: Seq[Seq[ExuConfig]] = Seq()
@@ -98,14 +84,14 @@ trait HasWritebackSink {
   }
 
   def writebackSinksParams: Seq[WritebackSourceParams] = {
-    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }
+    writebackSinks.toSeq.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }
   }
   final def writebackSinksMod(
      thisMod: Option[HasWritebackSource] = None,
      thisModImp: Option[HasWritebackSourceImp] = None
    ): Seq[Seq[HasWritebackSourceImp]] = {
     require(thisMod.isDefined == thisModImp.isDefined)
-    writebackSinks.map(_._1.map(source =>
+    writebackSinks.toSeq.map(_._1.map(source =>
       if (thisMod.isDefined && source == thisMod.get) thisModImp.get else source.writebackSourceImp)
     )
   }
@@ -114,7 +100,7 @@ trait HasWritebackSink {
     thisModImp: Option[HasWritebackSourceImp] = None
   ): Seq[Seq[ValidIO[ExuOutput]]] = {
     val sourceMod = writebackSinksMod(thisMod, thisModImp)
-    writebackSinks.zip(sourceMod).map{ case ((s, i), m) =>
+    writebackSinks.zip(sourceMod).toSeq.map{ case ((s, i), m) =>
       s.zip(i).zip(m).flatMap(x => x._1._1.writebackSource(x._2)(x._1._2))
     }
   }
@@ -130,7 +116,7 @@ trait HasWritebackSink {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
+abstract class XSCoreBase()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
@@ -234,7 +220,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   writebackSources.foreach(s => ctrlBlock.addWritebackSink(s))
 }
 
-class XSCore()(implicit p: config.Parameters) extends XSCoreBase
+class XSCore()(implicit p: Parameters) extends XSCoreBase
   with HasXSDts
 {
   lazy val module = new XSCoreImp(this)
@@ -255,12 +241,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val frontend = outer.frontend.module
   val ctrlBlock = outer.ctrlBlock.module
-  val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
+  frontend.io.reset_vector := DontCare // unused
   frontend.io.hartId  := io.hartId
   ctrlBlock.io.hartId := io.hartId
   exuBlocks.foreach(_.io.hartId := io.hartId)
@@ -276,13 +260,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val rfWriteback = outer.wbArbiter.module.io.out
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  wb2Ctrl.io.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
+  outer.wb2Ctrl.module.io.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
 
-  wb2Ctrl.io.redirect <> ctrlBlock.io.redirect
+  outer.wb2Ctrl.module.io.redirect <> ctrlBlock.io.redirect
   outer.wb2Ctrl.generateWritebackIO()
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 := DontCare
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
@@ -366,7 +351,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  memBlock.io.perfEventsPTW  := ptw.getPerf
+  memBlock.io.perfEventsPTW  := outer.ptw.module.getPerf
   ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId
@@ -414,13 +399,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater1 = PTWRepeater(frontend.io.ptw, fenceio.sfence, csrioIn.tlb)
-  val itlbRepeater2 = PTWRepeater(itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
+  val itlbRepeater2 = PTWRepeater(itlbRepeater1.io.ptw, outer.ptw.module.io.tlb(0), fenceio.sfence, csrioIn.tlb)
   val dtlbRepeater1  = PTWFilter(memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.filterSize)
-  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)
-  ptw.io.sfence <> fenceio.sfence
-  ptw.io.csr.tlb <> csrioIn.tlb
-  ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
-  ptw.io.csr.prefercache <> csrioIn.customCtrl.ptw_prefercache_enable
+  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, dtlbRepeater1.io.ptw, outer.ptw.module.io.tlb(1), fenceio.sfence, csrioIn.tlb)
+  outer.ptw.module.io.sfence <> fenceio.sfence
+  outer.ptw.module.io.csr.tlb <> csrioIn.tlb
+  outer.ptw.module.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
+  outer.ptw.module.io.csr.prefercache <> csrioIn.customCtrl.ptw_prefercache_enable
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
@@ -431,14 +416,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       ModuleNode(memBlock), ModuleNode(dtlbRepeater1),
       ResetGenNode(Seq(
         ModuleNode(itlbRepeater2),
-        ModuleNode(ptw),
+        ModuleNode(outer.ptw.module),
         ModuleNode(dtlbRepeater2),
-        ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(outer.ptw_to_l2_buffer.module),
       )),
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
         ResetGenNode(
-          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module) :+ ModuleNode(wb2Ctrl)
+          exuBlocks.tail.map(m => ModuleNode(m)) :+ ModuleNode(outer.wbArbiter.module) :+ ModuleNode(outer.wb2Ctrl.module)
         ),
         ResetGenNode(Seq(
           ModuleNode(ctrlBlock),

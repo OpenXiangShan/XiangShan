@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
-import huancun.utils.FastArbiter
+import utility.FastArbiter
 import mem.{AddPipelineReg}
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
@@ -55,7 +55,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // * cancel is slow to generate, it will not be used until the last moment
   //
   // cancel may come from the following sources:
-  // 1. miss req blocked by writeback queue: 
+  // 1. miss req blocked by writeback queue:
   //      a writeback req of the same address is in progress
   // 2. pmp check failed
   val cancel = Bool() // cancel is slow to generate, it will cancel missreq.valid
@@ -67,14 +67,14 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
 }
 
 class MissReqStoreData(implicit p: Parameters) extends DCacheBundle {
-  // store data and store mask will be written to miss queue entry 
+  // store data and store mask will be written to miss queue entry
   // 1 cycle after req.fire() and meta write
   val store_data = UInt((cfg.blockBytes * 8).W)
   val store_mask = UInt(cfg.blockBytes.W)
 }
 
 class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
-  // store data and store mask will be written to miss queue entry 
+  // store data and store mask will be written to miss queue entry
   // 1 cycle after req.fire() and meta write
   val store_data = UInt((cfg.blockBytes * 8).W)
   val store_mask = UInt(cfg.blockBytes.W)
@@ -571,7 +571,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     }))
     val l2_pf_store_only = Input(Bool())
   })
-  
+
   // 128KBL1: FIXME: provide vaddr for l2
 
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge)))
@@ -605,7 +605,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     if (name.nonEmpty) { out.suggestName(s"${name.get}_select") }
     out.valid := Cat(in.map(_.valid)).orR
     out.bits := ParallelMux(in.map(_.valid) zip in.map(_.bits))
-    in.map(_.ready := out.ready) 
+    in.map(_.ready := out.ready)
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
@@ -614,16 +614,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)
-        false.B 
+        false.B
       else
         Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
-      
+
       e.io.id := i.U
       e.io.l2_pf_store_only := io.l2_pf_store_only
       e.io.req.valid := io.req.valid
-      e.io.primary_valid := io.req.valid && 
-        !merge && 
-        !reject && 
+      e.io.primary_valid := io.req.valid &&
+        !merge &&
+        !reject &&
         !former_primary_ready &&
         e.io.primary_ready
       e.io.req.bits := io.req.bits.toMissReqWoStoreData()

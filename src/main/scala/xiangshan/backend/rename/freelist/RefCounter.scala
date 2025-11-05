@@ -16,7 +16,7 @@
 
 package xiangshan.backend.rename.freelist
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -96,4 +96,3 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     XSPerfAccumulate(s"free_reg_$i", VecInit(isFreed).asUInt.orR)
   }
 }
-

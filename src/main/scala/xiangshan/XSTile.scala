@@ -1,13 +1,13 @@
 package xiangshan
 
 import chisel3._
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
-import huancun.debug.TLLogger
+import utility.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import system.HasSoCParameter
@@ -67,10 +67,11 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   beu.node := TLBuffer.chainNode(3) := mmio_xbar
   mmio_port := TLBuffer.chainNode(3) := mmio_xbar
 
-  lazy val module = new LazyModuleImp(this){
+  class Impl extends LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
     beu.module.io.errors <> beu_errors
   }
+  lazy val module = new Impl
 }
 
 class XSTile()(implicit p: Parameters) extends LazyModule
@@ -144,7 +145,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val cpu_halt = Output(Bool())
@@ -179,8 +181,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
     val resetChain = Seq(
       Seq(misc.module, core.module) ++
-        l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-        ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+        l1i_to_l2_buffers.map(_.module.asInstanceOf[Module]) ++
+        ptw_to_l2_buffers.map(_.module.asInstanceOf[Module]) ++
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )

@@ -16,10 +16,9 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -105,7 +104,6 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val csr_dup = Vec(3, Input(new TlbCsrBundle()))
 }
 
-@chiselName
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
@@ -221,7 +219,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int) = {
-    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level),
+    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level)
   }
 
   // l1
@@ -271,7 +269,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
@@ -316,7 +314,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)

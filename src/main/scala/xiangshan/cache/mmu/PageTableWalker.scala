@@ -16,10 +16,9 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -67,7 +66,6 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
   })
 }
 
-@chiselName
 class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwFsmIO)
 
@@ -256,7 +254,6 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 }
 
 
-@chiselName
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
 
@@ -271,7 +268,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val is_having = state.map(_ === state_mem_out)
   val is_cache = state.map(_ === state_cache)
 
-  val full = !ParallelOR(is_emptys).asBool()
+  val full = !ParallelOR(is_emptys).asBool
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
   val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
@@ -368,7 +365,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.in.ready := !full
 
-  io.out.valid := ParallelOR(is_having).asBool()
+  io.out.valid := ParallelOR(is_having).asBool
   io.out.bits.req_info := entries(mem_ptr).req_info
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af

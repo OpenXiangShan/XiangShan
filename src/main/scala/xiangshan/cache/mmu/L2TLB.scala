@@ -16,11 +16,10 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -43,7 +42,6 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   lazy val module = new PTWImp(this)
 }
 
-@chiselName
 class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
@@ -274,7 +272,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   ptw.io.mem.resp.bits := resp_pte.last
   // mem -> cache
   val refill_from_mq = mem_resp_from_mq
-  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
+  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire()))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
@@ -458,7 +456,8 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
     node := ptw.node
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasPerfEvents {
     val io = IO(new PtwIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())

@@ -16,7 +16,7 @@
 
 package xiangshan.backend.exu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
@@ -259,7 +259,8 @@ class WbArbiterWrapper(
   }
   override lazy val writebackSourceImp: HasWritebackSourceImp = module
 
-  lazy val module = new LazyModuleImp(this)
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this)
     with HasXSParameter with HasWritebackSourceImp with HasExuWbHelper {
 
     val io = IO(new Bundle() {
@@ -349,7 +350,8 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
   }
 
-  lazy val module = new LazyModuleImp(this)
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this)
     with HasWritebackSourceImp
     with HasXSParameter
   {

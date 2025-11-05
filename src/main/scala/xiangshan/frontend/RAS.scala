@@ -16,9 +16,8 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
 import xiangshan._
@@ -31,7 +30,6 @@ class RASEntry()(implicit p: Parameters) extends XSBundle {
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
-@chiselName
 class RAS(implicit p: Parameters) extends BasePredictor {
   object RASEntry {
     def apply(retAddr: UInt, ctr: UInt): RASEntry = {
@@ -42,7 +40,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
   }
 
-  @chiselName
   class RASStack(val rasSize: Int) extends XSModule {
     val io = IO(new Bundle {
       val push_valid = Input(Bool())
@@ -73,13 +70,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
-    
+
     val top_write_en = WireInit(false.B)
     val top_write = Wire(new RASEntry)
-    val top_dup = RegEnable(dup(top_write), init=dup(RASEntry(0x80000000L.U, 0.U)), top_write_en)
+    val top_dup = RegEnable(dup(top_write), dup(RASEntry(0x80000000L.U, 0.U)), top_write_en)
     top_write := top_dup(0)
     top_dup.foreach(dontTouch(_))
-    
+
     val wen = WireInit(false.B)
     val write_bypass_entry = Reg(new RASEntry())
     val write_bypass_ptr = RegInit(0.U(log2Up(rasSize).W))
@@ -166,7 +163,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
-    
+
     update(io.recover_valid)(
       Mux(io.recover_valid, io.recover_push,     io.push_valid),
       Mux(io.recover_valid, io.recover_pop,      io.pop_valid),
@@ -175,10 +172,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(io.recover_valid, io.recover_sp - 1.U, topPtr),
       Mux(io.recover_valid, io.recover_new_addr, io.spec_new_addr),
       Mux(io.recover_valid, io.recover_top,      top_dup(0)))
-      
+
     io.sp := sp
     io.top := top_dup
-    
+
     val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
     val do_reset = RegInit(true.B)
     when (do_reset) {
@@ -237,7 +234,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     s2_last_target_out_dup zip s2_is_jalr_dup zip s2_jalr_target_dup zip s2_last_target_in_dup) {
       s2_lto := Mux(s2_is_jalr, s2_jalr_target, s2_lti)
     }
-  
+
   val s3_top_dup = io.s2_fire.zip(spec_ras.top).map {case (f, t) => RegEnable(t, f)}
   val s3_sp = RegEnable(spec_ras.sp, io.s2_fire(dupForRas))
   val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire(dupForRas))

@@ -16,7 +16,7 @@
 
 package  xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -147,7 +147,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port 
+    val cacheOp  = Flipped(new L1CacheInnerOpIO) // customized cache op port
   }}
 
   io.read.ready := !io.write.valid
@@ -157,10 +157,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegEnable(next = port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(port_0_read_0, io.read.fire())
+  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire())
+  val port_1_read_1_reg = RegEnable(port_1_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -196,8 +196,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tag_sram_write(i).valid := write_bank_0
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
-      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid,init = false.B)
-      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
+      tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid,false.B)
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, tag_sram_write(i).valid )
     }
     else {
       tagArrays(i).io.r.req.valid := port_0_read_1 || port_1_read_1
@@ -205,10 +205,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       tag_sram_write(i).valid := write_bank_1
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
-      tagArrays(i).io.w.req.valid :=  RegNext(tag_sram_write(i).valid, init = false.B)
-      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
+      tagArrays(i).io.w.req.valid :=  RegNext(tag_sram_write(i).valid, false.B)
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, tag_sram_write(i).valid )
 
-    }  
+    }
   }
 
   io.read.ready := !io.write.valid && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
@@ -249,7 +249,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   // deal with customized cache op
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
   when(io.cacheOp.req.valid){
     when(
       CacheInstrucion.isReadTag(io.cacheOp.req.bits.opCode) ||
@@ -265,8 +265,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       for (i <- 0 until 2) {
         tag_sram_write(i).valid := true.B
         tag_sram_write(i).bits.apply(
-          data = io.cacheOp.req.bits.write_tag_low, 
-          setIdx = io.cacheOp.req.bits.index, 
+          data = io.cacheOp.req.bits.write_tag_low,
+          setIdx = io.cacheOp.req.bits.index,
           waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
         )
       }
@@ -284,7 +284,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     // }
   }
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, 
+  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid,
     tagArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))(io.cacheOp.req.bits.wayNum),
     0.U
   )
@@ -324,10 +324,10 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   val write_data_bits = Wire(UInt(blockBits.W))
 
-  val port_0_read_0_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(io.read.valid && io.read.bits.head.port_0_read_0, io.read.fire())
+  val port_0_read_1_reg = RegEnable(io.read.valid && io.read.bits.head.port_0_read_1, io.read.fire())
+  val port_1_read_1_reg = RegEnable(io.read.valid && io.read.bits.head.port_1_read_1, io.read.fire())
+  val port_1_read_0_reg = RegEnable(io.read.valid && io.read.bits.head.port_1_read_0, io.read.fire())
 
   //val bank_0_idx_vec = io.read.bits.map(copy =>  Mux(io.read.bits.dup_valids && copy.port_0_read_0, copy.vSetIdx(0), copy.vSetIdx(1)))
   //val bank_1_idx_vec = io.read.bits.map(copy =>  Mux(io.read.valid && copy.port_0_read_1, copy.vSetIdx(0), copy.vSetIdx(1)))
@@ -359,8 +359,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     data_sram_write(i).bits.wbankidx := io.write.bits.bankIdx
     data_sram_write(i).bits.wmask    := io.write.bits.waymask.asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
 
-    dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid, init = false.B)
-    dataArrays(i).io.write.bits  := RegEnable(data_sram_write(i).bits, enable = data_sram_write(i).valid)
+    dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid, false.B)
+    dataArrays(i).io.write.bits  := RegEnable(data_sram_write(i).bits, data_sram_write(i).valid)
   }
 
 
@@ -379,12 +379,12 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   // val write_data_code = Wire(UInt(dataCodeEntryBits.W))
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
-  
+
 
   val bank_0_idx = bank_0_idx_vec.last
   val bank_1_idx = bank_1_idx_vec.last
 
-  
+
   io.read.ready := !io.write.valid &&
                     dataArrays.map(_.io.read.req.map(_.ready).reduce(_&&_)).reduce(_&&_)
 
@@ -402,11 +402,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
   io.cacheOp.resp.valid := false.B
-  val cacheOpShouldResp = WireInit(false.B) 
+  val cacheOpShouldResp = WireInit(false.B)
   val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
   dataresp := DontCare
 
-  val data_resp_way = RegEnable(dataresp(RegNext(io.cacheOp.req.bits.wayNum(4, 0))), enable = RegNext(cacheOpShouldResp, init = false.B))
+  val data_resp_way = RegEnable(dataresp(RegNext(io.cacheOp.req.bits.wayNum(4, 0))), RegNext(cacheOpShouldResp, false.B))
 
   for (w <- 0 until partWayNum) {
     when(io.cache_req_dup(w).valid){
@@ -431,8 +431,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       }
     }
   }
-  
-  io.cacheOp.resp.valid := RegNext(RegNext(cacheOpShouldResp, init = false.B), init = false.B)
+
+  io.cacheOp.resp.valid := RegNext(RegNext(cacheOpShouldResp, false.B), false.B)
   val numICacheLineWords = blockBits / 64
   require(blockBits >= 64 && isPow2(blockBits))
   for (wordIndex <- 0 until numICacheLineWords) {
@@ -668,7 +668,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
-  
+
   mainPipe.io.fetch.req <> io.fetch.req //&& !fetchShouldBlock(i)
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B
@@ -696,7 +696,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.cache_req_dup(3) := cacheOpDecoder.io.cache_req_dup(3)
 
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  cacheOpDecoder.io.cache.resp.valid := 
+  cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
@@ -754,7 +754,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
 
     if(bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx
     else sramBank.io.w.req.valid := io.write.valid && io.write.bits.wbankidx
-    sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt())
+    sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt)
 
     sramBank
   }

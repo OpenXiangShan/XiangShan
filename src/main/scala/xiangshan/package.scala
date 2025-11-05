@@ -16,7 +16,7 @@
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu._
@@ -102,20 +102,20 @@ package object xiangshan {
     def storeIsAMO(fuType: UInt) = fuType(1)
 
     val functionNameMap = Map(
-      jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int_to_float",
-      csr.litValue() -> "csr",
-      alu.litValue() -> "alu",
-      mul.litValue() -> "mul",
-      div.litValue() -> "div",
-      fence.litValue() -> "fence",
-      bku.litValue() -> "bku",
-      fmac.litValue() -> "fmac",
-      fmisc.litValue() -> "fmisc",
-      fDivSqrt.litValue() -> "fdiv/fsqrt",
-      ldu.litValue() -> "load",
-      stu.litValue() -> "store",
-      mou.litValue() -> "mou"
+      jmp.litValue -> "jmp",
+      i2f.litValue -> "int_to_float",
+      csr.litValue -> "csr",
+      alu.litValue -> "alu",
+      mul.litValue -> "mul",
+      div.litValue -> "div",
+      fence.litValue -> "fence",
+      bku.litValue -> "bku",
+      fmac.litValue -> "fmac",
+      fmisc.litValue -> "fmisc",
+      fDivSqrt.litValue -> "fdiv/fsqrt",
+      ldu.litValue -> "load",
+      stu.litValue -> "store",
+      mou.litValue -> "mou"
     )
   }
 

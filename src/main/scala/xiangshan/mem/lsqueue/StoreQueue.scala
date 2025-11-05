@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -159,7 +159,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //
   // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
   // Before data write finish, sbuffer is unable to provide store to load
-  // forward data. As an workaround, deqPtrExt and allocated flag update 
+  // forward data. As an workaround, deqPtrExt and allocated flag update
   // is delayed so that load can get the right data from store queue.
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
@@ -382,7 +382,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
     // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & 
+      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) &
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt)
     ) =/= 0.U
@@ -576,7 +576,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
-    // forward data. As an workaround, deqPtrExt and allocated flag update 
+    // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
     when (RegNext(io.sbuffer(i).fire())) {
@@ -659,7 +659,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqempty := RegNext(
-    enqPtrExt(0).value === deqPtrExt(0).value && 
+    enqPtrExt(0).value === deqPtrExt(0).value &&
     enqPtrExt(0).flag === deqPtrExt(0).flag
   )
 

@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -136,7 +136,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
       for(word <- 0 until CacheLineWords){
         for(byte <- 0 until DataBytes){
           val write_byte = sbuffer_in_s2_line_wen && (
-            line_write_buffer_mask(byte) && (line_write_buffer_offset === word.U) || 
+            line_write_buffer_mask(byte) && (line_write_buffer_offset === word.U) ||
             line_write_buffer_wline
           )
           when(write_byte){
@@ -154,14 +154,14 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   //   when(req.valid){
   //     for(line <- 0 until StoreBufferSize){
   //       when(
-  //         req.bits.wvec(line) && 
+  //         req.bits.wvec(line) &&
   //         req.bits.cleanMask
   //       ){
   //         for(word <- 0 until CacheLineWords){
   //           for(byte <- 0 until DataBytes){
   //             mask(line)(word)(byte) := false.B
   //             val debug_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
-  //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) || 
+  //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) ||
   //               req.bits.wline
   //             ))
   //             assert(!debug_last_cycle_write_byte)
@@ -235,7 +235,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     Cat(offect(OffsetWidth - 1, 3), 0.U(3.W))
 
   def isOneOf(key: UInt, seq: Seq[UInt]): Bool =
-    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR()
+    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR
 
   def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
@@ -264,17 +264,17 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // Now sbuffer enq logic is divided into 3 stages:
 
-  // sbuffer_in_s0: 
+  // sbuffer_in_s0:
   // * read data and meta from store queue
   // * store them in 2 entry fifo queue
 
-  // sbuffer_in_s1: 
+  // sbuffer_in_s1:
   // * read data and meta from fifo queue
   // * update sbuffer meta (vtag, ptag, flag)
   // * prevert that line from being sent to dcache (add a block condition)
-  // * prepare cacheline level write enable signal, RegNext() data and mask 
+  // * prepare cacheline level write enable signal, RegNext() data and mask
 
-  // sbuffer_in_s2: 
+  // sbuffer_in_s2:
   // * use cacheline level buffer to update sbuffer data and mask
   // * remove dcache write block (if there is)
 
@@ -456,8 +456,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val sbuffer_empty = Cat(invalidMask).andR()
-  val sq_empty = !Cat(io.in.map(_.valid)).orR()
+  val sbuffer_empty = Cat(invalidMask).andR
+  val sq_empty = !Cat(io.in.map(_.valid)).orR
   val empty = sbuffer_empty && sq_empty
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   val validCount = PopCount(activeMask)
@@ -504,7 +504,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
-    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR()
+    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR
   }
 
   def genSameBlockInflightMask(ptag_in: UInt): UInt = {
@@ -553,11 +553,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
   // current eviction should be blocked.
-  val sbuffer_out_s0_valid = missqReplayHasTimeOut || 
+  val sbuffer_out_s0_valid = missqReplayHasTimeOut ||
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate && 
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready
@@ -583,7 +583,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   when(sbuffer_out_s1_fire){
     sbuffer_out_s1_valid := false.B
   }
-  // when sbuffer_out_s0_fire, read dcache req data and store them in a pipeline reg 
+  // when sbuffer_out_s0_fire, read dcache req data and store them in a pipeline reg
   when(sbuffer_out_s0_cango){
     sbuffer_out_s1_valid := sbuffer_out_s0_valid
   }
@@ -603,9 +603,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
     need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && sbuffer_out_s0_cango && activeMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
-  val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, enable = sbuffer_out_s0_fire)
-  val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
-  val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
 
   io.dcache.req.valid := sbuffer_out_s1_valid && !blockDcacheWrite
   io.dcache.req.bits := DontCare
@@ -645,12 +645,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
     // Update w_sameblock_inflight flag is delayed for 1 cycle
     //
-    // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore 
+    // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore
     // current dcache.hit_resps. Then, in the next cycle, we have plenty of time to check
     // if the same block is still inflight
     (0 until StoreBufferSize).map(i => {
       when(
-        stateVec(i).w_sameblock_inflight && 
+        stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
         RegNext(resp.fire()) &&
         waitInflightMask(i) === UIntToOH(RegNext(id_to_sbuffer_id(dcache_resp_id)))
@@ -674,11 +674,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     assert(io.dcache.replay_resp.bits.replay)
     assert(stateVec(replay_resp_id).state_inflight === true.B)
   }
-  
+
   // TODO: reuse cohCount
   (0 until StoreBufferSize).map(i => {
     when(stateVec(i).w_timeout && stateVec(i).state_inflight && !missqReplayCount(i)(MissqReplayCountBits-1)) {
-      missqReplayCount(i) := missqReplayCount(i) + 1.U 
+      missqReplayCount(i) := missqReplayCount(i) + 1.U
     }
     when(activeMask(i) && !cohTimeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U

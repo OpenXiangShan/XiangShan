@@ -18,10 +18,8 @@ package utils
 
 import chisel3._
 import chisel3.util._
-import Chisel.experimental.chiselName
 
-@chiselName
-class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends MultiIOModule {
+class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends Module {
     class InBundle extends Bundle {
         val sel = Bool()
         val src = gen.cloneType

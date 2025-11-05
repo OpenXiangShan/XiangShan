@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -89,9 +89,9 @@ class SQData8Entry(implicit p: Parameters) extends XSBundle {
   val data = UInt((XLEN/8).W)
 }
 
-class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule 
-  with HasDCacheParameters 
-  with HasCircularQueuePtrHelper 
+class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule
+  with HasDCacheParameters
+  with HasCircularQueuePtrHelper
 {
   val io = IO(new Bundle() {
     // sync read port

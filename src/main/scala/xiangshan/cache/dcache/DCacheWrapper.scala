@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
-import huancun.utils.FastArbiter
+import utility.FastArbiter
 import mem.{AddPipelineReg}
 
 import scala.math.max
@@ -890,18 +890,20 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
     clientNode := dcache.clientNode
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
-    val io = IO(new DCacheIO)
-    val perfEvents = if (!useDcache) {
-      // a fake dcache which uses dpi-c to access memory, only for debug usage!
-      val fake_dcache = Module(new FakeDCache())
-      io <> fake_dcache.io
-      Seq()
-    }
-    else {
-      io <> dcache.module.io
-      dcache.module.getPerfEvents
-    }
-    generatePerfEvent()
+  lazy val module = new DCacheWrapperImp(this)
+}
+
+class DCacheWrapperImp(outer: DCacheWrapper) extends LazyModuleImp(outer) with HasPerfEvents {
+  val io = IO(new DCacheIO)
+  val perfEvents = if (!outer.useDcache) {
+    // a fake dcache which uses dpi-c to access memory, only for debug usage!
+    val fake_dcache = Module(new FakeDCache())
+    io <> fake_dcache.io
+    Seq()
   }
+  else {
+    io <> outer.dcache.module.io
+    outer.dcache.module.getPerfEvents
+  }
+  generatePerfEvent()
 }
