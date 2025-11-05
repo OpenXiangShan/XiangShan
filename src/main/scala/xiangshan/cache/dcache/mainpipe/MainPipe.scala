@@ -530,7 +530,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_store_hit = RegEnable(s2_store_hit, s2_fire_to_s3)
   val s3_hit_coh = RegNext(s2_hit_coh)
   val s3_new_hit_coh = RegNext(s2_new_hit_coh)
-  val s3_way_en = RegNext(s2_way_en)
+  val s3_way_en = RegInit(0.U(nWays.W))
+  s3_way_en := s2_way_en
   val s3_banked_store_wmask = RegNext(s2_banked_store_wmask)
   val s3_idx = RegNext(s2_idx)
   val s3_store_data_merged_without_cache = RegNext(s2_store_data_merged_without_cache)
