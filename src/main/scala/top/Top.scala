@@ -40,7 +40,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle, TraceRTLParamKey}
+import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle, TraceRTLParamKey, TraceRTLParameters}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -333,6 +333,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       BoringUtils.addSource(io.gateWay.out.ready, "TraceRTLFPGATracesCollectReady")
 
       println("[XSTop] TraceRTLMode and TraceRTLOnFPGA")
+
+      // generate c-head here
     } else {
       println(s"[XSTop] TraceRTLMode ${p(DebugOptionsKey).TraceRTLMode} TraceRTLOnFPGA ${p(TraceRTLParamKey).TraceRTLOnFPGA}")
       if (p(DebugOptionsKey).TraceRTLMode) {
@@ -379,6 +381,7 @@ object TopMain extends App {
   if (enableDifftest) {
     DifftestModule.finish("XiangShan", false)
   }
+  TraceRTLParameters.generateCppHeader(config)
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

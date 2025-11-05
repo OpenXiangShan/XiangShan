@@ -19,6 +19,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths, StandardOpenOption}
+import scala.collection.mutable.ListBuffer
+
 case object TraceRTLParamKey extends Field[TraceRTLParameters]
 
 case class TraceRTLParameters
@@ -47,4 +51,52 @@ case class TraceRTLParameters
 ) {
   def TraceBufferSize = TraceFetchWidth * 4
   def TraceFpgaRecvWidth = TraceFetchWidth // set it same to TraceFetchWidth now
+}
+
+object TraceRTLParameters {
+  def generateCppHeader(implicit p: Parameters): Unit = {
+    val trtl = p(TraceRTLParamKey)
+    val tOutBundle = new TraceInstrOuterBundle
+    val tCollectBundle = new TraceFPGACollectBundle
+
+    val result = ListBuffer.empty[String]
+    result += "#ifndef __TRACERTL_DUT_INFO_H__"
+    result += "#define __TRACERTL_DUT_INFO_H__"
+
+    // FPGA
+    result +=
+      s"""
+         |#define TRACERTL_FPGA_AXIS_WIDTH ${trtl.TraceFpgaAxisWidth}
+         |#define TRACERTL_FPGA_PACKET_INST_NUM ${trtl.TraceFpgaUnpackInstNum}
+         |#define TRACERTL_FPGA_COLLECT_INST_NUM ${trtl.TraceFpgaCollectWidth}
+         |#define TRACERTL_FPGA_COLLECT_INST_WIDTH ${tCollectBundle.getWidth}
+         |""".stripMargin
+
+    // TraceFormat InstructionBundle
+    result += s"#define TRACERTL_INST_BIT_WIDTH ${tOutBundle.getWidth}"
+    tOutBundle.elements.foreach { case (name, elt) =>
+      result += s"#define TRACERTL_INST_${name}_BIT_WIDTH"
+    }
+
+    result += "#endif // __TRACERTL_DUT_INFO_H__"
+
+    streamToFile(result, "tracertl_dut_info.h", append=false)
+  }
+
+  // copy from DifftestModule
+  def streamToFile(fileStream: ListBuffer[String], fileName: String, append: Boolean = false): Unit = {
+    val outputDir = sys.env("NOOP_HOME") + "/build/generated-src/"
+    Files.createDirectories(Paths.get(outputDir))
+    val outputFile = outputDir + fileName
+    val options = if (append) {
+      Seq(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+    } else {
+      Seq(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+    }
+    Files.write(
+      Paths.get(outputFile),
+      (fileStream.mkString("\n") + "\n").getBytes(StandardCharsets.UTF_8),
+      options: _*
+    )
+  }
 }

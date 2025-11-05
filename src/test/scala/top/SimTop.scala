@@ -28,13 +28,13 @@ import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, ChiselMap, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
-import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceRTLAXISMaster, TraceRTLAXISSlave, TraceRTLParamKey}
+import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage, TraceRTLAXISMaster, TraceRTLAXISSlave, TraceRTLParamKey, TraceRTLParameters}
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
   val trtlOpts = p(TraceRTLParamKey)
   if (debugOpts.TraceRTLMode) {
-    println(s"SimTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${trtlOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${trtl.TraceRTLOnPLDM}")
+    println(s"SimTop TraceRTLMode ${debugOpts.TraceRTLMode} TraceRTLOnFPGA ${trtlOpts.TraceRTLOnFPGA} TraceRTLOnPLDM ${trtlOpts.TraceRTLOnPLDM}")
   }
 
   val l_soc = LazyModule(new XSTop())
@@ -163,5 +163,6 @@ object SimTop extends App {
   ChiselDB.addToFileRegisters
   ChiselMap.addToFileRegisters
   Constantin.addToFileRegisters
+  TraceRTLParameters.generateCppHeader(config)
   FileRegisters.write(fileDir = "./build")
 }
