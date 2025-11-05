@@ -90,6 +90,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
+  def GenLatencyArray: Boolean = hasBerti
+
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 10
@@ -1006,7 +1008,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
-  val latencyArray = Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth))
+  val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)))
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
@@ -1149,8 +1151,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   (meta_read_ports.take(HybridLoadReadBase + 1) ++
    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
   (meta_read_ports.take(HybridLoadReadBase + 1) ++
-    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(latencyArray.io.read).foreach { case (p, r) => r <> p }
-  (meta_read_ports.take(HybridLoadReadBase + 1) ++
    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
   val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp).take(HybridLoadReadBase) ++
     Seq(mainPipe.io.extra_meta_resp) ++
@@ -1161,12 +1161,22 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   extra_meta_resp_ports.zip(prefetchArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).prefetch := r(i) })
   }}
-  extra_meta_resp_ports.zip(latencyArray.io.resp).foreach { case (p, r) => {
-    (0 until nWays).map(i => { p(i).latency := r(i) })
-  }}
   extra_meta_resp_ports.zip(accessArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).access := r(i) })
   }}
+  if (GenLatencyArray) {
+    (meta_read_ports.take(HybridLoadReadBase + 1) ++
+      meta_read_ports.takeRight(backendParams.HyuCnt)).zip(latencyArray.get.io.read).foreach { case (p, r) => r <> p }
+    extra_meta_resp_ports.zip(latencyArray.get.io.resp).foreach { case (p, r) => {
+      (0 until nWays).map(i => { p(i).latency := r(i) })
+    }}
+  } else {
+    (meta_read_ports.take(HybridLoadReadBase + 1) ++
+      meta_read_ports.takeRight(backendParams.HyuCnt)).foreach { case p => p.ready := true.B}
+    extra_meta_resp_ports.foreach { case p => {
+      (0 until nWays).map(i => { p(i).latency := 0.U })
+    }}
+  }
 
   if(LoadPrefetchL1Enabled) {
     // use last port to read prefetch and access flag
@@ -1181,9 +1191,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     prefetchArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
     prefetchArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
 
-    latencyArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
-    latencyArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
-    latencyArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
+    if(GenLatencyArray) {
+      latencyArray.get.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
+      latencyArray.get.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
+      latencyArray.get.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
+    }
 
     accessArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
     accessArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
@@ -1192,7 +1204,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_valid = RegNext(mainPipe.io.prefetch_flag_write.valid)
     val extra_flag_way_en = RegEnable(mainPipe.io.prefetch_flag_write.bits.way_en, mainPipe.io.prefetch_flag_write.valid)
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
-    val extra_flag_latency = Mux1H(extra_flag_way_en, latencyArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
     prefetcherMonitor.io.validity.valid := extra_flag_valid
@@ -1216,7 +1227,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val latency_flag_write_ports = ldu.map(_.io.latency_flag_write) ++ Seq(
     mainPipe.io.latency_flag_write
   )
-  latency_flag_write_ports.zip(latencyArray.io.write).foreach { case (p, w) => w <> p }
+  if (GenLatencyArray) {
+    latency_flag_write_ports.zip(latencyArray.get.io.write).foreach { case (p, w) => w <> p }
+  } else {
+    latency_flag_write_ports.foreach { case p => p.ready := true.B }
+  }
 
   // FIXME: add hybrid unit?
   val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
