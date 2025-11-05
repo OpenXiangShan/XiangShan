@@ -153,7 +153,7 @@ trait PMAMethod extends PMAConst {
       mask.U(PMPAddrBits.W)
     }
 
-    val num = NumPMA
+    val num = NumPMAReal
     require(num >= 16)
 
     val cfg_list = ListBuffer[UInt]()
@@ -169,7 +169,7 @@ trait PMAMethod extends PMAConst {
     }
 
     PMAConfigs.foreach(addPMA)
-    while (cfg_list.length < 16) {
+    while (cfg_list.length < num) {
       addPMA(PMAConfigEntry(0))
     }
 
@@ -227,7 +227,7 @@ trait PMACheckMethod extends PMPConst {
     lgMaxSize: Int
   ) = {
     val num = pmaEntries.size
-    require(num == NumPMA)
+    require(num == NumPMAReal)
     // pma should always be checked, could not be ignored
     // like amo and cached, it is the attribute not protection
     // so it must have initialization.
