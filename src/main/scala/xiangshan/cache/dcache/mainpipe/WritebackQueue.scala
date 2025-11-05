@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import coupledL2.WayKey
 
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
@@ -34,6 +35,8 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
 
   val delay_release = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+
+  val l2_way = UInt(4.W)
 }
 
 class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
@@ -247,6 +250,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     shrinkPermissions = req.param
   )._2
   voluntaryRelease.corrupt := req.corrupt
+  voluntaryRelease.user.lift(WayKey).foreach(_ := req.l2_way)
 
   val voluntaryReleaseData = edge.Release(
     fromSource = io.id,
@@ -256,6 +260,9 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     data = beat_data(beat),
     corrupt = req.corrupt
   )._2
+  voluntaryReleaseData.user.lift(WayKey).foreach(_ := req.l2_way)
+
+  require(io.mem_release.bits.user.lift(WayKey).nonEmpty, "WayKey should be present on release channel (TODO: remove this after parameterization)")
 
   // voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
   when(busy) {

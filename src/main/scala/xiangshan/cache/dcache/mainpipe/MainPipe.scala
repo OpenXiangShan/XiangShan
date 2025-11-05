@@ -166,6 +166,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val l2_way_write = DecoupledIO(new L2WayMetaWriteReq)
+
+    val l2_way_read_req_s1 = DecoupledIO(new MetaReadReq)
+    val l2_way_read_resp_s2 = Input(Vec(nWays, UInt(4.W)))
 
     // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
@@ -407,6 +411,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO) && !s1_hit
   val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
+  io.l2_way_read_req_s1.valid := s1_valid && s1_can_go
+  io.l2_way_read_req_s1.bits.idx := s1_idx
+  io.l2_way_read_req_s1.bits.way_en := s1_way_en
+
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
@@ -441,6 +449,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_tag_error = WireInit(false.B)
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
+
+  val s2_l2_way = ParallelMux(s2_way_en.asBools, (0 until nWays).map(w => io.l2_way_read_resp_s2(w)))
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
 
@@ -522,6 +532,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req = RegEnable(s2_req, s2_fire_to_s3)
   val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_fire_to_s3)
   val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
+  val s3_grant_way = RegEnable(io.refill_info.bits.grant_way, s2_fire_to_s3)
+  val s3_grant = RegEnable(io.refill_info.valid, s2_fire_to_s3)
   val s3_tag = RegEnable(s2_tag, s2_fire_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
@@ -529,6 +541,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_amo_hit = RegEnable(s2_amo_hit, s2_fire_to_s3)
   val s3_store_hit = RegEnable(s2_store_hit, s2_fire_to_s3)
   val s3_hit_coh = RegEnable(s2_hit_coh, s2_fire_to_s3)
+  val s3_l2_way = RegEnable(s2_l2_way, s2_fire_to_s3)
   val s3_new_hit_coh = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
@@ -909,6 +922,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.error_flag_write.bits.way_en := s3_way_en
   io.error_flag_write.bits.flag := s3_l2_error_wb
 
+  io.l2_way_write.valid := s3_fire && update_meta && s3_grant
+  io.l2_way_write.bits.idx := s3_idx
+  io.l2_way_write.bits.way_en := s3_way_en
+  io.l2_way_write.bits.l2_way := s3_grant_way
+
   // if we use (prefetch_flag && meta =/= ClientStates.Nothing) for prefetch check
   // prefetch_flag_write can be omited
   io.prefetch_flag_write.valid := s3_fire && s3_req.miss
@@ -999,6 +1017,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
   io.wb.bits.delay_release := s3_req.replace
   io.wb.bits.miss_id := s3_req.miss_id
+  io.wb.bits.l2_way := s3_l2_way
 
   // update plru in main pipe s3
   io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))

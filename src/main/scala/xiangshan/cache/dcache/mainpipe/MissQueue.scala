@@ -26,7 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import coupledL2.{IsKeywordKey, MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField, VaddrKey}
+import coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, VaddrKey, WayKey}
 import difftest._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
@@ -108,6 +108,7 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   // refill_info for mainpipe req awake
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
+  val grant_way  = UInt(4.W)
   val error      = Bool()
 }
 
@@ -508,6 +509,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+  val grant_way = Reg(UInt(4.W))
 
   // refill data with store data, this reg will be used to store:
   // 1. store data (if needed), before l2 refill data
@@ -646,6 +648,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
   when (io.mem_grant.fire) {
     w_grantfirst := true.B
+    grant_way := io.mem_grant.bits.user.lift(WayKey).getOrElse(0.U)
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
       // GrantData
@@ -682,6 +685,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     refill_data_raw(refill_count ^ isKeyword) := io.mem_grant.bits.data
     isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
   }
+
+  require(io.mem_grant.bits.user.lift(WayKey).nonEmpty, "WayKey should be present on grant channel (TODO: remove this after parameterization)")
 
   when (io.mem_finish.fire) {
     s_grantack := true.B
@@ -908,6 +913,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
+  io.refill_info.bits.grant_way  := grant_way
   io.refill_info.bits.error      := error
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
