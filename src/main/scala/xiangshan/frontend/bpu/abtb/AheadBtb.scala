@@ -36,6 +36,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val overrideValid:       Bool              = Input(Bool())
     val previousVAddr:       Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
     val prediction:          Prediction        = Output(new Prediction)
+    val readEntryVec:     Vec[AheadBtbEntry]   = Output(Vec(NumWays, new AheadBtbEntry))
+    val readTargetVec:    Vec[PrunedAddr]      = Output(Vec(NumWays, PrunedAddr(VAddrBits)))
+    val hitMask:          Vec[Bool]            = Output(Vec(NumWays, Bool()))
     val meta:                AheadBtbMeta      = Output(new AheadBtbMeta)
     val debug_startVAddr:    PrunedAddr        = Output(PrunedAddr(VAddrBits))
     val debug_previousVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
@@ -183,11 +186,17 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val s2_target =
     getFullTarget(s2_startVAddr, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
+  private val s2_targetVec = s2_entries.map { entry =>
+    getFullTarget(s2_startVAddr, entry.targetLowerBits, entry.targetCarry)
+  }
 
   io.prediction.taken       := s2_valid && s2_taken
   io.prediction.target      := s2_target
   io.prediction.attribute   := s2_firstTakenEntry.attribute
   io.prediction.cfiPosition := s2_firstTakenEntry.position
+  io.readEntryVec           := s2_entries
+  io.hitMask                := s2_hitMask.map(hit => hit && s2_valid)
+  io.readTargetVec          := s2_targetVec
 
   io.meta.valid           := s2_valid
   io.meta.hitMask         := s2_hitMask
