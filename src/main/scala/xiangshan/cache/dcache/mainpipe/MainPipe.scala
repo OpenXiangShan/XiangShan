@@ -519,21 +519,21 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
-  val s3_req = RegEnable(s2_req, s2_fire_to_s3)
-  val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_fire_to_s3)
+  val s3_req = RegNext(s2_req)
+  val s3_miss_param = RegNext(io.refill_info.bits.miss_param)
   val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
-  val s3_tag = RegEnable(s2_tag, s2_fire_to_s3)
+  val s3_tag = RegNext(s2_tag)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
-  val s3_hit = RegEnable(s2_hit, s2_fire_to_s3)
+  val s3_hit = RegNext(s2_hit)
   val s3_amo_hit = RegEnable(s2_amo_hit, s2_fire_to_s3)
   val s3_store_hit = RegEnable(s2_store_hit, s2_fire_to_s3)
-  val s3_hit_coh = RegEnable(s2_hit_coh, s2_fire_to_s3)
-  val s3_new_hit_coh = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
-  val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
-  val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
-  val s3_store_data_merged_without_cache = RegEnable(s2_store_data_merged_without_cache, s2_fire_to_s3)
+  val s3_hit_coh = RegNext(s2_hit_coh)
+  val s3_new_hit_coh = RegNext(s2_new_hit_coh)
+  val s3_way_en = RegNext(s2_way_en)
+  val s3_banked_store_wmask = RegNext(s2_banked_store_wmask)
+  val s3_idx = RegNext(s2_idx)
+  val s3_store_data_merged_without_cache = RegNext(s2_store_data_merged_without_cache)
   val s3_merge_mask = RegEnable(VecInit(s2_merge_mask.map(~_)), s2_fire_to_s3)
 
   val s3_data_resp = io.data_resp
@@ -597,7 +597,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // error signal for amo inst
   // s3_error_beu = s3_flag_error_beu || s3_tag_error_beu || s3_l2_error_beu || s3_data_error_beu
   val s3_error_beu = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire) || s3_data_error_beu
-  val s3_error_wb = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error_wb
+  val s3_error_wb = RegNext(s2_error, 0.U.asTypeOf(s2_error)) || s3_data_error_wb
   val s3_error_paddr_beu = get_block_addr(RegEnable(Cat(s2_tag, get_untag(s2_req.vaddr)), s2_fire))
 
   // LR, SC and AMO
