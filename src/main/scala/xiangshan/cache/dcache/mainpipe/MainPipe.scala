@@ -555,13 +555,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }))(s3_req.word_idx)
 
   val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
-  // data_error will be reported by data array 1 cycle after data read resp
-  val s3_l2_error = RegEnable(s2_l2_error, s2_fire)
-  val s3_data_error = Wire(Bool())
-  s3_data_error := Mux(GatedValidRegNextN(s1_fire,2), // ecc check result is generated 2 cycle after read req
-    io.readline_error_delayed && RegNext(s2_may_report_data_error),
-    RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
-  )
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
   val s3_need_replacement = RegEnable(s2_need_replacement && !s2_refill_tag_eq_way, s2_fire_to_s3)
 

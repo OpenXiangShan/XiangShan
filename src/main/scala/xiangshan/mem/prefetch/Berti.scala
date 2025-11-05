@@ -467,7 +467,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       when(nextCnt >= thresholdOfReset){
         counter := 0.U
         deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newCycle(cnt)}
-      }.elsewhen(counter >= thresholdOfUpdate){
+      }.elsewhen(nextCnt >= thresholdOfUpdate){
         deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newStatus(cnt)}
       }
     }
