@@ -15,5 +15,5 @@
 #***************************************************************************************
 
 
-from xspdb.xscmd.util import message, error, warn, info, GREEN, RESET
+from xspdb.xscmd.util import message, error, warn, info, GREEN, RESET, YELLOW
 from xspdb.xscmd.util import get_completions, find_executable_in_dirs

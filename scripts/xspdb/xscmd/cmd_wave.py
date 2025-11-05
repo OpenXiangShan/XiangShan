@@ -29,7 +29,7 @@ class CmdTrap:
         """Initialize the waveform (close waveform at beginning)
         """
         self.dut.RefreshComb()
-        self.dut.CloseWaveform()
+        self.dut.FlushWaveform()
         self.waveform_on = False
 
     def api_is_waveform_on(self):
@@ -63,7 +63,7 @@ class CmdTrap:
         if not self.waveform_on:
             info("waveform is already off")
             return True
-        self.dut.CloseWaveform()
+        self.dut.FlushWaveform()
         self.waveform_on = False
         return True
 
