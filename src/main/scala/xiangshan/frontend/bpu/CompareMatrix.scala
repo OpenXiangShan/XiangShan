@@ -76,6 +76,13 @@ class CompareMatrix(n: Int) extends Bundle {
     })
   }
 
+  def getGreatestElementOH(valid: Vec[Bool]): Vec[Bool] = {
+    require(valid.length == n, "valid length must be equal to matrix size")
+    VecInit((0 until n).map { i =>
+      valid(i) && (0 until n).map(j => (i == j).B || !valid(j) || m(j)(i)).reduce(_ && _)
+    })
+  }
+
   def getLeaseElementIdx(valid: Vec[Bool]): UInt =
     OHToUInt(getLeastElementOH(valid))
 
