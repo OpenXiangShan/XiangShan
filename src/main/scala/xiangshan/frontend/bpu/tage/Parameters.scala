@@ -41,8 +41,8 @@ case class TageParameters(
     UsefulCtrWidth:      Int = 2,
     UsefulCtrInitValue:  Int = 0,
     WriteBufferSize:     Int = 4,
-    UsefulResetCtrWidth: Int = 6,
-    UseAltCtrWidth:      Int = 4,
+    UsefulResetCtrWidth: Int = 7,
+    UseAltCtrWidth:      Int = 7,
     NumUseAltCtrs:       Int = 128
 ) {}
 

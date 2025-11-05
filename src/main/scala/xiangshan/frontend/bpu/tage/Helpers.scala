@@ -21,7 +21,6 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.RotateHelper
-import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper with HalfAlignHelper {
   def getBaseTableSetIndex(pc: PrunedAddr): UInt =
@@ -33,24 +32,17 @@ trait Helpers extends HasTageParameters with HasXSParameter with RotateHelper wi
   def getBaseTableAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
 
-  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { tableInfo =>
-      val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
-        allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
-      }
-      val foldedHist = Wire(new TageFoldedHist(tableInfo.NumSets))
-      foldedHist.forIdx := tageFoldedHist.head
-      foldedHist.forTag := tageFoldedHist(1) ^ Cat(tageFoldedHist(2), 0.U(1.W))
-      foldedHist
-    })
-
   def getSetIndex(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
     val setIdxWidth = log2Ceil(numSets / NumBanks)
+    require(hist.getWidth == setIdxWidth)
     pc(setIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth) ^ hist
   }
 
-  def getTag(pc: PrunedAddr, hist: UInt): UInt =
-    pc(TagWidth, 1) ^ hist
+  def getTag(pc: PrunedAddr, hist1: UInt, hist2: UInt): UInt = {
+    require(hist1.getWidth == TagWidth)
+    require(hist2.getWidth == (TagWidth - 1))
+    pc(TagWidth - 1) ^ hist1 ^ Cat(hist2, 0.U(1.W))
+  }
 
   def getBankIndex(pc: PrunedAddr): UInt =
     pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)

@@ -50,7 +50,7 @@ class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBu
   val usefulCtr:      SaturateCounter         = new SaturateCounter(UsefulCtrWidth)
   override def tag:   Option[UInt]            = Some(entry.tag)
   override def cnt:   Option[SaturateCounter] = Some(entry.takenCtr)
-  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive) // FIXME: use actualTaken
+  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive)
 }
 
 class TableWriteReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
@@ -67,28 +67,35 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
   val debug_tempTag: Vec[UInt]            = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
 }
 
-class TageFoldedHist(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val forIdx: UInt = UInt(log2Ceil(numSets / NumBanks).W)
-  val forTag: UInt = UInt(TagWidth.W)
+class TagMatchResultPerTable(implicit p: Parameters) extends TageBundle {
+  val hit:       Bool            = Bool()
+  val takenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+
+  // only used for train
+  val hitWayMaskOH: UInt = UInt(NumWays.W)
+  val tag:          UInt = UInt(TagWidth.W)
 }
 
-class TagMatchResult(implicit p: Parameters) extends TageBundle {
-  val hit:          Bool            = Bool()
-  val hitWayMaskOH: UInt            = UInt(NumWays.W)
-  val entry:        TageEntry       = new TageEntry
-  val usefulCtr:    SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+class PredictionPerBranch(implicit p: Parameters) extends TageBundle {
+  val hasProvider:      Bool            = Bool()
+  val providerTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val hasAlt:           Bool            = Bool()
+  val altTakenCtr:      SaturateCounter = new SaturateCounter(TakenCtrWidth)
 }
 
-class UpdateInfo(implicit p: Parameters) extends TageBundle {
-  val providerTableOH:      UInt            = UInt(NumTables.W)
-  val providerWayOH:        UInt            = UInt(NumWays.W)
-  val providerEntry:        TageEntry       = new TageEntry
+class UpdateInfoPerBranch(implicit p: Parameters) extends TageBundle {
+  val providerOH:           UInt            = UInt(NumTables.W)
+  val providerHitWayMaskOH: UInt            = UInt(NumWays.W)
+  val providerNewTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val providerNewUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  val providerTag:          UInt            = UInt(TagWidth.W)
 
-  val altTableOH:      UInt            = UInt(NumTables.W)
-  val altWayOH:        UInt            = UInt(NumWays.W)
-  val altEntry:        TageEntry       = new TageEntry
+  val altOH:           UInt            = UInt(NumTables.W)
+  val altHitWayMaskOH: UInt            = UInt(NumWays.W)
+  val altNewTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val altOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  val altTag:          UInt            = UInt(TagWidth.W)
 
   val increaseUseAlt: Bool = Bool()
   val decreaseUseAlt: Bool = Bool()
