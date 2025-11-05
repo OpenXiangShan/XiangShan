@@ -60,7 +60,9 @@ class TageTableInfo(
 
 class MicroTageInfo(
     val NumSets:       Int,
-    val HistoryLength: Int
+    val HistoryLength: Int,
+    val HistBitsInTag: Int,
+    val TagWidth:      Int
 ) extends NamedTuple[(Int, Int)] {
   require(NumSets > 0, "NumSets must be > 0")
   require(HistoryLength >= 0, "HistoryLength must be >= 0")
@@ -68,13 +70,13 @@ class MicroTageInfo(
   def asTuple: (Int, Int) =
     (NumSets, HistoryLength)
 
-  def getFoldedHistoryInfoSet(tagWidth: Int): Set[FoldedHistoryInfo] = {
-    require(tagWidth > 0, "tagWidth must be > 0")
+  def getFoldedHistoryInfoSet(): Set[FoldedHistoryInfo] = {
+    require(HistBitsInTag > 0, "HistBitsInTag must be > 0")
     if (HistoryLength > 0)
       Set(
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumSets))),
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, HistBitsInTag)),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, HistBitsInTag - 1))
       )
     else
       Set[FoldedHistoryInfo]()

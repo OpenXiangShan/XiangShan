@@ -265,12 +265,33 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // if ubtb or abtb find a taken branch, use the corresponding prediction
   // otherwise, use fall-through prediction
   // TODO: maybe need compare position？
+
+  private val s1_btbCfiPosition = Seq(ubtb.io.prediction.cfiPosition) ++ abtb.io.readEntryVec.map(_.position)
+  private val s1_btbHitMask     = Seq(ubtb.io.prediction.taken) ++ abtb.io.hitMask
+  private val s1_utageHitMap = s1_btbCfiPosition.zip(s1_btbHitMask).map { case (position, hit) =>
+    (position === utage.io.prediction.cfiPosition) && hit
+  }
+  private val s1_abtbPredictions = abtb.io.readEntryVec.zipWithIndex.map { case (entry, i) =>
+    // val target = getFullTarget(s1_pc, entry.targetLowerBits, entry.targetCarry)
+    val prediction = Wire(new Prediction)
+    prediction.taken       := true.B
+    prediction.target      := abtb.io.readTargetVec(i)
+    prediction.attribute   := entry.attribute
+    prediction.cfiPosition := entry.position
+    prediction
+  }
+  private val s1_btbPredictios = Seq(ubtb.io.prediction) ++ s1_abtbPredictions
+  // private val s1_btbTargets = s1_ubtbTargets ++ s1_abtbTargets
+  private val s1_selectOH         = PriorityEncoderOH(s1_utageHitMap)
+  private val s1_hybridPrediction = Mux1H(s1_utageHitMap, s1_btbPredictios)
+  private val s1_utageHit         = s1_utageHitMap.reduce(_ || _)
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        ubtb.io.prediction.taken -> ubtb.io.prediction,
-        abtb.io.prediction.taken -> abtb.io.prediction
+        (utage.io.prediction.taken && s1_utageHit) -> s1_hybridPrediction,
+        (ubtb.io.prediction.taken && !s1_utageHit) -> ubtb.io.prediction,
+        (abtb.io.prediction.taken && !s1_utageHit) -> abtb.io.prediction
       )
     )
 
@@ -326,7 +347,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.toFtq.s3FtqPtr := s3_ftqPtr
 
   // utage meta
-  private val s1_utageMeta = RegEnable(utage.io.prediction.bits, s0_fire)
+  private val s1_utageMeta = utage.io.prediction.meta.bits
   private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
   private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
 
