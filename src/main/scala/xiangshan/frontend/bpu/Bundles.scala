@@ -22,9 +22,10 @@ import utils.EnumUInt
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
+import xiangshan.frontend.bpu.history.ghr.GhrMeta
+import xiangshan.frontend.bpu.history.phr.PhrPtr
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
-import xiangshan.frontend.bpu.phr.PhrPtr
 import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.bpu.sc.ScMeta
@@ -212,6 +213,7 @@ class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
   val phrHistPtr: PhrPtr          = new PhrPtr
+  val ghrMeta:    GhrMeta         = new GhrMeta
   val rasMeta:    RasInternalMeta = new RasInternalMeta
   val topRetAddr: PrunedAddr      = PrunedAddr(VAddrBits)
   // TODO: rasPtr for recovery

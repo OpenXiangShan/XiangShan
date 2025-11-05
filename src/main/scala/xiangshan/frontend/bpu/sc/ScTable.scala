@@ -23,17 +23,17 @@ import utility.sram.SRAMTemplate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.WriteBuffer
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
+class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
-  class ScPathTableIO extends ScBundle {
+  class ScTableIO extends ScBundle {
     val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / NumWays).W)))
     val resp:   Vec[ScEntry]      = Output(Vec(NumWays, new ScEntry()))
     val update: PathTableTrain    = Input(new PathTableTrain(numSets))
   }
 
-  val io = IO(new ScPathTableIO())
+  val io = IO(new ScTableIO())
 
   def numRows: Int = numSets / NumBanks / NumWays
 
@@ -44,6 +44,7 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       way = NumWays,
       shouldReset = true,
       singlePort = true,
+      holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
@@ -93,7 +94,7 @@ class ScPathTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
-        VecInit.fill(ResolveEntryBranchNumber)(0.U.asTypeOf(new ScEntry()))
+        VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
       )
   }
 

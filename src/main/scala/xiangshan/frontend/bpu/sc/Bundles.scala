@@ -64,7 +64,9 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
   // FIXME: is there a better way to do this?
   private def ScEntryWidth = (new ScEntry).getWidth
-  val scResp:    Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scPred:    Vec[Bool]      = Vec(NumWays, Bool())
-  val useScPred: Vec[Bool]      = Vec(NumWays, Bool())
+  val scPathResp:   Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scGlobleResp: Vec[Vec[UInt]] = Vec(GlobalTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scGhr:        UInt           = UInt(GhrHistoryLength.W)
+  val scPred:       Vec[Bool]      = Vec(NumWays, Bool())
+  val useScPred:    Vec[Bool]      = Vec(NumWays, Bool())
 }

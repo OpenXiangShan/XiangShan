@@ -27,10 +27,12 @@ import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.history.ghr.Ghr
+import xiangshan.frontend.bpu.history.ghr.GhrMeta
+import xiangshan.frontend.bpu.history.phr.Phr
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
-import xiangshan.frontend.bpu.phr.Phr
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
@@ -56,6 +58,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
+  private val ghr         = Module(new Ghr)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -207,6 +210,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.foldedPathHist      := phr.io.s1_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.train.valid         := train.valid
+  sc.io.s3_override         := s3_override
+  sc.io.ghr                 := ghr.io.s0_ghist
   private val scTakenMask = sc.io.takenMask
   dontTouch(scTakenMask)
 
@@ -328,8 +333,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
+  // ghr meta
+  private val s3_ghrMeta = WireInit(0.U.asTypeOf(new GhrMeta))
+  s3_ghrMeta.ghr      := ghr.io.ghist.value
+  s3_ghrMeta.hitMask  := VecInit(s3_mbtbResult.map(_.valid))
+  s3_ghrMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+
   private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
   s3_speculationMeta.phrHistPtr := s3_phrMeta
+  s3_speculationMeta.ghrMeta    := s3_ghrMeta
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
@@ -359,7 +371,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // phr train
-  private val phrsWire       = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phrWire        = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s1_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s2_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -383,22 +395,32 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_foldedPhr   := phr.io.s2_foldedPhr
   s3_foldedPhr   := phr.io.s3_foldedPhr
   trainFoldedPhr := phr.io.trainFoldedPhr
-  phrsWire       := phr.io.phrs
+  phrWire        := phr.io.phrs
 
-  private val phrsWireValue = phrsWire.asUInt
+  private val phrWireValue = phrWire.asUInt
   private val redirectPhrValue =
-    (Cat(phrsWire.asUInt, phrsWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
+    (Cat(phrWire.asUInt, phrWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
       PhrHistoryLength - 1,
       0
     )
 
-  dontTouch(s0_foldedPhr)
-  dontTouch(s1_foldedPhr)
-  dontTouch(s2_foldedPhr)
-  dontTouch(s3_foldedPhr)
-  dontTouch(trainFoldedPhr)
-  dontTouch(phrsWireValue)
+  dontTouch(phrWireValue)
   dontTouch(redirectPhrValue)
+
+  // ghr update
+  ghr.io.stageCtrl           := stageCtrl
+  ghr.io.update.taken        := s3_taken
+  ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
+  ghr.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  ghr.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
+  ghr.io.redirect.valid      := redirect.valid
+  ghr.io.redirect.startVAddr := redirect.bits.startVAddr
+  ghr.io.redirect.taken      := redirect.bits.taken
+  ghr.io.redirect.meta       := redirect.bits.speculationMeta.ghrMeta
+  private val s0_ghist = ghr.io.s0_ghist
+  private val ghist    = ghr.io.ghist
+  dontTouch(s0_ghist)
+  dontTouch(ghist)
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)

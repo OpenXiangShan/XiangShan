@@ -41,7 +41,8 @@ case class FrontendParameters(
 
     def MaxTableHistoryLength: Int = (
       bpuParameters.tageParameters.TableInfos.map(_.HistoryLength) ++
-        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength)
+        bpuParameters.ittageParameters.TableInfos.map(_.HistoryLength) ++
+        bpuParameters.scParameters.PathTableInfos.map(_.HistoryLength)
     ).max
 
     def Shamt:   Int = bpuParameters.phrParameters.Shamt

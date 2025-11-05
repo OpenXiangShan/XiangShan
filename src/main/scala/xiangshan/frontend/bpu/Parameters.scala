@@ -18,9 +18,9 @@ package xiangshan.frontend.bpu
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
+import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
-import xiangshan.frontend.bpu.phr.PhrParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
@@ -59,6 +59,9 @@ trait HasBpuParameters extends HasFrontendParameters {
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
   def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * bpuParameters.mbtbParameters.NumAlignBanks
+
+  def GhrShamt:         Int = NumBtbResultEntries
+  def GhrHistoryLength: Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
