@@ -258,8 +258,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        ubtb.io.prediction.taken -> ubtb.io.prediction
-//      abtb.io.prediction.taken -> abtb.io.prediction
+        ubtb.io.prediction.taken -> ubtb.io.prediction,
+        abtb.io.prediction.taken -> abtb.io.prediction
       )
     )
 
