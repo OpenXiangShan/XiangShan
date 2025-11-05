@@ -191,7 +191,7 @@ class TLBFA(
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
-    when (sfence.bits.rs1 || io.csr.priv.virt) { // virtual address *.rs1 <- (rs1===0.U)
+    when (sfence.bits.rs1 || io.csr.priv.virt || (if (HasBitmapCheck) (io.csr.mbmc.BME === 1.U && io.csr.mbmc.CMODE === 0.U) else false.B)) { // virtual address *.rs1 <- (rs1===0.U)
       // Note: when virt=1, always flush all addr. See hfence.vvma comment.
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
