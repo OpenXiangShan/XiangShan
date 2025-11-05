@@ -32,6 +32,7 @@ case class BertiParams
   name: String = "berti",
   ht_set_cnt: Int = 64, //8,
   ht_way_cnt: Int = 6, // 16,
+  ht_replacement_policy: String = "fifo",
   dt_way_cnt: Int = 64, // 16,
   dt_delta_size: Int = 4, // 16,
   use_byte_addr: Boolean = false,
@@ -62,6 +63,9 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def DtCntWidth: Int = 4
 
   def useByteAddr: Boolean = bertiParams.use_byte_addr
+  def usePLRU: Boolean = bertiParams.ht_replacement_policy == "plru"
+  def useFIFO: Boolean = bertiParams.ht_replacement_policy == "fifo"
+  assert(usePLRU || useFIFO, s"unsupported ht replacement policy: ${bertiParams.ht_replacement_policy}")
   def HtSetSize: Int = bertiParams.ht_set_cnt
   def DtWaySize: Int = bertiParams.dt_way_cnt
   def HtWaySize: Int = bertiParams.ht_way_cnt
@@ -197,19 +201,19 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val entries = Reg(Vec(HtSetSize, Vec(HtWaySize, new Entry)))
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
   val decrModes = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
-  // LRU: replace record
-  val replacer = ReplacementPolicy.fromString("setplru", HtWaySize, HtSetSize)
-  // FIFO: for FIFO replace policy
-  val accessPtrs = RegInit(0.U.asTypeOf(Vec(HtSetSize, new HtWayPointer)))
-  // FIFO: for easier learning policy
-  val learnPtrs = RegInit(0.U.asTypeOf(Vec(HtSetSize, new HtWayPointer)))
   val currTime = GTimer()
+  // PLRU: replace record
+  val replacer = Option.when(usePLRU)(ReplacementPolicy.fromString("setplru", HtWaySize, HtSetSize))
+  // FIFO: for FIFO replace policy
+  val accessPtrs = Option.when(useFIFO)(RegInit(0.U.asTypeOf(Vec(HtSetSize, new HtWayPointer))))
+  // FIFO: for easier learning policy
+  val learnPtrs = Option.when(useFIFO)(RegInit(0.U.asTypeOf(Vec(HtSetSize, new HtWayPointer))))
 
   /*** functional function */
   def init(): Unit = {
     valids := 0.U.asTypeOf(chiselTypeOf(valids))
-    accessPtrs := 0.U.asTypeOf(chiselTypeOf(accessPtrs))
-    learnPtrs := 0.U.asTypeOf(chiselTypeOf(learnPtrs))
+    accessPtrs.foreach(_ := 0.U.asTypeOf(chiselTypeOf(accessPtrs.head)))
+    learnPtrs.foreach(_ := 0.U.asTypeOf(chiselTypeOf(learnPtrs.head)))
   }
 
   /**
@@ -223,41 +227,42 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     *   1. tag match
     *   2. FIFO queue (here used)
     * 
-    * // TODO lyq: how to support multi port of access. Maybe hard due to set division
+    * // TODO lyq:
+    *   How to support multi port of access for both historyTable and deltaTable.
+    *   Maybe hard due to set division.
     * 
     */
-  /* def accessLRU(pc: UInt, vaddr: UInt): Bool = {
+  def accessPLRU(pc: UInt, vaddr: UInt): Bool = {
+    // ensure option exists in this code path
+    require(replacer.isDefined, "PLRU replacer must be defined when usePLRU == true")
     val isReplace = Wire(Bool())
     val set = getIndex(pc)
     val tag = getTag(pc)
     val baseVAddr = getTrainBaseAddr2HT(vaddr)
-
     val matchVec = wayMap(w => valids(set)(w) && entries(set)(w).pcTag === tag)
     assert(PopCount(matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
-
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
       entries(set)(hitWay).update(baseVAddr, currTime)
-      replacer.access(set, hitWay)
+      replacer.get.access(set, hitWay)
       isReplace := false.B
     }.otherwise{
-      val way = replacer.way(set)
+      val way = replacer.get.way(set)
       entries(set)(way).alloc(tag, baseVAddr, currTime)
       valids(set)(way) := true.B
       isReplace := true.B
     }
-
     isReplace
   }
 
-  def searchLiteLRU(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
+  def searchLitePLRU(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
+    // ensure option exists in this code path
+    require(replacer.isDefined, "PLRU replacer must be defined when usePLRU == true")
     val res = Wire(new LearnDeltasLiteIO)
     val set = getIndex(pc)
     val tag = getTag(pc)
-    
     val matchVec = wayMap(w => valids(set)(w) && entries(set)(w).pcTag === tag)
     assert(PopCount(matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
-
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
       val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
@@ -265,27 +270,28 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp) && pair._1
       res.pc := pc
       res.delta := pair._2
-      replacer.access(set, hitWay)
+      replacer.get.access(set, hitWay)
     }.otherwise{
       res.valid := false.B
       res.pc := 0.U
       res.delta := 0.S
     }
-
     res
-  } */
+  }
 
   def accessFIFO(pc: UInt, vaddr: UInt): Bool = {
+    // ensure option exists in this code path
+    require(accessPtrs.isDefined, "accessPtrs must be defined when useFIFO == true")
     val isReplace = Wire(Bool())
     val set = getIndex(pc)
-    val way = accessPtrs(set).value
+    val way = accessPtrs.get(set).value
     val baseVAddr = getTrainBaseAddr2HT(vaddr)
     val matchVec = wayMap(w => valids(set)(w) && entries(set)(w).baseVAddr === baseVAddr)
     when(matchVec.orR){
       isReplace := false.B
     }.otherwise {
       isReplace := valids(set)(way)
-      val lastWay = (accessPtrs(set)-1.U).value
+      val lastWay = (accessPtrs.get(set)-1.U).value
       decrModes(set) := valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr
       valids(set)(way) := true.B
       entries(set)(way).alloc(
@@ -293,16 +299,18 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
         baseVAddr,
         currTime
       )
-      accessPtrs(set) := accessPtrs(set) + 1.U
+      accessPtrs.get(set) := accessPtrs.get(set) + 1.U
     }
     isReplace
   }
 
   def searchLiteFIFO(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
+    // ensure option exists in this code path
+    require(learnPtrs.isDefined, "learnPtrs must be defined when useFIFO == true")
     val res = Wire(new LearnDeltasLiteIO)
     val set = getIndex(pc)
     val tag = getTag(pc)
-    val way = learnPtrs(set).value
+    val way = learnPtrs.get(set).value
     val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
     stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
     res.pc := pc
@@ -312,14 +320,21 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     }.otherwise{
       res.delta := pair._2
     }
-    learnPtrs(set) := learnPtrs(set) + 1.U
+    learnPtrs.get(set) := learnPtrs.get(set) + 1.U
     res
+  }
+
+  def access(pc: UInt, vaddr: UInt): Bool = {
+    if (usePLRU) accessPLRU(pc, vaddr) else accessFIFO(pc, vaddr)
+  }
+  def searchLite(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
+    if (usePLRU) searchLitePLRU(pc, vaddr, latency) else searchLiteFIFO(pc, vaddr, latency)
   }
 
   /*** processing logic */
   val isReplace = Wire(Bool())
   when(io.access.valid){
-    isReplace := this.accessFIFO(io.access.bits.pc, io.access.bits.vaddr)
+    isReplace := this.access(io.access.bits.pc, io.access.bits.vaddr)
   }.otherwise{
     isReplace := false.B
   }
@@ -327,7 +342,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val searchResult = Wire(new LearnDeltasLiteIO)
   when(io.search.req.valid){
     val searchReq = io.search.req.bits
-    searchResult := this.searchLiteFIFO(searchReq.pc, searchReq.vaddr, searchReq.latency)
+    searchResult := this.searchLite(searchReq.pc, searchReq.vaddr, searchReq.latency)
   }.otherwise{
     searchResult := DontCare
     searchResult.valid := false.B
@@ -354,7 +369,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   searchLog.histLineVA := stat_histLineVA
   searchLog.currLineVA := stat_currLineVA
   searchLog.calDelta := io.search.resp.delta.asUInt
-  val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = true)
+  val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = false)
   searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
 }
 
@@ -635,7 +650,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   deltaInfo2Db.delta := pfRes._2.delta.asUInt
   deltaInfo2Db.coverageCnt := pfRes._2.coverageCnt
   deltaInfo2Db.status := pfRes._2.status.asUInt
-  val prefetchDeltaTable = ChiselDB.createTable("berti_prefetchDeltaTable" + p(XSCoreParamsKey).HartId.toString, new DeltaInfo2Db, basicDB = true)
+  val prefetchDeltaTable = ChiselDB.createTable("berti_prefetchDeltaTable" + p(XSCoreParamsKey).HartId.toString, new DeltaInfo2Db, basicDB = false)
   prefetchDeltaTable.log(data = deltaInfo2Db, en = io.prefetch.valid, clock = clock, reset = reset)
   
   XSPerfAccumulate("learn_req", io.learn.valid)
@@ -900,7 +915,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   /*** performance counter and debug */
   val srcTable = ChiselDB.createTable(
     "berti_source_pf_req" + p(XSCoreParamsKey).HartId.toString,
-    new SourcePrefetchReq, basicDB = true
+    new SourcePrefetchReq, basicDB = false
   )
   srcTable.log(
     data = e0_src,
@@ -911,7 +926,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
 
   val sendTable = ChiselDB.createTable(
     "berti_send_pf_req" + p(XSCoreParamsKey).HartId.toString,
-    new Entry, basicDB = true
+    new Entry, basicDB = false
   )
   sendTable.log(
     data = entries(pfIdx),
