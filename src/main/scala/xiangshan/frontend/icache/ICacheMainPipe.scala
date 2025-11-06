@@ -609,7 +609,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   XSPerfAccumulate("icache_bubble_s2_miss", s2_valid && !s2_fetch_finish)
   XSPerfAccumulate("icache_bubble_s0_wayLookup", s0_valid && !fromWayLookup.ready)
 
-  io.fetch.topdownIcacheMiss := !s2_fetch_finish
+  io.fetch.topdownIcacheMiss := s2_valid && !s2_fetch_finish
   io.fetch.topdownItlbMiss   := s0_valid && !fromWayLookup.ready
 
   // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
