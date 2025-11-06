@@ -58,7 +58,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val preDecodeInfo = new PreDecodeInfo
+    val isRvc = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
@@ -70,7 +70,7 @@ object Bundles {
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
-      this.preDecodeInfo := source.pd
+      this.isRvc := source.isRvc
       this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
@@ -87,7 +87,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val preDecodeInfo = new PreDecodeInfo
+    val isRvc = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
