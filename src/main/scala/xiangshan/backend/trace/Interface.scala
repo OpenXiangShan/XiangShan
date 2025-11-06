@@ -5,8 +5,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 import xiangshan.HasXSParameter
-import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.backend.fu.FuType
 
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
@@ -79,12 +79,12 @@ object Itype extends NamedUInt(4) {
   // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
   def Branch = NonTaken
 
-  def jumpTypeGen(brAttribute: BranchAttribute, rd: OpRegType, rs: OpRegType): UInt = {
+  def jumpTypeGen(fuType: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
-    val isJal       = brAttribute.isDirect
-    val isJalr      = brAttribute.isIndirect
-    val isBranch    = brAttribute.isConditional
+    val isJal       = FuType.isJump(fuType)
+    val isJalr      = FuType.isJump(fuType)
+    val isBranch    = FuType.isBrh(fuType)
 
     // push to RAS when rd is link, pop from RAS when rs is link
     def isUninferableCall      = isJalr && rd.isLink && (!rs.isLink || rs.isLink && isEqualRdRs)  //8   push

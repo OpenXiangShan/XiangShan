@@ -98,7 +98,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val exceptionVec = ExceptionVec()
   val backendException = Bool()
   val trigger = TriggerAction()
-  val pd = new PreDecodeInfo
+  val isRvc = Bool()
   val fixedTaken = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
