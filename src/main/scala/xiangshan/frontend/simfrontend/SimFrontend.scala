@@ -197,11 +197,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
-  val readyCount        = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
-  val robCommitValidVec = io.backend.toFtq.rob_commits.map(_.valid)
-  val robCommitBitsVec  = io.backend.toFtq.rob_commits.map(_.bits)
-  val robCommitValid    = robCommitValidVec.reduce(_ || _)
-  val robCommitBits     = ParallelPosteriorityMux(robCommitValidVec, robCommitBitsVec)
+  val readyCount = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
 
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
@@ -230,9 +226,9 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   fetchHelper.io.redirectPc       := io.backend.toFtq.redirect.bits.pc + io.backend.toFtq.redirect.bits.getPcOffset()
   fetchHelper.io.redirectTarget   := io.backend.toFtq.redirect.bits.target
 
-  fetchHelper.io.robCommitValid    := robCommitValid
-  fetchHelper.io.robCommitFtqFlag  := robCommitBits.ftqIdx.flag
-  fetchHelper.io.robCommitFtqValue := robCommitBits.ftqIdx.value
+  fetchHelper.io.robCommitValid    := io.backend.toFtq.commit.valid
+  fetchHelper.io.robCommitFtqFlag  := io.backend.toFtq.commit.bits.flag
+  fetchHelper.io.robCommitFtqValue := io.backend.toFtq.commit.bits.value
 
   io.backend.cfVec.zip(fetchHelper.io.out).zipWithIndex.map { case ((cfVec, fetchOut), idx) =>
     val rvcExpanders = Module(new RvcExpander)
