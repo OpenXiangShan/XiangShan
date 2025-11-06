@@ -23,10 +23,10 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
 import utility.DelayN
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
-import utility.ParallelPriorityMux
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
@@ -104,7 +104,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Reg(Vec(FtqSize, new BpuMeta))
 
-  // resolveQueue stores branch resolve information from backend.
+  // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
 
   private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect.bits.ftqIdx.value).topRetAddr.toUInt
@@ -278,7 +278,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
-    // TODO: When can redirect information be written to original entry instead of a new entry?
     val newEntryPtr = Mux(
       RedirectLevel.flushItself(redirect.bits.level) &&
         (redirect.bits.ftqOffset === 0.U || redirect.bits.ftqOffset === 1.U && !redirect.bits.isRVC),
@@ -320,28 +319,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
-  // TODO: frontend does not need this many rob commit channels
   // Backend may send commit for on entry multiple times, but the entry is actually committed when it is committed for
   // the first time. The rest of the commits can be ignored.
-  // TODO: Backend now still does not guarantee to send commit for every entry. For example, entry 0 has a flush-itself
-  // redirect in the middle, and entry 1 has a flush-itself redirect on the same instruction in the beginning, entry 2
-  // begins with the same instruction. Backend may not commit entry 0. This may not be totally backend's problem. Maybe
-  // it is frontend's responsibility to fix it.
-  private val robCommitPtr: FtqPtr = WireInit(FtqPtr(false.B, 0.U))
-  private val backendCommit = io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)
-  when(backendCommit) {
-    robCommitPtr := ParallelPriorityMux(
-      io.fromBackend.rob_commits.map(_.valid).reverse,
-      io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse
-    )
-  }
-  private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, FtqPtr(true.B, (FtqSize - 1).U), backendCommit)
-  private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
-  private val commit       = commitPtr < committedPtr
+  private val robCommitPtr = DataHoldBypass(
+    io.fromBackend.commit.bits,
+    FtqPtr(true.B, (FtqSize - 1).U),
+    io.fromBackend.commit.valid
+  )
+  private val commit = commitPtr <= robCommitPtr
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
-  // FIXME: commit info for return stack, connected once ready.
   io.toBpu.commit := DontCare
 
   // --------------------------------------------------------------------------------
