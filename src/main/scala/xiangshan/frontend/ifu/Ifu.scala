@@ -18,8 +18,6 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.ChiselDB
-import utility.Constantin
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.InstSeqNum
@@ -27,24 +25,12 @@ import utility.PerfCCT
 import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
-import utility.XSDebug
-import utility.XSPerfAccumulate
-import utility.XSPerfHistogram
-import utils.EnumUInt
 import xiangshan.FrontendTdataDistributeIO
-import xiangshan.RedirectLevel
-import xiangshan.RobCommitInfo
-import xiangshan.TopDownCounters
-import xiangshan.ValidUndirectioned
-import xiangshan.XSCoreParamsKey
 import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.cache.mmu.Pbmt
-import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
@@ -84,8 +70,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     // Backend: gpaMem
     val toBackend: IfuToBackendIO = new IfuToBackendIO
-    // Backend: commit
-    val robCommits: Vec[Valid[RobCommitInfo]] = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
 
     // debug extension: frontend trigger
     val frontendTrigger: FrontendTdataDistributeIO = Flipped(new FrontendTdataDistributeIO)
