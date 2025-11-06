@@ -55,9 +55,6 @@ class MIMOQueueIO[T <: Data](gen: T, entries: Int, inCnt: Int, outCnt: Int) exte
   val flush = Input(Bool())
   val enq = Vec(inCnt, Flipped(DecoupledIO(gen)))
   val deq = Vec(outCnt, DecoupledIO(gen))
-
-  override def cloneType: MIMOQueueIO.this.type =
-    new MIMOQueueIO[T](gen, entries, inCnt, outCnt).asInstanceOf[this.type]
 }
 
 class MIMOQueue[T <: Data]

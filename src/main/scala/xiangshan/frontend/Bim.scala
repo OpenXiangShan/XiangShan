@@ -20,7 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
 
 trait BimParams extends HasXSParameter {
   val BimBanks = PredictWidth
@@ -29,7 +28,6 @@ trait BimParams extends HasXSParameter {
   val bypassEntries = 4
 }
 
-@chiselName
 class BIM extends BasePredictor with BimParams {
   class BIMResp extends Resp {
     val ctrs = Vec(PredictWidth, UInt(2.W))
@@ -81,23 +79,23 @@ class BIM extends BasePredictor with BimParams {
   val wrbypass_rows     = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(nRows).W))))
   val wrbypass_enq_idx  = RegInit(0.U(log2Up(bypassEntries).W))
 
-  val wrbypass_hits = VecInit((0 until bypassEntries).map( i => 
+  val wrbypass_hits = VecInit((0 until bypassEntries).map( i =>
     !doing_reset && wrbypass_rows(i) === updateRow))
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtrs = VecInit((0 until BimBanks).map(b => 
+  val oldCtrs = VecInit((0 until BimBanks).map(b =>
                   Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(b),
                     wrbypass_ctrs(wrbypass_hit_idx)(b), u.metas(b).bimCtr)))
-  
+
   val newTakens = VecInit((0 until BimBanks).map(b => u.cfiIndex.valid && u.cfiIndex.bits === b.U))
   val newCtrs = VecInit((0 until BimBanks).map(b => satUpdate(oldCtrs(b), 2, newTakens(b))))
   // val oldSaturated = newCtr === oldCtr
-  
+
   val needToUpdate = VecInit((0 until PredictWidth).map(i => updateValid && u.br_mask(i) && u.valids(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
-  
+
   for (b <- 0 until BimBanks) {
     when (needToUpdate.reduce(_||_)) {
       when (wrbypass_hit) {
@@ -114,7 +112,7 @@ class BIM extends BasePredictor with BimParams {
       }
     }
   }
-  
+
   when (needToUpdate.reduce(_||_) && !wrbypass_hit) {
     wrbypass_rows(wrbypass_enq_idx) := updateRow
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
@@ -134,7 +132,7 @@ class BIM extends BasePredictor with BimParams {
     val u = io.update.bits
     XSDebug(doing_reset, "Reseting...\n")
     XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", updateValid, u.ftqPC, u.valids.asUInt, u.target)
-    
+
     XSDebug("[update] brMask=%b, taken=%b isMisPred=%b\n", u.br_mask.asUInt, newTakens.asUInt, u.mispred.asUInt)
     for (i <- 0 until BimBanks) {
       XSDebug(RegNext(io.pc.valid && io.inMask(i)), p"BimResp[$i]: ctr = ${io.resp.ctrs(i)}\n")
@@ -147,5 +145,5 @@ class BIM extends BasePredictor with BimParams {
       XSDebug(true.B, p"bimCtr(${i.U})=${Binary(u.metas(i).bimCtr)} oldCtr=${Binary(oldCtrs(i))} newCtr=${Binary(newCtrs(i))}\n")
     }
   }
-  
+
 }

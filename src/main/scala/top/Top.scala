@@ -22,14 +22,13 @@ import xiangshan._
 import utils._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Config
+import org.chipsalliance.cde.config
+import org.chipsalliance.cde.config.Config
 import device.{AXI4Plic, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
@@ -210,7 +209,8 @@ trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
 
 class BeuSinkNode()(implicit p: config.Parameters) extends LazyModule {
   val intSinkNode = IntSinkNode(IntSinkPortSimple())
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val interrupt = IO(Output(Bool()))
     interrupt := intSinkNode.in.head._1.head
   }
@@ -267,9 +267,8 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
     Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
     sim = !env.FPGAPlatform
   ))
-  val fakeTreeNode = new GenericLogicalTreeNode
   val beu = LazyModule(
-    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
+    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000)))
   val beuSink = LazyModule(new BeuSinkNode())
   beuSink.intSinkNode := beu.intNode
 
@@ -287,7 +286,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
-    childClock := io.clock.asClock()
+    childClock := io.clock.asClock
 
     withClockAndReset(childClock, io.reset) {
       val resetGen = Module(new ResetGen())
@@ -322,22 +321,20 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
 }
 
 object TopMain extends App {
-  override def main(args: Array[String]): Unit = {
-    Parameters.set(
-      args.contains("--dual-core") match {
-        case false => Parameters()
-        case true  => Parameters.dualCoreParameters
-      }
-    )
-    val otherArgs = args.filterNot(_ == "--dual-core")
-    implicit val p = new Config((_, _, _) => {
-      case XLen => 64
+  Parameters.set(
+    args.contains("--dual-core") match {
+      case false => Parameters()
+      case true  => Parameters.dualCoreParameters
+    }
+  )
+  val otherArgs = args.filterNot(_ == "--dual-core")
+  implicit val p = new Config((_, _, _) => {
+    case XLen => 64
+  })
+  XiangShanStage.execute(otherArgs, Seq(
+    ChiselGeneratorAnnotation(() => {
+      val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))
+      soc.module
     })
-    XiangShanStage.execute(otherArgs, Seq(
-      ChiselGeneratorAnnotation(() => {
-        val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))
-        soc.module
-      })
-    ))
-  }
+  ))
 }

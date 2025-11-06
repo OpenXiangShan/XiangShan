@@ -16,7 +16,7 @@
 
 package device
 
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import chisel3._
 import chiseltest._
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4UserYanker, AXI4Xbar}
@@ -40,7 +40,8 @@ class SimMMIOTestTop()(implicit p: Parameters) extends LazyModule {
     DebugIdentityNode() :=
     fuzz.node
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val finished = IO(Output(Bool()))
     finished := fuzz.module.io.finished
   }
@@ -56,5 +57,3 @@ class SimMMIOTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
     }
   }
 }
-
-

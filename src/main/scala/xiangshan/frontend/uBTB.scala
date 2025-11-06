@@ -20,7 +20,6 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -30,7 +29,6 @@ trait MicroBTBPatameter{
     val tagSize = 20
 }
 
-@chiselName
 class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
@@ -111,13 +109,13 @@ class MicroBTB extends BasePredictor
             meta.io.raddr(w+nWays) := w.U
             data.io.raddr(w) := w.U
         }
-        
+
         val rmetas = meta.io.rdata.take(nWays)
         val rdatas = data.io.rdata
-        
+
         val packetAlignedPC = packetAligned(io.read_pc.bits)
         val read_tag = getTag(io.read_pc.bits)
-        
+
         val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
         val takens = VecInit(rmetas.map(m => m.pred(1)))
         val hit_oh = hits.asUInt
@@ -125,7 +123,7 @@ class MicroBTB extends BasePredictor
         val hit_meta = ParallelMux(hits zip rmetas)
         val hit_data = ParallelMux(hits zip rdatas)
         val target = Cat(io.read_pc.bits(VAddrBits-1, lowerBitsSize+instOffsetBits), hit_data.lower, 0.U(instOffsetBits.W))
-        
+
         val ren = io.read_pc.valid
         io.read_resp.valid := ren
         io.read_resp.is_RVC := ren && hit_meta.is_RVC
@@ -136,7 +134,7 @@ class MicroBTB extends BasePredictor
 
         debug_io.read_hit := hit_oh.orR
         debug_io.read_hit_way := OHToUInt(hit_oh)
-        
+
         val do_reset = RegInit(true.B)
         val reset_way = RegInit(0.U(log2Ceil(nWays).W))
         when (RegNext(reset.asBool) && !reset.asBool) {
@@ -170,7 +168,7 @@ class MicroBTB extends BasePredictor
         val update_has_empty_way = update_emptys.reduce(_||_)
         val update_empty_way = ParallelPriorityEncoder(update_emptys)
         val update_way = Mux(update_hit, update_hit_way, Mux(update_has_empty_way, update_empty_way, update_alloc_way))
-    
+
         meta.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
         meta.io.wen(0)   := do_reset || RegNext(io.update_write_meta.valid)
         meta.io.wdata(0) := Mux(do_reset,
@@ -182,7 +180,7 @@ class MicroBTB extends BasePredictor
         data.io.wdata(0) := Mux(do_reset,
                                 0.U.asTypeOf(new MicroBTBData),
                                 RegNext(io.update_write_data.bits))
-        
+
         debug_io.update_hit := update_hit
         debug_io.update_hit_way := update_hit_way
         debug_io.update_write_way := update_way
@@ -192,13 +190,13 @@ class MicroBTB extends BasePredictor
 
     val ubtbBanks = Seq.fill(PredictWidth)(Module(new UBTBBank(nWays)))
     val banks = VecInit(ubtbBanks.map(_.io))
-    
+
     val read_resps = VecInit(banks.map(b => b.read_resp))
 
     for (b <- 0 until PredictWidth) {
         banks(b).read_pc.valid := io.inMask(b)
         banks(b).read_pc.bits := io.pc.bits
-        
+
         //only when hit and instruction valid and entry valid can output data
         io.out.targets(b) := read_resps(b).target
         io.out.hits(b)   := banks(b).read_hit && ctrl.ubtb_enable
@@ -207,7 +205,7 @@ class MicroBTB extends BasePredictor
         io.out.brMask(b) := read_resps(b).is_Br
     }
 
-    //uBTB update 
+    //uBTB update
     //backend should send fetch pc to update
     val u = RegNext(io.update.bits)
     val update_valid = RegNext(io.update.valid)
@@ -216,15 +214,15 @@ class MicroBTB extends BasePredictor
 
     val update_tag = getTag(update_packet_pc)
     val update_target_lower = u.target(lowerBitsSize-1+instOffsetBits, instOffsetBits)
-  
+
     // only when taken should we update target
-    val data_write_valids = 
+    val data_write_valids =
         VecInit((0 until PredictWidth).map(i =>
             update_valid && u.valids(i) && u.takens(i)))
-    val meta_write_valids = 
+    val meta_write_valids =
         VecInit((0 until PredictWidth).map(i =>
             update_valid && u.valids(i) && (u.br_mask(i) || u.takens(i))))
-        
+
     val update_write_metas = Wire(Vec(PredictWidth, new MicroBTBMeta))
     val update_write_datas = Wire(Vec(PredictWidth, new MicroBTBData))
     for (i <- 0 until PredictWidth) {
@@ -236,7 +234,7 @@ class MicroBTB extends BasePredictor
 
         update_write_datas(i).lower := update_target_lower
     }
-    
+
     for (b <- 0 until PredictWidth) {
         banks(b).update_write_meta.valid := meta_write_valids(b)
         banks(b).update_write_meta.bits := update_write_metas(b)
@@ -253,7 +251,7 @@ class MicroBTB extends BasePredictor
             PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
                 case (((t, v), m), pd)  => t && v && !m.ubtbHit.asBool && !pd.notCFI && update_valid}))
     }
-    
+
     if (BPUDebug && debug) {
         val update_pcs  = VecInit((0 until PredictWidth).map(i => update_packet_pc + (i << instOffsetBits).U))
         val update_bank = u.cfiIndex.bits

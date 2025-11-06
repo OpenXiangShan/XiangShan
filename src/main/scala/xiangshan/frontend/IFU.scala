@@ -22,7 +22,6 @@ import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
-import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
@@ -115,7 +114,6 @@ class PrevHalfInstr extends XSBundle {
   val ipf = Bool()
 }
 
-@chiselName
 class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
 {
   val io = IO(new IFUIO)
@@ -145,7 +143,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
-  val if2_valid = RegInit(init = false.B)
+  val if2_valid = RegInit(false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready && bpu.io.in_ready)
   val if1_fire = if1_valid &&  if2_allReady
 
@@ -157,9 +155,9 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
   val if2_fire = if2_allValid && if3_ready
-  val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
+  val if2_pc = RegEnable(if1_npc, resetVector.U, if1_fire)
   val if2_snpc = snpc(if2_pc)
-  val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
+  val if2_predHist = RegEnable(if1_gh.predHist, if1_fire)
   if2_ready := if3_ready && icache.io.tlb.resp.valid || !if2_valid
   when (if1_fire)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
@@ -178,13 +176,13 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   //********************** IF3 ****************************//
   // if3 should wait for instructions resp to arrive
-  val if3_valid = RegInit(init = false.B)
+  val if3_valid = RegInit(false.B)
   val if4_ready = WireInit(false.B)
   val if3_allValid = if3_valid && icache.io.resp.valid
   val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_snpc = RegEnable(if2_snpc, if2_fire)
-  val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
+  val if3_predHist = RegEnable(if2_predHist, if2_fire)
   if3_ready := if4_ready && icache.io.resp.valid || !if3_valid
   when (if3_flush) {
     if3_valid := false.B
@@ -285,7 +283,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
 
 
-  val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
+  val if4_predHist = RegEnable(if3_predHist, if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq && ftqEnqBuf_ready || !if4_valid) && GTimer() > 500.U
   when (if4_flush) {
@@ -303,14 +301,14 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   def jal_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
-      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)).asSInt(),
-      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)).asSInt()
+      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)).asSInt,
+      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)).asSInt
     )
   }
   def br_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
       Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)).asSInt,
-      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()
+      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt
     )
   }
   val if4_instrs = if4_pd.instrs
@@ -409,7 +407,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   // ***************** Ftq enq buffer ********************
   val toFtqBuf = Wire(new FtqEntry)
-  val ftqEnqBuf = RegEnable(toFtqBuf, enable=if4_fire)
+  val ftqEnqBuf = RegEnable(toFtqBuf, if4_fire)
   val ftqEnqBuf_valid = RegInit(false.B)
   val ftqLeftOne = WireInit(false.B) // TODO: to be replaced
   ftqEnqBuf_ready := io.toFtq.ready && !(io.ftqLeftOne && ftqEnqBuf_valid)
@@ -578,7 +576,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   XSPerfAccumulate("if3_redirect_fired", if3_fire && if3_redirect && !if3_flush)
   XSPerfAccumulate("if4_redirect", if4_valid && if4_redirect && !if4_flush)
   XSPerfAccumulate("if4_redirect_fired", if4_fire && if4_redirect && !if4_flush)
-  
+
   XSPerfAccumulate("if1_total_stall", !if2_allReady && if1_valid)
   XSPerfAccumulate("if1_stall_from_icache_req", !icache.io.req.ready && if1_valid)
   XSPerfAccumulate("if1_stall_from_if2", !if2_ready && if1_valid)
@@ -591,7 +589,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   XSPerfAccumulate("if3_prevHalfConsumed", if3_prevHalfConsumed)
   XSPerfAccumulate("if4_prevHalfConsumed", if4_prevHalfConsumed)
-  
+
 
   // debug info
   if (IFUDebug) {

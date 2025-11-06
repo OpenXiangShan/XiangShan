@@ -21,7 +21,6 @@ import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
 import firrtl.options.{HasShellOptions, Shell, ShellOption}
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
-import freechips.rocketchip.transforms.naming.{OverrideDesiredNameAnnotation, RenameDesiredNames}
 import xstransforms.ShowPrintTransform
 import xstransforms.PrintModuleName
 
@@ -111,7 +110,6 @@ object XiangShanStage {
       annotations ++ Seq(
         RunFirrtlTransformAnnotation(new ShowPrintTransform),
         RunFirrtlTransformAnnotation(new PrintModuleName),
-        RunFirrtlTransformAnnotation(new RenameDesiredNames)
       )
     )
   }

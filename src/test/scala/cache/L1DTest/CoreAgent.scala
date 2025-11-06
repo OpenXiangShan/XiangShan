@@ -17,7 +17,7 @@
 package cache.L1DTest
 
 import cache.TLCTest.{AddrState, ScoreboardData, TLCAgent, TLCTrans}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}

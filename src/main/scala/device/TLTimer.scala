@@ -19,7 +19,7 @@ package device
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.RegField
 import utils.{HasTLDump, XSDebug}
@@ -30,7 +30,8 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
   val node = TLRegisterNode(address, device, beatBytes = 8)
   val NumCores = top.Parameters.get.socParameters.NumCores
 
-  lazy val module = new LazyModuleImp(this) with HasTLDump {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasTLDump {
     val io = IO(new Bundle() {
       val mtip = Output(Vec(NumCores, Bool()))
       val msip = Output(Vec(NumCores, Bool()))

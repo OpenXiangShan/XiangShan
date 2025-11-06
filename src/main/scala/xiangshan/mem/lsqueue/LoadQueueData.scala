@@ -62,7 +62,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModu
       data(io.waddr(i)) := io.wdata(i)
     }
   }
-  
+
   // content addressed match
   for (i <- 0 until 2) {
     for (j <- 0 until numEntries) {
@@ -106,7 +106,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule 
       data(io.waddr(i)) := io.wdata(i)
     }
   }
-  
+
   // content addressed match
   for (i <- 0 until 2) {
     for (j <- 0 until numEntries) {
@@ -181,7 +181,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
     // masked write
     val mwmask = Input(Vec(numEntries, Bool()))
     val refillData = Input(UInt((cfg.blockBytes * 8).W))
-    
+
     // fwdMask io
     val fwdMaskWdata = Input(Vec(numWrite, UInt(8.W)))
     val fwdMaskWen = Input(Vec(numWrite, Bool()))
@@ -319,7 +319,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
     io.wb.rdata(i).data := coredataModule.io.rdata(i)
     io.wb.rdata(i).fwdMask := DontCare
   })
-  
+
   // read port wbNumRead
   paddrModule.io.raddr(wbNumRead) := io.uncache.raddr
   maskModule.io.raddr(wbNumRead) := io.uncache.raddr
@@ -329,7 +329,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
   io.uncache.rdata.mask := maskModule.io.rdata(wbNumRead)
   io.uncache.rdata.data := coredataModule.io.rdata(wbNumRead)
   io.uncache.rdata.fwdMask := DontCare
-  
+
   // write data
   // write port 0 -> wbNumWrite-1
   (0 until wbNumWrite).map(i => {
@@ -357,7 +357,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
       coredataModule.io.paddrWen(i) := true.B
     }
   })
-  
+
   // write port wbNumWrite
   // exceptionModule.io.wen(wbNumWrite) := false.B
   coredataModule.io.wen(wbNumWrite) := io.uncache.wen
@@ -378,10 +378,10 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
     // VecInit((0 until size).map(j => {
       // val addrMatch = io.violation(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
       // val violationVec = (0 until 8).map(k => data(j).mask(k) && io.violation(i).mask(k))
-      // Cat(violationVec).orR() && addrMatch
+      // Cat(violationVec).orR && addrMatch
     // }))
   })
-  
+
   // refill missed load
   def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
     val res = Wire(Vec(8, UInt(8.W)))
@@ -397,7 +397,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
     io.refill.matchMask := paddrModule.io.refillMmask
     // io.refill.matchMask(i) := get_block_addr(data(i).paddr) === get_block_addr(io.refill.paddr)
   })
-  
+
   // refill data according to matchMask, refillMask and refill.valid
   coredataModule.io.refillData := io.refill.data
   (0 until size).map(i => {

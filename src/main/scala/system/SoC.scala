@@ -16,7 +16,7 @@
 
 package system
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import device.{AXI4Plic, AXI4Timer, TLTimer}
 import chisel3._
 import chisel3.util._
@@ -30,7 +30,6 @@ import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveC
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkParameters, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
 
@@ -170,15 +169,14 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   clint.node := mmioXbar
   extDev := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
-  val fakeTreeNode = new GenericLogicalTreeNode
-
   val beu = LazyModule(
-    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
+    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000)))
   beu.node := mmioXbar
 
   class BeuSinkNode()(implicit p: Parameters) extends LazyModule {
     val intSinkNode = IntSinkNode(IntSinkPortSimple())
-    lazy val module = new LazyModuleImp(this){
+    lazy val module = new Impl
+    class Impl extends LazyModuleImp(this){
       val interrupt = IO(Output(Bool()))
       interrupt := intSinkNode.in.head._1.head
     }
@@ -192,7 +190,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   ))
   plic.node := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle{
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
@@ -225,7 +224,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     difftestIO1 <> DontCare
     trapIO0 <> xs_core(0).module.trapIO
     trapIO1 <> DontCare
-    
+
     if (env.DualCore) {
       difftestIO1 <> xs_core(1).module.difftestIO
       trapIO1 <> xs_core(1).module.trapIO

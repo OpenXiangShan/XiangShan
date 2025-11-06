@@ -1,5 +1,5 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -13,93 +13,134 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-import os.Path
 import mill._
 import scalalib._
+import $file.`rocket-chip`.common
+import $file.`rocket-chip`.cde.common
+import $file.`rocket-chip`.hardfloat.build
 
-trait CommonModule extends ScalaModule {
-  override def scalaVersion = "2.12.10"
+val defaultScalaVersion = "2.13.14"
 
-  override def scalacOptions = Seq("-Xsource:2.11")
-
-  private val macroParadise = ivy"org.scalamacros:::paradise:2.1.0"
-
-  override def compileIvyDeps = Agg(macroParadise)
-
-  override def scalacPluginIvyDeps = Agg(macroParadise)
-}
-
-val chisel = Agg(
-  ivy"edu.berkeley.cs::chisel3:3.4.3"
+val defaultVersions = Map(
+  "chisel" -> ivy"edu.berkeley.cs::chisel3:3.6.1",
+  "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.1",
+  "chiseltest" -> ivy"edu.berkeley.cs::chiseltest:0.6.2",
 )
 
-object `api-config-chipsalliance` extends CommonModule {
-  override def millSourcePath = super.millSourcePath / "design" / "craft"
+trait HasChisel extends ScalaModule {
+  def chiselModule: Option[ScalaModule] = None
+
+  def chiselPluginJar: T[Option[PathRef]] = None
+
+  def chiselIvy: Option[Dep] = Some(defaultVersions("chisel"))
+
+  def chiselPluginIvy: Option[Dep] = Some(defaultVersions("chisel-plugin"))
+
+  override def scalaVersion = defaultScalaVersion
+
+  override def scalacOptions = super.scalacOptions() ++
+    Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
 
-object hardfloat extends SbtModule with CommonModule {
-  override def millSourcePath = os.pwd / "berkeley-hardfloat"
-  override def ivyDeps = super.ivyDeps() ++ chisel
-}
+object rocketchip extends RocketChip
 
-object `rocket-chip` extends SbtModule with CommonModule {
+trait RocketChip
+  extends millbuild.`rocket-chip`.common.RocketChipModule
+    with SbtModule with HasChisel {
+  def scalaVersion: T[String] = T(defaultScalaVersion)
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    ivy"${scalaOrganization()}:scala-reflect:${scalaVersion()}",
-    ivy"org.json4s::json4s-jackson:3.6.1"
-  ) ++ chisel
+  override def millSourcePath = os.pwd / "rocket-chip"
 
-  object macros extends SbtModule with CommonModule
+  def macrosModule = macros
 
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    `api-config-chipsalliance`, macros, hardfloat
-  )
+  def hardfloatModule = hardfloat
 
-}
+  def cdeModule = cde
 
-object `block-inclusivecache-sifive` extends CommonModule {
-  override def ivyDeps = super.ivyDeps() ++ chisel
+  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.5.0"
 
-  override def millSourcePath = super.millSourcePath / 'design / 'craft / 'inclusivecache
+  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.5"
 
-  override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`)
-}
+  object macros extends Macros
 
-object chiseltest extends CommonModule with SbtModule {
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    ivy"edu.berkeley.cs::treadle:1.3.0",
-    ivy"org.scalatest::scalatest:3.2.0",
-    ivy"com.lihaoyi::utest:0.7.4"
-  ) ++ chisel
-  object test extends SbtModuleTests with TestModule.ScalaTest {
-    def ivyDeps = Agg(ivy"org.scalacheck::scalacheck:1.14.3")
-    def testFrameworks = Seq("org.scalatest.tools.Framework")
+  trait Macros
+    extends millbuild.`rocket-chip`.common.MacrosModule
+      with SbtModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
+  }
+
+  object cde extends CDE
+
+  trait CDE extends millbuild.`rocket-chip`.cde.common.CDEModule with ScalaModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "cde" / "cde"
   }
 }
 
+object hardfloat extends SbtModule with HasChisel {
 
-object XiangShan extends CommonModule with SbtModule {
-  override def millSourcePath = millOuterCtx.millSourcePath
+  override def millSourcePath = os.pwd / "berkeley-hardfloat"
 
-  override def forkArgs = Seq("-Xmx64G")
+}
 
-  override def ivyDeps = super.ivyDeps() ++ chisel
+object difftest extends SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "difftest"
+
+}
+
+object sifiveblockinclusivecache extends ScalaModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "block-inclusivecache-sifive" / "design" / "craft" / "inclusivecache"
+
   override def moduleDeps = super.moduleDeps ++ Seq(
-    `rocket-chip`,
-    `block-inclusivecache-sifive`,
-    chiseltest
+    rocketchip,
+  )
+}
+
+// extends this trait to use XiangShan in other projects
+trait XiangShanModule extends ScalaModule {
+
+  def rocketModule: ScalaModule
+
+  def inclusiveCacheModule: ScalaModule
+
+  def difftestModule: ScalaModule
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketModule,
+    sifiveblockinclusivecache,
+    difftestModule,
   )
 
-  object test extends SbtModuleTests with TestModule.ScalaTest {
+}
 
-    override def forkArgs = Seq("-Xmx64G")
+object XiangShan extends XiangShanModule with SbtModule with HasChisel {
+
+  override def millSourcePath = millOuterCtx.millSourcePath
+
+  def rocketModule = rocketchip
+
+  def inclusiveCacheModule = sifiveblockinclusivecache
+
+  def difftestModule = difftest
+
+  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+
+  object test extends SbtModuleTests with TestModule.ScalaTest {
+    override def forkArgs = XiangShan.forkArgs
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
-      ivy"org.scalatest::scalatest:3.2.0"
-    )
-
-    def testFrameworks = Seq(
-      "org.scalatest.tools.Framework"
+      defaultVersions("chiseltest"),
     )
   }
 

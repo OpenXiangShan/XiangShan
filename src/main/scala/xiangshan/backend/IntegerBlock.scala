@@ -30,9 +30,6 @@ class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
   val fast = Vec(numFast, Flipped(ValidIO(new ExuOutput))) //one cycle later than fastUops
   val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
-
-  override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
-
 }
 
 class IntBlockToCtrlIO extends XSBundle {

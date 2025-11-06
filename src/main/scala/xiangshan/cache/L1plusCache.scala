@@ -21,7 +21,7 @@ import chisel3.util._
 import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
 import system.L1CacheErrorInfo
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters,
   TLMasterParameters, TLMasterPortParameters, TLArbiter,
@@ -151,8 +151,8 @@ class L1plusCacheDataArray extends L1plusCacheModule {
 
   // write is always ready
   io.write.ready := true.B
-  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
-  val raddr = (io.read.bits.addr >> blockOffBits).asUInt()
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt
+  val raddr = (io.read.bits.addr >> blockOffBits).asUInt
 
   // for single port SRAM, do not allow read and write in the same cycle
   // for dual port SRAM, raddr === waddr is undefined behavior
@@ -173,13 +173,13 @@ class L1plusCacheDataArray extends L1plusCacheModule {
         setIdx=waddr,
         data=respData((b+1)*blockBits/2 - 1, b*blockBits/2),
         waymask=1.U)
-      
+
       codeArray.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
       codeArray.io.w.req.bits.apply(
         setIdx=waddr,
         data=respCode,
         waymask=1.U)
-      
+
       // data read
       array(b).io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
       array(b).io.r.req.bits.apply(setIdx=raddr)
@@ -188,9 +188,9 @@ class L1plusCacheDataArray extends L1plusCacheModule {
       codeArray.io.r.req.bits.apply(setIdx=raddr)
       for (r <- 0 until blockRows) {
         if(r < blockRows/2){ io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(0).io.r.resp.data(0)((r + 1) * rowBits - 1, r * rowBits) )) }
-        else { 
+        else {
           val r_half = r - blockRows/2
-          io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(1).io.r.resp.data(0)((r_half + 1) * rowBits - 1, r_half * rowBits))) 
+          io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(1).io.r.resp.data(0)((r_half + 1) * rowBits - 1, r_half * rowBits)))
         }
       }
     }
@@ -261,7 +261,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=true, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
-  when (reset.toBool || io.flush) {
+  when (reset.asBool || io.flush) {
     for (i <- 0 until nSets) {
       valid_array(i) := 0.U
     }
@@ -269,7 +269,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
   // tag write
-  val wen = io.write.valid && !reset.toBool && !io.flush
+  val wen = io.write.valid && !reset.asBool && !io.flush
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx=waddr,
@@ -289,7 +289,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.tagIdx)
   val rtags = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected)
-  
+
   val rtag_errors = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).error)
 
@@ -301,8 +301,8 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
 
   // we use single port SRAM
   // do not allow read and write in the same cycle
-  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush && tag_array.io.r.req.ready
-  io.write.ready := !reset.toBool && !io.flush && tag_array.io.w.req.ready
+  io.read.ready  := !io.write.valid && !reset.asBool && !io.flush && tag_array.io.r.req.ready
+  io.write.ready := !reset.asBool && !io.flush && tag_array.io.w.req.ready
 
   def dumpRead() = {
     when (io.read.fire()) {
@@ -554,7 +554,7 @@ class L1plusCachePipe extends L1plusCacheModule
   dump_pipeline_reqs("L1plusCachePipe s0", s0_valid, s0_req)
 // stage 1
   val s1_req = RegEnable(s0_req, s0_passdown)
-  val s1_valid_reg = RegEnable(s0_valid, init = false.B, enable = s0_passdown)
+  val s1_valid_reg = RegEnable(s0_valid, false.B, s0_passdown)
   val s1_addr = s1_req.addr
   when (s1_passdown && !s0_passdown) {
     s1_valid_reg := false.B
@@ -578,8 +578,8 @@ class L1plusCachePipe extends L1plusCacheModule
 
   // stage 2
   val s2_req   = RegEnable(s1_req, s1_passdown)
-  val s2_valid_reg = RegEnable(s1_valid, init=false.B, enable=s1_passdown)
-  val s2_meta_ecc = RegEnable(s1_meta_ecc, init=0.U.asTypeOf(Vec(nWays, Bool())), enable=s1_passdown)
+  val s2_valid_reg = RegEnable(s1_valid, false.B, s1_passdown)
+  val s2_meta_ecc = RegEnable(s1_meta_ecc, 0.U.asTypeOf(Vec(nWays, Bool())), s1_passdown)
   when (s2_passdown && !s1_passdown) {
     s2_valid_reg := false.B
   }
@@ -595,7 +595,7 @@ class L1plusCachePipe extends L1plusCacheModule
   val replacer = cacheParams.replacement
   val (touch_sets, touch_ways) = ( Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets).W))),  Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
 
-  touch_sets(0)       := get_idx(s2_req.addr)  
+  touch_sets(0)       := get_idx(s2_req.addr)
   touch_ways(0).valid := s2_valid && s2_hit
   touch_ways(0).bits  := s2_hit_way
 
@@ -644,7 +644,7 @@ class L1plusCachePipe extends L1plusCacheModule
   touch_sets(1)       := io.miss_meta_write.bits.tagIdx
   touch_ways(1).valid := io.miss_meta_write.valid
   touch_ways(1).bits  := wayNum
-  (0 until nWays).map{ w => 
+  (0 until nWays).map{ w =>
     XSPerfAccumulate("hit_way_" + Integer.toString(w, 10),  s2_valid && s2_hit && s2_hit_way === w.U)
     XSPerfAccumulate("refill_way_" + Integer.toString(w, 10), io.miss_meta_write.valid && wayNum === w.U)
     XSPerfAccumulate("access_way_" + Integer.toString(w, 10), (io.miss_meta_write.valid && wayNum === w.U) || (s2_valid && s2_hit && s2_hit_way === w.U))

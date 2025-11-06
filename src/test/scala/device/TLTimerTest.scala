@@ -16,7 +16,7 @@
 
 package device
 
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import chisel3._
 import chiseltest._
 import freechips.rocketchip.tilelink._
@@ -39,7 +39,8 @@ class TLTimerTestTop()(implicit p: Parameters) extends LazyModule {
 
   timer.node := ident.node := TLDelayer(0.1) := fuzz.node
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle() {
       val finished = Output(Bool())
     })

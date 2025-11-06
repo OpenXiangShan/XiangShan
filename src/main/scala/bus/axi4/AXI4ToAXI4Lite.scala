@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.experimental.DataMirror
 import chisel3.util._
 
-class AXI4ToAXI4Lite(inType: AXI4) extends MultiIOModule{
+class AXI4ToAXI4Lite(inType: AXI4) extends Module {
   val in = IO(Flipped(inType))
   val out = IO(new AXI4Lite)
 

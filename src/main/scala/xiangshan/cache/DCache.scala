@@ -213,7 +213,7 @@ class DuplicatedDataArray extends AbstractDataArray {
     })
   }
 
-  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
   io.write.ready := (if (readHighPriority) {
     if (singlePort) {
@@ -264,7 +264,7 @@ class DuplicatedDataArray extends AbstractDataArray {
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
     val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
 
-    val sel_low = r_way_en_reg.tail(half).orR()
+    val sel_low = r_way_en_reg.tail(half).orR
     val row_data = Mux(sel_low, data_left, data_right)
 
     io.rdata := row_data
@@ -333,7 +333,7 @@ class DuplicatedDataArray extends AbstractDataArray {
           data
         }
       })
-      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR()
+      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR
       io.errors(j).ecc_error.bits := true.B
       io.errors(j).paddr.valid := io.errors(j).ecc_error.valid
       io.errors(j).paddr.bits := RegNext(io.read(j).bits.addr)
@@ -383,7 +383,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.ecc_error.valid := RegNext(io.read.fire()) && Cat(ecc_errors).orR()
+  io.error.ecc_error.valid := RegNext(io.read.fire()) && Cat(ecc_errors).orR
   io.error.ecc_error.bits := true.B
   io.error.paddr.valid := io.error.ecc_error.valid
   io.error.paddr.bits := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))

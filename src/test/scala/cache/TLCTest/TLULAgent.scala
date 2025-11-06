@@ -18,7 +18,7 @@ package cache.TLCTest
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 import scala.util.Random
 import chisel3.util._

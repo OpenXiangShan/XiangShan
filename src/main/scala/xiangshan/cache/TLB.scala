@@ -216,8 +216,6 @@ class TlbData(superpage: Boolean = false) extends TlbBundle {
     val insideLevel = level.getOrElse(0.U)
     p"level:${insideLevel} ppn:${Hexadecimal(ppn)} perm:${perm}"
   }
-
-  override def cloneType: this.type = (new TlbData(superpage)).asInstanceOf[this.type]
 }
 
 object TlbCmd {
@@ -297,8 +295,6 @@ class TlbIO(Width: Int) extends TlbBundle {
   val ptw = new TlbPtwIO
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
-
-  override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
 }
 
 

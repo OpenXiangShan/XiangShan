@@ -16,12 +16,10 @@
 
 package cache.L1DTest
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
-import chiseltest.legacy.backends.verilator.VerilatorFlags
+import chiseltest.simulator.VerilatorFlags
 import chiseltest._
 import firrtl.stage.RunFirrtlTransformAnnotation
 import chiseltest.ChiselScalatestTester
@@ -39,7 +37,7 @@ import scala.util.Random
 import cache.TLCTest._
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, ListBuffer, Seq}
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
 class L1DTestTopIO extends Bundle {
   val slaveIO = new TLCTestSlaveMMIO()
@@ -54,7 +52,8 @@ class L1DTestTop()(implicit p: Parameters) extends LazyModule {
   val c_buffer = TLBuffer(a = BufferParams.none, b = BufferParams.none, c = BufferParams.pipe, d = BufferParams.none, e = BufferParams.none)
   slave.node := dcache_outer.node := c_buffer := dcache.clientNode
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new L1DTestTopIO())
     dcache.module.io.lsu <> io.dcacheIO
     slave.module.io <> io.slaveIO
@@ -63,7 +62,8 @@ class L1DTestTop()(implicit p: Parameters) extends LazyModule {
 
 class L1DTestTopWrapper()(implicit p: Parameters) extends LazyModule {
   val testTop = LazyModule(new L1DTestTop())
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new L1DTestTopIO)
     AddSinks()
     io <> testTop.module.io
@@ -81,14 +81,14 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     val rand = new Random(0xbeef)
     val addr_pool = {
-      for (_ <- 0 until 256) yield BigInt(rand.nextInt(0xfffff) << 6) | 0x80000000L.U.litValue()
+      for (_ <- 0 until 256) yield BigInt(rand.nextInt(0xfffff) << 6) | 0x80000000L.U.litValue
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
     println(f"addr pool length: $addr_list_len")
     val probeProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
 
     def peekBigInt(source: Data): BigInt = {
-      source.peek().litValue()
+      source.peek().litValue
     }
 
     def peekBoolean(source: Bool): Boolean = {
@@ -97,8 +97,8 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     test(LazyModule(new L1DTestTopWrapper()).module)
       .withAnnotations(Seq(VerilatorBackendAnnotation,
-        LineCoverageAnnotation,
-        ToggleCoverageAnnotation,
+        // LineCoverageAnnotation,
+        // ToggleCoverageAnnotation,
         VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000",
           "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT")),
         RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>

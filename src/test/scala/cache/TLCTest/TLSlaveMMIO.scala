@@ -16,13 +16,13 @@
 
 package cache.TLCTest
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLManagerNode, TLSlaveParameters, TLSlavePortParameters}
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
- 
+
 class TLCTestSlaveMMIO extends DCacheBundle
 {
   val AChannel = DecoupledIO(new TLCFakeABundle())
@@ -58,7 +58,8 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
   )))
 
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val (bus,edge) = node.in.head
 

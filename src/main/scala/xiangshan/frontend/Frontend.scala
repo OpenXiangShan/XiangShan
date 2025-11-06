@@ -18,7 +18,7 @@ package xiangshan.frontend
 import utils._
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
@@ -36,7 +36,7 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
 
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
-  with HasL1plusCacheParameters 
+  with HasL1plusCacheParameters
   with HasXSParameter
   with HasExceptionNO
 {

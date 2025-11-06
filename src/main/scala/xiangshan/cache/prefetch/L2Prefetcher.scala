@@ -24,7 +24,7 @@ import xiangshan.cache._
 import utils.{XSPerfAccumulate, _}
 import chisel3.ExcitingUtils._
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters,
   TLMasterParameters, TLMasterPortParameters, TLArbiter,
@@ -77,7 +77,7 @@ class L2PrefetcherIO extends XSBundle with HasPrefetchParameters {
 }
 
 // prefetch DCache lines in L2 using StreamPrefetch
-class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasPrefetchParameters {  
+class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasPrefetchParameters {
   val io = IO(new L2PrefetcherIO)
 
   val enable_prefetcher = RegNext(io.enable)
@@ -158,4 +158,3 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
     // XSPerfAccumulate("entryReq" + "%02d".format(i), bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U)
   })
 }
-

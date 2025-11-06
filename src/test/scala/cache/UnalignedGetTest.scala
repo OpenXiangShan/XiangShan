@@ -16,11 +16,9 @@
 
 package cache
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -87,7 +85,7 @@ class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
   io.req.ready           := false.B
   io.resp.valid          := false.B
   io.resp.bits           := DontCare
-  
+
   bus.a.valid := false.B
   bus.a.bits  := DontCare
   bus.b.ready := false.B
@@ -244,13 +242,14 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     TLToAXI4() :=
     TLBuffer() :=
     TLCacheCork() :=
-    DebugIdentityNode() := 
+    DebugIdentityNode() :=
     l2.node
 
   // connect uncache access to l2 control node
   l2.ctlnode.get := DebugIdentityNode() := uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val io = IO(new UnalignedGetTestTopIO)
 
@@ -400,7 +399,8 @@ class UnalignedGetTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 
   val testTop = LazyModule(new UnalignedGetTestTop())
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new UnalignedGetTestTopIO)
 
     AddSinks()

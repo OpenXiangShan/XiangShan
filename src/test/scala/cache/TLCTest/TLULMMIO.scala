@@ -16,7 +16,7 @@
 
 package cache.TLCTest
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
@@ -39,7 +39,8 @@ class TLCSnoopMMIONode()(implicit p: Parameters) extends LazyModule
 
   val node = TLAdapterNode()
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new TLULMMIO)
 
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
@@ -51,7 +52,7 @@ class TLCSnoopMMIONode()(implicit p: Parameters) extends LazyModule
       out.d.ready := in.d.ready && io.isOn
     }
     val (bus, edge) = node.in.head
-    
+
     io.AChannel.opcode := bus.a.bits.opcode
     io.AChannel.param := bus.a.bits.param
     io.AChannel.size := bus.a.bits.size

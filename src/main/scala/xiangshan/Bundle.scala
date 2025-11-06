@@ -35,7 +35,6 @@ import xiangshan.frontend.BPUCtrl
 import utils._
 
 import scala.math.max
-import Chisel.experimental.chiselName
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
@@ -57,8 +56,6 @@ class FetchPacket extends XSBundle with WaitTableParameters {
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
   val bits = gen.cloneType.asInstanceOf[T]
-
-  override def cloneType = new ValidUndirectioned(gen).asInstanceOf[this.type]
 }
 
 object ValidUndirectioned {
@@ -85,7 +82,6 @@ class TageMeta extends XSBundle with HasTageParameter {
   val scMeta = new SCMeta(EnableSC)
 }
 
-@chiselName
 class BranchPrediction extends XSBundle with HasIFUConst {
   // val redirect = Bool()
   val takens = UInt(PredictWidth.W)
@@ -232,7 +228,7 @@ class FtqEntry extends XSBundle {
   override def toPrintable: Printable = {
     p"ftqPC: ${Hexadecimal(ftqPC)} lastPacketPC: ${Hexadecimal(lastPacketPC.bits)} hasLastPrev:$hasLastPrev " +
       p"rasSp:$rasSp specCnt:$specCnt brmask:${Binary(Cat(br_mask))} rvcmask:${Binary(Cat(rvc_mask))} " +
-      p"valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
+      p"valids:${Binary(valids.asUInt)} cfi valid: ${cfiIndex.valid} " +
       p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isJalr:$cfiIsJalr, isRvc:$cfiIsRVC " +
       p"mispred:${Binary(Cat(mispred))} target:${Hexadecimal(target)}\n"
   }

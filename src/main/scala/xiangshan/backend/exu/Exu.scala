@@ -82,7 +82,7 @@ case class ExuConfig
   val hasUncertainlatency = latency.latencyVal.isEmpty
 
   def canAccept(fuType: UInt): Bool = {
-    Cat(fuConfigs.map(_.fuType === fuType)).orR()
+    Cat(fuConfigs.map(_.fuType === fuType)).orR
   }
 }
 
@@ -179,9 +179,9 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
       s.head._1.io.in.ready
     } else {
       if (needArbiter) {
-        Cat(s.map(x => x._1.io.in.ready && x._2)).orR()
+        Cat(s.map(x => x._1.io.in.ready && x._2)).orR
       } else {
-        Cat(s.map(x => x._1.io.in.ready)).andR()
+        Cat(s.map(x => x._1.io.in.ready)).andR
       }
     }
   }

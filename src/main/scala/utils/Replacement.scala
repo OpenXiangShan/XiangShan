@@ -353,7 +353,7 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
 class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolicy {
   val random = new RandomReplacement(n_ways)
 
-  def miss(set: UInt) =  random.miss 
+  def miss(set: UInt) =  random.miss
   def way(set: UInt) = random.way
 
   def access(set: UInt, touch_way: UInt) = random.access(touch_way)
@@ -375,12 +375,12 @@ class SbufferLRU(n_ways: Int) {
     val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
     val wayDecs       = touch_ways.map( w => Mux(w.valid, UIntToOH(w.bits, n_ways), 0.U) )
     val wayDec        = ParallelOR(wayDecs)
-    val wayUpd        = (~wayDec).asUInt()
+    val wayUpd        = (~wayDec).asUInt
 
     nextState.zipWithIndex.foreach { case (e, i) =>
       e := Mux(wayDec(i), wayUpd, moreRecentVec(i) & wayUpd )
     }
-    nextState.asUInt()
+    nextState.asUInt
   }
 
   // update the stateRect

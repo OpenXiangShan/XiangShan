@@ -22,8 +22,6 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
-import chisel3.experimental.chiselName
-
 
 import scala.math.min
 
@@ -102,7 +100,7 @@ class BTB extends BasePredictor with BTBParams{
   val if2_mask = RegEnable(if1_mask, io.pc.valid)
   val if1_row = btbAddr.getBankIdx(if1_packetAlignedPC)
   val if2_row = RegEnable(if1_row, io.pc.valid)
-  
+
   // BTB read requests
   meta.io.r.req.valid  := io.pc.valid
   data.io.r.req.valid  := io.pc.valid
@@ -110,7 +108,7 @@ class BTB extends BasePredictor with BTBParams{
   meta.io.r.req.bits.setIdx  := if1_row
   data.io.r.req.bits.setIdx  := if1_row
   edata.io.r.req.bits.setIdx := if1_row
-  
+
 
   // Entries read from SRAM
   val if2_metaRead =
@@ -186,7 +184,7 @@ class BTB extends BasePredictor with BTBParams{
     when (pd.isBr)   { t := BTBtype.B}
     t
   }
-  
+
   val do_update = RegNext(io.update)
   val u = do_update.bits
 
@@ -208,7 +206,7 @@ class BTB extends BasePredictor with BTBParams{
   // TODO: remove isRVC
   val metaWrite = BtbMetaEntry(btbAddr.getTag(cfi_pc), updateIsBr, u.cfiIsRVC)
   val dataWrite = BtbDataEntry(new_lower, new_extended)
-  
+
   val cfi_hit = u.metas(u.cfiIndex.bits).btbHit
   // for brs and jals, prediction is right once hit, so we only update on not hit or jalr mispreds
   val updateValid = do_update.valid && updateTaken && (!cfi_hit || updateIndirectMisPred)
@@ -221,7 +219,7 @@ class BTB extends BasePredictor with BTBParams{
   data.io.w.apply(updateValid, dataWrite, updateRow, updateWayMask)
   edata.io.w.apply(updateValid && new_extended, u.target, updateRow, "b1".U)
 
-  
+
   if (!env.FPGAPlatform) {
     val alloc_conflict =
       VecInit((0 until BtbBanks).map(i =>

@@ -16,7 +16,7 @@
 
 package cache.TLCTest
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -97,7 +97,8 @@ class TLCMasterMMIO()(implicit p: Parameters) extends LazyModule
   val node = TLClientNode(Seq(clientParameters))
 
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val (bus,edge) = node.out.head
 

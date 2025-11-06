@@ -150,26 +150,26 @@ class TLCScalaD
 
 trait TLCOp {
   //make BigInt parameters
-  val PutFullData = TLMessages.PutFullData.litValue()
-  val PutPartialData = TLMessages.PutPartialData.litValue()
-  val ArithmeticData = TLMessages.ArithmeticData.litValue()
-  val LogicalData = TLMessages.LogicalData.litValue()
-  val Get = TLMessages.Get.litValue()
-  val Hint = TLMessages.Hint.litValue()
-  val AcquireBlock = TLMessages.AcquireBlock.litValue()
-  val AcquirePerm = TLMessages.AcquirePerm.litValue()
-  val Probe = TLMessages.Probe.litValue()
-  val AccessAck = TLMessages.AccessAck.litValue()
-  val AccessAckData = TLMessages.AccessAckData.litValue()
-  val HintAck = TLMessages.HintAck.litValue()
-  val ProbeAck = TLMessages.ProbeAck.litValue()
-  val ProbeAckData = TLMessages.ProbeAckData.litValue()
-  val Release = TLMessages.Release.litValue()
-  val ReleaseData = TLMessages.ReleaseData.litValue()
-  val Grant = TLMessages.Grant.litValue()
-  val GrantData = TLMessages.GrantData.litValue()
-  val ReleaseAck = TLMessages.ReleaseAck.litValue()
-  val GrantAck = TLMessages.GrantAck.litValue()
+  val PutFullData = TLMessages.PutFullData.litValue
+  val PutPartialData = TLMessages.PutPartialData.litValue
+  val ArithmeticData = TLMessages.ArithmeticData.litValue
+  val LogicalData = TLMessages.LogicalData.litValue
+  val Get = TLMessages.Get.litValue
+  val Hint = TLMessages.Hint.litValue
+  val AcquireBlock = TLMessages.AcquireBlock.litValue
+  val AcquirePerm = TLMessages.AcquirePerm.litValue
+  val Probe = TLMessages.Probe.litValue
+  val AccessAck = TLMessages.AccessAck.litValue
+  val AccessAckData = TLMessages.AccessAckData.litValue
+  val HintAck = TLMessages.HintAck.litValue
+  val ProbeAck = TLMessages.ProbeAck.litValue
+  val ProbeAckData = TLMessages.ProbeAckData.litValue
+  val Release = TLMessages.Release.litValue
+  val ReleaseData = TLMessages.ReleaseData.litValue
+  val Grant = TLMessages.Grant.litValue
+  val GrantData = TLMessages.GrantData.litValue
+  val ReleaseAck = TLMessages.ReleaseAck.litValue
+  val GrantAck = TLMessages.GrantAck.litValue
 
   val toT = BigInt(0)
   val toB = BigInt(1)

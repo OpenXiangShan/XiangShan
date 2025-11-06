@@ -16,12 +16,10 @@
 
 package cache
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{VerilatorBackendAnnotation, LineCoverageAnnotation, ToggleCoverageAnnotation, UserCoverageAnnotation, StructuralCoverageAnnotation}
-import chiseltest.legacy.backends.verilator.VerilatorFlags
+import chiseltest.simulator.VerilatorFlags
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -138,7 +136,8 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
     TLCacheCork() :=
     l3.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val io = IO(new L2TestTopIO)
 
@@ -259,7 +258,8 @@ class L2TestTopWrapper()(implicit p: Parameters) extends LazyModule {
 
   val testTop = LazyModule(new L2TestTop())
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new L2TestTopIO)
 
     AddSinks()
@@ -274,10 +274,10 @@ class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
 
   val annos = Seq(
     VerilatorBackendAnnotation,
-    LineCoverageAnnotation,
-    ToggleCoverageAnnotation,
-    UserCoverageAnnotation,
-    StructuralCoverageAnnotation,
+    // LineCoverageAnnotation,
+    // ToggleCoverageAnnotation,
+    // UserCoverageAnnotation,
+    // StructuralCoverageAnnotation,
     VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
     RunFirrtlTransformAnnotation(new PrintModuleName)
   )

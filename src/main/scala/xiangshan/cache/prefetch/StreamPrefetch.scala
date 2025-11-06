@@ -44,19 +44,17 @@ class StreamPrefetchReq(p: StreamPrefetchParameters) extends PrefetchReq {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchReq(p)).asInstanceOf[this.type]
 }
 
 class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
   val id = UInt(p.totalWidth.W)
-  
+
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
 
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchResp(p)).asInstanceOf[this.type]
 }
 
 class StreamPrefetchFinish(p: StreamPrefetchParameters) extends PrefetchFinish {
@@ -68,7 +66,6 @@ class StreamPrefetchFinish(p: StreamPrefetchParameters) extends PrefetchFinish {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamPrefetchFinish(p)).asInstanceOf[this.type]
 }
 
 class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
@@ -83,21 +80,18 @@ class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}" +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
-  override def cloneType: this.type = (new StreamPrefetchIO(p)).asInstanceOf[this.type]
 }
 
 class StreamBufferUpdate(p: StreamPrefetchParameters) extends PrefetchBundle {
   val hitIdx = UInt(log2Up(p.streamSize).W)
 
   override def toPrintable: Printable = { p"hitIdx=${hitIdx}" }
-  override def cloneType: this.type = (new StreamBufferUpdate(p)).asInstanceOf[this.type]
 }
 
 class StreamBufferAlloc(p: StreamPrefetchParameters) extends StreamPrefetchReq(p) {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
   }
-  override def cloneType: this.type = (new StreamBufferAlloc(p)).asInstanceOf[this.type]
 }
 
 
@@ -150,7 +144,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule with HasT
     when (hitIdxBeforeHead) {
       (0 until streamSize).foreach(i => deqLater(i) := Mux(i.U >= head || i.U <= hitIdx, true.B, deqLater(i)))
     }
-    
+
     XSDebug(io.update.valid && !empty && (isPrefetching(hitIdx) || valid(hitIdx)), p"hitIdx=${hitIdx} headBeforehitIdx=${headBeforehitIdx} hitIdxBeforeHead=${hitIdxBeforeHead}\n")
   }
 
@@ -245,7 +239,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule with HasT
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
   io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) => r.ready}).asUInt.orR
-  
+
   // realloc this stream buffer for a newly-found stream
   when (io.alloc.valid) {
     needRealloc := true.B
@@ -291,8 +285,6 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule with HasT
 class CompareBundle(width: Int) extends PrefetchBundle {
   val bits = UInt(width.W)
   val idx = UInt()
-
-  override def cloneType: this.type = (new CompareBundle(width)).asInstanceOf[this.type]
 }
 
 object ParallelMin {
@@ -305,7 +297,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   val io = IO(new StreamPrefetchIO(p))
 
   require(p.blockBytes > 0)
-  
+
   // TODO: implement this
   def streamCnt = p.streamCnt
   def streamSize = p.streamSize
@@ -390,7 +382,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
   io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>  buf.io.resp.ready}).asUInt.orR
-  
+
   // debug info
   XSDebug(s"${p.cacheName} " + p"io: ${io}\n")
   XSDebug(s"${p.cacheName} " + p"bufValids: ${Binary(bufValids.asUInt)} hit: ${hit} ages: ")

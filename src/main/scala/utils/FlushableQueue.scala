@@ -20,9 +20,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.internal.naming._  // can't use chisel3_ version because of compile order
 
-class FlushableQueueIO[T <: Data](private val gen: T, entries: Int) extends QueueIO(gen, entries) {
-  val flush = Input(Bool())
-}
+class FlushableQueueIO[T <: Data](private val gen: T, entries: Int) extends QueueIO(gen, entries, hasFlush = true)
 
 class FlushableQueue[T <: Data](gen: T, val entries: Int,
   pipe: Boolean = false, flow: Boolean = false) extends Module() {
@@ -69,7 +67,7 @@ class FlushableQueue[T <: Data](gen: T, val entries: Int,
     when (io.deq.ready) { io.enq.ready := true.B }
   }
 
-  when (io.flush) {
+  when (io.flush.get) {
     if (entries > 1) {
       enq_ptr.value := 0.U
       deq_ptr.value := 0.U
@@ -104,9 +102,9 @@ object FlushableQueue {
       val q = Module(new FlushableQueue(chiselTypeOf(enq.bits), entries, pipe, flow))
       q.io.enq.valid := enq.valid // not using <> so that override is allowed
       q.io.enq.bits := enq.bits
-      q.io.flush := flush
+      q.io.flush.get := flush
       enq.ready := q.io.enq.ready
-      TransitName(q.io.deq, q)
+      q.io.deq
     }
   }
 }

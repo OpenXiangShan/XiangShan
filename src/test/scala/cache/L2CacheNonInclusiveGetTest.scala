@@ -17,11 +17,9 @@
 package cache
 
 import scala.collection.mutable.ArrayBuffer
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -85,13 +83,14 @@ class L2NonInclusiveGetTestTop()(implicit p: Parameters) extends LazyModule {
     TLToAXI4() :=
     TLBuffer() :=
     TLCacheCork() :=
-    DebugIdentityNode() := 
+    DebugIdentityNode() :=
     l2.node
 
   // connect uncache access to l2 control node
   l2.ctlnode.get := DebugIdentityNode() := uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val io = IO(Flipped(new L2NonInclusiveGetTestTopIO))
 

@@ -21,7 +21,6 @@ BUILD_DIR = ./build
 TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
-MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP = top.TestMain
 IMAGE ?= temp
@@ -44,10 +43,12 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.test.runMain $(FPGATOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
-	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
-	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/sim_sram.v
-	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+	mill -i XiangShan.test.runMain $(FPGATOP)                           \
+		--target-dir $(@D) --full-stacktrace --output-file $(@F)    \
+		--disable-all --remove-assert                               \
+		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
+		--gen-mem-verilog full $(SIM_ARGS)
+	@sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -71,13 +72,14 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
-	mill -i XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
-	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
+	mill -i XiangShan.test.runMain $(SIMTOP)                           \
+		--target-dir $(@D) --full-stacktrace --output-file $(@F)   \
+		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf \
+		--gen-mem-verilog full $(SIM_ARGS)
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
 	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
@@ -298,8 +300,6 @@ release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
 clean:
-	git submodule foreach git clean -fdx
-	git clean -fd
 	rm -rf ./build
 
 init:
@@ -310,4 +310,7 @@ bump:
 
 bsp:
 	mill -i mill.contrib.BSP/install
+idea:
+	mill -i mill.idea.GenIdea/idea
+
 .PHONY: verilog emu clean help init bump bsp $(REF_SO)

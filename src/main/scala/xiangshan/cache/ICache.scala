@@ -375,8 +375,8 @@ class ICache extends ICacheModule
   val s3_ready = WireInit(false.B)
   val s2_tlb_resp = WireInit(io.tlb.resp.bits)
   val s2_valid = RegInit(false.B)
-  val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
-  val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
+  val s2_req_pc = RegEnable(s1_req_pc, 0.U, s1_fire)
+  val s2_req_mask = RegEnable(s1_req_mask, 0.U, s1_fire)
 
   val (s2_idx, s2_tag) = { (get_idx(s2_req_pc), get_tag(s2_tlb_resp.paddr)) }
   val (s2_ready, s2_allValid)  = {((s3_ready || !s2_valid),  (s2_valid && io.tlb.resp.valid)) }
@@ -388,7 +388,7 @@ class ICache extends ICacheModule
 
   // SRAM(Meta and Data) read reseponse
   // TODO :Parity wrong excetion
-  val (metas, datas)  = {(metaArray.io.readResp.tags , RegEnable(next=dataArray.io.readResp.datas, enable=s2_fire))}
+  val (metas, datas)  = {(metaArray.io.readResp.tags , RegEnable(dataArray.io.readResp.datas, s2_fire))}
   val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(log2Ceil(nWays).W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
@@ -407,16 +407,16 @@ class ICache extends ICacheModule
   val victimWayMask = UIntToOH(replacer.way(s2_idx))
 
   val (touch_sets, touch_ways) = ( Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets).W))),  Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
-  
-  touch_sets(0)       := s2_idx  
+
+  touch_sets(0)       := s2_idx
   touch_ways(0).valid := s2_hit
-  touch_ways(0).bits  := OHToUInt(hitVec) 
-  
+  touch_ways(0).bits  := OHToUInt(hitVec)
+
   replacer.access(touch_sets, touch_ways)
 
   //deal with icache exception
   val icacheExceptionVec = Wire(Vec(8,Bool()))
-  val hasIcacheException = icacheExceptionVec.asUInt().orR()
+  val hasIcacheException = icacheExceptionVec.asUInt.orR
   icacheExceptionVec := DontCare
   icacheExceptionVec(accessFault) := (s2_tlb_resp.excp.af.instr && s2_allValid)
   icacheExceptionVec(pageFault) := s2_tlb_resp.excp.pf.instr && s2_allValid
@@ -447,16 +447,16 @@ class ICache extends ICacheModule
   val s3_valid = RegInit(false.B)
   val s3_miss  = WireInit(false.B)
   val s3_passdown = WireInit(false.B)
-  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
-  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
-  val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
+  val s3_req_pc = RegEnable(s2_req_pc, 0.U, s2_fire)
+  val s3_req_mask = RegEnable(s2_req_mask, 0.U, s2_fire)
+  val s3_tlb_resp = RegEnable(s2_tlb_resp, 0.U.asTypeOf(new TlbResp), s2_fire)
   val s3_tag = RegEnable(s2_tag, s2_fire)
-  val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
+  val s3_hit = RegEnable(s2_hit, false.B, s2_fire)
   val s3_sec_miss = RegInit(false.B)
-  val s3_mmio = RegEnable(next=s2_mmio,init=false.B,enable=s2_fire)
-  val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
-  val s3_exception_vec = RegEnable(next= icacheExceptionVec,init=0.U.asTypeOf(Vec(8,Bool())), enable=s2_fire)
-  val s3_has_exception = RegEnable(next= hasIcacheException,init=false.B,enable=s2_fire)
+  val s3_mmio = RegEnable(s2_mmio, false.B, s2_fire)
+  val s3_wayMask = RegEnable(waymask, 0.U, s2_fire)
+  val s3_exception_vec = RegEnable(icacheExceptionVec, 0.U.asTypeOf(Vec(8,Bool())), s2_fire)
+  val s3_has_exception = RegEnable(hasIcacheException, false.B, s2_fire)
   val s3_idx = get_idx(s3_req_pc)
   val s3_data = datas
 
@@ -492,7 +492,7 @@ class ICache extends ICacheModule
 
 
   /* icache miss
-   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking  
+   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking
    * block the pipeline until refill finishes
    */
   val icacheMissQueue = Module(new IcacheMissQueue)
@@ -528,11 +528,11 @@ class ICache extends ICacheModule
 
   val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
 
-  touch_sets(1)       := metaWriteReq.meta_write_idx  
+  touch_sets(1)       := metaWriteReq.meta_write_idx
   touch_ways(1).valid := icacheMissQueue.io.meta_write.valid
   touch_ways(1).bits  := wayNum
 
-  (0 until nWays).map{ w => 
+  (0 until nWays).map{ w =>
     XSPerfAccumulate("hit_way_" + Integer.toString(w, 10),  s2_hit && OHToUInt(hitVec)  === w.U)
     XSPerfAccumulate("refill_way_" + Integer.toString(w, 10), icacheMissQueue.io.meta_write.valid && wayNum === w.U)
     XSPerfAccumulate("access_way_" + Integer.toString(w, 10), (icacheMissQueue.io.meta_write.valid && wayNum === w.U) || (s2_hit && OHToUInt(hitVec)  === w.U))
@@ -572,10 +572,10 @@ class ICache extends ICacheModule
   .elsewhen(s3_sec_miss && io.resp.fire()) { s3_sec_miss := false.B }
 
   // val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
-  val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
+  val refillDataVecReg = RegEnable(refillDataVec, is_same_cacheline && icacheMissQueue.io.resp.fire())
 
   s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !s3_sec_miss
-  s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss ) 
+  s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss )
 
 
   val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
@@ -616,7 +616,7 @@ class ICache extends ICacheModule
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
-  io.resp.bits.acf := s3_exception_vec(accessFault) 
+  io.resp.bits.acf := s3_exception_vec(accessFault)
   io.resp.bits.mmio := s3_mmio
 
   //to itlb
@@ -638,7 +638,7 @@ class ICache extends ICacheModule
   io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
   //To icache Uncache
-  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking 
+  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking
   io.mmio_acquire.bits.addr := mmioBusAligned(s3_tlb_resp.paddr)
   io.mmio_acquire.bits.id := cacheID.U
 
@@ -693,7 +693,7 @@ class ICache extends ICacheModule
     val fromMMMIO = io.mmio_grant
     XSDebug(toMMIO.fire(),"[mmio_acquire] valid:%d  ready:%d\n",toMMIO.valid,toMMIO.ready)
     XSDebug(fromMMMIO.fire(),"[mmio_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMMMIO.valid,fromMMMIO.ready,fromMMMIO.bits.data,fromMMMIO.bits.id)
-  } 
+  }
 
   def dump_pipe_info(){
     dump_s1_info()

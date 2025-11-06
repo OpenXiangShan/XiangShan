@@ -35,7 +35,7 @@ class SubModule extends XSModule {
     val src1, src2 = Input(UInt(XLEN.W))
     val out = Output(UInt((XLEN+1).W))
   })
-  io.out := (io.src1 +& (~io.src2).asUInt()) + 1.U
+  io.out := (io.src1 +& (~io.src2).asUInt) + 1.U
 }
 
 class LeftShiftModule extends XSModule {
@@ -55,8 +55,8 @@ class RightShiftModule extends XSModule {
   })
   io.srl_l := io.srlSrc >> io.shamt
   io.srl_w := io.srlSrc(31, 0) >> io.shamt
-  io.sra_l := (io.sraSrc.asSInt() >> io.shamt).asUInt()
-  io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt() >> io.shamt).asUInt()
+  io.sra_l := (io.sraSrc.asSInt >> io.shamt).asUInt
+  io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt >> io.shamt).asUInt
 }
 
 class MiscResultSelect extends XSModule {

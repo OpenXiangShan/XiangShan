@@ -16,11 +16,9 @@
 
 package cache.TLCTest
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
-import chiseltest.legacy.backends.verilator.VerilatorFlags
+import chiseltest.simulator.VerilatorFlags
 
 import chiseltest._
 import chiseltest.ChiselScalatestTester
@@ -35,7 +33,7 @@ import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Seq}
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.collection.mutable.ListBuffer
 
@@ -101,7 +99,8 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
   val slave = LazyModule(new TLCSlaveMMIO())
   slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
 
     val io = IO(new TLCCacheTestTopIO)
 
@@ -118,7 +117,8 @@ class TLCCacheTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 
   val testTop = LazyModule(new TLCCacheTestTop())
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new TLCCacheTestTopIO)
     AddSinks()
     io <> testTop.module.io
@@ -174,7 +174,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     val probeProbMap = Map(nothing -> 0.5, branch -> 0.4, trunk -> 0.1)
 
     def peekBigInt(source: Data): BigInt = {
-      source.peek().litValue()
+      source.peek().litValue
     }
 
     def peekBoolean(source: Bool): Boolean = {
@@ -183,8 +183,8 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     test(LazyModule(new TLCCacheTestTopWrapper()).module)
       .withAnnotations(Seq(VerilatorBackendAnnotation,
-        LineCoverageAnnotation,
-        ToggleCoverageAnnotation,
+        // LineCoverageAnnotation,
+        // ToggleCoverageAnnotation,
         VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
         RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
         c.io.mastersIO.foreach { mio =>

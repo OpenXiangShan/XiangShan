@@ -44,7 +44,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
 
   // s_pad_* is not used
   val s_idle :: s_lzd :: s_normlize :: s_recurrence :: s_recovery_1 :: s_recovery_2 :: s_pad_1 :: s_pad_2 :: s_finish :: Nil = Enum(9)
-  require(s_finish.litValue() == 8)
+  require(s_finish.litValue == 8)
 
   val state = RegInit(s_idle)
   val finished = state(3).asBool // state === s_finish
@@ -117,16 +117,16 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val d = Reg(UInt(wLen.W))
 
   val aLeadingZeros = RegEnable(
-    next = PriorityEncoder(ws(len - 1, 0).asBools().reverse),
-    enable = state === s_lzd
+    PriorityEncoder(ws(len - 1, 0).asBools.reverse),
+    state === s_lzd
   )
   val bLeadingZeros = RegEnable(
-    next = PriorityEncoder(d(len - 1, 0).asBools().reverse),
-    enable = state === s_lzd
+    PriorityEncoder(d(len - 1, 0).asBools.reverse),
+    state === s_lzd
   )
-  val diff = Cat(0.U(1.W), bLeadingZeros).asSInt() - Cat(0.U(1.W), aLeadingZeros).asSInt()
+  val diff = Cat(0.U(1.W), bLeadingZeros).asSInt - Cat(0.U(1.W), aLeadingZeros).asSInt
   val isNegDiff = diff(diff.getWidth - 1)
-  val quotientBits = Mux(isNegDiff, 0.U, diff.asUInt())
+  val quotientBits = Mux(isNegDiff, 0.U, diff.asUInt)
   val qBitsIsOdd = quotientBits(0)
   val recoveryShift = RegEnable(len.U - bLeadingZeros, state === s_normlize)
   val a_shifted, b_shifted = Wire(UInt(len.W))
@@ -166,7 +166,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val sel_0 :: sel_d :: sel_dx2 :: sel_neg_d :: sel_neg_dx2 :: Nil = Enum(5)
   val dx2, neg_d, neg_dx2 = Wire(UInt(wLen.W))
   dx2 := d << 1
-  neg_d := (~d).asUInt() // add '1' in carry-save adder later
+  neg_d := (~d).asUInt // add '1' in carry-save adder later
   neg_dx2 := neg_d << 1
 
   val q_sel = Wire(UInt(3.W))
@@ -175,7 +175,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
     sel_dx2 -> 2.U(2.W)
   ))
 
-  val w_truncated = (ws(wLen - 1, wLen - 1 - 6) + wc(wLen - 1, wLen - 1 - 6)).asSInt()
+  val w_truncated = (ws(wLen - 1, wLen - 1 - 6) + wc(wLen - 1, wLen - 1 - 6)).asSInt
   val d_truncated = d(len - 1, len - 3)
 
   val qSelTable = Array(

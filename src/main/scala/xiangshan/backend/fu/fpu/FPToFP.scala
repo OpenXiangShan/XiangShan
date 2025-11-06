@@ -52,7 +52,7 @@ class FPToFPDataModule(latency: Int) extends FPUDataModule {
   dcmp.io.b := src2
   dcmp.io.signaling := !rmReg(1)
 
-  val lt = dcmp.io.lt || (dcmp.io.a.asSInt() < 0.S && dcmp.io.b.asSInt() >= 0.S)
+  val lt = dcmp.io.lt || (dcmp.io.a.asSInt < 0.S && dcmp.io.b.asSInt >= 0.S)
 
   when(wflags){
     val isnan1 = maxType.isNaN(src1)

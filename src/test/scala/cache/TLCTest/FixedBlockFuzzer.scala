@@ -19,7 +19,7 @@
 package cache.TLCTest
 
 import Chisel._
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.IDMapGenerator
 import freechips.rocketchip.diplomacy._
@@ -98,7 +98,8 @@ class FixedBlockFuzzer(
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(clientParams)))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val finished = Bool(OUTPUT)
       val blockAddr = Input(UInt(64.W))

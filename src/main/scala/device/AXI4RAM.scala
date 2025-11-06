@@ -16,7 +16,7 @@
 
 package device
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
@@ -57,7 +57,7 @@ class AXI4RAM
     require(address.length >= 1)
     val baseAddress = address(0).base
 
-    def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt()
+    def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt
 
     def inRange(idx: UInt) = idx < (memByte / beatBytes).U
 
@@ -70,7 +70,7 @@ class AXI4RAM
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.io.clk   := clock
-        mem.io.en    := !reset.asBool() && ((state === s_rdata) || (state === s_wdata))
+        mem.io.en    := !reset.asBool && ((state === s_rdata) || (state === s_wdata))
         mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
         mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
         mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
@@ -84,7 +84,7 @@ class AXI4RAM
 
       val wdata = VecInit.tabulate(beatBytes) { i => in.w.bits.data(8 * (i + 1) - 1, 8 * i) }
       when(wen) {
-        mem.write(wIdx, wdata, in.w.bits.strb.asBools())
+        mem.write(wIdx, wdata, in.w.bits.strb.asBools)
       }
 
       Cat(mem.read(rIdx).reverse)

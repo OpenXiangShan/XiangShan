@@ -55,9 +55,9 @@ class LitDCacheLineResp(
 }
 
 trait LitMemOp {
-  val M_XRD: BigInt = MemoryOpConstants.M_XRD.litValue()
-  val M_XWR: BigInt = MemoryOpConstants.M_XWR.litValue()
-  val M_XA_SWAP: BigInt = MemoryOpConstants.M_XA_SWAP.litValue()
+  val M_XRD: BigInt = MemoryOpConstants.M_XRD.litValue
+  val M_XWR: BigInt = MemoryOpConstants.M_XWR.litValue
+  val M_XA_SWAP: BigInt = MemoryOpConstants.M_XA_SWAP.litValue
 }
 
 class DCacheLoadTrans extends TLCTrans with LitMemOp {
@@ -171,4 +171,3 @@ class DCacheAMOCallerTrans extends DCacheAMOTrans with TLCCallerTrans {
     resetTimer()
   }
 }
-

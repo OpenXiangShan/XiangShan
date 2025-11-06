@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -192,8 +192,6 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     e
   }
 
-  override def cloneType: this.type = (new PtwEntry(tagLen, hasPerm, hasLevel)).asInstanceOf[this.type]
-
   override def toPrintable: Printable = {
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
     p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} " +
@@ -239,7 +237,6 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
     ps
   }
 
-  override def cloneType: this.type = (new PtwEntries(num, tagLen, level, hasPerm)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
@@ -393,7 +390,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val levelNext = level + 1.U
-  val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
+  val sfenceLatch = RegEnable(false.B, false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
   // Access Perf
   val l1AccessPerf = Wire(Vec(PtwL1EntrySize, Bool()))
@@ -734,7 +731,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       rfOH.suggestName(s"sp_rfOH")
     }
   }
-  
+
   // sfence
   when (sfence.valid) {
     state := s_idle

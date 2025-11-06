@@ -18,10 +18,8 @@ package utils
 
 import chisel3._
 import chisel3.util._
-import Chisel.experimental.chiselName
 
-@chiselName
-class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends MultiIOModule {
+class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends Module {
     class InBundle extends Bundle {
         val sel = Bool()
         val src = gen.cloneType
@@ -39,7 +37,7 @@ class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends M
 // this could be used to handle the situation
 // in which we have mux sources at multiple
 // locations, and this is same to multiple
-// when clauses as below, but collect them 
+// when clauses as below, but collect them
 // and put them into a ParallelPrioriyMux
 // when (sel1) { x := in1 }
 // when (sel2) { x := in2 }

@@ -34,8 +34,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   val flush = Input(Bool())
-  override def cloneType: DispatchQueueIO.this.type =
-    new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
   val dqFull = Output(Bool())
 }
 

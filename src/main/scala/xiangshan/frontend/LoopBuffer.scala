@@ -90,12 +90,12 @@
 //   val offsetCounter = Reg(UInt((log2Up(IBufSize)+2).W))
 //   val tsbbPC = RegInit(0.U(VAddrBits.W))
 
-//   val brTaken = Cat((0 until PredictWidth).map(i => io.in.fire && io.in.bits.mask(i) && predTakenVec(i))).orR()
+//   val brTaken = Cat((0 until PredictWidth).map(i => io.in.fire && io.in.bits.mask(i) && predTakenVec(i))).orR
 //   val brIdx = OHToUInt(predTakenVec.asUInt)
 //   val sbbTaken = brTaken && isSBB(io.in.bits.instrs(brIdx))
 
 //   val tsbbVec = Cat((0 until PredictWidth).map(i => io.in.fire && io.in.bits.mask(i) && io.in.bits.pc(i) === tsbbPC))
-//   val hasTsbb = tsbbVec.orR()
+//   val hasTsbb = tsbbVec.orR
 //   val tsbbIdx = OHToUInt(Reverse(tsbbVec))
 //   val tsbbTaken = brTaken && io.in.bits.pc(brIdx) === tsbbPC
 
@@ -115,7 +115,7 @@
 
 //   // Enque loop body
 //   when(io.in.fire && LBstate === s_fill) {
-//     io.loopBufPar.noTakenMask.asBools().zipWithIndex.map {case(m, i) =>
+//     io.loopBufPar.noTakenMask.asBools.zipWithIndex.map {case(m, i) =>
 //       when(m) {
 //         buffer(io.in.bits.pc(i)(7,1)).inst := io.in.bits.instrs(i)(15, 0)
 //         bufferValid(io.in.bits.pc(i)(7,1)) := true.B
@@ -156,7 +156,7 @@
 //           LBstate := s_fill
 //           XSDebug("State change: FILL\n")
 //           // This is ugly
-//           // offsetCounter := Cat("b1".U, sbboffset(io.in.bits.instrs(brIdx))) + 
+//           // offsetCounter := Cat("b1".U, sbboffset(io.in.bits.instrs(brIdx))) +
 //           //   (0 until PredictWidth).map(i => Mux(!io.in.bits.mask(i) || i.U < brIdx, 0.U, Mux(io.in.bits.pd(i).isRVC, 1.U, 2.U))).fold(0.U(log2Up(16+1).W))(_+_)
 //           offsetCounter := Cat("b1".U, sbboffset(io.in.bits.instrs(brIdx))._2)
 //           tsbbPC := io.in.bits.pc(brIdx)

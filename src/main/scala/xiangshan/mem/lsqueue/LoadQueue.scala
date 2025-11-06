@@ -189,7 +189,7 @@ class LoadQueue extends XSModule
         io.loadIn(i).bits.forwardMask.asUInt,
         io.loadIn(i).bits.mmio
       )}
-      datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) && 
+      datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) &&
         !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
         !io.needReplayFromRS(i) // do not writeback if that inst will be resend from rs
       writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
@@ -257,7 +257,7 @@ class LoadQueue extends XSModule
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && datavalid(i)
-  })).asUInt() // use uint instead vec to reduce verilog lines
+  })).asUInt // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
   // generate lastCycleSelect mask
@@ -349,7 +349,7 @@ class LoadQueue extends XSModule
     val length = mask.length
     val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
     val highBitsUint = Cat(highBits.reverse)
-    PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
+    PriorityEncoder(Mux(highBitsUint.orR, highBitsUint, mask.asUInt))
   }
 
   def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
@@ -419,7 +419,7 @@ class LoadQueue extends XSModule
     val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
-    val lqViolation = lqViolationVec.asUInt().orR()
+    val lqViolation = lqViolationVec.asUInt.orR
     val lqViolationIndex = getFirstOne(lqViolationVec, RegNext(lqIdxMask))
     val lqViolationUop = uop(lqViolationIndex)
     // lqViolationUop.lqIdx.flag := deqMask(lqViolationIndex) ^ deqPtrExt.flag
@@ -433,7 +433,7 @@ class LoadQueue extends XSModule
         io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
         (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
     })))
-    val wbViolation = wbViolationVec.asUInt().orR()
+    val wbViolation = wbViolationVec.asUInt.orR
     val wbViolationUop = getOldestInTwo(wbViolationVec, RegNext(VecInit(io.loadIn.map(_.bits.uop))))
     XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
@@ -444,7 +444,7 @@ class LoadQueue extends XSModule
         io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s1(j).paddr(PAddrBits - 1, 3) &&
         (io.storeIn(i).bits.mask & io.load_s1(j).mask).orR
     })))
-    val l1Violation = l1ViolationVec.asUInt().orR()
+    val l1Violation = l1ViolationVec.asUInt.orR
     val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.load_s1.map(_.uop))))
     XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
@@ -529,7 +529,7 @@ class LoadQueue extends XSModule
   // check if rollback request is still valid in parallel
   val rollbackValidVecChecked = Wire(Vec(3, Bool()))
   for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopVec).zipWithIndex) {
-    rollbackValidVecChecked(idx) := v && 
+    rollbackValidVecChecked(idx) := v &&
       (!lastCycleRedirect.valid || isBefore(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
       (!lastlastCycleRedirect.valid || isBefore(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx))
   }
@@ -623,7 +623,7 @@ class LoadQueue extends XSModule
 
   // Read vaddr for mem exception
   // no inst will be commited 1 cycle before tval update
-  vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value 
+  vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect

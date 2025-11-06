@@ -21,15 +21,12 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
-import chisel3.experimental.chiselName
-import scala.tools.nsc.doc.base.comment.Bold
 
 class RASEntry() extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
-@chiselName
 class RAS extends BasePredictor
 {
     class RASResp extends Resp
@@ -43,7 +40,7 @@ class RAS extends BasePredictor
         val rasTop = new RASEntry
     }
 
-    class RASIO extends DefaultBasePredictorIO 
+    class RASIO extends DefaultBasePredictorIO
     {
         val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
@@ -54,7 +51,7 @@ class RAS extends BasePredictor
         val meta = Output(new RASBranchInfo)
     }
 
-    
+
     def rasEntry() = new RASEntry
 
     object RASEntry {
@@ -69,7 +66,6 @@ class RAS extends BasePredictor
     override val io = IO(new RASIO)
     override val debug = true
 
-    @chiselName
     class RASStack(val rasSize: Int) extends XSModule {
         val io = IO(new Bundle {
             val push_valid = Input(Bool())
@@ -98,7 +94,7 @@ class RAS extends BasePredictor
         val sp = RegInit(0.U(log2Up(rasSize).W))
         val top = RegInit(0.U.asTypeOf(new RASEntry))
         val topPtr = RegInit(0.U(log2Up(rasSize).W))
-        
+
         def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
         def ptrDec(ptr: UInt) = Mux(ptr === 0.U, (rasSize-1).U, ptr - 1.U)
 

@@ -85,18 +85,18 @@ package object xiangshan {
     def storeIsAMO(fuType: UInt) = fuType(1)
 
     val functionNameMap = Map(
-      jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int to float",
-      csr.litValue() -> "csr",
-      alu.litValue() -> "alu",
-      mul.litValue() -> "mul",
-      div.litValue() -> "div",
-      fence.litValue() -> "fence",
-      fmac.litValue() -> "fmac",
-      fmisc.litValue() -> "fmisc",
-      fDivSqrt.litValue() -> "fdiv/fsqrt",
-      ldu.litValue() -> "load",
-      stu.litValue() -> "store"
+      jmp.litValue -> "jmp",
+      i2f.litValue -> "int to float",
+      csr.litValue -> "csr",
+      alu.litValue -> "alu",
+      mul.litValue -> "mul",
+      div.litValue -> "div",
+      fence.litValue -> "fence",
+      fmac.litValue -> "fmac",
+      fmisc.litValue -> "fmisc",
+      fDivSqrt.litValue -> "fdiv/fsqrt",
+      ldu.litValue -> "load",
+      stu.litValue -> "store"
     )
 
   }

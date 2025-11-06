@@ -21,7 +21,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.ExcitingUtils._
-import chisel3.experimental.chiselName
 
 trait LTBParams extends HasXSParameter with HasBPUParameter {
   //  +-----------+---------+--------------+-----------+
@@ -84,7 +83,6 @@ class LTBColumnRedirect extends LTBBundle {
   val isReplay = Bool()
 }
 
-@chiselName
 class LTBColumn extends LTBModule {
   val io = IO(new Bundle() {
     // if3 send req
@@ -299,9 +297,9 @@ class LTBColumn extends LTBModule {
     XSDebug(io.repair, "Repair...\n")
     XSDebug("if3_fire=%d if4_fire=%d valid=%d\n", io.if3_fire, io.if4_fire,valid)
     XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, if3_pc, if3_idx, if3_tag)
-    XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d\n", 
+    XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d\n",
       if4_entry.tag, if4_entry.conf, if4_entry.age, if4_entry.tripCnt, if4_entry.specCnt)
-    XSDebug("[if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d\n", 
+    XSDebug("[if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d\n",
       if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt)
     // XSDebug(false, true.B, p"unusable=${if4_entry.unusable}\n")
 
@@ -329,7 +327,6 @@ class LTBColumn extends LTBModule {
   }
 }
 
-@chiselName
 class LoopPredictor extends BasePredictor with LTBParams {
   class LoopResp extends Resp {
     val exit = Vec(PredictWidth, Bool())
@@ -351,7 +348,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   override val io = IO(new LoopIO)
-  
+
   val ltbs = Seq.fill(PredictWidth) { Module(new LTBColumn) }
 
   val ltbAddr = new TableAddr(idxLen + 4, PredictWidth)
@@ -370,7 +367,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val redirect = io.redirect.bits.cfiUpdate
   val redirectPC = redirect.pc
   val redirectBank = ltbAddr.getBank(redirectPC)
- 
+
   // 只要把同一个packAligned PC的每一项传进16个ltb中即可
   val packetAlignedPC = packetAligned(pc)
 

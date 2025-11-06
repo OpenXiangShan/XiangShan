@@ -17,7 +17,7 @@
 package top
 
 import chisel3._
-import chipsalliance.rocketchip.config
+import org.chipsalliance.cde.config
 import device._
 import freechips.rocketchip.amba.axi4.AXI4Xbar
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -40,7 +40,8 @@ class SimMMIO()(implicit p: config.Parameters) extends LazyModule {
   flash.node := axiBus
   sd.node := axiBus
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle() {
       val uart = new UARTIO
     })

@@ -20,7 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -56,7 +55,6 @@ class SCTableIO(val ctrBits: Int = 6) extends SCBundle {
   val update = Input(new SCUpdate(ctrBits))
 }
 
-@chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
@@ -70,14 +68,14 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
   val if2_idx = getIdx(io.req.bits.hist, io.req.bits.pc)
-  val if3_idx = RegEnable(if2_idx, enable=io.req.valid)
+  val if3_idx = RegEnable(if2_idx, io.req.valid)
 
-  val table_r = 
+  val table_r =
     VecInit((0 until TageBanks).map(b => VecInit((0 to 1).map(i => table.io.r.resp.data(b*2+i)))))
 
 
   val if2_mask = io.req.bits.mask
-  val if3_mask = RegEnable(if2_mask, enable=io.req.valid)
+  val if3_mask = RegEnable(if2_mask, io.req.valid)
 
   val update_idx = getIdx(io.update.hist, io.update.pc)
   val update_wdatas =
@@ -86,8 +84,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
 
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := if2_idx
-                        
-  val updateWayMask = 
+
+  val updateWayMask =
     VecInit((0 until TageBanks).map(b =>
       VecInit((0 to 1).map(i =>
         (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt))))).asUInt
@@ -104,7 +102,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   })
 
   val wrBypassEntries = 4
-  
+
   val wrbypass_idxs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
   val wrbypass_ctrs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, SInt(ctrBits.W)))))
   val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool()))))
@@ -143,7 +141,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
       }
     }
   }
-  
+
   when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
     wrbypass_idxs(wrbypass_enq_idx) := update_idx
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
@@ -157,8 +155,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
       p"if2_idx=${if2_idx}, hist=${Hexadecimal(io.req.bits.hist)}, " +
       p"if2_mask=${Binary(if2_mask)}\n")
     for (i <- 0 until TageBanks) {
-      XSDebug(RegNext(io.req.valid), 
-        p"scTableResp[${i.U}]: if3_idx=${if3_idx}," + 
+      XSDebug(RegNext(io.req.valid),
+        p"scTableResp[${i.U}]: if3_idx=${if3_idx}," +
         p"ctr:${io.resp(i).ctr}, if3_mask=${Binary(if3_mask)}\n")
       XSDebug(io.update.mask(i),
         p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
@@ -218,11 +216,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
       t
     }
   }
-  
+
   val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
   val useThresholds = VecInit(scThresholds map (_.thres))
   val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
-  
+
   val if3_scResps = VecInit(scTables.map(t => t.io.resp))
 
   val scUpdateMask = WireInit(0.U.asTypeOf(Vec(SCNTables, Vec(TageBanks, Bool()))))
@@ -234,14 +232,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
   scUpdateOldCtrs := DontCare
 
   val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
-  
+
   val if4_sc_used, if4_conf, if4_unconf, if4_agree, if4_disagree =
     0.U.asTypeOf(Vec(TageBanks, Bool()))
   val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
     0.U.asTypeOf(Vec(TageBanks, Bool()))
   val update_on_mispred, update_on_unconf, sc_misp_tage_corr, sc_corr_tage_misp =
     0.U.asTypeOf(Vec(TageBanks, Bool()))
-  
+
   // for sc ctrs
   def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
   // for tage ctrs
@@ -252,7 +250,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
     scMeta := DontCare
     // do summation in if3
     val if3_scTableSums = VecInit(
-      (0 to 1) map { i => 
+      (0 to 1) map { i =>
         ParallelSingedExpandingAdd(if3_scResps map (r => getCentered(r(w).ctr(i)))) // TODO: rewrite with wallace tree
       }
     )

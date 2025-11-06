@@ -163,15 +163,15 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
 
   io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
-  val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
+  val s2_br_mask = RegEnable(ftqRead.br_mask, s1_redirect_valid_reg)
   val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
-      if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
-    })(s1_redirect_bits_reg.ftqOffset), enable = s1_redirect_valid_reg)
-  val s2_hist = RegEnable(ftqRead.hist, enable = s1_redirect_valid_reg)
-  val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
-  val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
-  val s2_cfiUpdata_pc = RegEnable(cfiUpdate_pc, enable = s1_redirect_valid_reg)
-  val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, enable = s1_redirect_valid_reg)
+      if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR
+    })(s1_redirect_bits_reg.ftqOffset), s1_redirect_valid_reg)
+  val s2_hist = RegEnable(ftqRead.hist, s1_redirect_valid_reg)
+  val s2_target = RegEnable(target, s1_redirect_valid_reg)
+  val s2_pd = RegEnable(s1_pd, s1_redirect_valid_reg)
+  val s2_cfiUpdata_pc = RegEnable(cfiUpdate_pc, s1_redirect_valid_reg)
+  val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, s1_redirect_valid_reg)
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
   val s2_ftqRead = io.stage2FtqRead.entry
 
@@ -312,7 +312,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   )
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
-  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
+  flushRedirectReg.bits := RegEnable(flushRedirect.bits, flushRedirect.valid)
 
   io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, frontendRedirect)
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry

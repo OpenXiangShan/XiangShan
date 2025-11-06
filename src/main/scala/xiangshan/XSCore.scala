@@ -28,7 +28,7 @@ import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater}
 import xiangshan.cache.prefetch._
-import chipsalliance.rocketchip.config
+import org.chipsalliance.cde.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.L1CacheErrorInfo
@@ -297,23 +297,10 @@ trait HasXSParameter {
   )
 }
 
-abstract class XSModule extends MultiIOModule
+abstract class XSModule extends Module
   with HasXSParameter
   with HasExceptionNO
-  with HasFPUParameters {
-  def io: Record
-}
-
-//remove this trait after impl module logic
-trait NeedImpl {
-  this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
-    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
-    val io = chisel3.experimental.IO(iodef)
-    io <> DontCare
-    io
-  }
-}
+  with HasFPUParameters
 
 abstract class XSBundle extends Bundle
   with HasXSParameter

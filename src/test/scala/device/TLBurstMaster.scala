@@ -16,7 +16,7 @@
 
 package device
 
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import chiseltest._
@@ -37,7 +37,8 @@ class TLBurstMaster
     Seq(TLMasterParameters.v1("TLMaster", idRange))
   )))
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val io = IO(new Bundle() {
       val finished = Output(Bool())
     })

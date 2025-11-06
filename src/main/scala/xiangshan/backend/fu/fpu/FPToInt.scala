@@ -57,7 +57,7 @@ class FPToIntDataModule(latency: Int) extends FPUDataModule {
   dcmp.io.b := src2_d
   dcmp.io.signaling := !rm_reg(1)
 
-  val dcmp_out = ((~rm_reg).asUInt() & Cat(dcmp.io.lt, dcmp.io.eq)).orR()
+  val dcmp_out = ((~rm_reg).asUInt & Cat(dcmp.io.lt, dcmp.io.eq)).orR
   val dcmp_exc = dcmp.io.exceptionFlags
 
   val conv = Module(new RecFNToIN(maxExpWidth, maxSigWidth, XLEN))
@@ -67,7 +67,7 @@ class FPToIntDataModule(latency: Int) extends FPUDataModule {
 
   val conv_out = WireInit(conv.io.out)
   val conv_exc = WireInit(Cat(
-    conv.io.intExceptionFlags(2, 1).orR(),
+    conv.io.intExceptionFlags(2, 1).orR,
     0.U(3.W),
     conv.io.intExceptionFlags(0)
   ))

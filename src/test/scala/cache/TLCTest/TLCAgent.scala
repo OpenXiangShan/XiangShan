@@ -18,7 +18,7 @@ package cache.TLCTest
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import scala.util.Random
 import chisel3.util._
 
@@ -181,9 +181,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
 
   var clock = 0
 
-  def transStep(): Unit = {
-    Unit
-  }
+  def transStep(): Unit = {}
 
   def step(): Unit = {
     transStep()

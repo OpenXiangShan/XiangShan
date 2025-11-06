@@ -230,7 +230,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   val headClear = Cat(commitStateQueue(headPtr.value).map(s => {
     s === s_invalid || s === s_commited
-  })).andR()
+  })).andR
   when(headClear && headPtr =/= tailPtr) {
     headPtr := headPtr + 1.U
   }
@@ -272,7 +272,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.cfiIsRVC := RegNext(RegNext(cfiIsRVC(headPtr.value)))
   commitEntry.target := RegNext(RegNext(update_target(headPtr.value)))
 
-  io.commit_ftqEntry.valid := RegNext(RegNext(Cat(commit_valids).orR())) //TODO: do we need this?
+  io.commit_ftqEntry.valid := RegNext(RegNext(Cat(commit_valids).orR)) //TODO: do we need this?
   io.commit_ftqEntry.bits := commitEntry
 
   // read logic
@@ -380,7 +380,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     def loopCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
       commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
         case (((valid, pd), ans), taken) =>
-        Mux(valid && (pd.isBr) && ans.hit.asBool, 
+        Mux(valid && (pd.isBr) && ans.hit.asBool,
           isWrong ^ (!taken),
             false.B)
       }

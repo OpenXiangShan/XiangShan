@@ -279,8 +279,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val mipFixMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt()
-  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt()
+  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt
+  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt
   var extList = List('a', 's', 'i', 'u')
   if (HasMExtension) { extList = extList :+ 'm' }
   if (HasCExtension) { extList = extList :+ 'c' }
@@ -329,7 +329,7 @@ class CSR extends FunctionUnit with HasCSRConst
     GenMask(37) | // MBE
     GenMask(36) | // SBE
     GenMask(6)    // UBE
-  ), 64)).asUInt()
+  ), 64)).asUInt
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
@@ -427,7 +427,7 @@ class CSR extends FunctionUnit with HasCSRConst
     val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
     csrw_dirty_fp_state := true.B
     fcsrOld.frm := wdata(2,0)
-    fcsrOld.asUInt()
+    fcsrOld.asUInt
   }
   def frm_rfn(rdata: UInt): UInt = rdata(7,5)
 
@@ -440,7 +440,7 @@ class CSR extends FunctionUnit with HasCSRConst
     } else {
       fcsrNew.fflags := wdata(4,0)
     }
-    fcsrNew.asUInt()
+    fcsrNew.asUInt
   }
   def fflags_rfn(rdata:UInt): UInt = rdata(4,0)
 
@@ -630,10 +630,10 @@ class CSR extends FunctionUnit with HasCSRConst
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdata | src1),
-    CSROpType.clr  -> (rdata & (~src1).asUInt()),
+    CSROpType.clr  -> (rdata & (~src1).asUInt),
     CSROpType.wrti -> csri,
     CSROpType.seti -> (rdata | csri),
-    CSROpType.clri -> (rdata & (~csri).asUInt())
+    CSROpType.clri -> (rdata & (~csri).asUInt)
   ))
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
@@ -664,10 +664,10 @@ class CSR extends FunctionUnit with HasCSRConst
   val wdataFix = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdataFix | src1),
-    CSROpType.clr  -> (rdataFix & (~src1).asUInt()),
+    CSROpType.clr  -> (rdataFix & (~src1).asUInt),
     CSROpType.wrti -> csri,
     CSROpType.seti -> (rdataFix | csri),
-    CSROpType.clri -> (rdataFix & (~csri).asUInt())
+    CSROpType.clri -> (rdataFix & (~csri).asUInt)
   ))
   MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
@@ -679,7 +679,7 @@ class CSR extends FunctionUnit with HasCSRConst
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
-    mstatus := mstatusNew.asUInt()
+    mstatus := mstatusNew.asUInt
   }
   csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
@@ -800,7 +800,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
-  val intrBitSet = intrVec.orR()
+  val intrBitSet = intrVec.orR
   csrio.interrupt := intrBitSet
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
@@ -825,7 +825,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
-  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
+  val causeNO = (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionIntr = csrio.exception.valid
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",

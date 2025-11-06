@@ -39,16 +39,12 @@ object hartIdRFFp extends (() => Int) {
 class RfReadPort(len: Int) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
-  override def cloneType: RfReadPort.this.type =
-    new RfReadPort(len).asInstanceOf[this.type]
 }
 
 class RfWritePort(len: Int) extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Input(UInt(len.W))
-  override def cloneType: RfWritePort.this.type =
-    new RfWritePort(len).asInstanceOf[this.type]
 }
 
 class Regfile
@@ -201,7 +197,6 @@ class regfile_160x64_10w16r_sim extends BlackBox with HasBlackBoxResource {
 
   val vsrc = "/vsrc/regfile_160x64_10w16r_sim.v"
   println(s"Regfile: Using verilog source at: $vsrc")
-  setResource(vsrc)
+  addResource(vsrc)
 
 }
-

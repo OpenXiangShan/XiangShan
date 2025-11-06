@@ -18,7 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
 
@@ -33,7 +33,7 @@ class FlashHelper extends BlackBox with HasBlackBoxInline {
   setInline("FlashHelper.v",
     s"""
        |import "DPI-C" function void flash_read
-       |(  
+       |(
        |  input int addr,
        |  output longint data
        |);

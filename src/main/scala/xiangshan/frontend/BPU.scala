@@ -22,7 +22,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
-import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = true && !env.FPGAPlatform
@@ -117,7 +116,7 @@ trait PredictorUtils {
   }
 }
 
-trait HasIFUFire { this: MultiIOModule =>
+trait HasIFUFire { this: Module =>
   val fires = IO(Input(Vec(4, Bool())))
   val s1_fire  = fires(0)
   val s2_fire  = fires(1)
@@ -215,7 +214,6 @@ abstract class BPUStage extends XSModule with HasBPUParameter
   }
 }
 
-@chiselName
 class BPUStage1 extends BPUStage {
 
   // ubtb is accessed with inLatch pc in s1,
@@ -253,7 +251,7 @@ class BPUStage1 extends BPUStage {
     io.out.brInfo.metas.map(_.debug_ubtb_cycle := GTimer())
   }
 }
-@chiselName
+
 class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
@@ -283,7 +281,7 @@ class BPUStage2 extends BPUStage {
     io.out.brInfo.metas.map(_.debug_btb_cycle := GTimer())
   }
 }
-@chiselName
+
 class BPUStage3 extends BPUStage {
   class S3IO extends XSBundle {
     val predecode = Input(new Predecode)
@@ -474,7 +472,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     p.fires <> io.inFire
     p.ctrl <> io.ctrl
   })
-  
+
   io.in_ready := preds.map(p => p.in_ready).reduce(_&&_)
 
   val s1 = Module(new BPUStage1)
@@ -529,7 +527,7 @@ class FakeBPU extends BaseBPU {
   })
   io.brInfo <> DontCare
 }
-@chiselName
+
 class BPU extends BaseBPU {
 
   //**********************Stage 1****************************//
@@ -585,9 +583,9 @@ class BPU extends BaseBPU {
   s1.io.in.resp <> s1_resp_in
   s1.io.in.brInfo <> s1_brInfo_in
 
-  val s1_hist = RegEnable(io.in.hist, enable=s1_fire)
-  val s2_hist = RegEnable(s1_hist, enable=s2_fire)
-  val s3_hist = RegEnable(s2_hist, enable=s3_fire)
+  val s1_hist = RegEnable(io.in.hist, s1_fire)
+  val s2_hist = RegEnable(s1_hist, s2_fire)
+  val s3_hist = RegEnable(s2_hist, s3_fire)
 
   s1.io.debug_hist := s1_hist
   s2.io.debug_hist := s2_hist
@@ -623,7 +621,7 @@ class BPU extends BaseBPU {
   s3.s3IO.predecode <> io.predecode
   s3.s3IO.redirect <> io.redirect
   s3.s3IO.ctrl <> io.ctrl
-  
+
 
   if (BPUDebug) {
     if (debug_verbose) {

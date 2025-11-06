@@ -20,11 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
 import scala.util.matching.Regex
@@ -102,23 +97,20 @@ class TageUpdate extends TageBundle {
   val u = Vec(TageBanks, UInt(2.W))
 }
 
-class FakeTageTable() extends TageModule {
+class TagePredModule extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
-  io.resp := DontCare
-
 }
-@chiselName
+
+class FakeTageTable() extends TagePredModule {
+  io.resp := DontCare
+}
+
 class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int)
-  extends TageModule with HasFoldedHistory {
-  val io = IO(new Bundle() {
-    val req = Input(Valid(new TageReq))
-    val resp = Output(Vec(TageBanks, Valid(new TageResp)))
-    val update = Input(new TageUpdate)
-  })
+  extends TagePredModule with HasFoldedHistory {
   // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 4
@@ -166,12 +158,12 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val if3_table_r = table.io.r.resp.data
 
   val if2_mask = io.req.bits.mask
-  val if3_mask = RegEnable(if2_mask, enable=io.req.valid)
+  val if3_mask = RegEnable(if2_mask, io.req.valid)
 
   val if3_req_rhits = VecInit((0 until TageBanks).map(b => {
     if3_table_r(b).valid && if3_table_r(b).tag === if3_tag
   }))
-  
+
   (0 until TageBanks).map(b => {
     io.resp(b).valid := if3_req_rhits(b) && if3_mask(b)
     io.resp(b).bits.ctr := if3_table_r(b).ctr
@@ -281,7 +273,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       }
     }
   }
-  
+
   when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
     wrbypass_tags(wrbypass_enq_idx) := update_tag
     wrbypass_idxs(wrbypass_enq_idx) := update_idx
@@ -298,7 +290,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val ub = PriorityEncoder(u.uMask)
     val idx = if2_idx
     val tag = if2_tag
-    XSDebug(io.req.valid, 
+    XSDebug(io.req.valid,
       p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
       p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
       p"tag=$tag, mask=${Binary(if2_mask)}\n")
@@ -363,7 +355,6 @@ class FakeTage extends BaseTage {
   io.meta <> DontCare
 }
 
-@chiselName
 class Tage extends BaseTage {
 
   val tables = TableInfo.map {
@@ -379,20 +370,20 @@ class Tage extends BaseTage {
   override val debug = true
 
   // Keep the table responses to process in s3
-  // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=s3_fire)
-  // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=s3_fire)
-  
+  // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), s3_fire)
+  // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), s3_fire)
+
   val if3_resps = VecInit(tables.map(t => t.io.resp))
 
 
-  val if3_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
-  val if4_bim = RegEnable(if3_bim, enable=s3_fire)
+  val if3_bim = RegEnable(io.bim, io.pc.valid) // actually it is s2Fire
+  val if4_bim = RegEnable(if3_bim, s3_fire)
 
-  val debug_pc_s2 = RegEnable(io.pc.bits, enable=io.pc.valid)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=s3_fire)
+  val debug_pc_s2 = RegEnable(io.pc.bits, io.pc.valid)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, s3_fire)
 
-  val debug_hist_s2 = RegEnable(io.hist, enable=io.pc.valid)
-  val debug_hist_s3 = RegEnable(debug_hist_s2, enable=s3_fire)
+  val debug_hist_s2 = RegEnable(io.hist, io.pc.valid)
+  val debug_hist_s3 = RegEnable(debug_hist_s2, s3_fire)
 
   val u = io.update.bits
   val updateValids =
@@ -512,7 +503,7 @@ class Tage extends BaseTage {
         updateUMask(allocate.bits)(w) := true.B
         updateU(allocate.bits)(w) := 0.U
       }.otherwise {
-        
+
         val provider = updateMeta.provider
         val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
         for (i <- 0 until TageNTables) {
@@ -600,12 +591,3 @@ class Tage extends BaseTage {
 
 
 class Tage_SC extends Tage with HasSC {}
-
-object TageTest extends App {
-  override def main(args: Array[String]): Unit = {
-    (new ChiselStage).execute(args, Seq(
-      ChiselGeneratorAnnotation(() => new Tage),
-      RunFirrtlTransformAnnotation(new RenameDesiredNames)
-    ))
-  }
-}

@@ -136,7 +136,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     Cat(offect(OffsetWidth - 1, 3), 0.U(3.W))
 
   def isOneOf(key: UInt, seq: Seq[UInt]): Bool =
-    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR()
+    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR
 
   def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
@@ -196,7 +196,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)
-  val secondInsertIdx = Mux(sameTag, 
+  val secondInsertIdx = Mux(sameTag,
     firstInsertIdx,
     Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
   )
@@ -281,7 +281,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
+  val empty = Cat(invalidMask).andR && !Cat(io.in.map(_.valid)).orR
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   val validCount = PopCount(validMask)
   val do_eviction = RegNext(validCount >= threshold, init = false.B)
@@ -315,7 +315,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
-    !Cat(widthMap(i => inflightMask(i) && tag(idx) === tag(i))).orR()
+    !Cat(widthMap(i => inflightMask(i) && tag(idx) === tag(i))).orR
   }
 
   val need_drain = sbuffer_state === x_drain_sbuffer
@@ -352,8 +352,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
     need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
-  val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
-  val evictionTag = RegEnable(tag(evictionIdx), enable = willSendDcacheReq)
+  val evictionIdxReg = RegEnable(evictionIdx, willSendDcacheReq)
+  val evictionTag = RegEnable(tag(evictionIdx), willSendDcacheReq)
 
   io.dcache.req.valid := prepareValidReg
   io.dcache.req.bits.addr := getAddr(evictionTag)

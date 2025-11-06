@@ -23,7 +23,7 @@ import xiangshan.backend.fu.{FuConfig, FunctionUnit, HasPipelineReg}
 
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
-    def toSInt: SInt = Cat(0.U(1.W), x).asSInt()
+    def toSInt: SInt = Cat(0.U(1.W), x).asSInt
   }
 }
 

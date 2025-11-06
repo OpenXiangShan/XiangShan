@@ -60,7 +60,6 @@ class ScoreTableEntry(p: BOPParameters) extends PrefetchBundle {
   }
 
   override def toPrintable: Printable = { p"${offset}:${score}" }
-  override def cloneType: this.type = (new ScoreTableEntry(p)).asInstanceOf[this.type]
 }
 
 class TestOffsetReq(p: BOPParameters) extends PrefetchBundle {
@@ -72,7 +71,6 @@ class TestOffsetReq(p: BOPParameters) extends PrefetchBundle {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} off=${testOffset} ptr=${ptr}"
   }
-  override def cloneType: this.type = (new TestOffsetReq(p)).asInstanceOf[this.type]
 }
 
 class TestOffsetResp(p: BOPParameters) extends PrefetchBundle {
@@ -83,7 +81,6 @@ class TestOffsetResp(p: BOPParameters) extends PrefetchBundle {
   override def toPrintable: Printable = {
     p"pff=${testOffset} ptr=${ptr} hit=${hit}"
   }
-  override def cloneType: this.type = (new TestOffsetResp(p)).asInstanceOf[this.type]
 }
 
 class TestOffsetBundle(p: BOPParameters) extends PrefetchBundle {
@@ -94,7 +91,6 @@ class TestOffsetBundle(p: BOPParameters) extends PrefetchBundle {
     p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
   }
-  override def cloneType: this.type = (new TestOffsetBundle(p)).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchReq(p: BOPParameters) extends PrefetchReq {
@@ -103,7 +99,6 @@ class BestOffsetPrefetchReq(p: BOPParameters) extends PrefetchReq {
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchReq(p)).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchResp(p: BOPParameters) extends PrefetchResp {
@@ -112,7 +107,6 @@ class BestOffsetPrefetchResp(p: BOPParameters) extends PrefetchResp {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchResp(p)).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchFinish(p: BOPParameters) extends PrefetchFinish {
@@ -121,7 +115,6 @@ class BestOffsetPrefetchFinish(p: BOPParameters) extends PrefetchFinish {
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchFinish(p)).asInstanceOf[this.type]
 }
 
 class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
@@ -136,7 +129,6 @@ class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits} " +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchIO(p)).asInstanceOf[this.type]
 }
 
 class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
@@ -402,7 +394,7 @@ class BestOffsetPrefetch(p: BOPParameters) extends PrefetchModule {
 
   val bopEntries = (0 until nEntries).map { i =>
     val bopEntry = Module(new BestOffsetPrefetchEntry(p))
-    
+
     bopEntry.io.id := i.U
     bopEntry.io.prefetchOffset := scoreTable.io.prefetchOffset
 

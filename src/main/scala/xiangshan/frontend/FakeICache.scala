@@ -58,13 +58,13 @@ class FakeCache extends XSModule with HasICacheConst {
 
   val offsetBits = log2Up(memByte)
   val offsetMask = (1 << offsetBits) - 1
-  def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
+  def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt
   def inRange(idx: UInt): Bool = idx < (memByte / 8).U
 
   val s_idle :: s_mem_read :: Nil = Enum(2)
   val state = RegInit(s_idle)
   val beatCounter = RegInit(0.U(3.W))
-  
+
   io.out.bits.finish := false.B
   switch(state){
     is(s_idle) {when(io.in.fire){state := s_mem_read}}

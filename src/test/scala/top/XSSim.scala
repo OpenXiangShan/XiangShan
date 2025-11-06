@@ -19,7 +19,7 @@ package top
 import system._
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config
+import org.chipsalliance.cde.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import freechips.rocketchip.amba.axi4.{AXI4IdIndexer, AXI4IdentityNode, AXI4UserYanker, AXI4Xbar}
@@ -28,7 +28,7 @@ import freechips.rocketchip.tilelink.TLToAXI4
 import xiangshan._
 import utils._
 import ExcitingUtils.Debug
-import chipsalliance.rocketchip.config.Config
+import org.chipsalliance.cde.config.Config
 import freechips.rocketchip.tile.XLen
 
 class DiffTestIO extends XSBundle {
@@ -140,7 +140,8 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
   val axiMMIO = LazyModule(new SimMMIO())
   axiMMIO.axiBus := soc.extDev
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val difftest  = new DiffTestIO
       val difftest2 = new DiffTestIO
@@ -150,6 +151,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val trap2 = new TrapIO
       val uart = new UARTIO
     })
+    io.trap2 := DontCare
     io.difftest2 <> DontCare
 
     dontTouch(io.difftest)
@@ -177,7 +179,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).wdst := soc.module.difftestIO(i).fromRoq.wdst
         difftest(i).wpc := soc.module.difftestIO(i).fromRoq.wpc
         difftest(i).scFailed := soc.module.difftestIO(i).fromRoq.scFailed
-        
+
         difftest(i).r := soc.module.difftestIO(i).fromXSCore.r
 
         difftest(i).intrNO := soc.module.difftestIO(i).fromCSR.intrNO
@@ -225,9 +227,9 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).ptwResp := soc.module.difftestIO(i).fromPtw.ptwResp
         difftest(i).ptwAddr := soc.module.difftestIO(i).fromPtw.ptwAddr
         difftest(i).ptwData := soc.module.difftestIO(i).fromPtw.ptwData
-      
+
         trap(i) <> soc.module.trapIO(i)
-      }      
+      }
     }
 
     io.difftest := difftest(0)
@@ -285,6 +287,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val uart = new UARTIO
       val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
     })
+    io.trap2 := DontCare
     io.difftest2 <> DontCare
 
     io.difftest  <> dut.module.io.difftest
