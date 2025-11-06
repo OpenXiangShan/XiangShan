@@ -48,16 +48,16 @@ class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
     ) {}
 
 class IBufEntry(implicit p: Parameters) extends IBufferBundle {
-  val inst:             UInt          = UInt(32.W)
-  val pc:               PrunedAddr    = PrunedAddr(VAddrBits)
-  val foldpc:           UInt          = UInt(MemPredPCWidth.W)
-  val pd:               PreDecodeInfo = new PreDecodeInfo
-  val predTaken:        Bool          = Bool()
-  val fixedTaken:       Bool          = Bool()
-  val ftqPtr:           FtqPtr        = new FtqPtr
-  val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
-  val triggered:        UInt          = TriggerAction()
-  val isLastInFtqEntry: Bool          = Bool()
+  val inst:             UInt       = UInt(32.W)
+  val pc:               PrunedAddr = PrunedAddr(VAddrBits)
+  val foldpc:           UInt       = UInt(MemPredPCWidth.W)
+  val isRvc:            Bool       = Bool()
+  val predTaken:        Bool       = Bool()
+  val fixedTaken:       Bool       = Bool()
+  val ftqPtr:           FtqPtr     = new FtqPtr
+  val instrEndOffset:   UInt       = UInt(FetchBlockInstOffsetWidth.W)
+  val triggered:        UInt       = TriggerAction()
+  val isLastInFtqEntry: Bool       = Bool()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
@@ -65,7 +65,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     inst             := fetch.instrs(i)
     pc               := fetch.pc(i)
     foldpc           := fetch.foldpc(i)
-    pd               := fetch.pd(i)
+    isRvc            := fetch.isRvc(i)
     predTaken        := fetch.instrEndOffset(i).predTaken
     fixedTaken       := fetch.instrEndOffset(i).fixedTaken
     ftqPtr           := fetch.ftqPtr(i)
@@ -83,7 +83,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.inst               := inst
     result.pc                 := pc
     result.foldpc             := foldpc
-    result.pd                 := pd
+    result.isRvc              := isRvc
     result.predTaken          := predTaken
     result.fixedTaken         := fixedTaken
     result.ftqPtr             := ftqPtr
@@ -118,7 +118,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val inst:               UInt          = UInt(32.W)
   val pc:                 PrunedAddr    = PrunedAddr(VAddrBits)
   val foldpc:             UInt          = UInt(MemPredPCWidth.W)
-  val pd:                 PreDecodeInfo = new PreDecodeInfo
+  val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
   val fixedTaken:         Bool          = Bool()
   val ftqPtr:             FtqPtr        = new FtqPtr
@@ -143,7 +143,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.exceptionVec(ExceptionNO.hardwareError)       := exceptionType.isHwe
     cf.backendException                              := isBackendException
     cf.trigger                                       := triggered
-    cf.pd                                            := pd
+    cf.isRvc                                         := isRvc
     cf.fixedTaken                                    := fixedTaken
     cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := exceptionCrossPage
