@@ -311,7 +311,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
-    uops(i).lastIsRVC := io.in(i).bits.preDecodeInfo.isRVC
+    uops(i).lastIsRVC := io.in(i).bits.isRvc
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -476,7 +476,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
    * trace begin
    */
   val inVec = io.in.map(_.bits)
-  val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
+  val isRVCVec = inVec.map(_.isRvc)
   val nonRVCNumVec = (0 until RenameWidth).map{
     i => compressMasksVec(i).asBools.zip(isRVCVec).map{
       case (mask, isRVC) => (mask && !isRVC).asUInt
@@ -530,7 +530,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).traceBlockInPipe.itype := Mux(
         isXret,
         Itype.ExpIntReturn,
-        Itype.jumpTypeGen(inVec(i).preDecodeInfo.brAttribute, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+        Itype.jumpTypeGen(inVec(i).fuType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf(new OpRegType))
       )
     }
   }
@@ -630,7 +630,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
   val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
-  io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
+  io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && FuType.isJump(in.bits.fuType) && in.fire }
   io.out.map{ x =>
     x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(x.bits.trigger)
   }

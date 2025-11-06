@@ -322,7 +322,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
   val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
   val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
-  val pd:             Vec[PreDecodeInfo]  = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
+  val isRvc:          Vec[Bool]           = Vec(IBufferEnqueueWidth, Bool())
   val foldpc:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufferEnqueueWidth, new InstrEndOffset)
 
