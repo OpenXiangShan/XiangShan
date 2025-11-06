@@ -235,8 +235,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     checkTarget(i)    := checkPcMem((checkTargetPtr(i) + 1.U).value)
   }
 
-  ifu.io.robCommits <> io.backend.toFtq.rob_commits
-
   ibuffer.io.flush                := needFlush
   ibuffer.io.ControlRedirect      := FlushControlRedirect
   ibuffer.io.MemVioRedirect       := FlushMemVioRedirect

@@ -41,13 +41,13 @@ import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
-  val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
-
   val redirect = Valid(new Redirect)
   val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
+
+  val commit = Valid(new FtqPtr)
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -351,16 +351,23 @@ class CtrlBlockImp(
   val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
   val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)
   val frontendFlushBits = RegEnable(s1_robFlushRedirect.bits, s1_robFlushRedirect.valid) // ??
+
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
   // Thus, we make all flush reasons to behave the same as exceptions for frontend.
-  for (i <- 0 until CommitWidth) {
-    // why flushOut: instructions with flushPipe are not commited to frontend
-    // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !s0_robFlushRedirect.valid
-    io.frontend.toFtq.rob_commits(i).valid := GatedValidRegNext(s1_isCommit)
-    io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
-  }
+  // why flushOut: instructions with flushPipe are not commited to frontend
+  // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
+  val frontendCommit = rob.io.commits.commitValid.reduce(_ || _) &&
+    rob.io.commits.isCommit && !s0_robFlushRedirect.valid
+  io.frontend.toFtq.commit.valid := RegNext(frontendCommit)
+  io.frontend.toFtq.commit.bits := RegEnable(
+    ParallelPriorityMux(
+      rob.io.commits.commitValid.reverse,
+      rob.io.commits.info.map(_.ftqIdx).reverse
+    ),
+    frontendCommit
+  )
+
   io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s6_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
   io.frontend.toFtq.ftqIdxSelOH.valid := s6_flushFromRobValid || redirectGen.io.stage2Redirect.valid
