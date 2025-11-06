@@ -60,13 +60,11 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
 
   private val vtypeNewVec = vsetModuleVec.map(_.io.out.vconfig.vtype)
 
-  out.vtype(0) := vtypeSpec
-  out.specvtype(0) := vtypeSpec
-  for(i <- 1 until DecodeWidth) {
-    out.specvtype(i) := out.vtype(i - 1)
-    // select vtype for each instruction in a priority manner
-    // Only spread vtype forward and assign out.vtype to last valid vtype
-    out.vtype(i) := PriorityMuxDefault((isVsetiVec zip vtypeNewVec).take(i).reverse, vtypeSpec)
+  private val specvtype = vtypeSpec +: out.vtype
+  out.specvtype := specvtype.take(out.specvtype.length)
+  // select vtype for each instruction in a priority manner
+  for(i <- 0 until DecodeWidth) {
+    out.vtype(i) := PriorityMuxDefault((isVsetiVec zip vtypeNewVec).take(i + 1).reverse, vtypeSpec)
   }
 
   // assign the last vtype to vtypeSpec

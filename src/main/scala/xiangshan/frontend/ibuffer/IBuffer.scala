@@ -145,7 +145,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
 
   // empty and decode can accept insts
-  private val useBypass = enqPtr === deqPtr && decodeCanAccept && !enqHasVSet
+  private val useBypass = enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
@@ -304,12 +304,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // update vtype field, overwrite the assignment of outputEntriesNext above
   for (i <- outputEntriesNext.indices) {
-    when (i.U >= outputEntriesValidNum) {
+    when (decodeCanAccept && !resumingVType) {
+      // vtype can not be from bypass
       outputEntriesNext(i).bits.vtype := vtypeGen.out.vtype(i)
       outputEntriesNext(i).bits.specvtype := vtypeGen.out.specvtype(i)
-    }.otherwise {
-      outputEntriesNext(i).bits.vtype := outputEntries(i).bits.vtype
-      outputEntriesNext(i).bits.specvtype := outputEntries(i).bits.specvtype
+    }.elsewhen (outputEntriesIsNotFull && !resumingVType) {
+      when (i.U < outputEntriesValidNum) {
+        outputEntriesNext(i).bits.vtype := outputEntries(i).bits.vtype
+        outputEntriesNext(i).bits.specvtype := outputEntries(i).bits.specvtype
+      }.otherwise {
+        outputEntriesNext(i).bits.vtype := outputEntries(i.U - outputEntriesValidNum).bits.vtype
+        outputEntriesNext(i).bits.specvtype := outputEntries(i.U - outputEntriesValidNum).bits.specvtype
+      }
     }
   }
 

@@ -77,13 +77,13 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   private val log2Vlmul = vlmul
   // use 2 bits vsew to store vsew
-  private val log2Vsew = vsew(VSew.width - 1, 0) +& "b011".U
+  private val log2Vsew = (vsew.take(3) + 3.U).ensuring(_.getWidth == 3)
 
   // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
   // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
   // vlen = 128, lmul = 2, sew = 16
   // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
-  private val log2Vlmax: UInt = log2Vlen.U(3.W) + log2Vlmul - log2Vsew
+  private val log2Vlmax: UInt = (log2Vlen.U(3.W) + log2Vlmul - log2Vsew).ensuring(_.getWidth == 3)
   private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
