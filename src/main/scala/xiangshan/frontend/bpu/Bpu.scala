@@ -77,7 +77,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
-  private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
+  private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   private val constCtrl = {
     Constantin.init(true)
     val ret = Constantin.createRecord("constCtrl")
@@ -567,13 +567,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s3Override_takenMismatch_s3Tage_s1fallThrough",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && !s3_s1Prediction.taken &&
-      s3_takenBranchAttribute === BranchAttribute.Conditional
+      s3_prediction.attribute === BranchAttribute.Conditional
   )
   XSPerfAccumulate(
     "s3Override_takenMismatch_s3nonCond_s1fallThrough",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && !s3_s1Prediction.taken &&
-      !(s3_takenBranchAttribute === BranchAttribute.Conditional)
+      !(s3_prediction.attribute === BranchAttribute.Conditional)
   )
   XSPerfAccumulate(
     "s3Override_takenMismatch_s3fallThrough_s1uBTB",
