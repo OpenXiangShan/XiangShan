@@ -50,6 +50,7 @@ object ArgParser {
       |--disable-alwaysdb
       |--enable-dfx
       |--enable-simfrontend
+      |--enable-bpalign
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -145,6 +146,10 @@ object ArgParser {
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableSimFrontend = true)
+          }), tail)
+        case "--enable-bpalign" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableBpAlign = true)
           }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {

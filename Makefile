@@ -194,6 +194,10 @@ ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend
 endif
 
+# run with sim bpu(bpalign)
+ifeq ($(ENABLE_BPALIGN),1)
+override SIM_ARGS += --enable-bpalign
+endif
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
