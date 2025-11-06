@@ -1085,7 +1085,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // prefetch train --> s3
   io.s1_prefetch_spec := s1_fire
   io.s2_prefetch_spec := s2_fire
-  val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch
+  val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch && !s2_exception
   io.prefetch_train.valid              := s2_prefetch_train_valid
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   // TODO: use trace with bank conflict?

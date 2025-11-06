@@ -1337,7 +1337,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at load s3 **
-  val s2_prefetch_train_valid = s2_fire && s2_in.isFirstIssue && !s2_actually_uncache
+  // s2_un_access_exception can guarantee the physical address is valid
+  val s2_prefetch_train_valid = s2_fire && s2_in.isFirstIssue && !s2_actually_uncache && !s2_un_access_exception
   io.prefetch_train.valid := GatedValidRegNext(s2_prefetch_train_valid)
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
