@@ -26,12 +26,14 @@ class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
   val meta:        Valid[MicroTageMeta] = Valid(new MicroTageMeta)
 }
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
-  val histTableHitMap:     Vec[Bool] = Vec(NumTables, Bool())
-  val histTableUsefulMask: UInt      = UInt(NumTables.W)
-  val histTableTakenMap:   Vec[Bool] = Vec(NumTables, Bool())
-  val histTableHit:        Bool      = Bool()
-  val taken:               Bool      = Bool()
-  val cfiPosition:         UInt      = UInt(CfiPositionWidth.W)
+  val histTableHitMap:     Vec[Bool]       = Vec(NumTables, Bool())
+  val histTableUsefulMask: UInt            = UInt(NumTables.W)
+  val histTableTakenMap:   Vec[Bool]       = Vec(NumTables, Bool())
+  val histTableHit:        Bool            = Bool()
+  val taken:               Bool            = Bool()
+  val hitTakenCtr:         SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val hitUseful:           SaturateCounter = new SaturateCounter(UsefulWidth)
+  val cfiPosition:         UInt            = UInt(CfiPositionWidth.W)
 
   val testPredIdx0: UInt = UInt(TestPredIdx0Width.W)
   val testPredTag0: UInt = UInt(TestPredTag0Width.W)

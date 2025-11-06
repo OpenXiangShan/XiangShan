@@ -26,7 +26,8 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
  * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
@@ -61,6 +62,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   }
   private val takenCases       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.taken)
   private val cfiPositionCases = tables.reverse.map(t => t.resp.valid -> t.resp.bits.cfiPosition)
+  private val usefulCase       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitUseful)
+  private val takenCtrCase     = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitTakenCtr)
 
   private val histTableHit         = tables.map(_.resp.valid).reduce(_ || _)
   private val histTableHitMap      = tables.map(_.resp.valid)
@@ -68,6 +71,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val histTableUsefulMap   = VecInit(tables.map(_.resp.bits.useful)).asUInt
   private val histTableTaken       = MuxCase(false.B, takenCases)
   private val histTableCfiPosition = MuxCase(0.U(CfiPositionWidth.W), cfiPositionCases)
+  private val histTableTakenCtr    = MuxCase(0.U.asTypeOf(new SaturateCounter(TakenCtrWidth)), takenCtrCase)
+  private val histTableUseful      = MuxCase(0.U.asTypeOf(new SaturateCounter(UsefulWidth)), usefulCase)
   // ------ Base ----
   private val baseTable = Module(new MicroBaseTable(BaseTableSize))
   baseTable.io.req.startPc          := io.startVAddr
@@ -77,15 +82,19 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   private val finalPredTaken       = Mux(histTableHit, histTableTaken, baseTable.io.resp.taken)
   private val finalPredCfiPosition = Mux(histTableHit, histTableCfiPosition, baseTable.io.resp.cfiPosition)
-  io.prediction.taken                         := finalPredTaken
-  io.prediction.cfiPosition                   := finalPredCfiPosition
-  io.prediction.meta.valid                    := tables.map(_.resp.valid).reduce(_ || _)
-  io.prediction.meta.bits.histTableHitMap     := tables.map(_.resp.valid)
-  io.prediction.meta.bits.histTableTakenMap   := tables.map(_.resp.bits.taken)
-  io.prediction.meta.bits.histTableHit        := tables.map(_.resp.valid).reduce(_ || _)
-  io.prediction.meta.bits.histTableUsefulMask := VecInit(tables.map(_.resp.bits.useful)).asUInt
-  io.prediction.meta.bits.taken               := finalPredTaken
-  io.prediction.meta.bits.cfiPosition         := finalPredCfiPosition
+  private val prediction           = Wire(new MicroTagePrediction)
+  prediction.taken                         := finalPredTaken
+  prediction.cfiPosition                   := finalPredCfiPosition
+  prediction.meta.valid                    := tables.map(_.resp.valid).reduce(_ || _)
+  prediction.meta.bits.histTableHitMap     := tables.map(_.resp.valid)
+  prediction.meta.bits.histTableTakenMap   := tables.map(_.resp.bits.taken)
+  prediction.meta.bits.histTableHit        := tables.map(_.resp.valid).reduce(_ || _)
+  prediction.meta.bits.histTableUsefulMask := VecInit(tables.map(_.resp.bits.useful)).asUInt
+  prediction.meta.bits.taken               := finalPredTaken
+  prediction.meta.bits.cfiPosition         := finalPredCfiPosition
+  prediction.meta.bits.hitUseful           := histTableUseful
+  prediction.meta.bits.hitTakenCtr         := histTableTakenCtr
+  io.prediction := RegEnable(prediction, 0.U.asTypeOf(new MicroTagePrediction), io.stageCtrl.s0_fire)
 
   private val trainNext     = RegNext(io.train, 0.U.asTypeOf(Valid(new BpuTrain)))
   private val t1_trainData  = trainNext.bits
@@ -99,9 +108,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       b.valid && b.bits.attribute.isConditional &&
       (
         (t1_trainMeta.taken && (
-          (b.bits.cfiPosition < t1_trainMeta.cfiPosition && b.bits.taken) ||
-            (b.bits.cfiPosition === t1_trainMeta.cfiPosition && !b.bits.taken) ||
-            (b.bits.cfiPosition > t1_trainMeta.cfiPosition)
+          ((b.bits.cfiPosition < t1_trainMeta.cfiPosition) && b.bits.taken) ||
+            ((b.bits.cfiPosition === t1_trainMeta.cfiPosition) && !b.bits.taken) ||
+            ((b.bits.cfiPosition > t1_trainMeta.cfiPosition) && b.bits.taken)
         )) ||
           (!t1_trainMeta.taken && b.bits.taken)
       )
@@ -175,6 +184,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     t.update.bits.correct                := t1_histUpdateBranch.bits.taken === t1_trainMeta.taken
     t.update.bits.taken                  := t1_histUpdateBranch.bits.taken
     t.update.bits.foldedPathHistForTrain := io.foldedPathHistForTrain
+    t.update.bits.oldTakenCtr            := t1_trainMeta.hitTakenCtr
+    t.update.bits.oldUseful              := t1_trainMeta.hitUseful
   }
 
   // ==========================================================================
@@ -187,7 +198,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t1_misPredEQ = VecInit(t1_trainData.branches.map(b =>
     b.valid && b.bits.attribute.isConditional &&
       ((b.bits.cfiPosition === t1_trainMeta.cfiPosition) && (b.bits.taken ^ t1_trainMeta.taken)) &&
-        t1_trainMeta.histTableHit
+      t1_trainMeta.histTableHit
   )).reduce(_ || _)
   private val t1_misPredLT = VecInit(t1_trainData.branches.map(b =>
     b.valid && b.bits.attribute.isConditional &&
@@ -265,12 +276,12 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val (s0_idxTable0, s0_tagTable0) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 0)
   private val (s0_idxTable1, s0_tagTable1) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 1)
 
-  io.prediction.meta.bits.testPredIdx0 := s0_idxTable0
-  io.prediction.meta.bits.testPredTag0 := s0_tagTable0
-  io.prediction.meta.bits.testPredIdx1 := s0_idxTable1
-  io.prediction.meta.bits.testPredTag1 := s0_tagTable1
+  prediction.meta.bits.testPredIdx0 := s0_idxTable0
+  prediction.meta.bits.testPredTag0 := s0_tagTable0
+  prediction.meta.bits.testPredIdx1 := s0_idxTable1
+  prediction.meta.bits.testPredTag1 := s0_tagTable1
 
-  io.prediction.meta.bits.testPredStartAddr := io.startVAddr.toUInt
+  prediction.meta.bits.testPredStartAddr := io.startVAddr.toUInt
 
   private val (trainIdx0, trainTag0) = computeHash(t1_trainData.startVAddr.toUInt, io.foldedPathHistForTrain, 0)
   private val (trainIdx1, trainTag1) = computeHash(t1_trainData.startVAddr.toUInt, io.foldedPathHistForTrain, 1)
@@ -280,6 +291,6 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   XSPerfAccumulate("train_idx_miss", t1_trainValid && (t1_trainMeta.testPredIdx0 =/= trainIdx0))
   XSPerfAccumulate("train_tag_miss", t1_trainValid && (t1_trainMeta.testPredTag0 =/= trainTag0))
 
-  // t1_trainValid := trainNext.valid && (t1_trainMeta.testPredIdx0 === trainIdx0) && (t1_trainMeta.testPredTag0 === trainTag0) &&
-  //   (t1_trainMeta.testPredIdx1 === trainIdx1) && (t1_trainMeta.testPredTag1 === trainTag1)
+  t1_trainValid := trainNext.valid && (t1_trainMeta.testPredIdx0 === trainIdx0) && (t1_trainMeta.testPredTag0 === trainTag0) &&
+    (t1_trainMeta.testPredIdx1 === trainIdx1) && (t1_trainMeta.testPredTag1 === trainTag1)
 }

@@ -24,12 +24,14 @@ import xiangshan.backend.datapath.DataConfig.VAddrBits
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class MicroTageTable(
-    val numSets: Int,
-    val histLen: Int,
-    val tagLen:  Int
+    val numSets:       Int,
+    val histLen:       Int,
+    val tagLen:        Int,
+    val histBitsInTag: Int,
+    val tableId:       Int
 )(implicit p: Parameters) extends MicroTageModule with Helpers {
   class MicroTageTableIO extends MicroTageBundle {
     class MicroTageReq extends Bundle {
@@ -37,17 +39,22 @@ class MicroTageTable(
       val foldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     }
     class MicroTageResp extends Bundle {
-      val taken:       Bool = Bool()
-      val cfiPosition: UInt = UInt(CfiPositionWidth.W)
-      val useful:      Bool = Bool()
+      val taken:       Bool            = Bool()
+      val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+      val useful:      Bool            = Bool()
+      val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
+      val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
       val cfiPosition:            UInt                  = UInt(CfiPositionWidth.W)
       val alloc:                  Bool                  = Bool()
+      val allocTaken:             Bool                  = Bool()
       val correct:                Bool                  = Bool()
+      val taken:                  Bool                  = Bool()
       val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
-      // val wayMask:   UInt         = UInt(NumWays.W)
+      val oldTakenCtr:            SaturateCounter       = new SaturateCounter(TakenCtrWidth)
+      val oldUseful:              SaturateCounter       = new SaturateCounter(UsefulWidth)
     }
     val req:         MicroTageReq           = Input(new MicroTageReq)
     val resp:        Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
@@ -59,51 +66,77 @@ class MicroTageTable(
     val tag:         UInt            = UInt(tagLen.W)
     val takenCtr:    SaturateCounter = new SaturateCounter(TakenCtrWidth)
     val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-    val useful:      Bool            = Bool()
+    val useful:      SaturateCounter = new SaturateCounter(UsefulWidth)
   }
   val io                    = IO(new MicroTageTableIO)
   private val entries       = RegInit(VecInit(Seq.fill(numSets)(0.U.asTypeOf(new MicroTageEntry))))
-  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(false.B)))
+  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(0.U.asTypeOf(new SaturateCounter(UsefulWidth)))))
 
   val idxFhInfo    = new FoldedHistoryInfo(histLen, min(log2Ceil(numSets), histLen))
-  val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, tagLen))
-  val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, tagLen - 1))
-  def getUnhashedIdx(pc: PrunedAddr): UInt = pc.toUInt(VAddrBits - 1, instOffsetBits)
-  def getUnhashedTag(pc: PrunedAddr): UInt = pc.toUInt(VAddrBits - 1, log2Ceil(FetchBlockAlignSize))
+  val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag))
+  val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag - 1))
 
-  def computeHash(unhashedIdx: UInt, unhashedTag: UInt, allFh: PhrAllFoldedHistories): (UInt, UInt) = {
-    val idxFh    = allFh.getHistWithInfo(idxFhInfo).foldedHist
-    val tagFh    = allFh.getHistWithInfo(tagFhInfo).foldedHist
-    val altTagFh = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-    val idx      = (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
-    val tag      = (unhashedTag ^ tagFh ^ (altTagFh << 1))(tagLen - 1, 0)
+  def computeHash(startPc: UInt, allFh: PhrAllFoldedHistories, tableId: Int): (UInt, UInt) = {
+    val unhashedIdx = getUnhashedIdx(startPc)
+    val unhashedTag = getUnhashedTag(startPc)
+    val idxFh       = allFh.getHistWithInfo(idxFhInfo).foldedHist
+    val tagFh       = allFh.getHistWithInfo(tagFhInfo).foldedHist
+    val altTagFh    = allFh.getHistWithInfo(altTagFhInfo).foldedHist
+    val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
+      (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
+    } else {
+      (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
+    }
+    val lowTag  = (unhashedTag ^ tagFh ^ (altTagFh << 1))(histBitsInTag - 1, 0)
+    val highTag = connectPcTag(unhashedIdx, tableId)
+    val tag     = Cat(highTag, lowTag)(tagLen - 1, 0)
     (idx, tag)
   }
 
   // predict
-  private val readUnhasedIdx   = getUnhashedIdx(io.req.startPc)
-  private val readUnhasedTag   = getUnhashedTag(io.req.startPc)
-  private val (s0_idx, s0_tag) = computeHash(readUnhasedIdx, readUnhasedTag, io.req.foldedPathHist)
+  private val (s0_idx, s0_tag) = computeHash(io.req.startPc.toUInt, io.req.foldedPathHist, tableId)
   private val readEntry        = entries(s0_idx)
   private val readHit          = (readEntry.tag === s0_tag) && readEntry.valid
+  private val usefulEntry      = usefulEntries(s0_idx)
 
   io.resp.valid            := readHit
   io.resp.bits.taken       := readEntry.takenCtr.isPositive
   io.resp.bits.cfiPosition := readEntry.cfiPosition
-  io.resp.bits.useful      := usefulEntries(s0_idx) // readEntry.useful
+  io.resp.bits.useful      := usefulEntry.isPositive
+  io.resp.bits.hitTakenCtr := readEntry.takenCtr
+  io.resp.bits.hitUseful   := usefulEntry
 
   // train
-  private val trainUnhasedIdx = getUnhashedIdx(io.update.bits.startPc)
-  private val trainUnhasedTag = getUnhashedTag(io.update.bits.startPc)
   private val (trainIdx, trainTag) =
-    computeHash(trainUnhasedIdx, trainUnhasedTag, io.update.bits.foldedPathHistForTrain)
-  private val oldCtr      = entries(trainIdx).takenCtr
+    computeHash(io.update.bits.startPc.toUInt, io.update.bits.foldedPathHistForTrain, tableId)
+  // private val oldCtr      = entries(trainIdx).takenCtr
+  // private val oldUseful   = usefulEntries(trainIdx)
+  // private val updateEntry = Wire(new MicroTageEntry)
+  // updateEntry.valid          := true.B
+  // updateEntry.tag            := trainTag
+  // updateEntry.takenCtr.value := Mux(io.update.bits.alloc, oldCtr.getNeutral, oldCtr.getUpdate(io.update.bits.taken))
+  // updateEntry.cfiPosition    := io.update.bits.cfiPosition
+  // updateEntry.useful.value := Mux(
+  //   io.update.bits.alloc,
+  //   oldUseful.getNeutral,
+  //   oldUseful.getUpdate(io.update.bits.correct)
+  // )
+  private val oldTakenCtr = io.update.bits.oldTakenCtr
+  private val oldUseful   = io.update.bits.oldUseful
   private val updateEntry = Wire(new MicroTageEntry)
-  updateEntry.valid          := true.B
-  updateEntry.tag            := trainTag
-  updateEntry.takenCtr.value := Mux(io.update.bits.alloc, oldCtr.getNeutral, oldCtr.getUpdate(io.update.bits.correct))
-  updateEntry.cfiPosition    := io.update.bits.cfiPosition
-  updateEntry.useful         := Mux(io.update.bits.alloc || io.update.bits.correct, true.B, false.B)
+  updateEntry.valid := true.B
+  updateEntry.tag   := trainTag
+  updateEntry.takenCtr.value := Mux(
+    io.update.bits.alloc,
+    oldTakenCtr.getNeutral,
+    oldTakenCtr.getUpdate(io.update.bits.taken)
+  )
+  updateEntry.cfiPosition := io.update.bits.cfiPosition
+  updateEntry.useful.value := Mux(
+    io.update.bits.alloc,
+    oldUseful.getNeutral,
+    oldUseful.getUpdate(io.update.bits.correct)
+  )
 
   when(io.update.valid) {
     entries(trainIdx)       := updateEntry
@@ -111,10 +144,11 @@ class MicroTageTable(
   }
 
   when(io.usefulReset) {
-    usefulEntries.foreach(_ := false.B)
+    usefulEntries.foreach(_.value := 0.U)
   }
   // Per-index access distribution
   for (i <- 0 until numSets) {
     XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
+    XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.alloc)
   }
 }
