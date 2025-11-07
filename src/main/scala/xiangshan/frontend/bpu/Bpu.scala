@@ -318,8 +318,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val chiselType = MuxCase(
       Cat(true.B, false.B, false.B),
       Seq(
-        ubtb.io.prediction.taken -> Cat(false.B, false.B, true.B)
-//        abtb.io.prediction.taken -> Cat(false.B, true.B, false.B)
+        ubtb.io.prediction.taken -> Cat(false.B, false.B, true.B),
+        abtb.io.prediction.taken -> Cat(false.B, true.B, false.B)
       )
     )
     (chiselType(2), chiselType(1), chiselType(0))
