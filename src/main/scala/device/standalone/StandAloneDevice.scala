@@ -122,7 +122,7 @@ abstract class StandAloneDevice (
 
   // axi4 io
   private val axi4 = Option.when(!useTL)(AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    Seq(AXI4MasterParameters("axi4", IdRange(0, 1)))
+    Seq(AXI4MasterParameters("axi4", IdRange(0, 65536)))
   ))))
   axi4.foreach(
     xbar :=
