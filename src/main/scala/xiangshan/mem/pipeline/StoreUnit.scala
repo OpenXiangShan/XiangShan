@@ -50,8 +50,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val tlb             = new TlbRequestIO()
     val dcache          = new DCacheStoreIO
     val pmp             = Flipped(new PMPRespBundle())
-    val lsq             = ValidIO(new LsPipelineBundle)
-    val lsq_replenish   = Output(new LsPipelineBundle())
+    val toLsq           = ValidIO(new StoreAddrIO)
+    val toLsqRe         = Output(new StoreAddrIO) // write some exception info and memory type generate in s2
+    // ready indicate unaligned queue reject this unaligned request;
+    val toStoreUnalignQueue = DecoupledIO(new UnalignQueueIO)
     val feedback_slow   = ValidIO(new RSFeedback)
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
@@ -75,6 +77,9 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val sqCommitPtr    = Input(new SqPtr)
     val sqCommitUopIdx = Input(UopIdx())
     val sqCommitRobIdx = Input(new RobPtr)
+
+    // exception, last stage signal
+    val exceptionInfo  = ValidIO(new MemExceptionInfo)
 
     val s0_s1_s2_valid = Output(Bool())
   })
@@ -406,11 +411,21 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   // scalar store and scalar load nuke check, and also other purposes
   //A 128-bit aligned unaligned memory access requires changing the unaligned flag bit in sq
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
-  io.lsq.bits      := s1_out
-  io.lsq.bits.miss := s1_tlb_miss
-  io.lsq.bits.isvec := s1_out.isvec || s1_frm_mab_vec
-  io.lsq.bits.updateAddrValid := (!s1_in.isMisalign || s1_in.misalignWith16Byte) && (!s1_frm_mabuf || s1_in.isFinalSplit) || s1_exception
+  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch
+  io.toLsq.bits.cacheMiss := false.B // will be set in stage 2
+  connectSamePort(io.toLsq.bits, s1_out)
+  io.toLsq.bits.uop.ftqOffset := s1_in.uop.ftqOffset
+  io.toLsq.bits.size          := s1_in.alignedType
+  connectSamePort(io.toLsq.bits.uop, s1_out.uop)
+
+  //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
+  // if it was unalign splited, first request will be false, second will be true.
+  // Currently, it will be always true. After implement new unaligned process logic, it will be assign.
+  io.toLsq.bits.isLastRequest     := true.B
+  io.toLsq.bits.cross4KPage       := false.B
+  io.toLsq.bits.unalignWith16Byte := false.B
+  io.toLsq.bits.isUnsalign        := false.B
+
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_out.nc || s1_in.uop.robIdx.needFlush(io.redirect))
   io.dcache.s1_paddr := s1_paddr
@@ -497,8 +512,16 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire)
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
+
   val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
   val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
+  //TODO: when implement new Unalign, it need to assign
+  io.toStoreUnalignQueue.valid              := false.B
+  io.toStoreUnalignQueue.bits.sqIdx         := s2_out.uop.sqIdx
+  io.toStoreUnalignQueue.bits.paddr         := s2_out.paddr
+  io.toStoreUnalignQueue.bits.robIdx        := s2_out.uop.robIdx
+  io.toStoreUnalignQueue.bits.isLastRequest := true.B  // will be assign later
+  io.toStoreUnalignQueue.bits.cross4KPage   := false.B
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -519,17 +542,16 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
 
-  // mmio and exception
-  io.lsq_replenish := s2_out
-  io.lsq_replenish.af := s2_out.af && s2_valid && !s2_kill
-  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  // mmio and exception TODO:
+    io.toLsqRe := DontCare // I don't Care rest signal
+    connectSamePort(io.toLsqRe, s2_out)
+    connectSamePort(io.toLsqRe, s2_out.uop)
+  io.toLsqRe.af := s2_out.af && s2_valid && !s2_kill
+  io.toLsqRe.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
 
   // prefetch related
-  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
-  io.lsq_replenish.updateAddrValid := !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) || s2_exception
-  io.lsq_replenish.isvec := s2_out.isvec || s2_frm_mab_vec
-
-  io.lsq_replenish.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
+  io.toLsqRe.cacheMiss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+  io.toLsqRe.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
     TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill
 
 
@@ -631,6 +653,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
       sx_in(i).mask        := s3_in.mask
       sx_in(i).vaddr       := s3_in.fullva
       sx_in(i).vaNeedExt   := s3_in.vaNeedExt
+      sx_in(i).isHyper     := s3_in.isHyper
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
@@ -672,6 +695,19 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.stout.valid := sx_last_valid && !sx_last_in_vec
   io.stout.bits := sx_last_in.output
   io.stout.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg))
+
+  // exceptionInfo Gen
+  io.exceptionInfo.valid             := sx_last_valid && !sx_last_in_vec // normal writeback, not vector writeback
+  io.exceptionInfo.bits.robIdx       := sx_last_in.output.robIdx
+  io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg)
+  io.exceptionInfo.bits.vaddr        := sx_last_in.vaddr
+  io.exceptionInfo.bits.gpaddr       := sx_last_in.gpaddr
+  io.exceptionInfo.bits.isForVSnonLeafPTE := sx_last_in.isForVSnonLeafPTE
+  io.exceptionInfo.bits.vaNeedExt    := sx_last_in.vaNeedExt
+  io.exceptionInfo.bits.isHyper      := sx_last_in.isHyper
+  io.exceptionInfo.bits.uopIdx       := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
+  io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
+  io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
 
   io.vecstout.valid := sx_last_valid && sx_last_in_vec
   // TODO: implement it!

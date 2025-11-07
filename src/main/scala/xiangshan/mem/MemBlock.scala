@@ -83,6 +83,9 @@ trait HasMemBlockParameters extends HasXSParameter {
   val UncacheWBPort  = 2
   val NCWBPorts = Seq(1, 2)
 
+  def debugEn: Boolean = p(DebugOptionsKey).EnableDifftest
+  def pageOffset: Int      = PageOffsetWidth
+
   def arbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
@@ -498,6 +501,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer(ldaParams.head))
   val storeMisalignBuffer = Module(new StoreMisalignBuffer)
+
+  // exceptionInfoGen
+  val exceptionInfoGen = Module(new ExceptionInfoGen)
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -1045,9 +1051,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.csrCtrl       <> csrCtrl
     stu.io.dcache        <> dcache.io.lsu.sta(i)
     stu.io.feedback_slow <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
-    stu.io.stin         <> issueSta(i)
-    stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
-    stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
+    stu.io.stin          <> issueSta(i)
+    stu.io.toLsq         <> lsq.io.sta.storeAddrIn(i)
+    stu.io.toLsqRe       <> lsq.io.sta.storeAddrInRe(i)
+    stu.io.toStoreUnalignQueue <> lsq.io.sta.unalignQueueReq(i)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(TlbStartVec(dtlb_st_idx) + i).resp
@@ -1234,12 +1241,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
-  sbuffer.io.in(0).valid := lsq.io.sbuffer(0).valid || vSegmentUnit.io.sbuffer.valid
-  sbuffer.io.in(0).bits  := Mux1H(Seq(
+  sbuffer.io.in.req(0).valid := lsq.io.sbuffer.req(0).valid || vSegmentUnit.io.sbuffer.valid
+  sbuffer.io.in.req(0).bits  := Mux1H(Seq(
     vSegmentUnit.io.sbuffer.valid -> vSegmentUnit.io.sbuffer.bits,
-    lsq.io.sbuffer(0).valid       -> lsq.io.sbuffer(0).bits
+    lsq.io.sbuffer.req(0).valid       -> lsq.io.sbuffer.req(0).bits
   ))
-  vSegmentUnit.io.sbuffer.ready := sbuffer.io.in(0).ready
+  vSegmentUnit.io.sbuffer.ready := sbuffer.io.in.req(0).ready
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
 
@@ -1425,8 +1432,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       )
     }
 
-    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.toLsq(i).valid
-    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.toLsq(i).bits
+    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.exceptionInfo(i).valid
+    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.exceptionInfo(i).bits
   }
 
 
@@ -1512,167 +1519,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   }
 
-  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
-  // Exception address is used several cycles after flush.
-  // We delay it by 10 cycles to ensure its flush safety.
-  val atomicsException = RegInit(false.B)
-  when (DelayN(redirect.valid, 10) && atomicsException) {
-    atomicsException := false.B
-  }.elsewhen (atomicsUnit.io.exceptionInfo.valid) {
-    atomicsException := true.B
+  exceptionInfoGen.io.redirect          <> redirect
+  exceptionInfoGen.io.fromCsr           <> tlbcsr
+  io.mem_to_ooo.lsqio.vaddr             := RegNext(exceptionInfoGen.io.exceptionInfo.vaddr)
+  io.mem_to_ooo.lsqio.vl                := RegNext(exceptionInfoGen.io.exceptionInfo.vl)
+  io.mem_to_ooo.lsqio.vstart            := RegNext(exceptionInfoGen.io.exceptionInfo.vstart)
+  io.mem_to_ooo.lsqio.isForVSnonLeafPTE := RegNext(exceptionInfoGen.io.exceptionInfo.isForVSnonLeafPTE)
+  io.mem_to_ooo.lsqio.gpaddr            := RegNext(exceptionInfoGen.io.exceptionInfo.gpaddr)
+
+  val exceptionInfo = loadUnits.map(_.io.exceptionInfo) ++ storeUnits.map(_.io.exceptionInfo) ++
+    vlMergeBuffer.io.exceptionInfo ++ vsMergeBuffer.map(_.io.exceptionInfo.head) ++
+    Seq(lsq.io.stExceptionInfo) ++ Seq(lsq.io.ldExceptionInfo) ++
+    Seq(vSegmentUnit.io.exceptionInfo) ++ Seq(atomicsUnit.io.exceptionInfo)
+
+  exceptionInfoGen.io.req.zip(exceptionInfo).map{case (sink, source) =>
+    sink := source
   }
 
-  val misalignBufExceptionOverwrite = loadMisalignBuffer.io.overwriteExpBuf.valid || storeMisalignBuffer.io.overwriteExpBuf.valid
-  val misalignBufExceptionVaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
-    loadMisalignBuffer.io.overwriteExpBuf.vaddr,
-    storeMisalignBuffer.io.overwriteExpBuf.vaddr
-  )
-  val misalignBufExceptionIsHyper = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
-    loadMisalignBuffer.io.overwriteExpBuf.isHyper,
-    storeMisalignBuffer.io.overwriteExpBuf.isHyper
-  )
-  val misalignBufExceptionGpaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
-    loadMisalignBuffer.io.overwriteExpBuf.gpaddr,
-    storeMisalignBuffer.io.overwriteExpBuf.gpaddr
-  )
-  val misalignBufExceptionIsForVSnonLeafPTE = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
-    loadMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE,
-    storeMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE
-  )
-
-  val vSegmentException = RegInit(false.B)
-  when (DelayN(redirect.valid, 10) && vSegmentException) {
-    vSegmentException := false.B
-  }.elsewhen (vSegmentUnit.io.exceptionInfo.valid) {
-    vSegmentException := true.B
-  }
-  val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionInfo.bits.vaddr, atomicsUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionVstart = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vstart, vSegmentUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionVl     = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vl, vSegmentUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vaddr, vSegmentUnit.io.exceptionInfo.valid)
-  val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionInfo.bits.gpaddr, atomicsUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionGPAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.gpaddr, vSegmentUnit.io.exceptionInfo.valid)
-  val atomicsExceptionIsForVSnonLeafPTE = RegEnable(atomicsUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, atomicsUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionIsForVSnonLeafPTE = RegEnable(vSegmentUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, vSegmentUnit.io.exceptionInfo.valid)
-
-  val exceptionVaddr = Mux(
-    atomicsException,
-    atomicsExceptionAddress,
-    Mux(misalignBufExceptionOverwrite,
-      misalignBufExceptionVaddr,
-      Mux(vSegmentException,
-        vSegmentExceptionAddress,
-        lsq.io.exceptionAddr.vaddr
-      )
-    )
-  )
-  // whether vaddr need ext or is hyper inst:
-  // VaNeedExt: atomicsException -> false; misalignBufExceptionOverwrite -> true; vSegmentException -> false
-  // IsHyper: atomicsException -> false; vSegmentException -> false
-  val exceptionVaNeedExt = !atomicsException &&
-    (misalignBufExceptionOverwrite ||
-      (!vSegmentException && lsq.io.exceptionAddr.vaNeedExt))
-  val exceptionIsHyper = !atomicsException &&
-    (misalignBufExceptionOverwrite && misalignBufExceptionIsHyper ||
-      (!vSegmentException && lsq.io.exceptionAddr.isHyper && !misalignBufExceptionOverwrite))
-
-  def GenExceptionVa(
-    mode: UInt, isVirt: Bool, vaNeedExt: Bool,
-    satp: TlbSatpBundle, vsatp: TlbSatpBundle, hgatp: TlbHgatpBundle,
-    vaddr: UInt
-  ) = {
-    require(VAddrBits >= 50)
-
-    val satpNone = satp.mode === 0.U
-    val satpSv39 = satp.mode === 8.U
-    val satpSv48 = satp.mode === 9.U
-
-    val vsatpNone = vsatp.mode === 0.U
-    val vsatpSv39 = vsatp.mode === 8.U
-    val vsatpSv48 = vsatp.mode === 9.U
-
-    val hgatpNone = hgatp.mode === 0.U
-    val hgatpSv39x4 = hgatp.mode === 8.U
-    val hgatpSv48x4 = hgatp.mode === 9.U
-
-    // For !isVirt, mode check is necessary, as we don't want virtual memory in M-mode.
-    // For isVirt, mode check is unnecessary, as virt won't be 1 in M-mode.
-    // Also, isVirt includes Hyper Insts, which don't care mode either.
-
-    val useBareAddr =
-      (isVirt && vsatpNone && hgatpNone) ||
-      (!isVirt && (mode === CSRConst.ModeM)) ||
-      (!isVirt && (mode =/= CSRConst.ModeM) && satpNone)
-    val useSv39Addr =
-      (isVirt && vsatpSv39) ||
-      (!isVirt && (mode =/= CSRConst.ModeM) && satpSv39)
-    val useSv48Addr =
-      (isVirt && vsatpSv48) ||
-      (!isVirt && (mode =/= CSRConst.ModeM) && satpSv48)
-    val useSv39x4Addr = isVirt && vsatpNone && hgatpSv39x4
-    val useSv48x4Addr = isVirt && vsatpNone && hgatpSv48x4
-
-    val bareAddr   = ZeroExt(vaddr(PAddrBits - 1, 0), XLEN)
-    val sv39Addr   = SignExt(vaddr.take(39), XLEN)
-    val sv39x4Addr = ZeroExt(vaddr.take(39 + 2), XLEN)
-    val sv48Addr   = SignExt(vaddr.take(48), XLEN)
-    val sv48x4Addr = ZeroExt(vaddr.take(48 + 2), XLEN)
-
-    val ExceptionVa = Wire(UInt(XLEN.W))
-    when (vaNeedExt) {
-      ExceptionVa := Mux1H(Seq(
-        (useBareAddr)   -> bareAddr,
-        (useSv39Addr)   -> sv39Addr,
-        (useSv48Addr)   -> sv48Addr,
-        (useSv39x4Addr) -> sv39x4Addr,
-        (useSv48x4Addr) -> sv48x4Addr,
-      ))
-    } .otherwise {
-      ExceptionVa := vaddr
-    }
-
-    ExceptionVa
-  }
-
-  io.mem_to_ooo.lsqio.vaddr := RegNext(
-    GenExceptionVa(tlbcsr.priv.dmode, tlbcsr.priv.virt || exceptionIsHyper, exceptionVaNeedExt,
-    tlbcsr.satp, tlbcsr.vsatp, tlbcsr.hgatp, exceptionVaddr)
-  )
-
-  // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
-  XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
-  io.mem_to_ooo.lsqio.vstart := RegNext(Mux(vSegmentException,
-                                            vSegmentExceptionVstart,
-                                            lsq.io.exceptionAddr.vstart)
-  )
-  io.mem_to_ooo.lsqio.vl     := RegNext(Mux(vSegmentException,
-                                            vSegmentExceptionVl,
-                                            lsq.io.exceptionAddr.vl)
-  )
-
-  XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
-  io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(
-    atomicsException,
-    atomicsExceptionGPAddress,
-    Mux(misalignBufExceptionOverwrite,
-      misalignBufExceptionGpaddr,
-      Mux(vSegmentException,
-        vSegmentExceptionGPAddress,
-        lsq.io.exceptionAddr.gpaddr
-      )
-    )
-  ))
-  io.mem_to_ooo.lsqio.isForVSnonLeafPTE := RegNext(Mux(
-    atomicsException,
-    atomicsExceptionIsForVSnonLeafPTE,
-    Mux(misalignBufExceptionOverwrite,
-      misalignBufExceptionIsForVSnonLeafPTE,
-      Mux(vSegmentException,
-        vSegmentExceptionIsForVSnonLeafPTE,
-        lsq.io.exceptionAddr.isForVSnonLeafPTE
-      )
-    )
-  ))
   io.mem_to_ooo.topToBackendBypass match { case x =>
     x.hartId            := io.hartId
     x.l2FlushDone       := RegNext(io.l2_flush_done)
