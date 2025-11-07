@@ -20,7 +20,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import difftest.DifftestModule
+import difftest.{DifftestModule, DifftestTopIO, HasDiffTestInterfaces}
 import xiangshan._
 import utils._
 import utility._
@@ -43,10 +43,9 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.annotate
-import scala.collection.mutable.{Map}
 
-import difftest.common.DifftestWiring
-import difftest.util.Profile
+import scala.collection.mutable.Map
+import difftest.gateway.Gateway
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
@@ -473,11 +472,24 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 class XSTileDiffTop(implicit p: Parameters) extends XSTop {
   //TODO: need to keep the same module name as XSNoCDiffTop
   override lazy val desiredName: String = "XSTop"
-  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) {
-    DifftestWiring.createAndConnectExtraIOs()
-    Profile.generateJson("XiangShan")
-  }
 
+  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) with HasDiffTestInterfaces {
+    override def cpuName: Option[String] = Some("XiangShan")
+    override protected def implicitClock: Clock = io.clock
+    override protected def implicitReset: Reset = io.reset
+    override def connectTopIOsWithName(difftest: DifftestTopIO): Seq[(Data, String)] = {
+      val otherIOs = Seq(wrapper.nmi.getWrappedValue) ++
+        dma.toSeq ++
+        Seq(
+          memory,
+          peripheral,
+        )
+      otherIOs.map(d => (d, d.instanceName)) ++
+        io.elements.toSeq.collect { case (name, elem)
+          if !Seq("clock", "reset").contains(name) => (elem, "io_" + name)
+        }
+    }
+  }
   override lazy val module = new XSTileDiffTopImp(this)
 }
 
@@ -497,8 +509,13 @@ object TopMain extends App {
     Generator.execute(firrtlOpts, soc.module, firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
     val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+    Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else {
+    if (enableDifftest) {
+      // TODO: Temporarily force XSTop to use internal DPI-C; will later split Top and Difftest like DiffTop
+      Gateway.setConfig("U")
+    }
+
     val soc = if (config(SoCParamsKey).UseXSNoCTop)
       DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
     else
