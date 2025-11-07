@@ -23,9 +23,9 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
-import huancun.utils.{ModuleNode, ResetGen, ResetGenNode}
+import utility.{ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
-import utils._
+import utility._
 import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.cache.mmu._
@@ -35,7 +35,6 @@ import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters
 
 class WritebackSourceParams(
   var exuConfigs: Seq[Seq[ExuConfig]] = Seq()

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utility.{HasPerfEvents, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents {

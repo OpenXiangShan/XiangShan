@@ -26,7 +26,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan._
 import huancun.{AliasKey, DirtyKey}
 import xiangshan.cache._
-import utils._
+import utility._
 import difftest._
 
 
@@ -235,7 +235,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.resp.valid := state === s_wait_resp
   /** update coh meta */
   def missCohGen(param: UInt, dirty: Bool): UInt = {
-    MuxLookup(Cat(param, dirty), Nothing, Seq(
+    MuxLookup(Cat(param, dirty), Nothing)(Seq(
       Cat(toB, false.B) -> Branch,
       Cat(toB, true.B)  -> Branch,
       Cat(toT, false.B) -> Trunk,

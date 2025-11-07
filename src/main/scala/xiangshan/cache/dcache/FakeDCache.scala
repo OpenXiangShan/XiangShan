@@ -20,7 +20,7 @@ import chisel3._
 import difftest.common.DifftestMem
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
-import utils._
+import utility._
 
 class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new DCacheIO)

@@ -18,10 +18,10 @@ package xiangshan.backend.fu.util
 
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend._
-import utils.XSDebug
+import utility.XSDebug
 
 trait HasCSRConst {
 

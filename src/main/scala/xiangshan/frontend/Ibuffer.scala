@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.ExceptionNO._
 
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
@@ -141,7 +141,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     io.out(i).bits.instr := fastData.instr
     io.out(i).bits.exceptionVec := fastData.exceptionVec
     io.out(i).bits.foldpc := fastData.foldpc
-    XSError(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
+    XSError1(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
   }
   val nextStepData = Wire(Vec(2 * DecodeWidth, new IBufEntry))
   val ptrMatch = new QPtrMatchMatrix(deqPtrVec, enqPtrVec)

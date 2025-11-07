@@ -9,10 +9,9 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import utility.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.ResetGen
+import utility._
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{TLClientsMerger, TLEdgeBuffer, IntBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -83,6 +82,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
       case HCCacheParamsKey => l2param
+      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
+      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })))
   )
 

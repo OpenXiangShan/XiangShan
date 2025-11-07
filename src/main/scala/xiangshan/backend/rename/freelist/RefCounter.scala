@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 
 
@@ -55,7 +55,7 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     val isFreed = refCounter(de.bits) + refCounterInc(de.bits) === refCounterDec(de.bits)
     io.freeRegs(i).valid := RegNext(isNonZero && !blockedByDup) && RegNext(isFreed)
     val isFreed1 = refCounter(RegNext(de.bits)) === 0.U
-    XSError(RegNext(isFreed) =/= isFreed1, p"why isFreed ${RegNext(isFreed)} $isFreed1\n")
+    XSError1(RegNext(isFreed) =/= isFreed1, p"why isFreed ${RegNext(isFreed)} $isFreed1\n")
     io.freeRegs(i).bits := RegNext(deallocate(i).bits)
   }
 
@@ -80,10 +80,10 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     refCounterDec(i) := PopCount(deallocate.zip(deallocateOH).map(dealloc => dealloc._1.valid && dealloc._2(i)))
     val numAlloc1 = PopCount(allocate.map(alloc => alloc.valid && alloc.bits === i.U))
     val numDealloc1 = PopCount(deallocate.map(dealloc => dealloc.valid && dealloc.bits === i.U))
-    XSError(refCounterInc(i) =/= numAlloc1, p"why numAlloc ${refCounterInc(i)} $numAlloc1??")
-    XSError(refCounterDec(i) =/= numDealloc1, p"why numDealloc ${refCounterDec(i)} $numDealloc1??")
+    XSError1(refCounterInc(i) =/= numAlloc1, p"why numAlloc ${refCounterInc(i)} $numAlloc1??")
+    XSError1(refCounterDec(i) =/= numDealloc1, p"why numDealloc ${refCounterDec(i)} $numDealloc1??")
     refCounterNext(i) := refCounter(i) + refCounterInc(i) - refCounterDec(i)
-    XSError(RegNext(refCounter(i) + refCounterInc(i) < refCounterDec(i)), p"why $i?\n")
+    XSError1(RegNext(refCounter(i) + refCounterInc(i) < refCounterDec(i)), p"why $i?\n")
     refCounter(i) := refCounterNext(i)
   }
 

@@ -31,7 +31,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
-import utils._
+import utility._
 
 import scala.math.max
 import org.chipsalliance.cde.config.Parameters

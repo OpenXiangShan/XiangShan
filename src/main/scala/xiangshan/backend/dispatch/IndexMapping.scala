@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {

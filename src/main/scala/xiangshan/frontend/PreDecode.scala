@@ -20,7 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.{ExpandedInstruction, RVCDecoder}
 import chisel3.{util, _}
 import chisel3.util._
-import utils._
+import utility._
+import utils.PrintTriggerInfo
 import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
@@ -163,9 +164,9 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
   })
 
   if (HasCExtension) {
-    io.out := new RVCDecoder(io.in, XLEN).decode
+    io.out := new RVCDecoder(io.in, false.B, XLEN, XLEN, true).decode
   } else {
-    io.out := new RVCDecoder(io.in, XLEN).passthrough
+    io.out := new RVCDecoder(io.in, false.B, XLEN, XLEN, true).passthrough
   }
 }
 

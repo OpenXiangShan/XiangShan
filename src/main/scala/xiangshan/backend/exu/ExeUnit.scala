@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{Definition, instantiable, public}
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}

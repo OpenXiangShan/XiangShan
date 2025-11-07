@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 abstract class AbstractDivider(len: Int)(implicit p: Parameters) extends FunctionUnit(len){
   val ctrl = IO(Input(new MulDivCtrl))

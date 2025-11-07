@@ -19,7 +19,7 @@ package device
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
-import utils._
+import utility._
 
 class TimerIO extends Bundle {
   val mtip = Output(Bool())

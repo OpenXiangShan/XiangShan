@@ -21,7 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.ExtModule
 import freechips.rocketchip.diplomacy.AddressSet
-import utils._
+import utility._
 
 class FlashHelper extends ExtModule with HasExtModuleInline {
   val clk = IO(Input(Clock()))

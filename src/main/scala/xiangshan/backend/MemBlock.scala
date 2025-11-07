@@ -22,8 +22,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import huancun.PrefetchRecv
-import utility.{RegNextN, ValidIODelay}
-import utils._
+import utils.PrintTriggerInfo
+import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
@@ -62,7 +62,6 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
 
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasFPUParameters
   with HasWritebackSourceImp
   with HasPerfEvents
   with SdtrigExt
@@ -622,7 +621,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
   io.lsqio.exceptionAddr.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
-  XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
+  XSError1(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

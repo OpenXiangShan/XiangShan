@@ -17,11 +17,10 @@
 package xiangshan.mem
 
 import org.chipsalliance.cde.config.Parameters
-import chisel3.experimental.{DataMirror, requireIsChiselType}
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.cache._
 import difftest._
 
@@ -38,20 +37,9 @@ class DatamoduleResultBuffer[T <: Data]
   gen: T,
 ) extends Module {
 
-  val genType = if (compileOptions.declaredTypeMustBeUnbound) {
-    requireIsChiselType(gen)
-    gen
-  } else {
-    if (DataMirror.internal.isSynthesizable(gen)) {
-      chiselTypeOf(gen)
-    } else {
-      gen
-    }
-  }
-
   val io = IO(new DatamoduleResultBufferIO[T](gen))
 
-  val data = Reg(Vec(2, genType))
+  val data = Reg(Vec(2, gen))
   val valids = RegInit(VecInit(Seq.fill(2)(false.B)))
   val enq_flag = RegInit(false.B) // head is entry 0
   val deq_flag = RegInit(false.B) // tail is entry 0

@@ -19,9 +19,8 @@ package xiangshan.cache.mmu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst

@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import xiangshan._
-import utils._
+import utility._
 import huancun.{DirtyField, DirtyKey}
 
 class ReleaseReq(implicit p: Parameters) extends ICacheBundle{

@@ -20,7 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
-import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
+import utility.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utils.HasTLDump
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {

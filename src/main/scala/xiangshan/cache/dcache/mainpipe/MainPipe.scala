@@ -23,7 +23,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import utils._
+import utility._
 import xiangshan.L1CacheErrorInfo
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
@@ -507,7 +507,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
       //(effect param) -> (next)
       Cat(rd, toB, false.B)  -> Branch,
       Cat(rd, toB, true.B)   -> Branch,
@@ -598,7 +598,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
       }
     }
   }
-  XSError(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
+  XSError1(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
 
 
   val banked_amo_wmask = UIntToOH(s3_req.word_idx)

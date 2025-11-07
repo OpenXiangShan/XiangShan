@@ -19,6 +19,8 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import difftest.DifftestModule
+import utility._
 
 import scala.annotation.tailrec
 import scala.sys.exit
@@ -46,9 +48,10 @@ object ArgParser {
     val c = Class.forName(prefix + confString).getConstructor(Integer.TYPE)
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
-  def parse(args: Array[String]): (Parameters, Array[String]) = {
+  def parse(args: Array[String]): (Parameters, Array[String], Array[String]) = {
     val default = new DefaultConfig(1)
     var firrtlOpts = Array[String]()
+    var firtoolOpts = Array[String]()
     @tailrec
     def nextOption(config: Parameters, list: List[String]): Parameters = {
       list match {
@@ -85,13 +88,30 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
+        case "--firtool-opt" :: option :: tail =>
+          firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
+          nextOption(config, tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
           nextOption(config, tail)
       }
     }
-    var config = nextOption(default, args.toList)
-    (config, firrtlOpts)
+    val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
+    var config = nextOption(default, newArgs.toList).alter((site, here, up) => {
+      case LogUtilsOptionsKey => LogUtilsOptions(
+        enableDebug = here(DebugOptionsKey).EnableDebug,
+        enablePerf = here(DebugOptionsKey).EnablePerfDebug,
+        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform,
+        enableXMR = true, // here(DebugOptionsKey).EnableXMR,
+      )
+      case PerfCounterOptionsKey => PerfCounterOptions(
+        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        enablePerfDB = false, // here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        perfLevel = XSPerfLevel.NORMAL, // XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
+        perfDBHartID = 0
+      )
+    })
+    (config, firrtlOpts, firtoolOpts ++ firtoolOptions.map(_.option))
   }
 }

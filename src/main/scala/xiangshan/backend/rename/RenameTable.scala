@@ -19,7 +19,7 @@ package xiangshan.backend.rename
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{ParallelPriorityMux, XSError}
+import utility.{ParallelPriorityMux, XSError1}
 import xiangshan._
 
 class RatReadPort(implicit p: Parameters) extends XSBundle {
@@ -108,13 +108,13 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && intDestValid(i)
     arch.addr := io.robCommits.info(i).ldest
     arch.data := io.robCommits.info(i).pdest
-    XSError(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
+    XSError1(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
     spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && intDestValid(i)
     spec.addr := io.robCommits.info(i).ldest
     spec.data := io.robCommits.info(i).old_pdest
-    XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
+    XSError1(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
     when (rename.wen) {

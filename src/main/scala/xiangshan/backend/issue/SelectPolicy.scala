@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -47,7 +47,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     io.allocate(i).valid := sel._1
     io.allocate(i).bits := sel._2.asUInt
 
-    XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
+    XSError1(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
       p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
     XSDebug(io.allocate(i).fire, p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
@@ -60,7 +60,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
 
-    XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
+    XSError1(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
     XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
   }
@@ -165,7 +165,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit
 
   val ageMatrix = VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt
   val symmetricAge = RegNext(nextBest)
-  XSError(ageMatrix =/= symmetricAge, p"age error between ${Hexadecimal(ageMatrix)} and ${Hexadecimal(symmetricAge)}\n")
+  XSError1(ageMatrix =/= symmetricAge, p"age error between ${Hexadecimal(ageMatrix)} and ${Hexadecimal(symmetricAge)}\n")
 }
 
 object AgeDetector {

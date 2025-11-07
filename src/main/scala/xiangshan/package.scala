@@ -112,7 +112,7 @@ package object xiangshan {
       bku.litValue -> "bku",
       fmac.litValue -> "fmac",
       fmisc.litValue -> "fmisc",
-      fDivSqrt.litValue -> "fdiv/fsqrt",
+      fDivSqrt.litValue -> "fdiv_fsqrt",
       ldu.litValue -> "load",
       stu.litValue -> "store",
       mou.litValue -> "mou"
@@ -742,7 +742,7 @@ package object xiangshan {
   )
 
   val staCfg = FuConfig(
-    "sta",
+    "staddr",
     null,
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
@@ -752,7 +752,7 @@ package object xiangshan {
   )
 
   val stdCfg = FuConfig(
-    "std",
+    "stdata",
     fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
     writeIntRf = false, writeFpRf = false, latency = CertainLatency(1),
     trigger = false, // we don't have store data trigger yet

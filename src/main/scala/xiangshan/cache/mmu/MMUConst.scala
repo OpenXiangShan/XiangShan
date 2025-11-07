@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
-import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -129,49 +129,49 @@ trait HasTlbConst extends HasXSParameter {
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
-  val PtwWidth = 2
-  val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
-  val prefetchID = PtwWidth
-  val maxPrefetchNum = l2tlbParams.filterSize
+  def PtwWidth = 2
+  def sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
+  def prefetchID = PtwWidth
+  def maxPrefetchNum = l2tlbParams.filterSize
 
-  val blockBits = l2tlbParams.blockBytes * 8
+  def blockBits = l2tlbParams.blockBytes * 8
 
-  val bPtwWidth = log2Up(PtwWidth)
-  val bSourceWidth = log2Up(sourceWidth)
+  def bPtwWidth = log2Up(PtwWidth)
+  def bSourceWidth = log2Up(sourceWidth)
   // ptwl1: fully-associated
-  val PtwL1TagLen = vpnnLen
+  def PtwL1TagLen = vpnnLen
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
    * +-------+----------+-------------+
    */
   // ptwl2: 8-way group-associated
-  val l2tlbParams.l2nWays = l2tlbParams.l2nWays
-  val PtwL2SetNum = l2tlbParams.l2nSets
-  val PtwL2SectorSize = blockBits /XLEN
-  val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
-  val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
-  val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
-  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
+  def PtwL2nWays = l2tlbParams.l2nWays
+  def PtwL2SetNum = l2tlbParams.l2nSets
+  def PtwL2SectorSize = blockBits /XLEN
+  def PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
+  def PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
+  def PtwL2SetIdxLen = log2Up(PtwL2SetNum)
+  def PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
 
   // ptwl3: 16-way group-associated
-  val l2tlbParams.l3nWays = l2tlbParams.l3nWays
-  val PtwL3SetNum = l2tlbParams.l3nSets
-  val PtwL3SectorSize =  blockBits / XLEN
-  val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
-  val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
-  val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
-  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
+  def PtwL3nWays = l2tlbParams.l3nWays
+  def PtwL3SetNum = l2tlbParams.l3nSets
+  def PtwL3SectorSize =  blockBits / XLEN
+  def PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
+  def PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
+  def PtwL3SetIdxLen = log2Up(PtwL3SetNum)
+  def PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
 
   // super page, including 1GB and 2MB page
-  val SPTagLen = vpnnLen * 2
+  def SPTagLen = vpnnLen * 2
 
   // miss queue
-  val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
-  val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
-  val MemReqWidth = l2tlbParams.llptwsize + 1
-  val FsmReqID = l2tlbParams.llptwsize
-  val bMemID = log2Up(MemReqWidth)
+  def MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
+  def MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
+  def MemReqWidth = l2tlbParams.llptwsize + 1
+  def FsmReqID = l2tlbParams.llptwsize
+  def bMemID = log2Up(MemReqWidth)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)

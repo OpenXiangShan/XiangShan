@@ -19,7 +19,7 @@ package xiangshan.frontend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import scala.{Tuple2 => &}
 
@@ -170,7 +170,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   val s1_hit_full_pred_dup = s1_hit_oh_dup.zip(s1_possible_full_preds_dup).map(t => Mux1H(t._1, t._2))
-  XSError(PopCount(s1_hit_oh_dup(0)) > 1.U, "fauftb has multiple hits!\n")
+  XSError1(PopCount(s1_hit_oh_dup(0)) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable_dup = RegNext(dup(io.ctrl.ubtb_enable))
 
   io.out.s1.full_pred.map(_ := s1_hit_full_pred_dup(0))
@@ -179,7 +179,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   io.out.s1.full_pred(special_idx_for_dup).hit := s1_hit_dup(1) && fauftb_enable_dup(special_idx_for_dup)
 
   for (i <- 1 until numDup) {
-    XSError(io.out.s1.full_pred(i).asUInt =/= io.out.s1.full_pred(0).asUInt,
+    XSError1(io.out.s1.full_pred(i).asUInt =/= io.out.s1.full_pred(0).asUInt,
       p"fauftb s1 pred $i differs from pred 0\n")
   }
 

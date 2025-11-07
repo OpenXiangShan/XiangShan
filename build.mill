@@ -1,0 +1,149 @@
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package build
+
+import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
+import $ivy.`org.chipsalliance::chisel:6.7.0`
+import $ivy.`org.chipsalliance::firtool-resolver:2.0.1`
+import de.tobiasroeser.mill.vcs.version.VcsVersion
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import mill._
+import mill.scalalib._
+import mill.scalalib.scalafmt.ScalafmtModule
+import os.Path
+
+val defaultScalaVersion = "2.13.15"
+
+val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
+
+trait ChiselModule extends SbtModule with ScalafmtModule {
+  def scalaVersion: T[String] = defaultScalaVersion
+
+  def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.7.0")
+
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:6.7.0")
+
+  def resolveFirtoolDeps = T {
+    firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
+      case Right(bin) => bin.path.getAbsolutePath
+      case Left(err)  => err
+    }
+  }
+}
+
+object `rocket-chip` extends ChiselModule {
+  object macros extends ScalaModule {
+    def scalaVersion: T[String] = defaultScalaVersion
+
+    def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
+  }
+
+  object hardfloat extends ChiselModule {
+    def millSourcePath: Path = pwd / "rocket-chip" / "hardfloat" / "hardfloat"
+  }
+
+  object cde extends ScalaModule {
+    def scalaVersion: T[String] = defaultScalaVersion
+
+    def millSourcePath: Path = pwd / "rocket-chip" / "cde" / "cde"
+  }
+
+  def mainClass = Some("freechips.rocketchip.diplomacy.Main")
+
+  def moduleDeps = Seq(macros, hardfloat, cde)
+
+  def ivyDeps: T[Agg[Dep]] =
+    super.ivyDeps() ++ Agg(ivy"com.lihaoyi::mainargs:0.7.7", ivy"org.json4s::json4s-jackson:4.0.7")
+}
+
+object utility extends ChiselModule {
+  def millSourcePath: Path = pwd / "huancun" / "Utility"
+
+  def moduleDeps = Seq(`rocket-chip`)
+
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"com.lihaoyi::sourcecode:0.4.4")
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"org.scalatest::scalatest:3.2.19")
+  }
+}
+
+object huancun extends ChiselModule {
+  def moduleDeps = Seq(`rocket-chip`, utility)
+}
+
+object difftest extends ChiselModule {
+  object test extends SbtTests with TestModule.ScalaTest {
+    override def sources: T[Seq[PathRef]] = Task.Sources {
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
+    }
+  }
+}
+
+object fudian extends ChiselModule {}
+
+object xiangshan extends ChiselModule {
+  def millSourcePath = pwd
+
+  def moduleDeps = Seq(
+    `rocket-chip`,
+    difftest,
+    huancun,
+    fudian,
+    utility,
+  )
+
+  val resourcesPath: String = pwd.toString() + "/src/main/resources"
+  val envPath:       String = sys.env("PATH") + ":" + resourcesPath
+
+  def forkEnv = Map("PATH" -> envPath)
+
+  def forkArgs = Seq(
+    s"-Xmx${sys.props.getOrElse("jvm-xmx", "40G")}",
+    s"-Xss${sys.props.getOrElse("jvm-xss", "256m")}"
+  )
+
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"org.scalatest::scalatest:3.2.19",
+    ivy"io.circe::circe-yaml:0.16.1",
+    ivy"io.circe::circe-generic-extras:0.14.4"
+  )
+
+  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    def moduleDeps: Seq[JavaModule] = super.moduleDeps ++ Seq(xiangshan, difftest.test)
+
+    def forkArgs: T[Seq[String]] = super.forkArgs
+
+    def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Seq("-deprecation", "-feature")
+
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+      ivy"edu.berkeley.cs::chiseltest:6.0.0",
+    )
+
+    val resourcesPath: String = pwd.toString() + "/src/main/resources"
+    val envPath:       String = sys.env("PATH") + ":" + resourcesPath
+
+    def forkEnv = Map("PATH" -> envPath)
+  }
+}

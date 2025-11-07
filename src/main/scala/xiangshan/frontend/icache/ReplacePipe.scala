@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import xiangshan._
-import utils._
+import utility._
 
 class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -212,7 +212,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.error.opType.release       := RegNext(RegNext(!r2_req_is_probe_dup_1))
   io.error.opType.probe         := RegNext(RegNext(r2_req_is_probe_dup_1))
 
-  XSError(r2_parity_error && RegNext(RegNext(r1_fire)), "ICache has parity error in ReplacePipe!")
+  XSError1(r2_parity_error && RegNext(RegNext(r1_fire)), "ICache has parity error in ReplacePipe!")
 
 
   /*** for Release mux ***/

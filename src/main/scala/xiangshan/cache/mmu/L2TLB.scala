@@ -22,7 +22,7 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
-import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import huancun.{PreferCacheKey, PreferCacheField}
@@ -213,7 +213,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR
   when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
   when (flush) { last_resp_v := false.B }
-  XSError(last_resp_v && cache.io.refill.valid &&
+  XSError1(last_resp_v && cache.io.refill.valid &&
     (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
     (cache.io.refill.bits.level_dup(0) === last_resp_level),
     "l2tlb should not access mem at same addr for twice")
@@ -347,7 +347,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   }
 
   def outReady(source: UInt, port: Int): Bool = {
-    MuxLookup(source, true.B,
+    MuxLookup(source, true.B)(
       (0 until PtwWidth).map(i => i.U -> outArb(i).in(port).ready))
   }
 

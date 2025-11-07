@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
-import utils.MaskExpand
+import utility.MaskExpand
 
 import scala.collection.mutable
 

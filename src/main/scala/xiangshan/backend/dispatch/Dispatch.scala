@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
-import utils._
+import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.RobEnqIO
@@ -113,7 +113,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     when (!CommitType.isFused(io.fromRename(i).bits.ctrl.commitType)) {
       updatedUop(i).ctrl.commitType := updatedCommitType(i)
     }.otherwise {
-      XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
+      XSError1(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
     }
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (io.fromRename(i).bits.isLUI) {
@@ -247,7 +247,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val enqFireCnt = PopCount(io.toIntDq.req.map(_.valid && io.toIntDq.canAccept)) +
     PopCount(io.toFpDq.req.map(_.valid && io.toFpDq.canAccept)) +
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
-  XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
+  XSError1(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
   XSPerfAccumulate("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
   XSPerfAccumulate("empty", !hasValidInstr)

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.exu.ExuConfig
 
@@ -97,7 +97,7 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
 
     for (i <- 0 until params.numEntries) {
       val w = VecInit(wen.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
-      XSError(RegNext(PopCount(w) > 1.U), s"why not OH $i?")
+      XSError1(RegNext(PopCount(w) > 1.U), s"why not OH $i?")
       when(PopCount(w) > 1.U) {
         XSDebug("ERROR: RS DataArray write overlap!\n")
       }

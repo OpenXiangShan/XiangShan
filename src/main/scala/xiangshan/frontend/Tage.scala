@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 import scala.math.min
 import scala.util.matching.Regex
@@ -286,7 +286,7 @@ class TageTable
   if (EnableGHistDiff) {
     val idx_history = compute_folded_ghist(io.req.bits.ghist, log2Ceil(nRowsPerBr))
     val idx_fh = io.req.bits.folded_hist.getHistWithInfo(idxFhInfo)
-    XSError(idx_history =/= idx_fh.folded_hist, p"tage table $tableIdx has different fh," +
+    XSError1(idx_history =/= idx_fh.folded_hist, p"tage table $tableIdx has different fh," +
       p" ghist: ${Binary(idx_history)}, fh: ${Binary(idx_fh.folded_hist)}\n")
   }
   // pc is start address of basic block, most 2 branch inst in block
@@ -350,7 +350,7 @@ class TageTable
   if (EnableGHistDiff) {
     val update_idx_history = compute_folded_ghist(io.update.ghist, log2Ceil(nRowsPerBr))
     val update_idx_fh = io.update.folded_hist.getHistWithInfo(idxFhInfo)
-    XSError(update_idx_history =/= update_idx_fh.folded_hist && io.update.mask.reduce(_||_),
+    XSError1(update_idx_history =/= update_idx_fh.folded_hist && io.update.mask.reduce(_||_),
       p"tage table $tableIdx has different fh when update," +
       p" ghist: ${Binary(update_idx_history)}, fh: ${Binary(update_idx_fh.folded_hist)}\n")
   }

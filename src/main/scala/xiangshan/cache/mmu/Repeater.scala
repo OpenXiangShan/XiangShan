@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
-import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -77,9 +77,9 @@ class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with 
   XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
-  XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
-  XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.entry.tag), "ptw repeater recv resp with wrong tag")
-  XSError(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
+  XSError1(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
+  XSError1(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.entry.tag), "ptw repeater recv resp with wrong tag")
+  XSError1(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
   TimeOutAssert(sent && !recv, timeOutThreshold, "Repeater doesn't recv resp in time")
 }
 

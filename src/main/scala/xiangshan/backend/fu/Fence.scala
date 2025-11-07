@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.ExceptionNO.illegalInstr
 
 class FenceToSbuffer extends Bundle {
@@ -63,8 +63,8 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   sfence.valid := state === s_tlb && !disableSfence
   sfence.bits.rs1  := uop.ctrl.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.ctrl.imm(9, 5) === 0.U
-  XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
-  XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
+  XSError1(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
+  XSError1(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
   sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire)
   sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire)
 

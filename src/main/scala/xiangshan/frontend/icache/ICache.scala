@@ -26,7 +26,7 @@ import huancun.{AliasField, DirtyField, PreferCacheField, PrefetchField}
 import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
-import utils.{SRAMTemplate, _}
+import utility._
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
@@ -267,7 +267,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
         tag_sram_write(i).bits.apply(
           data = io.cacheOp.req.bits.write_tag_low,
           setIdx = io.cacheOp.req.bits.index,
-          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(log2Ceil(ICacheWays) - 1, 0))
         )
       }
       cacheOpShouldResp := true.B

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.exu._
 
@@ -116,7 +116,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     if (cfg == FmacExeUnitCfg) {
       fastOut.valid := fuOut.valid
       fastOut.bits := fuOut.bits.uop
-      XSError(fuOut.valid && !fuOut.ready, "fastUopOut should not be blocked\n")
+      XSError1(fuOut.valid && !fuOut.ready, "fastUopOut should not be blocked\n")
       println(s"Enable fast wakeup from function unit ${cfg.name}")
     }
   }
@@ -145,9 +145,9 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     println(s"scheduler.writeback($i) is connected from exu ${cfg.name}")
     val outerWb = io.rfWriteback(i)
     val hasWb = outerWb.valid || scheWb.valid
-    XSError(hasWb && outerWb.bits.uop.robIdx =/= scheWb.bits.uop.robIdx,
+    XSError1(hasWb && outerWb.bits.uop.robIdx =/= scheWb.bits.uop.robIdx,
       "different instruction between io.rfWriteback and fu.writeback\n")
-    XSError(hasWb && outerWb.bits.data =/= scheWb.bits.data,
+    XSError1(hasWb && outerWb.bits.data =/= scheWb.bits.data,
       "different data between io.rfWriteback and fu.writeback\n")
   }
 
@@ -173,12 +173,12 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     }
 
     println(s"writeback from exu $i is replaced by RegNext(rs.fastUopOut)")
-    XSError(wbOut.valid && !wbOut.ready, "fast uop wb should not be blocked\n")
+    XSError1(wbOut.valid && !wbOut.ready, "fast uop wb should not be blocked\n")
     require(cfg.hasExclusiveWbPort, "it's impossible to have allWakeupFromRs if it doesn't have exclusive rf ports")
     val fuWb = fuBlock.io.writeback(i)
     val fuWbValid = if (cfg.hasFastUopOut) RegNext(fuWb.valid) else fuWb.valid
     val fuWbRobIdx = if (cfg.hasFastUopOut) RegNext(fuWb.bits.uop.robIdx) else fuWb.bits.uop.robIdx
-    XSError((wbOut.valid || fuWbValid) && wbOut.bits.uop.robIdx =/= fuWbRobIdx,
+    XSError1((wbOut.valid || fuWbValid) && wbOut.bits.uop.robIdx =/= fuWbRobIdx,
       "different instruction between rs.fastUopOut and fu.writeback\n")}
   }
 

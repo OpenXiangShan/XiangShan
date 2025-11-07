@@ -19,13 +19,14 @@ package top
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import utility.FileRegisters
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
 import device.{AXI4Plic, DebugModule, TLTimer}
+import difftest.DifftestModule
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
@@ -36,7 +37,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.tilelink
 import utility.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
-import huancun.utils.ResetGen
+import utility.ResetGen
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -78,6 +79,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param
+      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
+      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })))
   )
 
@@ -206,12 +209,18 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 }
 
 object TopMain extends App {
-  val (config, firrtlOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
+
   val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-  XiangShanStage.execute(firrtlOpts, Seq(
-    ChiselGeneratorAnnotation(() => {
-      soc.module
-    })
-  ))
+  Generator.execute(
+    firrtlOpts,
+    soc.module,
+    firtoolOpts
+  )
+
+  // generate difftest bundles (w/o DifftestTopIO)
+  if (config(DebugOptionsKey).EnableDifftest) {
+    DifftestModule.collect("XiangShan")
+  }
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

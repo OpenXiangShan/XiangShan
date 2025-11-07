@@ -19,7 +19,7 @@ package xiangshan.frontend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
@@ -641,10 +641,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
+  XSError1(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
 
   (0 until copyNum).map{i =>
-    XSError(copied_bpu_ptr(i) =/= bpuPtr, "\ncopiedBpuPtr is different from bpuPtr!\n")
+    XSError1(copied_bpu_ptr(i) =/= bpuPtr, "\ncopiedBpuPtr is different from bpuPtr!\n")
   }
 
   // ****************************************************************
@@ -739,7 +739,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // }
 
   // TODO: remove this
-  XSError(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
+  XSError1(io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
           p"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr)}\n")
 
   // when fall through is smaller in value than start address, there must be a false hit
@@ -749,7 +749,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
     ) {
       entry_hit_status(ifuPtr.value) := h_false_hit
-      // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
+      // XSError1(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
     }
     XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
   }
@@ -1074,12 +1074,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       bpu_ftb_update_stall := 0.U
     }
     is (3.U) {
-      XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+      XSError1(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
     }
   }
 
   // TODO: remove this
-  XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
+  XSError1(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
@@ -1138,7 +1138,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     when (bpu_s3_redirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
       prefetchPtr := bpu_s3_resp.ftq_idx
-      // XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
+      // XSError1(true.B, "\ns3_redirect mechanism not implemented!\n")
     }
 
 
@@ -1162,12 +1162,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
 
     // TODO: remove this
-    // XSError(io.toPrefetch.req.valid && diff_prefetch_addr =/= prefetch_addr,
+    // XSError1(io.toPrefetch.req.valid && diff_prefetch_addr =/= prefetch_addr,
     //         f"\nprefetch_req_target wrong! prefetchPtr: ${prefetchPtr}, prefetch_addr: ${Hexadecimal(prefetch_addr)} diff_prefetch_addr: ${Hexadecimal(diff_prefetch_addr)}\n")
 
 
-    XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
+    XSError1(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
+    XSError1(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
   }
   else {
     io.toPrefetch.req <> DontCare

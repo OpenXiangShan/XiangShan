@@ -16,7 +16,7 @@
 
 package xiangshan
 
-import Chisel.log2Ceil
+import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.tile.XLen
 import system.SoCParamsKey
@@ -42,12 +42,12 @@ case class PMParameters
 trait HasPMParameters {
   implicit val p: Parameters
 
-  val PMPAddrBits = p(SoCParamsKey).PAddrBits
-  val PMXLEN = p(XLen)
-  val pmParams = p(PMParameKey)
-  val NumPMP = pmParams.NumPMP
-  val NumPMA = pmParams.NumPMA
+  def PMPAddrBits = p(SoCParamsKey).PAddrBits
+  def PMXLEN = p(XLen)
+  def pmParams = p(PMParameKey)
+  def NumPMP = pmParams.NumPMP
+  def NumPMA = pmParams.NumPMA
 
-  val PlatformGrain = pmParams.PlatformGrain
-  val mmpma = pmParams.mmpma
+  def PlatformGrain = pmParams.PlatformGrain
+  def mmpma = pmParams.mmpma
 }

@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.HasExuWbHelper
@@ -273,14 +273,14 @@ class WbArbiterWrapper(
     override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
       // To optimize write ports, we can remove the duplicate ports.
       val duplicatePorts = fpWbPorts.zipWithIndex.filter(cfgs => cfgs._1.length == 1 && intWbPorts.contains(cfgs._1))
-      val duplicateSource = exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.map(_._1).contains(Seq(cfg._1))).map(_._2)
+      val duplicateSource = this.exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.map(_._1).contains(Seq(cfg._1))).map(_._2)
       val duplicateSink = intWbPorts.zipWithIndex.filter(cfgs => duplicatePorts.map(_._1).contains(cfgs._1)).map(_._2)
       require(duplicateSource.length == duplicatePorts.length)
       require(duplicateSink.length == duplicatePorts.length)
       // effectivePorts: distinct write-back ports that write to the regfile
       val effectivePorts = io.out.zipWithIndex.filterNot(i => duplicatePorts.map(_._2).contains(i._2 - numIntWbPorts))
       // simplePorts: write-back ports that don't write to the regfile but update the ROB states
-      val simplePorts = exuConfigs.zip(io.in).filter(cfg => !cfg._1.writeFpRf && !cfg._1.writeIntRf)
+      val simplePorts = this.exuConfigs.zip(io.in).filter(cfg => !cfg._1.writeFpRf && !cfg._1.writeIntRf)
       val simpleWriteback = simplePorts.map(_._2).map(decoupledIOToValidIO)
       val writeback = WireInit(VecInit(effectivePorts.map(_._1) ++ simpleWriteback))
       for ((sink, source) <- duplicateSink.zip(duplicateSource)) {
@@ -293,7 +293,7 @@ class WbArbiterWrapper(
     io.in.foreach(_.ready := true.B)
 
     intArbiter.module.io.redirect <> io.redirect
-    val intWriteback = io.in.zip(exuConfigs).filter(_._2.writeIntRf)
+    val intWriteback = io.in.zip(this.exuConfigs).filter(_._2.writeIntRf)
     intArbiter.module.io.in.zip(intWriteback).foreach { case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen
       arb.valid := wb.valid && (!cfg.writeFpRf.B || !wb.bits.uop.ctrl.fpWen)
@@ -313,7 +313,7 @@ class WbArbiterWrapper(
     }
 
     fpArbiter.module.io.redirect <> io.redirect
-    val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
+    val fpWriteback = io.in.zip(this.exuConfigs).filter(_._2.writeFpRf)
     fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen
       arb.valid := wb.valid && (!cfg.writeIntRf.B || wb.bits.uop.ctrl.fpWen)

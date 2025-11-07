@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
@@ -484,8 +484,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     else {
       val func = dp.map(rs => (op: MicroOp) => rs_all(rs._1).canAccept(op.ctrl.fuType))
       val arbiterOut = DispatchArbiter(allocate(i), func)
-      val rsIn = VecInit(dp.map(rs => rs_all(rs._1).module.io.fromDispatch(rs._2)))
-      rsIn <> arbiterOut
+      // val rsIn = VecInit(dp.map(rs => rs_all(rs._1).module.io.fromDispatch(rs._2)))
+      arbiterOut <> dp.map(rs => rs_all(rs._1).module.io.fromDispatch(rs._2))
     }
 
     val numIntRfPorts = dp.map(_._1).map(rs_all(_).intSrcCnt).max

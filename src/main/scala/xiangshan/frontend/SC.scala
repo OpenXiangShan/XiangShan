@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 import scala.math.min
 import scala.{Tuple2 => &}
@@ -101,7 +101,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
 
-  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(VecInit(_))
+  val per_br_ctrs_unshuffled = table.io.r.resp.data.grouped(2).toSeq.map(VecInit(_))
   val per_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
     UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
     per_br_ctrs_unshuffled
@@ -151,8 +151,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     update_wdata(pi) := ctrUpdate(oldCtr, taken)
   }
 
-  val per_br_update_wdata_packed = update_wdata_packed.sliding(2,2).map(VecInit(_)).toSeq
-  val per_br_update_way_mask = updateWayMask.sliding(2,2).map(VecInit(_)).toSeq
+  val per_br_update_wdata_packed = update_wdata_packed.grouped(2).map(VecInit(_)).toSeq
+  val per_br_update_way_mask = updateWayMask.grouped(2).map(VecInit(_)).toSeq
   for (li <- 0 until numBr) {
     val wrbypass = wrbypasses(li)
     val br_pidx = get_phy_br_idx(update_unhashed_idx, li)

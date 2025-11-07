@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates
 import xiangshan._
 import xiangshan.cache.mmu._
-import utils._
+import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle}
 
@@ -473,7 +473,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.errors(i).opType           := DontCare
     io.errors(i).opType.fetch     := true.B
   }
-  XSError(s2_parity_error.reduce(_||_) && RegNext(RegNext(s1_fire)), "ICache has parity error in MainPaipe!")
+  XSError1(s2_parity_error.reduce(_||_) && RegNext(RegNext(s1_fire)), "ICache has parity error in MainPaipe!")
 
 
   /** exception and pmp logic **/

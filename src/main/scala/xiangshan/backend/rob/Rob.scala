@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.FtqPtr
@@ -321,7 +321,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
-  val debug_microOp = Mem(RobSize, new MicroOp)
+  val debug_microOp = Reg(Vec(RobSize, new MicroOp))
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
 
@@ -591,7 +591,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
     when (io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
-      XSError(!walk_v(i), s"why not $i???\n")
+      XSError1(!walk_v(i), s"why not $i???\n")
     }
     when (state === s_extrawalk) {
       if (i < RenameWidth) {
@@ -737,7 +737,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       redirectWalkDistance - (thisCycleWalkCount - io.redirect.bits.flushItself()),
       redirectWalkDistance + io.redirect.bits.flushItself()
     )
-    XSError(state === s_walk && thisCycleWalkCount < io.redirect.bits.flushItself(),
+    XSError1(state === s_walk && thisCycleWalkCount < io.redirect.bits.flushItself(),
       p"walk distance error ($thisCycleWalkCount < ${io.redirect.bits.flushItself()}\n")
   }.elsewhen (state === s_walk) {
     walkCounter := walkCounter - thisCycleWalkCount
@@ -859,7 +859,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
     exceptionGen.io.enq(i).bits.replayInst := false.B
-    XSError(canEnqueue(i) && io.enq.req(i).bits.ctrl.replayInst, "enq should not set replayInst")
+    XSError1(canEnqueue(i) && io.enq.req(i).bits.ctrl.replayInst, "enq should not set replayInst")
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
     exceptionGen.io.enq(i).bits.trigger.clear() // Don't care frontend timing and chain, backend hit and canFire

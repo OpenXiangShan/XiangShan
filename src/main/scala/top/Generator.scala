@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -14,28 +15,16 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-// See LICENSE.Berkeley for license details.
+package top
 
-package utils
+import circt.stage._
+import chisel3.stage.ChiselGeneratorAnnotation
+import xiangshan.transforms._
 
-import Chisel._
+object Generator {
+  def execute(args: Array[String], mod: => chisel3.RawModule, firtoolOpts: Array[String]) = {
+    val annotations = firtoolOpts.map(FirtoolOption.apply).toSeq
 
-class LatencyPipe[T <: Data](typ: T, latency: Int) extends Module {
-  val io = new Bundle {
-    val in = Decoupled(typ).flip
-    val out = Decoupled(typ)
-  }
-
-  def doN[T](n: Int, func: T => T, in: T): T =
-    (0 until n).foldLeft(in)((last, _) => func(last))
-
-  io.out <> doN(latency, (last: DecoupledIO[T]) => Queue(last, 1, pipe=true), io.in)
-}
-
-object LatencyPipe {
-  def apply[T <: Data](in: DecoupledIO[T], latency: Int): DecoupledIO[T] = {
-    val pipe = Module(new LatencyPipe(in.bits, latency))
-    pipe.io.in <> in
-    pipe.io.out
+    (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(() => mod) +: annotations)
   }
 }

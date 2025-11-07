@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.mem.LsqEnqIO
@@ -68,9 +68,9 @@ class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyMod
   val numInFire = PopCount(io.in.map(_.fire))
   val numStaFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StaExeUnitCfg)).map(_._1.fire))
   val numStdFire = PopCount(io.out.zip(outer.configs).filter(_._2.contains(StdExeUnitCfg)).map(_._1.fire))
-  // XSError(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
+  // XSError1(numStaFire =/= numStdFire, "sta_fire != std_fire\n")
   val numOutFire = PopCount(io.out.map(_.fire)) - numStdFire
-  // XSError(numInFire =/= numOutFire, "in != out\n")
+  // XSError1(numInFire =/= numOutFire, "in != out\n")
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire", PopCount(io.in.map(_.fire)))

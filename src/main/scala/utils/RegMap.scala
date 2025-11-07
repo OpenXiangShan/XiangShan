@@ -18,6 +18,7 @@ package utils
 
 import chisel3._
 import chisel3.util._
+import utility.{LookupTree, LookupTreeDefault}
 
 object RegMap {
   def Unwritable = null

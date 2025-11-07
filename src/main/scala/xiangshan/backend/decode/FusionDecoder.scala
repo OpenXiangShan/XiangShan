@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
-import utils._
+import utility._
 import xiangshan._
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
@@ -537,7 +537,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val fusionVec = RegEnable(VecInit(fusionList.map(_.isValid)), fire)
     val thisCleared = io.clear(i)
     out.valid := instrPairValid && !thisCleared && fusionVec.asUInt.orR
-    XSError(instrPairValid && PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
+    XSError1(instrPairValid && PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
     def connectByInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[Int]]): Unit = {
       field(out.bits).valid := false.B
       field(out.bits).bits := DontCare

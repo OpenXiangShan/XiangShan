@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 
 class BypassInfo(numWays: Int, dataBits: Int) extends Bundle {
@@ -44,7 +44,7 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Par
     val bypassVec = VecInit(bypassValid)
     val target = Mux(bypassVec.asUInt.orR, ParallelMux(bypassValid, bypassData), baseData)
 
-    XSError(PopCount(bypassVec) > 1.U, p"bypass mask ${Binary(bypassVec.asUInt)} is not one-hot\n")
+    XSError1(PopCount(bypassVec) > 1.U, p"bypass mask ${Binary(bypassVec.asUInt)} is not one-hot\n")
     bypassVec.zipWithIndex.map { case (m, i) =>
       XSDebug(bypassVec(i), p"target($debugIndex) bypassed from $i:0x${Hexadecimal(bypassData(i))}\n")
     }

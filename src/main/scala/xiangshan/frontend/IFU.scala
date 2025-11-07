@@ -23,7 +23,7 @@ import freechips.rocketchip.rocket.RVCDecoder
 import xiangshan._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
-import utils._
+import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
@@ -639,7 +639,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs (0) := new RVCDecoder(inst, XLEN).decode.bits
+    // x: chisel3.UInt, fsIsOff: chisel3.Bool, xLen: Int, fLen: Int, useAddiForMv: Boolean
+    io.toIbuffer.bits.instrs (0) := new RVCDecoder(inst, false.B, XLEN, XLEN, true).decode.bits
 
 
     io.toIbuffer.bits.pd(0).valid   := true.B

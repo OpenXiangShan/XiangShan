@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.Instance
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utility.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu.FMAMidResultIO

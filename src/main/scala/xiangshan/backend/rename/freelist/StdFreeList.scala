@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 
 class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
@@ -31,7 +31,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
+  XSError1(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
   val tailPtrOHReg = RegInit(0.U(size.W))
@@ -95,7 +95,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   if (enableFreeListCheck) {
     for (i <- 0 until size) {
       for (j <- i+1 until size) {
-        XSError(freeList(i) === freeList(j), s"Found same entry in free list! (i=$i j=$j)\n")
+        XSError1(freeList(i) === freeList(j), s"Found same entry in free list! (i=$i j=$j)\n")
       }
     }
   }

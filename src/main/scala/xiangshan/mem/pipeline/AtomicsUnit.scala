@@ -19,7 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.cache.{AtomicWordIO, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
@@ -300,7 +300,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   }
 
   io.out.valid := out_valid
-  XSError((state === s_finish) =/= out_valid, "out_valid reg error\n")
+  XSError1((state === s_finish) =/= out_valid, "out_valid reg error\n")
   io.out.bits := DontCare
   io.out.bits.uop := in.uop
   io.out.bits.uop.cf.exceptionVec := exceptionVec

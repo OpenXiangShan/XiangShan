@@ -18,10 +18,9 @@ package xiangshan.cache
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import utils._
+import utility._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
 
 import scala.math.max
@@ -300,8 +299,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
   XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict)
-  XSPerfAccumulate("data_array_rrl_bank_conflict(0)", rrl_bank_conflict(0))
-  XSPerfAccumulate("data_array_rrl_bank_conflict(1)", rrl_bank_conflict(1))
+  XSPerfAccumulate("data_array_rrl_bank_conflict_0", rrl_bank_conflict(0))
+  XSPerfAccumulate("data_array_rrl_bank_conflict_1", rrl_bank_conflict(1))
   XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict(0))
   XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict(1))
   XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid)

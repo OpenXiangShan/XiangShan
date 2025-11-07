@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 
 
 class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
@@ -31,7 +31,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
+  XSError1(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
   val headPtrOHShift = CircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)

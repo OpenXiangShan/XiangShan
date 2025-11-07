@@ -19,7 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
@@ -175,8 +175,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       miss(index) := false.B
       pending(index) := false.B
       error(index) := false.B
-      XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
-      XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
+      XSError1(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
+      XSError1(index =/= lqIdx.value, s"must be the same entry $i\n")
     }
     io.enq.resp(i) := lqIdx
   }
@@ -497,7 +497,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   (0 until CommitWidth).map(i => {
     when(commitCount > i.U){
       allocated((deqPtrExt+i.U).value) := false.B
-      XSError(!allocated((deqPtrExt+i.U).value), s"why commit invalid entry $i?\n")
+      XSError1(!allocated((deqPtrExt+i.U).value), s"why commit invalid entry $i?\n")
     }
   })
 

@@ -21,7 +21,7 @@ import chisel3.util._
 import difftest._
 import difftest.common.DifftestMem
 import org.chipsalliance.cde.config.Parameters
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -203,8 +203,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
-      XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
-      XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
+      XSError1(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
+      XSError1(index =/= sqIdx.value, s"must be the same entry $i\n")
     }
     io.enq.resp(i) := sqIdx
   }
@@ -519,7 +519,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * (1) When store commits, mark it as committed.
     * (2) They will not be cancelled and can be sent to lower level.
     */
-  XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
+  XSError1(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
     when (commitCount > i.U) { // MMIO inst is not in progress

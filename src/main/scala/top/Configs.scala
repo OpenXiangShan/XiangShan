@@ -19,7 +19,7 @@ package top
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import system._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
@@ -44,6 +44,8 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
   case EnableJtag => true.B
+  case LogUtilsOptionsKey => LogUtilsOptions(false, false, false)
+  case PerfCounterOptionsKey => PerfCounterOptions(false, false, XSPerfLevel.NORMAL, 0)
 })
 
 // Synthesizable minimal XiangShan

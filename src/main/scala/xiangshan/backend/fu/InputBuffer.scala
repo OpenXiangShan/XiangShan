@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.issue.AgeDetector
 
@@ -71,7 +71,7 @@ class InputBuffer(numEntries: Int, enableBypass: Boolean)(implicit p: Parameters
     for (i <- 0 until numEntries) {
       when (age.io.out(i)) {
         emptyVecNext(i) := true.B
-        XSError(emptyVec(i), "should not deq an empty entry\n")
+        XSError1(emptyVec(i), "should not deq an empty entry\n")
       }
     }
   }

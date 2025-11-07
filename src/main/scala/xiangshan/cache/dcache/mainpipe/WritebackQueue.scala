@@ -22,7 +22,8 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import huancun.DirtyKey
-import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
+import utility.{HasPerfEvents, XSDebug, XSPerfAccumulate}
+import utils.HasTLDump
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val param  = UInt(cWidth.W)

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
@@ -315,8 +315,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := dispatchReady(i)
-    XSError(s0_doEnqueue(i) && !select.io.allocate(i).valid, s"port $i should not enqueue\n")
-    XSError(!RegNext(io.redirect.valid) && select.io.allocate(i).valid =/= dispatchReady(i), s"port $i performance deviation\n")
+    XSError1(s0_doEnqueue(i) && !select.io.allocate(i).valid, s"port $i should not enqueue\n")
+    XSError1(!RegNext(io.redirect.valid) && select.io.allocate(i).valid =/= dispatchReady(i), s"port $i performance deviation\n")
     s0_enqFlushed(i) := (if (params.dropOnRedirect) io.redirect.valid else io.fromDispatch(i).bits.robIdx.needFlush(io.redirect))
     s0_doEnqueue(i) := io.fromDispatch(i).fire && !s0_enqFlushed(i)
     val slowWakeup = io.slowPorts.map(_.bits.uop.wakeup(io.fromDispatch(i).bits, params.exuCfg.get))
@@ -398,7 +398,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val numSelected = PopCount(s1_issuePtrOH.map(_.valid))
   val numReadyEntries = PopCount(statusArray.io.canIssue)
   val shouldSelected = Mux(numReadyEntries > params.numDeq.U, params.numDeq.U, numReadyEntries)
-  XSError(numSelected < shouldSelected,
+  XSError1(numSelected < shouldSelected,
     p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
 
   // Allocation: store dispatch uops into payload and data array

@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
-import utils._
+import utility._
 
 trait HasSDConst {
   def MemorySize = 4L * 1024 * 1024 * 1024 // 4GB

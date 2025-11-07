@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
+import utils.OverrideableQueue
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 

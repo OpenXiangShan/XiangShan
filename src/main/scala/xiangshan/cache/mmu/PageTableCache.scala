@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
-import utils._
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -404,8 +404,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toTlb.prefetch := from_pre(stageResp.bits.req_info.source)
   io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
   io.resp.valid := stageResp.valid
-  XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
-  // XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
+  XSError1(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
+  // XSError1(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
@@ -564,8 +564,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l3eccFlush = resp_res.l3.ecc && stageResp_valid_1cycle_dup(1) // RegNext(l3eccError, init = false.B)
   val eccVpn = stageResp.bits.req_info.vpn
 
-  XSError(l2eccFlush, "l2tlb.cache.l2 ecc error. Should not happen at sim stage")
-  XSError(l3eccFlush, "l2tlb.cache.l3 ecc error. Should not happen at sim stage")
+  XSError1(l2eccFlush, "l2tlb.cache.l2 ecc error. Should not happen at sim stage")
+  XSError1(l3eccFlush, "l2tlb.cache.l3 ecc error. Should not happen at sim stage")
   when (l2eccFlush) {
     val flushSetIdxOH = UIntToOH(genPtwL2SetIdx(eccVpn))
     val flushMask = VecInit(flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l2nWays, a.asUInt) }).asUInt

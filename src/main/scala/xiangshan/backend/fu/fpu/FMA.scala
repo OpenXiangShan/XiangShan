@@ -22,7 +22,7 @@ import chisel3.util._
 import fudian.utils.Multiplier
 import fudian.{FCMA, FCMA_ADD, FCMA_ADD_s1, FCMA_ADD_s2, FMUL, FMULToFADD, FMUL_s1, FMUL_s2, FMUL_s3, RawFloat}
 import xiangshan._
-import utils._
+import utility._
 
 
 class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends Bundle {
@@ -230,7 +230,7 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   // For FMUL:
   // (1) It always accept FMA from FADD (if an FMA wants FMUL, it's never blocked).
   // (2) It has lower writeback arbitration priority than FADD (and may be blocked when FMUL.out.valid).
-  XSError(isFMA && !add_pipe.io.in.ready, "FMA should not be blocked\n")
+  XSError1(isFMA && !add_pipe.io.in.ready, "FMA should not be blocked\n")
   mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid) || waitAddOperand
   add_pipe.io.out.ready := io.out.ready
 

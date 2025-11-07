@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{SqPtr, MemWaitUpdateReq}
 
@@ -121,13 +121,13 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     }).unzip
     val stateMatch = VecInit(stateMatchVec).asUInt.orR
     val dataMatch = VecInit(dataMatchVec).asUInt
-    XSError(PopCount(dataMatchVec) > 1.U, p"matchVec ${Binary(dataMatch)} should be one-hot\n")
+    XSError1(PopCount(dataMatchVec) > 1.U, p"matchVec ${Binary(dataMatch)} should be one-hot\n")
     (stateMatch, dataMatch)
   }
 
   def deqRespSel(i: Int) : (Bool, Bool, UInt, SqPtr) = {
     val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i)))
-    XSError(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
+    XSError1(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
     val deqValid = mask.asUInt.orR
     val successVec = io.deqResp.map(_.bits.success)
     val respTypeVec = io.deqResp.map(_.bits.resptype)
@@ -138,7 +138,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   def enqUpdate(i: Int): (Bool, StatusEntry) = {
     val updateVec = VecInit(io.update.map(u => u.enable && u.addr(i)))
     val updateStatus = Mux1H(updateVec, io.update.map(_.data))
-    XSError(PopCount(updateVec) > 1.U, "should not update the same entry\n")
+    XSError1(PopCount(updateVec) > 1.U, "should not update the same entry\n")
     (updateVec.asUInt.orR, updateStatus)
   }
 
@@ -156,10 +156,10 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isFlushed = statusNext.robIdx.needFlush(io.redirect)
     flushedVec(i) := RegNext(realValid && isFlushed) || deqRespSucc
     statusNextValid := realValid && !(isFlushed || deqRespSucc)
-    XSError(updateValid(i) && statusValid, p"should not update a valid entry $i\n")
-    XSError(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
+    XSError1(updateValid(i) && statusValid, p"should not update a valid entry $i\n")
+    XSError1(deqRespValid && !realValid, p"should not deq an invalid entry $i\n")
     if (params.hasFeedback) {
-      XSError(deqRespValid && !statusArray(i).scheduled, p"should not deq an un-scheduled entry $i\n")
+      XSError1(deqRespValid && !statusArray(i).scheduled, p"should not deq an un-scheduled entry $i\n")
     }
 
     // scheduled: when the entry is scheduled for issue, mark it true.
@@ -175,7 +175,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       // updateValid may arrive at the same cycle as hasIssued.
       statusNext.scheduled := hasIssued || Mux(updateValid(i), updateVal(i).scheduled, keepScheduled)
     }
-    XSError(hasIssued && !realValid, p"should not issue an invalid entry $i\n")
+    XSError1(hasIssued && !realValid, p"should not issue an invalid entry $i\n")
     is_issued(i) := statusValid && hasIssued
 
     // blocked: indicate whether the entry is blocked for issue until certain conditions meet.
@@ -204,7 +204,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
         statusNext.blocked := true.B
         statusNext.waitForSqIdx := deqRespDataInvalidSqIdx
         statusNext.waitForStoreData := true.B
-        XSError(statusValid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
+        XSError1(statusValid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
           "Previous store instructions are all issued. Should not trigger dataInvalid.\n")
       }
     }
@@ -212,7 +212,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // credit: the number of cycles this entry needed until it can be scheduled
     val creditStep = Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
     statusNext.credit := Mux(updateValid(i), updateVal(i).credit, creditStep)
-    XSError(statusValid && status.credit > 0.U && !status.scheduled,
+    XSError1(statusValid && status.credit > 0.U && !status.scheduled,
       p"instructions $i with credit ${status.credit} must not be scheduled\n")
 
     // srcState: indicate whether the operand is ready for issue

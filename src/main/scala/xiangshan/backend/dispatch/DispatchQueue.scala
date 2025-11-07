@@ -19,7 +19,7 @@ package xiangshan.backend.dispatch
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 
@@ -153,7 +153,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   }
   headPtr := headPtrNext
   headPtrOH := Mux(io.redirect.valid, headPtrOH, ParallelPriorityMux(deqEnable_n, headPtrOHVec))
-  XSError(headPtrOH =/= headPtr.head.toOH, p"head: $headPtrOH != UIntToOH(${headPtr.head})")
+  XSError1(headPtrOH =/= headPtr.head.toOH, p"head: $headPtrOH != UIntToOH(${headPtr.head})")
 
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
@@ -189,7 +189,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   }
   tailPtrOH := Mux(lastLastCycleMisprediction, tailPtr.head.toOH, tailPtrOHVec(numEnq))
   val tailPtrOHAccurate = !lastCycleMisprediction && !lastLastCycleMisprediction
-  XSError(tailPtrOHAccurate && tailPtrOH =/= tailPtr.head.toOH, p"tail: $tailPtrOH != UIntToOH(${tailPtr.head})")
+  XSError1(tailPtrOHAccurate && tailPtrOH =/= tailPtr.head.toOH, p"tail: $tailPtrOH != UIntToOH(${tailPtr.head})")
 
   // update valid counter and allowEnqueue reg
   validCounter := Mux(io.redirect.valid,
@@ -254,7 +254,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   }
   XSDebug(false, true.B, "\n")
 
-  // XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
+  // XSError1(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
   QueuePerf(size, PopCount(stateEntries.map(_ =/= s_invalid)), !canEnqueue)
   io.dqFull := !canEnqueue
   XSPerfAccumulate("in", numEnq)

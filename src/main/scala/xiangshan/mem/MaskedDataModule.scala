@@ -19,7 +19,7 @@ package xiangshan.mem
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
+import utility._
 import xiangshan.cache._
 
 class MaskedSyncDataModuleTemplate[T <: Data](
@@ -180,7 +180,7 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
       val s1_bank_mwrite_data = Mux1H(s1_bank_mwrite_en_vec, s1_mwdata)
       when (s1_entry_write_en || s1_bank_mwrite_en) {
         data(bank * numEntryPerBank + entry) := Mux1H(
-          Seq(s1_entry_write_en, s1_bank_mwrite_en), 
+          Seq(s1_entry_write_en, s1_bank_mwrite_en),
           Seq(s1_entry_write_data, s1_bank_mwrite_data)
         )
       }

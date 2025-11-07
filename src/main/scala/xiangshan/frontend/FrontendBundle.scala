@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.frontend.icache._
-import utils._
+import utility._
 import scala.math._
 import scala.{Tuple2 => &}
 
