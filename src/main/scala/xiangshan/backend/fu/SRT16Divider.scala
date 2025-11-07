@@ -441,7 +441,7 @@ object mLookUpTable2 {
 
 class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
 
-  val newReq = io.in.fire()
+  val newReq = io.in.fire
 
   val uop = io.in.bits.uop
   val uopReg = RegEnable(uop, newReq)

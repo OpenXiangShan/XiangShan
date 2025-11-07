@@ -79,13 +79,13 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
     * ReplacePipe Stage 0
     ******************************************************************************
     */
-  val r0_valid = generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B)
+  val r0_valid = generatePipeControl(lastFire = io.pipe_req.fire, thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B)
 
-  val r0_req         = RegEnable(io.pipe_req.bits, io.pipe_req.fire())
+  val r0_req         = RegEnable(io.pipe_req.bits, io.pipe_req.fire)
   val r0_req_vidx    = r0_req.vidx
 
-  val copied_r0_valid    =  Seq.fill(partWayNum)(generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B))
-  val copied_r0_req_vidx =  Seq.fill(partWayNum)(RegEnable(io.pipe_req.bits.vidx, io.pipe_req.fire()))
+  val copied_r0_valid    =  Seq.fill(partWayNum)(generatePipeControl(lastFire = io.pipe_req.fire, thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B))
+  val copied_r0_req_vidx =  Seq.fill(partWayNum)(RegEnable(io.pipe_req.bits.vidx, io.pipe_req.fire))
 
   val array_req = List(toMeta, toData)
 
@@ -143,7 +143,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   val (release_tag, release_coh)   = (Mux1H(release_waymask, r1_meta_ptags), Mux1H(release_waymask, r1_meta_cohs))
   val release_addr     = get_block_addr(Cat(release_tag, get_untag(r1_req.vaddr)) )
 
-  when(RegNext(io.meta_read.fire()) && r1_req.isProbe){
+  when(RegNext(io.meta_read.fire) && r1_req.isProbe){
     assert(PopCount(probe_hit_vec) <= 1.U, "Probe Multi-Hit")
   }
 

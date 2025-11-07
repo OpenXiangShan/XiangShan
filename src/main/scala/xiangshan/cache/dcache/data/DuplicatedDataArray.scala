@@ -108,7 +108,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     io.read(j).ready := (if (readHighPriority) true.B else !rwhazard)
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(j).fire() && PopCount(io.read(j).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(j).fire && PopCount(io.read(j).bits.way_en) > 1.U)))
     val way_en = RegNext(io.read(j).bits.way_en)
 
     val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
@@ -161,7 +161,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
           data
         }
       })
-      io.errors(j).report_to_beu := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR
+      io.errors(j).report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
       io.errors(j).paddr := RegNext(io.read(j).bits.addr)
     }
 

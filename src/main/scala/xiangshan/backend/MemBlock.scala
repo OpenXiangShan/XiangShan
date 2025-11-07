@@ -456,7 +456,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       stOut(i).bits.uop.cf.trigger.backendCanFire := triggerCanFireVec
     }
     // store data
-//    when(lsq.io.storeDataIn(i).fire()){
+//    when(lsq.io.storeDataIn(i).fire){
 //
 //      val hit = Wire(Vec(3, Bool()))
 //      for (j <- 0 until 3) {

@@ -115,7 +115,7 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
+    val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire)
     val vpn_gen_ppn = if(sameCycle || saveLevel) vpn else vpn_reg
 
     val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
@@ -123,7 +123,7 @@ class TLBFA(
 
     hitVec.suggestName("hitVec")
 
-    val hitVecReg = if (sameCycle) hitVec else RegEnable(hitVec, req.fire())
+    val hitVecReg = if (sameCycle) hitVec else RegEnable(hitVec, req.fire)
 
     resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
     resp.bits.hit := Cat(hitVecReg).orR
@@ -254,12 +254,12 @@ class TLBSA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = RegEnable(vpn, req.fire())
+    val vpn_reg = RegEnable(vpn, req.fire)
 
     val ridx = get_set_idx(vpn, nSets)
     val v_resize = v.asTypeOf(Vec(VPRE_SELECT, Vec(VPOST_SELECT, UInt(nWays.W))))
     val vidx_resize = RegNext(v_resize(get_set_idx(drop_set_idx(vpn, VPOST_SELECT), VPRE_SELECT)))
-    val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire()))
+    val vidx = vidx_resize(get_set_idx(vpn_reg, VPOST_SELECT)).asBools.map(_ && RegNext(req.fire))
     val vidx_bypass = RegNext((entries.io.waddr === ridx) && entries.io.wen)
     entries.io.raddr(i) := ridx
 

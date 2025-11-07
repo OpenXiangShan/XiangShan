@@ -88,9 +88,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 0: req from Ftq */
   val p0_valid  =   fromFtq.req.valid
   val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, VAddrBits)
-  p0_fire   :=   p0_valid && p1_ready && toITLB.fire() && !fromITLB.bits.miss && toIMeta.ready && enableBit
+  p0_fire   :=   p0_valid && p1_ready && toITLB.fire && !fromITLB.bits.miss && toIMeta.ready && enableBit
   //discard req when source not ready
-  // p0_discard := p0_valid && ((toITLB.fire() && fromITLB.bits.miss) || !toIMeta.ready || !enableBit)
+  // p0_discard := p0_valid && ((toITLB.fire && fromITLB.bits.miss) || !toIMeta.ready || !enableBit)
 
   toIMeta.valid     := p0_valid
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
@@ -193,7 +193,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     maxPrefetchCoutner := 0.U
 
     prefetch_dir.foreach(_.valid := false.B)
-  }.elsewhen(toMissUnit.enqReq.fire()){
+  }.elsewhen(toMissUnit.enqReq.fire){
     maxPrefetchCoutner := maxPrefetchCoutner + 1.U
 
     prefetch_dir(maxPrefetchCoutner).valid := true.B
@@ -201,7 +201,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   }
 
   p3_ready := toMissUnit.enqReq.ready || !enableBit
-  p3_fire  := toMissUnit.enqReq.fire()
+  p3_fire  := toMissUnit.enqReq.fire
 
 }
 
@@ -238,7 +238,7 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
   //state change
   switch(state) {
     is(s_idle) {
-      when(io.req.fire()) {
+      when(io.req.fire) {
         state := s_send_hint
         req := io.req.bits
       }
@@ -246,7 +246,7 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
 
     // memory request
     is(s_send_hint) {
-      when(io.mem_hint.fire()) {
+      when(io.mem_hint.fire) {
         state := s_idle
       }
     }
@@ -263,6 +263,6 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
   io.mem_hint.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
 
 
-  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())
+  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire)
 
 }

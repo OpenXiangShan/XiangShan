@@ -218,12 +218,12 @@ object AddPipelineReg {
 
     val valid = RegInit(false.B)
     valid.suggestName("pipeline_reg_valid")
-    when (io.out.fire()) { valid := false.B }
-    when (io.in.fire()) { valid := true.B }
+    when (io.out.fire) { valid := false.B }
+    when (io.in.fire) { valid := true.B }
     when (io.isFlush) { valid := false.B }
 
     io.in.ready := !valid || io.out.ready
-    io.out.bits := RegEnable(io.in.bits, io.in.fire())
+    io.out.bits := RegEnable(io.in.bits, io.in.fire)
     io.out.valid := valid //&& !isFlush
   }
 

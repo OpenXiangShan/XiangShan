@@ -429,7 +429,7 @@ class SRT4QDS(len: Int, itn_len: Int) extends Module {
 
 class SRT4Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
 
-  val newReq = io.in.fire()
+  val newReq = io.in.fire
 
   val uop = io.in.bits.uop
   val uopReg = RegEnable(uop, newReq)

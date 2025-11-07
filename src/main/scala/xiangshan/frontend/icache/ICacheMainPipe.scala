@@ -684,31 +684,31 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
 
     is(wait_one_resp) {
-      when( (miss_0_except_1_latch ||only_0_miss_latch || miss_0_hit_1_latch) && fromMSHR(0).fire()){
+      when( (miss_0_except_1_latch ||only_0_miss_latch || miss_0_hit_1_latch) && fromMSHR(0).fire){
         wait_state := wait_finish
-      }.elsewhen( hit_0_miss_1_latch && fromMSHR(1).fire()){
+      }.elsewhen( hit_0_miss_1_latch && fromMSHR(1).fire){
         wait_state := wait_finish
       }
     }
 
     is(wait_two_resp) {
-      when(fromMSHR(0).fire() && fromMSHR(1).fire()){
+      when(fromMSHR(0).fire && fromMSHR(1).fire){
         wait_state := wait_finish
-      }.elsewhen( !fromMSHR(0).fire() && fromMSHR(1).fire() ){
+      }.elsewhen( !fromMSHR(0).fire && fromMSHR(1).fire ){
         wait_state := wait_0_resp
-      }.elsewhen(fromMSHR(0).fire() && !fromMSHR(1).fire()){
+      }.elsewhen(fromMSHR(0).fire && !fromMSHR(1).fire){
         wait_state := wait_1_resp
       }
     }
 
     is(wait_0_resp) {
-      when(fromMSHR(0).fire()){
+      when(fromMSHR(0).fire){
         wait_state := wait_finish
       }
     }
 
     is(wait_1_resp) {
-      when(fromMSHR(1).fire()){
+      when(fromMSHR(1).fire){
         wait_state := wait_finish
       }
     }
@@ -729,13 +729,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       toMSHR(i).bits.coh      := s2_victim_coh(i)
 
 
-      when(toMSHR(i).fire() && missStateQueue(j)(i) === m_invalid){
+      when(toMSHR(i).fire && missStateQueue(j)(i) === m_invalid){
         missStateQueue(j)(i)     := m_valid
         missSlot(i).m_vSetIdx := s2_req_vsetIdx(i)
         missSlot(i).m_pTag    := get_phy_tag(s2_req_paddr(i))
       }
 
-      when(fromMSHR(i).fire() && missStateQueue(j)(i) === m_valid ){
+      when(fromMSHR(i).fire && missStateQueue(j)(i) === m_valid ){
         missStateQueue(j)(i)         := m_refilled
         missSlot(i).m_data        := fromMSHR(i).bits.data
         missSlot(i).m_corrupt     := fromMSHR(i).bits.corrupt
@@ -758,7 +758,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
         }
       }
 
-      when(missStateQueue(j)(i) === m_check_final && toMSHR(i).fire()){
+      when(missStateQueue(j)(i) === m_check_final && toMSHR(i).fire){
         missStateQueue(j)(i)     :=  m_valid
         missSlot(i).m_vSetIdx := s2_req_vsetIdx(i)
         missSlot(i).m_pTag    := get_phy_tag(s2_req_paddr(i))

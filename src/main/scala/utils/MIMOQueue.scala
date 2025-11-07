@@ -108,12 +108,12 @@ class MIMOQueue[T <: Data]
   def genPtrs(init: UInt, vec: Vec[DecoupledIO[T]]) = {
     if(perf){
       vec.indices.map(i => {
-        init + PopCount(vec.take(i).map(_.fire()))
+        init + PopCount(vec.take(i).map(_.fire))
       })
     } else {
       val ptrs = vec.map(_ => Wire(UInt((ptr_width+1).W)))
       for(i <- vec.indices){
-        ptrs(i) := {if(i==0) init else ptrs(i-1) + vec(i-1).fire()}
+        ptrs(i) := {if(i==0) init else ptrs(i-1) + vec(i-1).fire}
       }
       ptrs
     }
@@ -129,10 +129,10 @@ class MIMOQueue[T <: Data]
       else !isEmpty(deq_ptr_wire, enq_ptr)
     }
     deq.bits := ram(deq_idx)
-    if(perf) when(deq.fire()){ valids(deq_idx) := false.B }
+    if(perf) when(deq.fire){ valids(deq_idx) := false.B }
   }
 
-  deq_ptr := deq_ptrs.last + io.deq(outCnt-1).fire()
+  deq_ptr := deq_ptrs.last + io.deq(outCnt-1).fire
 
   // enqueue
   val enq_ptrs = genPtrs(enq_ptr, io.enq)
@@ -143,7 +143,7 @@ class MIMOQueue[T <: Data]
       if(perf) !valids(enq_idx)
       else !isFull(enq_ptr_wire, deq_ptr)
     }
-    when(enq.fire()){
+    when(enq.fire){
       ram(enq_idx) := enq.bits
       if(perf){
         valids(enq_idx) := true.B
@@ -151,7 +151,7 @@ class MIMOQueue[T <: Data]
     }
   }
 
-  enq_ptr := enq_ptrs.last + io.enq(inCnt-1).fire()
+  enq_ptr := enq_ptrs.last + io.enq(inCnt-1).fire
 
   when(io.flush){
     deq_ptr := 0.U
@@ -161,8 +161,8 @@ class MIMOQueue[T <: Data]
 
   // Debug(false){
   //   val cnt = RegInit((if(init.nonEmpty) entries else 0).U(32.W))
-  //   val enqCnt = PopCount(io.enq.map(_.fire()))
-  //   val deqCnt = PopCount(io.deq.map(_.fire()))
+  //   val enqCnt = PopCount(io.enq.map(_.fire))
+  //   val deqCnt = PopCount(io.deq.map(_.fire))
   //   cnt := cnt + enqCnt - deqCnt
   //   assert(cnt > deqCnt, "MIMOQueue underflow!")
   //   assert(cnt + enqCnt < entries.U(32.W), "MIMOQueue overflow!")

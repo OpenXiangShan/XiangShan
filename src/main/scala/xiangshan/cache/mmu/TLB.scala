@@ -135,7 +135,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     resp(i).valid := validReg
     resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
     resp(i).bits.fast_miss := fast_miss
-    resp(i).bits.ptwBack := ptw.resp.fire()
+    resp(i).bits.ptwBack := ptw.resp.fire
 
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
@@ -282,18 +282,18 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     // NOTE: ITLB is blocked, so every resp will be valid only when hit
     // every req will be ready only when hit
     for (i <- 0 until Width) {
-      XSPerfAccumulate(s"access${i}", io.requestor(i).req.fire() && vmEnable_dup.head)
-      XSPerfAccumulate(s"miss${i}", ptw.req(i).fire())
+      XSPerfAccumulate(s"access${i}", io.requestor(i).req.fire && vmEnable_dup.head)
+      XSPerfAccumulate(s"miss${i}", ptw.req(i).fire)
     }
 
   }
   //val reqCycleCnt = Reg(UInt(16.W))
-  //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire || sfence.valid)
-  //XSPerfAccumulate("ptw_req_count", ptw.req.fire())
-  //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
-  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
-  XSPerfAccumulate("ptw_resp_sp_count", ptw.resp.fire() && !ptw.resp.bits.pf && (ptw.resp.bits.entry.level.get === 0.U || ptw.resp.bits.entry.level.get === 1.U))
+  //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire, ptw.resp.fire || sfence.valid)
+  //XSPerfAccumulate("ptw_req_count", ptw.req.fire)
+  //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire, reqCycleCnt, 0.U))
+  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_sp_count", ptw.resp.fire && !ptw.resp.bits.pf && (ptw.resp.bits.entry.level.get === 0.U || ptw.resp.bits.entry.level.get === 1.U))
 
   // Log
   for(i <- 0 until Width) {
@@ -305,7 +305,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr_dup.head}\n")
   XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable_dup.head} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire(), p"L2TLB req:${ptw.req(i).bits}\n")
+    XSDebug(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
@@ -321,8 +321,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     )
   } else {
     Seq(
-      ("access", PopCount((0 until Width).map(i => io.requestor(i).req.fire()))),
-      ("miss  ", PopCount((0 until Width).map(i => ptw.req(i).fire()))         ),
+      ("access", PopCount((0 until Width).map(i => io.requestor(i).req.fire))),
+      ("miss  ", PopCount((0 until Width).map(i => ptw.req(i).fire))         ),
     )
   }
   generatePerfEvent()

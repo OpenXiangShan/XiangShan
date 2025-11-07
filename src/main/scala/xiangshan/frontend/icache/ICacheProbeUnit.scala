@@ -53,7 +53,7 @@ class ICacheProbeEntry(id: Int)(implicit p: Parameters) extends ICacheModule {
 
   when (state === s_invalid) {
     io.req.ready := true.B
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req := io.req.bits
       state := s_pipe_req
     }
@@ -71,7 +71,7 @@ class ICacheProbeEntry(id: Int)(implicit p: Parameters) extends ICacheModule {
     pipe_req.needData := req.needData
     pipe_req.id := Cat(ProbeKey.U, id.U)
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_invalid
     }
   }
@@ -159,11 +159,11 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
 //  val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
 //  val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
 //
-//  val probeline_vec_reg  = RegEnable(next = hit_vec.asUInt, enable = RegNext(io.meta_read.fire()) )
-//  val probeline_cohs_reg = RegEnable(next = hit_coh, enable = RegNext(io.meta_read.fire()) )
-//  val probeline_data_reg = RegEnable(next = hit_data, enable = RegNext(io.data_read.fire()) )
-//  val probeline_coh  = Mux(RegNext(io.meta_read.fire()), hit_coh, probeline_cohs_reg)
-//  val probeline_data = Mux(RegNext(io.data_read.fire()), hit_data, probeline_data_reg)
+//  val probeline_vec_reg  = RegEnable(next = hit_vec.asUInt, enable = RegNext(io.meta_read.fire) )
+//  val probeline_cohs_reg = RegEnable(next = hit_coh, enable = RegNext(io.meta_read.fire) )
+//  val probeline_data_reg = RegEnable(next = hit_data, enable = RegNext(io.data_read.fire) )
+//  val probeline_coh  = Mux(RegNext(io.meta_read.fire), hit_coh, probeline_cohs_reg)
+//  val probeline_data = Mux(RegNext(io.data_read.fire), hit_data, probeline_data_reg)
 //
 //  io.req.ready := state === s_idle
 //
@@ -204,23 +204,23 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
 //
 //    // memory request
 //    is(s_read_array) {
-//      when(io.meta_read.fire() && io.data_read.fire()) {
+//      when(io.meta_read.fire && io.data_read.fire) {
 //        state := s_send_release
 //      }
 //    }
 //
 //    is(s_send_release) {
-//      when(io.release_req.fire()){
+//      when(io.release_req.fire){
 //        state := s_write_back
 //      }
 //    }
 //
 //    is(s_write_back) {
-//      state := Mux(io.meta_write.fire() , s_idle, s_write_back)
+//      state := Mux(io.meta_write.fire , s_idle, s_write_back)
 //    }
 //  }
 //
-//  when(RegNext(io.meta_read.fire())){
+//  when(RegNext(io.meta_read.fire)){
 //    assert(PopCount(hit_vec) === 1.U)
 //  }
 //}

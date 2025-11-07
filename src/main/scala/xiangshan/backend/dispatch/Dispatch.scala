@@ -96,7 +96,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val inst0actualOut = io.enqRob.req(0).valid
   when (io.redirect.valid) {
     singleStepStatus := false.B
-  }.elsewhen (io.singleStep && io.fromRename(0).fire() && inst0actualOut) {
+  }.elsewhen (io.singleStep && io.fromRename(0).fire && inst0actualOut) {
     singleStepStatus := true.B
   }
   XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
@@ -120,7 +120,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       updatedUop(i).psrc(0) := 0.U
     }
 
-    io.lfst.req(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit
+    io.lfst.req(i).valid := io.fromRename(i).fire && updatedUop(i).cf.storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).cf.ssid
     io.lfst.req(i).bits.robIdx := updatedUop(i).robIdx // speculatively assigned in rename
@@ -135,7 +135,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
-    when (io.fromRename(i).fire()) {
+    when (io.fromRename(i).fire) {
       XSDebug(updatedUop(i).cf.trigger.getFrontendCanFire, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).ctrl.singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     }
@@ -143,16 +143,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   // store set perf count
   XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_strict_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && updatedUop(i).cf.loadWaitStrict && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && updatedUop(i).cf.loadWaitBit && updatedUop(i).cf.loadWaitStrict && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
+    io.fromRename(i).fire && updatedUop(i).cf.loadWaitBit && isStore(i)
   )))
 
   /**

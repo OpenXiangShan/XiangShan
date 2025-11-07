@@ -44,7 +44,7 @@ class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extend
     o.bits := io.in.bits
   }
 
-  io.in.ready := VecInit(io.out.map(_.fire())).asUInt.orR
+  io.in.ready := VecInit(io.out.map(_.fire)).asUInt.orR
 }
 
 object DispatchArbiter {

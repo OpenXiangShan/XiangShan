@@ -83,13 +83,13 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   // )
 
   // tag read
-  val ren = io.read.fire()
+  val ren = io.read.fire
 
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
 
-  // val ecc_ren = io.ecc_read.fire()
+  // val ecc_ren = io.ecc_read.fire
   // ecc_array.io.r.req.valid := ecc_ren
   // ecc_array.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
   io.ecc_resp := 0.U.asTypeOf(io.ecc_resp.cloneType)//ecc_array.io.r.resp.data

@@ -142,7 +142,7 @@ class AXI4Plic
     val claimCompletionMap = claimCompletion.zipWithIndex.map {
       case (r, hart) => {
         val addr = 0x200004 + hart * 0x1000
-        when(in.r.fire() && (getOffset(raddr) === addr.U)) {
+        when(in.r.fire && (getOffset(raddr) === addr.U)) {
           inHandle(r) := true.B
         }
         RegMap(addr, r, completionFn)
@@ -173,7 +173,7 @@ class AXI4Plic
 
     val rdata = Wire(UInt(32.W))
     RegMap.generate(mapping, getOffset(raddr), rdata,
-      getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb >> waddr(2, 0)))
+      getOffset(waddr), in.w.fire, in.w.bits.data, MaskExpand(in.w.bits.strb >> waddr(2, 0)))
     // narrow read
     in.r.bits.data := Fill(2, rdata)
 

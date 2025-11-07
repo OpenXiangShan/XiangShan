@@ -263,7 +263,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     io.read(rport_index).ready := !(rwhazard || rrhazard)
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en(rport_index) := io.read(rport_index).bits.way_en
   })
   io.readline.ready := !(rwhazard)
@@ -370,7 +370,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) &&
+    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire)) &&
     //   read_bank_error_delayed(RegNext(RegNext(bank_addrs(rport_index)))) &&
     //   !RegNext(io.bank_conflict_slow(rport_index))
     io.read_error_delayed(rport_index) := 0.U.asTypeOf(io.read_error_delayed(rport_index).cloneType)
