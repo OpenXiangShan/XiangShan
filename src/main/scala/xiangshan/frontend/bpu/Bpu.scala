@@ -387,6 +387,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s1_prediction := s1_prediction
   phr.io.train.s1_pc         := s1_pc
 
+  // Phr.commit are temporarily unavailable for debugging purposes
   phr.io.commit.valid := train.valid
   phr.io.commit.bits  := train.bits
 
@@ -395,7 +396,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_foldedPhr   := phr.io.s2_foldedPhr
   s3_foldedPhr   := phr.io.s3_foldedPhr
   trainFoldedPhr := phr.io.trainFoldedPhr
-  phrWire        := phr.io.phrs
+  phrWire        := phr.io.phr
 
   private val phrWireValue = phrWire.asUInt
   private val redirectPhrValue =
