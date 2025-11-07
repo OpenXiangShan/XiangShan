@@ -22,7 +22,7 @@ import chisel3._
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
 import utils.GTimer
-import utility.FileRegisters
+import utility.{ChiselDB, FileRegisters}
 import xiangshan.{DebugOptions, DebugOptionsKey}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.debug._
@@ -65,31 +65,29 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.version := 0.U(4.W)
 
   val io = IO(new Bundle(){
-    val logCtrl = new LogCtrlIO
-    val perfInfo = new PerfInfoIO
-    val uart = new UARTIO
     val memAXI = if(useDRAMSim) soc.memory.cloneType else null
   })
-
-  simMMIO.io.uart <> io.uart
 
   if(useDRAMSim){
     io.memAXI <> soc.memory
   }
 
+  val difftest = DifftestModule.finish("XiangShan")
+  difftest.uart <> simMMIO.io.uart
+
   if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
     val timer = WireInit(GTimer())
     dontTouch(timer)
-    val logEnable = WireInit((timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end))
+    val logEnable = WireInit((timer >= difftest.logCtrl.begin) && (timer < difftest.logCtrl.end))
     dontTouch(logEnable)
     ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
     ExcitingUtils.addSource(timer, "logTimestamp")
   }
 
   if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
-    val clean = WireInit(io.perfInfo.clean)
+    val clean = WireInit(difftest.perfCtrl.clean)
     dontTouch(clean)
-    val dump = WireInit(io.perfInfo.dump)
+    val dump = WireInit(difftest.perfCtrl.dump)
     dontTouch(dump)
     ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
     ExcitingUtils.addSource(dump, "XSPERF_DUMP")
@@ -101,6 +99,9 @@ class SimTop(implicit p: Parameters) extends Module {
 }
 
 object SimTop extends App {
+  val enableChiselDB = true
+  ChiselDB.init(enableChiselDB)
+
   // Keep this the same as TopMain except that SimTop is used here instead of XSTop
   val (config, firrtlOpts) = ArgParser.parse(args)
   XiangShanStage.execute(firrtlOpts, Seq(
@@ -108,5 +109,7 @@ object SimTop extends App {
       DisableMonitors(p => new SimTop()(p))(config)
     })
   ))
-  FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
+
+  ChiselDB.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
 }

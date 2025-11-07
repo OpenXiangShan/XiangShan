@@ -16,11 +16,13 @@
 
 TOP = XSTop
 FPGATOP = top.TopMain
-BUILD_DIR = ./build
-TOP_V = $(BUILD_DIR)/$(TOP).v
+BUILD_DIR = $(abspath ./build)
+
+RTL_DIR = $(BUILD_DIR)/rtl
+
+TOP_V = $(RTL_DIR)/$(TOP).sv
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
-MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP  = top.SimTop
 IMAGE  ?= temp
@@ -69,8 +71,9 @@ help:
 	mill -i XiangShan.test.runMain $(SIMTOP) --help
 
 $(TOP_V): $(SCALA_FILE)
-	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) --target-dir $(@D)                      \
+	@mkdir -p $(@D)
+	$(TIME_CMD) mill -i XiangShan.runMain $(FPGATOP)                    \
+		--compiler sverilog --target-dir $(@D)                      \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
@@ -87,12 +90,13 @@ $(TOP_V): $(SCALA_FILE)
 verilog: $(TOP_V)
 
 SIM_TOP   = SimTop
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).sv
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
-	mkdir -p $(@D)
+	@mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) --target-dir $(@D)      \
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP)                \
+		--compiler sverilog --target-dir $(@D)                      \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf  \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
@@ -104,11 +108,11 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+	@sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(SIM_TOP_V)
 
 FILELIST := $(ABS_WORK_DIR)/build/cpu_flist.f
 sim-verilog: $(SIM_TOP_V)
-	find $(ABS_WORK_DIR)/build -name "*.v" > $(FILELIST)
+	find $(ABS_WORK_DIR)/build -name "*.sv" > $(FILELIST)
 
 clean:
 	$(MAKE) -C ./difftest clean
@@ -119,40 +123,16 @@ init:
 	cd rocket-chip && git submodule update --init cde hardfloat
 	cd huancun && git submodule update --init Utility
 
-bump:
-	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
-
 bsp:
 	mill -i mill.bsp.BSP/install
 
-idea:
-	mill -i mill.idea.GenIdea/idea
-
 # verilator simulation
 emu: sim-verilog
-	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
-
-emu-run:
-	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu WITH_CONSTANTIN=0
 
 # vcs simulation
 simv:
-	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest simv WITH_CONSTANTIN=0
 
-simv_rtl:
-	$(MAKE) -C ./difftest simv_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) CONSIDER_FSDB=$(CONSIDER_FSDB)
-
-simv_rtl-run:
-	$(shell if [ ! -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN) ];then mkdir -p $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN); fi)
-	touch sim/rtl/$(RUN_BIN)/sim.log
-	$(shell if [ -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv ];then rm -f $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv; fi)
-	$(shell if [ -e $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir ];then rm -rf $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir; fi)
-	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv
-	ln -s $(ABS_WORK_DIR)/sim/rtl/comp/simv.daidir $(ABS_WORK_DIR)/sim/rtl/$(RUN_BIN)/simv.daidir
-	cd sim/rtl/$(RUN_BIN) && (./simv $(RUN_OPTS) | tee -a sim.log)
-
-verdi_rtl:
-	cd sim/rtl/$(RUN_BIN) && verdi -sv -2001 +verilog2001ext+v +systemverilogext+v -ssf tb_top.vf -dbdir simv.daidir -f sim_flist.f
-
-.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: verilog sim-verilog emu clean help init bump bsp
 

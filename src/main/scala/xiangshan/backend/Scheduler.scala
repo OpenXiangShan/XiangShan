@@ -19,7 +19,7 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
+import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
@@ -522,16 +522,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
-    val difftest = Module(new DifftestArchIntRegState)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.gpr := RegNext(RegNext(VecInit(intRfReadData.takeRight(32))))
+    val difftest = DifftestModule(new DiffArchIntRegState, delay = 2)
+    difftest.coreid := io.hartId
+    difftest.value := VecInit(intRfReadData.takeRight(32))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
-    val difftest = Module(new DifftestArchFpRegState)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.fpr := RegNext(RegNext(VecInit(fpRfReadData.takeRight(32))))
+    val difftest = DifftestModule(new DiffArchFpRegState, delay = 2)
+    difftest.coreid := io.hartId
+    difftest.value := VecInit(fpRfReadData.takeRight(32))
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(allocate.map(_.valid)))

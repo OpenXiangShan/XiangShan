@@ -672,13 +672,12 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   if (env.EnableDifftest) {
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.cacheid := 1.U
-    difftest.io.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
-    difftest.io.addr := io.refill_to_ldq.bits.addr
-    difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
+    difftest.coreid := io.hartId
+    difftest.index := 1.U
+    difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
+    difftest.addr := io.refill_to_ldq.bits.addr
+    difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
   }
 
   XSPerfAccumulate("miss_req", io.req.fire())
