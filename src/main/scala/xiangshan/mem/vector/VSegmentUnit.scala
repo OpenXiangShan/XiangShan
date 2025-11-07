@@ -498,11 +498,11 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
         instMicroOp.exceptionVaddr    := io.dtlb.resp.bits.fullva
         instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
         instMicroOp.exceptionIsForVSnonLeafPTE  := io.dtlb.resp.bits.isForVSnonLeafPTE
-        lowPagePaddr  := Mux(isMisalignReg && !notCross16ByteReg && !curPtr, io.dtlb.resp.bits.paddr(0), lowPagePaddr)
-        lowPageGPaddr := Mux(isMisalignReg && !notCross16ByteReg && !curPtr, io.dtlb.resp.bits.gpaddr(0), lowPageGPaddr)
+        lowPagePaddr  := Mux(!curPtr, io.dtlb.resp.bits.paddr(0), lowPagePaddr)
+        lowPageGPaddr := Mux(!curPtr, io.dtlb.resp.bits.gpaddr(0), lowPageGPaddr)
 
-        highPagePaddr  := Mux(isMisalignReg && !notCross16ByteReg && curPtr, io.dtlb.resp.bits.paddr(0), highPagePaddr)
-        highPageGPaddr := Mux(isMisalignReg && !notCross16ByteReg && curPtr, io.dtlb.resp.bits.gpaddr(0), highPageGPaddr)
+        highPagePaddr  := Mux(curPtr, io.dtlb.resp.bits.paddr(0), highPagePaddr)
+        highPageGPaddr := Mux(curPtr, io.dtlb.resp.bits.gpaddr(0), highPageGPaddr)
       }
   }
   // pmp
