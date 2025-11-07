@@ -890,37 +890,33 @@ class CSR extends FunctionUnit with HasCSRConst
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
-  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-
   if (!env.FPGAPlatform) {
-    val difftest = Module(new DifftestArchEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := 0.U
-    difftest.io.intrNO := RegNext(difftestIntrNO)
-    difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
+    val difftest = DifftestModule(new DiffArchEvent, delay = 1, dontCare = true)
+    difftest.coreid := 0.U
+    difftest.interrupt := Mux(raiseIntr, causeNO, 0.U)
+    difftest.exception := Mux(csrio.exception.valid, causeNO, 0.U)
   }
 
   if (!env.FPGAPlatform) {
-    val difftest = Module(new DifftestCSRState)
-    difftest.io.clock := clock
-    difftest.io.coreid := 0.U
-    difftest.io.priviledgeMode := priviledgeMode
-    difftest.io.mstatus := mstatus
-    difftest.io.sstatus := mstatus & sstatusRmask
-    difftest.io.mepc := mepc
-    difftest.io.sepc := sepc
-    difftest.io.mtval:= mtval
-    difftest.io.stval:= stval
-    difftest.io.mtvec := mtvec
-    difftest.io.stvec := stvec
-    difftest.io.mcause := mcause
-    difftest.io.scause := scause
-    difftest.io.satp := satp
-    difftest.io.mip := mipReg
-    difftest.io.mie := mie
-    difftest.io.mscratch := mscratch
-    difftest.io.sscratch := sscratch
-    difftest.io.mideleg := mideleg
-    difftest.io.medeleg := medeleg
+    val difftest = DifftestModule(new DiffCSRState)
+    difftest.coreid := 0.U
+    difftest.privilegeMode := priviledgeMode
+    difftest.mstatus := mstatus
+    difftest.sstatus := mstatus & sstatusRmask
+    difftest.mepc := mepc
+    difftest.sepc := sepc
+    difftest.mtval:= mtval
+    difftest.stval:= stval
+    difftest.mtvec := mtvec
+    difftest.stvec := stvec
+    difftest.mcause := mcause
+    difftest.scause := scause
+    difftest.satp := satp
+    difftest.mip := mipReg
+    difftest.mie := mie
+    difftest.mscratch := mscratch
+    difftest.sscratch := sscratch
+    difftest.mideleg := mideleg
+    difftest.medeleg := medeleg
   }
 }

@@ -18,21 +18,10 @@ package device
 
 import chisel3._
 import chisel3.util._
-import bus.axi4._
+import difftest.UARTIO
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
-
-class UARTIO extends Bundle {
-  val out = new Bundle {
-    val valid = Output(Bool())
-    val ch = Output(UInt(8.W))
-  }
-  val in = new Bundle {
-    val valid = Output(Bool())
-    val ch = Input(UInt(8.W))
-  }
-}
 
 class AXI4UART
 (

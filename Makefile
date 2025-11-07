@@ -1,5 +1,5 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -16,14 +16,16 @@
 
 
 TOP = XSTop
-FPGATOP = top.TopMain
-BUILD_DIR = ./build
-TOP_V = $(BUILD_DIR)/$(TOP).v
+
+BUILD_DIR = $(abspath ./build)
+RTL_DIR = $(BUILD_DIR)/rtl
+
+TOP_V = $(RTL_DIR)/$(TOP).sv
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
+FPGATOP = top.TopMain
 SIMTOP = top.TestMain
-IMAGE ?= temp
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -33,9 +35,6 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
-# remote machine with more cores to speedup c++ build
-REMOTE ?= localhost
-
 .DEFAULT_GOAL = verilog
 
 help:
@@ -43,7 +42,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.test.runMain $(FPGATOP)                           \
+	mill -i XiangShan.test.runMain $(FPGATOP) --compiler sverilog       \
 		--target-dir $(@D) --full-stacktrace --output-file $(@F)    \
 		--disable-all --remove-assert                               \
 		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
@@ -57,22 +56,14 @@ $(TOP_V): $(SCALA_FILE)
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 
-deploy: build/top.zip
-
-
-build/top.zip: $(TOP_V)
-	@zip -r $@ $< $<.conf build/*.anno.json
-
-.PHONY: deploy build/top.zip
-
 verilog: $(TOP_V)
 
-SIM_TOP   = XSSimTop
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+SIM_TOP   = SimTop
+SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).sv
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	date -R
-	mill -i XiangShan.test.runMain $(SIMTOP)                           \
+	@date -R
+	mill -i XiangShan.test.runMain $(SIMTOP) --compiler sverilog       \
 		--target-dir $(@D) --full-stacktrace --output-file $(@F)   \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf \
 		--gen-mem-verilog full $(SIM_ARGS)
@@ -83,88 +74,13 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
-	date -R
+	@sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(SIM_TOP_V)
+	@date -R
 
-SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
-SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
+sim-verilog: $(SIM_TOP_V)
 
-DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
-DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
-
-SIM_VSRC = $(shell find ./src/test/vsrc -name "*.v" -or -name "*.sv")
-
-include Makefile.emu
-
-EMU_VCS := simv
-
-VCS_SRC_FILE = $(TOP_V) \
-               $(BUILD_DIR)/plusarg_reader.v \
-               $(BUILD_DIR)/SDHelper.v
-
-VCS_TB_DIR = $(abspath ./src/test/vcs)
-VCS_TB_FILE = $(shell find $(VCS_TB_DIR) -name "*.c") \
-              $(shell find $(VCS_TB_DIR) -name "*.v")
-
-VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
-  -LDFLAGS -Wl,--no-as-needed \
-  -sverilog \
-  +lint=TFIPC-L \
-  -debug_all +vcd+vcdpluson \
-  +define+RANDOMIZE_GARBAGE_ASSIGN \
-  +define+RANDOMIZE_INVALID_ASSIGN \
-  +define+RANDOMIZE_REG_INIT \
-  +define+RANDOMIZE_MEM_INIT \
-  +define+RANDOMIZE_DELAY=1
-
-$(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
-	rm -rf csrc
-	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
-
-ifndef NEMU_HOME
-$(error NEMU_HOME is not set)
-endif
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-$(REF_SO):
-	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
-
-SEED ?= $(shell shuf -i 1-10000 -n 1)
-
-VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
-VME_MODULES ?=
-
-#-----------------------timing scripts-------------------------
-# run "make vme/tap help=1" to get help info
-
-# extract verilog module from TopMain.v
-# usage: make vme VME_MODULES=Roq
-TIMING_SCRIPT_PATH = ./timingScripts
-vme: $(TOP_V)
-	make -C $(TIMING_SCRIPT_PATH) vme
-
-# get and sort timing analysis with total delay(start+end) and max delay(start or end)
-# and print it out
-tap:
-	make -C $(TIMING_SCRIPT_PATH) tap
-
-# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
-phy_evaluate: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
-phy_evaluate_atc: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-cache:
-	$(MAKE) emu IMAGE=Makefile
-
-release-lock:
-	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
+emu: sim-verilog
+	$(MAKE) -C ./difftest emu WITH_CHISELDB=0 WITH_CONSTANTIN=0
 
 clean:
 	rm -rf ./build
@@ -172,11 +88,8 @@ clean:
 init:
 	git submodule update --init
 
-bump:
-	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
-
 bsp:
-	mill -i mill.contrib.BSP/install
+	mill -i mill.bsp.BSP/install
 
 idea:
 	mill -i mill.idea.GenIdea/idea

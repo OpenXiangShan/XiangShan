@@ -28,15 +28,11 @@ import freechips.rocketchip.tilelink.TLToAXI4
 import xiangshan._
 import utils._
 import ExcitingUtils.Debug
+import difftest.DifftestModule
 import org.chipsalliance.cde.config.Config
 import freechips.rocketchip.tile.XLen
 
-class LogCtrlIO extends Bundle {
-  val log_begin, log_end = Input(UInt(64.W))
-  val log_level = Input(UInt(64.W)) // a cpp uint
-}
-
-class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
+class SimTop()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
   // address space[0G - 1024G)
   val fullRange = AddressSet(0x0L, 0xffffffffffL)
   // MMIO address space[0G - 2G)
@@ -52,17 +48,12 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
   // AXIRam
   // -----------------------------------
-  val axiMem = {
-    if (axiSim)
-      AXI4IdentityNode()
-    else
-      LazyModule(new AXI4RAM(
-        dramRange,
-        memByte = 64L * 1024 * 1024 * 1024,
-        useBlackBox = true,
-        beatBytes = L3BusWidth / 8
-      )).node
-  }
+  val axiMem = LazyModule(new AXI4RAM(
+    dramRange,
+    memByte = 64L * 1024 * 1024 * 1024,
+    useBlackBox = true,
+    beatBytes = L3BusWidth / 8
+  )).node
   axiMem := xbar
 
   // AXI DMA
@@ -80,30 +71,23 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    val io = IO(new Bundle {
-      val logCtrl = new LogCtrlIO
-      val perfInfo = new PerfInfoIO
-      val uart = new UARTIO
-    })
-
-    dontTouch(io.logCtrl)
-    dontTouch(io.perfInfo)
-    dontTouch(io.uart)
-
-    io.uart <> axiMMIO.module.io.uart
     val NumCores = top.Parameters.get.socParameters.NumCores
     soc.module.io.extIntrs := 0.U
 
+    val difftest = DifftestModule.finish("XiangShan")
+
+    difftest.uart <> axiMMIO.module.io.uart
+
     if (env.EnableDebug || env.EnablePerfDebug) {
       val timer = GTimer()
-      val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+      val logEnable = (timer >= difftest.logCtrl.begin) && (timer < difftest.logCtrl.end)
       ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSource(timer, "logTimestamp")
     }
 
     if (env.EnablePerfDebug) {
-      val clean = io.perfInfo.clean
-      val dump = io.perfInfo.dump
+      val clean = difftest.perfCtrl.clean
+      val dump = difftest.perfCtrl.dump
       ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
       ExcitingUtils.addSource(dump, "XSPERF_DUMP")
     }
@@ -111,40 +95,6 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     // Check and dispaly all source and sink connections
     ExcitingUtils.fixConnections()
     ExcitingUtils.checkAndDisplay()
-  }
-}
-
-class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
-  println(s"axiSim:${axiSim}")
-  val dut = LazyModule(new XSSimSoC(axiSim))
-  val axiSimRam = {
-    if (axiSim) LazyModule(new AXI4RAM(
-      dut.dramRange,
-      memByte = 128 * 1024 * 1024,
-      useBlackBox = true,
-      beatBytes = L3BusWidth / 8
-    ))
-    else null
-  }
-  if (axiSim) {
-    axiSimRam.node := dut.axiMem
-  }
-
-  lazy val module = new LazyModuleImp(this) {
-    val io = IO(new Bundle {
-      val logCtrl = new LogCtrlIO
-      val perfInfo = new PerfInfoIO
-      val uart = new UARTIO
-      val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
-    })
-    io.logCtrl <> dut.module.io.logCtrl
-    io.perfInfo <> dut.module.io.perfInfo
-    io.uart <> dut.module.io.uart
-    if (axiSim) {
-      io.memAXI <> axiSimRam.module.io
-    } else {
-      io.memAXI <> DontCare
-    }
   }
 }
 
@@ -172,7 +122,7 @@ object TestMain extends App {
   XiangShanStage.execute(
     otherArgs,
     Seq(
-      ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop(axiSim)).module)
+      ChiselGeneratorAnnotation(() => LazyModule(new SimTop()).module)
     )
   )
 }

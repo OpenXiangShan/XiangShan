@@ -466,11 +466,6 @@ class WaitTableUpdateReq extends XSBundle with WaitTableParameters {
   val wdata = Bool() // true.B by default
 }
 
-class PerfInfoIO extends XSBundle {
-  val clean = Input(Bool())
-  val dump = Input(Bool())
-}
-
 class CustomCSRCtrlIO extends XSBundle {
   // Prefetcher
   val l1plus_pf_enable = Output(Bool())

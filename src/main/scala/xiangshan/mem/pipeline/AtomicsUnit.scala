@@ -264,14 +264,13 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   }
 
   if (!env.FPGAPlatform) {
-    val difftest = Module(new DifftestAtomicEvent)
-    difftest.io.clock      := clock
-    difftest.io.coreid     := 0.U
-    difftest.io.atomicResp := io.dcache.resp.fire()
-    difftest.io.atomicAddr := paddr_reg
-    difftest.io.atomicData := data_reg
-    difftest.io.atomicMask := mask_reg
-    difftest.io.atomicFuop := fuop_reg
-    difftest.io.atomicOut  := resp_data_wire
+    val difftest = DifftestModule(new DiffAtomicEvent, dontCare = true)
+    difftest.coreid := 0.U
+    difftest.valid := io.dcache.resp.fire
+    difftest.addr := paddr_reg
+    difftest.data := data_reg.asTypeOf(difftest.data)
+    difftest.mask := mask_reg
+    difftest.fuop := fuop_reg
+    difftest.out := resp_data_wire.asTypeOf(difftest.out)
   }
 }

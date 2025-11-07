@@ -394,14 +394,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
       val wmask = io.sbuffer(i).bits.mask
 
-      val difftest = Module(new DifftestStoreEvent)
-      difftest.io.clock       := clock
-      difftest.io.coreid      := 0.U
-      difftest.io.index       := i.U
-      difftest.io.valid       := storeCommit
-      difftest.io.storeAddr   := waddr
-      difftest.io.storeData   := wdata
-      difftest.io.storeMask   := wmask
+      val difftest = DifftestModule(new DiffStoreEvent, dontCare = true)
+      difftest.coreid := 0.U
+      difftest.index  := i.U
+      difftest.valid  := storeCommit
+      difftest.addr   := Cat(waddr(63, 3), 0.U(3.W))
+      difftest.data   := wdata
+      difftest.mask   := wmask
     }
   }
 

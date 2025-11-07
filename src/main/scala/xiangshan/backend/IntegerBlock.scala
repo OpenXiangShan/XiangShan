@@ -282,10 +282,9 @@ class IntegerBlock
     for ((rport, rat) <- intRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
       rport.addr := rat
     }
-    val difftest = Module(new DifftestArchIntRegState)
-    difftest.io.clock  := clock
-    difftest.io.coreid := 0.U
-    difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
+    val difftest = DifftestModule(new DiffArchIntRegState)
+    difftest.coreid := 0.U
+    difftest.value  := VecInit(intRf.io.debug_rports.map(_.data))
   }
 
 }

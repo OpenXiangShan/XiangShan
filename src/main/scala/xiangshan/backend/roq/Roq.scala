@@ -876,55 +876,60 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
 
   if (!env.FPGAPlatform) {
+    val ptr = deqPtrVec.head.value
+    val uop = debug_microOp(ptr)
+
+    val difftest = DifftestModule(new DiffLrScEvent, delay = 1)
+    difftest.coreid := 0.U
+    difftest.valid := io.commits.valid.head && !io.commits.isWalk && uop.ctrl.fuType === FuType.mou &&
+      (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)
+    difftest.success := uop.diffTestDebugLrScValid
+  }
+
+  if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
-      val difftest = Module(new DifftestInstrCommit)
-      difftest.io.clock    := clock
-      difftest.io.coreid   := 0.U
-      difftest.io.index    := i.U
+      val difftest = DifftestModule(new DiffInstrCommit, delay = 1, dontCare = true)
+      difftest.coreid   := 0.U
+      difftest.index    := i.U
 
       val ptr = deqPtrVec(i).value
       val uop = debug_microOp(ptr)
       val exuOut = debug_exuDebug(ptr)
-      val exuData = debug_exuData(ptr)
-      difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
-      difftest.io.pc       := RegNext(uop.cf.pc)
-      difftest.io.instr    := RegNext(uop.cf.instr)
-      difftest.io.skip     := RegNext(exuOut.isMMIO || exuOut.isPerfCnt)
-      difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)
-      difftest.io.scFailed := RegNext(!uop.diffTestDebugLrScValid &&
-        uop.ctrl.fuType === FuType.mou &&
-        (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
-      difftest.io.wen      := RegNext(io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U)
-      difftest.io.wdata    := RegNext(exuData)
-      difftest.io.wdest    := RegNext(uop.ctrl.ldest)
+      difftest.valid    := io.commits.valid(i) && !io.commits.isWalk
+      difftest.pc       := uop.cf.pc
+      difftest.instr    := uop.cf.instr
+      difftest.skip     := exuOut.isMMIO || exuOut.isPerfCnt
+      difftest.isRVC    := uop.cf.pd.isRVC
+      difftest.rfwen    := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
+      difftest.wdest    := uop.ctrl.ldest
     }
   }
 
   if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
-      val difftest = Module(new DifftestLoadEvent)
-      difftest.io.clock  := clock
-      difftest.io.coreid := 0.U
-      difftest.io.index  := i.U
+      val difftest = DifftestModule(new DiffLoadEvent)
+      difftest.coreid := 0.U
+      difftest.index  := i.U
 
       val ptr = deqPtrVec(i).value
       val uop = debug_microOp(ptr)
       val exuOut = debug_exuDebug(ptr)
-      difftest.io.valid  := io.commits.valid(i) && !io.commits.isWalk
-      difftest.io.paddr  := exuOut.paddr
-      difftest.io.opType := uop.ctrl.fuOpType
-      difftest.io.fuType := uop.ctrl.fuType
+      difftest.valid  := io.commits.valid(i) && !io.commits.isWalk
+      difftest.paddr  := exuOut.paddr
+      difftest.opType := uop.ctrl.fuOpType
+      difftest.isAtomic := uop.ctrl.fuType === FuType.mou
+      difftest.isLoad := uop.ctrl.fuType === FuType.ldu
+      difftest.isVLoad := false.B
     }
   }
 
   if (!env.FPGAPlatform) {
-    val difftest = Module(new DifftestTrapEvent)
-    difftest.io.clock    := clock
-    difftest.io.coreid   := 0.U
-    difftest.io.valid    := hitTrap
-    difftest.io.code     := trapCode
-    difftest.io.pc       := trapPC
-    difftest.io.cycleCnt := GTimer()
-    difftest.io.instrCnt := instrCnt
+    val difftest = DifftestModule(new DiffTrapEvent, dontCare = true)
+    difftest.coreid   := 0.U
+    difftest.hasTrap  := hitTrap
+    difftest.code     := trapCode
+    difftest.pc       := trapPC
+    difftest.cycleCnt := GTimer()
+    difftest.instrCnt := instrCnt
   }
 }

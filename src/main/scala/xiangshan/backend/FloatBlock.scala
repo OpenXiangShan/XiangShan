@@ -237,9 +237,8 @@ class FloatBlock
     for ((rport, rat) <- fpRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
       rport.addr := rat
     }
-    val difftest = Module(new DifftestArchFpRegState)
-    difftest.io.clock  := clock
-    difftest.io.coreid := 0.U
-    difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(_.data))
+    val difftest = DifftestModule(new DiffArchFpRegState)
+    difftest.coreid := 0.U
+    difftest.value  := VecInit(fpRf.io.debug_rports.map(_.data))
   }
 }

@@ -19,6 +19,7 @@ package top
 import chisel3._
 import org.chipsalliance.cde.config
 import device._
+import difftest.UARTIO
 import freechips.rocketchip.amba.axi4.AXI4Xbar
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 

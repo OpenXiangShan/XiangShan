@@ -19,22 +19,8 @@ package device
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
-import xiangshan.HasXSParameter
-import utils.{MaskExpand}
-
-class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
-  val io = IO(new Bundle {
-    val clk   = Input(Clock())
-    val en    = Input(Bool())
-    val rIdx  = Input(UInt(DataBits.W))
-    val rdata = Output(UInt(DataBits.W))
-    val wIdx  = Input(UInt(DataBits.W))
-    val wdata = Input(UInt(DataBits.W))
-    val wmask = Input(UInt(DataBits.W))
-    val wen   = Input(Bool())
-  })
-}
+import difftest.common.DifftestMem
+import freechips.rocketchip.diplomacy.AddressSet
 
 class AXI4RAM
 (
@@ -67,18 +53,16 @@ class AXI4RAM
     require(beatBytes >= 8)
 
     val rdata = if (useBlackBox) {
-      val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
-      mems.zipWithIndex map { case (mem, i) =>
-        mem.io.clk   := clock
-        mem.io.en    := !reset.asBool && ((state === s_rdata) || (state === s_wdata))
-        mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
-        mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
-        mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
-        mem.io.wmask := MaskExpand(in.w.bits.strb((i + 1) * 8 - 1, i * 8))
-        mem.io.wen   := wen
+      val mem = DifftestMem(memByte, beatBytes)
+      when (wen) {
+        mem.write(
+          addr = wIdx,
+          data = in.w.bits.data.asTypeOf(Vec(beatBytes, UInt(8.W))),
+          mask = in.w.bits.strb.asBools
+        )
       }
-      val rdata = mems.map {mem => mem.io.rdata}
-      Cat(rdata.reverse)
+      val raddr = Mux(in.r.fire && !rLast, rIdx + 1.U, rIdx)
+      mem.readAndHold(raddr, in.ar.fire || in.r.fire).asUInt
     } else {
       val mem = Mem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
 

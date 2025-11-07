@@ -369,13 +369,13 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   if (!env.FPGAPlatform) {
-    val difftest = Module(new DifftestSbufferEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := 0.U
-    difftest.io.sbufferResp := io.dcache.resp.fire()
-    difftest.io.sbufferAddr := getAddr(tag(respId))
-    difftest.io.sbufferData := data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
-    difftest.io.sbufferMask := mask(respId).asUInt
+    val difftest = DifftestModule(new DiffSbufferEvent)
+    difftest.coreid := 0.U
+    difftest.index := 0.U
+    difftest.valid := io.dcache.resp.fire
+    difftest.addr := getAddr(tag(respId))
+    difftest.data := data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+    difftest.mask := mask(respId).asUInt
   }
 
   for (i <- 0 until StoreBufferSize) {
