@@ -20,7 +20,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import difftest.DifftestModule
+import difftest.{DifftestModule, DifftestTopIO, HasDiffTestInterfaces}
 import xiangshan._
 import utils._
 import utility._
@@ -44,8 +44,8 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.annotate
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import scala.collection.mutable.{Map}
 
+import scala.collection.mutable.Map
 import difftest.common.DifftestWiring
 import difftest.util.Profile
 
@@ -472,11 +472,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 class XSTileDiffTop(implicit p: Parameters) extends XSTop {
   //TODO: need to keep the same module name as XSNoCDiffTop
   override lazy val desiredName: String = "XSTop"
-  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) {
-    DifftestWiring.createAndConnectExtraIOs()
-    Profile.generateJson("XiangShan")
-  }
 
+  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) with HasDiffTestInterfaces {
+    override def cpuName: Option[String] = Some("XiangShan")
+    override def connectTopIOs(difftest: DifftestTopIO): Seq[Data] = {
+      wrapper.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
+      Seq(
+        memory.viewAs[AXI4Bundle],
+        peripheral.viewAs[AXI4Bundle],
+        dma.get,
+        io
+      )
+    }
+  }
   override lazy val module = new XSTileDiffTopImp(this)
 }
 
@@ -496,7 +504,7 @@ object TopMain extends App {
     Generator.execute(firrtlOpts, soc.module, firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
     val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+    Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else {
     val soc = if (config(SoCParamsKey).UseXSNoCTop)
       DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
@@ -504,11 +512,6 @@ object TopMain extends App {
       DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
 
     Generator.execute(firrtlOpts, soc.module, firtoolOpts)
-
-    // generate difftest bundles (w/o DifftestTopIO)
-    if (enableDifftest) {
-      DifftestModule.collect("XiangShan")
-    }
   }
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
