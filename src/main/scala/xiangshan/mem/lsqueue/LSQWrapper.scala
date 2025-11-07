@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
@@ -81,8 +81,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
-      val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
-      val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
+      val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO))) // from store_s1
+      val storeAddrInRe = Vec(StorePipelineWidth, Input(new StoreAddrIO)) // from store_s2
+      // ready indicate unaligned queue reject this unaligned request
+      val unalignQueueReq = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
@@ -91,8 +93,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
-    val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
+    val sbuffer = new SbufferWriteIO
+    val forward = Vec(LoadPipelineWidth, new ForwardQueryIO)
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
@@ -122,7 +124,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val sqCommitPtr = Output(new SqPtr)
     val sqCommitUopIdx = Output(UopIdx())
     val sqCommitRobIdx = Output(new RobPtr)
-    val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
     val misalignAllowSpec = Input(Bool())
     val issuePtrExt = Output(new SqPtr)
@@ -135,6 +136,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val lqEmpty = Output(Bool())
     val rarValidCount = Output(UInt())
     val wfi = Flipped(new WfiReqBundle)
+    val stExceptionInfo = ValidIO(new MemExceptionInfo)
+    val ldExceptionInfo = ValidIO(new MemExceptionInfo)
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssued = Input(Bool())
@@ -143,14 +146,16 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   })
 
   val loadQueue = Module(new LoadQueue)
-  val storeQueue = Module(new StoreQueue)
+  val storeQueue = Module(new NewStoreQueue)
 
   storeQueue.io.hartId := io.hartId
-  storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
   storeQueue.io.wfi <> io.wfi
 
   if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
-
+  // TODO: Don't use for now, will be remove in the feature
+  io.vecmmioStout := DontCare
+  io.maControl := DontCare
+  io.cboZeroStout := DontCare
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
@@ -165,49 +170,54 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   io.lqDeqPtr := loadQueue.io.lqDeqPtr
   io.sqDeqPtr := storeQueue.io.sqDeqPtr
-  io.sqCommitRobIdx := storeQueue.io.sqCommitRobIdx
-  io.sqCommitUopIdx := storeQueue.io.sqCommitUopIdx
-  io.sqCommitPtr    := storeQueue.io.sqCommitPtr
+  io.sqCommitRobIdx := storeQueue.io.sqDeqRobIdx
+  io.sqCommitUopIdx := storeQueue.io.sqDeqUopIdx
+  io.sqCommitPtr    := storeQueue.io.sqDeqPtr
   io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
     loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
     loadQueue.io.enq.req(i).bits       := io.enq.req(i).bits
-    loadQueue.io.enq.req(i).bits.sqIdx := storeQueue.io.enq.resp(i)
+    loadQueue.io.enq.req(i).bits.sqIdx := storeQueue.io.enq.resp(i).sqIdx
 
-    storeQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(1)
-    storeQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
-    storeQueue.io.enq.req(i).bits       := io.enq.req(i).bits
-    storeQueue.io.enq.req(i).bits.lqIdx := loadQueue.io.enq.resp(i)
+    storeQueue.io.enq.req(i).bits.needAlloc := io.enq.needAlloc(i)(1)
+    storeQueue.io.enq.req(i).valid          := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
+    connectSamePort(storeQueue.io.enq.req(i).bits.uop, io.enq.req(i).bits)
+    // only enable difftest, it will be used.
+    if(env.EnableDifftest){
+      storeQueue.io.enq.req(i).bits.debugUop.get := io.enq.req(i).bits
+    }
+//    storeQueue.io.enq.req(i).bits.lqIdx := loadQueue.io.enq.resp(i) // TODO: need it ?
 
     io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
-    io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i)
+    io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i).sqIdx
   }
 
   // store queue wiring
-  storeQueue.io.brqRedirect <> io.brqRedirect
-  storeQueue.io.vecFeedback   <> io.stvecFeedback
-  storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
-  storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
-  storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
-  storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
-  storeQueue.io.sbuffer     <> io.sbuffer
-  storeQueue.io.mmioStout   <> io.mmioStout
-  storeQueue.io.cboZeroStout <> io.cboZeroStout
-  storeQueue.io.vecmmioStout <> io.vecmmioStout
-  storeQueue.io.rob         <> io.rob
-  storeQueue.io.exceptionAddr.isStore := DontCare
-  storeQueue.io.sqCancelCnt  <> io.sqCancelCnt
-  storeQueue.io.sqDeq        <> io.sqDeq
-  storeQueue.io.sqEmpty      <> io.sqEmpty
-  storeQueue.io.sqFull       <> io.sqFull
-  storeQueue.io.forward      <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
-  storeQueue.io.force_write  <> io.force_write
-  storeQueue.io.cmoOpReq     <> io.cmoOpReq
-  storeQueue.io.cmoOpResp    <> io.cmoOpResp
-  storeQueue.io.flushSbuffer <> io.flushSbuffer
-  storeQueue.io.maControl    <> io.maControl
-  io.diffStore := storeQueue.io.diffStore
+  storeQueue.io.redirect                    <> io.brqRedirect
+//  storeQueue.io.vecFeedback   <> io.stvecFeedback
+  storeQueue.io.fromStoreUnit.unalignQueueReq <> io.sta.unalignQueueReq
+  storeQueue.io.fromStoreUnit.storeAddrIn     <> io.sta.storeAddrIn // from store_s1
+  storeQueue.io.fromStoreUnit.storeAddrInRe   <> io.sta.storeAddrInRe // from store_s2
+  storeQueue.io.storeDataIn                   <> io.std.storeDataIn // from store_s0
+  storeQueue.io.fromStoreUnit.storeMaskIn     <> io.sta.storeMaskIn // from store_s0
+  storeQueue.io.writeToSbuffer                <> io.sbuffer
+  storeQueue.io.writeBack                     <> io.mmioStout
+  storeQueue.io.fromRob.pendingPtr            := io.rob.pendingPtr
+  storeQueue.io.fromRob.pendingPtrNext        := io.rob.pendingPtrNext
+  storeQueue.io.exceptionInfo                 <> io.stExceptionInfo
+  storeQueue.io.sqCancelCnt                   <> io.sqCancelCnt
+  storeQueue.io.sqDeq                         <> io.sqDeq
+  storeQueue.io.sqEmpty                       <> io.sqEmpty
+  storeQueue.io.sqFull                        <> io.sqFull
+  storeQueue.io.forward                       <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+  io.force_write                              := storeQueue.io.sbufferCtrl.req.forceWrite
+  storeQueue.io.toDCache.req                  <> io.cmoOpReq
+  storeQueue.io.toDCache.resp                 <> io.cmoOpResp
+  io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
+  storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
+//  storeQueue.io.maControl    <> io.maControl
+  io.diffStore                                := storeQueue.io.diffStore
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -225,15 +235,15 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
  // loadQueue.io.refill              <> io.refill
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
-  loadQueue.io.exceptionAddr.isStore := DontCare
+  loadQueue.io.exceptionInfo       <> io.ldExceptionInfo
   loadQueue.io.loadMisalignFull    := io.loadMisalignFull
   loadQueue.io.misalignAllowSpec   := io.misalignAllowSpec
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
-  loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
-  loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec
-  loadQueue.io.sq.stDataReadySqPtr <> storeQueue.io.stDataReadySqPtr
-  loadQueue.io.sq.stDataReadyVec   <> storeQueue.io.stDataReadyVec
-  loadQueue.io.sq.stIssuePtr       <> storeQueue.io.stIssuePtr
+  loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.toLoadQueue.stAddrReadySqPtr
+  loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.toLoadQueue.stAddrReadyVec
+  loadQueue.io.sq.stDataReadySqPtr <> storeQueue.io.toLoadQueue.stDataReadySqPtr
+  loadQueue.io.sq.stDataReadyVec   <> storeQueue.io.toLoadQueue.stDataReadyVec
+  loadQueue.io.sq.stIssuePtr       <> storeQueue.io.toLoadQueue.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
@@ -245,27 +255,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.lqEmpty             <> io.lqEmpty
   io.mdpTrain                      := loadQueue.io.mdpTrain
 
-  // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
-  // s0: commit
-  // s1:               exception find
-  // s2:               exception triggered
-  // s3: ptr updated & new address
-  // address will be used at the next cycle after exception is triggered
-  io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
-  io.exceptionAddr.vaNeedExt := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaNeedExt, loadQueue.io.exceptionAddr.vaNeedExt)
-  io.exceptionAddr.isHyper := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isHyper, loadQueue.io.exceptionAddr.isHyper)
-  io.exceptionAddr.vstart := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vstart, loadQueue.io.exceptionAddr.vstart)
-  io.exceptionAddr.vl     := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vl, loadQueue.io.exceptionAddr.vl)
-  io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
-  io.exceptionAddr.isForVSnonLeafPTE:= Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isForVSnonLeafPTE, loadQueue.io.exceptionAddr.isForVSnonLeafPTE)
-  io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
+  io.issuePtrExt := storeQueue.io.toLoadQueue.stAddrReadySqPtr
 
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
   val pendingstate = RegInit(s_idle)
-  val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.uncache.req.valid) || (
-    loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid &&
-    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.uncache.req.bits.robIdx
+  val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.toUncacheBuffer.req.valid) || (
+    loadQueue.io.uncache.req.valid && storeQueue.io.toUncacheBuffer.req.valid &&
+    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.toUncacheBuffer.req.bits.robIdx
   )
 
   switch(pendingstate){
@@ -290,18 +287,18 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   }
 
   loadQueue.io.uncache := DontCare
-  storeQueue.io.uncache := DontCare
+  storeQueue.io.toUncacheBuffer := DontCare
   loadQueue.io.uncache.req.ready := false.B
-  storeQueue.io.uncache.req.ready := false.B
+  storeQueue.io.toUncacheBuffer.req.ready := false.B
   loadQueue.io.uncache.resp.valid := false.B
   loadQueue.io.uncache.idResp.valid := false.B
-  storeQueue.io.uncache.resp.valid := false.B
-  storeQueue.io.uncache.idResp.valid := false.B
+  storeQueue.io.toUncacheBuffer.resp.valid := false.B
+  storeQueue.io.toUncacheBuffer.idResp.valid := false.B
   when(pendingstate === s_idle){
     when(selectLq){
       io.uncache.req <> loadQueue.io.uncache.req
     }.otherwise{
-      io.uncache.req <> storeQueue.io.uncache.req
+      io.uncache.req <> storeQueue.io.toUncacheBuffer.req
     }
   }.otherwise{
     io.uncache.req.valid := false.B
@@ -310,21 +307,21 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   when (io.uncache.resp.bits.is2lq) {
     io.uncache.resp <> loadQueue.io.uncache.resp
   } .otherwise {
-    io.uncache.resp <> storeQueue.io.uncache.resp
+    io.uncache.resp <> storeQueue.io.toUncacheBuffer.resp
   }
   when(io.uncache.idResp.bits.is2lq) {
     loadQueue.io.uncache.idResp <> io.uncache.idResp
   }.otherwise {
-    storeQueue.io.uncache.idResp <> io.uncache.idResp
+    storeQueue.io.toUncacheBuffer.idResp <> io.uncache.idResp
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
   loadQueue.io.noUopsIssed := io.noUopsIssued
 
-  assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
-  assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.uncache.idResp.valid))
+  assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.toUncacheBuffer.resp.valid))
+  assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.toUncacheBuffer.idResp.valid))
   when (!io.uncacheOutstanding) {
-    assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
+    assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.toUncacheBuffer.resp.valid) && pendingstate === s_idle))
   }
 
 

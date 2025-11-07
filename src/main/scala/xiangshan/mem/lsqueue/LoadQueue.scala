@@ -168,7 +168,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
-      val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
+      val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO))) // from store_s1
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
@@ -192,7 +192,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncachebuffer
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
-    val exceptionAddr = new ExceptionAddrIO
+    val exceptionInfo = ValidIO(new MemExceptionInfo())
     val loadMisalignFull = Input(Bool())
     val misalignAllowSpec = Input(Bool())
     val lqFull = Output(Bool())
@@ -219,7 +219,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadQueueRAW = Module(new LoadQueueRAW)  //  read-after-write violation
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
-  val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new LoadQueueUncache) // uncache
   /**
    * LoadQueueRAR
@@ -261,36 +260,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
-  /**
-   * Load queue exception buffer
-   */
-  exceptionBuffer.io.redirect <> io.redirect
-  for (i <- 0 until LoadPipelineWidth) {
-    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isvec // from load_s3
-    exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
-  }
-  // vlsu exception!
-  for (i <- 0 until VecLoadPipelineWidth) {
-    exceptionBuffer.io.req(LoadPipelineWidth + i).valid                 := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits                  := DontCare
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr            := io.vecFeedback(i).bits.vaddr
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.fullva           := io.vecFeedback(i).bits.vaddr
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaNeedExt        := io.vecFeedback(i).bits.vaNeedExt
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.gpaddr           := io.vecFeedback(i).bits.gpaddr
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx       := io.vecFeedback(i).bits.uopidx
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx       := io.vecFeedback(i).bits.robidx
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart   := io.vecFeedback(i).bits.vstart
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl       := io.vecFeedback(i).bits.vl
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.exceptionVec := io.vecFeedback(i).bits.exceptionVec
-  }
-  // mmio non-data error exception
-  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth) := uncacheBuffer.io.exception
-  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth).bits.vaNeedExt := true.B
-
   loadQueueReplay.io.loadMisalignFull := io.loadMisalignFull
   loadQueueReplay.io.misalignAllowSpec := io.misalignAllowSpec
 
-  io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
   /**
    * Load uncache buffer
@@ -301,6 +273,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.mmioRawData <> io.ld_raw_data
   uncacheBuffer.io.rob <> io.rob
   uncacheBuffer.io.uncache <> io.uncache
+
+  io.exceptionInfo <> uncacheBuffer.io.exceptionInfo
 
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3

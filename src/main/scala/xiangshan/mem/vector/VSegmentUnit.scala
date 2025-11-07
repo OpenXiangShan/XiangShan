@@ -992,13 +992,15 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
 
   // exception
   io.exceptionInfo                    := DontCare
-  io.exceptionInfo.bits.robidx        := instMicroOp.uop.robIdx
-  io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uop.vpu.vuopIdx
+  io.exceptionInfo.bits.robIdx        := instMicroOp.uop.robIdx
+  io.exceptionInfo.bits.uopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := instMicroOp.exceptionIsForVSnonLeafPTE
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
+  io.exceptionInfo.bits.exceptionVec  := instMicroOp.uop.exceptionVec
+  io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
 
