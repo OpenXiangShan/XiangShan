@@ -781,6 +781,16 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.vecDifftestInfo.bits.uop      := uopq(deqPtr.value).uop
   io.vecDifftestInfo.bits.start    := 0.U // only use in no-segment unit-stride
   io.vecDifftestInfo.bits.offset   := 0.U
+  io.diffPmaStore.foreach{case sink =>
+    sink.valid                     := io.sbuffer.valid
+    sink.bits.data                 := io.sbuffer.bits.data
+    sink.bits.addr                 := io.sbuffer.bits.addr
+    sink.bits.data                 := io.sbuffer.bits.data
+    sink.bits.mask                 := io.sbuffer.bits.mask
+    sink.bits.wline                := io.sbuffer.bits.wline
+    sink.bits.vecValid             := io.sbuffer.bits.vecValid
+    sink.bits.diffIsHighPart       := io.sbuffer.bits.addr(3)  // segment store event is treat as scalar store!
+  }
 
   /**
    * update ptr
@@ -992,13 +1002,15 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
 
   // exception
   io.exceptionInfo                    := DontCare
-  io.exceptionInfo.bits.robidx        := instMicroOp.uop.robIdx
-  io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uop.vpu.vuopIdx
+  io.exceptionInfo.bits.robIdx        := instMicroOp.uop.robIdx
+  io.exceptionInfo.bits.uopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := instMicroOp.exceptionIsForVSnonLeafPTE
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
+  io.exceptionInfo.bits.exceptionVec  := instMicroOp.uop.exceptionVec
+  io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
 

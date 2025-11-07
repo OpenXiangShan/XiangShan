@@ -184,7 +184,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
 
     // from sta s1
-    val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO)))
 
     // from std s1
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite)))
@@ -311,7 +311,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // store address execute
     storeAddrInSameCycleVec(i) := VecInit((0 until StorePipelineWidth).map(w => {
       io.storeAddrIn(w).valid &&
-      !io.storeAddrIn(w).bits.miss &&
+      !io.storeAddrIn(w).bits.tlbMiss &&
       blockSqIdx(i) === io.storeAddrIn(w).bits.uop.sqIdx
     })).asUInt.orR // for better timing
 

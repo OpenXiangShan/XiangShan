@@ -84,7 +84,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
 
 
   //Gather writeback information
-  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.robidx === entries.uop.robIdx }
+  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.robIdx === entries.uop.robIdx }
 
   def getOldest(valid: Seq[Bool], bits: Seq[DynInst]): DynInst = {
     def getOldest_recursion[T <: Data](valid: Seq[Bool], bits: Seq[DynInst]): (Seq[Bool], Seq[DynInst]) = {
@@ -120,7 +120,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   val portUop         = Wire(Vec(VLUopWritebackWidth, new DynInst))
   portUop.zip(io.mergeUopWriteback.map(_.bits)).map{ case(sink, source) =>
     sink              := WireInit(0.U.asTypeOf(new DynInst))
-    sink.robIdx       := source.robidx
+    sink.robIdx       := source.robIdx
     sink.vpu.vl       := source.vl
     sink.exceptionVec := source.exceptionVec
   }
