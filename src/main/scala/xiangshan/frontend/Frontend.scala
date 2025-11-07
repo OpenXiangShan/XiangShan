@@ -46,6 +46,7 @@ import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
+import xiangshan.frontend.bpu.BpAlign
 import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.ibuffer.IBuffer
 import xiangshan.frontend.icache._
@@ -113,7 +114,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu          = Module(new Bpu)
+  val bpu          = Module(if (env.EnableBpAlign) new BpAlign else new Bpu)
   val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)

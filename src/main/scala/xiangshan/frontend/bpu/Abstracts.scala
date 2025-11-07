@@ -20,11 +20,24 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSBundle
 import xiangshan.XSModule
+import xiangshan.frontend.BpuToFtqIO
+import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 
 abstract class BpuBundle(implicit p: Parameters) extends XSBundle with HasBpuParameters
 
 abstract class BpuModule(implicit p: Parameters) extends XSModule with HasBpuParameters
+
+abstract class BpuTopModule(implicit p: Parameters) extends BpuModule {
+  val io: BpuTopIO
+}
+
+abstract class BpuTopIO(implicit p: Parameters) extends BpuBundle {
+  val ctrl:        BpuCtrl    = Input(new BpuCtrl)
+  val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
+  val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
+  val toFtq:       BpuToFtqIO = new BpuToFtqIO
+}
 
 abstract class BasePredictor(implicit p: Parameters) extends BpuModule {
   val io: BasePredictorIO

@@ -39,32 +39,9 @@ import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 
-class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
-  class DummyBpuIO extends Bundle {
-    val ctrl:        BpuCtrl    = Input(new BpuCtrl)
-    val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
-    val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
-    val toFtq:       BpuToFtqIO = new BpuToFtqIO
-  }
-
+class Bpu(implicit p: Parameters) extends BpuTopModule with HalfAlignHelper {
+  class DummyBpuIO extends BpuTopIO
   val io: DummyBpuIO = IO(new DummyBpuIO)
-
-  private val bpAlign = Module(new BpuAlign)
-  bpAlign.io.clock                    := clock.asBool
-  bpAlign.io.reset                    := reset.asBool
-  bpAlign.io.in.prediction_ready      := io.toFtq.prediction.ready
-  bpAlign.io.in.speculationMeta_ready := io.toFtq.speculationMeta.ready
-  bpAlign.io.in.meta_ready            := io.toFtq.meta.ready
-  bpAlign.io.in.redirect_valid        := io.fromFtq.redirect.valid
-  bpAlign.io.in.train_valid           := io.fromFtq.train.valid
-  bpAlign.io.in.commit_valid          := io.fromFtq.commit.valid
-  bpAlign.io.in.redirect              := io.fromFtq.redirect.bits
-  bpAlign.io.in.train                 := io.fromFtq.train.bits
-  bpAlign.io.in.commit                := io.fromFtq.commit.bits
-  bpAlign.io.in.bpuPtr                := io.fromFtq.bpuPtr
-  bpAlign.io.in.redirectFromIFU       := io.fromFtq.redirectFromIFU
-  bpAlign.io.in.ctrl                  := io.ctrl
-  bpAlign.io.in.resetVector           := io.resetVector
 
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
