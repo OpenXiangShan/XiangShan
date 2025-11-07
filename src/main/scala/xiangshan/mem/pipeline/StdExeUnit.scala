@@ -59,5 +59,5 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.sqData.bits.fuOpType := Mux(io.vstdIn.valid, io.vstdIn.bits.fuOpType, io.in.bits.fuOpType)
   io.sqData.bits.data := Mux(io.vstdIn.valid, io.vstdIn.bits.data, io.in.bits.src(0))
   io.sqData.bits.sqIdx := Mux(io.vstdIn.valid, io.vstdIn.bits.sqIdx, io.in.bits.sqIdx.get)
-  io.sqData.bits.vecDebug := io.vstdIn.bits.vecDebug // DontCare for scalar stds
+  io.sqData.bits.vecDebug.foreach(_ := io.vstdIn.bits.vecDebug.get) // DontCare for scalar stds
 }

@@ -31,7 +31,7 @@ import xiangshan._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
-import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
+import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
 
 // DCache specific parameters
 case class DCacheParameters
@@ -353,19 +353,19 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val vecValid = Bool()
   val sqNeedDeq = Bool()
 
-  def fromDataBufferEntry(src: DataBufferEntry, cmd: UInt) = {
-    this := DontCare
-    this := DontCare
-    this.cmd := cmd
-    this.addr := src.addr
-    this.vaddr := src.vaddr
-    this.data := src.data
-    this.mask := src.mask
-    this.wline := src.wline && src.vecValid
-    this.prefetch := src.prefetch
-    this.vecValid := src.vecValid
-    this.sqNeedDeq := src.sqNeedDeq
-  }
+//  def fromDataBufferEntry(src: DataBufferEntry, cmd: UInt) = {
+//    this := DontCare
+//    this := DontCare
+//    this.cmd := cmd
+//    this.addr := src.addr
+//    this.vaddr := src.vaddr
+//    this.data := src.data
+//    this.mask := src.mask
+//    this.wline := src.wline && src.vecValid
+//    this.prefetch := src.prefetch
+//    this.vecValid := src.vecValid
+//    this.sqNeedDeq := src.sqNeedDeq
+//  }
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
@@ -487,11 +487,8 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val data = UInt(XLEN.W)
   val mask = UInt((XLEN/8).W)
   val id   = UInt(uncacheIdxBits.W)
-  val instrtype = UInt(sourceTypeWidth.W)
   val nc = Bool()
   val memBackTypeMM = Bool()
-  val isFirstIssue = Bool()
-  val replayCarry = new ReplayCarry(nWays)
 
   def dump(cond: Bool) = {
     XSDebug(cond, "UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
