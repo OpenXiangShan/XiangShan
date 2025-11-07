@@ -78,7 +78,6 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
       waySplit = 2,
       dataSplit = 1,
       shouldReset = true,
-      holdRead = true,
       singlePort = true,
       withClockGate = true,
       hasMbist = hasMbist,

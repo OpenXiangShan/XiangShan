@@ -72,7 +72,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
         set = nSets,
         width = DataSramWidth, // DataEntryBits + DataPaddingBits
         shouldReset = true,
-        holdRead = true,
         singlePort = true,
         withClockGate = false, // enable signal timing is bad, no gating here
         hasMbist = hasMbist,
