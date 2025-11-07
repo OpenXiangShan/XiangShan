@@ -26,7 +26,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig.MouCfg
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DynInst, ExuInput, ExuOutput}
+import xiangshan.backend.Bundles.{ExceptionInfo, DynInst, ExuInput, ExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
@@ -53,11 +53,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val exceptionInfo = ValidIO(new Bundle {
-      val vaddr = UInt(XLEN.W)
-      val gpaddr = UInt(XLEN.W)
-      val isForVSnonLeafPTE = Bool()
-    })
+    val exceptionInfo = ValidIO(new MemExceptionInfo)
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
   io.in.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset))
@@ -463,10 +459,17 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   /**
     * IO assignment
     */
-  io.exceptionInfo.valid := atom_override_xtval
-  io.exceptionInfo.bits.vaddr := vaddr
-  io.exceptionInfo.bits.gpaddr := gpaddr
+  io.exceptionInfo.valid                  := atom_override_xtval
+  io.exceptionInfo.bits.robIdx            := uop.robIdx
+  io.exceptionInfo.bits.vaddr             := vaddr
+  io.exceptionInfo.bits.gpaddr            := gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
+  io.exceptionInfo.bits.exceptionVec      := exceptionVec
+  io.exceptionInfo.bits.vaNeedExt         := false.B
+  io.exceptionInfo.bits.isHyper           := false.B
+  io.exceptionInfo.bits.uopIdx            := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
+  io.exceptionInfo.bits.vl                := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
+  io.exceptionInfo.bits.vstart            := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
