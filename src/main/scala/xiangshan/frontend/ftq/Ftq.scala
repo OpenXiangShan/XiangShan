@@ -378,89 +378,146 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "squashCycles_bpWrong_redirect_wrongTaken",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken)
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken)
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongPosition",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition)
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition)
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongAttribute",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
 //      (redirectCfiOffset ===
-//        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+//        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+      //        0.U.asTypeOf(new BranchInfo)).cfiPosition) &&
       !(redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute)
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute)
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition) &&
       (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute) &&
       (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).target.toUInt)
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).target.toUInt)
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_conditional",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition) &&
       (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute) &&
       (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).target.toUInt) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).target.toUInt) &&
       redirect.bits.attribute.isConditional
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_direct",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition) &&
       (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute) &&
       (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).target.toUInt) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).target.toUInt) &&
       redirect.bits.attribute.isDirect
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_indirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition) &&
       (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute) &&
       (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).target.toUInt) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).target.toUInt) &&
       redirect.bits.attribute.isIndirect
   )
+
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_indirect_retCall",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).taken) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).taken) &&
       (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).cfiPosition) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).cfiPosition) &&
       (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).attribute) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).attribute) &&
       (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(new BranchInfo).target.toUInt) &&
+        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
+          0.U.asTypeOf(new BranchInfo)
+        ).target.toUInt) &&
       redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect
   )
 
