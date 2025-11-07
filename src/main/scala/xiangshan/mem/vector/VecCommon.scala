@@ -222,6 +222,7 @@ abstract class VLSUModule(implicit p: Parameters) extends XSModule
 abstract class VLSUBundle(implicit p: Parameters) extends XSBundle
   with HasVLSUParameters
 
+
 class VLSUBundleWithMicroOp(implicit p: Parameters) extends VLSUBundle {
   val uop = new DynInst
 }
@@ -301,6 +302,7 @@ class VecMemExuOutput(val param: ExeUnitParams)(implicit p: Parameters) extends 
   val mask        = UInt(VLENB.W)
   val vaddr       = UInt(XLEN.W)
   val vaNeedExt   = Bool()
+  val isHyper     = Bool()
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
   val vecTriggerMask = UInt((VLEN/8).W)

@@ -43,7 +43,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
 
     // from store unit s1
-    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO)))
 
     // global rollback flush
     val rollback = Vec(StorePipelineWidth,Output(Valid(new Redirect)))
@@ -322,7 +322,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     XSDebug(
       lqViolation,
       "need rollback (ld wb before store) pc %x robidx %d target %x\n",
-      storeIn(i).bits.uop.pc, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
+      storeIn(i).bits.uop.pc.get, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
     )
 
     (lqViolation, lqViolationUop)
@@ -338,7 +338,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stIsFirstIssue = Wire(Vec(StorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.tlbMiss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
