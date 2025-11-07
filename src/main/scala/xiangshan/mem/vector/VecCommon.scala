@@ -301,6 +301,7 @@ class VecMemExuOutput(val param: ExeUnitParams)(implicit p: Parameters) extends 
   val mask        = UInt(VLENB.W)
   val vaddr       = UInt(XLEN.W)
   val vaNeedExt   = Bool()
+  val isHyper     = Bool()
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
   val vecTriggerMask = UInt((VLEN/8).W)
