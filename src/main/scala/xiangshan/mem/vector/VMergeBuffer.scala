@@ -134,6 +134,13 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.feedback(VecFeedbacks.COMMIT)      := !hasExp
     sink.feedback(VecFeedbacks.FLUSH)       := hasExp
     sink.feedback(VecFeedbacks.LAST)        := true.B
+    sink
+  }
+
+  def toExceptionGenConnect(source: MBufferBundle): MemExceptionInfo = {
+    val sink                                 = WireInit(0.U.asTypeOf(new MemExceptionInfo))
+    sink.robIdx                             := source.uop.robIdx
+    sink.uopIdx                             := source.uop.uopIdx
     sink.vstart                             := source.vstart // TODO: if lsq need vl for fof?
     sink.vaddr                              := source.vaddr
     sink.vaNeedExt                          := source.vaNeedExt
@@ -141,6 +148,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.isForVSnonLeafPTE                  := source.isForVSnonLeafPTE
     sink.vl                                 := source.vl
     sink.exceptionVec                       := ExceptionNO.selectByFu(source.exceptionVec, fuCfg)
+    sink.isHyper                            := false.B
     sink
   }
 
@@ -372,6 +380,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
     lsqport.valid:= selFire && selAllocated && !needRSReplay(entryIdx)
+    //to exceptionGen
+    io.exceptionInfo(i).bits  := toExceptionGenConnect(selEntry)
+    io.exceptionInfo(i).valid := selFire && selAllocated && !needRSReplay(entryIdx)
     //to RS
     val feedbackOut                       = WireInit(0.U.asTypeOf(io.feedback(i).bits)).suggestName(s"feedbackOut_${i}")
     val feedbackValid                     = selFire && selAllocated
