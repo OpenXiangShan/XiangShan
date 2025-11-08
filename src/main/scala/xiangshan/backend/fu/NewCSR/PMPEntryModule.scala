@@ -26,16 +26,16 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   val addr  = io.in.addr
   val wdata = io.in.wdata
 
-  val pmpMask  = RegInit(VecInit(Seq.fill(p(PMParameKey).NumPMP)(0.U(PMPAddrBits.W))))
+  val pmpMask  = RegInit(VecInit(Seq.fill(p(PMParameKey).NumPMPReal)(0.U(PMPAddrBits.W))))
 
-  val pmpEntry = Wire(Vec(p(PMParameKey).NumPMP, new PMPEntry))
+  val pmpEntry = Wire(Vec(p(PMParameKey).NumPMPReal, new PMPEntry))
   for (i <- pmpEntry.indices) {
     pmpEntry(i).gen(pmpCfg(i), pmpAddr(i), pmpMask(i))
   }
 
   // write pmpCfg
   val cfgVec = WireInit(VecInit(Seq.fill(8)(0.U.asTypeOf(new PMPCfgBundle))))
-  for (i <- 0 until (p(PMParameKey).NumPMP/8+1) by 2) {
+  for (i <- 0 until (p(PMParameKey).NumPMPReal/4-1) by 2) {
     when (wen && (addr === (CSRs.pmpcfg0 + i).U)) {
       for (j <- cfgVec.indices) {
         val cfgOldTmp = pmpEntry(8*i/2+j).cfg
@@ -58,15 +58,15 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
 
   io.out.pmpCfgWData := Cat(cfgVec.map(_.asUInt).reverse)
 
-  val pmpAddrW = Wire(Vec(p(PMParameKey).NumPMP, UInt(64.W)))
-  val pmpAddrR = Wire(Vec(p(PMParameKey).NumPMP, UInt(64.W)))
+  val pmpAddrW = Wire(Vec(p(PMParameKey).NumPMPReal, UInt(64.W)))
+  val pmpAddrR = Wire(Vec(p(PMParameKey).NumPMPReal, UInt(64.W)))
 
-  for (i <- 0 until p(PMParameKey).NumPMP) {
+  for (i <- 0 until p(PMParameKey).NumPMPReal) {
     pmpAddrW(i) := pmpEntry(i).addr.ADDRESS.asUInt
     pmpAddrR(i) := pmpEntry(i).addr.ADDRESS.asUInt
     // write pmpAddr
     when (wen && (addr === (CSRs.pmpaddr0 + i).U)) {
-      if (i != (p(PMParameKey).NumPMP - 1)) {
+      if (i != (p(PMParameKey).NumPMPReal - 1)) {
         val addrNextLocked: Bool = PMPCfgLField.addrLocked(pmpEntry(i).cfg, pmpEntry(i + 1).cfg)
         pmpMask(i) := Mux(!addrNextLocked, pmpEntry(i).matchMask(wdata), pmpEntry(i).mask)
         pmpAddrW(i) := Mux(!addrNextLocked, wdata, pmpEntry(i).addr.ADDRESS.asUInt)
@@ -93,14 +93,14 @@ class PMPEntryHandleIOBundle(implicit p: Parameters) extends PMPBundle {
     val ren   = Bool()
     val addr  = UInt(12.W)
     val wdata = UInt(64.W)
-    val pmpCfg  = Vec(NumPMP, new PMPCfgBundle)
-    val pmpAddr = Vec(NumPMP, new PMPAddrBundle)
+    val pmpCfg  = Vec(NumPMPReal, new PMPCfgBundle)
+    val pmpAddr = Vec(NumPMPReal, new PMPAddrBundle)
   })
 
   val out = Output(new Bundle {
     val pmpCfgWData  = UInt(PMXLEN.W)
-    val pmpAddrRData = Vec(NumPMP, UInt(64.W))
-    val pmpAddrWData = Vec(NumPMP, UInt(64.W))
+    val pmpAddrRData = Vec(NumPMPReal, UInt(64.W))
+    val pmpAddrWData = Vec(NumPMPReal, UInt(64.W))
   })
 }
 
