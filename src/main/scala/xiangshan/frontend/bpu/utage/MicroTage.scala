@@ -71,6 +71,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val histTableHitMap      = tables.map(_.resp.valid)
   private val histTableTakenMap    = tables.map(_.resp.bits.taken)
   private val histTableUsefulMap   = VecInit(tables.map(_.resp.bits.useful)).asUInt
+  private val histTableNoUsefulMask = tables.map(_.resp.bits.hitNoUseful)
   private val histTableTaken       = MuxCase(false.B, takenCases)
   private val histTableCfiPosition = MuxCase(0.U(CfiPositionWidth.W), cfiPositionCases)
   private val histTableTakenCtr    = MuxCase(0.U.asTypeOf(new SaturateCounter(TakenCtrWidth)), takenCtrCase)
@@ -90,6 +91,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   prediction.meta.bits.cfiPosition         := finalPredCfiPosition
   prediction.meta.bits.hitUseful           := histTableUseful
   prediction.meta.bits.hitTakenCtr         := histTableTakenCtr
+  prediction.meta.bits.histTableNoUsefulMask := histTableNoUsefulMask
   io.prediction := RegEnable(prediction, 0.U.asTypeOf(new MicroTagePrediction), io.stageCtrl.s0_fire)
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
@@ -109,11 +111,13 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_allocCfiPosition   = Mux(t0_trainData.attribute.isConditional, t0_trainData.cfiPosition, t0_trainMeta.cfiPosition)
 
   private val t0_providerMask = PriorityEncoderOH(t0_trainMeta.histTableHitMap.reverse).reverse
+  private val t0_fastAllocMak = t0_providerMask.asUInt & t0_trainMeta.histTableNoUsefulMask.asUInt
   private val hitMask            = t0_trainMeta.histTableHitMap.asUInt
   private val lowerFillMask      = Mux(hitMask === 0.U, 0.U, hitMask | (hitMask - 1.U))
   private val usefulMask         = t0_trainMeta.histTableUsefulMask
   private val allocCandidateMask = ~(lowerFillMask | usefulMask)
-  private val t0_allocMask       = PriorityEncoderOH(allocCandidateMask)
+  private val normalAllocMask    = PriorityEncoderOH(allocCandidateMask)
+  private val t0_allocMask       = Mux(t0_fastAllocMak.orR, t0_fastAllocMak, normalAllocMask)
 
   when(tickCounter(TickWidth)) {
     tickCounter := 0.U

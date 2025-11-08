@@ -44,6 +44,7 @@ class MicroTageTable(
       val useful:      Bool            = Bool()
       val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
       val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
+      val hitNoUseful: Bool            = Bool()
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
@@ -105,6 +106,7 @@ class MicroTageTable(
   io.resp.bits.useful      := usefulEntry.isPositive
   io.resp.bits.hitTakenCtr := readEntry.takenCtr
   io.resp.bits.hitUseful   := usefulEntry
+  io.resp.bits.hitNoUseful := usefulEntry.isSaturateNegative
 
   // train
   private val (trainIdx, trainTag) =
@@ -143,8 +145,14 @@ class MicroTageTable(
     usefulEntries(trainIdx) := updateEntry.useful
   }
 
+  // when(io.usefulReset) {
+  //   usefulEntries.foreach(_.value := _.value >> 1.U)
+  // }
+
   when(io.usefulReset) {
-    usefulEntries.foreach(_.value := 0.U)
+    usefulEntries.zipWithIndex.foreach { case (entry, i) =>
+      usefulEntries(i).value := entry.value >> 1.U
+    }
   }
   // Per-index access distribution
   for (i <- 0 until numSets) {

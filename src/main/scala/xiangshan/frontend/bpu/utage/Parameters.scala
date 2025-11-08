@@ -30,7 +30,7 @@ case class MicroTageParameters(
     TakenCtrWidth: Int = 3,
     TagWidth:      Int = 13,
     NumTables:     Int = 2,
-    TickWidth:     Int = 7,
+    TickWidth:     Int = 5,
     UsefulWidth:   Int = 2,
     BaseTableSize: Int = 512
 ) {}

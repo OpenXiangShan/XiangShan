@@ -28,6 +28,7 @@ class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val histTableHitMap:     Vec[Bool]       = Vec(NumTables, Bool())
   val histTableUsefulMask: UInt            = UInt(NumTables.W)
+  val histTableNoUsefulMask: Vec[Bool]     = Vec(NumTables, Bool())
   val histTableTakenMap:   Vec[Bool]       = Vec(NumTables, Bool())
   val histTableHit:        Bool            = Bool()
   val taken:               Bool            = Bool()
