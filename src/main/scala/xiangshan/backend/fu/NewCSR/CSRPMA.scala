@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import freechips.rocketchip.tile.XLen
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRWARLField => WARL}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.PMAConfigEntry
 import xiangshan.backend.fu.util.CSRConst
@@ -14,20 +14,20 @@ import xiangshan.{HasPMParameters, PMParameKey}
 import scala.collection.immutable.SeqMap
 
 trait CSRPMA { self: NewCSR =>
-  val pmacfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMA/8+1, 2).map(num =>
+  val pmacfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal/4-1, 2).map(num =>
     Module(new CSRModule(s"Pmacfg$num") with HasPMACfgRSink {
       // read condition
-      regOut := cfgRData(64*(num/2+1)-1, 64*num/2)
+      regOut := cfgRData
     })
       .setAddr(CSRConst.PmacfgBase + num)
   )
 
   // every pmacfg has 8 cfgs
-  val pmacfgs: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMA).map(num =>
+  val pmacfgs: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal).map(num =>
     Module(new CSRModule(s"Pma$num"+"cfg", new PMACfgInitBundle(num)))
   )
 
-  val pmaaddr: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMA).map(num =>
+  val pmaaddr: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal).map(num =>
     Module(new CSRModule(s"Pmaaddr$num") with HasPMAAddrSink {
       // read condition
       regOut := addrRegOut(num)
@@ -48,10 +48,10 @@ trait CSRPMA { self: NewCSR =>
 
   private val pmaCfgRead = Cat(pmacfgs.map(_.rdata(7, 0)).reverse)
 
-  pmaCSRMods.foreach { mod =>
+  pmacfg.zipWithIndex.foreach { case(mod, i) =>
     mod match {
       case m: HasPMACfgRSink =>
-        m.cfgRData := pmaCfgRead
+        m.cfgRData := pmaCfgRead((i+1)*64-1, i*64)
       case _ =>
     }
   }
@@ -73,14 +73,14 @@ class PMACfgBundle extends PMPCfgBundle {
 }
 
 trait HasPMACfgRSink { self: CSRModule[_] =>
-  val cfgRData = IO(Input(UInt((p(PMParameKey).NumPMA/8 * p(XLen)).W)))
+  val cfgRData = IO(Input(UInt(64.W)))
 }
 
 trait HasPMAAddrSink { self: CSRModule[_] =>
-  val addrRData = IO(Input(Vec(p(PMParameKey).NumPMA, UInt(64.W))))
-  val addrRegOut = IO(Input(Vec(p(PMParameKey).NumPMA, UInt(64.W))))
+  val addrRData = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
+  val addrRegOut = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
 }
 
 trait PMAInit extends HasPMParameters with PMAReadWrite {
-  def pmaInit: Seq[PMAConfigEntry] = (PMAConfigs ++ Seq.fill(NumPMA-PMAConfigs.length)(PMAConfigEntry(0))).reverse
+  def pmaInit: Seq[PMAConfigEntry] = (PMAConfigs ++ Seq.fill(NumPMAReal-PMAConfigs.length)(PMAConfigEntry(0))).reverse
 }

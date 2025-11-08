@@ -26,8 +26,10 @@ case object PMParameKey extends Field[PMParameters]
 
 case class PMParameters
 (
-  NumPMP: Int = 16,
-  NumPMA: Int = 16,
+  NumPMP: Int = 64,
+  NumPMA: Int = 64,
+  NumPMPReal: Int = 32,
+  NumPMAReal: Int = 32, // if pmaReal set num > 32, need fix pmaCfgBase
 
   PlatformGrain: Int = log2Ceil(4*1024), // 4KB, a normal page
   mmpma: MMPMAConfig = MMPMAConfig(
@@ -50,6 +52,8 @@ trait HasPMParameters {
   def pmParams = p(PMParameKey)
   def NumPMP = pmParams.NumPMP
   def NumPMA = pmParams.NumPMA
+  def NumPMPReal = pmParams.NumPMPReal
+  def NumPMAReal = pmParams.NumPMAReal
 
   def PlatformGrain = pmParams.PlatformGrain
   def mmpma = pmParams.mmpma

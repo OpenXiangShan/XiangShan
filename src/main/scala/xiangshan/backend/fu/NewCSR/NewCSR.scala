@@ -432,10 +432,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val dbltrpToMN     = trapHandleMod.io.out.dbltrpToMN
   val hasDTExcp      = trapHandleMod.io.out.hasDTExcp
 
+  val NumPMPReal = p(PMParameKey).NumPMPReal
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
   pmpEntryMod.io.in.pmpCfg  := pmpcfgs.map(_.regOut.asInstanceOf[PMPCfgBundle])
-  pmpEntryMod.io.in.pmpAddr := pmpaddr.map(_.regOut.asInstanceOf[PMPAddrBundle])
+  pmpEntryMod.io.in.pmpAddr := pmpaddr.take(NumPMPReal).map(_.regOut.asInstanceOf[PMPAddrBundle])
   pmpEntryMod.io.in.ren   := ren
   pmpEntryMod.io.in.wen   := wenLegalReg
   pmpEntryMod.io.in.addr  := addr
@@ -556,8 +557,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   pmpaddr.zipWithIndex.foreach { case (mod, i) =>
-    mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpaddr0 + i).U)
-    mod.w.wdata := pmpEntryMod.io.out.pmpAddrWData(i)
+    if (i < NumPMPReal) {
+      mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpaddr0 + i).U)
+      mod.w.wdata := pmpEntryMod.io.out.pmpAddrWData(i)
+    }
   }
 
   pmacfgs.zipWithIndex.foreach { case (mod, i) =>
