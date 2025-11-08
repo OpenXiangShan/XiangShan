@@ -122,7 +122,7 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ```
 
 ### Run with xspdb 
-* Install [picker](https://github.com/XS-MLVP/picker), a verifaction tool that supports high-level languages.
+* Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
 * Run `make pdb` to build XiangShan Python binaries.
 * Run `make pdb-run` to run XiangShan binaries.
 
