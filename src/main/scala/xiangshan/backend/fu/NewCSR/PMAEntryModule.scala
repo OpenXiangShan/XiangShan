@@ -24,10 +24,10 @@ class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAIni
   val addr  = io.in.addr
   val wdata = io.in.wdata
 
-  require(NumPMA >= 16, "The number of PMA should be greater than or equal to 16.")
+  require(NumPMAReal >= 16, "The number of PMA should be greater than or equal to 16.")
 
-  val pmaAddrInit = VecInit(Seq.fill(p(PMParameKey).NumPMA)(0.U((PMPAddrWidth-PMPOffBits).W)))
-  val pmaMaskInit = VecInit(Seq.fill(p(PMParameKey).NumPMA)(0.U(PMPAddrWidth.W)))
+  val pmaAddrInit = VecInit(Seq.fill(p(PMParameKey).NumPMAReal)(0.U((PMPAddrWidth-PMPOffBits).W)))
+  val pmaMaskInit = VecInit(Seq.fill(p(PMParameKey).NumPMAReal)(0.U(PMPAddrWidth.W)))
 
   pmaAddrInit.zip(pmaMaskInit).zip(pmaInit).foreach { case ((addr, mask), init) =>
     addr := genAddr(init).U((PMPAddrWidth-PMPOffBits).W)
@@ -37,7 +37,7 @@ class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAIni
   val pmaAddr = RegInit(pmaAddrInit)
   val pmaMask = RegInit(pmaMaskInit)
 
-  val pmaEntry = Wire(Vec(p(PMParameKey).NumPMA, new PMAEntry))
+  val pmaEntry = Wire(Vec(p(PMParameKey).NumPMAReal, new PMAEntry))
 
   for (i <- pmaEntry.indices) {
     pmaEntry(i).gen(pmaCfg(i), pmaAddr(i), pmaMask(i))
@@ -45,7 +45,7 @@ class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAIni
 
   // write pmaCfg
   val cfgVec = WireInit(VecInit(Seq.fill(8)(0.U.asTypeOf(new PMACfgBundle))))
-  for (i <- 0 until (p(PMParameKey).NumPMA/8+1) by 2) {
+  for (i <- 0 until (p(PMParameKey).NumPMAReal/4-1) by 2) {
     when (wen && (addr === (CSRConst.PmacfgBase + i).U)) {
       for (j <- cfgVec.indices) {
         val cfgOldTmp = pmaEntry(8*i/2+j).cfg
@@ -69,13 +69,13 @@ class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAIni
   io.out.pmaCfgWdata := Cat(cfgVec.map(_.asUInt).reverse)
 
 
-  val pmaAddrR = Wire(Vec(p(PMParameKey).NumPMA, UInt(64.W)))
+  val pmaAddrR = Wire(Vec(p(PMParameKey).NumPMAReal, UInt(64.W)))
 
-  for (i <- 0 until p(PMParameKey).NumPMA) {
+  for (i <- 0 until p(PMParameKey).NumPMAReal) {
     pmaAddrR(i) := pmaEntry(i).addr
     // write pmaAddr
     when (wen && (addr === (CSRConst.PmaaddrBase + i).U)) {
-      if (i != (p(PMParameKey).NumPMA - 1)) {
+      if (i != (p(PMParameKey).NumPMAReal - 1)) {
         val addrNextLocked: Bool = PMPCfgLField.addrLocked(pmaEntry(i).cfg, pmaEntry(i + 1).cfg)
         pmaMask(i) := Mux(!addrNextLocked, pmaEntry(i).matchMask(wdata), pmaEntry(i).mask)
         pmaAddr(i) := Mux(!addrNextLocked, wdata, pmaEntry(i).addr)
@@ -102,13 +102,13 @@ class PMAEntryHandleIOBundle(implicit p: Parameters) extends PMABundle {
     val ren = Bool()
     val addr = UInt(12.W)
     val wdata = UInt(64.W)
-    val pmaCfg = Vec(NumPMA, new PMACfgBundle)
+    val pmaCfg = Vec(NumPMAReal, new PMACfgBundle)
   })
 
   val out = Output(new Bundle {
     val pmaCfgWdata = UInt(PMXLEN.W)
-    val pmaAddrRData = Vec(NumPMA, UInt(64.W))
-    val pmaAddrRegOut = Vec(NumPMA, UInt(64.W))
+    val pmaAddrRData = Vec(NumPMAReal, UInt(64.W))
+    val pmaAddrRegOut = Vec(NumPMAReal, UInt(64.W))
   })
 }
 

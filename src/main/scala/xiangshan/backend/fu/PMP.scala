@@ -289,12 +289,12 @@ class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
 
 trait PMPMethod extends PMPConst {
   def pmp_init() : (Vec[UInt], Vec[UInt], Vec[UInt])= {
-    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(PMXLEN.W))))
+    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMPReal/8, UInt(PMXLEN.W))))
     // val addr = Wire(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W)))
     // val mask = Wire(Vec(NumPMP, UInt(PMPAddrBits.W)))
     // INFO: these CSRs could be uninitialized, but for difftesting with NEMU, we opt to initialize them.
-    val addr = WireInit(0.U.asTypeOf(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W))))
-    val mask = WireInit(0.U.asTypeOf(Vec(NumPMP, UInt(PMPAddrBits.W))))
+    val addr = WireInit(0.U.asTypeOf(Vec(NumPMPReal, UInt((PMPAddrBits-PMPOffBits).W))))
+    val mask = WireInit(0.U.asTypeOf(Vec(NumPMPReal, UInt(PMPAddrBits.W))))
     (cfg, addr, mask)
   }
 
@@ -346,17 +346,17 @@ trait PMPMethod extends PMPConst {
 class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
-    val pmp = Output(Vec(NumPMP, new PMPEntry()))
-    val pma = Output(Vec(NumPMA, new PMPEntry()))
+    val pmp = Output(Vec(NumPMPReal, new PMPEntry()))
+    val pma = Output(Vec(NumPMAReal, new PMPEntry()))
   })
 
   val w = io.distribute_csr.w
 
-  val pmp = Wire(Vec(NumPMP, new PMPEntry()))
-  val pma = Wire(Vec(NumPMA, new PMPEntry()))
+  val pmp = Wire(Vec(NumPMPReal, new PMPEntry()))
+  val pma = Wire(Vec(NumPMAReal, new PMPEntry()))
 
-  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, CSRs.pmpcfg0, CSRs.pmpaddr0, pmp)
-  val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
+  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMPReal, CSRs.pmpcfg0, CSRs.pmpaddr0, pmp)
+  val pmaMapping = pmp_gen_mapping(pma_init, NumPMAReal, PmacfgBase, PmaaddrBase, pma)
   val mapping = pmpMapping ++ pmaMapping
 
   val rdata = Wire(UInt(PMXLEN.W))
@@ -420,7 +420,7 @@ trait PMPCheckMethod extends PMPConst {
     lgMaxSize: Int
   ) = {
     val num = pmpEntries.size
-    require(num == NumPMP)
+    require(num == NumPMPReal)
 
     val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
@@ -461,8 +461,8 @@ trait PMPCheckMethod extends PMPConst {
 class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
   val cmode = Bool()
   val mode = UInt(2.W)
-  val pmp = Vec(NumPMP, new PMPEntry())
-  val pma = Vec(NumPMA, new PMPEntry())
+  val pmp = Vec(NumPMPReal, new PMPEntry())
+  val pma = Vec(NumPMAReal, new PMPEntry())
 
   def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
     this.cmode := cmode

@@ -30,14 +30,14 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
     val req = io.req
     val resp = io.resp
 
-    val (cfg_map, addr_map, pma) = gen_mmpma_mapping(NumPMA)
+    val (cfg_map, addr_map, pma) = gen_mmpma_mapping(NumPMAReal)
     node.regmap(
       0x0000 -> RegFieldGroup(
         "MMPMA_Config_Register", desc = Some("MMPMA configuation register"),
         regs = cfg_map
       ),
       // still blank space here, fix it
-      0x0100 -> RegFieldGroup(
+      0x0400 -> RegFieldGroup(
         "MMPMA_Address_Register", desc = Some("MMPMA Address register"),
         regs = addr_map
       )
