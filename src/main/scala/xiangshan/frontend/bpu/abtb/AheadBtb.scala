@@ -84,7 +84,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   s0_fire := io.enable && predictReqValid
   s1_fire := io.enable && s1_valid && s2_ready && predictReqValid
-  s2_fire := io.enable && s2_valid
+  s2_fire := io.enable && s2_valid && io.stageCtrl.s1_fire
 
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
@@ -188,6 +188,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.meta.taken           := s2_taken
   io.meta.takenMaskOH     := s2_firstTakenEntryOH
   io.meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
+  io.meta.readEntryVec    := s2_entries
+  io.meta.takenVec        := s2_ctrResult
 
   // used for check abtb output
   io.debug_startVAddr := s2_startVAddr
@@ -207,7 +209,30 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_valid = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousVAddr.valid
   private val t0_previousVAddr = io.previousVAddr.bits
+  private val t0_startVAddr    = io.fastTrain.get.bits.startVAddr
+  private val t0_tag           = getTag(t0_startVAddr)
+  private val t0_readEntries   = t0_train.abtbMeta.readEntryVec
+  private val t0_takenVec      = t0_train.abtbMeta.takenVec
+  private val t0_hitMask       = t0_readEntries.map(entry => entry.valid && entry.tag === t0_tag)
+  private val t0_hit           = t0_hitMask.reduce(_ || _)
+  private val t0_takenMask     = VecInit(t0_hitMask.zip(t0_takenVec).map { case (hit, taken) => hit && taken })
+  private val t0_taken         = t0_takenMask.reduce(_ || _)
 
+  private val t0_positions     = VecInit(t0_readEntries.map(_.position))
+  private val t0_compareMatrix = CompareMatrix(t0_positions)
+  private val t0_firstTakenEntryOH = t0_compareMatrix.getLeastElementOH(t0_takenMask)
+  private val t0_firstTakenEntry   = Mux1H(t0_firstTakenEntryOH, t0_readEntries)
+
+  private val t0_meta = Wire(new AheadBtbMeta)
+  t0_meta.valid           := t0_train.abtbMeta.valid
+  t0_meta.hitMask         := t0_hitMask
+  t0_meta.attributes      := t0_readEntries.map(_.attribute)
+  t0_meta.positions       := t0_positions
+  t0_meta.taken           := t0_taken
+  t0_meta.takenMaskOH     := t0_firstTakenEntryOH
+  t0_meta.targetLowerBits := t0_firstTakenEntry.targetLowerBits
+  t0_meta.readEntryVec    := t0_readEntries
+  t0_meta.takenVec        := t0_takenVec
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
      - update taken counter
@@ -224,7 +249,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_bankIdx  = getBankIndex(t1_previousVAddr)
   private val t1_bankMask = UIntToOH(t1_bankIdx)
 
-  private val t1_meta = t1_train.abtbMeta
+  // private val t1_meta = t1_train.abtbMeta
+  private val t1_meta = RegEnable(t0_meta, t0_valid)
 
   private val t1_predictTaken           = t1_meta.taken
   private val t1_predictPosition        = Mux1H(t1_meta.takenMaskOH, t1_meta.positions)

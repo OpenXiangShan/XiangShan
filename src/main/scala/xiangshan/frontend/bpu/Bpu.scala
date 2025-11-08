@@ -138,6 +138,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
+  // utage meta
+  private val s1_utageMeta = utage.io.prediction.meta.bits
+  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
+  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -167,6 +172,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.startVAddr      := s3_pc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
+  fastTrain.bits.utageMeta       := s3_utageMeta
+  fastTrain.bits.hasOverride     := s3_override
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -189,7 +196,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // utage
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
-  utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -284,14 +291,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // private val s1_btbTargets = s1_ubtbTargets ++ s1_abtbTargets
   private val s1_selectOH         = PriorityEncoderOH(s1_utageHitMap)
   private val s1_hybridPrediction = Mux1H(s1_utageHitMap, s1_btbPredictios)
-  private val s1_utageHit         = s1_utageHitMap.reduce(_ || _)
+  private val s1_utageHit         = s1_utageHitMap.reduce(_ || _) && utage.io.prediction.taken
+  private val notUseMicroTage  = (ubtb.io.prediction.taken && !ubtb.io.prediction.attribute.isConditional && (ubtb.io.prediction.cfiPosition < utage.io.prediction.cfiPosition)) ||
+    (abtb.io.prediction.taken && !abtb.io.prediction.attribute.isConditional && (abtb.io.prediction.cfiPosition < utage.io.prediction.cfiPosition))
+  private val notUseUbtb  = (abtb.io.prediction.taken && !abtb.io.prediction.attribute.isConditional && (abtb.io.prediction.cfiPosition < ubtb.io.prediction.cfiPosition))
+
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        (utage.io.prediction.taken && s1_utageHit) -> s1_hybridPrediction,
-        (ubtb.io.prediction.taken && !s1_utageHit) -> ubtb.io.prediction,
-        (abtb.io.prediction.taken && !s1_utageHit) -> abtb.io.prediction
+        (utage.io.prediction.taken && s1_utageHit && !notUseMicroTage) -> s1_hybridPrediction,
+        (ubtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage) && !notUseUbtb) -> ubtb.io.prediction,
+        (abtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage)) -> abtb.io.prediction
       )
     )
 
@@ -345,11 +356,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // tell ftq s3 ftqPtr for meta enqueue and s3 override
   io.toFtq.s3FtqPtr := s3_ftqPtr
-
-  // utage meta
-  private val s1_utageMeta = utage.io.prediction.meta.bits
-  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
-  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
 
   // mbtb meta
   private val s3_mbtbMeta = RegEnable(mbtb.io.meta, s2_fire)

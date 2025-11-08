@@ -67,6 +67,8 @@ class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
   val taken:           Bool                 = Bool()
   val takenMaskOH:     Vec[Bool]            = Vec(NumWays, Bool())
   val targetLowerBits: UInt                 = UInt(TargetLowerBitsWidth.W)
+  val readEntryVec:    Vec[AheadBtbEntry]   = Vec(NumWays, new AheadBtbEntry)
+  val takenVec:        Vec[Bool]            = Vec(NumWays, Bool())
 }
 
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {

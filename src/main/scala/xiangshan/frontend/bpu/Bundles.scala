@@ -201,7 +201,9 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
   val startVAddr:      PrunedAddr   = PrunedAddr(VAddrBits)
   val finalPrediction: Prediction   = new Prediction
+  val hasOverride:     Bool         = Bool()
   val abtbMeta:        AheadBtbMeta = new AheadBtbMeta
+  val utageMeta:  MicroTageMeta = new MicroTageMeta
 }
 
 class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
