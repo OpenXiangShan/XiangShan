@@ -66,7 +66,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mill -i XiangShan.test.runMain $(SIMTOP) --compiler sverilog       \
 		--target-dir $(@D) --full-stacktrace --output-file $(@F)   \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf \
-		--gen-mem-verilog full $(SIM_ARGS)
+		--disable-log --gen-mem-verilog full $(SIM_ARGS)
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
