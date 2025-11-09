@@ -255,7 +255,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   def getMisaMxl(mxl: BigInt): BigInt = mxl << (XLEN - 2)
   def getMisaExt(ext: Char): Long = 1 << (ext.toInt - 'a'.toInt)
-  var extList = List('a', 's', 'i', 'u')
+  var extList = List('a', 's', 'i', 'u', 'b')
   if (HasMExtension) { extList = extList :+ 'm' }
   if (HasCExtension) { extList = extList :+ 'c' }
   if (HasFPU) { extList = extList ++ List('f', 'd') }
