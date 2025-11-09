@@ -41,20 +41,21 @@ class MicroTageTable(
     class MicroTageResp extends Bundle {
       val taken:       Bool            = Bool()
       val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-      val useful:      Bool            = Bool()
+      val useful:      UInt            = UInt(UsefulWidth.W)
       val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
       val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
-      val cfiPosition:            UInt                  = UInt(CfiPositionWidth.W)
-      val alloc:                  Bool                  = Bool()
+      val allocValid:             Bool                  = Bool()
+      val updateValid:            Bool                  = Bool()
+      val usefulValid:            Bool                  = Bool()
       val allocTaken:             Bool                  = Bool()
-      val correct:                Bool                  = Bool()
-      val taken:                  Bool                  = Bool()
+      val allocCfiPosition:       UInt                  = UInt(CfiPositionWidth.W)
+      val updateTaken:            Bool                  = Bool()
+      val updateCfiPosition:      UInt                  = UInt(CfiPositionWidth.W)
+      val usefulCorrect:          Bool                  = Bool()
       val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
-      val oldTakenCtr:            SaturateCounter       = new SaturateCounter(TakenCtrWidth)
-      val oldUseful:              SaturateCounter       = new SaturateCounter(UsefulWidth)
     }
     val req:         MicroTageReq           = Input(new MicroTageReq)
     val resp:        Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
@@ -66,7 +67,7 @@ class MicroTageTable(
     val tag:         UInt            = UInt(tagLen.W)
     val takenCtr:    SaturateCounter = new SaturateCounter(TakenCtrWidth)
     val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-    val useful:      SaturateCounter = new SaturateCounter(UsefulWidth)
+    // val useful:      SaturateCounter = new SaturateCounter(UsefulWidth)
   }
   val io                    = IO(new MicroTageTableIO)
   private val entries       = RegInit(VecInit(Seq.fill(numSets)(0.U.asTypeOf(new MicroTageEntry))))
@@ -102,53 +103,55 @@ class MicroTageTable(
   io.resp.valid            := readHit
   io.resp.bits.taken       := readEntry.takenCtr.isPositive
   io.resp.bits.cfiPosition := readEntry.cfiPosition
-  io.resp.bits.useful      := usefulEntry.isPositive
+  io.resp.bits.useful      := usefulEntry.value
   io.resp.bits.hitTakenCtr := readEntry.takenCtr
   io.resp.bits.hitUseful   := usefulEntry
 
   // train
   private val (trainIdx, trainTag) =
     computeHash(io.update.bits.startPc.toUInt, io.update.bits.foldedPathHistForTrain, tableId)
-  // private val oldCtr      = entries(trainIdx).takenCtr
-  // private val oldUseful   = usefulEntries(trainIdx)
-  // private val updateEntry = Wire(new MicroTageEntry)
-  // updateEntry.valid          := true.B
-  // updateEntry.tag            := trainTag
-  // updateEntry.takenCtr.value := Mux(io.update.bits.alloc, oldCtr.getNeutral, oldCtr.getUpdate(io.update.bits.taken))
-  // updateEntry.cfiPosition    := io.update.bits.cfiPosition
-  // updateEntry.useful.value := Mux(
-  //   io.update.bits.alloc,
-  //   oldUseful.getNeutral,
-  //   oldUseful.getUpdate(io.update.bits.correct)
-  // )
-  private val oldTakenCtr = io.update.bits.oldTakenCtr
-  private val oldUseful   = io.update.bits.oldUseful
+
+  private val oldTakenCtr = entries(trainIdx).takenCtr
+  private val oldUseful   = usefulEntries(trainIdx)
   private val updateEntry = Wire(new MicroTageEntry)
   updateEntry.valid := true.B
   updateEntry.tag   := trainTag
   updateEntry.takenCtr.value := Mux(
-    io.update.bits.alloc,
+    io.update.bits.allocValid,
     oldTakenCtr.getNeutral,
-    oldTakenCtr.getUpdate(io.update.bits.taken)
-  )
-  updateEntry.cfiPosition := io.update.bits.cfiPosition
-  updateEntry.useful.value := Mux(
-    io.update.bits.alloc,
-    oldUseful.getNeutral,
-    oldUseful.getUpdate(io.update.bits.correct)
+    oldTakenCtr.getUpdate(io.update.bits.updateTaken)
   )
 
-  when(io.update.valid) {
-    entries(trainIdx)       := updateEntry
-    usefulEntries(trainIdx) := updateEntry.useful
+  updateEntry.cfiPosition := Mux(
+    io.update.bits.allocValid,
+    io.update.bits.allocCfiPosition,
+    io.update.bits.updateCfiPosition
+  )
+
+  private val updateUseful = Mux(
+    io.update.bits.allocValid,
+    oldUseful.getNeutral,
+    oldUseful.getUpdate(io.update.bits.usefulCorrect)
+  )
+
+  // Write back updated entry on valid update
+  when(io.update.valid && (io.update.bits.allocValid || io.update.bits.updateValid)) {
+    entries(trainIdx) := updateEntry
+  }
+
+  when(io.update.valid && (io.update.bits.usefulValid || io.update.bits.allocValid)) {
+    usefulEntries(trainIdx).value := updateUseful // updateEntry.useful
   }
 
   when(io.usefulReset) {
-    usefulEntries.foreach(_.value := 0.U)
+    usefulEntries.zipWithIndex.foreach { case (entry, i) =>
+      usefulEntries(i).value := entry.value >> 1.U
+    }
   }
+
   // Per-index access distribution
   for (i <- 0 until numSets) {
     XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
-    XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.alloc)
+    XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.allocValid)
   }
 }
