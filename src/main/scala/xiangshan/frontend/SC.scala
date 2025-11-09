@@ -234,11 +234,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
   val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
 
   val if4_sc_used, if4_conf, if4_unconf, if4_agree, if4_disagree =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
+    VecInit.fill(TageBanks)(false.B)
   val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
+    VecInit.fill(TageBanks)(false.B)
   val update_on_mispred, update_on_unconf, sc_misp_tage_corr, sc_corr_tage_misp =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
+    VecInit.fill(TageBanks)(false.B)
 
   // for sc ctrs
   def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S

@@ -19,6 +19,7 @@ package xiangshan.transforms
 
 import utility.XSLog
 
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 class PrintModuleName extends firrtl.options.Phase {
 
   override def invalidates(a: firrtl.options.Phase) = false
@@ -34,8 +35,8 @@ class PrintModuleName extends firrtl.options.Phase {
     val c = circuitAnno.circuit
 
     def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
-      case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en) =>
-        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en)
+      case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en, name) =>
+        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en, name)
       case other: firrtl.ir.Statement =>
         other.mapStmt(onStmt)
     }
