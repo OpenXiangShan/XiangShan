@@ -96,7 +96,7 @@ class FDivSqrtDataModule extends FPUDataModule {
 
 class FDivSqrt extends FPUSubModule {
 
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire)
   val kill_r = !io.in.ready && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
 
   override val dataModule = Module(new FDivSqrtDataModule)

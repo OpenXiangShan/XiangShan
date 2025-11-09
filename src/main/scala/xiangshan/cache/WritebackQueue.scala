@@ -77,7 +77,7 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // s_invalid: receive requests
   // new req entering
   io.req.ready := state === s_invalid
-  when (io.req.fire()) {
+  when (io.req.fire) {
     assert (remain === 0.U)
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     req        := io.req.bits
@@ -129,7 +129,7 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     Mux(req.hasData, voluntaryReleaseData, voluntaryRelease),
     Mux(req.hasData, probeResponseData, probeResponse))
 
-  when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
+  when (io.mem_release.fire) { remain_clr := PriorityEncoderOH(remain) }
 
   val (_, _, release_done, _) = edge.count(io.mem_release)
 
@@ -141,13 +141,13 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // receive ReleaseAck for Releases
   when (state === s_release_resp) {
     io.mem_grant.ready := true.B
-    when (io.mem_grant.fire()) {
+    when (io.mem_grant.fire) {
       state := s_invalid
     }
   }
 
   // performance counters
-  XSPerfAccumulate("wb_req", io.req.fire())
+  XSPerfAccumulate("wb_req", io.req.fire)
   XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
   XSPerfAccumulate("wb_probe_resp", state === s_release_req && release_done && !req.voluntary)
   XSPerfAccumulate("penalty_blocked_by_channel_C", io.mem_release.valid && !io.mem_release.ready)
@@ -160,7 +160,7 @@ class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    
+
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
   })
@@ -207,15 +207,15 @@ class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // sanity check
   // print all input/output requests for debug purpose
   // print req
-  when (io.req.fire()) {
+  when (io.req.fire) {
     io.req.bits.dump()
   }
 
-  when (io.mem_release.fire()) {
+  when (io.mem_release.fire) {
     io.mem_release.bits.dump
   }
 
-  when (io.mem_grant.fire()) {
+  when (io.mem_grant.fire) {
     io.mem_grant.bits.dump
   }
 
@@ -228,5 +228,5 @@ class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   }
 
   // performance counters
-  XSPerfAccumulate("wb_req", io.req.fire())
+  XSPerfAccumulate("wb_req", io.req.fire)
 }

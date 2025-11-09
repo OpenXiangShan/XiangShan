@@ -153,7 +153,7 @@ class ReservationStation
   io.numExist := select.io.numExist
   select.io.redirectVec := ctrl.io.redirectVec
   select.io.readyVec := ctrl.io.readyVec
-  select.io.enq.valid := io.fromDispatch.valid && !(io.redirect.valid || io.flush) 
+  select.io.enq.valid := io.fromDispatch.valid && !(io.redirect.valid || io.flush)
   io.fromDispatch.ready := select.io.enq.ready
   select.io.deq.ready := io.deq.ready
   if (feedback) {
@@ -180,7 +180,7 @@ class ReservationStation
     ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
 
-  data.io.in.valid := select.io.enq.fire()
+  data.io.in.valid := select.io.enq.fire
   data.io.in.addr := select.io.enq.bits
   data.io.in.uop := io.fromDispatch.bits // NOTE: used for imm-pc src value mux
   data.io.in.enqSrcReady := ctrl.io.enqSrcReady
@@ -250,7 +250,7 @@ class ReservationStationSelect
       val valid = Input(Bool())
       val bits  = Output(UInt(iqIdxWidth.W))
       val ready = Output(Bool())
-      def fire() = valid && ready
+      def fire = valid && ready
     }
     val deq = DecoupledIO(UInt(iqIdxWidth.W))
 
@@ -389,7 +389,7 @@ class ReservationStationSelect
   // enq
   isFull := tailPtr.flag
   // agreement with dispatch: don't fire when io.redirect.valid
-  val enqueue = io.enq.fire()
+  val enqueue = io.enq.fire
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
   val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new IQPtr), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
@@ -421,7 +421,7 @@ class ReservationStationSelect
   XSPerfAccumulate("exuBlockDeq", issueValid && !io.deq.ready)
   XSPerfAccumulate("bubbleBlockEnq", haveBubble && !io.enq.ready)
   XSPerfAccumulate("validButNotSel", PopCount(selectMask) - haveReady)
-  
+
   QueuePerf(iqSize, io.numExist, !io.enq.ready)
   XSPerfAccumulate("validUtil", PopCount(validQueue))
   XSPerfAccumulate("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
@@ -430,7 +430,7 @@ class ReservationStationSelect
   XSPerfAccumulate("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
   XSPerfAccumulate("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
 
-  
+
   if (!feedback && nonBlocked) {
     XSPerfAccumulate("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
     XSPerfAccumulate("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
@@ -443,7 +443,7 @@ class ReservationStationSelect
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
       XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
-    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
+    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U)
   }
   for(i <- 0 until iqSize) {
     if (i == 0) XSPerfAccumulate("empty", io.numExist === 0.U)

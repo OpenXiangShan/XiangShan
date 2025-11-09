@@ -164,7 +164,7 @@ class LoadQueue extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
-    when(io.loadIn(i).fire()) {
+    when(io.loadIn(i).fire) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
@@ -214,7 +214,7 @@ class LoadQueue extends XSModule
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
     vaddrModule.io.wdata(i) := RegNext(io.loadIn(i).bits.vaddr)
-    vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire())
+    vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire)
   }
 
   when(io.dcache.valid) {
@@ -261,8 +261,8 @@ class LoadQueue extends XSModule
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
   // generate lastCycleSelect mask
-  val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
-  val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  val evenSelectMask = Mux(io.ldout(0).fire, getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
+  val oddSelectMask = Mux(io.ldout(1).fire, getOddBits(UIntToOH(loadWbSel(1))), 0.U)
   // generate real select vec
   val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
   val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
@@ -281,7 +281,7 @@ class LoadQueue extends XSModule
   (0 until LoadPipelineWidth).map(i => {
     loadWbSel(i) := RegNext(loadWbSelGen(i))
     loadWbSelV(i) := RegNext(loadWbSelVGen(i), init = false.B)
-    when(io.ldout(i).fire()){
+    when(io.ldout(i).fire){
       // Mark them as writebacked, so they will not be selected in the next cycle
       writebacked(loadWbSel(i)) := true.B
     }
@@ -323,7 +323,7 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
 
-    when(io.ldout(i).fire()) {
+    when(io.ldout(i).fire) {
       XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
@@ -571,12 +571,12 @@ class LoadQueue extends XSModule
       }
     }
     is(s_req) {
-      when(io.uncache.req.fire()) {
+      when(io.uncache.req.fire) {
         uncacheState := s_resp
       }
     }
     is(s_resp) {
-      when(io.uncache.resp.fire()) {
+      when(io.uncache.resp.fire) {
         uncacheState := s_wait
       }
     }
@@ -599,7 +599,7 @@ class LoadQueue extends XSModule
 
   io.uncache.resp.ready := true.B
 
-  when (io.uncache.req.fire()) {
+  when (io.uncache.req.fire) {
     pending(deqPtr) := false.B
 
     XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
@@ -613,7 +613,7 @@ class LoadQueue extends XSModule
 
   // (3) response from uncache channel: mark as datavalid
   dataModule.io.uncache.wen := false.B
-  when(io.uncache.resp.fire()){
+  when(io.uncache.resp.fire){
     datavalid(deqPtr) := true.B
     dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
@@ -661,9 +661,9 @@ class LoadQueue extends XSModule
   io.lqFull := !allowEnqueue
   XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
-  XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
+  XSPerfAccumulate("mmioCnt", io.uncache.req.fire)
   XSPerfAccumulate("refill", io.dcache.valid)
-  XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire()))))
+  XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire))))
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 

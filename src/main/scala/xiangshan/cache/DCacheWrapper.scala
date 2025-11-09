@@ -297,14 +297,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // add a stage to break the Arbiter bits.addr to ready path
   val mainPipeReq_valid = RegInit(false.B)
   val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
-  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
+  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire)
 
   mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
   mainPipe.io.req.valid := mainPipeReq_valid
   mainPipe.io.req.bits  := mainPipeReq_req
 
-  when (mainPipeReqArb.io.out.fire()) { mainPipeReq_valid := true.B }
-  when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
+  when (mainPipeReqArb.io.out.fire) { mainPipeReq_valid := true.B }
+  when (!mainPipeReqArb.io.out.fire && mainPipeReq_fire) { mainPipeReq_valid := false.B }
 
   missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
   storeReplayUnit.io.pipe_resp   <> mainPipe.io.store_resp
@@ -336,19 +336,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
     wb.io.mem_grant <> bus.d
   } .otherwise {
-    assert (!bus.d.fire())
+    assert (!bus.d.fire)
   }
 
   //----------------------------------------
   // assertions
   // dcache should only deal with DRAM addresses
-  when (bus.a.fire()) {
+  when (bus.a.fire) {
     assert(bus.a.bits.address >= 0x80000000L.U)
   }
-  when (bus.b.fire()) {
+  when (bus.b.fire) {
     assert(bus.b.bits.address >= 0x80000000L.U)
   }
-  when (bus.c.fire()) {
+  when (bus.c.fire) {
     assert(bus.c.bits.address >= 0x80000000L.U)
   }
 
@@ -362,7 +362,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // performance counters
-  val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
+  val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire))
   XSPerfAccumulate("num_loads", num_loads)
 
   io.mshrFull := missQueue.io.full

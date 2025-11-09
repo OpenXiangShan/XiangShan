@@ -336,7 +336,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * PTW refill
     */
-  val refill = ptw.resp.fire() && !sfence.valid
+  val refill = ptw.resp.fire && !sfence.valid
 
   val normalReplacer = if (isDtlb) Some("random") else Some("plru")
   val superReplacer = if (isDtlb) Some("random") else Some("plru")
@@ -450,7 +450,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := miss
-    resp(i).bits.ptwBack := io.ptw.resp.fire()
+    resp(i).bits.ptwBack := io.ptw.resp.fire
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
     val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
@@ -491,7 +491,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // ptw
   val waiting = RegInit(false.B)
-  when (ptw.req.fire()) {
+  when (ptw.req.fire) {
     waiting := true.B
   }
   when (sfence.valid || ptw.resp.valid) {
@@ -550,20 +550,20 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   } else {
     // NOTE: ITLB is blocked, so every resp will be valid only when hit
     // every req will be ready only when hit
-    XSPerfAccumulate("access", io.requestor(0).req.fire() && vmEnable)
-    XSPerfAccumulate("miss", ptw.req.fire())
+    XSPerfAccumulate("access", io.requestor(0).req.fire && vmEnable)
+    XSPerfAccumulate("miss", ptw.req.fire)
   }
   val reqCycleCnt = Reg(UInt(16.W))
-  when (ptw.req.fire()) {
+  when (ptw.req.fire) {
     reqCycleCnt := 1.U
   }
   when (waiting) {
     reqCycleCnt := reqCycleCnt + 1.U
   }
-  XSPerfAccumulate("ptw_req_count", ptw.req.fire())
-  XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
+  XSPerfAccumulate("ptw_req_count", ptw.req.fire)
+  XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire, reqCycleCnt, 0.U))
   XSPerfAccumulate("wait_blocked_count", waiting && hasMissReq)
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.pf)
   for (i <- 0 until TlbEntrySize) {
     val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
     XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
@@ -588,7 +588,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
   XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
-  XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
+  XSDebug(ptw.req.fire, p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug

@@ -233,15 +233,15 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   for(((in, wordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
-    writeReq(i).valid := in.fire()
+    writeReq(i).valid := in.fire
     writeReq(i).bits.wordOffset := wordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     val insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val flushMask = if(i == 0) true.B else !sameTag
-    accessIdx(i).valid := RegNext(in.fire())
+    accessIdx(i).valid := RegNext(in.fire)
     accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
-    when(in.fire()){
+    when(in.fire){
       when(canMerge(i)){
         writeReq(i).bits.idx := mergeIdx(i)
         mergeWordReq(in.bits, mergeIdx(i), wordOffset)
@@ -262,7 +262,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   for((req, i) <- io.in.zipWithIndex){
-    XSDebug(req.fire(),
+    XSDebug(req.fire,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(req.bits.mask)} " +
@@ -327,7 +327,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val prepareValidReg = RegInit(false.B)
   val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
   val willSendDcacheReq = prepareValid && canSendDcacheReq
-  when(io.dcache.req.fire()){
+  when(io.dcache.req.fire){
     prepareValidReg := false.B
   }
   when(canSendDcacheReq){
@@ -356,13 +356,13 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
   io.dcache.req.bits.id := evictionIdxReg
 
-  XSDebug(io.dcache.req.fire(),
+  XSDebug(io.dcache.req.fire,
     p"send buf [$evictionIdxReg] to Dcache, req fire\n"
   )
 
   io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
   val respId = io.dcache.resp.bits.id
-  when(io.dcache.resp.fire()){
+  when(io.dcache.resp.fire){
     stateVec(respId) := s_invalid
     assert(stateVec(respId) === s_inflight)
     XSDebug(p"recv cache resp: id=[$respId]\n")

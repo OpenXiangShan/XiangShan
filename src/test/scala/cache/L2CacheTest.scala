@@ -141,7 +141,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     val io = IO(new L2TestTopIO)
 
-    val in = HoldUnless(io.in.bits, io.in.fire())
+    val in = HoldUnless(io.in.bits, io.in.fire)
 
     cores.foreach(_.module.io <> DontCare)
 
@@ -173,27 +173,27 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     switch(state){
       is(s_idle){
-        when(io.in.fire()){
+        when(io.in.fire){
           state := s_write_req
         }
       }
       is(s_write_req){
-        when(storePorts.map(_.req.fire()).reduce(_||_)){
+        when(storePorts.map(_.req.fire).reduce(_||_)){
           state := s_write_resp
         }
       }
       is(s_write_resp){
-        when(storePorts.map(_.resp.fire()).reduce(_||_)){
+        when(storePorts.map(_.resp.fire).reduce(_||_)){
           state := s_read_req
         }
       }
       is(s_read_req){
-        when(loadPorts.map(_.req.fire()).reduce(_||_)){
+        when(loadPorts.map(_.req.fire).reduce(_||_)){
           state := s_read_resp
         }
       }
       is(s_read_resp){
-        when(loadPorts.map(_.resp.fire()).reduce(_||_)){
+        when(loadPorts.map(_.resp.fire).reduce(_||_)){
           state := s_finish
         }
       }
@@ -211,7 +211,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
         port.req.valid := state===s_write_req && i.U===in.hartId
         port.resp.ready := true.B
         XSDebug(
-          port.req.fire(),
+          port.req.fire,
           "write data %x to dcache [%d]\n",
           port.req.bits.data,
           i.U
@@ -228,7 +228,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
         port.req.valid := state===s_read_req && i.U=/=in.hartId
         port.resp.ready := true.B
         XSDebug(
-          port.resp.fire(),
+          port.resp.fire,
           "read data %x form dcache [%d]\n",
           port.resp.bits.data,
           i.U
@@ -237,17 +237,17 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     val rdata = Reg(UInt(64.W))
 
-    when(loadPorts.map(_.resp.fire()).reduce(_||_)){
+    when(loadPorts.map(_.resp.fire).reduce(_||_)){
       state := s_finish
       rdata := PriorityMux(
-        loadPorts.map(p => p.resp.fire() -> p.resp.bits.data)
+        loadPorts.map(p => p.resp.fire -> p.resp.bits.data)
       )
     }
 
     io.out.bits.rdata := rdata
     io.out.valid := state === s_finish
 
-    when(io.out.fire()){
+    when(io.out.fire){
       state := s_idle
     }
   }

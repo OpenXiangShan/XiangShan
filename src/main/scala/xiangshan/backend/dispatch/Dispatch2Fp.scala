@@ -117,7 +117,7 @@ class Dispatch2Fp extends XSModule {
     enq.bits.src2State := src2Ready(deqIndex)
     enq.bits.src3State := src3Ready(deqIndex)
 
-    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
+    XSInfo(enq.fire, p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State}) " +
       p"enters reservation station $i from ${deqIndex}\n")
   }
@@ -132,12 +132,12 @@ class Dispatch2Fp extends XSModule {
     io.fromDq(i).ready := fmacCanAccept(i) && fmacReadyVec(fmacIndex(i)) ||
                           fmiscCanAccept(i) && (if (i <= 1) true.B else if (i == 2) fmisc2CanOut else fmisc3CanOut) && fmiscReady && !io.enqIQCtrl(2).valid && !io.enqIQCtrl(3).valid
 
-    XSInfo(io.fromDq(i).fire(),
+    XSInfo(io.fromDq(i).fire,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Fp dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Fp dispatch queue with index $i\n")
   }
-  XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
+  XSError(PopCount(io.fromDq.map(_.fire)) =/= PopCount(io.enqIQCtrl.map(_.fire)), "deq =/= enq\n")
 
   /**
     * Part 5: send read port index of register file to reservation station
@@ -150,7 +150,7 @@ class Dispatch2Fp extends XSModule {
 //  for (i <- 0 until exuParameters.FpExuCnt) {
 //    readPortIndexReg(i) := readPortIndex(i)
 //    uopReg(i) := io.enqIQCtrl(i).bits
-//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
+//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire
 //
 //    io.enqIQData(i) := DontCare
 //    io.enqIQData(i).src1 := io.readRf(readPortIndexReg(i)).data
@@ -165,13 +165,13 @@ class Dispatch2Fp extends XSModule {
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
-  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))
-  XSPerfAccumulate("out_fmac0", io.enqIQCtrl(0).fire())
-  XSPerfAccumulate("out_fmac1", io.enqIQCtrl(1).fire())
-  XSPerfAccumulate("out_fmac2", io.enqIQCtrl(2).fire())
-  XSPerfAccumulate("out_fmac3", io.enqIQCtrl(3).fire())
-  XSPerfAccumulate("out_fmisc0", io.enqIQCtrl(4).fire())
-  XSPerfAccumulate("out_fmisc1", io.enqIQCtrl(5).fire())
+  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire)))
+  XSPerfAccumulate("out_fmac0", io.enqIQCtrl(0).fire)
+  XSPerfAccumulate("out_fmac1", io.enqIQCtrl(1).fire)
+  XSPerfAccumulate("out_fmac2", io.enqIQCtrl(2).fire)
+  XSPerfAccumulate("out_fmac3", io.enqIQCtrl(3).fire)
+  XSPerfAccumulate("out_fmisc0", io.enqIQCtrl(4).fire)
+  XSPerfAccumulate("out_fmisc1", io.enqIQCtrl(5).fire)
   val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
   XSPerfAccumulate("blocked", block_num)
   XSPerfAccumulate("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))

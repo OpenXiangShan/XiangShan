@@ -58,7 +58,7 @@ class JBTAC extends XSModule {
 
  io.in.pc.ready := true.B
 
- val fireLatch = RegNext(io.in.pc.fire())
+ val fireLatch = RegNext(io.in.pc.fire)
 
  // JBTAC, divided into 8 banks, makes prediction for indirect jump except ret.
  val jbtacAddr = new TableAddr(log2Up(JbtacSize), JbtacBanks)
@@ -86,16 +86,16 @@ class JBTAC extends XSModule {
  (0 until JbtacBanks).map(
    b => {
      jbtac(b).reset := reset.asBool
-     jbtac(b).io.r.req.valid := io.in.pc.fire() && b.U === readBank
+     jbtac(b).io.r.req.valid := io.in.pc.fire && b.U === readBank
      jbtac(b).io.r.req.bits.setIdx := readRow
-     readFire(b) := jbtac(b).io.r.req.fire()
+     readFire(b) := jbtac(b).io.r.req.fire
      readEntries(b) := jbtac(b).io.r.resp.data(0)
    }
  )
 
  val readBankLatch = jbtacAddr.getBank(histXORAddrLatch)
  val readRowLatch = jbtacAddr.getBankIdx(histXORAddrLatch)
- val readMaskLatch = RegEnable(io.in.mask, io.in.pc.fire())
+ val readMaskLatch = RegEnable(io.in.mask, io.in.pc.fire)
 
  val outHit = readEntries(readBankLatch).valid &&
    readEntries(readBankLatch).tag === Cat(jbtacAddr.getTag(io.in.pcLatch), jbtacAddr.getIdx(io.in.pcLatch)) &&
@@ -138,7 +138,7 @@ class JBTAC extends XSModule {
  val rawBypassHit = Wire(Vec(JbtacBanks, Bool()))
  for (b <- 0 until JbtacBanks) {
    when (readBank === writeBank && readRow === writeRow && b.U === readBank) {
-     when (io.in.pc.fire() && writeValid) {
+     when (io.in.pc.fire && writeValid) {
        rawBypassHit(b) := true.B
        jbtac(b).io.r.req.valid := false.B
        // readEntries(b) := RegNext(writeEntry)
@@ -156,7 +156,7 @@ class JBTAC extends XSModule {
    when (RegNext(rawBypassHit(b))) { readEntries(b) := RegNext(writeEntry) }
  }
 
- XSDebug(io.in.pc.fire(), "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
+ XSDebug(io.in.pc.fire, "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
    io.in.pc.bits, histXORAddr, readBank, readRow, io.in.hist)
  XSDebug("out: hit=%d tgt=%x hitIdx=%d iRVILateJump=%d isRVC=%d\n",
    io.out.hit, io.out.target, io.out.hitIdx, io.out.isRVILateJump, io.out.isRVC)

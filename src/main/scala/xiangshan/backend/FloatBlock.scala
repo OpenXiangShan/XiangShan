@@ -60,7 +60,7 @@ class FloatBlock
     val in = WireInit(w)
     w.ready := in.ready
     in.valid := w.valid && !w.bits.uop.roqIdx.needFlush(redirect, flush)
-    PipelineConnect(in, r, r.fire() || r.bits.uop.roqIdx.needFlush(redirect, flush), false.B)
+    PipelineConnect(in, r, r.fire || r.bits.uop.roqIdx.needFlush(redirect, flush), false.B)
   }
   // to memBlock's store rs
   io.intWakeUpOut <> intWakeUpFpReg.map(x => WireInit(x))
@@ -196,7 +196,7 @@ class FloatBlock
     out.bits := exu.io.out.bits
     out.valid := exu.io.out.valid && !out.bits.uop.roqIdx.needFlush(redirect, flush)
     PipelineConnect(out, outReg,
-      outReg.fire() || outReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
+      outReg.fire || outReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
     )
     io.wakeUpOut.slow(i).valid := outReg.valid
     io.wakeUpOut.slow(i).bits := outReg.bits
@@ -213,10 +213,10 @@ class FloatBlock
         ) || outReg.bits.uop.ctrl.fpWen
       // don't consider flush in 'intFire'
       val intFire = exu.io.out.valid && out.ready && out.bits.uop.ctrl.rfWen
-      exu.io.out.ready := intFire || fpWbArbiter.io.in(i).fire() || !exu.io.out.valid
+      exu.io.out.ready := intFire || fpWbArbiter.io.in(i).fire || !exu.io.out.valid
     } else {
       outReg.ready := true.B
-      exu.io.out.ready := fpWbArbiter.io.in(i).fire() || !exu.io.out.valid
+      exu.io.out.ready := fpWbArbiter.io.in(i).fire || !exu.io.out.valid
     }
   }
 

@@ -95,7 +95,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
-    when (io.deq(i).fire() && !(io.redirect.valid || io.flush)) {
+    when (io.deq(i).fire && !(io.redirect.valid || io.flush)) {
       stateEntries(headPtr(i).value) := s_invalid
 
 //      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
@@ -130,7 +130,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
     // For dequeue, the first entry should never be s_invalid
     // Otherwise, there should be a redirect and tail walks back
     // in this case, we set numDeq to 0
-    !deq.fire() && (if (i == 0) true.B else stateEntries(headPtr(i).value) =/= s_invalid)
+    !deq.fire && (if (i == 0) true.B else stateEntries(headPtr(i).value) =/= s_invalid)
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // agreement with reservation station: don't dequeue when redirect.valid
@@ -223,6 +223,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   QueuePerf(size, PopCount(stateEntries.map(_ =/= s_invalid)), !canEnqueue)
   io.dqFull := !canEnqueue
   XSPerfAccumulate("in", numEnq)
-  XSPerfAccumulate("out", PopCount(io.deq.map(_.fire())))
+  XSPerfAccumulate("out", PopCount(io.deq.map(_.fire)))
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
 }

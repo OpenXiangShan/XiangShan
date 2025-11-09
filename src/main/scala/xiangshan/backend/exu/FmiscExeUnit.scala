@@ -41,7 +41,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
 
   io.out.bits.fflags := MuxCase(
     0.U,
-    fus.map(x => x.io.out.fire() -> x.fflags)
+    fus.map(x => x.io.out.fire -> x.fflags)
   )
   val fpOutCtrl = io.out.bits.uop.ctrl.fpu
   io.out.bits.data := box(arb.io.out.bits.data, fpOutCtrl.typeTagOut)

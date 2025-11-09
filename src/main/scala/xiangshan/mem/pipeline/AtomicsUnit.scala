@@ -82,7 +82,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   when (state === s_invalid) {
     io.in.ready := true.B
-    when (io.in.fire()) {
+    when (io.in.fire) {
       in := io.in.bits
       state := s_tlb
     }
@@ -187,7 +187,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.id   := DontCare
 
-    when(io.dcache.req.fire()){
+    when(io.dcache.req.fire){
       state := s_cache_resp
       paddr_reg := io.dcache.req.bits.addr
       data_reg := io.dcache.req.bits.data
@@ -198,7 +198,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
-    when(io.dcache.resp.fire()) {
+    when(io.dcache.resp.fire) {
       is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
@@ -253,7 +253,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.redirect := DontCare
     io.out.bits.debug.isMMIO := is_mmio
     io.out.bits.debug.paddr := paddr
-    when (io.out.fire()) {
+    when (io.out.fire) {
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
       state := s_invalid
     }

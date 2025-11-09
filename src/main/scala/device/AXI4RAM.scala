@@ -49,7 +49,7 @@ class AXI4RAM
 
     val wIdx = index(waddr) + writeBeatCnt
     val rIdx = index(raddr) + readBeatCnt
-    val wen = in.w.fire() && inRange(wIdx)
+    val wen = in.w.fire && inRange(wIdx)
     require(beatBytes >= 8)
 
     val rdata = if (useBlackBox) {

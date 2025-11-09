@@ -33,7 +33,7 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
 {
   val io = IO(new Bundle{
     val in = Flipped(new TLCached(params))
-    val out = new AXI4 
+    val out = new AXI4
   })
 
   val in = io.in
@@ -56,19 +56,19 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
   val axi4_size = log2Up(outerBeatBytes).U
 
   val s_idle :: s_wait_awready :: s_mem_write :: s_wait_bresp :: s_wait_arready :: s_mem_read :: s_send_resp :: Nil = Enum(7)
- 
+
   val state = RegInit(s_idle)
- 
+
   when (in.anyFire) {
     XSDebug("tilelink in ")
     in.dump
   }
- 
+
   when (out.anyFire) {
     XSDebug("tilelink out ")
     out.dump
   }
- 
+
   // assign default value to signals
   in.a.ready := N
   in.b.valid := N
@@ -77,7 +77,7 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
   in.d.valid := N
   in.d.bits  := DontCare
   in.e.ready := N
- 
+
   out.aw.valid := N
   out.aw.bits  := DontCare
   out.w.valid  := N
@@ -86,37 +86,37 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
   out.ar.valid := N
   out.ar.bits  := DontCare
   out.r.ready  := N
- 
+
   val req = Reg(chiselTypeOf(io.in.a.bits))
-  when (in.a.fire()) {
+  when (in.a.fire) {
     req := in.a.bits
   }
- 
+
   val opcode = in.a.bits.opcode
   val is_read = opcode === TLMessages.Get
   val is_write = opcode === TLMessages.PutPartialData
-  val read_fire = in.a.fire() && is_read
-  val write_fire = in.a.fire() && is_write
-  assert(!(in.a.fire() && !is_read && !is_write), "FakeTLLLC: Invalid opcode on channel A")
- 
- 
+  val read_fire = in.a.fire && is_read
+  val write_fire = in.a.fire && is_write
+  assert(!(in.a.fire && !is_read && !is_write), "FakeTLLLC: Invalid opcode on channel A")
+
+
   // state transitions:
   // s_idle: idle state
   // capture requests
   // --------------------------------------------------------------------------------
   when (state === s_idle) {
     in.a.ready := true.B
- 
+
     when (read_fire) {
       state := s_wait_arready
     }
- 
+
     when (write_fire) {
       state := s_wait_awready
     }
   }
- 
- 
+
+
   // acquire block: do AXI read
   // s_wait_arready, s_mem_read, s_read_resp
   // --------------------------------------------------------------------------------
@@ -135,21 +135,21 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
     out_ar.cache := AXI4Parameters.CACHE_RALLOCATE | AXI4Parameters.CACHE_WALLOCATE | AXI4Parameters.CACHE_MODIFIABLE | AXI4Parameters.CACHE_BUFFERABLE
     out_ar.prot := 0.asUInt(3.W)
     out_ar.qos := 0.asUInt(4.W)
- 
-    when (out.ar.fire()) {
+
+    when (out.ar.fire) {
       state := s_mem_read
     }
   }
- 
+
   val resp_data = Reg(UInt(outerBeatSize.W))
   when (state === s_mem_read) {
     out.r.ready := Y
-    when (out.r.fire()) {
+    when (out.r.fire) {
       resp_data := out.r.bits.data
       state := s_send_resp
     }
   }
- 
+
   // deal with write
   // s_wait_awready & s_mem_write
   // --------------------------------------------------------------------------------
@@ -165,35 +165,35 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
     out_aw.cache := AXI4Parameters.CACHE_RALLOCATE | AXI4Parameters.CACHE_WALLOCATE | AXI4Parameters.CACHE_MODIFIABLE | AXI4Parameters.CACHE_BUFFERABLE
     out_aw.prot := 0.asUInt(3.W)
     out_aw.qos := 0.asUInt(4.W)
-    when (out.aw.fire()) {
+    when (out.aw.fire) {
       state := s_mem_write
     }
   }
- 
+
   when (state === s_mem_write) {
     val out_w = out.w.bits
     out.w.valid := Y
     out_w.data := req.data
     out_w.strb := req.mask
     out_w.last := Y
-    when (out.w.fire()) {
+    when (out.w.fire) {
       state := s_wait_bresp
     }
   }
- 
+
   when (state === s_wait_bresp) {
     out.b.ready := Y
-    when (out.b.fire()) {
+    when (out.b.fire) {
       state := s_send_resp
     }
   }
- 
+
   when (state === s_send_resp) {
     in.d.valid := Y
     val accessAck      = TLSlaveUtilities.AccessAck(req)
     val accessAckData  = TLSlaveUtilities.AccessAck(req, resp_data)
     in.d.bits := Mux(req.opcode === TLMessages.Get, accessAckData, accessAck)
-    when (in.d.fire()) {
+    when (in.d.fire) {
       state := s_idle
     }
   }

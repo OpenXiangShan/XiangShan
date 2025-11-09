@@ -225,7 +225,7 @@ class IntegerBlock
     exeUnits.filter(_.config.hasRedirect).map(_.io.out)
   ).foreach {
     case (x, y) =>
-      x.valid := y.fire() && y.bits.redirectValid
+      x.valid := y.fire && y.bits.redirectValid
       x.bits := y.bits
   }
 
@@ -260,10 +260,10 @@ class IntegerBlock
     case (exu, wInt) =>
       if(exu.config.writeFpRf){
         val wakeUpOut = io.wakeUpOut.slow(0) // jmpExeUnit
-        val writeFpReady = wakeUpOut.fire() && wakeUpOut.bits.uop.ctrl.fpWen
-        exu.io.out.ready := wInt.fire() || writeFpReady || !exu.io.out.valid
+        val writeFpReady = wakeUpOut.fire && wakeUpOut.bits.uop.ctrl.fpWen
+        exu.io.out.ready := wInt.fire || writeFpReady || !exu.io.out.valid
       } else {
-        exu.io.out.ready := wInt.fire() || !exu.io.out.valid
+        exu.io.out.ready := wInt.fire || !exu.io.out.valid
       }
   }
 

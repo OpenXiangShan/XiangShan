@@ -23,7 +23,7 @@ import xiangshan.cache._
 import utils._
 
 trait HasPrefetchParameters extends HasXSParameter {
-  
+
 }
 
 abstract class PrefetchModule extends XSModule with HasPrefetchParameters
@@ -39,11 +39,11 @@ class PrefetchReq extends PrefetchBundle {
 }
 
 class PrefetchResp extends PrefetchBundle {
-  
+
 }
 
 class PrefetchFinish extends PrefetchBundle {
-  
+
 }
 
 class PrefetchTrain extends PrefetchBundle {
@@ -69,5 +69,5 @@ class PrefetchTrain extends PrefetchBundle {
 //   io.req.bits := DontCare
 //   io.resp.ready := true.B
 
-//   assert(!io.resp.fire(), "FakePrefetcher should not receive resp")
+//   assert(!io.resp.fire, "FakePrefetcher should not receive resp")
 // }

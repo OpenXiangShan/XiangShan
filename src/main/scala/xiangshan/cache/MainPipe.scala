@@ -145,7 +145,7 @@ class MainPipe extends DCacheModule {
   // stage 0
   // read meta
   val s0_valid = io.req.valid
-  val s0_fire = io.req.fire()
+  val s0_fire = io.req.fire
   val s0_req = io.req.bits
 
   val word_mask = Wire(Vec(blockRows, Vec(rowWords, Bits(wordBytes.W))))
@@ -194,7 +194,7 @@ class MainPipe extends DCacheModule {
   val store_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === STORE_SOURCE.U && !full_overwrite
   val amo_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === AMO_SOURCE.U
   val probe_need_data = s0_req.probe
-  
+
   val need_data = miss_need_data || store_need_data || amo_need_data || probe_need_data
 
   def rowWordBits = log2Floor(rowWords)
@@ -250,7 +250,7 @@ class MainPipe extends DCacheModule {
   val ecc_meta_resp = WireInit(VecInit(Seq.fill(nWays)(0.U(encMetaBits.W))))
   ecc_meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(ecc_meta_resp))
   val meta_resp = ecc_meta_resp.map(m => getMeta(m).asTypeOf(new L1Metadata))
-  
+
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_req.addr))).asUInt
@@ -312,7 +312,7 @@ class MainPipe extends DCacheModule {
   val s2_amo_word = RegEnable(s1_amo_word, s1_fire)
   val s2_amo_word_addr = RegEnable(s1_amo_word_addr, s1_fire)
 
-  s2_s0_set_conflict := s2_valid && get_idx(s2_req.addr) === get_idx(s0_req.addr)  
+  s2_s0_set_conflict := s2_valid && get_idx(s2_req.addr) === get_idx(s0_req.addr)
 
   when (s1_fire) { s2_valid := true.B }
   .elsewhen(s2_fire) { s2_valid := false.B }
@@ -500,7 +500,7 @@ class MainPipe extends DCacheModule {
 
   // when we release this block,
   // we invalidate this reservation set
-  when (io.wb_req.fire()) {
+  when (io.wb_req.fire) {
     when (io.wb_req.bits.addr === lrsc_addr) {
       lrsc_count := 0.U
     }
@@ -528,7 +528,7 @@ class MainPipe extends DCacheModule {
   //   1. not store and not amo, data: store_data mask: store_mask(full_mask)
   //   2. store, data: store_data mask: store_mask(full_mask)
   //   3. amo, data: merge(store_data, amo_data, amo_mask) mask: store_mask(full_mask)
-  // 
+  //
   // Probe: do not write data, DontCare
   // Store hit: data: merge(s3_data, store_data, store_mask) mask: store_mask
   // AMO hit: data: merge(s3_data, amo_data, amo_mask) mask: store_mask
@@ -659,27 +659,27 @@ class MainPipe extends DCacheModule {
   // nemu use this to see whether lr sc counter is still valid
   io.amo_resp.bits.id   := lrsc_valid
 
-  when (io.req.fire()) {
+  when (io.req.fire) {
     io.req.bits.dump()
   }
 
-  when (io.miss_req.fire()) {
+  when (io.miss_req.fire) {
     io.miss_req.bits.dump()
   }
 
-  when (io.miss_resp.fire()) {
+  when (io.miss_resp.fire) {
     io.miss_resp.bits.dump()
   }
 
-  when (io.store_resp.fire()) {
+  when (io.store_resp.fire) {
     io.store_resp.bits.dump()
   }
 
-  when (io.amo_resp.fire()) {
+  when (io.amo_resp.fire) {
     io.amo_resp.bits.dump()
   }
 
-  when (io.wb_req.fire()) {
+  when (io.wb_req.fire) {
     io.wb_req.bits.dump()
   }
 

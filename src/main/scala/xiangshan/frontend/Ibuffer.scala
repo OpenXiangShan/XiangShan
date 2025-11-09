@@ -93,7 +93,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Enque
   io.in.ready := allowEnq
- 
+
   val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
   for(i <- 0 until PredictWidth) {
     if (i == 0) {
@@ -171,7 +171,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   }
 
   for (i <- 0 until DecodeWidth) {
-    XSDebug(io.out(i).fire(), p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
+    XSDebug(io.out(i).fire, p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
       p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
   }
 

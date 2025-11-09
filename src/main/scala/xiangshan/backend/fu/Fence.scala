@@ -53,7 +53,7 @@ class Fence extends FunctionUnit{ // TODO: check it
 
   val sbuffer = toSbuffer.flushSb
   val sbEmpty = toSbuffer.sbIsEmpty
-  val uop = RegEnable(io.in.bits.uop, io.in.fire())
+  val uop = RegEnable(io.in.bits.uop, io.in.fire)
   val func = uop.ctrl.fuOpType
   val lsrc1 = uop.ctrl.lsrc1
   val lsrc2 = uop.ctrl.lsrc2
@@ -64,7 +64,7 @@ class Fence extends FunctionUnit{ // TODO: check it
   sfence.valid := state === s_tlb
   sfence.bits.rs1  := lsrc1 === 0.U
   sfence.bits.rs2  := lsrc2 === 0.U
-  sfence.bits.addr := RegEnable(src1, io.in.fire())
+  sfence.bits.addr := RegEnable(src1, io.in.fire)
 
   when (state === s_idle && valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }

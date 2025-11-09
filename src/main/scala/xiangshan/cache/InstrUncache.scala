@@ -91,7 +91,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters 
     io.req.ready := true.B
     beatCounter.value := 0.U
 
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req   := io.req.bits
       state := s_refill_req
     }
@@ -106,7 +106,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters 
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 
-    when (io.mmio_acquire.fire()) {
+    when (io.mmio_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -116,7 +116,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters 
   when (state === s_refill_resp) {
     io.mmio_grant.ready := true.B
 
-    when (io.mmio_grant.fire()) {
+    when (io.mmio_grant.fire) {
       // val realAddr = packetAligned(req.addr) + (beatCounter.value << log2Ceil(mmioBusBytes).U)
       // val start = realAddr(5,3)
       respDataReg(beatCounter.value) := io.mmio_grant.bits.data
@@ -131,7 +131,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters 
     io.resp.bits.data := respDataReg.asUInt
     io.resp.bits.id := req.id
     // meta data should go with the response
-    when (io.resp.fire() || needFlush) {
+    when (io.resp.fire || needFlush) {
       state := s_invalid
       beatCounter.value := 0.U
     }

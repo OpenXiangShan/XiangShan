@@ -33,7 +33,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 {
   val io = IO(new Bundle{
     val in = Flipped(new TLCached(params))
-    val out = new AXI4 
+    val out = new AXI4
   })
 
   val in = io.in
@@ -122,10 +122,10 @@ class FakeTLLLC(params: TLParameters) extends XSModule
   // luckily, channel A and C has the same parameter
   val acquire_req = Reg(chiselTypeOf(io.in.a.bits))
   val release_req = Reg(chiselTypeOf(io.in.c.bits))
-  when (in.a.fire()) {
+  when (in.a.fire) {
     acquire_req := in.a.bits
   }
-  when (in.c.fire()) {
+  when (in.c.fire) {
     release_req := in.c.bits
   }
 
@@ -138,16 +138,16 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 
   val data_buf = Reg(Vec(outerDataBeats, UInt(outerBeatSize.W)))
 
-  val opcode = Mux(in.a.fire(), in.a.bits.opcode, in.c.bits.opcode)
-  val param = Mux(in.a.fire(), in.a.bits.param, in.c.bits.param)
+  val opcode = Mux(in.a.fire, in.a.bits.opcode, in.c.bits.opcode)
+  val param = Mux(in.a.fire, in.a.bits.param, in.c.bits.param)
 
   val is_acquire_block = opcode === TLMessages.AcquireBlock
-  val acquire_block_fire = in.a.fire() && is_acquire_block
-  assert(!(in.a.fire() && !is_acquire_block), "FakeTLLLC: Invalid opcode on channel A")
+  val acquire_block_fire = in.a.fire && is_acquire_block
+  assert(!(in.a.fire && !is_acquire_block), "FakeTLLLC: Invalid opcode on channel A")
 
   val is_release_data = opcode === TLMessages.ReleaseData
   val release_data_fire = in.c.fire && is_release_data
-  assert(!(in.c.fire() && !is_release_data), "FakeTLLLC: Invalid opcode on channel C")
+  assert(!(in.c.fire && !is_release_data), "FakeTLLLC: Invalid opcode on channel C")
 
   // return (valid or not, needs_memory_access, new_param, next_state)
   def helper(request_type: UInt, request_param: UInt): (Bool, Bool, UInt, UInt) = {
@@ -162,7 +162,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
   }
 
   XSDebug("state: %d\n", state)
-  
+
   // state transitions:
   // s_idle: idle state
   // capture requests
@@ -180,7 +180,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
       needs_memory_access := res._2
       new_param := res._3
       state := res._4
-    } .elsewhen (in.b.fire() || in.d.fire() || in.e.fire()) {
+    } .elsewhen (in.b.fire || in.d.fire || in.e.fire) {
       assert(N, "Inner tilelink Unexpected handshake")
     }
   }
@@ -204,15 +204,15 @@ class FakeTLLLC(params: TLParameters) extends XSModule
     out_ar.prot := 0.asUInt(3.W)
     out_ar.qos := 0.asUInt(4.W)
 
-    when (out.ar.fire()) {
+    when (out.ar.fire) {
       state := s_mem_read
     }
   }
 
-  val (refill_cnt, refill_done) = Counter(out.r.fire(), outerDataBeats)
+  val (refill_cnt, refill_done) = Counter(out.r.fire, outerDataBeats)
   when (state === s_mem_read) {
     out.r.ready := Y
-    when (out.r.fire()) {
+    when (out.r.fire) {
       data_buf(refill_cnt) := out.r.bits.data
       when (refill_done) {
         state := s_send_acquire_resp
@@ -223,7 +223,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
   // only trigger counter when state === s_send_acquire_resp
   // s_send_release_resp also use channel D
   // do not let it mess up with our own counter
-  val resp_fire = in.d.fire() && state === s_send_acquire_resp
+  val resp_fire = in.d.fire && state === s_send_acquire_resp
   val resp_data_fire = resp_fire && needs_memory_access
   val resp_not_data_fire = resp_fire && !needs_memory_access
   val (resp_cnt, resp_done) = Counter(resp_data_fire, innerDataBeats)
@@ -251,7 +251,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 
   when (state === s_wait_e) {
     in.e.ready := Y
-    when (in.e.fire()) {
+    when (in.e.fire) {
       state := s_idle
     }
   }
@@ -278,15 +278,15 @@ class FakeTLLLC(params: TLParameters) extends XSModule
       state := s_send_release_resp
     }
   }
-  
+
   when (state === s_send_release_resp) {
     in.d.valid := Y
     in.d.bits := TLSlaveUtilities.ReleaseAck(params, release_req.source, release_req.size, false.B)
-    when (in.d.fire()) {
+    when (in.d.fire) {
       state := s_wait_awready
     }
   }
-  
+
 
   // deal with write
   // s_wait_awready & s_mem_write
@@ -303,12 +303,12 @@ class FakeTLLLC(params: TLParameters) extends XSModule
     out_aw.cache := AXI4Parameters.CACHE_RALLOCATE | AXI4Parameters.CACHE_WALLOCATE | AXI4Parameters.CACHE_MODIFIABLE | AXI4Parameters.CACHE_BUFFERABLE
     out_aw.prot := 0.asUInt(3.W)
     out_aw.qos := 0.asUInt(4.W)
-    when (out.aw.fire()) {
+    when (out.aw.fire) {
       state := s_mem_write
     }
   }
 
-  val (wb_cnt, wb_done) = Counter(out.w.fire(), outerDataBeats)
+  val (wb_cnt, wb_done) = Counter(out.w.fire, outerDataBeats)
   when (state === s_mem_write) {
     val out_w = out.w.bits
     out.w.valid := Y
@@ -322,7 +322,7 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 
   when (state === s_wait_bresp) {
     out.b.ready := Y
-    when (out.b.fire()) {
+    when (out.b.fire) {
       state := s_idle
     }
   }

@@ -140,7 +140,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val stage2Flush = io.redirect.valid || io.flush
   val stage3Flush = RegNext(stage2Flush)
 
-  val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
+  val real_fire = io.enq.fire && !stage2Flush && !stage3Flush
 
   val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_4R_SRAMEntry, FtqSize, 9, 1))
   ftq_pc_mem.io.wen(0) := real_fire
@@ -444,7 +444,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
-  XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
+  XSDebug(io.enq.fire, p"ftq enq: ${io.enq.bits}")
 
   io.bpuInfo.bpRight := PopCount(predRights)
   io.bpuInfo.bpWrong := PopCount(predWrongs)

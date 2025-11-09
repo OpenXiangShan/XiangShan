@@ -802,7 +802,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val commitIsStore = io.commits.info.map(_.commitType).map(_ === CommitType.STORE)
   XSPerfAccumulate("commitInstrStore", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsStore).map{ case (v, t) => v && t })))
   XSPerfAccumulate("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
-  // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire())))
+  // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire)))
   // XSPerfAccumulate("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
   XSPerfAccumulate("walkInstrAcc", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U))
   XSPerfAccumulate("walkCycleAcc", state === s_walk || state === s_extrawalk)

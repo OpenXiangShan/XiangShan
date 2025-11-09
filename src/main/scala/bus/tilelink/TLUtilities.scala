@@ -223,29 +223,29 @@ object TLUtilities {
   }
 
   def first(bits: TLChannel, fire: Bool): Bool = firstlastHelper(bits, fire)._1
-  def first(x: DecoupledIO[TLChannel]): Bool = first(x.bits, x.fire())
+  def first(x: DecoupledIO[TLChannel]): Bool = first(x.bits, x.fire)
   def first(x: ValidIO[TLChannel]): Bool = first(x.bits, x.valid)
 
   def last(bits: TLChannel, fire: Bool): Bool = firstlastHelper(bits, fire)._2
-  def last(x: DecoupledIO[TLChannel]): Bool = last(x.bits, x.fire())
+  def last(x: DecoupledIO[TLChannel]): Bool = last(x.bits, x.fire)
   def last(x: ValidIO[TLChannel]): Bool = last(x.bits, x.valid)
 
   def done(bits: TLChannel, fire: Bool): Bool = firstlastHelper(bits, fire)._3
-  def done(x: DecoupledIO[TLChannel]): Bool = done(x.bits, x.fire())
+  def done(x: DecoupledIO[TLChannel]): Bool = done(x.bits, x.fire)
   def done(x: ValidIO[TLChannel]): Bool = done(x.bits, x.valid)
 
   def firstlast(bits: TLChannel, fire: Bool): (Bool, Bool, Bool) = {
     val r = firstlastHelper(bits, fire)
     (r._1, r._2, r._3)
   }
-  def firstlast(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool) = firstlast(x.bits, x.fire())
+  def firstlast(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool) = firstlast(x.bits, x.fire)
   def firstlast(x: ValidIO[TLChannel]): (Bool, Bool, Bool) = firstlast(x.bits, x.valid)
 
   def count(bits: TLChannel, fire: Bool): (Bool, Bool, Bool, UInt) = {
     val r = firstlastHelper(bits, fire)
     (r._1, r._2, r._3, r._4)
   }
-  def count(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool, UInt) = count(x.bits, x.fire())
+  def count(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool, UInt) = count(x.bits, x.fire)
   def count(x: ValidIO[TLChannel]): (Bool, Bool, Bool, UInt) = count(x.bits, x.valid)
 
   def addr_inc(bits: TLChannel, fire: Bool): (Bool, Bool, Bool, UInt) = {
@@ -253,7 +253,7 @@ object TLUtilities {
     val r = firstlastHelper(bits, fire)
     (r._1, r._2, r._3, r._4 << log2Ceil(params.beatBytes))
   }
-  def addr_inc(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool, UInt) = addr_inc(x.bits, x.fire())
+  def addr_inc(x: DecoupledIO[TLChannel]): (Bool, Bool, Bool, UInt) = addr_inc(x.bits, x.fire)
   def addr_inc(x: ValidIO[TLChannel]): (Bool, Bool, Bool, UInt) = addr_inc(x.bits, x.valid)
 
   /*
@@ -274,18 +274,18 @@ object TLUtilities {
     val (d_request, d_response) = (isRequest(x.d.bits), isResponse(x.d.bits))
     val (e_request, e_response) = (isRequest(x.e.bits), isResponse(x.e.bits))
 
-    val a_inc = x.a.fire() && a_first && a_request
-    val b_inc = x.b.fire() && b_first && b_request
-    val c_inc = x.c.fire() && c_first && c_request
-    val d_inc = x.d.fire() && d_first && d_request
-    val e_inc = x.e.fire() && e_first && e_request
+    val a_inc = x.a.fire && a_first && a_request
+    val b_inc = x.b.fire && b_first && b_request
+    val c_inc = x.c.fire && c_first && c_request
+    val d_inc = x.d.fire && d_first && d_request
+    val e_inc = x.e.fire && e_first && e_request
     val inc = Cat(Seq(a_inc, d_inc) ++ (if (bce) Seq(b_inc, c_inc, e_inc) else Nil))
 
-    val a_dec = x.a.fire() && a_last && a_response
-    val b_dec = x.b.fire() && b_last && b_response
-    val c_dec = x.c.fire() && c_last && c_response
-    val d_dec = x.d.fire() && d_last && d_response
-    val e_dec = x.e.fire() && e_last && e_response
+    val a_dec = x.a.fire && a_last && a_response
+    val b_dec = x.b.fire && b_last && b_response
+    val c_dec = x.c.fire && c_last && c_response
+    val d_dec = x.d.fire && d_last && d_response
+    val e_dec = x.e.fire && e_last && e_response
     val dec = Cat(Seq(a_dec, d_dec) ++ (if (bce) Seq(b_dec, c_dec, e_dec) else Nil))
 
     val next_flight = flight + PopCount(inc) - PopCount(dec)

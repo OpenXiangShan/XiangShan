@@ -87,7 +87,7 @@ object TLArbiter
       // Track remaining beats
       val maskedBeats = (winner zip beatsIn) map { case (w,b) => Mux(w, b, 0.U) }
       val initBeats = maskedBeats.reduce(_ | _) // no winner => 0 beats
-      beatsLeft := Mux(latch, initBeats, beatsLeft - sink.fire())
+      beatsLeft := Mux(latch, initBeats, beatsLeft - sink.fire)
 
       // The one-hot source granted access in the previous cycle
       val state = RegInit(VecInit(Seq.fill(sources.size)(false.B)))
@@ -127,8 +127,8 @@ class TestRobin(txns: Int = 128, timeout: Int = 500000)(implicit p: Parameters) 
   sink.ready := ready
 
   TLArbiter(TLArbiter.roundRobin)(sink, sources.zipWithIndex.map { case (z, i) => (i.U, z) }:_*)
-  when (sink.fire()) { printf("TestRobin: %d\n", sink.bits) }
-  when (!sink.fire()) { printf("TestRobin: idle (%d %d)\n", valid, ready) }
+  when (sink.fire) { printf("TestRobin: %d\n", sink.bits) }
+  when (!sink.fire) { printf("TestRobin: idle (%d %d)\n", valid, ready) }
 
   count := count + 1.U
   io.finished := count >= txns.U

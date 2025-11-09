@@ -112,7 +112,7 @@ class Dispatch2Ls extends XSModule {
     }
     enq.bits.src3State := DontCare
 
-    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
+    XSInfo(enq.fire, p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
       p"enters issue queue $i from ${indexVec(i)}\n")
   }
@@ -128,12 +128,12 @@ class Dispatch2Ls extends XSModule {
     io.fromDq(i).ready := loadCanAccept(i) && (if (i <= 1) true.B else if (i == 2) load2CanOut else load3CanOut) && loadReady ||
                           storeCanAccept(i) && (if (i <= 1) true.B else if (i == 2) store2CanOut else store3CanOut) && storeReady
 
-    XSInfo(io.fromDq(i).fire(),
+    XSInfo(io.fromDq(i).fire,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Ls dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index $i\n")
   }
-  XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
+  XSError(PopCount(io.fromDq.map(_.fire)) =/= PopCount(io.enqIQCtrl.map(_.fire)), "deq =/= enq\n")
 
   /**
     * Part 5: the second stage of dispatch 2 (send data to reservation station)
@@ -142,7 +142,7 @@ class Dispatch2Ls extends XSModule {
 //  val dataValidRegDebug = Reg(Vec(exuParameters.LsExuCnt, Bool()))
 //  for (i <- 0 until exuParameters.LsExuCnt) {
 //    uopReg(i) := io.enqIQCtrl(i).bits
-//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
+//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire
 //
 //    io.enqIQData(i) := DontCare
 //    // assert(uopReg(i).ctrl.src1Type =/= SrcType.pc)
@@ -163,11 +163,11 @@ class Dispatch2Ls extends XSModule {
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
-  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))
-  XSPerfAccumulate("out_load0", io.enqIQCtrl(0).fire())
-  XSPerfAccumulate("out_load1", io.enqIQCtrl(1).fire())
-  XSPerfAccumulate("out_store0", io.enqIQCtrl(2).fire())
-  XSPerfAccumulate("out_store1", io.enqIQCtrl(3).fire())
+  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire)))
+  XSPerfAccumulate("out_load0", io.enqIQCtrl(0).fire)
+  XSPerfAccumulate("out_load1", io.enqIQCtrl(1).fire)
+  XSPerfAccumulate("out_store0", io.enqIQCtrl(2).fire)
+  XSPerfAccumulate("out_store1", io.enqIQCtrl(3).fire)
   val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
   XSPerfAccumulate("blocked", block_num)
   XSPerfAccumulate("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))

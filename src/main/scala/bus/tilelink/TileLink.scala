@@ -36,10 +36,10 @@ case class TLParameters(
   }
 
 
-object TLMessages 
+object TLMessages
 {
   // opcode width
-  val width = 3 
+  val width = 3
   //                                  A    B    C    D    E
   def PutFullData    = 0.U(width.W) //     .    .                   => AccessAck
   def PutPartialData = 1.U(width.W) //     .    .                   => AccessAck
@@ -61,7 +61,7 @@ object TLMessages
   def GrantData      = 5.U(width.W) //                    .         => GrantAck
   def ReleaseAck     = 6.U(width.W) //                    .
   def GrantAck       = 0.U(width.W) //                         .
- 
+
   def isA(x: UInt) = x <= AcquirePerm
   def isB(x: UInt) = x <= Probe
   def isC(x: UInt) = x <= ReleaseData
@@ -69,7 +69,7 @@ object TLMessages
 
   def adResponse = VecInit(AccessAck, AccessAck, AccessAckData, AccessAckData, AccessAckData, HintAck, Grant, Grant)
   def bcResponse = VecInit(AccessAck, AccessAck, AccessAckData, AccessAckData, AccessAckData, HintAck, ProbeAck, ProbeAck)
-  
+
   def a = Seq( ("PutFullData",TLPermissions.PermMsgReserved),
                ("PutPartialData",TLPermissions.PermMsgReserved),
                ("ArithmeticData",TLAtomics.ArithMsg),
@@ -110,7 +110,7 @@ object TLMessages
   * The three primary TileLink permissions are:
   *   (T)runk: the agent is (or is on inwards path to) the global point of serialization.
   *   (B)ranch: the agent is on an outwards path to
-  *   (N)one: 
+  *   (N)one:
   * These permissions are permuted by transfer operations in various ways.
   * Operations can cap permissions, request for them to be grown or shrunk,
   * or for a report on their current status.
@@ -148,12 +148,12 @@ object TLPermissions
   def PermMsgGrow:Seq[String] = Seq("Grow NtoB", "Grow NtoT", "Grow BtoT")
   def PermMsgCap:Seq[String] = Seq("Cap toT", "Cap toB", "Cap toN")
   def PermMsgReport:Seq[String] = Seq("Shrink TtoB", "Shrink TtoN", "Shrink BtoN", "Report TotT", "Report BtoB", "Report NtoN")
-  def PermMsgReserved:Seq[String] = Seq("Reserved") 
+  def PermMsgReserved:Seq[String] = Seq("Reserved")
 }
 
 object TLAtomics
 {
-  val width = 3 
+  val width = 3
 
   // Arithmetic types
   def MIN  = 0.U(width.W)
@@ -173,7 +173,7 @@ object TLAtomics
   def ArithMsg:Seq[String] = Seq("MIN", "MAX", "MINU", "MAXU", "ADD")
   def LogicMsg:Seq[String] = Seq("XOR", "OR", "AND", "SWAP")
 }
- 
+
 
 object TLHints
 {
@@ -265,12 +265,12 @@ class TLBundleE(override val params: TLParameters) extends TLChannel
 class TLUnCached(val params: TLParameters) extends Bundle {
   val a = Decoupled(new TLBundleA(params))
   val d = Flipped(Decoupled(new TLBundleD(params)))
-  def anyFire = a.fire() || d.fire()
+  def anyFire = a.fire || d.fire
   def dump(): Unit = {
-    when (a.fire()) {
+    when (a.fire) {
       a.bits.dump
     }
-    when (d.fire()) {
+    when (d.fire) {
       d.bits.dump
     }
   }
@@ -281,16 +281,16 @@ class TLCached(override val params: TLParameters) extends TLUnCached(params) {
   val b = Flipped(Decoupled(new TLBundleB(params)))
   val c = Decoupled(new TLBundleC(params))
   val e = Decoupled(new TLBundleE(params))
-  override def anyFire = super.anyFire || b.fire() || c.fire() || e.fire()
+  override def anyFire = super.anyFire || b.fire || c.fire || e.fire
   override def dump(): Unit = {
     super.dump
-    when (b.fire()) {
+    when (b.fire) {
       b.bits.dump
     }
-    when (c.fire()) {
+    when (c.fire) {
       c.bits.dump
     }
-    when (e.fire()) {
+    when (e.fire) {
       e.bits.dump
     }
   }

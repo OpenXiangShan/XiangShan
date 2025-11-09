@@ -625,10 +625,10 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
     XSDebug("[IF4][if4_prevHalfInstr] v=%d pc=%x npc=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.bits.pc, if4_prevHalfInstr.bits.npc, if4_prevHalfInstr.bits.instr, if4_prevHalfInstr.bits.ipf)
     if4_gh.debug("if4")
-    XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d acf=%d crossPageIPF=%d\n",
+    XSDebug(io.fetchPacket.fire, "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d acf=%d crossPageIPF=%d\n",
       io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf, io.fetchPacket.bits.acf, io.fetchPacket.bits.crossPageIPFFix)
     for (i <- 0 until PredictWidth) {
-      XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] %b %x pc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
+      XSDebug(io.fetchPacket.fire, "[IF4][fetchPacket] %b %x pc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
         io.fetchPacket.bits.mask(i),
         io.fetchPacket.bits.instrs(i),
         io.fetchPacket.bits.pc(i),

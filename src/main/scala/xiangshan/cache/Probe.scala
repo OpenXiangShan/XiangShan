@@ -71,7 +71,7 @@ class ProbeEntry extends DCacheModule {
 
   when (state === s_invalid) {
     io.req.ready := true.B
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req := io.req.bits
       state := s_pipe_req
     }
@@ -88,13 +88,13 @@ class ProbeEntry extends DCacheModule {
     pipe_req.probe_param := req.param
     pipe_req.addr   := req.addr
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_invalid
     }
   }
 
   // perfoemance counters
-  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
+  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire)
   XSPerfAccumulate("probe_penalty", state =/= s_invalid)
   XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr)
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
@@ -152,12 +152,12 @@ class ProbeQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   }
 
   // debug output
-  when (io.mem_probe.fire()) {
+  when (io.mem_probe.fire) {
     XSDebug("mem_probe: ")
     io.mem_probe.bits.dump
   }
 
-  when (io.pipe_req.fire()) {
+  when (io.pipe_req.fire) {
     io.pipe_req.bits.dump()
   }
 

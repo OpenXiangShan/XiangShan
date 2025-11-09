@@ -106,21 +106,21 @@ class AXI4Lite extends Bundle {
   val b  = Flipped(Decoupled(new AXI4LiteBundleB))
   val ar = Decoupled(new AXI4LiteBundleA)
   val r  = Flipped(Decoupled(new AXI4LiteBundleR))
-  def anyFire = aw.fire() || w.fire() || b.fire() || ar.fire() || r.fire()
+  def anyFire = aw.fire || w.fire || b.fire || ar.fire || r.fire
   def dump(): Unit = {
-    when (aw.fire()) {
+    when (aw.fire) {
       aw.bits.dump("AW")
     }
-    when (w.fire()) {
+    when (w.fire) {
       w.bits.dump("W")
     }
-    when (b.fire()) {
+    when (b.fire) {
       b.bits.dump("B")
     }
-    when (ar.fire()) {
+    when (ar.fire) {
       ar.bits.dump("AR")
     }
-    when (r.fire()) {
+    when (r.fire) {
       r.bits.dump("R")
     }
   }
@@ -160,19 +160,19 @@ class AXI4(val dataBits: Int = AXI4Parameters.dataBits, val idBits: Int = AXI4Pa
   override val ar = Decoupled(new AXI4BundleA(idBits))
   override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits, idBits)))
   override def dump(): Unit = {
-    when (aw.fire()) {
+    when (aw.fire) {
       aw.bits.dump("AW")
     }
-    when (w.fire()) {
+    when (w.fire) {
       w.bits.dump("W")
     }
-    when (b.fire()) {
+    when (b.fire) {
       b.bits.dump("B")
     }
-    when (ar.fire()) {
+    when (ar.fire) {
       ar.bits.dump("AR")
     }
-    when (r.fire()) {
+    when (r.fire) {
       r.bits.dump("R")
     }
   }

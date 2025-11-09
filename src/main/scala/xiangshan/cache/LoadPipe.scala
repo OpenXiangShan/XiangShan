@@ -61,7 +61,7 @@ class LoadPipe extends DCacheModule {
 
   // ready can wait for valid
   io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
-  io.meta_read.valid := io.lsu.req.fire() && !io.nack
+  io.meta_read.valid := io.lsu.req.fire && !io.nack
 
   val meta_read = io.meta_read.bits
 
@@ -73,7 +73,7 @@ class LoadPipe extends DCacheModule {
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
-  val s0_valid = io.lsu.req.fire()
+  val s0_valid = io.lsu.req.fire
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
 
@@ -121,7 +121,7 @@ class LoadPipe extends DCacheModule {
   data_read.rmask := UIntToOH(get_row(s1_addr))
   io.data_read.valid := s1_fire && !s1_nack
 
-  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
+  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire) && s1_tag_match && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
@@ -137,7 +137,7 @@ class LoadPipe extends DCacheModule {
   s2_ready := true.B
 
   when (s1_fire) { s2_valid := !io.lsu.s1_kill }
-  .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
+  .elsewhen(io.lsu.resp.fire) { s2_valid := false.B }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
@@ -205,7 +205,7 @@ class LoadPipe extends DCacheModule {
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
   resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire || s2_nack)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -236,14 +236,14 @@ class LoadPipe extends DCacheModule {
   }
 
   // performance counters
-  XSPerfAccumulate("load_req", io.lsu.req.fire())
+  XSPerfAccumulate("load_req", io.lsu.req.fire)
   XSPerfAccumulate("load_s1_kill", s1_fire && io.lsu.s1_kill)
   XSPerfAccumulate("load_hit_way", s1_fire && s1_tag_match)
-  XSPerfAccumulate("load_replay", io.lsu.resp.fire() && resp.bits.replay)
-  XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
-  XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
-  XSPerfAccumulate("load_miss", io.lsu.resp.fire() && resp.bits.miss)
+  XSPerfAccumulate("load_replay", io.lsu.resp.fire && resp.bits.replay)
+  XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data)
+  XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr)
+  XSPerfAccumulate("load_hit", io.lsu.resp.fire && !resp.bits.miss)
+  XSPerfAccumulate("load_miss", io.lsu.resp.fire && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
-  XSPerfAccumulate("ideal_ld_fast_wakeup", io.data_read.fire() && s1_tag_match)
+  XSPerfAccumulate("ideal_ld_fast_wakeup", io.data_read.fire && s1_tag_match)
 }

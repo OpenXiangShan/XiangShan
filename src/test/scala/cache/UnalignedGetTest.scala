@@ -124,7 +124,7 @@ class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
   when (state === s_invalid) {
     io.req.ready := true.B
 
-    when (io.req.fire()) {
+    when (io.req.fire) {
       refill_ctr := 0.U
       req := io.req.bits
       state := s_refill_req
@@ -141,7 +141,7 @@ class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
       fromSource      = 0.U,
       toAddress       = req.address,
       lgSize          = req.size)._2
-    when (mem_acquire.fire()) {
+    when (mem_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -150,7 +150,7 @@ class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
     mem_grant.ready := true.B
 
     when (edge.hasData(mem_grant.bits)) {
-      when (mem_grant.fire()) {
+      when (mem_grant.fire) {
         refill_ctr := refill_ctr + 1.U
         val beatIdx = (req.address(log2Up(blockSize) - 1, 0) >> log2Up(beatBytes)) + refill_ctr
         val mask = MaskExpand(edge.mask(req.address, req.size))
@@ -172,17 +172,17 @@ class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
     io.resp.valid     := true.B
     io.resp.bits.data := resp_data
 
-    when (io.resp.fire()) {
+    when (io.resp.fire) {
       state := s_invalid
     }
   }
 
   // debug output
-  when (io.req.fire()) {
+  when (io.req.fire) {
     XSDebug("address: %x size: %d\n", io.req.bits.address, io.req.bits.size)
   }
 
-  when (io.resp.fire()) {
+  when (io.resp.fire) {
     XSDebug("data: %x\n", io.resp.bits.data)
   }
 }
@@ -253,7 +253,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
 
     val io = IO(new UnalignedGetTestTopIO)
 
-    val in = HoldUnless(io.in.bits, io.in.fire())
+    val in = HoldUnless(io.in.bits, io.in.fire)
 
     dcache.module.io <> DontCare
     uncache.module.io <> DontCare
@@ -301,37 +301,37 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
 
     switch(state){
       is(s_idle){
-        when(io.in.fire()){
+        when(io.in.fire){
           state := s_write_req
         }
       }
       is(s_write_req){
-        when(storePort.req.fire()) {
+        when(storePort.req.fire) {
           state := s_write_resp
         }
       }
       is(s_write_resp){
-        when(storePort.resp.fire()) {
+        when(storePort.resp.fire) {
           state := s_flush_req
         }
       }
       is(s_flush_req){
-        when(flushPort.req.fire()) {
+        when(flushPort.req.fire) {
           state := s_flush_resp
         }
       }
       is(s_flush_resp){
-        when(flushPort.resp.fire()) {
+        when(flushPort.resp.fire) {
           state := s_read_req
         }
       }
       is(s_read_req){
-        when(loadPort.req.fire()) {
+        when(loadPort.req.fire) {
           state := s_read_resp
         }
       }
       is(s_read_resp){
-        when(loadPort.resp.fire()) {
+        when(loadPort.resp.fire) {
           state := s_finish
         }
       }
@@ -349,7 +349,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     storePort.req.valid := state === s_write_req
     storePort.resp.ready := true.B
     XSDebug(
-      storePort.req.fire(),
+      storePort.req.fire,
       "write data %x to dcache\n",
       storePort.req.bits.data,
     )
@@ -362,7 +362,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     flushPort.req.valid := state === s_flush_req
     flushPort.resp.ready := true.B
     XSDebug(
-      flushPort.req.fire(),
+      flushPort.req.fire,
       "flush address %x to memory\n",
       flushPort.req.bits.addr,
     )
@@ -373,14 +373,14 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     loadPort.req.valid := state === s_read_req
     loadPort.resp.ready := true.B
     XSDebug(
-      loadPort.resp.fire(),
+      loadPort.resp.fire,
       "read data %x form getGenerator\n",
       loadPort.resp.bits.data,
     )
 
     val rdata = Reg(UInt(512.W))
 
-    when(loadPort.resp.fire()) {
+    when(loadPort.resp.fire) {
       state := s_finish
       rdata := loadPort.resp.bits.data
     }
@@ -388,7 +388,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     io.out.bits.rdata := rdata
     io.out.valid := state === s_finish
 
-    when(io.out.fire()){
+    when(io.out.fire){
       state := s_idle
     }
   }

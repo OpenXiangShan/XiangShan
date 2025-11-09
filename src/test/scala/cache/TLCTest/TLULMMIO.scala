@@ -60,7 +60,7 @@ class TLCSnoopMMIONode()(implicit p: Parameters) extends LazyModule
     io.AChannel.address := bus.a.bits.address
     io.AChannel.mask := bus.a.bits.mask
     io.AChannel.data := bus.a.bits.data
-    io.AFire := bus.a.fire()
+    io.AFire := bus.a.fire
 
     io.DChannel.opcode := bus.d.bits.opcode
     io.DChannel.param := bus.d.bits.param
@@ -69,7 +69,7 @@ class TLCSnoopMMIONode()(implicit p: Parameters) extends LazyModule
     io.DChannel.sink := bus.d.bits.sink
     io.DChannel.denied := bus.d.bits.denied
     io.DChannel.data := bus.d.bits.data
-    io.DFire := bus.d.fire()
+    io.DFire := bus.d.fire
   }
 
 }

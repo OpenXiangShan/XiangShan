@@ -114,7 +114,7 @@ class IntToFP extends FPUSubModule {
   dataModule.in_valid := io.in.valid
   dataModule.out_ready := io.out.ready
   connectDataModule
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire)
   dataModule.kill_w := io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
   dataModule.kill_r := uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
   io.in.ready := dataModule.in_ready

@@ -56,12 +56,12 @@ class TLBurstMaster
         }
       }
       is(s_addr){
-        when(out.a.fire()){
+        when(out.a.fire){
           state := s_data
         }
       }
       is(s_data){
-        when(out.d.fire()){
+        when(out.d.fire){
           addr := addr + beatBytes.U
         }
         when(edge.done(out.d)){

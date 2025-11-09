@@ -271,7 +271,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
 
 class SRT4Divider(len: Int) extends AbstractDivider(len) {
 
-  val newReq = io.in.fire()
+  val newReq = io.in.fire
 
   val uop = io.in.bits.uop
   val uopReg = RegEnable(uop, newReq)

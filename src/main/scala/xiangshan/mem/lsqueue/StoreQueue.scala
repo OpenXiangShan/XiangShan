@@ -104,11 +104,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // Read dataModule
   // deqPtrExtNext and deqPtrExtNext+1 entry will be read from dataModule
-  // if !sbuffer.fire(), read the same ptr
-  // if sbuffer.fire(), read next
-  val deqPtrExtNext = WireInit(Mux(io.sbuffer(1).fire(),
+  // if !sbuffer.fire, read the same ptr
+  // if sbuffer.fire, read next
+  val deqPtrExtNext = WireInit(Mux(io.sbuffer(1).fire,
     VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
+    Mux(io.sbuffer(0).fire || io.mmioStout.fire,
       VecInit(deqPtrExt.map(_ + 1.U)),
       deqPtrExt
     )
@@ -192,7 +192,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.wen(i) := false.B
     paddrModule.io.wen(i) := false.B
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
-    when (io.storeIn(i).fire()) {
+    when (io.storeIn(i).fire) {
       datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
       writebacked(stWbIndex) := !io.storeIn(i).bits.mmio
       pending(stWbIndex) := io.storeIn(i).bits.mmio
@@ -225,7 +225,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(stWbIndex)
     vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
-    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
+    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire)
   }
 
   /**
@@ -288,17 +288,17 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       }
     }
     is(s_req) {
-      when(io.uncache.req.fire()) {
+      when(io.uncache.req.fire) {
         uncacheState := s_resp
       }
     }
     is(s_resp) {
-      when(io.uncache.resp.fire()) {
+      when(io.uncache.resp.fire) {
         uncacheState := s_wb
       }
     }
     is(s_wb) {
-      when (io.mmioStout.fire()) {
+      when (io.mmioStout.fire) {
         uncacheState := s_wait
       }
     }
@@ -317,7 +317,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   io.uncache.req.bits.id   := DontCare
 
-  when(io.uncache.req.fire()){
+  when(io.uncache.req.fire){
     pending(deqPtr) := false.B
 
     XSDebug(
@@ -331,7 +331,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // (3) response from uncache channel: mark as datavalid
   io.uncache.resp.ready := true.B
-  when (io.uncache.resp.fire()) {
+  when (io.uncache.resp.fire) {
     datavalid(deqPtr) := true.B
   }
 
@@ -346,7 +346,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
-  when (io.mmioStout.fire()) {
+  when (io.mmioStout.fire) {
     writebacked(deqPtr) := true.B
     allocated(deqPtr) := false.B
   }
@@ -369,8 +369,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     // We use RegNext to prepare data for sbuffer
     val ptr = deqPtrExt(i).value
-    // if !sbuffer.fire(), read the same ptr
-    // if sbuffer.fire(), read next
+    // if !sbuffer.fire, read the same ptr
+    // if sbuffer.fire, read next
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := paddrModule.io.rdata(i)
@@ -378,18 +378,18 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.mask := dataModule.io.rdata(i).mask
     io.sbuffer(i).bits.id   := DontCare
 
-    when (io.sbuffer(i).fire()) {
+    when (io.sbuffer(i).fire) {
       allocated(ptr) := false.B
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
-  when (io.sbuffer(1).fire()) {
-    assert(io.sbuffer(0).fire())
+  when (io.sbuffer(1).fire) {
+    assert(io.sbuffer(0).fire)
   }
 
   if (!env.FPGAPlatform) {
     for (i <- 0 until StorePipelineWidth) {
-      val storeCommit = io.sbuffer(i).fire()
+      val storeCommit = io.sbuffer(i).fire
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
       val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
       val wmask = io.sbuffer(i).bits.mask
@@ -434,7 +434,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   deqPtrExt := deqPtrExtNext
 
-  val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
+  val dequeueCount = Mux(io.sbuffer(1).fire, 2.U, Mux(io.sbuffer(0).fire || io.mmioStout.fire, 1.U, 0.U))
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
 
   allowEnqueue := validCount + enqNumber <= (StoreQueueSize - RenameWidth).U
@@ -449,8 +449,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
   io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
-  XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
-  XSPerfAccumulate("mmio_wb_success", io.mmioStout.fire())
+  XSPerfAccumulate("mmioCnt", io.uncache.req.fire)
+  XSPerfAccumulate("mmio_wb_success", io.mmioStout.fire)
   XSPerfAccumulate("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready)
   XSPerfAccumulate("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))

@@ -118,7 +118,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.error <> RegNext(RegNext(ifu.io.error))
 
   // for(out <- ibuffer.io.out){
-  //   XSInfo(out.fire(),
+  //   XSInfo(out.fire,
   //     p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
   //   )
   // }

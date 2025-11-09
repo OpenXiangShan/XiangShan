@@ -210,7 +210,7 @@ class ICacheMetaArray extends ICacheArray
   metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
   io.read.ready := !io.write.valid
   io.readResp.tags := rtags_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
-  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire()) && rtags_wrong(w)}
+  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire) && rtags_wrong(w)}
 
   //write
   val write = io.write.bits
@@ -281,7 +281,7 @@ class ICacheDataArray extends ICacheArray
   }
 
   io.read.ready := !io.write.valid
-  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire()) && rdata_wrong(w).orR }
+  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire) && rdata_wrong(w).orR }
 
   //write
   val write = io.write.bits
@@ -464,7 +464,7 @@ class ICache extends ICacheModule
 
   when(s3_flush)                  { s3_valid := false.B }
   .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B }
-  .elsewhen(io.resp.fire())       { s3_valid := false.B }
+  .elsewhen(io.resp.fire)       { s3_valid := false.B }
 
 
   /* icache hit
@@ -502,8 +502,8 @@ class ICache extends ICacheModule
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := s3_flush
 
-  when(icacheMissQueue.io.req.fire() || io.mmio_acquire.fire()){blocking := true.B}
-  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) ||  io.mmio_grant.fire() || s3_flush) ){blocking := false.B}
+  when(icacheMissQueue.io.req.fire || io.mmio_acquire.fire){blocking := true.B}
+  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire && isICacheResp) ||  io.mmio_grant.fire || s3_flush) ){blocking := false.B}
 
   /* icache flush
    * backend send fence.i signal to flush all the cacheline in icache for consistency
@@ -551,7 +551,7 @@ class ICache extends ICacheModule
                                 idx=refillReq.refill_idx,
                                 waymask=refillReq.refill_waymask)
 
-  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire()) || io.mmio_grant.fire()))
+  s3_ready := ((io.resp.fire || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire) || io.mmio_grant.fire))
 
 
   when(icacheFlush){ validArray := 0.U }
@@ -567,11 +567,11 @@ class ICache extends ICacheModule
   // deal with same cacheline miss in s3 and s2
   val is_same_cacheline = s3_miss && s2_valid  && (groupAligned(s2_req_pc) ===groupAligned(s3_req_pc))
   when(s3_flush) { s3_sec_miss := false.B }
-  .elsewhen(is_same_cacheline && !s3_flush && io.resp.fire()) { s3_sec_miss := true.B }
-  .elsewhen(s3_sec_miss && io.resp.fire()) { s3_sec_miss := false.B }
+  .elsewhen(is_same_cacheline && !s3_flush && io.resp.fire) { s3_sec_miss := true.B }
+  .elsewhen(s3_sec_miss && io.resp.fire) { s3_sec_miss := false.B }
 
-  // val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
-  val refillDataVecReg = RegEnable(refillDataVec, is_same_cacheline && icacheMissQueue.io.resp.fire())
+  // val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire)
+  val refillDataVecReg = RegEnable(refillDataVec, is_same_cacheline && icacheMissQueue.io.resp.fire)
 
   s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !s3_sec_miss
   s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss )
@@ -632,7 +632,7 @@ class ICache extends ICacheModule
   icacheMissQueue.io.mem_grant <> io.mem_grant
 
   // to train l1plus prefetcher
-  io.prefetchTrainReq.valid := s3_valid && icacheMissQueue.io.req.fire()
+  io.prefetchTrainReq.valid := s3_valid && icacheMissQueue.io.req.fire
   io.prefetchTrainReq.bits := DontCare
   io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
@@ -668,30 +668,30 @@ class ICache extends ICacheModule
     XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
     XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
     XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
-    XSDebug(s3_hit && io.resp.fire(),"[Stage 3] ---------Hit Way--------- \n")
+    XSDebug(s3_hit && io.resp.fire,"[Stage 3] ---------Hit Way--------- \n")
     for(i <- 0 until blockRows){
-        XSDebug(s3_hit && io.resp.fire(),"[Stage 3] (%d)  %x\n",i.U,dataHitWay(i))
+        XSDebug(s3_hit && io.resp.fire,"[Stage 3] (%d)  %x\n",i.U,dataHitWay(i))
     }
     XSDebug("[Stage 3] outPacket :%x\n",outPacket)
     XSDebug("[Stage 3] startPtr:%d refillDataOut :%x\n",Cat(s3_req_pc(ptrHighBit,ptrLowBit),0.U(packetInstNumBit.W)),refillDataVec.asUInt)
-    XSDebug(icacheMissQueue.io.resp.fire(),"[Stage 3] ---------refill cacheline--------- \n")
+    XSDebug(icacheMissQueue.io.resp.fire,"[Stage 3] ---------refill cacheline--------- \n")
     for(i <- 0 until blockRows){
-        XSDebug(icacheMissQueue.io.resp.fire(),"[Stage 3] (%d)  %x\n",i.U,refillDataVec(i))
+        XSDebug(icacheMissQueue.io.resp.fire,"[Stage 3] (%d)  %x\n",i.U,refillDataVec(i))
     }
     XSDebug(is_same_cacheline,"WARNING: same cacheline happen!")
   }
   def dump_mem_info() = {
     val toMem = io.mem_acquire
     val fromMem = io.mem_grant
-    XSDebug(toMem.fire(),"[mem_acquire] valid:%d  ready:%d\n",toMem.valid,toMem.ready)
-    XSDebug(fromMem.fire(),"[mem_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMem.valid,fromMem.ready,fromMem.bits.data,fromMem.bits.id)
+    XSDebug(toMem.fire,"[mem_acquire] valid:%d  ready:%d\n",toMem.valid,toMem.ready)
+    XSDebug(fromMem.fire,"[mem_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMem.valid,fromMem.ready,fromMem.bits.data,fromMem.bits.id)
   }
 
   def dump_mmio_info() = {
     val toMMIO = io.mmio_acquire
     val fromMMMIO = io.mmio_grant
-    XSDebug(toMMIO.fire(),"[mmio_acquire] valid:%d  ready:%d\n",toMMIO.valid,toMMIO.ready)
-    XSDebug(fromMMMIO.fire(),"[mmio_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMMMIO.valid,fromMMMIO.ready,fromMMMIO.bits.data,fromMMMIO.bits.id)
+    XSDebug(toMMIO.fire,"[mmio_acquire] valid:%d  ready:%d\n",toMMIO.valid,toMMIO.ready)
+    XSDebug(fromMMMIO.fire,"[mmio_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMMMIO.valid,fromMMMIO.ready,fromMMMIO.bits.data,fromMMMIO.bits.id)
   }
 
   def dump_pipe_info(){
@@ -706,6 +706,6 @@ class ICache extends ICacheModule
 
   // Performance Counter
   XSPerfAccumulate("req", s3_valid && !blocking)
-  XSPerfAccumulate("miss", s3_miss && blocking && io.resp.fire())
-  XSPerfAccumulate("mmio", s3_mmio && blocking && io.resp.fire())
+  XSPerfAccumulate("miss", s3_miss && blocking && io.resp.fire)
+  XSPerfAccumulate("mmio", s3_mmio && blocking && io.resp.fire)
 }

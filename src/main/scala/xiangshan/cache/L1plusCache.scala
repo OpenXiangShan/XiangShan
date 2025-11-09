@@ -285,7 +285,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   }
 
   // tag read
-  tag_array.io.r.req.valid := io.read.fire()
+  tag_array.io.r.req.valid := io.read.fire
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.tagIdx)
   val rtags = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected)
@@ -305,14 +305,14 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   io.write.ready := !reset.asBool && !io.flush && tag_array.io.w.req.ready
 
   def dumpRead() = {
-    when (io.read.fire()) {
+    when (io.read.fire) {
       XSDebug("MetaArray Read: idx: (t:%d v:%d) way_en: %x tag: %x\n",
         io.read.bits.tagIdx, io.read.bits.validIdx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
   def dumpWrite() = {
-    when (io.write.fire()) {
+    when (io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_valid: %x\n",
         io.write.bits.tagIdx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.valid)
     }
@@ -544,7 +544,7 @@ class L1plusCachePipe extends L1plusCacheModule
 
   // Pipeline
   // stage 0
-  s0_valid := io.req.fire()
+  s0_valid := io.req.fire
   val s0_req = io.req.bits
 
   s0_passdown := s0_valid
@@ -752,7 +752,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
   when (state === s_invalid) {
     io.req.ready := true.B
 
-    when (io.req.fire()) {
+    when (io.req.fire) {
       refill_ctr := 0.U
       req := io.req.bits
       state := s_refill_req
@@ -767,7 +767,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
       fromSource      = io.id,
       toAddress       = req.addr,
       lgSize          = (log2Up(cfg.blockBytes)).U)._2
-    when (io.mem_acquire.fire()) {
+    when (io.mem_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -778,7 +778,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.mem_grant.ready := true.B
 
     when (edge.hasData(io.mem_grant.bits)) {
-      when (io.mem_grant.fire()) {
+      when (io.mem_grant.fire) {
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
@@ -801,7 +801,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.resp.bits.data := resp_data
     io.resp.bits.id   := req.id
 
-    when (io.resp.fire()) {
+    when (io.resp.fire) {
       state := s_data_write_req
     }
   }
@@ -816,7 +816,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.refill.bits.rmask   := DontCare
     io.refill.bits.data    := refill_data_raw.map(row => cacheParams.dataCode.encode(row))
 
-    when (io.refill.fire()) {
+    when (io.refill.fire) {
       state := s_meta_write_req
     }
   }
@@ -831,7 +831,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.meta_write.bits.data.tag   := req_tag
     io.meta_write.bits.way_en     := req.way_en
 
-    when (io.meta_write.fire()) {
+    when (io.meta_write.fire) {
       state := s_invalid
     }
   }
@@ -916,27 +916,27 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
 
   // print all input/output requests for debug purpose
   // print req
-  XSDebug(req.fire(), "req id: %d cmd: %x addr: %x way_en: %x\n",
+  XSDebug(req.fire, "req id: %d cmd: %x addr: %x way_en: %x\n",
     req.bits.id, req.bits.cmd, req.bits.addr, req.bits.way_en)
 
   val resp = io.resp
-  XSDebug(resp.fire(), s"resp: data: %x id: %d\n",
+  XSDebug(resp.fire, s"resp: data: %x id: %d\n",
     resp.bits.data, resp.bits.id)
 
   // print refill
-  XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)
+  XSDebug(io.refill.fire, "refill addr %x\n", io.refill.bits.addr)
 
   // print meta_write
-  XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_valid: %d new_tag: %x\n",
+  XSDebug(io.meta_write.fire, "meta_write idx %x way_en: %x old_tag: %x new_valid: %d new_tag: %x\n",
     io.meta_write.bits.tagIdx, io.meta_write.bits.way_en, io.meta_write.bits.tag,
     io.meta_write.bits.data.valid, io.meta_write.bits.data.tag)
 
   // print tilelink messages
-  when (io.mem_acquire.fire()) {
+  when (io.mem_acquire.fire) {
     XSDebug("mem_acquire ")
     io.mem_acquire.bits.dump
   }
-  when (io.mem_grant.fire()) {
+  when (io.mem_grant.fire) {
     XSDebug("mem_grant ")
     io.mem_grant.bits.dump
   }

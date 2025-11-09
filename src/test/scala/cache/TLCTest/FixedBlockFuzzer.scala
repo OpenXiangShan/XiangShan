@@ -193,7 +193,7 @@ class FixedBlockFuzzer(
     val a_gen = if (nOperations>0) num_reqs =/= UInt(0) else Bool(true)
     out.a.valid := !reset && a_gen && legal && (!a_first || idMap.io.alloc.valid)
     idMap.io.alloc.ready := a_gen && legal && a_first && out.a.ready
-    idMap.io.free.valid := d_first && out.d.fire()
+    idMap.io.free.valid := d_first && out.d.fire
     idMap.io.free.bits := out.d.bits.source
 
     out.a.bits  := bits
@@ -204,14 +204,14 @@ class FixedBlockFuzzer(
 
     // Increment the various progress-tracking states
     inc := !legal || req_done
-    inc_beat := !legal || out.a.fire()
+    inc_beat := !legal || out.a.fire
 
     if (nOperations>0) {
-      when (out.a.fire() && a_last) {
+      when (out.a.fire && a_last) {
         num_reqs := num_reqs - UInt(1)
       }
 
-      when (out.d.fire() && d_last) {
+      when (out.d.fire && d_last) {
         num_resps := num_resps - UInt(1)
       }
     }

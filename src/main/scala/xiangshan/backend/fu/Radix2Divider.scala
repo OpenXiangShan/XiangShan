@@ -35,7 +35,7 @@ class Radix2Divider(len: Int) extends AbstractDivider(len) {
 
   val s_idle :: s_log2 :: s_shift :: s_compute :: s_finish :: Nil = Enum(5)
   val state = RegInit(s_idle)
-  val newReq = (state === s_idle) && io.in.fire()
+  val newReq = (state === s_idle) && io.in.fire
 
   val (a, b) = (io.in.bits.src(0), io.in.bits.src(1))
   val divBy0 = b === 0.U(len.W)

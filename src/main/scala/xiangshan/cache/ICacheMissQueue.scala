@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 
 abstract class ICacheMissQueueModule extends XSModule
-  with HasICacheParameters 
+  with HasICacheParameters
 
 abstract class ICacheMissQueueBundle extends XSBundle
   with HasICacheParameters
@@ -85,7 +85,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
         val req = Flipped(DecoupledIO(new IcacheMissReq))
         val resp = DecoupledIO(new IcacheMissResp)
-        
+
         val mem_acquire = DecoupledIO(new L1plusCacheReq)
         val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
@@ -112,7 +112,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
     //initial
     io.resp.bits := DontCare
     io.mem_acquire.bits := DontCare
-    io.mem_grant.ready := true.B   
+    io.mem_grant.ready := true.B
     io.meta_write.bits := DontCare
     io.refill.bits := DontCare
 
@@ -127,21 +127,21 @@ class IcacheMissEntry extends ICacheMissQueueModule
     //state change
     switch(state){
       is(s_idle){
-        when(io.req.fire()){
+        when(io.req.fire){
           state := s_memReadReq
           req := io.req.bits
         }
       }
 
       // memory request
-      is(s_memReadReq){ 
-        when(io.mem_acquire.fire()){ 
+      is(s_memReadReq){
+        when(io.mem_acquire.fire){
           state := s_memReadResp
         }
       }
 
       is(s_memReadResp){
-        when (io.mem_grant.bits.id === io.id && io.mem_grant.fire()) {
+        when (io.mem_grant.bits.id === io.id && io.mem_grant.fire) {
 	        respDataReg := io.mem_grant.bits.data
           state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
         }
@@ -149,7 +149,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
       //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
-        when((io.refill.fire() && io.meta_write.fire()) || needFlush){
+        when((io.refill.fire && io.meta_write.fire) || needFlush){
           state := s_wait_resp
         }
       }
@@ -157,7 +157,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
       is(s_wait_resp){
         io.resp.bits.data := respDataReg.asUInt
 	      io.resp.bits.clientID := req.clientID
-        when(io.resp.fire() || needFlush ){ state := s_idle }
+        when(io.resp.fire || needFlush ){ state := s_idle }
       }
 
     }
@@ -166,8 +166,8 @@ class IcacheMissEntry extends ICacheMissQueueModule
     //WARNING: Maybe could not finish refill in 1 cycle
     io.meta_write.valid := (state === s_write_back) && !needFlush
     io.meta_write.bits.apply(tag=req_tag, setIdx=req_idx, waymask=req_waymask)
-   
-    io.refill.valid := (state === s_write_back) && !needFlush 
+
+    io.refill.valid := (state === s_write_back) && !needFlush
     io.refill.bits.apply(data=respDataReg.asUInt,
                         setIdx=req_idx,
                         waymask=req_waymask)
@@ -191,12 +191,12 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
 }
 
-class IcacheMissQueue extends ICacheMissQueueModule 
+class IcacheMissQueue extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
     val req = Flipped(DecoupledIO(new IcacheMissReq))
     val resp = DecoupledIO(new IcacheMissResp)
-    
+
     val mem_acquire = DecoupledIO(new L1plusCacheReq)
     val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
@@ -214,7 +214,7 @@ class IcacheMissQueue extends ICacheMissQueueModule
 
   //initial
   io.mem_grant.ready := true.B
-  
+
   val entry_alloc_idx = Wire(UInt())
   val req_ready = WireInit(false.B)
 
@@ -246,11 +246,11 @@ class IcacheMissQueue extends ICacheMissQueueModule
     XSPerfAccumulate(
       "entryPenalty" + Integer.toString(i, 10),
       BoolStopWatch(
-        start = entry.io.req.fire(),
-        stop = entry.io.resp.fire() || entry.io.flush,
+        start = entry.io.req.fire,
+        stop = entry.io.resp.fire || entry.io.flush,
         startHighPriority = true)
     )
-    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire)
 
     entry
   }

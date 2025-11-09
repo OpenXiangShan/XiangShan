@@ -58,7 +58,7 @@ class StoreReplayEntry extends DCacheModule
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
-    when (io.lsu.req.fire()) {
+    when (io.lsu.req.fire) {
       req   := io.lsu.req.bits
       state := s_pipe_req
     }
@@ -80,7 +80,7 @@ class StoreReplayEntry extends DCacheModule
     pipe_req.store_mask  := req.mask
     pipe_req.id := io.id
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_pipe_resp
     }
   }
@@ -95,7 +95,7 @@ class StoreReplayEntry extends DCacheModule
     // wait for missQueue to handling miss and replaying our request
     // when miss and replay
     // req missed and fail to enter missQueue, manually replay it later
-    when (io.pipe_resp.fire()) {
+    when (io.pipe_resp.fire) {
       when (io.pipe_resp.bits.miss) {
         when (io.pipe_resp.bits.replay) {
           delay_counter.value := 0.U
@@ -120,29 +120,29 @@ class StoreReplayEntry extends DCacheModule
     io.lsu.resp.bits  := DontCare
     io.lsu.resp.bits.id := req.id
 
-    when (io.lsu.resp.fire()) {
+    when (io.lsu.resp.fire) {
       state := s_invalid
     }
   }
 
   // debug output
-  when (io.lsu.req.fire()) {
+  when (io.lsu.req.fire) {
     XSDebug(s"StoreReplayEntryTransaction req %d\n", io.id)
   }
 
-  when (io.lsu.resp.fire()) {
+  when (io.lsu.resp.fire) {
     XSDebug(s"StoreReplayEntryTransaction resp %d\n", io.id)
   }
 
   // performance counters
-  XSPerfAccumulate("store_req", io.lsu.req.fire())
+  XSPerfAccumulate("store_req", io.lsu.req.fire)
   XSPerfAccumulate("store_penalty", state =/= s_invalid)
   // this is useless
-  // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
-  XSPerfAccumulate("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
-  XSPerfAccumulate("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
+  // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire && !io.pipe_resp.bits.miss)
+  XSPerfAccumulate("store_replay", state === s_pipe_resp && io.pipe_resp.fire && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
+  XSPerfAccumulate("store_miss", state === s_pipe_resp && io.pipe_resp.fire && io.pipe_resp.bits.miss)
 
-  val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire, io.lsu.resp.fire)
   XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
 }
 
@@ -202,24 +202,24 @@ class StoreReplayQueue extends DCacheModule
   }
 
   // debug output
-  when (io.lsu.req.fire()) {
+  when (io.lsu.req.fire) {
     io.lsu.req.bits.dump()
   }
 
-  when (io.lsu.resp.fire()) {
+  when (io.lsu.resp.fire) {
     io.lsu.resp.bits.dump()
   }
 
-  when (io.pipe_req.fire()) {
+  when (io.pipe_req.fire) {
     io.pipe_req.bits.dump()
   }
 
-  when (io.pipe_resp.fire()) {
+  when (io.pipe_resp.fire) {
     io.pipe_resp.bits.dump()
   }
 
   // performance counters
-  XSPerfAccumulate("store_req", io.lsu.req.fire())
+  XSPerfAccumulate("store_req", io.lsu.req.fire)
   val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 }

@@ -308,8 +308,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
   arb.io.in <> VecInit(io.tlb.map(_.req))
-  val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
-  val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
+  val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire)
+  val req = RegEnable(arb.io.out.bits, arb.io.out.fire)
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
   val sfence = RegNext(io.sfence)
@@ -317,9 +317,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val satp   = csr.satp
   val priv   = csr.priv
 
-  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire(), sfence.valid)
-  val validOneCycle = OneCycleValid(arb.io.out.fire(), sfence.valid)
-  arb.io.out.ready := !valid// || resp(arbChosen).fire()
+  val valid = ValidHold(arb.io.out.fire, resp(arbChosen).fire, sfence.valid)
+  val validOneCycle = OneCycleValid(arb.io.out.fire, sfence.valid)
+  arb.io.out.ready := !valid// || resp(arbChosen).fire
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -366,7 +366,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val spg = Reg(UInt(PtwSPEntrySize.W))
 
   // mem alias
-  val memRespFire = mem.d.fire()
+  val memRespFire = mem.d.fire
   val memRdata = mem.d.bits.data
   val memSelData = Wire(UInt(XLEN.W))
   val memPte   = memSelData.asTypeOf(new PteBundle)
@@ -375,14 +375,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val memValid = mem.d.valid
   val memRespReady = mem.d.ready
   val memReqReady = mem.a.ready
-  val memReqFire = mem.a.fire()
+  val memReqFire = mem.a.fire
 
   // fsm
   val s_idle :: s_read_ptw :: s_req :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val levelNext = level + 1.U
-  val sfenceLatch = RegEnable(false.B, false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
+  val sfenceLatch = RegEnable(false.B, false.B, memValid) // NOTE: store sfence to disable mem.resp.fire, but not stall other ptw req
 
   // Access Perf
   val l1AccessPerf = Wire(Vec(PtwL1EntrySize, Bool()))
@@ -577,7 +577,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val l2addr = MakeAddr(Mux(l1HitReg, l1HitPPNReg, memPteReg.ppn), getVpnn(vpn, 1))
   val l3addr = MakeAddr(Mux(l2HitReg, l2HitPPNReg, memPteReg.ppn), getVpnn(vpn, 0))
   val memAddr = Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
-  val memAddrReg = RegEnable(memAddr, mem.a.fire())
+  val memAddrReg = RegEnable(memAddr, mem.a.fire)
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
@@ -821,11 +821,11 @@ class PTWRepeater extends XSModule with HasXSParameter with HasPtwConst {
   })
 
   val (tlb, ptw, sfence) = (io.tlb, io.ptw, RegNext(io.sfence.valid))
-  val req = RegEnable(tlb.req.bits, tlb.req.fire())
-  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
-  val haveOne = BoolStopWatch(tlb.req.fire(), tlb.resp.fire() || sfence)
-  val sent = BoolStopWatch(ptw.req.fire(), tlb.req.fire() || sfence)
-  val recv = BoolStopWatch(ptw.resp.fire(), tlb.req.fire() || sfence)
+  val req = RegEnable(tlb.req.bits, tlb.req.fire)
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
+  val haveOne = BoolStopWatch(tlb.req.fire, tlb.resp.fire || sfence)
+  val sent = BoolStopWatch(ptw.req.fire, tlb.req.fire || sfence)
+  val recv = BoolStopWatch(ptw.resp.fire, tlb.req.fire || sfence)
 
   tlb.req.ready := !haveOne
   ptw.req.valid := haveOne && !sent

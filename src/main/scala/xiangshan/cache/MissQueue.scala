@@ -246,7 +246,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.mem_acquire.valid := true.B
     io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
 
-    when (io.mem_acquire.fire()) {
+    when (io.mem_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -272,7 +272,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
-    when (io.mem_grant.fire()) {
+    when (io.mem_grant.fire) {
       when (edge.hasData(io.mem_grant.bits)) {
         // GrantData
         for (i <- 0 until beatRows) {
@@ -334,13 +334,13 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     pipe_req.amo_mask   := req.amo_mask
     pipe_req.id     := req.id
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_main_pipe_resp
     }
   }
 
   when (state === s_main_pipe_resp) {
-    when (io.pipe_resp.fire()) {
+    when (io.pipe_resp.fire) {
       state := s_release_entry
     }
   }
@@ -349,7 +349,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.mem_finish.valid := grantack.valid
     io.mem_finish.bits  := grantack.bits
 
-    when (io.mem_finish.fire()) {
+    when (io.mem_finish.fire) {
       grantack.valid := false.B
       state := s_main_pipe_req
     }
@@ -362,7 +362,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   XSPerfAccumulate("miss_req", io.req_valid && io.primary_ready)
   XSPerfAccumulate("miss_penalty", BoolStopWatch(io.req_valid && io.primary_ready, state === s_release_entry))
   XSPerfAccumulate("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req_valid && io.primary_ready, io.refill.valid, true))
-  XSPerfAccumulate("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
+  XSPerfAccumulate("pipeline_penalty", BoolStopWatch(io.pipe_req.fire, io.pipe_resp.fire))
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
   XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
@@ -376,7 +376,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, io.refill.valid)
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
 
-  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire, io.mem_grant.fire && refill_done)
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
 }
 
@@ -473,8 +473,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     XSPerf(
       "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
       BoolStopWatch(
-        start = entry.io.req.fire(), 
-        stop = entry.io.resp.fire(),
+        start = entry.io.req.fire,
+        stop = entry.io.resp.fire,
         startHighPriority = true)
     )
     */
@@ -498,7 +498,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
   // print all input/output requests for debug purpose
 
-  when (io.req.fire()) {
+  when (io.req.fire) {
     io.req.bits.dump()
     // sanity check
     val source = io.req.bits.source
@@ -528,21 +528,21 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     assert (io.req.bits.addr(blockOffBits - 1, 0) === 0.U)
   }
 
-  when (io.refill.fire()) {
+  when (io.refill.fire) {
     io.refill.bits.dump()
   }
 
-  when (io.mem_acquire.fire()) {
+  when (io.mem_acquire.fire) {
     XSDebug("mem_acquire ")
     io.mem_acquire.bits.dump
   }
 
-  when (io.mem_grant.fire()) {
+  when (io.mem_grant.fire) {
     XSDebug("mem_grant ")
     io.mem_grant.bits.dump
   }
 
-  when (io.mem_finish.fire()) {
+  when (io.mem_finish.fire) {
     XSDebug("mem_finish ")
     io.mem_finish.bits.dump
   }
@@ -551,7 +551,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     XSDebug(p"block probe req ${Hexadecimal(io.probe_req)}\n")
   }
 
-  XSPerfAccumulate("miss_req", io.req.fire())
+  XSPerfAccumulate("miss_req", io.req.fire)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~primary_ready.asUInt)

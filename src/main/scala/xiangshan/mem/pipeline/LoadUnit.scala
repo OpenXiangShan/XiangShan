@@ -93,7 +93,7 @@ class LoadUnit_S0 extends XSModule {
 
   io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
 
-  XSDebug(io.dcacheReq.fire(),
+  XSDebug(io.dcacheReq.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
   XSPerfAccumulate("in", io.in.valid)
@@ -212,7 +212,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
   }
 
-  XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
+  XSDebug(io.out.fire, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_uop.cf.pc,
     io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
     io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
@@ -257,7 +257,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   io.in.ready := io.out.ready || !io.in.valid
 
-  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
+  XSDebug(io.out.fire, "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
     forwardData.asUInt, forwardMask.asUInt
   )
@@ -364,7 +364,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
-  when(io.ldout.fire()){
+  when(io.ldout.fire){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
   }
 }

@@ -280,7 +280,7 @@ class DuplicatedDataArray extends AbstractDataArray {
     io.read(j).ready := (if (readHighPriority) true.B else !rwhazard)
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(j).fire() && PopCount(io.read(j).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(j).fire && PopCount(io.read(j).bits.way_en) > 1.U)))
     val way_en = RegNext(io.read(j).bits.way_en)
 
     val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
@@ -333,7 +333,7 @@ class DuplicatedDataArray extends AbstractDataArray {
           data
         }
       })
-      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR
+      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
       io.errors(j).ecc_error.bits := true.B
       io.errors(j).paddr.valid := io.errors(j).ecc_error.valid
       io.errors(j).paddr.bits := RegNext(io.read(j).bits.addr)
@@ -376,14 +376,14 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     waymask = VecInit(wmask).asUInt)
 
   // tag read
-  val ren = io.read.fire()
+  val ren = io.read.fire
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.ecc_error.valid := RegNext(io.read.fire()) && Cat(ecc_errors).orR
+  io.error.ecc_error.valid := RegNext(io.read.fire) && Cat(ecc_errors).orR
   io.error.ecc_error.bits := true.B
   io.error.paddr.valid := io.error.ecc_error.valid
   io.error.paddr.bits := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
@@ -392,14 +392,14 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   io.read.ready := !wen
 
   def dumpRead() = {
-    when(io.read.fire()) {
+    when(io.read.fire) {
       XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
         io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
   def dumpWrite() = {
-    when(io.write.fire()) {
+    when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
     }
@@ -448,7 +448,7 @@ class DuplicatedMetaArray extends DCacheModule {
 
   def dumpRead() = {
     (0 until LoadPipelineWidth) map { w =>
-      when(io.read(w).fire()) {
+      when(io.read(w).fire) {
         XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
           io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
       }
@@ -456,7 +456,7 @@ class DuplicatedMetaArray extends DCacheModule {
   }
 
   def dumpWrite() = {
-    when(io.write.fire()) {
+    when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
     }
