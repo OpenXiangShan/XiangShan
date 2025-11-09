@@ -61,12 +61,12 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
 
   when (in.anyFire) {
     XSDebug("tilelink in ")
-    in.dump
+    in.dump()
   }
 
   when (out.anyFire) {
     XSDebug("tilelink out ")
-    out.dump
+    out.dump()
   }
 
   // assign default value to signals

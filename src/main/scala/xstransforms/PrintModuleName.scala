@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -14,35 +15,31 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xstransforms
+package xiangshan.transforms
 
-import firrtl._
-import firrtl.ir._
-import firrtl.options.Dependency
-import firrtl.passes.wiring.WiringTransform
-import firrtl.stage.TransformManager.TransformDependency
-import utils.XSLog
+import utility.XSLog
 
-class PrintModuleName extends Transform with DependencyAPIMigration {
+class PrintModuleName extends firrtl.options.Phase {
 
-  // avoid print's check
-  override def prerequisites = firrtl.stage.Forms.Checks
-  override def invalidates(a: Transform) = false
-  override def optionalPrerequisites = Seq(Dependency[WiringTransform])
+  override def invalidates(a: firrtl.options.Phase) = false
 
-  override protected def execute(state: CircuitState): CircuitState = {
+  override def transform(annotations: firrtl.AnnotationSeq): firrtl.AnnotationSeq = {
 
-    val c = state.circuit
+    import xiangshan.transforms.Helpers._
 
-    def onStmt(s: Statement): Statement = s match {
-      case Print(info, StringLit(string), args, clk, en) => 
-        Print(info, StringLit(string.replace(XSLog.MagicStr, "%m")), args, clk, en)
-      case other: Statement =>
+    val (Seq(circuitAnno: firrtl.stage.FirrtlCircuitAnnotation), otherAnnos) = annotations.partition {
+      case _: firrtl.stage.FirrtlCircuitAnnotation => true
+      case _ => false
+    }
+    val c = circuitAnno.circuit
+
+    def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
+      case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en) =>
+        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en)
+      case other: firrtl.ir.Statement =>
         other.mapStmt(onStmt)
     }
 
-    state.copy(c.mapModule(m => m.mapStmt(onStmt)))
-
+    firrtl.stage.FirrtlCircuitAnnotation(c.mapModule(m => m.mapStmt(onStmt))) +: otherAnnos
   }
-
 }

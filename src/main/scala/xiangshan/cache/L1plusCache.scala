@@ -238,9 +238,9 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   }
 
   def dump() = {
-    dumpRead
-    dumpWrite
-    dumpResp
+    dumpRead()
+    dumpWrite()
+    dumpResp()
   }
 }
 
@@ -326,9 +326,9 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   }
 
   def dump() = {
-    dumpRead
-    dumpWrite
-    dumpResp
+    dumpRead()
+    dumpWrite()
+    dumpResp()
   }
 }
 

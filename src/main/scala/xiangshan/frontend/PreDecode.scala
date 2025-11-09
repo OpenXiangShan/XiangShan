@@ -170,9 +170,10 @@ class RVCExpander extends XSModule {
     val out = Output(new ExpandedInstruction)
   })
 
+  //RVCDecoder(x: UInt, fsIsOff: Bool, xLen: Int, fLen: Int, useAddiForMv: Boolean = false)
   if (HasCExtension) {
-    io.out := new RVCDecoder(io.in, XLEN).decode
+    io.out := new RVCDecoder(io.in, false.B, XLEN, XLEN).decode
   } else {
-    io.out := new RVCDecoder(io.in, XLEN).passthrough
+    io.out := new RVCDecoder(io.in, false.B, XLEN, XLEN).passthrough
   }
 }

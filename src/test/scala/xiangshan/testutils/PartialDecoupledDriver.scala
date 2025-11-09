@@ -19,9 +19,10 @@ package xiangshan.testutils
 import chisel3._
 import chisel3.util._
 import chiseltest._
-import chisel3.experimental.BundleLiterals._
 
 class PartialDecoupledDriver[T <: Data](x: DecoupledIO[T]) extends DecoupledDriver(x){
+  val sourceClock = x.getSourceClock()
+  val sinkClock = x.getSinkClock()
 
   def enqueuePartialNow(data: T): Unit = timescope {
     // TODO: check for init
@@ -29,7 +30,7 @@ class PartialDecoupledDriver[T <: Data](x: DecoupledIO[T]) extends DecoupledDriv
     x.valid.poke(true.B)
     fork.withRegion(Monitor) {
       x.ready.expect(true.B)
-    }.joinAndStep(getSourceClock)
+    }.joinAndStep(sourceClock)
   }
 
   def enqueuePartial(data: T): Unit = timescope {
@@ -38,9 +39,9 @@ class PartialDecoupledDriver[T <: Data](x: DecoupledIO[T]) extends DecoupledDriv
     x.valid.poke(true.B)
     fork.withRegion(Monitor) {
       while (!x.ready.peek().litToBoolean) {
-        getSourceClock.step(1)
+        sourceClock.step(1)
       }
-    }.joinAndStep(getSourceClock)
+    }.joinAndStep(sourceClock)
   }
 
   def enqueuePartialSeq(data: Seq[T]): Unit = timescope {
@@ -56,7 +57,7 @@ class PartialDecoupledDriver[T <: Data](x: DecoupledIO[T]) extends DecoupledDriv
     fork.withRegion(Monitor) {
       x.valid.expect(true.B)
       x.bits.asInstanceOf[Record].expectPartial(data.asInstanceOf[Record])
-    }.joinAndStep(getSinkClock)
+    }.joinAndStep(sinkClock)
   }
 
   def expectDequeuePartial(data: T): Unit = timescope {
@@ -66,7 +67,7 @@ class PartialDecoupledDriver[T <: Data](x: DecoupledIO[T]) extends DecoupledDriv
       waitForValid()
       x.valid.expect(true.B)
       x.bits.asInstanceOf[Record].expectPartial(data.asInstanceOf[Record])
-    }.joinAndStep(getSinkClock)
+    }.joinAndStep(sinkClock)
   }
 
   def expectDequeuePartialSeq(data: Seq[T]): Unit = timescope {

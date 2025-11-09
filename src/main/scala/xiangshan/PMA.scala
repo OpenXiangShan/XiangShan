@@ -91,7 +91,7 @@ object AddressSpace {
 
   def MemMapList = SimpleMemMapList
 
-  def printMemmap(){
+  def printMemmap() = {
     println("-------------------- memory map --------------------")
     for(i <- MemMapList){
       println("[" + i._1._1 + " -> " + i._1._2 + "] Width:" + (if(i._2.get("width").get == "h0") "unlimited" else i._2.get("width").get) + " Description:" + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
@@ -99,7 +99,7 @@ object AddressSpace {
     println("----------------------------------------------------")
   }
 
-  def checkMemmap(){
+  def checkMemmap() = {
     for(i <- MemMapList){
       // pma mode check
       val s = i._2.get("mode").get

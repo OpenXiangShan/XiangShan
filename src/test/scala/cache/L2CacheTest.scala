@@ -16,25 +16,22 @@
 
 package cache
 
-import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
-import chisel3.util._
-import chiseltest.simulator.VerilatorFlags
-import chiseltest._
 import chisel3.experimental.BundleLiterals._
-import firrtl.stage.RunFirrtlTransformAnnotation
-import chiseltest.ChiselScalatestTester
+import chisel3.util._
+import chiseltest._
+import chiseltest.simulator.VerilatorFlags
 import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import utils.{DebugIdentityNode, HoldUnless, XSDebug}
+import utils.{HoldUnless, XSDebug}
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
-import xstransforms.PrintModuleName
 
 import scala.util.Random
 
@@ -279,7 +276,6 @@ class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
     // UserCoverageAnnotation,
     // StructuralCoverageAnnotation,
     VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
-    RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 
   it should "run" in {

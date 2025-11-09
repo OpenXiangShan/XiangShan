@@ -256,7 +256,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     init = false.B
   )
   loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
-  VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
+  redirectGen.io.stage1FtqRead <> ftq.io.ftqRead.tail.dropRight(1)
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay

@@ -26,7 +26,7 @@ object LookupTree {
 
 object LookupTreeDefault {
   def apply[T <: Data](key: UInt, default: T, mapping: Iterable[(UInt, T)]): T =
-    MuxLookup(key, default, mapping.toSeq)
+    MuxLookup(key, default)(mapping.toSeq)
 }
 
 

@@ -77,12 +77,12 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 
   when (in.anyFire) {
     XSDebug("in ")
-    in.dump
+    in.dump()
   }
 
   when (out.anyFire) {
     XSDebug("out ")
-    out.dump
+    out.dump()
   }
 
   // XSDebug.exec(in.anyFire, in.dump)

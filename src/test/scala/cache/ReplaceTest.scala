@@ -82,7 +82,7 @@ class ReplaceTest extends AnyFlatSpec
     with ChiselScalatestTester 
     with Matchers 
     with ParallelTestExecution
-    with HasPartialDecoupledDriver {
+{
 
     it should "run" in {
         test(new RepTestTop){ c =>

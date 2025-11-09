@@ -285,7 +285,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
-  val debug_microOp = Mem(RoqSize, new MicroOp)
+  val debug_microOp = Reg(Vec(RoqSize, new MicroOp))
   val debug_exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
@@ -867,7 +867,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     debug_deqUop.ctrl.fuType === FuType.mou &&
     (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
 
-  val hitTrap = trapVec.reduce(_||_)
+  val hitTrap = WireInit(trapVec.reduce(_||_))
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 

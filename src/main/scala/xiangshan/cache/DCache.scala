@@ -187,10 +187,10 @@ abstract class AbstractDataArray extends DCacheModule {
   }
 
   def dump() = {
-    dumpRead
-    dumpWrite
-    dumpNack
-    dumpResp
+    dumpRead()
+    dumpWrite()
+    dumpNack()
+    dumpResp()
   }
 }
 
@@ -413,8 +413,8 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   // }
 
   def dump() = {
-    dumpRead
-    dumpWrite
+    dumpRead()
+    dumpWrite()
     // dumpResp
   }
 }
@@ -432,7 +432,7 @@ class DuplicatedMetaArray extends DCacheModule {
     val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
   })
   val meta = Seq.fill(LoadPipelineWidth) {
-    Module(new L1MetadataArray(onReset _))
+    Module(new L1MetadataArray(() => onReset))
   }
 
   for (w <- 0 until LoadPipelineWidth) {
@@ -472,8 +472,8 @@ class DuplicatedMetaArray extends DCacheModule {
   // }
 
   def dump() = {
-    dumpRead
-    dumpWrite
+    dumpRead()
+    dumpWrite()
     // dumpResp
   }
 }

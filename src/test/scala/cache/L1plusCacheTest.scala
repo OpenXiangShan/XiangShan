@@ -16,28 +16,20 @@
 
 package cache
 
-import scala.collection.mutable.ArrayBuffer
-import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
-import chisel3.util._
 import chiseltest._
-import chisel3.experimental.BundleLiterals._
-import firrtl.stage.RunFirrtlTransformAnnotation
-import chiseltest.ChiselScalatestTester
 import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.MicroOp
-import xiangshan.cache.{DCache, DCacheLineIO, L1plusCache, L1plusCacheIO, MemoryOpConstants}
+import xiangshan.cache._
 import xiangshan.testutils.AddSinks
-import xstransforms.PrintModuleName
 
-import scala.util.Random
+import scala.collection.mutable.ArrayBuffer
 
 case object L1plusCacheTestKey extends Field[Long]
 
@@ -123,7 +115,6 @@ class L1plusCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matche
 
   val annos = Seq(
     VerilatorBackendAnnotation,
-    RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 
   it should "run" in {

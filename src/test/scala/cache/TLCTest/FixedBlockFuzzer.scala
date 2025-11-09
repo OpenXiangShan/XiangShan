@@ -18,7 +18,8 @@
 
 package cache.TLCTest
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.IDMapGenerator
@@ -27,13 +28,13 @@ import freechips.rocketchip.util._
 
 object FixedLFSR64
 {
-  def apply(increment: Bool = Bool(true)): UInt =
+  def apply(increment: Bool = true.B): UInt =
   {
     val wide = 64
-    val lfsr = Reg(UInt(value = 0xabcd4face1L ,width = wide)) // fixed initial value
+    val lfsr = Reg(0xabcd4face1L.U(wide.W)) // fixed initial value
     val xor = lfsr(0) ^ lfsr(1) ^ lfsr(3) ^ lfsr(4)
     when (increment) {
-      lfsr := Mux(lfsr === UInt(0), UInt(1), Cat(xor, lfsr(wide-1,1)))
+      lfsr := Mux(lfsr === 0.U, 1.U, Cat(xor, lfsr(wide-1,1)))
     }
     lfsr
   }
@@ -42,8 +43,8 @@ object FixedLFSR64
 trait HasNoiseMakerIO
 {
   val io = new Bundle {
-    val inc = Bool(INPUT)
-    val random = UInt(OUTPUT)
+    val inc = Input(Bool())
+    val random = Output(UInt())
   }
 }
 
@@ -54,7 +55,7 @@ class FixedLFSRNoiseMaker(wide: Int) extends Module with HasNoiseMakerIO
 }
 
 object FixedLFSRNoiseMaker {
-  def apply(wide: Int, increment: Bool = Bool(true)): UInt = {
+  def apply(wide: Int, increment: Bool = true.B): UInt = {
     val nm = Module(new FixedLFSRNoiseMaker(wide))
     nm.io.inc := increment
     nm.io.random
@@ -101,7 +102,7 @@ class FixedBlockFuzzer(
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val finished = Bool(OUTPUT)
+      val finished = Output(Bool())
       val blockAddr = Input(UInt(64.W))
     })
 
@@ -116,12 +117,12 @@ class FixedBlockFuzzer(
     val dataBits     = edge.bundle.dataBits
 
     // Progress through operations
-    val num_reqs = Reg(init = UInt(nOperations, log2Up(nOperations+1)))
-    val num_resps = Reg(init = UInt(nOperations, log2Up(nOperations+1)))
+    val num_reqs = RegInit(nOperations.U(log2Up(nOperations+1).W))
+    val num_resps = RegInit(nOperations.U(log2Up(nOperations+1).W))
     if (nOperations>0) {
-      io.finished := num_resps === UInt(0)
+      io.finished := num_resps === 0.U
     } else {
-      io.finished := Bool(false)
+      io.finished := false.B
     }
 
     // Progress within each operation
@@ -139,9 +140,9 @@ class FixedBlockFuzzer(
     val inc_beat = Wire(Bool())
     val blockAddrReg = RegEnable(io.blockAddr,0.U(64.W),inc)
     val arth_op_3 = noiseMaker(3, inc, 0)
-    val arth_op   = Mux(arth_op_3 > UInt(4), UInt(4), arth_op_3)
+    val arth_op   = Mux(arth_op_3 > 4.U, 4.U, arth_op_3)
     val log_op    = noiseMaker(2, inc, 0)
-    val amo_size  = UInt(2) + noiseMaker(1, inc, 0) // word or dword
+    val amo_size  = 2.U + noiseMaker(1, inc, 0) // word or dword
     val size      = noiseMaker(sizeBits, inc, 0)
     val rawAddr   = Cat(blockAddrReg(63,6),noiseMaker(addressBits, inc, 2)(5,0))
     val addr      = overrideAddress.map(_.legalize(rawAddr)).getOrElse(rawAddr) & ~UIntToOH1(size, addressBits)
@@ -171,36 +172,36 @@ class FixedBlockFuzzer(
     // Pick a specific message to try to send
     val a_type_sel  = noiseMaker(2, inc, 0)
 
-    val legal = legal_dest && MuxLookup(a_type_sel, glegal, Seq(
-      UInt("b00") -> glegal,
-      UInt("b01") -> (pflegal && !Bool(noModify)),
-      UInt("b10") -> (pplegal && !Bool(noModify))
+    val legal = legal_dest && MuxLookup(a_type_sel, glegal)(Seq(
+      "b00".U -> glegal,
+      "b01".U-> (pflegal && !noModify.B),
+      "b10".U -> (pplegal && !noModify.B)
 //      UInt("b011") -> (alegal && !Bool(noModify)),
 //      UInt("b100") -> (llegal && !Bool(noModify)),
 //      UInt("b101") -> hlegal
     ))
 
-    val bits = MuxLookup(a_type_sel, gbits, Seq(
-      UInt("b00") -> gbits,
-      UInt("b01") -> pfbits,
-      UInt("b10") -> ppbits,
+    val bits = MuxLookup(a_type_sel, gbits)(Seq(
+      "b00".U -> gbits,
+      "b01".U -> pfbits,
+      "b10".U -> ppbits,
 //      UInt("b011") -> abits,
 //      UInt("b100") -> lbits,
 //      UInt("b101") -> hbits
     ))
 
     // Wire up Fuzzer flow control
-    val a_gen = if (nOperations>0) num_reqs =/= UInt(0) else Bool(true)
-    out.a.valid := !reset && a_gen && legal && (!a_first || idMap.io.alloc.valid)
+    val a_gen = if (nOperations>0) num_reqs =/= 0.U else true.B
+    out.a.valid := !reset.asBool && a_gen && legal && (!a_first || idMap.io.alloc.valid)
     idMap.io.alloc.ready := a_gen && legal && a_first && out.a.ready
     idMap.io.free.valid := d_first && out.d.fire
     idMap.io.free.bits := out.d.bits.source
 
     out.a.bits  := bits
-    out.b.ready := Bool(true)
-    out.c.valid := Bool(false)
-    out.d.ready := Bool(true)
-    out.e.valid := Bool(false)
+    out.b.ready := true.B
+    out.c.valid := false.B
+    out.d.ready := true.B
+    out.e.valid := false.B
 
     // Increment the various progress-tracking states
     inc := !legal || req_done
@@ -208,11 +209,11 @@ class FixedBlockFuzzer(
 
     if (nOperations>0) {
       when (out.a.fire && a_last) {
-        num_reqs := num_reqs - UInt(1)
+        num_reqs := num_reqs - 1.U
       }
 
       when (out.d.fire && d_last) {
-        num_resps := num_resps - UInt(1)
+        num_resps := num_resps - 1.U
       }
     }
   }

@@ -16,28 +16,22 @@
 
 package cache.L1DTest
 
-import org.chipsalliance.cde.config.{Field, Parameters}
+import cache.TLCTest._
 import chisel3._
-import chisel3.util._
+import chiseltest.{ChiselScalatestTester, _}
 import chiseltest.simulator.VerilatorFlags
-import chiseltest._
-import firrtl.stage.RunFirrtlTransformAnnotation
-import chiseltest.ChiselScalatestTester
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, BufferParams}
-import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
+import freechips.rocketchip.diplomacy.{BufferParams, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.TLBuffer
+import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.EnviromentParameters
-import xiangshan.cache.{DCache, DCacheLineReq, DCacheToLsuIO, DCacheWordReq, MemoryOpConstants}
+import utils.DebugIdentityNode
+import xiangshan.cache.{DCache, DCacheToLsuIO}
 import xiangshan.testutils.AddSinks
-import xstransforms.PrintModuleName
-
-import scala.util.Random
-import cache.TLCTest._
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.util.Random
 
 class L1DTestTopIO extends Bundle {
   val slaveIO = new TLCTestSlaveMMIO()
@@ -101,7 +95,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         // ToggleCoverageAnnotation,
         VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000",
           "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT")),
-        RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
+      )) { c =>
         c.io.dcacheIO.load.foreach { l =>
           l.req.initSource().setSourceClock(c.clock)
           l.resp.initSink().setSinkClock(c.clock)

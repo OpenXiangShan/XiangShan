@@ -42,19 +42,19 @@ object TLArbiter
     readys(width-1, 0)
   }
 
-  def lowestFromSeq[T <: TLChannel](sink: DecoupledIO[T], sources: Seq[DecoupledIO[T]]) {
+  def lowestFromSeq[T <: TLChannel](sink: DecoupledIO[T], sources: Seq[DecoupledIO[T]]) = {
     apply(lowestIndexFirst)(sink, sources.map(s => (TLUtilities.numBeats1(s.bits), s)):_*)
   }
 
-  def lowest[T <: TLChannel](sink: DecoupledIO[T], sources: DecoupledIO[T]*) {
+  def lowest[T <: TLChannel](sink: DecoupledIO[T], sources: DecoupledIO[T]*) = {
     apply(lowestIndexFirst)(sink, sources.toList.map(s => (TLUtilities.numBeats1(s.bits), s)):_*)
   }
 
-  def robin[T <: TLChannel](sink: DecoupledIO[T], sources: DecoupledIO[T]*) {
+  def robin[T <: TLChannel](sink: DecoupledIO[T], sources: DecoupledIO[T]*) = {
     apply(roundRobin)(sink, sources.toList.map(s => (TLUtilities.numBeats1(s.bits), s)):_*)
   }
 
-  def apply[T <: Data](policy: Policy)(sink: DecoupledIO[T], sources: (UInt, DecoupledIO[T])*) {
+  def apply[T <: Data](policy: Policy)(sink: DecoupledIO[T], sources: (UInt, DecoupledIO[T])*) = {
     if (sources.isEmpty) {
       sink.valid := false.B
     } else if (sources.size == 1) {

@@ -18,22 +18,19 @@ package top
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
-import system._
-import chisel3.stage.ChiselGeneratorAnnotation
-import org.chipsalliance.cde.config
-import org.chipsalliance.cde.config.Config
 import device.{AXI4Plic, TLTimer}
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams}
+import freechips.rocketchip.tilelink._
+import org.chipsalliance.cde.config
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import system._
+import utils._
+import xiangshan._
 import xiangshan.cache.prefetch.L2Prefetcher
-
 
 class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter {
@@ -328,13 +325,13 @@ object TopMain extends App {
     }
   )
   val otherArgs = args.filterNot(_ == "--dual-core")
-  implicit val p = new Config((_, _, _) => {
-    case XLen => 64
-  })
-  XiangShanStage.execute(otherArgs, Seq(
-    ChiselGeneratorAnnotation(() => {
-      val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))
-      soc.module
-    })
-  ))
+
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(otherArgs)
+
+  val soc = DisableMonitors(p => LazyModule(new XSTop()(config)))(config)
+  Generator.execute(
+    firrtlOpts,
+    soc.module,
+    firtoolOpts
+  )
 }

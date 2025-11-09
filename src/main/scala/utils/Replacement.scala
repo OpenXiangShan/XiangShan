@@ -384,7 +384,7 @@ class SbufferLRU(n_ways: Int) {
   }
 
   // update the stateRect
-  def access(touch_ways: Seq[Valid[UInt]]) {
+  def access(touch_ways: Seq[Valid[UInt]]) = {
     when (ParallelOR(touch_ways.map(_.valid))) {
       state_reg := get_next_state(state_reg, touch_ways)
     }

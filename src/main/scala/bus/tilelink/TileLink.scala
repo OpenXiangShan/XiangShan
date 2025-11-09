@@ -268,10 +268,10 @@ class TLUnCached(val params: TLParameters) extends Bundle {
   def anyFire = a.fire || d.fire
   def dump(): Unit = {
     when (a.fire) {
-      a.bits.dump
+      a.bits.dump()
     }
     when (d.fire) {
-      d.bits.dump
+      d.bits.dump()
     }
   }
 }
@@ -283,15 +283,15 @@ class TLCached(override val params: TLParameters) extends TLUnCached(params) {
   val e = Decoupled(new TLBundleE(params))
   override def anyFire = super.anyFire || b.fire || c.fire || e.fire
   override def dump(): Unit = {
-    super.dump
+    super.dump()
     when (b.fire) {
-      b.bits.dump
+      b.bits.dump()
     }
     when (c.fire) {
-      c.bits.dump
+      c.bits.dump()
     }
     when (e.fire) {
-      e.bits.dump
+      e.bits.dump()
     }
   }
 }

@@ -16,27 +16,22 @@
 
 package cache
 
-import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
+import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chiseltest._
-import chisel3.experimental.BundleLiterals._
-import firrtl.stage.RunFirrtlTransformAnnotation
-import chiseltest.ChiselScalatestTester
 import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, IdRange}
-import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar, TLMasterParameters, TLMasterPortParameters, TLClientNode}
-import org.scalatest.matchers.should.Matchers
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLClientNode, TLMasterParameters, TLMasterPortParameters, TLToAXI4, TLXbar}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import org.scalatest.flatspec.AnyFlatSpec
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters, InclusiveCacheControlParameters}
-import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{XSBundle, HasXSParameter}
-import xiangshan.cache.{DCache, Uncache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
+import org.scalatest.matchers.should.Matchers
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheControlParameters, InclusiveCacheMicroParameters}
+import utils.{DebugIdentityNode, HoldUnless, MaskExpand, XSDebug}
+import xiangshan.cache._
 import xiangshan.testutils.AddSinks
-import xstransforms.PrintModuleName
-import utils.MaskExpand
-
+import xiangshan.{HasXSParameter, XSBundle}
 
 import scala.util.Random
 
@@ -415,7 +410,6 @@ class UnalignedGetTest extends AnyFlatSpec with ChiselScalatestTester with Match
 
   val annos = Seq(
     VerilatorBackendAnnotation,
-    RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 
   it should "run" in {

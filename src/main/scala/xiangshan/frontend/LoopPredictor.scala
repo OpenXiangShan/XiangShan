@@ -386,7 +386,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.redirect.bits.specCnt := redirect.specCnt(i)
     ltbs(i).io.redirect.bits.mispred := redirect.isMisPred
     ltbs(i).io.redirect.bits.taken := redirect.taken
-    ltbs(i).io.redirect.bits.isReplay := io.redirect.bits.flushItself
+    ltbs(i).io.redirect.bits.isReplay := io.redirect.bits.flushItself()
 
     ltbs(i).io.repair := redirectValid && redirectBank =/= i.U
   }
@@ -417,7 +417,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
     XSDebug("[IF4][req] updatePC=%x, updateValid=%d, isBr=%b\n", update.ftqPC, updateValid, update.br_mask.asUInt)
-    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, io.redirect.bits.flushItself)
+    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, io.redirect.bits.flushItself())
     XSDebug("[IF4][req] isMisPred=%d\n", redirect.isMisPred)
 
     XSDebug(redirectValid, "[redirect SpecCnt] ")

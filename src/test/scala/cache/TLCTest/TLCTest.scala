@@ -16,26 +16,21 @@
 
 package cache.TLCTest
 
-import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
-import chiseltest.simulator.VerilatorFlags
-
 import chiseltest._
-import chiseltest.ChiselScalatestTester
-import firrtl.stage.RunFirrtlTransformAnnotation
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLDelayer, TLXbar}
+import chiseltest.simulator.VerilatorFlags
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBuffer, TLXbar}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import utils.{DebugIdentityNode, XSDebug}
+import utils.DebugIdentityNode
 import xiangshan.testutils.AddSinks
-import xstransforms.PrintModuleName
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
-import scala.collection.mutable.ListBuffer
 
 case class TLCCacheTestParams
 (
@@ -131,11 +126,11 @@ trait RandomSampleUtil {
   }
 
   final def sample[A](dist: Map[A, Double], r: scala.util.Random): A = {
-    val p = r.nextDouble
+    val p = r.nextDouble()
     val it = dist.iterator
     var accum = 0.0
     while (it.hasNext) {
-      val (item, itemProb) = it.next
+      val (item, itemProb) = it.next()
       accum += itemProb
       if (accum >= p)
         return item // return so that we don't have to search through the whole distribution
@@ -186,7 +181,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         // LineCoverageAnnotation,
         // ToggleCoverageAnnotation,
         VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
-        RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
+      )) { c =>
         c.io.mastersIO.foreach { mio =>
           mio.AChannel.initSource().setSourceClock(c.clock)
           mio.CChannel.initSource().setSourceClock(c.clock)

@@ -152,7 +152,7 @@ class ICacheMetaWriteBundle extends ICacheBundle
   val phyTag = UInt(tagBits.W)
   val waymask = UInt(nWays.W)
 
-  def apply(tag:UInt, idx:UInt, waymask:UInt){
+  def apply(tag:UInt, idx:UInt, waymask:UInt) = {
     this.virIdx := idx
     this.phyTag := tag
     this.waymask := waymask
@@ -166,7 +166,7 @@ class ICacheDataWriteBundle extends ICacheBundle
   val data = UInt(blockBits.W)
   val waymask = UInt(nWays.W)
 
-  def apply(data:UInt, idx:UInt, waymask:UInt){
+  def apply(data:UInt, idx:UInt, waymask:UInt) = {
     this.virIdx := idx
     this.data := data
     this.waymask := waymask
@@ -694,7 +694,7 @@ class ICache extends ICacheModule
     XSDebug(fromMMMIO.fire,"[mmio_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMMMIO.valid,fromMMMIO.ready,fromMMMIO.bits.data,fromMMMIO.bits.id)
   }
 
-  def dump_pipe_info(){
+  def dump_pipe_info() = {
     dump_s1_info()
     dump_s2_info()
     dump_s3_info()

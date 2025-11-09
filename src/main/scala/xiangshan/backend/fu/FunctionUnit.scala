@@ -165,7 +165,7 @@ object FunctionUnit extends HasXSParameter {
   }
 
   val aluCfg = FuConfig(
-    fuGen = alu _,
+    fuGen = () => alu,
     fuSel = _ => true.B,
     fuType = FuType.alu,
     numIntSrc = 2,
@@ -176,7 +176,7 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val jmpCfg = FuConfig(
-    fuGen = jmp _,
+    fuGen = () => jmp,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp,
     fuType = FuType.jmp,
     numIntSrc = 1,
@@ -187,14 +187,14 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val fenceCfg = FuConfig(
-    fuGen = fence _,
+    fuGen = () => fence,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency() // TODO: need rewrite latency structure, not just this value
   )
 
   val csrCfg = FuConfig(
-    fuGen = csr _,
+    fuGen = () => csr,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr,
     fuType = FuType.csr,
     numIntSrc = 1,
@@ -205,7 +205,7 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val i2fCfg = FuConfig(
-    fuGen = i2f _,
+    fuGen = () => i2f,
     fuSel = i2fSel,
     FuType.i2f,
     numIntSrc = 1,
@@ -217,7 +217,7 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val divCfg = FuConfig(
-    fuGen = divider _,
+    fuGen = () => divider,
     fuSel = (x: FunctionUnit) => MDUOpType.isDiv(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.div,
     2,
@@ -229,7 +229,7 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val mulCfg = FuConfig(
-    fuGen = multiplier _,
+    fuGen = () => multiplier,
     fuSel = (x: FunctionUnit) => MDUOpType.isMul(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.mul,
     2,
@@ -241,25 +241,25 @@ object FunctionUnit extends HasXSParameter {
   )
 
   val fmacCfg = FuConfig(
-    fuGen = fmac _,
+    fuGen = () => fmac,
     fuSel = _ => true.B,
     FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
   )
 
   val f2iCfg = FuConfig(
-    fuGen = f2i _,
+    fuGen = () => f2i,
     fuSel = f2iSel,
     FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
   )
 
   val f2fCfg = FuConfig(
-    fuGen = f2f _,
+    fuGen = () => f2f,
     fuSel = f2fSel,
     FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
   )
 
   val fdivSqrtCfg = FuConfig(
-    fuGen = fdivSqrt _,
+    fuGen = () => fdivSqrt,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
   )

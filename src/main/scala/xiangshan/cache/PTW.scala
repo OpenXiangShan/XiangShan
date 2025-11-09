@@ -178,7 +178,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(pteBundle).ppn
     perm.map(_ := pte.asTypeOf(pteBundle).perm)
@@ -310,14 +310,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   arb.io.in <> VecInit(io.tlb.map(_.req))
   val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire)
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire)
-  val resp  = VecInit(io.tlb.map(_.resp))
+  val resp  = io.tlb.map(_.resp)
   val vpn = req.vpn
   val sfence = RegNext(io.sfence)
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
 
-  val valid = ValidHold(arb.io.out.fire, resp(arbChosen).fire, sfence.valid)
+  val valid = ValidHold(arb.io.out.fire, VecInit(resp.map(_.fire))(arbChosen), sfence.valid)
   val validOneCycle = OneCycleValid(arb.io.out.fire, sfence.valid)
   arb.io.out.ready := !valid// || resp(arbChosen).fire
 

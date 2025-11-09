@@ -17,10 +17,8 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import utils.SignExt
-import xiangshan.XSModule
 import xiangshan.backend.fu.util.CSA3_2
 
 /** A Radix-4 SRT Integer Divider
@@ -170,7 +168,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   neg_dx2 := neg_d << 1
 
   val q_sel = Wire(UInt(3.W))
-  val wc_adj = MuxLookup(q_sel, 0.U(2.W), Seq(
+  val wc_adj = MuxLookup(q_sel, 0.U(2.W))(Seq(
     sel_d -> 1.U(2.W),
     sel_dx2 -> 2.U(2.W)
   ))
@@ -196,7 +194,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
       if (!ge.contains(k)) ge = ge + (k -> (w_truncated >= k.S(7.W)))
     }
   }
-  q_sel := MuxLookup(d_truncated, sel_0,
+  q_sel := MuxLookup(d_truncated, sel_0)(
     qSelTable.map(x =>
       MuxCase(sel_neg_dx2, Seq(
         ge(x(0)) -> sel_dx2,
@@ -214,7 +212,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val csa = Module(new CSA3_2(wLen))
   csa.io.in(0) := ws
   csa.io.in(1) := Cat(wc(wLen - 1, 2), wc_adj)
-  csa.io.in(2) := MuxLookup(q_sel, 0.U, Seq(
+  csa.io.in(2) := MuxLookup(q_sel, 0.U)(Seq(
     sel_d -> neg_d,
     sel_dx2 -> neg_dx2,
     sel_neg_d -> d,
@@ -236,7 +234,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
       sel_neg_d -> (qm, 3),
       sel_neg_dx2 -> (qm, 2)
     )
-    q := MuxLookup(q_sel, 0.U,
+    q := MuxLookup(q_sel, 0.U)(
       qMap.map(m => m._1 -> Cat(m._2._1(len - 3, 0), m._2._2.U(2.W)))
     )
     val qmMap = Seq(
@@ -246,7 +244,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
       sel_neg_d -> (qm, 2),
       sel_neg_dx2 -> (qm, 1)
     )
-    qm := MuxLookup(q_sel, 0.U,
+    qm := MuxLookup(q_sel, 0.U)(
       qmMap.map(m => m._1 -> Cat(m._2._1(len - 3, 0), m._2._2.U(2.W)))
     )
   }.elsewhen(state === s_recovery_1) {

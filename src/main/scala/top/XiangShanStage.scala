@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -16,101 +17,46 @@
 
 package top
 
-import chisel3.stage.ChiselCli
-import firrtl.AnnotationSeq
-import firrtl.annotations.NoTargetAnnotation
-import firrtl.options.{HasShellOptions, Shell, ShellOption}
-import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
-import xstransforms.ShowPrintTransform
-import xstransforms.PrintModuleName
+import chisel3.stage._
+import xiangshan.transforms._
+import circt.stage.CLI
+import circt.stage.ChiselStage
 
-case class DisablePrintfAnnotation(m: String) extends NoTargetAnnotation
+@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
+class XiangShanStage extends ChiselStage {
 
-object DisablePrintfAnnotation extends HasShellOptions{
+  override val shell = new firrtl.options.Shell("xiangshan") with CLI with XiangShanCli {
+    // These are added by firrtl.options.Shell (which we must extend because we are a Stage)
+    override protected def includeLoggerOptions = false
+  }
 
-  val options = Seq(
-    new ShellOption[String](
-      longOption = "disable-module-print",
-      toAnnotationSeq = s => Seq(DisablePrintfAnnotation(s)),
-      helpText =
-        "The verilog 'printf' in the <module> and it's submodules will be removed\n",
-      shortOption = Some("dm"),
-      helpValueName = Some("<module>")
-    )
-  )
+  trait XiangShanCli { this: firrtl.options.Shell =>
+    parser.note("XiangShan Options")
+    DisablePrintfAnnotation.addOptions(parser)
+    EnablePrintfAnnotation.addOptions(parser)
+    DisableAllPrintAnnotation.addOptions(parser)
+  }
 
-}
+  override def run(annotations: firrtl.AnnotationSeq): firrtl.AnnotationSeq = {
 
-case class EnablePrintfAnnotation(m: String) extends NoTargetAnnotation
-
-object EnablePrintfAnnotation extends HasShellOptions {
-  val options = Seq(
-    new ShellOption[String](
-      longOption = "enable-module-print",
-      toAnnotationSeq = s => Seq(EnablePrintfAnnotation(s)),
-      helpText =
-        "The verilog 'printf' except the <module> and it's submodules will be removed\n",
-      shortOption = Some("em"),
-      helpValueName = Some("<module>")
-    )
-  )
-
-}
-
-case class DisableAllPrintAnnotation() extends NoTargetAnnotation
-
-object DisableAllPrintAnnotation extends HasShellOptions {
-  val options = Seq(
-    new ShellOption[Unit](
-      longOption = "disable-all",
-      toAnnotationSeq = _ => Seq(DisableAllPrintAnnotation()),
-      helpText =
-        "All the verilog 'printf' will be removed\n",
-      shortOption = Some("dall")
-    )
-  )
-}
-
-case class RemoveAssertAnnotation() extends NoTargetAnnotation
-
-object RemoveAssertAnnotation extends HasShellOptions{
-  val options = Seq(
-    new ShellOption[Unit](
-      longOption = "remove-assert",
-      toAnnotationSeq = _ => Seq(RemoveAssertAnnotation()),
-      helpText = "All the 'assert' will be removed\n",
-      shortOption = None
-    )
-  )
-}
-
-trait XiangShanCli { this: Shell =>
-  parser.note("XiangShan Options")
-  DisablePrintfAnnotation.addOptions(parser)
-  EnablePrintfAnnotation.addOptions(parser)
-  DisableAllPrintAnnotation.addOptions(parser)
-  RemoveAssertAnnotation.addOptions(parser)
-}
-
-class XiangShanStage extends chisel3.stage.ChiselStage {
-  override val shell: Shell = new Shell("xiangshan")
-    with XiangShanCli
-    with ChiselCli
-    with FirrtlCli
-}
-
-object XiangShanStage {
-  def execute
-  (
-    args: Array[String],
-    annotations: AnnotationSeq
-  ): AnnotationSeq = {
-    (new XiangShanStage).execute(
-      args,
-      annotations ++ Seq(
-        RunFirrtlTransformAnnotation(new ShowPrintTransform),
-        RunFirrtlTransformAnnotation(new PrintModuleName),
+    val pm = new firrtl.options.PhaseManager(
+      targets = Seq(
+        firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputFile],
+        firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputAnnotationFile],
+        firrtl.options.Dependency[chisel3.stage.phases.AddSerializationAnnotations],
+        firrtl.options.Dependency[chisel3.stage.phases.Convert],
+        firrtl.options.Dependency[xiangshan.transforms.PrintModuleName],
+        firrtl.options.Dependency[xiangshan.transforms.PrintControl],
+        firrtl.options.Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
+        firrtl.options.Dependency[circt.stage.phases.AddImplicitOutputFile],
+        firrtl.options.Dependency[circt.stage.phases.CIRCT]
+      ),
+      currentState = Seq(
+        firrtl.options.Dependency[firrtl.stage.phases.AddDefaults],
+        firrtl.options.Dependency[firrtl.stage.phases.Checks]
       )
     )
+    pm.transform(annotations)
   }
+
 }

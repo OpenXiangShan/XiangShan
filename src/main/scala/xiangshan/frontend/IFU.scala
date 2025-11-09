@@ -68,7 +68,6 @@ class GlobalHistory extends XSBundle {
 
   final def =/= (that: GlobalHistory): Bool = !(this === that)
 
-  implicit val name = "IFU"
   def debug(where: String) = XSDebug(p"[${where}_GlobalHistory] hist=${Binary(predHist)}\n")
   // override def toString(): String = "histPtr=%d, sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d".format(histPtr, sawNTBr, takenOnBr, saveHalfRVI)
 }

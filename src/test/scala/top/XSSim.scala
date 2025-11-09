@@ -16,23 +16,17 @@
 
 package top
 
-import system._
 import chisel3._
-import chisel3.util._
-import org.chipsalliance.cde.config
-import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4IdIndexer, AXI4IdentityNode, AXI4UserYanker, AXI4Xbar}
-import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.TLToAXI4
-import xiangshan._
+import difftest.{DifftestModule, DifftestTopIO, HasDiffTestInterfaces, UARTIO}
+import freechips.rocketchip.amba.axi4.{AXI4IdIndexer, AXI4Xbar}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
+import org.chipsalliance.cde.config
+import system._
 import utils._
-import ExcitingUtils.Debug
-import difftest.DifftestModule
-import org.chipsalliance.cde.config.Config
-import freechips.rocketchip.tile.XLen
+import xiangshan._
 
-class SimTop()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
+class XSSim()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
   // address space[0G - 1024G)
   val fullRange = AddressSet(0x0L, 0xffffffffffL)
   // MMIO address space[0G - 2G)
@@ -70,31 +64,38 @@ class SimTop()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   axiMMIO.axiBus := soc.extDev
 
   lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) {
+  class Impl extends LazyModuleImp(this) with HasDiffTestInterfaces {
     val NumCores = top.Parameters.get.socParameters.NumCores
     soc.module.io.extIntrs := 0.U
 
-    val difftest = DifftestModule.finish("XiangShan")
+    val uart = IO(new UARTIO)
+    uart <> axiMMIO.module.io.uart
 
-    difftest.uart <> axiMMIO.module.io.uart
-
-    if (env.EnableDebug || env.EnablePerfDebug) {
-      val timer = GTimer()
-      val logEnable = (timer >= difftest.logCtrl.begin) && (timer < difftest.logCtrl.end)
-      ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-      ExcitingUtils.addSource(timer, "logTimestamp")
-    }
-
-    if (env.EnablePerfDebug) {
-      val clean = difftest.perfCtrl.clean
-      val dump = difftest.perfCtrl.dump
-      ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
-      ExcitingUtils.addSource(dump, "XSPERF_DUMP")
-    }
-
-    // Check and dispaly all source and sink connections
+    // Check and display all source and sink connections
     ExcitingUtils.fixConnections()
     ExcitingUtils.checkAndDisplay()
+
+    override def cpuName: Option[String] = Some("XiangShan")
+
+    override def connectTopIOs(difftest: DifftestTopIO): Seq[Data] = {
+      difftest.uart <> uart
+
+      // if (env.EnableDebug || env.EnablePerfDebug) {
+      //   val timer = GTimer()
+      //   val logEnable = WireInit((timer >= difftest.logCtrl.begin) && (timer < difftest.logCtrl.end))
+      //   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+      //   ExcitingUtils.addSource(timer, "logTimestamp")
+      // }
+
+      // if (env.EnablePerfDebug) {
+      //   val clean = WireInit(difftest.perfCtrl.clean)
+      //   val dump = WireInit(difftest.perfCtrl.dump)
+      //   ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
+      //   ExcitingUtils.addSource(dump, "XSPERF_DUMP")
+      // }
+
+      Seq.empty
+    }
   }
 }
 
@@ -115,14 +116,12 @@ object TestMain extends App {
   )
 
   val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")
-  implicit val p = new Config((_, _, _) => {
-    case XLen => 64
-  })
-  // generate verilog
-  XiangShanStage.execute(
-    otherArgs,
-    Seq(
-      ChiselGeneratorAnnotation(() => LazyModule(new SimTop()).module)
-    )
+
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(otherArgs)
+
+  Generator.execute(
+    firrtlOpts,
+    DifftestModule.top(LazyModule(new XSSim()(config)).module),
+    firtoolOpts
   )
 }
