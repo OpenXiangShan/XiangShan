@@ -21,30 +21,22 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.SaturateCounter
 
 class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
-  val taken:       Bool                 = Bool()
-  val cfiPosition: UInt                 = UInt(CfiPositionWidth.W)
-  val meta:        Valid[MicroTageMeta] = Valid(new MicroTageMeta)
+  val taken:       Bool = Bool()
+  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
 }
+
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
-  val histTableHitMap:     Vec[Bool]       = Vec(NumTables, Bool())
-  val histTableUsefulMask: UInt            = UInt(NumTables.W)
-  val histTableTakenMap:   Vec[Bool]       = Vec(NumTables, Bool())
-  val histTableHit:        Bool            = Bool()
-  val taken:               Bool            = Bool()
-  val hitTakenCtr:         SaturateCounter = new SaturateCounter(TakenCtrWidth)
-  val hitUseful:           SaturateCounter = new SaturateCounter(UsefulWidth)
-  val cfiPosition:         UInt            = UInt(CfiPositionWidth.W)
+  val histTableHitMap:         Vec[Bool] = Vec(NumTables, Bool())
+  val histTableTakenMap:       Vec[Bool] = Vec(NumTables, Bool())
+  val histTableUsefulVec:      Vec[UInt] = Vec(NumTables, UInt(UsefulWidth.W))
+  val histTableCfiPositionVec: Vec[UInt] = Vec(NumTables, UInt(CfiPositionWidth.W))
+  val baseTaken:               Bool      = Bool()
+  val baseCfiPosition:         UInt      = UInt(CfiPositionWidth.W)
 
-  val testPredIdx0: UInt = UInt(TestPredIdx0Width.W)
-  val testPredTag0: UInt = UInt(TestPredTag0Width.W)
-  val testPredIdx1: UInt = UInt(TestPredIdx1Width.W)
-  val testPredTag1: UInt = UInt(TestPredTag1Width.W)
-  // val testPredIdx2:      UInt = UInt(TestPredIdx2Width.W)
-  // val testPredTag2:      UInt = UInt(TestPredTag2Width.W)
+  // only for test and debug
+  val testPredIdx0:      UInt = UInt(TestPredIdx0Width.W)
+  val testPredTag0:      UInt = UInt(TestPredTag0Width.W)
+  val testPredIdx1:      UInt = UInt(TestPredIdx1Width.W)
+  val testPredTag1:      UInt = UInt(TestPredTag1Width.W)
   val testPredStartAddr: UInt = UInt(VAddrBits.W)
-//  val testFoldedPathHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
-
-  // val pred_s0_idx: UInt      = UInt(7.W)
-  // val pred_s0_Tag: UInt      = UInt(4.W)
-  // val pred_s0_startAddr: UInt = UInt(VAddrBits.W)
 }
