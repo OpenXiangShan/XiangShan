@@ -61,6 +61,10 @@ class SaturateCounter(width: Int) extends Bundle {
   def resetPositive(): Unit =
     value := ((1 << width) - 1).U
 
+  def getWeakPositive(): UInt = (1 << (width - 1)).U
+
+  def getWeakNegative(): UInt = ((1 << (width - 1)) - 1).U
+
   // for TAGE taken ctr
   def isWeak: Bool = {
     require(width >= 2)
