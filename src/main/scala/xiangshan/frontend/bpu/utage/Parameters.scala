@@ -21,25 +21,24 @@ import xiangshan.frontend.bpu.MicroTageInfo
 import xiangshan.frontend.bpu.TageTableInfo
 
 case class MicroTageParameters(
+    // TODO: The length of the Tag and its alias status will need to be adjusted later. The same applies to the number of items.
     TableInfos: Seq[MicroTageInfo] = Seq(
       new MicroTageInfo(512, 6, 6, 15),
       // new MicroTageInfo(64, 16, 8, 18),
-      new MicroTageInfo(512, 24, 10, 20)
+      new MicroTageInfo(512, 12, 6, 15)
       // new MicroTageInfo(128, 32, 16, 24)
     ),
     TakenCtrWidth: Int = 3,
-    TagWidth:      Int = 13,
     NumTables:     Int = 2,
-    TickWidth:     Int = 7,
+    TickWidth:     Int = 5,
     UsefulWidth:   Int = 2,
-    BaseTableSize: Int = 512
+    BaseTableSize: Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
 trait HasMicroTageParameters extends HasBpuParameters {
-  val utageParameters: MicroTageParameters = MicroTageParameters()
+  val utageParameters: MicroTageParameters = bpuParameters.utageParameters
   def TableInfos:      Seq[MicroTageInfo]  = utageParameters.TableInfos
   def TakenCtrWidth:   Int                 = utageParameters.TakenCtrWidth
-  def TagWidth:        Int                 = utageParameters.TagWidth
   def NumTables:       Int                 = utageParameters.NumTables
   def TickWidth:       Int                 = utageParameters.TickWidth
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
@@ -49,11 +48,10 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def TestPredTag0Width: Int = TableInfos(0).TagWidth
   def TestPredIdx1Width: Int = log2Ceil(TableInfos(1).NumSets)
   def TestPredTag1Width: Int = TableInfos(1).TagWidth
-  // def TestPredIdx2Width: Int      = log2Ceil(TableInfos(2).NumSets)
-  // def TestPredTag2Width: Int      = TableInfos(2).TagWidth
-  // abtb can only be fast-trained, we don't have continous predict block on resolve
-  def EnableFastTrain: Boolean = false
+  // utage can only be fast-trained, we don't have continous predict block on resolve
+  def EnableFastTrain: Boolean = true
 
+  // Hash PC into tag to reduce aliasing (at cost of capacity).
   def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)
   def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(16, 15, 13, 11, 10, 8, 6, 4, 2, 1)
   def PCTagHashXorPairsForLongHistory: Seq[(Int, Int)] = Seq(
