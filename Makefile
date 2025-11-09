@@ -70,7 +70,7 @@ TIME_CMD = time -a -o $(TIMELOG)
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i XiangShan.test.runMain top.TopMain --help
+	mill -i xiangshan.test.runMain top.XiangShanSim --help
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
