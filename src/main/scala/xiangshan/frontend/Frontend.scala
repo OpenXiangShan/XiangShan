@@ -222,19 +222,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new PrunedAddr(VAddrBits)))
-  when(ftq.io.toBackend.wen) {
-    checkPcMem(ftq.io.toBackend.ftqIdx) := ftq.io.toBackend.startVAddr
-  }
-
-  val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
-  val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
-
-  for (i <- 0 until DecodeWidth) {
-    checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
-    checkTarget(i)    := checkPcMem((checkTargetPtr(i) + 1.U).value)
-  }
-
   ibuffer.io.flush                := needFlush
   ibuffer.io.ControlRedirect      := FlushControlRedirect
   ibuffer.io.MemVioRedirect       := FlushMemVioRedirect

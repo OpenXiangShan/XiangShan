@@ -39,6 +39,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
+import xiangshan.frontend.bpu.BranchAttribute
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
@@ -48,6 +49,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 
   val commit = Valid(new FtqPtr)
+  val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
