@@ -46,6 +46,7 @@ import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.ras.RasMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
@@ -102,10 +103,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
 
   // metaQueue stores information needed to train BPU.
-  private val metaQueue = Reg(Vec(FtqSize, new BpuMeta))
+  private val metaQueueResolve = Reg(Vec(FtqSize, new BpuMeta))
+  private val metaQueueCommit  = Reg(Vec(FtqSize, new RasMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
+
+  // commitQueue caches branch commit information from backend.
+  private val commitQueue = Module(new CommitQueue)
 
   private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect.bits.ftqIdx.value).topRetAddr.toUInt
   private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
@@ -179,8 +184,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
 
   when(io.fromBpu.meta.valid) {
-    metaQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
+    metaQueueResolve(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
   }
+
+  metaQueueCommit(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits.ras
 
   resolveQueue.io.bpuEnqueue    := bpuEnqueue
   resolveQueue.io.bpuEnqueuePtr := predictionPtr
@@ -312,13 +319,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toBpu.train.valid           := resolveQueue.io.bpuTrain.valid
   resolveQueue.io.bpuTrain.ready := io.toBpu.train.ready
-  io.toBpu.train.bits.meta       := metaQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
+  io.toBpu.train.bits.meta       := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
   io.toBpu.train.bits.startVAddr := resolveQueue.io.bpuTrain.bits.startVAddr
   io.toBpu.train.bits.branches   := resolveQueue.io.bpuTrain.bits.branches
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
+
   // Backend may send commit for on entry multiple times, but the entry is actually committed when it is committed for
   // the first time. The rest of the commits can be ignored.
   private val robCommitPtr = DataHoldBypass(
@@ -330,7 +338,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
-  io.toBpu.commit := DontCare
+
+  commitQueue.io.backendCommit := io.fromBackend.callRetCommit
+
+  io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
+  io.toBpu.commit.bits.rasMeta              := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
+  io.toBpu.commit.bits.attribute.branchType := DontCare
+  io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
 
   // --------------------------------------------------------------------------------
   // MMIO fetch
@@ -359,7 +373,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     PrunedAddrInit(redirect.bits.pc),
     redirect.bits.ftqOffset
   )._1
-  private val debugMeta = metaQueue(backendRedirectFtqIdx.bits.value).debug
+  private val debugMeta = metaQueueResolve(backendRedirectFtqIdx.bits.value).debug
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTaken",
