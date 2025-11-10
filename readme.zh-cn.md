@@ -96,6 +96,10 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
+## 在FPGA开发板上运行
+
+若要在FPGA开发板上运行香山Nanhu-G核心，请参考NEXST[NEXST](https://github.com/NEXST-TOOL/nexst)项目。
+
 ## 错误排除指南
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
