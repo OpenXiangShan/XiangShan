@@ -74,12 +74,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_valid = RegInit(false.B)
 
   private val predictReqValid = io.stageCtrl.s0_fire
+  private val predictionSent  = io.stageCtrl.s1_fire
   private val redirectValid   = io.redirectValid
   private val overrideValid   = io.overrideValid
 
   s0_fire := io.enable && predictReqValid
   s1_fire := io.enable && s1_valid && s2_ready && predictReqValid
-  s2_fire := io.enable && s2_valid
+  s2_fire := io.enable && s2_valid && predictionSent
 
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
