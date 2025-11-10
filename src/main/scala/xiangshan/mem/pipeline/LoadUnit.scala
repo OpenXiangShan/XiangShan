@@ -1322,7 +1322,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     s2_troublem
 
   // need allocate new entry
-  val s2_can_query = !(s2_dcache_fast_rep || s2_nuke) && s2_troublem
+  val s2_dcache_no_query = !s2_dcache_miss && (s2_bank_conflict || s2_wpu_pred_fail)
+  val s2_can_query = !(s2_dcache_no_query || s2_in.rep_info.nuke) && s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && s2_full_fwd
 
@@ -1602,7 +1603,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s3_misalign_rep_cause := VecInit(s3_mab_sel_rep_cause.asBools)
 
-  when (s3_exception || s3_hw_err || s3_rep_frm_fetch || s3_frm_mabuf) {
+  when (s3_rep_frm_fetch || s3_frm_mabuf) {
     s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
   } .otherwise {
     s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
@@ -1973,6 +1974,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     ("load_s1_tlb_miss        ", s1_fire && io.tlb.resp.bits.miss                               ),
     ("load_s2_in_fire         ", s1_fire                                                        ),
     ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
+    ("l1D_load_hw_prf_access  ", s2_fire && s2_hw_prf                                           ),// Only hw prf
+    ("l1D_load_hw_prf_miss    ", s2_fire && s2_hw_prf && io.dcache.resp.bits.miss               ) // Only hw prf
   )
   generatePerfEvent()
 

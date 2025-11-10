@@ -417,6 +417,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
   val s2_resp_data  = s2_data128bit
 
+  val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
@@ -657,6 +658,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     ("load_replay_for_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data          ),
     ("load_replay_for_no_mshr  ", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr       ),
     ("load_replay_for_conflict ", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow ),
+    ("l1D_read_dcache_access   ", io.lsu.resp.fire && !s2_is_prefetch                           ),
+    ("l1D_read_dcache_miss     ", io.lsu.resp.fire && !s2_is_prefetch && real_miss              )
   )
   generatePerfEvent()
 }
