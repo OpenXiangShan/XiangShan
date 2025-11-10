@@ -28,6 +28,7 @@ MILL_ARGS += --config $(CONFIG) --num-cores $(NUM_CORES)
 CHISEL_TARGET ?= systemverilog
 MILL_ARGS += --target $(CHISEL_TARGET)
 MILL_ARGS += --firtool-opt "-O=release --disable-annotation-unknown"
+MILL_ARGS += --firtool-opt "--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 ifeq ($(CHISEL_TARGET),systemverilog)
 MILL_ARGS += --split-verilog
 endif
