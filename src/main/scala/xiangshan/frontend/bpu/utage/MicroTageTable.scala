@@ -133,6 +133,12 @@ class MicroTageTable(
     oldTakenCtr.getNeutral,
     oldTakenCtr.getUpdate(io.update.bits.taken)
   )
+
+  // updateEntry.takenCtr.value := Mux(
+  // io.update.bits.alloc,
+  // Mux(io.update.bits.allocTaken, oldTakenCtr.getWeakPositive, oldTakenCtr.getWeakNegative), //oldTakenCtr.getNeutral,
+  // oldTakenCtr.getUpdate(io.update.bits.taken)
+  // )
   updateEntry.cfiPosition := io.update.bits.cfiPosition
   updateEntry.useful.value := Mux(
     io.update.bits.alloc,

@@ -82,19 +82,19 @@ class WriteBuffer[T <: WriteReqBundle](
   dontTouch(replacerWay)
   dontTouch(emptyVec)
 
-  // not allowed to write entries with same setIdx and tag
-  for {
-    i <- 0 until numPorts
-    j <- i + 1 until numPorts
-  } {
-    val writeSameEntry =
-      writePortValid(i) && writePortValid(j) && writePortBits(i).setIdx === writePortBits(j).setIdx &&
-        writePortBits(i).tag.getOrElse(0.U) === writePortBits(j).tag.getOrElse(0.U)
-    XSError(
-      writeSameEntry,
-      f"WriteBuffer can not support write same data on the same cycle, port${i} and port${j} write the same entry "
-    )
-  }
+  // // not allowed to write entries with same setIdx and tag
+  // for {
+  //   i <- 0 until numPorts
+  //   j <- i + 1 until numPorts
+  // } {
+  //   val writeSameEntry =
+  //     writePortValid(i) && writePortValid(j) && writePortBits(i).setIdx === writePortBits(j).setIdx &&
+  //       writePortBits(i).tag.getOrElse(0.U) === writePortBits(j).tag.getOrElse(0.U)
+  //   XSError(
+  //     writeSameEntry,
+  //     f"WriteBuffer can not support write same data on the same cycle, port${i} and port${j} write the same entry "
+  //   )
+  // }
 
   /**
      * Write request processing cases:

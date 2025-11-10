@@ -217,7 +217,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.testPredTag0 === trainTag0))
   XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.testPredIdx0 =/= trainIdx0))
   XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.testPredTag0 =/= trainTag0))
-
+  XSPerfAccumulate("train_needAlloc", t0_trainValid && t0_histTableNeedAlloc)
+  XSPerfAccumulate("train_needUpdate", t0_trainValid && t0_histTableNeedUpdate)
+  XSPerfAccumulate("train_histHitMisPred", t0_trainValid && t0_histHitMisPred)
   // t0_trainValid := trainNext.valid && (t1_trainMeta.testPredIdx0 === trainIdx0) && (t1_trainMeta.testPredTag0 === trainTag0) &&
   //   (t1_trainMeta.testPredIdx1 === trainIdx1) && (t1_trainMeta.testPredTag1 === trainTag1)
 }
