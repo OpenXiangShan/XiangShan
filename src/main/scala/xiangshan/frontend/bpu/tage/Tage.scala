@@ -85,7 +85,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   baseTable.io.readReqValid := s0_fire
-  baseTable.io.startPc      := s0_startVAddr
+  baseTable.io.startVAddr   := s0_startVAddr
 
   // to stall resolveQueue when bank conflict
   io.readBankIdx := s0_bankIdx
