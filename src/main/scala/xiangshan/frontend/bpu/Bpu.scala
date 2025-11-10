@@ -207,7 +207,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.commit.valid            := commitUpdate.valid
   ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
   ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
-  ras.io.commit.bits.pushAddr    := commitUpdate.bits.pushAddr
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
   ras.io.specIn.bits.isRvc       := false.B
