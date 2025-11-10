@@ -160,38 +160,33 @@ trait ICacheAddrHelper extends HasICacheParameters {
 
 trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper with ICacheAddrHelper {
   def updateMetaInfo(
-      update:      Valid[MissRespBundle],
-      waymask:     UInt,
-      vSetIdx:     UInt,
-      pTag:        UInt,
-      maybeRvcMap: UInt,
-      code:        UInt
-  ): (Bool, UInt, UInt, UInt) = {
-    require(waymask.getWidth == nWays)
-    val newMask        = WireInit(waymask)
-    val newMaybeRvcMap = WireInit(maybeRvcMap)
-    val newCode        = WireInit(code)
-    val valid          = update.valid && !update.bits.corrupt
-    val vSetSame       = update.bits.vSetIdx === vSetIdx
-    val pTagSame       = getPTagFromBlk(update.bits.blkPAddr) === pTag
-    val waySame        = update.bits.waymask === waymask
+      update:  Valid[MissRespBundle],
+      vSetIdx: UInt,
+      pTag:    UInt,
+      info:    MetaInfo
+  ): (Bool, MetaInfo) = {
+    val newInfo  = WireInit(info)
+    val valid    = update.valid && !update.bits.corrupt
+    val vSetSame = update.bits.vSetIdx === vSetIdx
+    val pTagSame = getPTagFromBlk(update.bits.blkPAddr) === pTag
+    val waySame  = update.bits.waymask === info.waymask
     when(valid && vSetSame) {
       when(pTagSame) {
         // vSetIdx & pTag match => update has newer data
-        newMask := update.bits.waymask
+        newInfo.waymask := update.bits.waymask
         // also update maybeRvcMap and ecc code
-        newMaybeRvcMap := update.bits.maybeRvcMap
+        newInfo.maybeRvcMap := update.bits.maybeRvcMap
         // we have getPhyTagFromBlk(fromMSHR.bits.blkPAddr) === pTag, so we can use pTag directly for better timing
-        newCode := encodeMetaEccByPort(ICacheMetadata(pTag, update.bits.maybeRvcMap))
+        newInfo.metaCodes := encodeMetaEccByPort(ICacheMetadata(pTag, update.bits.maybeRvcMap))
       }.elsewhen(waySame) {
         // vSetIdx & way match, but pTag not match => older hit data has been replaced, treat as a miss
-        newMask := 0.U
+        newInfo.waymask := 0.U
         // we don't care about maybeRvcMap/code, since it's not used for a missed request
       }
       // otherwise is an irrelevant update, ignore it
     }
     val updated = valid && vSetSame && (pTagSame || waySame)
-    (updated, newMask, newMaybeRvcMap, newCode)
+    (updated, newInfo)
   }
 
   def checkMshrHit(

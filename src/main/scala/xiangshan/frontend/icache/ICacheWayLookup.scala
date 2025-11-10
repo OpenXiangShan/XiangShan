@@ -105,18 +105,14 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   /* *** update *** */
   private val entryUpdate = VecInit(entries.map { entry =>
     (0 until PortNumber).map { i =>
-      val (updated, newMask, newMaybeRvcMap, newCode) = updateMetaInfo(
+      val (updated, newInfo) = updateMetaInfo(
         io.update,
-        entry.waymask(i),
         entry.vSetIdx(i),
         entry.pTag,
-        entry.maybeRvcMap(i),
-        entry.metaCodes(i)
+        entry.getMetaInfo(i)
       )
       when(updated) {
-        entry.waymask(i)     := newMask
-        entry.maybeRvcMap(i) := newMaybeRvcMap
-        entry.metaCodes(i)   := newCode
+        entry.updateMetaInfo(i, newInfo)
       }
       updated
     }.reduce(_ || _)
