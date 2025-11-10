@@ -98,7 +98,7 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 
 ## 在FPGA开发板上运行
 
-若要在FPGA开发板上运行香山Nanhu-G核心，请参考NEXST[NEXST](https://github.com/NEXST-TOOL/nexst)项目。
+若要在FPGA开发板上运行香山Nanhu-G核心，请参考[NEXST](https://github.com/NEXST-TOOL/nexst)项目。
 
 ## 错误排除指南
 
