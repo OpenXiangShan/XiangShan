@@ -109,7 +109,6 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
 
 class RasCommitInfo(implicit p: Parameters) extends RasBundle {
   val attribute: BranchAttribute = new BranchAttribute
-  val pushAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
   val meta:      RasMeta         = new RasMeta
 }
 
