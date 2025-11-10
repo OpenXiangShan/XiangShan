@@ -55,6 +55,12 @@ object ICacheMetadata {
   }
 }
 
+class MetaInfo(implicit p: Parameters) extends ICacheBundle {
+  val waymask:     UInt = UInt(nWays.W)
+  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+  val metaCodes:   UInt = UInt(MetaEccBits.W)
+}
+
 /* ***** Array write ***** */
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
@@ -239,6 +245,20 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
   val pTag:        UInt      = UInt(tagBits.W)
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+
+  def getMetaInfo(i: Int): MetaInfo = {
+    val info = Wire(new MetaInfo)
+    info.waymask     := waymask(i)
+    info.maybeRvcMap := maybeRvcMap(i)
+    info.metaCodes   := metaCodes(i)
+    info
+  }
+
+  def updateMetaInfo(i: Int, info: MetaInfo): Unit = {
+    waymask(i)     := info.waymask
+    maybeRvcMap(i) := info.maybeRvcMap
+    metaCodes(i)   := info.metaCodes
+  }
 }
 
 class WayLookupExceptionEntry(implicit p: Parameters) extends ICacheBundle {
