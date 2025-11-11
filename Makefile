@@ -294,18 +294,18 @@ clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf $(BUILD_DIR)
 
+GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
+
 # Initialize necessary submodules
 init:
-	git submodule update --init
-	cd rocket-chip && git submodule update --init cde hardfloat
-	cd openLLC && git submodule update --init openNCB
+	git submodule update --init $(GIT_FORCE_FLAG)
+	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
+	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
 init-force:
-	git submodule update --init --force
-	cd rocket-chip && git submodule update --init --force cde hardfloat
-	cd openLLC && git submodule update --init --force openNCB
+	$(MAKE) init GIT_FORCE_INIT=1
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
