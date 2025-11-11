@@ -3,19 +3,6 @@ package xiangshan.backend.decode.isa
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 
-object PseudoInstructions {
-  // no write csr
-  //                                    csr     | rs1 | funct3 |  rd | opcode
-  def CSRRS_RO           = BitPat("b????????????_00000____?10___?????_1110011")
-  def CSRRC_RO           = BitPat("b????????????_00000____?11___?????_1110011")
-
-  // no read csr
-  def CSRRW_WO           = BitPat("b????????????_xxxxx____?01___?????_1110011")
-
-  // imm of addi is all 0s
-  def MOV = BitPat("b000000000000_?????_000_?????_0010011")
-}
-
 object CSRReadOnlyBlockInstructions {
   def hexToPaddedBinary(hex: Int): String = {
     "b" + String.format("%12s", hex.toBinaryString).replace(' ', '0')
