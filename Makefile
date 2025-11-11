@@ -62,11 +62,11 @@ TIME_CMD = time -a -o $(TIMELOG)
 help:
 	mill -i xiangshan.test.runMain top.XiangShanSim --help
 
+TOP_V = $(RTL_DIR)/XSTop.sv
 $(TOP_V): $(SCALA_FILE)
 	@mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan.runMain top.TopMain \
-		--target-dir $(@D) --full-stacktrace --output-file $(@F)    \
-		--disable-all --remove-assert $(MILL_ARGS)
+		--disable-all $(MILL_ARGS)
 	@sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
