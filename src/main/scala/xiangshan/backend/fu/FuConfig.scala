@@ -145,7 +145,9 @@ case class FuConfig (
   // csr's redirect also uses redirect bundle
   def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def hasPredecode: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
+  def hasIsRVC: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
+
+  def hasRasAction: Boolean = Seq(FuType.jmp).contains(fuType)
 
   def needTargetPc: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 

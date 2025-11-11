@@ -42,7 +42,6 @@ import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 

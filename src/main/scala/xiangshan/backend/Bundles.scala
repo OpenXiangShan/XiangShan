@@ -8,7 +8,7 @@ import utils.BundleUtils.makeValid
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.DataSource
+import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
 import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
@@ -19,14 +19,16 @@ import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, Sched
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{IntPregParams, RfReadPortWithConfig, RfWritePortBundle}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.trace._
 import xiangshan.frontend._
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 import yunsuan.vector.VIFuParam
-import xiangshan.backend.trace._
+
 import utility._
-import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.backend.datapath.WakeUpConfig
+
 
 object Bundles {
   /**
@@ -58,7 +60,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val isRvc = Bool()
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
@@ -70,7 +72,7 @@ object Bundles {
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
-      this.isRvc := source.isRvc
+      this.isRVC := source.isRvc
       this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
@@ -87,7 +89,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val isRvc = Bool()
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
@@ -180,7 +182,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
@@ -254,7 +256,7 @@ object Bundles {
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -280,6 +282,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val numLsElem = NumLsElem()
+    val rasAction = BranchAttribute.RasAction()
     // for mdp
     val storeSetHit = Bool()
     val waitForRobIdx = new RobPtr
@@ -311,7 +314,7 @@ object Bundles {
     // TODO change these bundles to option bundles depend on issueBlockParam
     def numSrc = params.numSrc
     // from frontend
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Option.when(params.needIsRVC)(Bool())
     val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -337,6 +340,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
+    val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit = Bool()
     val waitForRobIdx = new RobPtr
@@ -358,7 +362,7 @@ object Bundles {
     def numSrc = params.numSrc
 
     // from frontend
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Option.when(params.needIsRVC)(Bool())
     val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -384,6 +388,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
+    val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit = Bool()
     val waitForRobIdx = new RobPtr
@@ -423,7 +428,7 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
-    val preDecodeInfo   = new PreDecodeInfo
+    val isRVC           = Bool()
     val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
@@ -469,6 +474,7 @@ object Bundles {
     val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
+    val rasAction       = BranchAttribute.RasAction()
     // reg cache
     val useRegCache     = Vec(backendParams.numIntRegSrc, Bool())
     val regCacheIdx     = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
@@ -889,8 +895,9 @@ object Bundles {
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
+    val rasAction     = if (params.hasRasAction)  Some(BranchAttribute.RasAction())   else None
     val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val preDecode     = if (params.hasPredecode || params.aluNeedPc)  Some(new PreDecodeInfo)             else None
+    val isRVC         = if (params.hasIsRVC || params.aluNeedPc)      Some(Bool())                        else None
     val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needPc || params.aluNeedPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
@@ -922,7 +929,7 @@ object Bundles {
 
     def getPcOffset() = {
       val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
-      val rvcOffset = Mux(this.preDecode.get.isRVC, 0.U, 2.U)
+      val rvcOffset = Mux(this.isRVC.get, 0.U, 2.U)
       val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
       thisPcOffset
     }
@@ -954,7 +961,8 @@ object Bundles {
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)
-      this.preDecode     .foreach(_ := source.common.preDecode.get)
+      this.isRVC         .foreach(_ := source.common.isRVC.get)
+      this.rasAction     .foreach(_ := source.common.rasAction.get)
       this.nextPcOffset  .foreach(_ := source.common.nextPcOffset.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
@@ -998,7 +1006,8 @@ object Bundles {
       uop.debugInfo      := this.perfDebugInfo
       uop.debug_seqNum   := this.debug_seqNum
       uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
-      uop.preDecodeInfo  := this.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
+      uop.isRVC          := this.isRVC.getOrElse(false.B)
+      uop.rasAction      := this.rasAction.getOrElse(0.U)
       uop.numLsElem      := this.numLsElem.getOrElse(0.U)
       uop
     }
@@ -1028,9 +1037,9 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())         else None
     // uop info
-    val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
+    val isRVC        = if(params.hasIsRVC)      Some(Bool())                  else None
     // vldu used only
     val vls = OptionWrapper(params.hasVLoadFu, new Bundle {
       val vpu = new VPUCtrlSignals
@@ -1272,7 +1281,7 @@ object Bundles {
       output.debug_seqNum := this.uop.debug_seqNum
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)
-      output.predecodeInfo.foreach(_ := this.uop.preDecodeInfo)
+      output.isRVC.foreach(_ := this.uop.isRVC)
       output.vls.foreach(x => {
         x.vdIdx := this.vdIdx.get
         x.vdIdxInField := this.vdIdxInField.get

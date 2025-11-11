@@ -347,7 +347,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := rollbackLqWb(i).valid
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := rollbackLqWb(i).bits.preDecodeInfo.isRVC
+    redirect.bits.isRVC       := rollbackLqWb(i).bits.isRVC
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
     redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset

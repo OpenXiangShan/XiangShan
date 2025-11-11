@@ -311,7 +311,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
-    uops(i).lastIsRVC := io.in(i).bits.isRvc
+    uops(i).lastIsRVC := io.in(i).bits.isRVC
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -358,7 +358,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).ftqOffset := uops(i - 1).ftqOffset
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
-        uops(i).preDecodeInfo.isRVC := uops(i - 1).preDecodeInfo.isRVC
+        uops(i).isRVC := uops(i - 1).isRVC
         uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
       }
     }
@@ -476,7 +476,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
    * trace begin
    */
   val inVec = io.in.map(_.bits)
-  val isRVCVec = inVec.map(_.isRvc)
+  val isRVCVec = inVec.map(_.isRVC)
   val nonRVCNumVec = (0 until RenameWidth).map{
     i => compressMasksVec(i).asBools.zip(isRVCVec).map{
       case (mask, isRVC) => (mask && !isRVC).asUInt
@@ -530,7 +530,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).traceBlockInPipe.itype := Mux(
         isXret,
         Itype.ExpIntReturn,
-        Itype.jumpTypeGen(inVec(i).fuType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf(new OpRegType))
+        Itype.jumpTypeGen(inVec(i).fuType, inVec(i).fuOpType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf(new OpRegType))
       )
     }
   }

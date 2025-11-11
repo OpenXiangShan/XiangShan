@@ -8,14 +8,13 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
-import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.{BranchInfo, BranchAttribute}
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -27,7 +26,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val v0Wen       = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
-  val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
+  val isRVC       = OptionWrapper(cfg.hasIsRVC, Bool())
+  val rasAction   = OptionWrapper(cfg.hasRasAction, BranchAttribute.RasAction())
   val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
   val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(FetchBlockInstOffsetWidth.W))
   val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
@@ -50,7 +50,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
-  val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
+  val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
   val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
@@ -127,7 +127,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.v0Wen .foreach(_ := RegEnable(io.in.bits.ctrl.v0Wen.get, io.in.fire))
     io.out.bits.ctrl.vlWen .foreach(_ := RegEnable(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
-    io.out.bits.ctrl.preDecode.foreach(_ := RegEnable(io.in.bits.ctrl.preDecode.get, io.in.fire))
+    io.out.bits.ctrl.isRVC.foreach(_ := RegEnable(io.in.bits.ctrl.isRVC.get, io.in.fire))
     io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
@@ -143,7 +143,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.v0Wen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.v0Wen.get, io.in.fire))
     io.out.bits.ctrl.vlWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
-    io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
+    io.out.bits.ctrl.isRVC.foreach(_ := DataHoldBypass(io.in.bits.ctrl.isRVC.get, io.in.fire))
     io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
@@ -159,7 +159,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.v0Wen.foreach(_ := io.in.bits.ctrl.v0Wen.get)
     io.out.bits.ctrl.vlWen.foreach(_ := io.in.bits.ctrl.vlWen.get)
     // io.out.bits.ctrl.flushPipe should be connected in fu
-    io.out.bits.ctrl.preDecode.foreach(_ := io.in.bits.ctrl.preDecode.get)
+    io.out.bits.ctrl.isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
     io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
     io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
     io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo

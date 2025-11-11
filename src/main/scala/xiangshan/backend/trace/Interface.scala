@@ -7,6 +7,7 @@ import utils.NamedUInt
 import xiangshan.HasXSParameter
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.fu.FuType
+import xiangshan.JumpOpType
 
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
@@ -79,11 +80,11 @@ object Itype extends NamedUInt(4) {
   // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
   def Branch = NonTaken
 
-  def jumpTypeGen(fuType: UInt, rd: OpRegType, rs: OpRegType): UInt = {
+  def jumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
-    val isJal       = FuType.isJump(fuType)
-    val isJalr      = FuType.isJump(fuType)
+    val isJal       = FuType.isJump(fuType) && fuoptype === JumpOpType.jal
+    val isJalr      = FuType.isJump(fuType) && fuoptype === JumpOpType.jalr
     val isBranch    = FuType.isBrh(fuType)
 
     // push to RAS when rd is link, pop from RAS when rs is link
@@ -132,8 +133,12 @@ object Itype extends NamedUInt(4) {
 
   def isBranchType(itype: UInt) = itype === Branch
 
+  def isPush(itype: UInt) = Seq(UninferableCall, InferableCall, CoRoutineSwap).map(_ === itype).reduce(_ || _)
+
+  def isPop(itype: UInt) = Seq(CoRoutineSwap, FunctionReturn).map(_ === itype).reduce(_ || _)
+
   // supportSijump
-  def isUninferable(itype: UInt) = Seq(UninferableCall, UninferableTailCall, CoRoutineSwap,
+  def isUninferable(itype: UInt) = Seq(UninferableCall, CoRoutineSwap,
     UninferableTailCall, OtherUninferableJump).map(_ === itype).reduce(_ || _)
 }
 

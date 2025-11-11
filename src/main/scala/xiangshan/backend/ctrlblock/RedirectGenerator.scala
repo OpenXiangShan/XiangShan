@@ -4,7 +4,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 import chisel3._
 import utility.{HasCircularQueuePtrHelper, XORFold, GatedValidRegNext}
-import xiangshan.frontend.{PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRead
 import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule, AddrTransType}
 
@@ -18,7 +17,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val oldestExuRedirect = Flipped(ValidIO(new Redirect))
     val oldestExuRedirectIsCSR = Input(Bool())
     val instrAddrTransType = Input(new AddrTransType)
-    val oldestExuOutPredecode = Input(new PreDecodeInfo) // guarded by exuRedirect.valid
     val loadReplay = Flipped(ValidIO(new Redirect))
     val robFlush = Flipped(ValidIO(new Redirect))
     val stage2Redirect = ValidIO(new Redirect)
@@ -45,7 +43,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val flushAfter = RegInit(0.U.asTypeOf(ValidIO(new Redirect)))
   val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(flushAfter) || robFlush.valid))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map { case (v, f) => v && !f }).asUInt.orR
-  val oldestExuPredecode = io.oldestExuOutPredecode
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)
   val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)

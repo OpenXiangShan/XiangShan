@@ -126,6 +126,10 @@ case class IssueBlockParams(
 
   def needPc: Boolean = JmpCnt + BrhCnt + FenceCnt > 0
 
+  def needRasAction: Boolean = JmpCnt > 0
+
+  def needIsRVC: Boolean = JmpCnt + BrhCnt + CsrCnt + LduCnt > 0
+
   def needSrcFrm: Boolean = exuBlockParams.map(_.needSrcFrm).reduce(_ || _)
 
   def needSrcVxrm: Boolean = exuBlockParams.map(_.needSrcVxrm).reduce(_ || _)

@@ -36,6 +36,7 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
+import xiangshan.backend.trace.Itype
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._
 import xiangshan.mem._
@@ -175,7 +176,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
-    fromRenameUpdate(i).bits.preDecodeInfo.isRVC := fromRename(i).bits.lastIsRVC
+    fromRenameUpdate(i).bits.isRVC := fromRename(i).bits.lastIsRVC
+    fromRenameUpdate(i).bits.rasAction := 
+      Itype.isPush(fromRename(i).bits.traceBlockInPipe.itype) ## Itype.isPop(fromRename(i).bits.traceBlockInPipe.itype)
   }
 
   val renameWidth = io.fromRename.size
