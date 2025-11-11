@@ -568,7 +568,7 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
   io.writeBack.bits.lqIdx.foreach(_ := req.uop.lqIdx)
   io.writeBack.bits.sqIdx.foreach(_ := req.uop.sqIdx)
   io.writeBack.bits.trigger.foreach(_ := req.uop.trigger)
-  io.writeBack.bits.predecodeInfo.foreach(_ := req.uop.preDecodeInfo)
+  io.writeBack.bits.isRVC.foreach(_ := req.uop.isRVC)
   io.writeBack.bits.vls.foreach(x => {
     x.vpu := req.uop.vpu
     x.oldVdPsrc := req.uop.psrc(2)

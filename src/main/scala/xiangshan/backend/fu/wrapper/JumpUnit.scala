@@ -24,7 +24,8 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   )
   private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
-  private val isRVC = io.in.bits.ctrl.preDecode.get.isRVC
+  private val isRVC = io.in.bits.ctrl.isRVC.get
+  private val rasAction = io.in.bits.ctrl.rasAction.get
 
   jumpDataModule.io.src := src
   jumpDataModule.io.pc := pc
@@ -71,6 +72,13 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(jumpDataModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := true.B
   io.toFrontendBJUResolve.get.bits.mispredict := needTrain
-  io.toFrontendBJUResolve.get.bits.attribute  := io.in.bits.ctrl.preDecode.get.brAttribute
+  io.toFrontendBJUResolve.get.bits.attribute.branchType := MuxCase(
+    BranchAttribute.BranchType.None,
+    Seq(
+      (func === JumpOpType.jal)  -> BranchAttribute.BranchType.Direct,
+      (func === JumpOpType.jalr) -> BranchAttribute.BranchType.Indirect
+    )
+  )
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction := rasAction
   connect0LatencyCtrlSingal
 }

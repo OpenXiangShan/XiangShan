@@ -596,7 +596,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s3_out.lqIdx.foreach(_ := s3_in.uop.lqIdx)
   s3_out.sqIdx.foreach(_ := s3_in.uop.sqIdx)
   s3_out.trigger.foreach(_ := s3_in.uop.trigger)
-  s3_out.predecodeInfo.foreach(_ := s3_in.uop.preDecodeInfo)
+  s3_out.isRVC.foreach(_ := s3_in.uop.isRVC)
   s3_out.debug.isMMIO := s3_in.mmio
   s3_out.debug.isNCIO := s3_in.nc && !s3_in.memBackTypeMM
   s3_out.debug.isPerfCnt := false.B

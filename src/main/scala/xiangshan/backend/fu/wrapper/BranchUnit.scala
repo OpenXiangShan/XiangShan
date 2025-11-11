@@ -44,7 +44,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
-  addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
+  addModule.io.isRVC := io.in.bits.ctrl.isRVC.get
   addModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
 
   io.out.valid := io.in.valid
@@ -80,6 +80,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
-  io.toFrontendBJUResolve.get.bits.attribute  := io.in.bits.ctrl.preDecode.get.brAttribute
+  io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
   connect0LatencyCtrlSingal
 }

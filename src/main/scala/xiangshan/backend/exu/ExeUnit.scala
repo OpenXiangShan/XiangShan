@@ -186,7 +186,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.v0Wen       .foreach(x => x := source.bits.v0Wen.get)
       sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.vlWen.get)
       sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.flushPipe.get)
-      sink.bits.ctrl.preDecode   .foreach(x => x := source.bits.preDecode.get)
+      sink.bits.ctrl.isRVC       .foreach(x => x := source.bits.isRVC.get)
+      sink.bits.ctrl.rasAction   .foreach(x=> x  := source.bits.rasAction.get)
       sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
@@ -216,7 +217,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.v0Wen.foreach(x => x := source.v0Wen.get)
       sink.vlWen.foreach(x => x := source.vlWen.get)
       sink.flushPipe.foreach(x => x := source.flushPipe.get)
-      sink.preDecode.foreach(x => x := source.preDecode.get)
+      sink.isRVC.foreach(x => x := source.isRVC.get)
+      sink.rasAction.foreach(x => x := source.rasAction.get)
       sink.ftqIdx.foreach(x => x := source.ftqIdx.get)
       sink.ftqOffset.foreach(x => x := source.ftqOffset.get)
       sink.predictInfo.foreach(x => x := source.predictInfo.get)
@@ -387,7 +389,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
   io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
   io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
-  io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
+  io.out.bits.isRVC.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.isRVC.getOrElse(false.B))))
 
   io.toFrontendBJUResolve.foreach{ case resolve => {
     val bjus = funcUnits.filter(x => x.cfg.isJmp || x.cfg.isBrh)
