@@ -223,6 +223,13 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   XSPerfAccumulate("predHit", s1_hit && s1_fire)
   XSPerfAccumulate("predMiss", !s1_hit && s1_fire)
 
+  XSPerfAccumulate("s1Hits3FallThrough", t1_valid && t1_hit && !t1_actualTaken)
+  XSPerfAccumulate("s1Misses3Taken", t1_valid && !t1_hit && t1_actualTaken)
+  XSPerfAccumulate("s1Hits3Taken", t1_valid && t1_hit && t1_actualTaken)
+  XSPerfAccumulate("s1Misses3FallThrough", t1_valid && !t1_hit && !t1_actualTaken)
+
+  XSPerfAccumulate("s1InvalidatedEntries", t1_valid && t1_hit && !t1_actualTaken && t1_hitNotUseful)
+
   XSPerfAccumulate("trainHitEntries", t0_valid && t0_realHit)
   XSPerfAccumulate("trainHitT1Update", t0_valid && t0_hitT1Update)
   XSPerfAccumulate("trainHitT1Victim", t0_valid && t0_hitT1Victim)
