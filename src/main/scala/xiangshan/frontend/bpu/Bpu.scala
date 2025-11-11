@@ -191,6 +191,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // abtb
   abtb.io.redirectValid       := redirect.valid
   abtb.io.overrideValid       := s3_override
+  abtb.io.overrideMeta        := s2_abtbMeta
+  abtb.io.overridePreviousAddr := s3_pc
   abtb.io.previousVAddr.valid := s4_valid
   abtb.io.previousVAddr.bits  := s4_pc
 

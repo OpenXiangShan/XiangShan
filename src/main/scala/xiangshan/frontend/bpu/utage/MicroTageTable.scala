@@ -41,10 +41,9 @@ class MicroTageTable(
     class MicroTageResp extends Bundle {
       val taken:       Bool            = Bool()
       val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-      val useful:      Bool            = Bool()
+      val useful:      UInt            = UInt(UsefulWidth.W)
       val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
       val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
-      val hitNoUseful: Bool            = Bool()
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
@@ -61,6 +60,7 @@ class MicroTageTable(
     val resp:        Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
     val update:      Valid[MicroTageUpdate] = Input(Valid(new MicroTageUpdate))
     val usefulReset: Bool                   = Input(Bool())
+    val usefulPenalty: Bool                 = Input(Bool())
   }
   class MicroTageEntry() extends MicroTageBundle {
     val valid:       Bool            = Bool()
@@ -83,11 +83,13 @@ class MicroTageTable(
     val idxFh       = allFh.getHistWithInfo(idxFhInfo).foldedHist
     val tagFh       = allFh.getHistWithInfo(tagFhInfo).foldedHist
     val altTagFh    = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-    val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
-      (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
-    } else {
-      (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
-    }
+    // val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
+    //   (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
+    // } else {
+    //   (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
+    // }
+    val idx = (unhashedIdx ^ Cat(idxFh, idxFh) ^ (unhashedIdx >> 6))(log2Ceil(numSets) - 1, 0)
+    //val idx = (unhashedIdx ^ Cat(0.U(12.W), idxFh))(log2Ceil(numSets) - 1, 0)
     val lowTag  = (unhashedTag ^ tagFh ^ (altTagFh << 1))(histBitsInTag - 1, 0)
     val highTag = connectPcTag(unhashedIdx, tableId)
     val tag     = Cat(highTag, lowTag)(tagLen - 1, 0)
@@ -103,26 +105,14 @@ class MicroTageTable(
   io.resp.valid            := readHit
   io.resp.bits.taken       := readEntry.takenCtr.isPositive
   io.resp.bits.cfiPosition := readEntry.cfiPosition
-  io.resp.bits.useful      := usefulEntry.isPositive
+  io.resp.bits.useful      := usefulEntry.value
   io.resp.bits.hitTakenCtr := readEntry.takenCtr
   io.resp.bits.hitUseful   := usefulEntry
-  io.resp.bits.hitNoUseful := usefulEntry.isSaturateNegative
 
   // train
   private val (trainIdx, trainTag) =
     computeHash(io.update.bits.startPc.toUInt, io.update.bits.foldedPathHistForTrain, tableId)
-  // private val oldCtr      = entries(trainIdx).takenCtr
-  // private val oldUseful   = usefulEntries(trainIdx)
-  // private val updateEntry = Wire(new MicroTageEntry)
-  // updateEntry.valid          := true.B
-  // updateEntry.tag            := trainTag
-  // updateEntry.takenCtr.value := Mux(io.update.bits.alloc, oldCtr.getNeutral, oldCtr.getUpdate(io.update.bits.taken))
-  // updateEntry.cfiPosition    := io.update.bits.cfiPosition
-  // updateEntry.useful.value := Mux(
-  //   io.update.bits.alloc,
-  //   oldUseful.getNeutral,
-  //   oldUseful.getUpdate(io.update.bits.correct)
-  // )
+
   private val oldTakenCtr = io.update.bits.oldTakenCtr
   private val oldUseful   = io.update.bits.oldUseful
   private val updateEntry = Wire(new MicroTageEntry)
@@ -133,11 +123,10 @@ class MicroTageTable(
     oldTakenCtr.getNeutral,
     oldTakenCtr.getUpdate(io.update.bits.taken)
   )
-
   // updateEntry.takenCtr.value := Mux(
-  // io.update.bits.alloc,
-  // Mux(io.update.bits.allocTaken, oldTakenCtr.getWeakPositive, oldTakenCtr.getWeakNegative), //oldTakenCtr.getNeutral,
-  // oldTakenCtr.getUpdate(io.update.bits.taken)
+  //   io.update.bits.alloc,
+  //   Mux(io.update.bits.allocTaken, oldTakenCtr.getWeakPositive, oldTakenCtr.getWeakNegative),
+  //   oldTakenCtr.getUpdate(io.update.bits.taken)
   // )
   updateEntry.cfiPosition := io.update.bits.cfiPosition
   updateEntry.useful.value := Mux(
@@ -150,10 +139,9 @@ class MicroTageTable(
     entries(trainIdx)       := updateEntry
     usefulEntries(trainIdx) := updateEntry.useful
   }
-
-  // when(io.usefulReset) {
-  //   usefulEntries.foreach(_.value := _.value >> 1.U)
-  // }
+  when(io.usefulPenalty) {
+    usefulEntries(trainIdx).value := usefulEntries(trainIdx).getUpdate(false.B)
+  }
 
   when(io.usefulReset) {
     usefulEntries.zipWithIndex.foreach { case (entry, i) =>

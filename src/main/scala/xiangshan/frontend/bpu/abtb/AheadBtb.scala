@@ -34,6 +34,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     val redirectValid:    Bool               = Input(Bool())
     val overrideValid:    Bool               = Input(Bool())
+    val overrideMeta:     AheadBtbMeta       = Input(new AheadBtbMeta)
+    val overridePreviousAddr: PrunedAddr     = Input(PrunedAddr(VAddrBits))
     val previousVAddr:    Valid[PrunedAddr]  = Flipped(Valid(PrunedAddr(VAddrBits)))
     val prediction:       Prediction         = Output(new Prediction)
     val readEntryVec:     Vec[AheadBtbEntry] = Output(Vec(NumWays, new AheadBtbEntry))
@@ -89,14 +91,15 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
 
-  s2_flush := redirectValid || overrideValid
-  s1_flush := s2_flush
+  s2_flush := redirectValid
+  s1_flush := s2_flush || overrideValid
 
   when(s0_fire)(s1_valid := true.B)
     .elsewhen(s1_flush)(s1_valid := false.B)
     .elsewhen(s1_fire)(s1_valid := false.B)
 
   when(s2_flush)(s2_valid := false.B)
+    .elsewhen(overrideValid)(s2_valid := true.B)
     .elsewhen(s1_fire)(s2_valid := !s1_flush)
     .elsewhen(s2_fire)(s2_valid := false.B)
 
@@ -139,12 +142,23 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - get target from found entry
      - output prediction
      -------------------------------------------------------------------------------------------------------------- */
+  private val overrideSetIdx  = getSetIndex(io.overridePreviousAddr)
+  private val overrideBankIdx = getBankIndex(io.overridePreviousAddr)
+  private val overrideBankMask = UIntToOH(overrideBankIdx)
+  private val overrideEntries  = io.overrideMeta.readEntryVec
+  private val overrideStartVAddr = io.startVAddr
 
-  private val s2_setIdx     = RegEnable(s1_setIdx, s1_fire)
-  private val s2_bankIdx    = RegEnable(s1_bankIdx, s1_fire)
-  private val s2_bankMask   = RegEnable(s1_bankMask, s1_fire)
-  private val s2_entries    = RegEnable(s1_entries, s1_fire)
-  private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
+  private val tmpSetIdx = Mux(overrideValid, overrideSetIdx, s1_setIdx)
+  private val tmpBankIdx = Mux(overrideValid, overrideBankIdx, s1_bankIdx)
+  private val tmpBankMask = Mux(overrideValid, overrideBankMask, s1_bankMask)
+  private val tmpEntries  = Mux(overrideValid, overrideEntries, s1_entries)
+  private val tmpStartVAddr = Mux(overrideValid, overrideStartVAddr, s1_startVAddr)
+
+  private val s2_setIdx     = RegEnable(tmpSetIdx, s1_fire || overrideValid)
+  private val s2_bankIdx    = RegEnable(tmpBankIdx, s1_fire || overrideValid)
+  private val s2_bankMask   = RegEnable(tmpBankMask, s1_fire || overrideValid)
+  private val s2_entries    = RegEnable(tmpEntries, s1_fire || overrideValid)
+  private val s2_startVAddr = RegEnable(tmpStartVAddr, s1_fire || overrideValid)
 
   //  private val s2_entriesDelay1 = RegNext(s2_entries)
 
