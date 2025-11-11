@@ -385,6 +385,14 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
 
+  for (i <- 0 until CommitWidth) {
+    val crc = io.frontend.toFtq.callRetCommit(i)
+    val blk = rob.io.trace.traceCommitInfo.blocks(i)
+    val vld = rob.io.commits.isCommit && rob.io.commits.commitValid(i)
+    crc.valid := GatedValidRegNext(vld)
+    crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
+    crc.bits.rasAction := RegEnable(Itype.isPop(blk.bits.tracePipe.itype) ## Itype.isPush(blk.bits.tracePipe.itype), vld)
+  }
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid
