@@ -290,10 +290,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           val cause     = UInt(TraceCauseWidth.W)
           val tval      = UInt(TraceTvalWidth.W)
           val priv      = UInt(TracePrivWidth.W)
-          val iaddr     = UInt((TraceTraceGroupNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceTraceGroupNum * TraceItypeWidth).W)
-          val iretire   = UInt((TraceTraceGroupNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
+          val mstatus   = UInt(TraceStatusWidth.W)
+          val valid     = UInt(TraceGrpNum.W)
+          val iaddr     = UInt((TraceGrpNum * TraceIaddrWidth).W)
+          val itype     = UInt((TraceGrpNum * TraceItypeWidth).W)
+          val iretire   = UInt((TraceGrpNum * TraceIretireWidthCompressed).W)
+          val ilastsize = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
         })
       })
     })
@@ -352,6 +354,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       io.traceCoreInterface(i).toEncoder.priv := traceInterface.toEncoder.priv
       io.traceCoreInterface(i).toEncoder.cause := traceInterface.toEncoder.trap.cause
       io.traceCoreInterface(i).toEncoder.tval := traceInterface.toEncoder.trap.tval
+      io.traceCoreInterface(i).toEncoder.mstatus := traceInterface.toEncoder.mstatus
+      io.traceCoreInterface(i).toEncoder.valid := VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt
       io.traceCoreInterface(i).toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
       io.traceCoreInterface(i).toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
