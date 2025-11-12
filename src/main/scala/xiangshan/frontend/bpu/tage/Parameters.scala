@@ -25,7 +25,7 @@ case class TageParameters(
     BaseTableTakenCtrWidth: Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
       // TageTableInfo(NumSets, HistoryLength)
-      new TageTableInfo(1024, 4),
+      new TageTableInfo(1024, 6),
       new TageTableInfo(1024, 9),
       new TageTableInfo(1024, 17),
       new TageTableInfo(1024, 31),
@@ -34,14 +34,16 @@ case class TageParameters(
       new TageTableInfo(1024, 211),
       new TageTableInfo(1024, 407)
     ),
-    NumWays:            Int = 3,
-    NumBanks:           Int = 4, // to alleviate read-write conflicts in single-port SRAM
-    TagWidth:           Int = 13,
-    TakenCtrWidth:      Int = 3,
-    UsefulCtrWidth:     Int = 2,
-    UsefulCtrInitValue: Int = 0,
-    WriteBufferSize:    Int = 4,
-    AllocFailCtrWidth:  Int = 6  // TODO
+    NumWays:             Int = 2,
+    NumBanks:            Int = 4, // to alleviate read-write conflicts in single-port SRAM
+    TagWidth:            Int = 13,
+    TakenCtrWidth:       Int = 3,
+    UsefulCtrWidth:      Int = 2,
+    UsefulCtrInitValue:  Int = 0,
+    WriteBufferSize:     Int = 4,
+    UsefulResetCtrWidth: Int = 6,
+    UseAltCtrWidth:      Int = 4,
+    NumUseAltCtrs:       Int = 128
 ) {}
 
 trait HasTageParameters extends HasBpuParameters {
@@ -60,10 +62,11 @@ trait HasTageParameters extends HasBpuParameters {
   def UsefulCtrWidth:     Int = tageParameters.UsefulCtrWidth
   def UsefulCtrInitValue: Int = tageParameters.UsefulCtrInitValue
   def WriteBufferSize:    Int = tageParameters.WriteBufferSize
-  def AllocFailCtrWidth:  Int = tageParameters.AllocFailCtrWidth
+
+  def UsefulResetCtrWidth: Int = tageParameters.UsefulResetCtrWidth
+  def UseAltCtrWidth:      Int = tageParameters.UseAltCtrWidth
+  def NumUseAltCtrs:       Int = tageParameters.NumUseAltCtrs
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
   def NumTables:  Int                = TableInfos.length
-
-  def TageEntryWidth: Int = (new TageEntry).getWidth
 }

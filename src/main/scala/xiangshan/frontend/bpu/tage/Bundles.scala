@@ -22,10 +22,9 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
-  val valid:     Bool            = Bool()
-  val tag:       UInt            = UInt(TagWidth.W)
-  val takenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
-  val usefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  val valid:    Bool            = Bool()
+  val tag:      UInt            = UInt(TagWidth.W)
+  val takenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
 }
 
 class BaseTableSramWriteReq(implicit p: Parameters) extends TageBundle {
@@ -40,29 +39,59 @@ class TableReadReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
 }
 
 class TableReadResp(implicit p: Parameters) extends TageBundle {
-  val entries:      Vec[TageEntry]  = Vec(NumWays, new TageEntry)
-  val allocFailCtr: SaturateCounter = new SaturateCounter(AllocFailCtrWidth)
+  val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
+  val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, new SaturateCounter(UsefulCtrWidth))
 }
 
 class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasTageParameters {
   val setIdx:         UInt                    = UInt(log2Ceil(numSets / NumBanks).W)
   val entry:          TageEntry               = new TageEntry
+  val usefulCtr:      SaturateCounter         = new SaturateCounter(UsefulCtrWidth)
   override def tag:   Option[UInt]            = Some(entry.tag)
   override def cnt:   Option[SaturateCounter] = Some(entry.takenCtr)
-  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive)
-}
-class AllocFailCtrSramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
-    with HasTageParameters {
-  val setIdx:       UInt            = UInt(log2Ceil(numSets / NumBanks).W)
-  val allocFailCtr: SaturateCounter = new SaturateCounter(AllocFailCtrWidth)
+  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive) // FIXME: use actualTaken
 }
 
-class TableUpdateEntriesReq(implicit p: Parameters) extends TageBundle {
-  val wayMask: UInt           = UInt(NumWays.W)
-  val entries: Vec[TageEntry] = Vec(NumWays, new TageEntry)
+class TableWriteReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
+  val setIdx:     UInt                 = UInt(log2Ceil(numSets / NumBanks).W)
+  val bankMask:   UInt                 = UInt(NumBanks.W)
+  val wayMask:    UInt                 = UInt(NumWays.W)
+  val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
+  val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, new SaturateCounter(UsefulCtrWidth))
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
   val baseTableCtrs: Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
+  val debug_setIdx:  Vec[UInt]            = Vec(NumTables, UInt(8.W))        // TODO: remove it
+  val debug_tempTag: Vec[UInt]            = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
+}
+
+class TageFoldedHist(numSets: Int)(implicit p: Parameters) extends TageBundle {
+  val forIdx: UInt = UInt(log2Ceil(numSets / NumBanks).W)
+  val forTag: UInt = UInt(TagWidth.W)
+}
+
+class TagMatchResult(implicit p: Parameters) extends TageBundle {
+  val hit:          Bool            = Bool()
+  val hitWayMaskOH: UInt            = UInt(NumWays.W)
+  val entry:        TageEntry       = new TageEntry
+  val usefulCtr:    SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+}
+
+class UpdateInfo(implicit p: Parameters) extends TageBundle {
+  val providerTableOH:      UInt            = UInt(NumTables.W)
+  val providerWayOH:        UInt            = UInt(NumWays.W)
+  val providerEntry:        TageEntry       = new TageEntry
+  val providerNewUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+
+  val altTableOH:      UInt            = UInt(NumTables.W)
+  val altWayOH:        UInt            = UInt(NumWays.W)
+  val altEntry:        TageEntry       = new TageEntry
+  val altOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+
+  val increaseUseAlt: Bool = Bool()
+  val decreaseUseAlt: Bool = Bool()
+
+  val needAllocate: Bool = Bool()
 }
