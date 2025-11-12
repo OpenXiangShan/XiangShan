@@ -491,10 +491,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
   dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
   dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
-  dataPath.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
-  dataPath.io.diffFpRat .foreach(_ := ctrlBlock.io.diff_fp_rat.get)
-  dataPath.io.diffVecRat.foreach(_ := ctrlBlock.io.diff_vec_rat.get)
-  dataPath.io.diffV0Rat .foreach(_ := ctrlBlock.io.diff_v0_rat.get)
   dataPath.io.diffVlRat .foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
   dataPath.io.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
