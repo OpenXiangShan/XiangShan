@@ -24,8 +24,8 @@ jobs:
           echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init submodules
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -122,8 +122,8 @@ jobs:
             echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
             mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
             mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-        - name: init submodules
-          run: make init
+        - name: Initialize submodules
+          run: make init-force
         - name: clean up
           run: |
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean

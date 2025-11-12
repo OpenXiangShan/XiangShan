@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: init
-        run: make init
+      - name: Initialize submodules 
+        run: make init-force
 
       - uses: docker/metadata-action@v5
         id: metadata
