@@ -28,11 +28,10 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
-import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, LqPtr}
 import xiangshan.mem.prefetch._
+import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, LqPtr}
 
 // DCache specific parameters
 case class DCacheParameters
@@ -91,6 +90,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
+  def GenLatencyArray: Boolean = hasBerti
+
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 10
@@ -111,6 +112,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def HW_PREFETCH_STRIDE = 10
 
   def BLOOM_FILTER_ENTRY_NUM = 4096
+  def TIMESTAMP_WIDTH = 16
+  def LATENCY_WIDTH = 16 // FIXME lyq: here should be 12, test for 16
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
@@ -357,6 +360,7 @@ class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
   val error = Bool() // cache line has been marked as corrupted by l2 / ecc error detected when store
   val prefetch = UInt(L1PfSourceBits.W) // cache line is first required by prefetch
   val access = Bool() // cache line has been accessed by load / store
+  val latency = UInt(LATENCY_WIDTH.W)
 
   // val debug_access_timestamp = UInt(64.W) // last time a load / store / refill access that cacheline
 }
@@ -467,6 +471,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
+  val refill_latency = UInt(LATENCY_WIDTH.W)
   // s2
   val handled = Bool()
   val real_miss = Bool()
@@ -825,6 +830,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
+  val refillTrain = ValidIO(new TrainReqBundle)
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
@@ -1002,6 +1008,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
+  val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)))
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
@@ -1043,6 +1050,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
+  io.refillTrain := missQueue.io.refill_train
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {
@@ -1156,6 +1164,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   extra_meta_resp_ports.zip(accessArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).access := r(i) })
   }}
+  if (GenLatencyArray) {
+    (meta_read_ports.take(HybridLoadReadBase + 1) ++
+      meta_read_ports.takeRight(backendParams.HyuCnt)).zip(latencyArray.get.io.read).foreach { case (p, r) => r <> p }
+    extra_meta_resp_ports.zip(latencyArray.get.io.resp).foreach { case (p, r) => {
+      (0 until nWays).map(i => { p(i).latency := r(i) })
+    }}
+  } else {
+    (meta_read_ports.take(HybridLoadReadBase + 1) ++
+      meta_read_ports.takeRight(backendParams.HyuCnt)).foreach { case p => p.ready := true.B}
+    extra_meta_resp_ports.foreach { case p => {
+      (0 until nWays).map(i => { p(i).latency := 0.U })
+    }}
+  }
 
   if(LoadPrefetchL1Enabled) {
     // use last port to read prefetch and access flag
@@ -1169,6 +1190,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     prefetchArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
     prefetchArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
     prefetchArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
+
+    if(GenLatencyArray) {
+      latencyArray.get.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
+      latencyArray.get.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
+      latencyArray.get.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
+    }
 
     accessArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
     accessArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
@@ -1196,6 +1223,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.prefetch_flag_write // refill required by prefetch will set prefetch_flag
   )
   prefetch_flag_write_ports.zip(prefetchArray.io.write).foreach { case (p, w) => w <> p }
+
+  val latency_flag_write_ports = ldu.map(_.io.latency_flag_write) ++ Seq(
+    mainPipe.io.latency_flag_write
+  )
+  if (GenLatencyArray) {
+    latency_flag_write_ports.zip(latencyArray.get.io.write).foreach { case (p, w) => w <> p }
+  } else {
+    latency_flag_write_ports.foreach { case p => p.ready := true.B }
+  }
 
   // FIXME: add hybrid unit?
   val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
@@ -1701,7 +1737,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // assertions
   // dcache should only deal with DRAM addresses
-  import freechips.rocketchip.util._
   when (bus.a.fire) {
     assert(PmemRanges.map(_.cover(bus.a.bits.address)).reduce(_ || _))
   }

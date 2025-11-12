@@ -230,6 +230,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val rep_carry     = new ReplayCarry(nWays)
     val mshrid        = UInt(log2Up(cfg.nMissEntries).W)
     val isFirstIssue  = Bool()
+    val repForTlbMiss = Bool()
     val fast_rep      = Bool()
     val ld_rep        = Bool()
     val prf           = Bool()
@@ -275,7 +276,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //       the other uops should have higher priority
   // src 7: vec read from RS (io.vecldin)
   // src 8: int read / software prefetch first issue from RS (io.in)
-  // src 9: hardware prefetch from prefetchor (high confidence) (io.prefetch)
+  // src 9: hardware prefetch from prefetchor (low confidence) (io.prefetch)
   // priority: high to low
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.uop.lqIdx) ||
                                io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
@@ -295,7 +296,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
-    io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U,
+    io.prefetch_req.valid, // lower confidence prefetch or lower prefetch-priority ldu
   )))
   // load flow source ready
   val s0_src_ready_vec = Wire(Vec(SRC_NUM, Bool()))
@@ -511,6 +512,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
+    out.repForTlbMiss := src.tlbMiss
     out
   }
 
@@ -760,7 +762,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.uop.exceptionVec(loadAddrMisaligned) := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive && !s0_misalignWith16Byte
   s0_out.isMisalign := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
-  when(io.tlb.req.valid && s0_sel_src.isFirstIssue) {
+  when(io.tlb.req.valid && (s0_sel_src.isFirstIssue || s0_sel_src.repForTlbMiss)) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }.otherwise{
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_sel_src.uop.debugInfo.tlbFirstReqTime
@@ -888,9 +890,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_paddr_dup_dcache := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(1))
   s1_gpaddr_dup_lsu   := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
 
-  when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {
-    // printf("load idx = %d\n", s1_tlb_memidx.idx)
+  when (io.tlb.resp.valid && !s1_tlb_miss) {
     s1_out.uop.debugInfo.tlbRespTime := GTimer()
+  }.elsewhen (io.tlb.resp.valid && s1_tlb_miss) {
+    s1_out.uop.debugInfo.tlbRespTime := s1_in.uop.debugInfo.tlbFirstReqTime
+  }.otherwise {
+    s1_out.uop.debugInfo.tlbRespTime := s1_in.uop.debugInfo.tlbRespTime
   }
 
   io.tlb.req_kill   := s1_kill || s1_dly_err
@@ -1332,13 +1337,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at load s3 **
-  val s2_prefetch_train_valid = s2_fire && s2_in.isFirstIssue && !s2_actually_uncache
+  // s2_un_access_exception can guarantee the physical address is valid
+  val s2_prefetch_train_valid = s2_fire && s2_in.isFirstIssue && !s2_actually_uncache && !s2_un_access_exception
   io.prefetch_train.valid := GatedValidRegNext(s2_prefetch_train_valid)
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_valid)
   io.prefetch_train.bits.meta_access := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_valid)
   io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_hw_prf)
+  io.prefetch_train.bits.refillLatency := RegEnable(io.dcache.resp.bits.refill_latency, s2_prefetch_train_valid)
   io.prefetch_train.bits.isFinalSplit := false.B
   io.prefetch_train.bits.misalignWith16Byte := false.B
   io.prefetch_train.bits.misalignNeedWakeUp := false.B

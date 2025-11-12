@@ -17,15 +17,11 @@
 
 package xiangshan.cache.mmu
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
-import utils._
 import utility._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
+import xiangshan._
+import xiangshan.cache.MemoryOpConstants
 
 
 case class TLBParameters
@@ -127,7 +123,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
   val storefiltersize = if (StorePipelineWidth >= 3) 16 else 8
-  val prefetchfiltersize = 8
+  val prefetchfiltersize = 16
 
   val sramSinglePort = true
 

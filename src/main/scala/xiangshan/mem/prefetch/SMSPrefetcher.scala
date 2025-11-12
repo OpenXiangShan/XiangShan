@@ -930,7 +930,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val gen_req = Flipped(ValidIO(new PfGenReq()))
     val tlb_req = new TlbRequestIO(2)
     val pmp_resp = Flipped(new PMPRespBundle())
-    val l2_pf_addr = ValidIO(UInt(PAddrBits.W))
+    val l2_pf_addr = DecoupledIO(UInt(PAddrBits.W))
     val pf_alias_bits = Output(UInt(2.W))
     val debug_source_type = Output(UInt(log2Up(nSourceType).W))
   })
@@ -944,12 +944,10 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, smsParams.pf_filter_size))
   val pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), smsParams.pf_filter_size))
 
-  io.l2_pf_addr.valid := pf_req_arb.io.out.valid
-  io.l2_pf_addr.bits := pf_req_arb.io.out.bits
+  io.l2_pf_addr <> pf_req_arb.io.out
   io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
     case (entry, i) => (i.U === pf_req_arb.io.chosen) -> entry.alias_bits
   }))
-  pf_req_arb.io.out.ready := true.B
 
   io.debug_source_type := VecInit(entries.map(_.debug_source_type))(pf_req_arb.io.chosen)
 
@@ -1059,6 +1057,8 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s3_pmp_resp = io.pmp_resp
   val s3_update_valid = s3_tlb_resp_fire && !s3_tlb_resp.miss
   val s3_drop = s3_update_valid && (
+    // is region addr in pmem ranges
+    !PmemRanges.map(_.cover(s3_tlb_resp.paddr.head)).reduce(_ || _) ||
     // page/access fault
     s3_tlb_resp.excp.head.pf.ld || s3_tlb_resp.excp.head.gpf.ld || s3_tlb_resp.excp.head.af.ld ||
     // uncache
@@ -1329,11 +1329,11 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   pf_filter.io.pmp_resp := io.pmp_resp
-  val is_valid_address = PmemRanges.map(_.cover(pf_filter.io.l2_pf_addr.bits)).reduce(_ || _)
 
-  io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
   io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+  pf_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits

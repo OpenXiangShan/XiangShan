@@ -230,9 +230,9 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s4_valid = GatedValidRegNext(s3_valid)
   val s4_l2_pf_req_bits = RegEnable(s3_l2_pf_req_bits, s3_valid)
 
-  io.l1_prefetch_req.valid := s3_valid
+  io.l1_prefetch_req.valid := s3_valid && io.enable
   io.l1_prefetch_req.bits := s3_l1_pf_req_bits
-  io.l2_l3_prefetch_req.valid := s4_valid
+  io.l2_l3_prefetch_req.valid := s4_valid && io.enable
   io.l2_l3_prefetch_req.bits := s4_l2_pf_req_bits
 
   XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_l3_prefetch_req.valid)))
