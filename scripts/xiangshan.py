@@ -73,6 +73,7 @@ class XSArgs(object):
         # Makefile arguments
         self.threads = args.threads
         self.make_threads = args.make_threads
+        self.with_constantin = 1 if args.with_constantin else None
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
         self.is_spike = "Spike" if args.spike else None
@@ -84,7 +85,7 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
-        self.with_chiseldb = 0 if args.no_db else 1
+        self.with_chiseldb = 1 if args.dump_db else 0
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -95,7 +96,7 @@ class XSArgs(object):
             self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
-        self.disable_db = args.no_db
+        self.dump_db = args.dump_db
         self.gcpt_restore_bin = args.gcpt_restore_bin
         self.instr_trace = args.instr_trace
         self.pgo = args.pgo
@@ -132,6 +133,7 @@ class XSArgs(object):
         makefile_args = [
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
+            (self.with_constantin, "WITH_CONSTANTIN"),
             (self.is_release,    "RELEASE"),
             (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
@@ -276,7 +278,7 @@ class XiangShan(object):
             numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
-        chiseldb_args = "--dump-db" if not self.args.disable_db else ""
+        chiseldb_args = "--dump-db" if self.args.dump_db else ""
         instr_trace_args = f"--instr-trace {instr_trace}" if instr_trace_valid else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
         return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args} {gcpt_restore_args} {instr_trace_args}')
@@ -692,6 +694,7 @@ if __name__ == "__main__":
     # makefile arguments
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
+    parser.add_argument('--with-constantin', action='store_true', help='enable constantin')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--make-threads', nargs='?', type=int, help='number of make threads', default=200)
@@ -713,7 +716,7 @@ if __name__ == "__main__":
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
     parser.add_argument('--instr-trace', type=str, default="", help="run the test with the trace of the simfrontend")
     # both makefile and emu arguments
-    parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--dump-db', action='store_true', help='enable chiseldb dump')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
