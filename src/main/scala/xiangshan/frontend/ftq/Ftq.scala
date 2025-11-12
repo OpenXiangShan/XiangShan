@@ -129,7 +129,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with BPU
   // --------------------------------------------------------------------------------
 
-  private val bpTrainStallCnt = RegInit(0.U(log2Ceil(BpTrainStall)))
+  private val bpTrainStallCnt = RegInit(0.U(log2Ceil(BpTrainStallLimit) + 1))
   when(io.toBpu.train.valid && !io.toBpu.train.ready) {
     bpTrainStallCnt := bpTrainStallCnt + 1.U
   }.otherwise {
@@ -140,7 +140,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // BPU
   io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
     distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U &&
-    bpTrainStallCnt < BpTrainStall.U
+    bpTrainStallCnt < BpTrainStallLimit.U
   io.fromBpu.meta.ready            := true.B
   io.fromBpu.speculationMeta.ready := true.B
 
