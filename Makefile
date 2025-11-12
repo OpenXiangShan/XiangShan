@@ -293,6 +293,7 @@ sim-verilog: $(call docker-deps,$(SIM_TOP_V))
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf $(BUILD_DIR)
+	rm -rf out
 
 init:
 	git submodule update --init
