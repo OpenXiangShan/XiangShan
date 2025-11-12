@@ -218,7 +218,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     io.lsin.valid, // int flow first issue or software prefetch
     io.vec_stu_io.in.valid,
     io.ldu_io.l2l_fwd_in.valid && io.ldu_io.ld_fast_match,
-    io.ldu_io.prefetch_req.valid && io.ldu_io.prefetch_req.bits.confidence === 0.U,
+    io.ldu_io.prefetch_req.valid  // lower confidence prefetch or lower prefetch-priority ldu
   )))
   // load flow source ready
   val s0_src_ready_vec = Wire(Vec(SRC_NUM, Bool()))
@@ -1085,7 +1085,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // prefetch train --> s3
   io.s1_prefetch_spec := s1_fire
   io.s2_prefetch_spec := s2_fire
-  val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch
+  val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch && !s2_exception
   io.prefetch_train.valid              := s2_prefetch_train_valid
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   // TODO: use trace with bank conflict?

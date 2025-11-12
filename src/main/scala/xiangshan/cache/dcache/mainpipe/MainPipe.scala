@@ -16,18 +16,17 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
-import xiangshan.mem.prefetch._
 import xiangshan.mem.HasL1PrefetchSourceParameter
+import xiangshan.mem.prefetch._
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -166,6 +165,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val latency_flag_write = DecoupledIO(new LatencyMetaWriteReq)
 
     // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
@@ -440,6 +440,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
+  val s2_refill_latency = Mux(io.refill_info.valid && isFromL1Prefetch(s2_req.pf_source), io.refill_info.bits.refill_latency, 0.U)
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
@@ -553,6 +554,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     else Cat(s3_store_data_merged(i + 1), s3_store_data_merged(i))
   }))(s3_req.word_idx)
 
+  val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
   val s3_need_replacement = RegEnable(s2_need_replacement && !s2_refill_tag_eq_way, s2_fire_to_s3)
 
@@ -916,6 +918,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.way_en := s3_way_en
   io.prefetch_flag_write.bits.source := s3_req.pf_source
 
+  io.latency_flag_write.valid := s3_fire && s3_req.miss
+  io.latency_flag_write.bits.idx := s3_idx
+  io.latency_flag_write.bits.way_en := s3_way_en
+  io.latency_flag_write.bits.latency := s3_refill_latency
+
   // regenerate repl_way & repl_coh
   io.bloom_filter_query.set.valid := s2_fire_to_s3 && s2_req.miss && !isFromL1Prefetch(s2_repl_pf) && s2_repl_coh.isValid() && isFromL1Prefetch(s2_req.pf_source)
   io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(s2_repl_tag, get_untag(s2_req.vaddr))) // the evict block address
@@ -923,6 +930,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.bloom_filter_query.clr.valid := s3_fire && isFromL1Prefetch(s3_req.pf_source)
   io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(s3_req.addr)
 
+  XSPerfAccumulate("prefetch_write_valid", s3_fire && s3_req.miss)
+  XSPerfAccumulate("prefetch_write_valid_pf", io.prefetch_flag_write.valid && isFromL1Prefetch(s3_req.pf_source))
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
