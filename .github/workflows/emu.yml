@@ -41,8 +41,8 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -123,8 +123,8 @@ jobs:
           echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -210,8 +210,8 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -260,8 +260,8 @@ jobs:
           echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -366,8 +366,8 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -403,8 +403,8 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -449,8 +449,8 @@ jobs:
         run: echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
       - name: psutil
         run: sudo apt install python3-psutil
-      - name: init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: mill
         uses: jodersky/setup-mill@v0.3.0
         with:

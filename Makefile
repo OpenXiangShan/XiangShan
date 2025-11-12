@@ -294,10 +294,18 @@ clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf $(BUILD_DIR)
 
+GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
+
+# Initialize necessary submodules
 init:
-	git submodule update --init
-	cd rocket-chip && git submodule update --init cde hardfloat
-	cd openLLC && git submodule update --init openNCB
+	git submodule update --init $(GIT_FORCE_FLAG)
+	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
+	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
+
+# Initialize necessary submodules (force)
+#   This ensure that all submodules files are checked out to the correct commit. Good for CI.
+init-force:
+	$(MAKE) init GIT_FORCE_INIT=1
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
@@ -353,4 +361,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog emu clean help init init-force bump bsp $(REF_SO)

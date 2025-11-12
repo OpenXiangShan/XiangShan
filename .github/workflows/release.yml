@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: init
-        run: make init
+      - name: Initialize submodules 
+        run: make init-force
 
       - uses: docker/metadata-action@v5
         id: metadata
@@ -57,8 +57,8 @@ jobs:
           FILE_SHA=$(git rev-parse --short HEAD)
           FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
           echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
-      - name: submodule init
-        run: make init
+      - name: Initialize submodules
+        run: make init-force
       - name: check picker availability
         run: |
           echo "Checking picker command..."
