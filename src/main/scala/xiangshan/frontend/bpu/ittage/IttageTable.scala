@@ -26,7 +26,6 @@ import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
@@ -36,7 +35,7 @@ class IttageTable(
     val histLen:  Int,
     val tagLen:   Int,
     val tableIdx: Int
-)(implicit p: Parameters) extends IttageModule with PhrHelper {
+)(implicit p: Parameters) extends IttageModule {
   class IttageTableIO extends IttageBundle {
     class Req extends Bundle {
       val pc:         PrunedAddr            = PrunedAddr(VAddrBits)

@@ -333,7 +333,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_rasMeta = ras.io.specMeta
 
   // phr meta
-  private val s2_phrMeta = RegEnable(phr.io.phrPtr, s1_fire)
+  private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
   // ghr meta
@@ -343,7 +343,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_ghrMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
 
   private val s3_speculationMeta = Wire(new BpuSpeculationMeta)
-  s3_speculationMeta.phrHistPtr := s3_phrMeta
+  s3_speculationMeta.phrMeta    := s3_phrMeta
   s3_speculationMeta.ghrMeta    := s3_ghrMeta
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
@@ -374,7 +374,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // phr train
-  private val phrWire        = WireInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phrBits        = WireInit(0.U(PhrHistoryLength.W))
   private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s1_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s2_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -384,6 +384,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.stageCtrl     := stageCtrl
   phr.io.train.redirect      := redirect
   phr.io.train.s3_override   := s3_override
+  phr.io.train.s3_phrMeta    := s3_phrMeta
   phr.io.train.s3_prediction := s3_prediction
   phr.io.train.s3_pc         := s3_pc
   phr.io.train.s1_valid      := s1_fire
@@ -398,17 +399,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_foldedPhr   := phr.io.s2_foldedPhr
   s3_foldedPhr   := phr.io.s3_foldedPhr
   trainFoldedPhr := phr.io.trainFoldedPhr
-  phrWire        := phr.io.phr
+  phrBits        := phr.io.phr.asUInt
 
-  private val phrWireValue = phrWire.asUInt
-  private val redirectPhrValue =
-    (Cat(phrWire.asUInt, phrWire.asUInt) >> (redirect.bits.speculationMeta.phrHistPtr.value + 1.U))(
-      PhrHistoryLength - 1,
-      0
-    )
-
-  dontTouch(phrWireValue)
-  dontTouch(redirectPhrValue)
+  dontTouch(phrBits)
 
   // ghr update
   ghr.io.stageCtrl           := stageCtrl
