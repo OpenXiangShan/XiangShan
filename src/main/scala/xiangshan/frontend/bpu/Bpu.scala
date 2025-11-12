@@ -298,13 +298,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     (abtb.io.prediction.taken && !abtb.io.prediction.attribute.isConditional && (abtb.io.prediction.cfiPosition < utage.io.prediction.cfiPosition))
   private val notUseUbtb  = (abtb.io.prediction.taken && !abtb.io.prediction.attribute.isConditional && (abtb.io.prediction.cfiPosition < ubtb.io.prediction.cfiPosition))
 
+  // s1_prediction :=
+    // MuxCase(
+      // fallThrough.io.prediction,
+      // Seq(
+        // (utage.io.prediction.taken && s1_utageHit && !notUseMicroTage) -> s1_hybridPrediction,
+        // (ubtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage) && !notUseUbtb) -> ubtb.io.prediction,
+        // (abtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage)) -> abtb.io.prediction
+      // )
+    // )
+
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        (utage.io.prediction.taken && s1_utageHit && !notUseMicroTage) -> s1_hybridPrediction,
-        (ubtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage) && !notUseUbtb) -> ubtb.io.prediction,
-        (abtb.io.prediction.taken && (!s1_utageHit || notUseMicroTage)) -> abtb.io.prediction
+        ubtb.io.prediction.taken  -> ubtb.io.prediction,
+        abtb.io.prediction.taken  -> abtb.io.prediction
       )
     )
 

@@ -78,7 +78,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val finalPredTaken       = MuxCase(false.B, takenCases)
   private val finalPredCfiPosition = MuxCase(0.U(CfiPositionWidth.W), cfiPositionCases)
   private val prediction           = Wire(new MicroTagePrediction)
-  prediction.taken                             := finalPredTaken
+  prediction.taken                             := false.B // finalPredTaken
   prediction.cfiPosition                       := finalPredCfiPosition
   prediction.meta.valid                        := tables.map(_.resp.valid).reduce(_ || _)
   prediction.meta.bits.histTableHitMap         := tables.map(_.resp.valid)
