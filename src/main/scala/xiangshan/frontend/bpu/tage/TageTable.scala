@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.sram.SRAMConflictBehavior
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
@@ -40,8 +41,9 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         new TageEntry,
         set = numSets / NumBanks,
         way = 1,
-        singlePort = true,
+        singlePort = false, // FIXME: use singlePort
         shouldReset = true,
+        conflictBehavior = SRAMConflictBehavior.AssertionFail, // FIXME: use singlePort
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl

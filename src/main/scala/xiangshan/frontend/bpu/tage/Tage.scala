@@ -95,7 +95,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   baseTable.io.readReqValid := s0_fire
-  baseTable.io.startPc      := s0_startVAddr
+  baseTable.io.startVAddr   := s0_startVAddr
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.predictReadReq.valid         := s0_fire
@@ -237,9 +237,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_bankIdx  = getBankIndex(t0_startVAddr)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
 
-  private val t0_readBankConflict = io.train.valid && t0_hasConditionalBranch && s0_fire && t0_bankIdx === s0_bankIdx
-  dontTouch(t0_readBankConflict)
-  io.train.ready := !t0_readBankConflict
+  private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
+  private val t0_hasCond  = t0_condMask.reduce(_ || _)
+
+  private val t0_readBankConflict = io.train.valid && t0_hasCond && s0_fire && t0_bankIdx === s0_bankIdx
+  io.train.ready := true.B
 
   private val t0_foldedHistForIdx = VecInit(histInfoForIdx.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist))
   private val t0_foldedHistForTag = VecInit(histInfoForTag.map(io.foldedPathHistForTrain.getHistWithInfo(_).foldedHist))
@@ -268,9 +270,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.trainReadReq.bits.bankMask := t0_bankMask
   }
 
-  when(t0_valid) {
-    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
-  }
+//  when(t0_valid) {
+//    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
+//  }
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
