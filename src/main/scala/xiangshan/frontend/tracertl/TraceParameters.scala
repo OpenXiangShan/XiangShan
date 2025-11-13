@@ -156,8 +156,8 @@ object TraceRTLParameters {
         |        printf("Error: BitReader bytePos_(%lu) out of range(%lu)\\n", bytePos_, endByte_);
         |        exit(1);
         |      }
-        |      bool bit = (data_[bytePos_] >> bitPos_) & 1u;
-        |      v = (v << 1) | bit;
+        |      uint64_t bit = (data_[bytePos_] >> bitPos_) & 1u;
+        |      v = v | (bit << i);
         |      if (++bitPos_ == 8) { bitPos_ = 0; ++bytePos_; }
         |    }
         |    return v;
