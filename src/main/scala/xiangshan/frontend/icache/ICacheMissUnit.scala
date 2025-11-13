@@ -332,6 +332,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     difftest.valid  := writeSramValid
     difftest.addr   := Cat(mshrResp.blkPAddr, 0.U(blockOffBits.W))
     difftest.data   := respDataReg.asTypeOf(difftest.data)
-    difftest.idtfr  := DontCare
+    difftest.mask   := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }
 }
