@@ -439,6 +439,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** check abtb output *** */
   when(abtb.io.prediction.taken) {
     assert(abtb.io.debug_startVAddr === s1_pc)
+    // assert((abtb.io.debug_previousVAddr === s2_pc) || (abtb.io.debug_previousVAddr === s4_pc),
+    //   "abtb previousVAddr doesn't match"
+    // )
   }
 
   /* *** BpTrace *** */
