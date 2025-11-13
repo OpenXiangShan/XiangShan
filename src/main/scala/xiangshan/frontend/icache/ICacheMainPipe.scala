@@ -657,15 +657,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
       val bankSel = getBankSel(s2_req_offset, s2_valid).reduce(_ | _)
       val lineSel = getLineSel(s2_req_offset)
 
-      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
+//      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
+      diffMainPipeOut.valid := false.B
       diffMainPipeOut.addr := Mux(
         lineSel(i),
         blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt,
         blkPaddrAll(0) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt
       )
 
-      diffMainPipeOut.data  := s2_datas(i).asTypeOf(diffMainPipeOut.data)
-      diffMainPipeOut.idtfr := DontCare
+      diffMainPipeOut.data := s2_datas(i).asTypeOf(diffMainPipeOut.data)
     }
   }
 }

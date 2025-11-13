@@ -553,7 +553,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     difftest.valid := cache.io.refill.valid
     difftest.addr := difftest_ptw_addr(RegEnable(mem.d.bits.source, mem.d.valid))
     difftest.data := refill_data.asTypeOf(difftest.data)
-    difftest.idtfr := DontCare
   }
 
   if (env.EnableDifftest) {
