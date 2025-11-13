@@ -33,7 +33,6 @@ class TraceDriveCollectorIO(implicit p: Parameters) extends TraceBundle {
 class TraceDrivePtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[TraceDrivePtr](Size)
 
 class TraceDriveCollector(implicit p: Parameters) extends TraceModule
-  with TraceParams
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceDriveCollectorIO)
 

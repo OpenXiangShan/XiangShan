@@ -25,6 +25,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, Laz
 import utility._
 import xiangshan.frontend.tracertl.{TraceAXI4Xbar, TraceAXI4Memory}
 import xiangshan.DebugOptionsKey
+import xiangshan.frontend.tracertl.TraceRTLParamKey
 
 class MemoryRequestHelper(requestType: Int)
   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
@@ -319,13 +320,17 @@ class AXI4MemoryWrapper (
   memByte: Long,
   useBlackBox: Boolean = false
 )(implicit p: Parameters) extends AXI4MemorySlave(slave, memByte, useBlackBox) {
-  val ramRange = if (p(DebugOptionsKey).TraceRTLMode) {
+  val ramRange = if (p(DebugOptionsKey).TraceRTLMode &&
+    !p(TraceRTLParamKey).TraceRTLOnFPGA &&
+    !p(TraceRTLParamKey).TraceRTLOnPLDM) {
     // ugly code to avoid AddressSet conflict check
     // ram and fastRam actually have the same address range
     require(slaveParam.address.map(_.contains(0x80000000L)).reduce(_||_))
     require(slaveParam.address.map(_.contains(0x80000000L + 0x7ffffff0L)).reduce(_||_))
 
-    slaveParam.address.flatMap(_.subtract(AddressSet(0x80000000L, 0x7fffffffL)))
+    val fastRamRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+    // slaveParam.address.flatMap(_.subtract(AddressSet(0x80000000L, 0x7fffffffL)))
+    slaveParam.address.flatMap{case s => fastRamRange.map(x => s.subtract(x))}.flatten
   } else slaveParam.address
 
   val ram = LazyModule(new AXI4Memory(
@@ -337,10 +342,13 @@ class AXI4MemoryWrapper (
     burstLen
   ))
 
-  if (p(DebugOptionsKey).TraceRTLMode) {
-    val fastRamRange = AddressSet(0x80000000L, 0x7fffffffL)
+  if (p(DebugOptionsKey).TraceRTLMode &&
+    !p(TraceRTLParamKey).TraceRTLOnFPGA &&
+    !p(TraceRTLParamKey).TraceRTLOnPLDM) {
+    // val fastRamRange = AddressSet(0x80000000L, 0x7fffffffL) // 2GB. for spec17, enlarge it
+    val fastRamRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
     val fast = LazyModule(new TraceAXI4Memory(
-      Seq(fastRamRange),
+      fastRamRange,
       memByte,
       useBlackBox,
       slaveParam.executable,

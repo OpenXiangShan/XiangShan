@@ -17,6 +17,7 @@ package xiangshan.frontend.tracertl
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility._
 
 
@@ -28,10 +29,10 @@ class TraceUnpackageBufferPtr(entries: Int) extends CircularQueuePtr[TraceUnpack
 // DATA_WIDTH = 16 * 48 = 768
 // AXIS_DATA_WIDTH = 512
 // MAX_DATA_WIDTH = ~20000(maybe)
-class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INST_NUM: Int) extends Module {
+class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INST_NUM: Int)(implicit p: Parameters) extends Module {
 
   private val TRACE_INNER_INST_WIDTH = (new TraceInstrInnerBundle).getWidth
-  private val TRACE_OUTER_INST_WIDTH = (new TraceInstrOuterBundle).getWidth
+  private val TRACE_OUTER_INST_WIDTH = (new TraceInstrFpgaBundle).getWidth
 
   private val BUS_CORE_DATA_WIDTH = TRACE_INNER_INST_WIDTH  * DUT_BUS_INST_NUM
   private val PACKET_INST_WIDTH = TRACE_OUTER_INST_WIDTH  * PACKET_INST_NUM
@@ -54,6 +55,8 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
 
   val recvIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
   val tranIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
+
+  val instIDCounter = RegInit(1.U(p(TraceRTLParamKey).TraceInstIDWidth.W))
 
   // recv
   // TODO: fsm seems not necessary
@@ -92,15 +95,15 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
   val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
 
   val dataOutOuterUInt = WireInit(dataOuterVecAtIndex.asTypeOf(Vec(DUT_BUS_INST_NUM, UInt(TRACE_OUTER_INST_WIDTH.W))))
-  val dataOutOuterFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrOuterBundle))
+  val dataOutOuterFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrFpgaBundle))
   dataOutOuterFormat.zip(dataOutOuterUInt).foreach { case (outer, uint) =>
-    outer := TraceInstrOuterBundle.readRaw(uint)
+    outer := TraceInstrFpgaBundle.readRaw(uint, reverse=false)
   }
 
   val dataOutInnerUInt = Wire(Vec(DUT_BUS_INST_NUM, UInt(TRACE_INNER_INST_WIDTH.W)))
   val dataOutInnerFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
-  dataOutInnerFormat.zip(dataOutOuterFormat).foreach { case (inner, outer) =>
-    inner := outer.toInnerBundle
+  dataOutInnerFormat.zip(dataOutOuterFormat).zipWithIndex.foreach { case ((inner, outer), index) =>
+    inner := outer.toInnerBundle(instIDCounter + index.U)
   }
   dataOutInnerUInt.zip(dataOutInnerFormat).foreach { case (uint, inner) =>
     uint := inner.asUInt
@@ -130,6 +133,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
       bufferValid(tranIdx.value) := false.B
       tranIdx := tranIdx + 1.U
     }
+    instIDCounter := instIDCounter + DUT_BUS_INST_NUM.U
   }
 
   // assert the first instruction
@@ -144,7 +148,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
 
   // debug
   // val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
-  // val dataOuterTraceFormat = dataOuterVec(data_cycle_index).asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrOuterBundle))
+  // val dataOuterTraceFormat = dataOuterVec(data_cycle_index).asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrFpgaBundle))
   // val dataInnerTraceFormat = io.data.bits.asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
 
   // dontTouch(dataFlatten)

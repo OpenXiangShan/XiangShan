@@ -21,59 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.{XSBundle, XSModule}
 import xiangshan.cache.HasL1CacheParameters
 
-trait TraceParams {
-  val TraceInstrWidth = 32
-  // val blockOffBits = log2Ceil(64)
-}
-
-class TraceBundle(implicit p: Parameters) extends XSBundle with TraceParams
-class TraceModule(implicit p: Parameters) extends XSModule with TraceParams
-
-class TraceInstrOuterBundle extends Bundle {
-  val pcVA = UInt(64.W)
-  val pcPA = UInt(64.W)
-  val memoryAddrVA = UInt(64.W)
-  val memoryAddrPA = UInt(64.W)
-  val target = UInt(64.W)
-  val inst = UInt(32.W)
-  val memoryType = UInt(4.W)
-  val memorySize = UInt(4.W)
-  val branchType = UInt(8.W)
-  val branchTaken = UInt(8.W)
-  val exception = UInt(8.W)
-
-  val fastSimulation = UInt(8.W)
-  val InstID = UInt(64.W)
-
-  def toInnerBundle: TraceInstrInnerBundle = {
-    val inner = Wire(new TraceInstrInnerBundle)
-    inner.elements.foreach { case (name, elt) =>
-      require(this.elements.contains(name), s"[TraceInstrOuterBundle] Error: field $name not found in outer bundle")
-      elt := this.elements(name)
-    }
-    inner
-  }
-
-  def nextPC = Mux((exception =/= 0.U) || branchTaken(0), target,
-               Mux(inst(1,0) === 3.U, pcVA + 4.U, pcVA + 2.U))
-}
-
-object TraceInstrOuterBundle {
-
-  // FIXME: asTypeOf would use the reverse order of fields
-  def readRaw(outer: UInt): TraceInstrOuterBundle = {
-    val m = Wire(new TraceInstrOuterBundle)
-    var offset = 0
-    m.getElements.reverse.foreach( elt => {
-      val width = elt.getWidth
-      elt := outer(offset + width - 1, offset)
-      offset += width
-    })
-    assert(offset == outer.getWidth, s"ERROR in TraceInstrOuterBundle, fromOuterRaw offset not match, expect ${outer.getWidth}, got ${offset}")
-
-    m
-  }
-}
+class TraceBundle(implicit p: Parameters) extends XSBundle
+class TraceModule(implicit p: Parameters) extends XSModule
 
 class TraceInstrInnerBundle extends Bundle {
   def VAddrBits = 50
@@ -102,7 +51,7 @@ class TraceInstrInnerBundle extends Bundle {
   def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
   def isTaken = branchTaken(0) === 1.U
   def isException = exception =/= 0.U
-  def isBranch = branchType =/= 0.U
+  // def isBranch = branchType =/= 0.U
 
   def seqPC = pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U)
   def targeEqSeq = target === seqPC
@@ -143,6 +92,87 @@ object TraceInstrInnerBundle {
       offset += width
     })
     assert(offset == raw.getWidth, s"ERROR in TraceInstrInnerBundle, fromOuterRaw offset not match, expect ${raw.getWidth}, got ${offset}")
+
+    m
+  }
+}
+
+object TraceInstType {
+  def Compute   = "b000".U
+  def Branch    = "b001".U
+  def Load      = "b010".U
+  def Store     = "b011".U
+  def Exception = "b100".U
+  def Other     = "b101".U
+
+  def len     = 3
+  def apply() = UInt(len.W)
+}
+
+class TraceInstrFpgaBundle(implicit p: Parameters) extends Bundle {
+  def trtl = p(TraceRTLParamKey)
+
+  val traceType = UInt(TraceInstType.len.W)
+  val pcVA = UInt(trtl.TraceVAddrWidth.W)
+  val pcPAWoOff = UInt((trtl.TracePAddrWidth-12).W)
+  // memory addr va, target
+  val op1 = UInt(trtl.TraceVAddrWidth.W)
+  // memory addr pa, taken, exception
+  val op2 = UInt((trtl.TracePAddrWidth-12).W)
+  // TODO: move inst to memory to save bus width
+  val inst = UInt(trtl.TraceInstCodeWidth.W)
+
+  def pcPA = Cat(pcPAWoOff, pcVA(11,0))
+  def memoryAddrVA = op1
+  def memoryAddrPA = Cat(op2, memoryAddrVA(11,0))
+  def target = op1
+  def branchTaken = op2(0)
+  def exception = Mux(traceType === TraceInstType.Exception, op2(7,0), 0.U)
+
+  def isCompute = traceType === TraceInstType.Compute
+  def isBranch = traceType === TraceInstType.Branch
+  def isLoad = traceType === TraceInstType.Load
+  def isStore = traceType === TraceInstType.Store
+  def isException = traceType === TraceInstType.Exception
+  def isUnknownType = traceType === TraceInstType.Other
+
+  def nextPC = Mux(isException || branchTaken.asBool, target,
+               Mux(inst(1,0) === 3.U, pcVA + 4.U, pcVA + 2.U))
+  def toInnerBundle(instID: UInt): TraceInstrInnerBundle = {
+    val inner = Wire(new TraceInstrInnerBundle)
+    inner.pcVA := pcVA
+    inner.pcPA := pcPA
+    inner.memoryAddrVA := op1
+    inner.memoryAddrPA := Cat(op2, memoryAddrVA(11,0))
+    inner.target := target
+    inner.inst := inst
+    inner.memoryType := Mux1H(Seq(
+      isLoad -> 1.U,
+      isStore -> 2.U,
+    ))
+    inner.memorySize := 0.U
+    inner.branchType := Mux(isBranch, 1.U, 0.U)
+    inner.branchTaken := branchTaken && isBranch
+    inner.exception := exception
+    inner.fastSimulation := 0.U
+    inner.InstID := instID
+
+    inner
+  }
+}
+
+object TraceInstrFpgaBundle {
+
+  def readRaw(rawBits: UInt, reverse: Boolean)(implicit p: Parameters): TraceInstrFpgaBundle = {
+    val m = Wire(new TraceInstrFpgaBundle)
+    var offset = 0
+    val elements = if (reverse) m.getElements.reverse else m.getElements
+    elements.foreach( elt => {
+      val width = elt.getWidth
+      elt := rawBits(offset + width - 1, offset)
+      offset += width
+    })
+    assert(offset == rawBits.getWidth, s"ERROR in TraceInstrFpgaBundle, fromOuterRaw offset not match, expect ${rawBits.getWidth}, got ${offset}")
 
     m
   }

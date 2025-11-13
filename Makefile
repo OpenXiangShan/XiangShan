@@ -109,6 +109,10 @@ ifeq ($(WITH_CHISELDB),1)
 override SIM_ARGS += --with-chiseldb
 endif
 
+ifeq ($(WITH_CHISELMAP),1)
+override SIM_ARGS += --with-chiselmap
+endif
+
 # run emu with chisel-db
 ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb

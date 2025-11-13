@@ -1381,7 +1381,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     class PCChiselMapBundle extends Bundle {
       val pc = UInt(VAddrBits.W)
     }
-    val pcMap = ChiselMap.createTable("PC", Vec(CommitWidth, new PCChiselMapBundle), basicDB = true)
+    val pcMap = ChiselMap.createTable("PC", Vec(CommitWidth, new PCChiselMapBundle))
     val pcVec = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
     pcVec.zipWithIndex.map{ case (x, i) =>
       x.valid := io.commits.commitValid(i) && io.commits.isCommit
@@ -1390,21 +1390,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     pcMap.log(pcVec, 1.U, "PC", clock, reset)
 
     // PC-Head, ChiselMap
-    val pcRobHeadMap = ChiselMap.createTable("PCRobHead", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcRobHeadMap = ChiselMap.createTable("PCRobHead", Vec(1, new PCChiselMapBundle))
     val pcHead = Wire(Vec(1, Valid(new PCChiselMapBundle)))
     pcHead(0).valid := io.commits.commitValid(0) && io.commits.isCommit
     pcHead(0).bits.pc := io.commits.info(0).debug_pc.get
     pcRobHeadMap.log(pcHead, 1.U, "PCRoBHead", clock, reset)
 
     // PC-Head, ChiselMap
-    val pcRobUopBlockMap = ChiselMap.createTable("PCRobUopBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcRobUopBlockMap = ChiselMap.createTable("PCRobUopBlock", Vec(1, new PCChiselMapBundle))
     val pcUopBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
     val headEntry_tmp = robEntries(deqPtr.value)
     pcUopBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isUopWritebacked
     pcUopBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
     pcRobUopBlockMap.log(pcUopBlock, 1.U, "PCRoBUopBlock", clock, reset)
 
-    val pcRobBlockMap = ChiselMap.createTable("PCRobBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+    val pcRobBlockMap = ChiselMap.createTable("PCRobBlock", Vec(1, new PCChiselMapBundle))
     val pcBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
     pcBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isWritebacked
     pcBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
@@ -1422,7 +1422,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val rsPlusFu = UInt(64.W)
       val commit = UInt(64.W)
     }
-    val pcLatencyMap = ChiselMap.createTableBase("PCLatency", Vec(CommitWidth, new PCChiselMapBundle), Vec(CommitWidth, new InstrLatencyBundle), basicDB = true)
+    val pcLatencyMap = ChiselMap.createTableBase("PCLatency", Vec(CommitWidth, new PCChiselMapBundle), Vec(CommitWidth, new InstrLatencyBundle))
     val pcLatencyKey = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
     val pcLatencyValue = Wire(Vec(CommitWidth, new InstrLatencyBundle))
     (0 until CommitWidth).foreach { i =>
@@ -1533,7 +1533,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         traceCollectQueue.io.in.bits(i).valid := io.commits.commitValid(i)
         traceCollectQueue.io.in.bits(i).bits.pcVA := SignExt(uop.pc, XLEN)
         traceCollectQueue.io.in.bits(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
-        traceCollectQueue.io.in.bits(i).bits.padding := 0.U
+        // traceCollectQueue.io.in.bits(i).bits.padding := 0.U
 
         when (traceCollectQueue.io.in.valid && traceCollectQueue.io.in.bits(i).valid) {
           XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")

@@ -656,7 +656,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //   val fuType = chiselTypeOf(io.out.head.bits.ctrl.fuType)
   //   val fuOpType = chiselTypeOf(io.out.head.bits.ctrl.fuOpType)
   // }
-  // val instTypeMap = ChiselMap.createTable("instType", Vec(RenameWidth, new FuTypeBundle), basicDB = true)
+  // val instTypeMap = ChiselMap.createTable("instType", Vec(RenameWidth, new FuTypeBundle))
   // val perf_FuType = Wire(Vec(RenameWidth, Valid(new FuTypeBundle)))
   // perf_FuType.zipWithIndex.map{case (x, i) =>
   //   x.valid := io.out(i).fire

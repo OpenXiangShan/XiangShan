@@ -100,7 +100,7 @@ class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
       val isMemVio = Bool()
       val taken = Bool()
     }
-    val backRedMap = ChiselMap.createTable("backendRedirect", Vec(1, new BackendRedirectCMBundle), basicDB = true)
+    val backRedMap = ChiselMap.createTable("backendRedirect", Vec(1, new BackendRedirectCMBundle))
     val perf_backRedMap = Wire(Vec(1, Valid(new BackendRedirectCMBundle())))
     perf_backRedMap(0).valid := io.backend.toFtq.redirect.valid
     perf_backRedMap(0).bits.specifyField(

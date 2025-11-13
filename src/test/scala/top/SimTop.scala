@@ -148,7 +148,7 @@ object SimTop extends App {
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
-  val enableChiselMap = true // config(DebugOptionsKey).EnableChiselMap
+  val enableChiselMap = config(DebugOptionsKey).EnableChiselMap
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
   ChiselMap.init(enableChiselMap && !envInFPGA)

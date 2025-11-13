@@ -22,10 +22,9 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 
 // size must be multiple of 8bit(byte)
-class TraceFPGACollectBundle extends Bundle {
-  val padding = UInt(17.W) // padding to make sure the whole bundle is multiple of 8bit(byte)
-  val instNum = UInt(8.W)
-  val pcVA = UInt(39.W)
+class TraceFPGACollectBundle(implicit p: Parameters) extends Bundle {
+  val instNum = UInt(3.W)
+  val pcVA = UInt(p(TraceRTLParamKey).TraceVAddrWidth.W)
 }
 
 class TraceCollectQueuePtr(entries: Int) extends CircularQueuePtr[TraceCollectQueuePtr](entries)
@@ -85,7 +84,7 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
   BoringUtils.addSource(out, "TraceRTLFPGATracesCollect")
 }
 
-class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int) extends Module {
+class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int)(implicit p: Parameters) extends Module {
 
   // PACKET_INST_NUM should be equal TraceCollectQueue.CommitCheckWidth
   private val TRACE_FPGA_COLLECT_WIDTH = (new TraceFPGACollectBundle).getWidth
@@ -96,7 +95,6 @@ class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int) extends Modul
   private val TRACE_COLLECT_BYTES = TRACE_FPGA_COLLECT_WIDTH / 8 // FIXME: when TRACE_FPGA_COLLECT_WIDTH not multiple of 8bit(byte)
 
   println(s"[TraceAXISPackage] PACKET_INST_NUM: $PACKET_INST_NUM, PACKET_INST_WIDTH: $PACKET_INST_WIDTH, AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM, PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
-  require(TRACE_FPGA_COLLECT_WIDTH == 64, "TraceFPGACollectBundle width should be 64 for simplicity")
 
   class TracePackageBufferPtr(entries: Int) extends CircularQueuePtr[TracePackageBufferPtr](entries) with HasCircularQueuePtrHelper
 

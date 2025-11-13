@@ -20,9 +20,15 @@ import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
 import circt.stage.ChiselStage
 import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage}
+import xiangshan.frontend.tracertl.TraceRTLParamKey
+import top.ArgParser
 
 // used to generated TraceAXISUnpackage.sv and *Package.sv without SimTop
 object TraceRTLAXISModGen extends App {
+  // FIXME: updatge args in Makefile. manual add parse
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
+  val trtlOpts = config(TraceRTLParamKey)
+
   val targetDir = "./build/tracertl"
 
   (new ChiselStage).execute(
@@ -30,7 +36,9 @@ object TraceRTLAXISModGen extends App {
       "--target-dir", targetDir,
       "--target", "systemverilog",
     ),
-    Seq(ChiselGeneratorAnnotation(() => new TraceAXISPackage(128, 512)))
+    Seq(ChiselGeneratorAnnotation(() => new TraceAXISPackage(
+      trtlOpts.TraceFpgaCollectWidth,
+      trtlOpts.TraceFpgaAxisWidth)(config)))
   )
 
   println(s"Successfully generated TraceAXISPackage.sv in $targetDir")
@@ -40,7 +48,11 @@ object TraceRTLAXISModGen extends App {
       "--target-dir", targetDir,
       "--target", "systemverilog",
     ),
-    Seq(ChiselGeneratorAnnotation(() => new TraceAXISUnpackage(100*16, 512, 16)))
+    Seq(ChiselGeneratorAnnotation(() => new TraceAXISUnpackage(
+      trtlOpts.TraceFpgaUnpackInstNum,
+      trtlOpts.TraceFpgaAxisWidth,
+      trtlOpts.TraceFpgaRecvWidth
+    )(config)))
   )
 
   println(s"Successfully generated TraceAXISUpackage.sv in $targetDir")

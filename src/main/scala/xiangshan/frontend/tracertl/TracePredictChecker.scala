@@ -23,8 +23,7 @@ import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, FaultType}
 
 // TracePredictChecker is just the same with the IFU's PredChecker
 // with no regnext for stage2Out and different input
-class TracePredictChecker(implicit p: Parameters) extends TraceModule
-  with TraceParams {
+class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   val io = IO(new Bundle {
     val wb_enable = Input(Bool())
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))

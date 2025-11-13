@@ -75,8 +75,7 @@ class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
   val block = Output(Bool())
 }
 
-class TraceRTL(implicit p: Parameters) extends TraceModule
-  with TraceParams {
+class TraceRTL(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceRTLIO)
   dontTouch(io)
 

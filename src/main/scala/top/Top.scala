@@ -365,7 +365,7 @@ object TopMain extends App {
   val enableDifftest = config(DebugOptionsKey).EnableDifftest || config(DebugOptionsKey).AlwaysBasicDiff
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
-  val enableChiselMap = true
+  val enableChiselMap = config(DebugOptionsKey).EnableChiselMap
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
   ChiselMap.init(enable = enableChiselMap && !envInFPGA)

@@ -39,7 +39,6 @@ class TraceFPGAHugeBufferPtr(entries: Int) extends CircularQueuePtr[TraceFPGAHug
   with HasCircularQueuePtrHelper {}
 
 class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
-  with TraceParams
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderFPGAIO)
 
@@ -73,6 +72,17 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
       hugeBuffer(writePtr.value + i.U) := fpgaTraces(i)
     }
     writePtr := writePtr + trtl.TraceFpgaRecvWidth.U
+  }
+
+  when (fpgaTracesValid) {
+    (0 until trtl.TraceFpgaRecvWidth-1).foreach(i => {
+      XSError(fpgaTraces(i).nextPC =/= fpgaTraces(i + 1).pcVA,
+        s"Error in TraceReaderFPGA. Fpga Recv: the ${i}th inst's nextPC is not equal to ${i+1}th inst's PC")
+    })
+    (0 until trtl.TraceFpgaRecvWidth-1).foreach(i => {
+      XSError((fpgaTraces(i).InstID+1.U) =/= fpgaTraces(i + 1).InstID,
+        s"Error in TraceReaderFPGA. Fpga Recv: the ${i}th inst's next instID is not equal to ${i+1}th inst's instID")
+    })
   }
 
   io.instsValid := !isEmpty(writePtr, readPtr)

@@ -72,7 +72,6 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
 class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[TraceBufferPtr](Size)
 
 class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
-  with TraceParams
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val enable = Input(Bool())
@@ -139,7 +138,6 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
 
 
 class TraceReader(implicit p: Parameters) extends TraceModule
-  with TraceParams
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderIO())
   dontTouch(io)

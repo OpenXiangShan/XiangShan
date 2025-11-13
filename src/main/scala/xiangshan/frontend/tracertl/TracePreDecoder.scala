@@ -30,7 +30,6 @@ import xiangshan.frontend.{HasPdConst, PreDecodeResp}
  */
 
 class TracePreDecoder(implicit p: Parameters) extends TraceModule
-  with TraceParams
   with HasPdConst {
   val io = IO(new Bundle {
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))

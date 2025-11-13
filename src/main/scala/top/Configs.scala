@@ -448,6 +448,7 @@ class FpgaTraceRTLDefaultConfig(n: Int = 1) extends Config (
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,
       AlwaysBasicDB = false,
+      EnableChiselMap = false,
       TraceRTLMode = true,
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
@@ -467,6 +468,7 @@ class FpgaTraceRTLMinimalConfig(n: Int = 1) extends Config(
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,
       AlwaysBasicDB = false,
+      EnableChiselMap = false,
       TraceRTLMode = true,
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
