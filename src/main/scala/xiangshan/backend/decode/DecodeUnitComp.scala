@@ -155,6 +155,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val vlmulReg = latchedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
   val vstartReg = latchedInst.vpu.vstart
+  val dependOldVdReg = latchedInst.vpu.isDependOldVd
 
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
@@ -1983,6 +1984,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle.head.waitForward := isIxSegment
       csBundle(numOfUop - 1.U).blockBackward := isIxSegment
     }
+  }
+
+  for (i <- 0 until MAX_VLMUL) {
+    csBundle(i).vpu.isDependOldVd := dependOldVdReg || ((csBundle(i).ldest === dest) && (vstartReg =/= 0.U))
   }
 
   //readyFromRename Counter
