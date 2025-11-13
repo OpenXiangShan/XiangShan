@@ -18,11 +18,13 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.HasCircularQueuePtrHelper
 import utility.XSError
+import utility.XSPerfAccumulate
 import xiangshan.CallRetCommit
 import xiangshan.frontend.bpu.BranchAttribute
 
-class CommitQueue(implicit p: Parameters) extends FtqModule {
+class CommitQueue(implicit p: Parameters) extends FtqModule with HasCircularQueuePtrHelper {
 
   class CommitQueueIO extends FtqBundle {
     val backendCommit: Vec[Valid[CallRetCommit]] = Input(Vec(CommitWidth, Valid(new CallRetCommit)))
@@ -36,16 +38,18 @@ class CommitQueue(implicit p: Parameters) extends FtqModule {
   private val enqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
   private val deqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
 
+  private val full = distanceBetween(enqPtr, deqPtr) >= (CommitQueueSize - 8).U
+
   private val isCallRet = io.backendCommit.map(instr =>
     instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
   )
 
   private val enqIndex = VecInit((0 until CommitWidth).map(i => (enqPtr + PopCount(isCallRet.take(i))).value))
 
-  enqPtr := enqPtr + PopCount(isCallRet)
+  when(!full)(enqPtr := enqPtr + PopCount(isCallRet))
 
   io.backendCommit.zipWithIndex.foreach { case (branch, i) =>
-    when(isCallRet(i)) {
+    when(isCallRet(i) && !full) {
       mem(enqIndex(i)).valid := true.B
       mem(enqIndex(i)).bits  := branch.bits
     }
@@ -61,4 +65,7 @@ class CommitQueue(implicit p: Parameters) extends FtqModule {
   io.bpuTrain.bits  := mem(deqPtr.value).bits
 
   XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in Commit Queue")
+
+  // We do not expect the commit queue to be full often
+  XSPerfAccumulate("commitQueueFull", full)
 }
