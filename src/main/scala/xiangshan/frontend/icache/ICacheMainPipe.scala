@@ -55,8 +55,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val req:          DecoupledIO[FtqFetchRequest] = Flipped(DecoupledIO(new FtqFetchRequest))
     val flush:        Bool                         = Input(Bool())
     val flushFromBpu: BpuFlushInfo                 = Input(new BpuFlushInfo)
-    // Pmp
-    val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
     val resp:      Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
     val respStall: Bool                    = Input(Bool())
@@ -73,7 +71,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val (toData, fromData) = (io.dataRead.req, io.dataRead.resp)
   private val toMetaFlush        = io.metaFlush.req
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
-  private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
   private val fromWayLookup      = io.wayLookupRead
   private val eccEnable =
     if (ForceMetaEccFail || ForceDataEccFail) true.B else io.eccEnable
@@ -127,8 +124,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_pTag              = fromWayLookup.bits.pTag
   private val s0_gpAddr            = fromWayLookup.bits.gpAddr
   private val s0_isForVSnonLeafPTE = fromWayLookup.bits.isForVSnonLeafPTE
-  private val s0_itlbException     = fromWayLookup.bits.itlbException
+  private val s0_exception         = fromWayLookup.bits.exception
   private val s0_itlbPbmt          = fromWayLookup.bits.itlbPbmt
+  private val s0_pmpMmio           = fromWayLookup.bits.pmpMmio
   private val s0_maybeRvcMap       = fromWayLookup.bits.maybeRvcMap
   private val s0_metaCodes         = fromWayLookup.bits.metaCodes
   private val s0_hits              = VecInit(fromWayLookup.bits.waymask.map(_.orR))
@@ -180,9 +178,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_isForVSnonLeafPTE =
     RegEnable(s0_isForVSnonLeafPTE, 0.U.asTypeOf(s0_isForVSnonLeafPTE), s0_fire)
   private val s1_doubleline         = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
-  private val s1_itlbException      = RegEnable(s0_itlbException, 0.U.asTypeOf(s0_itlbException), s0_fire)
+  private val s1_exception          = RegEnable(s0_exception, 0.U.asTypeOf(s0_exception), s0_fire)
   private val s1_isBackendException = RegEnable(s0_isBackendException, false.B, s0_fire)
   private val s1_itlbPbmt           = RegEnable(s0_itlbPbmt, 0.U.asTypeOf(s0_itlbPbmt), s0_fire)
+  private val s1_pmpMmio            = RegEnable(s0_pmpMmio, false.B, s0_fire)
   private val s1_waymasks           = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
   private val s1_sramMaybeRvcMapRaw = RegEnable(s0_maybeRvcMap, 0.U.asTypeOf(s0_maybeRvcMap), s0_fire)
   private val s1_metaCodes          = RegEnable(s0_metaCodes, 0.U.asTypeOf(s0_metaCodes), s0_fire)
@@ -272,18 +271,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
   io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_sramHits(0)
   io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_sramHits(1) && s1_doubleline
-
-  /* *** PMP check (to be removed) *** */
-  // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
-  toPmp.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
-  toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
-  toPmp.bits.size := 3.U
-  toPmp.bits.cmd  := TlbCmd.exec
-  private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
-  private val s1_pmpMmio      = fromPmp.mmio
-
-  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
-  private val s1_exception = s1_itlbException || s1_pmpException
 
   /* *** Ecc check *** */
   private val s1_metaCorrupt =

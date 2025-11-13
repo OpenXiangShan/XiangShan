@@ -48,8 +48,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // IFU
     val toIfu:   ICacheToIfuIO = new ICacheToIfuIO
     val fromIfu: IfuToICacheIO = Flipped(new IfuToICacheIO)
-    // PMP: magic number 2: mainPipe & prefetchPipe both need a Pmp check
-    val pmp: Vec[PmpCheckBundle] = Vec(2, new PmpCheckBundle)
+    // PMP
+    val pmp: PmpCheckBundle = new PmpCheckBundle
     // iTLB
     val itlb:          TlbRequestIO = new TlbRequestIO
     val itlbFlushPipe: Bool         = Bool()
@@ -190,9 +190,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   replacer.io.touch <> mainPipe.io.replacerTouch
   replacer.io.victim <> missUnit.io.victim
 
-  io.pmp(0) <> mainPipe.io.pmp
-  io.pmp(1) <> prefetcher.io.pmp
-
+  io.pmp <> prefetcher.io.pmp
   io.itlb <> prefetcher.io.itlb
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 

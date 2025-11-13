@@ -146,19 +146,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val pmp = Module(new PMP)
   pmp.io.distribute_csr := csrCtrl.distribute_csr
 
-  private val pmpChecker = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(sameCycle = true)).io))
+  private val pmpChecker = Module(new PMPChecker(sameCycle = true))
 
-  private val pmpRequestor = icache.io.pmp
-  require(pmpRequestor.length == coreParams.ipmpPortNum)
-
-  (pmpChecker zip pmpRequestor).foreach { case (checker, requestor) =>
-    if (HasBitmapCheck) {
-      checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
-    } else {
-      checker.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
-    }
-    requestor.resp := checker.resp
+  if (HasBitmapCheck) {
+    pmpChecker.io.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp.req)
+  } else {
+    pmpChecker.io.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp.req)
   }
+  icache.io.pmp.resp := pmpChecker.io.resp
 
   // icache use a non-block tlb port
   private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))

@@ -146,7 +146,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   io.write.ready := !full && !exceptionEntry.valid
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
-    when(io.write.bits.itlbException.hasException) {
+    when(io.write.bits.exception.hasException) {
       exceptionEntry.valid := true.B
       exceptionEntry.bits  := io.write.bits.exceptionEntry
       exceptionPtr         := writePtr

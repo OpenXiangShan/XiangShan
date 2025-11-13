@@ -239,10 +239,11 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
   val pTag:        UInt      = UInt(tagBits.W)
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+  val pmpMmio:     Bool      = Bool()
 }
 
 class WayLookupExceptionEntry(implicit p: Parameters) extends ICacheBundle {
-  val itlbException:     ExceptionType = new ExceptionType
+  val exception:         ExceptionType = new ExceptionType
   val gpAddr:            PrunedAddr    = PrunedAddr(PAddrBitsMax)
   val isForVSnonLeafPTE: Bool          = Bool()
 }
@@ -258,7 +259,8 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   def metaCodes:         Vec[UInt]     = entry.metaCodes
   def pTag:              UInt          = entry.pTag
   def itlbPbmt:          UInt          = entry.itlbPbmt
-  def itlbException:     ExceptionType = exceptionEntry.itlbException
+  def pmpMmio:           Bool          = entry.pmpMmio
+  def exception:         ExceptionType = exceptionEntry.exception
   def gpAddr:            PrunedAddr    = exceptionEntry.gpAddr
   def isForVSnonLeafPTE: Bool          = exceptionEntry.isForVSnonLeafPTE
 }

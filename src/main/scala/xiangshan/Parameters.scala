@@ -202,7 +202,6 @@ case class XSCoreParameters
     NWays = 48,
   ),
   itlbPortNum: Int = 1, // ICache does not support cross-page fetch in V3, we need only 1 port
-  ipmpPortNum: Int = 2, // ICache(PrefetchPipe + MainPipe)
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     NWays = 48,

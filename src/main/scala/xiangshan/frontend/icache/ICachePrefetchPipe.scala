@@ -267,6 +267,26 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }
 
   /**
+   ******************************************************************************
+   * PMP check
+   ******************************************************************************
+   */
+  // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped
+  toPmp.valid     := s1_valid // !ExceptionType.hasException(s1_itlbException(i)) // bad for timing
+  toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
+  toPmp.bits.size := 3.U
+  toPmp.bits.cmd  := TlbCmd.exec
+  private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
+  private val s1_pmpMmio      = fromPmp.mmio
+
+  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
+  // here, itlb exception includes backend exception
+  private val s1_exceptionOut = s1_itlbException || s1_pmpException
+
+  // merge pmp mmio and itlb pbmt
+  private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
+
+  /**
     ******************************************************************************
     * send enqueue req to ICacheWayLookup
     ******** **********************************************************************
@@ -284,8 +304,9 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   toWayLookup.bits.gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
   toWayLookup.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   toWayLookup.bits.metaCodes         := s1_metaCodes
-  toWayLookup.bits.itlbException     := s1_itlbException
+  toWayLookup.bits.exception         := s1_exceptionOut
   toWayLookup.bits.itlbPbmt          := s1_itlbPbmt
+  toWayLookup.bits.pmpMmio           := s1_pmpMmio
 
   when(toWayLookup.fire) {
     val waymasksVec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
@@ -302,26 +323,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       s1_vAddr(1).toUInt
     )
   }
-
-  /**
-    ******************************************************************************
-    * PMP check
-    ******************************************************************************
-    */
-  // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped
-  toPmp.valid     := s1_valid // !ExceptionType.hasException(s1_itlbException(i)) // bad for timing
-  toPmp.bits.addr := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
-  toPmp.bits.size := 3.U
-  toPmp.bits.cmd  := TlbCmd.exec
-  private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
-  private val s1_pmpMmio      = fromPmp.mmio
-
-  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
-  // here, itlb exception includes backend exception
-  private val s1_exceptionOut = s1_itlbException || s1_pmpException
-
-  // merge pmp mmio and itlb pbmt
-  private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
 
   /**
     ******************************************************************************
