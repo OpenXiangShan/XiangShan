@@ -107,8 +107,8 @@ make idea
 * Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts).
 * Clone this project and run `make init` to initialize submodules.
 
-### Run with simulator
-#### Verilator
+### Run with simulator (Verilator)
+
 * Install [Verilator](https://verilator.org/guide/latest/), the open-source Verilog simulator.
 * Run `make emu` to build the C++ simulator `./build/emu` with Verilator.
 * Refer to `./build/emu --help` for run-time arguments of the simulator.
@@ -121,9 +121,10 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
-#### GalaxSim
+### Run with simulator (GalaxSim)
+
 * Install [GalaxSim](https://free.x-epic.com/), the free-to-use Verilog simulator.
-* Run `make xsim` to compile  simulation executable. Then run `make xsim-run` to do simulation.
+* Run `make xsim` to compile for simulation executable. Then run `make xsim-run` to do simulation.
 * Refer to `Makefile` and `galaxsim.mk` for more information.
 
 ### Run with xspdb 
