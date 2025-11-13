@@ -78,28 +78,27 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
-  private val constCtrl = {
-    Constantin.init(true)
-    val ret = Constantin.createRecord("constCtrl")
-    Constantin.init(false)
-    ret
-  }
+  private val constCtrl = Constantin.createRecord("constCtrl")
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-//  ubtb.io.enable        := ctrl.ubtbEnable
-//  abtb.io.enable        := ctrl.abtbEnable
-//  mbtb.io.enable        := ctrl.mbtbEnable
-//  tage.io.enable        := ctrl.tageEnable
-//  sc.io.enable          := ctrl.scEnable
-//  ittage.io.enable      := ctrl.ittageEnable
-//  ras.io.enable         := false.B
-  ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
-  abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
-  mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
-  tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
-  sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
-  ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
-  ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
+  if (env.EnableConstantin && !env.FPGAPlatform) {
+    ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
+    abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
+    mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
+    tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
+    sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
+    ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
+    ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
+  }
+  else {
+      ubtb.io.enable        := ctrl.ubtbEnable
+      abtb.io.enable        := ctrl.abtbEnable
+      mbtb.io.enable        := ctrl.mbtbEnable
+      tage.io.enable        := ctrl.tageEnable
+      sc.io.enable          := ctrl.scEnable
+      ittage.io.enable      := ctrl.ittageEnable
+      ras.io.enable         := false.B
+  }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
