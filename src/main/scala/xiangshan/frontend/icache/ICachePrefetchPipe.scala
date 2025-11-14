@@ -208,13 +208,13 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * Receive resp from IMeta and check
     ******************************************************************************
     */
-  private val s1_metaPTags  = fromMeta.tags
-  private val s1_metaValids = fromMeta.entryValid
+  private val s1_sramMetaInfo = VecInit(fromMeta.entries.map { portEntries =>
+    val waymask       = getWaymask(s1_pTag, portEntries)
+    val selectedEntry = Mux1H(waymask, portEntries)
 
-  private val s1_sramMetaInfo = VecInit((0 until PortNumber).map { port =>
     val info = Wire(new MetaInfo)
-    info.waymask     := getWaymask(s1_pTag, s1_metaPTags(port), s1_metaValids(port))
-    info.maybeRvcMap := Mux1H(info.waymask, fromMeta.maybeRvcMap(port))
+    info.waymask     := waymask
+    info.maybeRvcMap := selectedEntry.bits.meta.maybeRvcMap.getOrElse(0.U.asTypeOf(info.maybeRvcMap))
     // select ecc code
     /* NOTE:
      * When ECC check fails, s1_waymasks may be corrupted, so this selected meta_codes may be wrong.
@@ -228,7 +228,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
      * 3. hit -> fake miss: We can't detect this, but we can (pre)fetch the correct data from L2 cache, so it's not a problem.
      * 4. hit -> hit / miss -> miss: ECC failure happens in an irrelevant way, so we don't care about it this time.
      */
-    info.metaCodes := Mux1H(info.waymask, fromMeta.codes(port))
+    info.metaCodes := selectedEntry.bits.code
     info
   })
 
@@ -250,7 +250,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   })
 
   // assign metaInfo wire to updated value ((sram or reg) + miss)
-  s1_metaInfo.zipWithIndex.foreach { case(info, i) =>
+  s1_metaInfo.zipWithIndex.foreach { case (info, i) =>
     val (_, newInfo) = updateMetaInfo(
       fromMiss,
       s1_vSetIdx(i),

@@ -34,15 +34,6 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule
 
   val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
 
-  private object ICacheMetaEntry {
-    def apply(meta: ICacheMetadata, poison: Bool)(implicit p: Parameters): ICacheMetaEntry = {
-      val entry = Wire(new ICacheMetaEntry)
-      entry.meta := meta
-      entry.code := encodeMetaEccByPort(meta, poison)
-      entry
-    }
-  }
-
   // sanity check
   require(MetaEntryBits == (new ICacheMetaEntry).getWidth)
 
@@ -80,30 +71,23 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule
 
   private val r1_rotator = RegEnable(r0_rotator, io.read.req.fire)
   // rotate back to original order
-  private val r1_result = r1_rotator.revert(VecInit(banks.map(_.io.read.resp)))
+  io.read.resp.entries := r1_rotator.revert(VecInit(banks.map(_.io.read.resp.entries)))
 
-  io.read.resp.entryValid := VecInit(r1_result.map(port => VecInit(port.entries.map(_.valid))))
-  io.read.resp.metas      := VecInit(r1_result.map(port => VecInit(port.entries.map(_.bits.meta))))
-  io.read.resp.codes      := VecInit(r1_result.map(port => VecInit(port.entries.map(_.bits.code))))
-
-  // TEST: force ECC to fail by setting readCodes to 0
+  // TEST: force ECC to fail by setting parity codes to 0
   if (ForceMetaEccFail) {
-    io.read.resp.codes := 0.U.asTypeOf(io.read.resp.codes)
+    io.read.resp.entries.foreach(_.foreach(_.bits.code := 0.U(MetaEccBits.W)))
   }
 
   /* *** write *** */
   private val w0_bankIdx = getInterleavedBankIdx(io.write.req.bits.vSetIdx)
+  private val w0_valid   = io.write.req.valid
   private val w0_setIdx  = getInterleavedSetIdx(io.write.req.bits.vSetIdx)
   private val w0_waymask = io.write.req.bits.waymask
-
-  private val w0_entry = ICacheMetaEntry(
-    meta = io.write.req.bits.meta,
-    poison = io.write.req.bits.poison
-  )
+  private val w0_entry   = io.write.req.bits.entry
 
   io.write.req.ready := banks.map(_.io.write.req.ready).reduce(_ && _)
   banks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid        := io.write.req.valid && (i.U === w0_bankIdx)
+    b.io.write.req.valid        := w0_valid && (i.U === w0_bankIdx)
     b.io.write.req.bits.setIdx  := w0_setIdx
     b.io.write.req.bits.waymask := w0_waymask
     b.io.write.req.bits.entry   := w0_entry

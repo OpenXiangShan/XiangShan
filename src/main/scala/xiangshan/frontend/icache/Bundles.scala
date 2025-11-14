@@ -69,11 +69,10 @@ class MetaInfo(implicit p: Parameters) extends ICacheBundle {
 /* ***** Array write ***** */
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val meta:    ICacheMetadata = new ICacheMetadata
-    val vSetIdx: UInt           = UInt(idxBits.W)
-    val waymask: UInt           = UInt(nWays.W)
-    val poison:  Bool           = Bool()
+  class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle with ICacheEccHelper {
+    val entry:   ICacheMetaEntry = new ICacheMetaEntry
+    val vSetIdx: UInt            = UInt(idxBits.W)
+    val waymask: UInt            = UInt(nWays.W)
 
     def generate(
         phyTag:      UInt,
@@ -82,10 +81,10 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
         waymask:     UInt,
         poison:      Bool
     ): Unit = {
-      this.meta    := ICacheMetadata(phyTag, maybeRvcMap)
-      this.vSetIdx := vSetIdx
-      this.waymask := waymask
-      this.poison  := poison
+      this.entry.meta := ICacheMetadata(phyTag, maybeRvcMap)
+      this.entry.code := encodeMetaEccByPort(this.entry.meta, poison)
+      this.vSetIdx    := vSetIdx
+      this.waymask    := waymask
     }
   }
   val req: DecoupledIO[MetaWriteReqBundle] = DecoupledIO(new MetaWriteReqBundle)
@@ -131,14 +130,7 @@ class ArrayReadReqBundle(implicit p: Parameters) extends ICacheBundle {
 class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
   class MetaReadRespBundle(implicit p: Parameters) extends ICacheBundle {
-    val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
-    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(MetaEccBits.W)))
-    val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
-    // for compatibility
-    def tags: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.phyTag))))
-    def maybeRvcMap: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.maybeRvcMap.getOrElse(0.U(MaxInstNumPerBlock.W))))))
+    val entries: Vec[Vec[Valid[ICacheMetaEntry]]] = Vec(PortNumber, Vec(nWays, Valid(new ICacheMetaEntry)))
   }
   val req:  DecoupledIO[MetaReadReqBundle] = DecoupledIO(new MetaReadReqBundle)
   val resp: MetaReadRespBundle             = Input(new MetaReadRespBundle)

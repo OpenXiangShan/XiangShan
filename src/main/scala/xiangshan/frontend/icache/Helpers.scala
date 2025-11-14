@@ -103,18 +103,11 @@ trait ICacheEccHelper extends HasICacheParameters {
 }
 
 trait ICacheMetaHelper extends HasICacheParameters {
-  def getWaymask(reqPTag: UInt, metaPTag: Vec[UInt], metaValid: Vec[Bool]): UInt = {
-    require(metaPTag.length == nWays)
-    require(metaValid.length == nWays)
-    VecInit((metaPTag zip metaValid).map { case (wayPTag, wayValid) =>
-      wayValid && (wayPTag === reqPTag)
-    }).asUInt
-  }
+  def getWaymask(reqPTag: UInt, pTags: Vec[UInt], valids: Vec[Bool]): UInt =
+    VecInit((pTags zip valids).map { case (pt, v) => v && pt === reqPTag }).asUInt
 
-  def getWaymask(reqPTagVec: Vec[UInt], metaPTagVec: Vec[Vec[UInt]], metaValidVec: Vec[Vec[Bool]]): Vec[UInt] =
-    VecInit((reqPTagVec zip metaPTagVec zip metaValidVec).map { case ((reqPTag, metaPTag), metaValid) =>
-      getWaymask(reqPTag, metaPTag, metaValid)
-    })
+  def getWaymask(reqPTag: UInt, entries: Vec[Valid[ICacheMetaEntry]]): UInt =
+    getWaymask(reqPTag, VecInit(entries.map(_.bits.meta.phyTag)), VecInit(entries.map(_.valid)))
 }
 
 trait ICacheDataHelper extends HasICacheParameters {

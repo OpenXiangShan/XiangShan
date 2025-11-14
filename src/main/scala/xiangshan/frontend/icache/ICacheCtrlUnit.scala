@@ -199,7 +199,7 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       }
       is(InjectFsmState.ReadMetaResp) {
         // metaArray ensures resp is valid one cycle after req
-        val waymask = getWaymask(iPTag, io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
+        val waymask = getWaymask(iPTag, io.metaRead.resp.entries.head) // we need first port only
         iWaymask := waymask
         when(!waymask.orR) {
           // not hit, refuse to inject
