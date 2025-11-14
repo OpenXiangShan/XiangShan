@@ -49,6 +49,9 @@ jobs:
     runs-on: [self-hosted, xspdb]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
