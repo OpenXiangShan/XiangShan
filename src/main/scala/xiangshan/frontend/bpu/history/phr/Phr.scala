@@ -272,6 +272,14 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val predictFHist_diff_commitTrueFHist = commitValid && commitFDiffPredictFVec.reduce(_ || _)
     val predictHist_diff_commitHist =
       commitValid && predictHist(MaxHistLens - 1, 0) =/= commitTrueHist(MaxHistLens - 1, 0)
+    val histFolded_diff_s0Folded = histFoldedPhr.asUInt =/= s0_foldedPhrReg.asUInt
+    when(s0_fire) {
+      assert(
+        !histFolded_diff_s0Folded,
+        f"The history of on-site folding is inconsistent with the updated results of folding history"
+      )
+    }
+
     XSPerfAccumulate(f"predictFHist_diff_commitTrueFHist", predictFHist_diff_commitTrueFHist)
     XSPerfAccumulate(f"predictHist_diff_commitHist", predictHist_diff_commitHist)
     dontTouch(commitHistValue)
@@ -283,11 +291,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     dontTouch(predictHist_diff_commitHist)
     dontTouch(commitFDiffPredictFVec.asUInt)
     dontTouch(commitTakenPc)
+    dontTouch(histFolded_diff_s0Folded)
   }
 
-  private val histFolded_diff_s0Folded = histFoldedPhr.asUInt =/= s0_foldedPhrReg.asUInt
-
-  XSPerfAccumulate("histFoldedPhr_diff_s0_foldedPhrReg", histFolded_diff_s0Folded)
   // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
@@ -297,7 +303,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   dontTouch(phrValue)
   dontTouch(histFoldedPhr)
   dontTouch(redirectPhr)
-  dontTouch(histFolded_diff_s0Folded)
   dontTouch(s0_phrPtr)
   dontTouch(s1_phrPtr)
 }
