@@ -90,24 +90,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     // debug extension: frontend trigger
     val frontendTrigger: FrontendTdataDistributeIO = Flipped(new FrontendTdataDistributeIO)
 
-    // itlb: req / resp
-    val itlb: TlbRequestIO = new TlbRequestIO
-
-    // pmp: req / resp
-    val pmp: PmpCheckBundle = new PmpCheckBundle
-
     // Backend: csr control
     val csrFsIsOff: Bool = Input(Bool())
   }
   val io: IfuIO = IO(new IfuIO)
-  io.itlb.req.valid  := false.B
-  io.itlb.req.bits   := DontCare
-  io.itlb.req_kill   := false.B
-  io.itlb.resp.ready := true.B
-  io.pmp.req.valid   := false.B
-  io.pmp.req.bits    := DontCare
-  // submodule
 
+  // submodule
   private val preDecoder         = Module(new PreDecode)
   private val instrBoundary      = Module(new InstrBoundary)
   private val predChecker        = Module(new PredChecker)

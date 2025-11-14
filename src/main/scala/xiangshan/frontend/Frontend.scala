@@ -143,36 +143,42 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   bpu.io.resetVector := io.reset_vector
 
   // pmp
-  val pmp       = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
+  private val pmp = Module(new PMP)
   pmp.io.distribute_csr := csrCtrl.distribute_csr
-  val pmp_req_vec = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
-  (0 until 2).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req) // magic number 2: prefetchPipe & mainPipe
-  pmp_req_vec.last <> ifu.io.pmp.req
 
-  for (i <- pmp_check.indices) {
+  private val pmpChecker = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(sameCycle = true)).io))
+
+  private val pmpRequestor = icache.io.pmp
+  require(pmpRequestor.length == coreParams.ipmpPortNum)
+
+  (pmpChecker zip pmpRequestor).foreach { case (checker, requestor) =>
     if (HasBitmapCheck) {
-      pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
     } else {
-      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      checker.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
     }
+    requestor.resp := checker.resp
   }
-  (0 until 2).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
-  ifu.io.pmp.resp <> pmp_check.last.resp
 
-  // icache use a non-block tlb port, ifu use a block tlb port
-  val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false, true), itlbParams))
-  itlb.io.requestor.head <> icache.io.itlb
-  itlb.io.requestor.last <> ifu.io.itlb // mmio may need re-tlb, blocked
+  // icache use a non-block tlb port
+  private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))
   itlb.io.hartId := io.hartId
-  itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
   itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.base_connect(sfence, tlbCsr)
 
-  val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
-  itlb_ptw.connect(itlb.io.ptw)
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
-  val itlbRepeater2 =
+  private val itlbRequestor = VecInit(Seq(icache.io.itlb))
+  require(itlbRequestor.length == coreParams.itlbPortNum)
+
+  (itlb.io.requestor zip itlbRequestor).foreach { case (port, requestor) =>
+    port <> requestor
+  }
+
+  private val ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
+  ptw.connect(itlb.io.ptw)
+  private val itlbRepeater1 =
+    PTWFilter(itlbParams.fenceDelay, ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
+  private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
   // ICache-Memblock
