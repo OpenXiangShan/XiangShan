@@ -2,7 +2,7 @@ package xiangshan.backend.fu.vector
 
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.{BitPat, Mux1H}
+import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.VSew
 
 object Utils {
@@ -24,4 +24,18 @@ object Utils {
   def NOnes(n: Int): UInt = bitPatToUInt(BitPat.Y(n))
 
   def NZeros(n: Int): UInt = bitPatToUInt(BitPat.N(n))
+
+  def SplitMask(maskIn: UInt, vsew: UInt): Vec[UInt] = {
+    val maskWidth = maskIn.getWidth
+    val maskDataVec = Wire(Vec(maskWidth / 8, UInt(8.W)))
+    for ((maskData, i) <- maskDataVec.zipWithIndex) {
+      maskData := Mux1H(Seq(
+        (vsew === VSew.e8)  -> maskIn(i * 8 + 7, i * 8),
+        (vsew === VSew.e16) -> maskIn(i * 4 + 3, i * 4),
+        (vsew === VSew.e32) -> maskIn(i * 2 + 1, i * 2),
+        (vsew === VSew.e64) -> maskIn(i),
+      ))
+    }
+    maskDataVec
+  }
 }
