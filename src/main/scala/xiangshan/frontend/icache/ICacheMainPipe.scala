@@ -643,29 +643,27 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     ******************************************************************************
     */
   if (env.EnableDifftest) {
-    val discards = (0 until PortNumber).map { i =>
-      ExceptionType.hasException(toIFU.bits.exception(i)) ||
-      toIFU.bits.pmp_mmio(i) ||
-      Pbmt.isUncache(toIFU.bits.itlb_pbmt(i))
-    }
-    val blkPaddrAll = s2_req_paddr.map(addr => (addr(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt)
-    (0 until ICacheDataBanks).foreach { i =>
-      val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
-      diffMainPipeOut.coreid := io.hartId
-      diffMainPipeOut.index  := (3 + i).U
+    val bankSel = getBankSel(s2_req_offset, s2_valid)
 
-      val bankSel = getBankSel(s2_req_offset, s2_valid).reduce(_ | _)
-      val lineSel = getLineSel(s2_req_offset)
+    // do difftest for each fetched cache line
+    s2_req_paddr.zipWithIndex.foreach { case (pa, i) =>
+      val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
+      difftest.coreid := io.hartId
+      difftest.index  := (3 + i).U // magic number 3/4: ICache MainPipe refill test
 
-//      diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
-      diffMainPipeOut.valid := false.B
-      diffMainPipeOut.addr := Mux(
-        lineSel(i),
-        blkPaddrAll(1) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt,
-        blkPaddrAll(0) + (i.U << log2Ceil(blockBytes / ICacheDataBanks)).asUInt
+      difftest.valid := s2_fire && !(
+        ExceptionType.hasException(toIFU.bits.exception(i)) ||
+          toIFU.bits.pmp_mmio(i) ||
+          Pbmt.isUncache(toIFU.bits.itlb_pbmt(i))
       )
-
-      diffMainPipeOut.data := s2_datas(i).asTypeOf(diffMainPipeOut.data)
+      difftest.addr := Cat(pa(PAddrBits - 1, blockOffBits), 0.U(blockOffBits.W))
+      difftest.data := s2_datas.asTypeOf(difftest.data)
+      // NOTE: each mask bit controls (512bit / difftest.mask.getWidth) (currently 64bit) comparison
+      // this only works for DataBanks <= difftest.mask.getWidth (and isPow2)
+      difftest.mask := VecInit((0 until difftest.mask.getWidth).map { j =>
+        // the j-th mask locates in (j / (difftest.mask.getWidth / DataBanks)) bank
+        bankSel(i)(j / (difftest.mask.getWidth / ICacheDataBanks))
+      }).asUInt
     }
   }
 }
