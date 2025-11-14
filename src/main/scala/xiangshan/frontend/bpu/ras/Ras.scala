@@ -96,7 +96,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   private val commitValid    = RegNext(io.commit.valid, init = false.B)
   private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
-  private val commitPushAddr = commitInfo.pushAddr
+  private val commitPushAddr = DontCare
   stack.commit.valid     := commitValid
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
   stack.commit.popValid  := commitValid && commitInfo.attribute.isReturn

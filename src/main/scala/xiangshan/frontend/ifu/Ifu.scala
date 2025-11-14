@@ -18,8 +18,6 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.ChiselDB
-import utility.Constantin
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.InstSeqNum
@@ -27,24 +25,12 @@ import utility.PerfCCT
 import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
-import utility.XSDebug
-import utility.XSPerfAccumulate
-import utility.XSPerfHistogram
-import utils.EnumUInt
 import xiangshan.FrontendTdataDistributeIO
-import xiangshan.RedirectLevel
-import xiangshan.RobCommitInfo
-import xiangshan.TopDownCounters
-import xiangshan.ValidUndirectioned
-import xiangshan.XSCoreParamsKey
 import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.cache.mmu.Pbmt
-import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
@@ -84,8 +70,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     // Backend: gpaMem
     val toBackend: IfuToBackendIO = new IfuToBackendIO
-    // Backend: commit
-    val robCommits: Vec[Valid[RobCommitInfo]] = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
 
     // debug extension: frontend trigger
     val frontendTrigger: FrontendTdataDistributeIO = Flipped(new FrontendTdataDistributeIO)
@@ -618,7 +602,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.instrs         := s3_alignExpdInstr
   io.toIBuffer.bits.valid          := s3_alignInstrValid.asUInt
   io.toIBuffer.bits.enqEnable      := checkerOutStage1.fixedTwoFetchRange.asUInt & s3_alignInstrValid.asUInt
-  io.toIBuffer.bits.pd             := s3_alignPds
+  io.toIBuffer.bits.isRvc          := s3_alignPds.map(_.isRVC)
   io.toIBuffer.bits.pc             := s3_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s3_prevIBufEnqPtr
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
@@ -733,9 +717,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
 
     io.toIBuffer.bits.pc(s3_shiftNum)                    := uncachePc
-    io.toIBuffer.bits.pd(s3_shiftNum).valid              := true.B
-    io.toIBuffer.bits.pd(s3_shiftNum).isRVC              := uncacheIsRvc
-    io.toIBuffer.bits.pd(s3_shiftNum).brAttribute        := brAttribute
+    io.toIBuffer.bits.isRvc(s3_shiftNum)                 := uncacheIsRvc
     io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
     io.toIBuffer.bits.exceptionType := uncacheException || uncacheRvcException

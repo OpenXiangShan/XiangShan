@@ -23,10 +23,10 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
 import utility.DelayN
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
-import utility.ParallelPriorityMux
 import utility.XSError
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
@@ -40,6 +40,7 @@ import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.ras.RasMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HasPerfEvents
@@ -95,10 +96,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
 
   // metaQueue stores information needed to train BPU.
-  private val metaQueue = Reg(Vec(FtqSize, new BpuMeta))
+  private val metaQueueResolve = Reg(Vec(FtqSize, new BpuMeta))
+  private val metaQueueCommit  = Reg(Vec(FtqSize, new RasMeta))
 
-  // resolveQueue stores branch resolve information from backend.
+  // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
+
+  // commitQueue caches branch commit information from backend.
+  private val commitQueue = Module(new CommitQueue)
 
   private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect.bits.ftqIdx.value).topRetAddr.toUInt
   private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
@@ -172,8 +177,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
 
   when(io.fromBpu.meta.valid) {
-    metaQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
+    metaQueueResolve(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
   }
+
+  metaQueueCommit(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits.ras
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -268,7 +275,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
-    // TODO: When can redirect information be written to original entry instead of a new entry?
     val newEntryPtr = Mux(
       RedirectLevel.flushItself(redirect.bits.level) &&
         (redirect.bits.ftqOffset === 0.U || redirect.bits.ftqOffset === 1.U && !redirect.bits.isRVC),
@@ -303,36 +309,32 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toBpu.train.valid           := resolveQueue.io.bpuTrain.valid
   resolveQueue.io.bpuTrain.ready := io.toBpu.train.ready
-  io.toBpu.train.bits.meta       := metaQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
+  io.toBpu.train.bits.meta       := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
   io.toBpu.train.bits.startVAddr := resolveQueue.io.bpuTrain.bits.startVAddr
   io.toBpu.train.bits.branches   := resolveQueue.io.bpuTrain.bits.branches
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
-  // TODO: frontend does not need this many rob commit channels
+
   // Backend may send commit for on entry multiple times, but the entry is actually committed when it is committed for
   // the first time. The rest of the commits can be ignored.
-  // TODO: Backend now still does not guarantee to send commit for every entry. For example, entry 0 has a flush-itself
-  // redirect in the middle, and entry 1 has a flush-itself redirect on the same instruction in the beginning, entry 2
-  // begins with the same instruction. Backend may not commit entry 0. This may not be totally backend's problem. Maybe
-  // it is frontend's responsibility to fix it.
-  private val robCommitPtr: FtqPtr = WireInit(FtqPtr(false.B, 0.U))
-  private val backendCommit = io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)
-  when(backendCommit) {
-    robCommitPtr := ParallelPriorityMux(
-      io.fromBackend.rob_commits.map(_.valid).reverse,
-      io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse
-    )
-  }
-  private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, FtqPtr(true.B, (FtqSize - 1).U), backendCommit)
-  private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
-  private val commit       = commitPtr < committedPtr
+  private val robCommitPtr = DataHoldBypass(
+    io.fromBackend.commit.bits,
+    FtqPtr(true.B, (FtqSize - 1).U),
+    io.fromBackend.commit.valid
+  )
+  private val commit = commitPtr <= robCommitPtr
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
-  // FIXME: commit info for return stack, connected once ready.
-  io.toBpu.commit := DontCare
+
+  commitQueue.io.backendCommit := io.fromBackend.callRetCommit
+
+  io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
+  io.toBpu.commit.bits.rasMeta              := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
+  io.toBpu.commit.bits.attribute.branchType := DontCare
+  io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
 
   // --------------------------------------------------------------------------------
   // MMIO fetch
