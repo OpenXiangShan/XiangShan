@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
+import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
@@ -295,6 +296,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         val tag          = t2_tempTag(tableIdx) ^ branch.bits.cfiPosition
         val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
         val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
+        dontTouch(tag.suggestName(s"branch_${brIdx}_table_${tableIdx}_tag"))
 
         val result = Wire(new TagMatchResult).suggestName(s"branch_${brIdx}_table_${tableIdx}_result")
         result.hit          := isCond && hitWayMask.reduce(_ || _)
@@ -307,16 +309,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val hasProvider     = hitTableMask.reduce(_ || _)
     val providerTableOH = getLongestHistTableOH(hitTableMask)
     val providerInfo    = Mux1H(providerTableOH, allTableTagMatchResults)
+    dontTouch(hitTableMask.asUInt.suggestName(s"branch_${brIdx}_hitTableMask"))
 
     val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
     val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
     val altInfo                = Mux1H(altTableOH, allTableTagMatchResults)
+    dontTouch(hitTableMaskNoProvider.asUInt.suggestName(s"branch_${brIdx}_hitTableMaskNoProvider"))
 
     val pred           = providerInfo.entry.takenCtr.isPositive
     val providerIsWeak = providerInfo.entry.takenCtr.isWeak
     val altPred        = altInfo.entry.takenCtr.isPositive
     val basePred       = t2_baseTableCtrs(branch.bits.cfiPosition).isPositive
+    val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(t2_branchesUseAltIdx(brIdx)).isPositive
+    val finalPred      = Mux(useAlt, altPred, Mux(hasProvider, pred, basePred))
     val actualTaken    = branch.bits.taken
 
     val providerNewTakenCtr = providerInfo.entry.takenCtr.getUpdate(actualTaken)
@@ -325,8 +331,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       providerInfo.usefulCtr.getIncrease,
       providerInfo.usefulCtr.value
     )
-
-    val updateAlt      = providerIsWeak && hasAlt && useAltCtrVec(t2_branchesUseAltIdx(brIdx)).isPositive
     val altNewTakenCtr = altInfo.entry.takenCtr.getUpdate(actualTaken)
 
     val increaseUseAlt = hasProvider && providerIsWeak && Mux(hasAlt, altPred, basePred) === actualTaken
@@ -338,14 +342,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     updateInfo.providerEntry.valid          := true.B
     updateInfo.providerEntry.tag            := providerInfo.entry.tag
     updateInfo.providerEntry.takenCtr.value := providerNewTakenCtr
+    updateInfo.providerOldUsefulCtr         := providerInfo.usefulCtr
     updateInfo.providerNewUsefulCtr.value   := providerNewUsefulCtr
 
-    updateInfo.altTableOH              := altTableOH.asUInt & Fill(NumTables, updateAlt)
+    updateInfo.altTableOH              := altTableOH.asUInt & Fill(NumTables, useAlt)
     updateInfo.altWayOH                := altInfo.hitWayMaskOH
     updateInfo.altEntry.valid          := true.B
     updateInfo.altEntry.tag            := altInfo.entry.tag
     updateInfo.altEntry.takenCtr.value := altNewTakenCtr
     updateInfo.altOldUsefulCtr         := altInfo.usefulCtr
+
+    updateInfo.useAlt    := useAlt
+    updateInfo.finalPred := finalPred
 
     updateInfo.needAllocate := isCond && branch.bits.mispredict && !(hasProvider && providerTableOH(NumTables - 1))
 
@@ -466,6 +474,45 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }.elsewhen(t2_valid && t2_needAllocate && !t2_canAllocate) {
     usefulResetCtr.increase()
   }
+
+  /* --------------------------------------------------------------------------------------------------------------
+     TAGE Trace
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val tageTraceTable = ChiselDB.createTable("TageTrace", new TageTrace, EnableTageTrace)
+  private val tageTrace      = Wire(new TageTrace)
+  tageTrace.condTrace.zipWithIndex.foreach { case (trace, i) =>
+    trace.valid                  := t2_condMask(i)
+    trace.bits.startVAddr        := t2_startVAddr
+    trace.bits.branchVAddr       := t2_branchesVAddr(i)
+    trace.bits.hasProvider       := t2_allBranchUpdateInfo(i).providerTableOH.orR
+    trace.bits.providerTableIdx  := OHToUInt(t2_allBranchUpdateInfo(i).providerTableOH)
+    trace.bits.providerSetIdx    := t2_setIdx(trace.bits.providerTableIdx)
+    trace.bits.providerWayIdx    := OHToUInt(t2_allBranchUpdateInfo(i).providerWayOH)
+    trace.bits.providerTakenCtr  := t2_allBranchUpdateInfo(i).providerEntry.takenCtr
+    trace.bits.providerUsefulCtr := t2_allBranchUpdateInfo(i).providerOldUsefulCtr
+    trace.bits.hasAlt            := t2_allBranchUpdateInfo(i).altTableOH.orR
+    trace.bits.altTableIdx       := OHToUInt(t2_allBranchUpdateInfo(i).altTableOH)
+    trace.bits.altSetIdx         := t2_setIdx(trace.bits.altTableIdx)
+    trace.bits.altWayIdx         := OHToUInt(t2_allBranchUpdateInfo(i).altWayOH)
+    trace.bits.altTakenCtr       := t2_allBranchUpdateInfo(i).altEntry.takenCtr
+    trace.bits.altUsefulCtr      := t2_allBranchUpdateInfo(i).altOldUsefulCtr
+    trace.bits.baseTableCtr      := t2_baseTableCtrs(t2_branches(i).bits.cfiPosition)
+    trace.bits.useAlt            := t2_allBranchUpdateInfo(i).useAlt
+    trace.bits.finalPred         := t2_allBranchUpdateInfo(i).finalPred
+    trace.bits.actualTaken       := t2_branches(i).bits.taken
+    trace.bits.allocSuccess      := t2_allBranchUpdateInfo(i).needAllocate && t2_allocateTableMaskOH.orR
+    trace.bits.allocTableIdx     := OHToUInt(t2_allocateTableMaskOH)
+    trace.bits.allocateSetIdx    := t2_setIdx(trace.bits.allocTableIdx)
+    trace.bits.allocWayIdx       := OHToUInt(t2_allocateWayMaskOH)
+  }
+
+  tageTraceTable.log(
+    data = tageTrace,
+    en = t2_valid,
+    clock = clock,
+    reset = reset
+  )
 
   /* --------------------------------------------------------------------------------------------------------------
      performance counter

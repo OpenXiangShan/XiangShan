@@ -43,7 +43,8 @@ case class TageParameters(
     WriteBufferSize:     Int = 4,
     UsefulResetCtrWidth: Int = 6,
     UseAltCtrWidth:      Int = 4,
-    NumUseAltCtrs:       Int = 128
+    NumUseAltCtrs:       Int = 128,
+    EnableTageTrace:     Boolean = false
 ) {}
 
 trait HasTageParameters extends HasBpuParameters {
@@ -69,4 +70,6 @@ trait HasTageParameters extends HasBpuParameters {
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
   def NumTables:  Int                = TableInfos.length
+
+  def EnableTageTrace: Boolean = tageParameters.EnableTageTrace
 }
