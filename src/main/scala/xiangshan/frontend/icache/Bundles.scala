@@ -55,6 +55,11 @@ object ICacheMetadata {
   }
 }
 
+class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
+  val meta: ICacheMetadata = new ICacheMetadata
+  val code: UInt           = UInt(MetaEccBits.W)
+}
+
 class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val waymask:     UInt = UInt(nWays.W)
   val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)

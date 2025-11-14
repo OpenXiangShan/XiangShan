@@ -173,6 +173,18 @@ trait RotateHelper {
     }
     MuxLookup(idx, vec)(rotations)
   }
+
+  def vecRotateLeft[T <: Data](vec: Vec[T], idx: UInt): Vec[T] = {
+    require(isPow2(vec.length))
+    require(idx.getWidth == log2Ceil(vec.length))
+    val len = vec.length
+    // generate all possible results of rotation
+    val rotations = (0 until len).map { i =>
+      val rotatedIndices = (0 until len).map(j => (j + len - i) % len)
+      i.U -> VecInit(rotatedIndices.map(idx => vec(idx)))
+    }
+    MuxLookup(idx, vec)(rotations)
+  }
 }
 
 trait PhrHelper {

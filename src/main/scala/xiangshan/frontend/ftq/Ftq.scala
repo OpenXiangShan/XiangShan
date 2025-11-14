@@ -129,7 +129,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with BPU
   // --------------------------------------------------------------------------------
 
-  private val bpTrainStallCnt = RegInit(0.U(log2Ceil(BpTrainStall)))
+  private val bpTrainStallCnt = RegInit(0.U(log2Ceil(BpTrainStall).W))
   when(io.toBpu.train.valid && !io.toBpu.train.ready) {
     bpTrainStallCnt := bpTrainStallCnt + 1.U
   }.otherwise {

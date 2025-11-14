@@ -31,7 +31,6 @@ case class ICacheParameters(
     rowBits:    Int = 64, // per bank, by default we split 64B cacheline into 8 banks, so each bank has 8B (64b)
     blockBytes: Int = 64, // cacheline size
     /* *** ICache specific *** */
-    PortNumber: Int = 2, // TODO: remove this when dropping cross-page fetch
     // replacer
     Replacer: String = "setplru", // "random", "setlru", "setplru"
     // missUnit
@@ -45,6 +44,11 @@ case class ICacheParameters(
     MetaEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEccUnit: Option[Int] = None, // if None, use blockBytes
+    // meta array
+    // by default, odd and even meta entries are stored in different banks to allow concurrent access
+    NumInterleavedBank: Int = 2,
+    MetaWaySplit:       Int = 2, // for ppa optimization, split metadata into several SRAMs by way
+    MetaDataSplit:      Int = 1, // for ppa optimization, split metadata into several SRAMs by data
     // data array
     // by default we store 64data + 1parity + 1padding, this is better than 65bits (from physical design)
     DataPaddingBits: Int = 1,
@@ -57,14 +61,27 @@ case class ICacheParameters(
     ForceMetaEccFail: Boolean = false,
     ForceDataEccFail: Boolean = false
 ) extends L1CacheParameters {
+  // this is used to prevent magic number in the code, DO NOT CHANGE, it won't work other than 2
+  // explanation: we allow concurrent access to consecutive cachelines
+  def PortNumber: Int = 2
+
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
   require(isPow2(rowBits), s"rowBits($rowBits) must be pow2")
   require(isPow2(blockBytes), s"blockBytes($blockBytes) must be pow2")
   require(rowBits < blockBytes * 8, s"rowBits($rowBits) must be less than blockBits(${blockBytes * 8})")
+
+  // Interleaved bank number must be pow2, and smaller than nSets, and greater than possible concurrent access number
+  require(isPow2(NumInterleavedBank), s"NumInterleavedBank($NumInterleavedBank) must be pow2")
+  require(NumInterleavedBank <= nSets, s"NumInterleavedBank($NumInterleavedBank) must be <= nSets($nSets)")
+  require(
+    NumInterleavedBank >= PortNumber,
+    s"NumInterleavedBank($NumInterleavedBank) must be >= 2 to allow concurrent access to consecutive cachelines"
+  )
 }
 
-trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameters {
+trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore number.of.methods
+    with HasL1CacheParameters {
   def icacheParameters: ICacheParameters = frontendParameters.icacheParameters
 
   // implement cacheParams to use HasL1CacheParameters trait
@@ -105,6 +122,14 @@ trait HasICacheParameters extends HasFrontendParameters with HasL1CacheParameter
   def MetaBits:      Int    = (new ICacheMetadata).getWidth
   def MetaEntryBits: Int    = MetaCode.width(MetaBits)
   def MetaEccBits:   Int    = MetaEntryBits - MetaBits
+
+  def NumInterleavedBank:     Int = icacheParameters.NumInterleavedBank
+  def NumInterleavedSet:      Int = nSets / NumInterleavedBank
+  def InterleavedBankIdxBits: Int = log2Ceil(NumInterleavedBank)
+  def InterleavedSetIdxBits:  Int = idxBits - InterleavedBankIdxBits
+
+  def MetaWaySplit:  Int = icacheParameters.MetaWaySplit
+  def MetaDataSplit: Int = icacheParameters.MetaDataSplit
 
   // dataArray w/ parity
   def DataEcc:         String = icacheParameters.DataEcc
