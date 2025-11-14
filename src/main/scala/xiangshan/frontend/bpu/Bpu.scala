@@ -19,10 +19,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
+import utility.Constantin
 import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utils.EnumUInt
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
@@ -76,16 +78,27 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val redirect     = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
-  private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
-  fallThrough.io.enable := true.B // fallThrough is always enabled
-  ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := ctrl.abtbEnable
-  mbtb.io.enable        := ctrl.mbtbEnable
-  tage.io.enable        := ctrl.tageEnable
-  sc.io.enable          := ctrl.scEnable
-  ittage.io.enable      := ctrl.ittageEnable
-  ras.io.enable         := false.B
+  private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
+  private val constCtrl = Constantin.createRecord("constCtrl")
 
+  fallThrough.io.enable := true.B // fallThrough is always enabled
+  if (env.EnableConstantin && !env.FPGAPlatform) {
+    ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
+    abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
+    mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
+    tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
+    sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
+    ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
+    ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
+  } else {
+    ubtb.io.enable   := ctrl.ubtbEnable
+    abtb.io.enable   := ctrl.abtbEnable
+    mbtb.io.enable   := ctrl.mbtbEnable
+    tage.io.enable   := ctrl.tageEnable
+    sc.io.enable     := ctrl.scEnable
+    ittage.io.enable := ctrl.ittageEnable
+    ras.io.enable    := false.B
+  }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
@@ -300,6 +313,30 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
 
+  // used for performance counters
+  private object S1PredictionSource extends EnumUInt(3) {
+    def Ubtb:        UInt = 0.U(width.W)
+    def Abtb:        UInt = 1.U(width.W)
+    def FallThrough: UInt = 2.U(width.W)
+  }
+  private object S3PredictionSource extends EnumUInt(4) {
+    def Ras:         UInt = 0.U(width.W)
+    def ITTage:      UInt = 1.U(width.W)
+    def Mbtb:        UInt = 2.U(width.W)
+    def FallThrough: UInt = 3.U(width.W)
+  }
+  private val s1_predictionSource = PriorityEncoder(Seq(
+    ubtb.io.prediction.taken,
+    abtb.io.prediction.taken,
+    true.B
+  ))
+  private val s3_predictionSource = PriorityEncoder(Seq(
+    false.B, // s3_taken && s3_firstTakenBranchIsReturn,
+    s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit,
+    s3_taken,
+    true.B
+  ))
+
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
   private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
 
@@ -482,6 +519,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   /* *** perf pred *** */
+
+  private val s2_s1UseFallThrough = RegEnable(s1_predictionSource === S1PredictionSource.FallThrough, s1_fire)
+  private val s2_s1UseABTB        = RegEnable(s1_predictionSource === S1PredictionSource.Abtb, s1_fire)
+  private val s2_s1UseUBTB        = RegEnable(s1_predictionSource === S1PredictionSource.Ubtb, s1_fire)
+  private val s3_s1UseFallThrough = RegEnable(s2_s1UseFallThrough, s2_fire)
+  private val s3_s1UseABTB        = RegEnable(s2_s1UseABTB, s2_fire)
+  private val s3_s1UseUBTB        = RegEnable(s2_s1UseUBTB, s2_fire)
+
   XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
   XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
   XSPerfHistogram(
@@ -493,7 +538,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     ),
     io.toFtq.prediction.fire,
     0,
-    FetchBlockInstNum
+    FetchBlockInstNum + 1
   )
   XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
@@ -503,10 +548,142 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   XSPerfAccumulate(
     "s3_use_ittage",
-    s3_fire && s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit && !s3_firstTakenBranchIsReturn
+    s3_fire && s3_taken &&
+      s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit &&
+      !s3_firstTakenBranchIsReturn
+  )
+  XSPerfAccumulate(
+    "s3_use_mbtb_tage",
+    s3_fire &&
+      s3_prediction.attribute.isConditional
   )
 
+  XSPerfAccumulate("finalPred_s1_fall", s3_fire && !s3_override && s3_s1UseFallThrough)
+  XSPerfAccumulate("finalPred_s1_ubtb", s3_fire && !s3_override && s3_s1UseUBTB)
+  XSPerfAccumulate("finalPred_s1_abtb", s3_fire && !s3_override && s3_s1UseABTB)
+  XSPerfAccumulate("finalPred_s3_mbtb_tage", s3_fire && s3_override && s3_prediction.attribute.isConditional)
+  XSPerfAccumulate(
+    "finalPred_s3_mbtb_ittage",
+    s3_fire && s3_taken &&
+      s3_override && s3_firstTakenBranchIsIndirect &&
+      ittage.io.prediction.hit && !s3_firstTakenBranchIsReturn
+  )
+  XSPerfAccumulate("finalPred_s3_mbtb_ras", false.B)
+
   XSPerfAccumulate("s1Invalid", !s1_valid)
+
+  // taken mismatch
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3Tage_s1fallThrough",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && !s3_s1Prediction.taken &&
+      s3_prediction.attribute === BranchAttribute.Conditional
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3nonCond_s1fallThrough",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && !s3_s1Prediction.taken &&
+      !(s3_prediction.attribute === BranchAttribute.Conditional)
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fallThrough_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      !s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fallThrough_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      !s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_s1UseABTB
+  )
+  // position mismatch
+  XSPerfAccumulate(
+    "s3Override_positionMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_positionMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
+      s3_s1UseABTB
+  )
+  // attribute mismatch
+  XSPerfAccumulate(
+    "s3Override_attributeMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
+      s3_s1UseUBTB
+  )
+  XSPerfAccumulate(
+    "s3Override_attributeMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken === s3_s1Prediction.taken &&
+//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
+      s3_s1UseABTB
+  )
+  // target mismatch
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3mBTB_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.Mbtb
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3ITTage_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.ITTage
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3RAS_s1uBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.Ras
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3mBTB_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.Mbtb
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3ITTage_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.ITTage
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3RAS_s1aBTB",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.Ras
+  )
 
   /* *** perf train *** */
   private val t0_mispredictBranch = train.bits.mispredictBranch

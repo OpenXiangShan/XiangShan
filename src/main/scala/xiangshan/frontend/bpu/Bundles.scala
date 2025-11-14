@@ -155,12 +155,18 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   // override valid
   val s3Override: Bool = Bool()
+  // for perf counters
+  val attribute: Option[BranchAttribute] = if (!env.FPGAPlatform) Some(new BranchAttribute) else None
 
   def fromStage(pc: PrunedAddr, prediction: Prediction): Unit = {
     this.startVAddr           := pc
     this.takenCfiOffset.valid := prediction.taken
     this.takenCfiOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
     this.target               := prediction.target
+    this.attribute match {
+      case Some(attr) => attr := prediction.attribute
+      case None       => /* do nothing */
+    }
   }
   // TODO: what else do we need?
 }

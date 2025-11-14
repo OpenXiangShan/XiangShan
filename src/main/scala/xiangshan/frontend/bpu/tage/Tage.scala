@@ -150,7 +150,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val hasProvider = result._1
       val pred        = result._2
       val altPred     = s2_baseTableCtrs(position).isPositive
-//      hit && Mux(hasProvider, pred, altPred)
+      //      hit && Mux(hasProvider, pred, altPred)
       hit && altPred // temporarily only use base table prediction
   }
 
