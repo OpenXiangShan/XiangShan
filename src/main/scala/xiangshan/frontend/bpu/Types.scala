@@ -56,6 +56,19 @@ class TageTableInfo(
     else
       Set[FoldedHistoryInfo]()
   }
+
+  def getTageFoldedHistoryInfo(numBanks: Int, tagWidth: Int): List[FoldedHistoryInfo] = {
+    require(numBanks > 0, "numBanks must be > 0")
+    require(tagWidth > 0, "tagWidth must be > 0")
+    if (HistoryLength > 0)
+      List( // FoldedHistoryInfo(unfolded history length, folded history length)
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumSets / numBanks))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
+      )
+    else
+      List[FoldedHistoryInfo]()
+  }
 }
 
 class IttageTableInfo(

@@ -201,7 +201,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
   // tage
-  tage.io.mbtbResult             := mbtb.io.result
+  tage.io.branchesFromMainBtb    := mbtb.io.result
   tage.io.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
 
