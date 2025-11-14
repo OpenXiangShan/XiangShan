@@ -23,7 +23,7 @@ case class FtqParameters(
     FtqSize:            Int = 64,
     ResolveQueueSize:   Int = 64,
     BpRunAheadDistance: Int = 8,
-    BpTrainStall:       Int = 8
+    BpTrainStallLimit:  Int = 8
 ) {
   // sanity check
   require(isPow2(FtqSize))
@@ -33,5 +33,5 @@ trait HasFtqParameters extends HasFrontendParameters {
   def ftqParameters:      FtqParameters = frontendParameters.ftqParameters
   def ResolveQueueSize:   Int           = ftqParameters.ResolveQueueSize
   def BpRunAheadDistance: Int           = ftqParameters.BpRunAheadDistance
-  def BpTrainStall:       Int           = ftqParameters.BpTrainStall
+  def BpTrainStallLimit:  Int           = ftqParameters.BpTrainStallLimit
 }
