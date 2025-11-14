@@ -55,6 +55,11 @@ object ICacheMetadata {
   }
 }
 
+class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
+  val meta: ICacheMetadata = new ICacheMetadata
+  val code: UInt           = UInt(MetaEccBits.W)
+}
+
 class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val waymask:     UInt = UInt(nWays.W)
   val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
@@ -68,7 +73,6 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
     val meta:    ICacheMetadata = new ICacheMetadata
     val vSetIdx: UInt           = UInt(idxBits.W)
     val waymask: UInt           = UInt(nWays.W)
-    val bankIdx: Bool           = Bool()
     val poison:  Bool           = Bool()
 
     def generate(
@@ -76,13 +80,11 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
         maybeRvcMap: UInt,
         vSetIdx:     UInt,
         waymask:     UInt,
-        bankIdx:     Bool,
         poison:      Bool
     ): Unit = {
       this.meta    := ICacheMetadata(phyTag, maybeRvcMap)
       this.vSetIdx := vSetIdx
       this.waymask := waymask
-      this.bankIdx := bankIdx
       this.poison  := poison
     }
   }

@@ -173,7 +173,6 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       maybeRvcMap = 0.U,
       vSetIdx = iVSetIdx,
       waymask = iWaymask,
-      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 

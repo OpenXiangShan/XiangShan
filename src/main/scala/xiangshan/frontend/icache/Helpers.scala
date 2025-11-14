@@ -156,6 +156,12 @@ trait ICacheAddrHelper extends HasICacheParameters {
 
   def getPAddrFromPTag(vAddr: PrunedAddr, pTag: UInt): PrunedAddr =
     PrunedAddrInit(Cat(pTag, vAddr(pgUntagBits - 1, 0)))
+
+  def getInterleavedBankIdx(vSetIdx: UInt): UInt =
+    vSetIdx(InterleavedBankIdxBits - 1, 0)
+
+  def getInterleavedSetIdx(vSetIdx: UInt): UInt =
+    vSetIdx(idxBits - 1, InterleavedBankIdxBits)
 }
 
 trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper with ICacheAddrHelper {
