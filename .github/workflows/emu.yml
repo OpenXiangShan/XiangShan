@@ -34,6 +34,9 @@ jobs:
     name: Generate Verilog
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -112,6 +115,9 @@ jobs:
     name: EMU - Basics
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -203,6 +209,9 @@ jobs:
     name: EMU - CHI
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -249,6 +258,9 @@ jobs:
     name: EMU - Performance
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -356,6 +368,9 @@ jobs:
     name: EMU - SimFrontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -418,6 +433,9 @@ jobs:
     name: EMU - MC
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -455,6 +473,9 @@ jobs:
     name: SIMV - Basics
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
