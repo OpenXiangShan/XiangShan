@@ -17,11 +17,11 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, SchedulerType}
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
+import xiangshan.backend.regfile.{IntPregParams, RfReadPortWithConfig, RfWritePortBundle}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.{VecMissalignedDebugBundle}
+import xiangshan.mem.VecMissalignedDebugBundle
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
 import utility._
@@ -1027,67 +1027,52 @@ object Bundles {
       this.debug_seqNum := source.debug_seqNum
     }
 
-    def asIntRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(IntData()).addrWidth)))
+    def asIntRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.intPregParams))
+      rfWrite := 0.U.asTypeOf(rfWrite)
       rfWrite.wen := this.rfWen && fire
-      rfWrite.addr := this.pdest
+      rfWrite.pdest := this.pdest
       rfWrite.data := this.data
-      rfWrite.intWen := this.rfWen
-      rfWrite.fpWen := false.B
-      rfWrite.vecWen := false.B
-      rfWrite.v0Wen := false.B
-      rfWrite.vlWen := false.B
+      rfWrite.rfWen := this.rfWen
       rfWrite
     }
 
-    def asFpRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(FpData()).addrWidth)))
+    def asFpRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.fpPregParams))
+      rfWrite := 0.U.asTypeOf(rfWrite)
       rfWrite.wen := this.fpWen && fire
-      rfWrite.addr := this.pdest
+      rfWrite.pdest := this.pdest
       rfWrite.data := this.data
-      rfWrite.intWen := false.B
       rfWrite.fpWen := this.fpWen
-      rfWrite.vecWen := false.B
-      rfWrite.v0Wen := false.B
-      rfWrite.vlWen := false.B
       rfWrite
     }
 
-    def asVfRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VecData()).addrWidth)))
+    def asVfRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.vfPregParams))
+      rfWrite := 0.U.asTypeOf(rfWrite)
       rfWrite.wen := this.vecWen && fire
-      rfWrite.addr := this.pdest
+      rfWrite.pdest := this.pdest
       rfWrite.data := this.data
-      rfWrite.intWen := false.B
-      rfWrite.fpWen := false.B
       rfWrite.vecWen := this.vecWen
-      rfWrite.v0Wen := false.B
-      rfWrite.vlWen := false.B
       rfWrite
     }
 
-    def asV0RfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(V0Data()).addrWidth)))
+    def asV0RfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.v0PregParams))
+      rfWrite := 0.U.asTypeOf(rfWrite)
       rfWrite.wen := this.v0Wen && fire
-      rfWrite.addr := this.pdest
+      rfWrite.pdest := this.pdest
       rfWrite.data := this.data
-      rfWrite.intWen := false.B
-      rfWrite.fpWen := false.B
-      rfWrite.vecWen := false.B
       rfWrite.v0Wen := this.v0Wen
-      rfWrite.vlWen := false.B
       rfWrite
     }
 
-    def asVlRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VlData()).addrWidth)))
+    def asVlRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.vlPregParams))
+      rfWrite := 0.U.asTypeOf(rfWrite)
       rfWrite.wen := this.vlWen && fire
-      rfWrite.addr := this.pdest
+      rfWrite.pdest := this.pdest
       rfWrite.data := this.data
-      rfWrite.intWen := false.B
-      rfWrite.fpWen := false.B
-      rfWrite.vecWen := false.B
-      rfWrite.v0Wen := false.B
       rfWrite.vlWen := this.vlWen
       rfWrite
     }

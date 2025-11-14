@@ -81,9 +81,6 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val backendToTopBypass = Flipped(new BackendToTopBundle)
 
-  val loadFastMatch = Vec(LdExuCnt, Input(UInt(LdExuCnt.W)))
-  val loadFastFuOpType = Vec(LdExuCnt, Input(FuOpType()))
-  val loadFastImm = Vec(LdExuCnt, Input(UInt(12.W)))
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
