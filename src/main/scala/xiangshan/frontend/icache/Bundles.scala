@@ -134,14 +134,7 @@ class ArrayReadReqBundle(implicit p: Parameters) extends ICacheBundle {
 class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
   class MetaReadRespBundle(implicit p: Parameters) extends ICacheBundle {
-    val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
-    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(MetaEccBits.W)))
-    val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
-    // for compatibility
-    def tags: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.phyTag))))
-    def maybeRvcMap: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.maybeRvcMap.getOrElse(0.U(MaxInstNumPerBlock.W))))))
+    val entries: Vec[Vec[Valid[ICacheMetaEntry]]] = Vec(PortNumber, Vec(nWays, Valid(new ICacheMetaEntry)))
   }
   val req:  DecoupledIO[MetaReadReqBundle] = DecoupledIO(new MetaReadReqBundle)
   val resp: MetaReadRespBundle             = Input(new MetaReadRespBundle)

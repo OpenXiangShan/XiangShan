@@ -83,18 +83,14 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule
 
   private val readRotateNumReg = RegEnable(r0_rotateNum, 0.U(InterleavedBankIdxBits.W), io.read.req.fire)
   // rotate back to original order
-  private val readResult = vecRotateLeft(
-    VecInit(banks.map(_.io.read.resp)),
+  io.read.resp.entries := vecRotateLeft(
+    VecInit(banks.map(_.io.read.resp.entries)),
     readRotateNumReg
   )
 
-  io.read.resp.entryValid := VecInit(readResult.map(port => VecInit(port.entries.map(_.valid))))
-  io.read.resp.metas      := VecInit(readResult.map(port => VecInit(port.entries.map(_.bits.meta))))
-  io.read.resp.codes      := VecInit(readResult.map(port => VecInit(port.entries.map(_.bits.code))))
-
-  // TEST: force ECC to fail by setting readCodes to 0
+  // TEST: force ECC to fail by setting parity codes to 0
   if (ForceMetaEccFail) {
-    io.read.resp.codes := 0.U.asTypeOf(io.read.resp.codes)
+    io.read.resp.entries.foreach(_.foreach(_.bits.code := 0.U(MetaEccBits.W)))
   }
 
   /* *** read *** */
