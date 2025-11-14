@@ -56,7 +56,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
           sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.intWen.getOrElse(false.B)
-          sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
+          sink.bits.intWen := source.bits.intWen.getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
           sink.bits.pdest := source.bits.pdest
           // int i2f wakeup fstore from fpRegion, so there is not need bypass fp data in int region
           sink.bits.data := source.bits.data(source.bits.params.getForwardIndex())
