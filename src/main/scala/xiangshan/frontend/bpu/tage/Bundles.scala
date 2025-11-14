@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
@@ -83,6 +84,7 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val providerTableOH:      UInt            = UInt(NumTables.W)
   val providerWayOH:        UInt            = UInt(NumWays.W)
   val providerEntry:        TageEntry       = new TageEntry
+  val providerOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
   val providerNewUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
   val altTableOH:      UInt            = UInt(NumTables.W)
@@ -90,8 +92,44 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val altEntry:        TageEntry       = new TageEntry
   val altOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
+  val useAlt:    Bool = Bool()
+  val finalPred: Bool = Bool()
+
   val increaseUseAlt: Bool = Bool()
   val decreaseUseAlt: Bool = Bool()
 
   val needAllocate: Bool = Bool()
+}
+
+class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
+  val startVAddr:  PrunedAddr = PrunedAddr(VAddrBits)
+  val branchVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+
+  val hasProvider:       Bool            = Bool()
+  val providerTableIdx:  UInt            = UInt(log2Ceil(NumTables).W)
+  val providerSetIdx:    UInt            = UInt(16.W)
+  val providerWayIdx:    UInt            = UInt(log2Ceil(NumWays).W)
+  val providerTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val providerUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+
+  val hasAlt:       Bool            = Bool()
+  val altTableIdx:  UInt            = UInt(log2Ceil(NumTables).W)
+  val altSetIdx:    UInt            = UInt(16.W)
+  val altWayIdx:    UInt            = UInt(log2Ceil(NumWays).W)
+  val altTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
+  val altUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+
+  val baseTableCtr: SaturateCounter = new SaturateCounter(BaseTableTakenCtrWidth)
+
+  val useAlt:         Bool = Bool()
+  val finalPred:      Bool = Bool()
+  val actualTaken:    Bool = Bool()
+  val allocSuccess:   Bool = Bool()
+  val allocTableIdx:  UInt = UInt(log2Ceil(NumTables).W)
+  val allocateSetIdx: UInt = UInt(16.W)
+  val allocWayIdx:    UInt = UInt(log2Ceil(NumWays).W)
+}
+
+class TageTrace(implicit p: Parameters) extends TageBundle {
+  val condTrace: Vec[Valid[ConditionalBranchTrace]] = Vec(NumBtbResultEntries, Valid(new ConditionalBranchTrace))
 }
