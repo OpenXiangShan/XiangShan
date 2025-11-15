@@ -3,7 +3,6 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DiffFpWriteback, DiffIntWriteback, DiffVecV0Writeback, DiffVecWriteback, DifftestModule}
 import utility.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
@@ -385,49 +384,6 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
     sink.valid := source.valid
     sink.bits := source.bits
     source.ready := true.B
-  }
-
-  // difftest
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    intWbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffIntWriteback(IntPhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire && out.bits.rfWen
-      difftest.address := out.bits.pdest
-      difftest.data := out.bits.data
-    })
-  }
-
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    fpWbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffFpWriteback(FpPhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire // all fp instr will write fp rf
-      difftest.address := out.bits.pdest
-      difftest.data := out.bits.data
-    })
-  }
-
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    vfWbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffVecWriteback(VfPhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire
-      difftest.address := out.bits.pdest
-      difftest.data(0) := out.bits.data(63, 0)
-      difftest.data(1) := out.bits.data(127, 64)
-    })
-  }
-
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    v0WbArbiterOut.foreach(out => {
-      val difftest = DifftestModule(new DiffVecV0Writeback(V0PhyRegs))
-      difftest.coreid := io.fromTop.hartId
-      difftest.valid := out.fire
-      difftest.address := out.bits.pdest
-      difftest.data(0) := out.bits.data(63, 0)
-      difftest.data(1) := out.bits.data(127, 64)
-    })
   }
 }
 

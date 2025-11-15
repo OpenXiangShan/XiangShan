@@ -1550,7 +1550,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val instr = uop.instr.asTypeOf(new XSInstBitFields)
       val isVLoad = instr.isVecLoad
 
-      val difftest = DifftestModule(new DiffInstrCommit(MaxPhyRegs), delay = 3, dontCare = true)
+      val diffMaxPhyRegs = Seq(MaxPhyRegs, 2 * (V0PhyRegs + VfPhyRegs)).max // For width of wpdest and otherwpdest
+      val difftest = DifftestModule(new DiffInstrCommit(diffMaxPhyRegs), delay = 3, dontCare = true)
       val dt_skip = Mux(eliminatedMove, false.B, exuOut.isSkipDiff)
       difftest.coreid := io.hartId
       difftest.index := i.U
@@ -1563,7 +1564,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.v0wen := io.commits.commitValid(i) && (uop.v0Wen || isVLoad && instr.VD === 0.U)
       difftest.wpdest := commitInfo.debug_pdest.get
       difftest.wdest := Mux(isVLoad, instr.VD, commitInfo.debug_ldest.get)
-      difftest.otherwpdest := debug_VecOtherPdest(ptr)
+      // When merge v0Rat and vecRat, the index of vecRats should starts from V0PhyRegs
+      // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
+      difftest.otherwpdest := debug_VecOtherPdest(ptr).zipWithIndex.flatMap { case (pdest, idx) =>
+        val vecDest = if (idx == 0) {
+          Mux(difftest.v0wen, pdest, pdest + V0PhyRegs.U)
+        } else {
+          pdest + V0PhyRegs.U
+        }
+        val splitDest = (vecDest << 1).asUInt
+        Seq(splitDest, splitDest + 1.U)
+      }
       difftest.nFused := instrSize - 1.U
       when(difftest.valid) {
         assert(instrSize >= 1.U)
