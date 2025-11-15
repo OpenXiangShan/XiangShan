@@ -533,7 +533,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
     dataPath.io.fromPcTargetMem <> io.fromPcTargetMem.get
     dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
-    dataPath.io.diffIntRat.foreach(_ := io.diffIntRat.get)
 
     bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
     bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
@@ -656,7 +655,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     io.fpToIntIQResp.get := dataPath.io.toIntIQ
     dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
-    dataPath.io.diffFpRat.foreach(_ := io.diffFpRat.get)
     io.toFpPreg := wbDataPath.io.toFpPreg
     bypassNetwork.io.fromDataPath.fp <> dataPath.io.toFpExu
 
@@ -774,8 +772,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
     dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
-    dataPath.io.diffVecRat.foreach(_ := io.diffVecRat.get)
-    dataPath.io.diffV0Rat.foreach(_ := io.diffV0Rat.get)
     dataPath.io.diffVlRat.foreach(_ := io.diffVlRat.get)
 
     dataPath.io.fromVecExcpMod.foreach(_ := io.fromVecExcpMod.get)
@@ -995,10 +991,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val flush = Flipped(ValidIO(new Redirect))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   val fromPcTargetMem = Option.when(params.isIntSchd)(Flipped(new PcToDataPathIO(backendParams)))
-  val diffIntRat = Option.when(params.isIntSchd)(Input(Vec(32, UInt(params.pregIdxWidth.W))))
-  val diffFpRat = Option.when(params.isFpSchd)(Input(Vec(32, UInt(params.pregIdxWidth.W))))
-  val diffVecRat = Option.when(params.isVecSchd)(Input(Vec(31, UInt(params.pregIdxWidth.W))))
-  val diffV0Rat = Option.when(params.isVecSchd)(Input(Vec(1, UInt(log2Up(V0PhyRegs).W))))
   val diffVlRat = Option.when(params.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
   val diffVl = Option.when(params.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
   val vlWriteBackInfoIn = new Bundle {
