@@ -961,7 +961,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val selectBits = ParallelPriorityMux(entryCanEnqSeq, io.enq.req.map(_.bits))
 
     val deqCancel = VecInit(deqPtrExt.zipWithIndex.map{case (ptr, j) =>
-      ptr.value === i.U && sqDeqCnt >= j.U
+      ptr.value === i.U && sqDeqCnt > j.U
     }).asUInt.orR
 
     when (entryCanEnq) {
