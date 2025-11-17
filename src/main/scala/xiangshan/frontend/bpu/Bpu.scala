@@ -240,13 +240,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
   // sc
-  sc.io.mbtbResult             := mbtb.io.result
-  sc.io.tageInfo.condTakenMask := tage.io.condTakenMask
-  sc.io.tageInfo.condTakenCtr := tage.io.condTakenMask.map { b =>
-    val ctr = Wire(new SaturateCounter(bpuParameters.tageParameters.TakenCtrWidth))
-    ctr.value := Mux(b, 4.U, 3.U)
-    ctr
-  }
+  sc.io.mbtbResult                := mbtb.io.result
+  sc.io.tageInfo.condTakenMask    := tage.io.condTakenMask
+  sc.io.tageInfo.providerTakenCtr := tage.io.providerTakenCtrVec
   // FIXME: need tage cond taken ctr
   sc.io.foldedPathHist      := phr.io.s1_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
@@ -335,7 +331,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_utageMeta.baseCfiPosition  := baseBrCfiPosition
 
   private val s2_mbtbResult    = mbtb.io.result
-  private val s2_condTakenMask = tage.io.condTakenMask
+  private val s2_condTakenMask = sc.io.takenMask
+  // private val s2_condTakenMask = tage.io.condTakenMask
   private val s2_jumpMask = VecInit(s2_mbtbResult.map { e =>
     e.valid && (e.bits.attribute.isDirect || e.bits.attribute.isIndirect)
   })
