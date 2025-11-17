@@ -329,12 +329,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
+  val stIsRVC = Wire(Vec(StorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
+    stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.preDecodeInfo.isRVC, storeIn(w).valid, TotalSelectCycles)._2
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -351,6 +353,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
     redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
+    redirect.bits.stIsRVC     := stIsRVC(i)
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
