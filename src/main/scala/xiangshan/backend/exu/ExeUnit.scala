@@ -458,6 +458,8 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   fu.io.in.valid          := io.in.valid
   io.in.ready             := fu.io.in.ready
 
+  // std don't need isRVC
+  fu.io.in.bits.ctrl.preDecode.foreach(_ := 0.U.asTypeOf(fu.io.in.bits.ctrl.preDecode.get))
   fu.io.in.bits.ctrl.robIdx    := io.in.bits.uop.robIdx
   fu.io.in.bits.ctrl.pdest     := io.in.bits.uop.pdest
   fu.io.in.bits.ctrl.fuOpType  := io.in.bits.uop.fuOpType
