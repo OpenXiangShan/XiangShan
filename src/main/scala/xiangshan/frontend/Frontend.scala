@@ -406,8 +406,9 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
   val perfFromIO    = Seq()
   val perfBlock     = Seq()
+  val perfFromITLB  = itlb.getPerfEvents.map { case (str, idx) => ("itlb_" + str, idx) }
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock ++ perfFromITLB
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {

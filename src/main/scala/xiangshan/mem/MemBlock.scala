@@ -596,6 +596,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
 
+  val perfEventsDTLBld = dtlb_ld_tlb_ld.getPerfEvents.map { case (str, idx) => ("dtlb_ld_" + str, idx) }
+  val perfEventsDTLBst = dtlb_st_tlb_st.getPerfEvents.map { case (str, idx) => ("dtlb_st_" + str, idx) }
+
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
@@ -1807,11 +1810,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val csrevents = pfevent.io.hpmevent.slice(16,24)
 
   val perfFromUnits = (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
+  val perfFromTLB = perfEventsDTLBld ++ perfEventsDTLBst
   val perfFromPTW = perfEventsPTW.map(x => ("PTW_" + x._1, x._2))
   val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
                           ("stDeqCount", stDeqCount))
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromPTW ++ perfBlock
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromTLB ++ perfFromPTW ++ perfBlock
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
