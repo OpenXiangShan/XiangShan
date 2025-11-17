@@ -780,10 +780,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
-      updatedUop(i).loadWaitBit := io.lfst.resp(i).bits.shouldWait
-      updatedUop(i).waitForRobIdx := io.lfst.resp(i).bits.robIdx
+      fromRenameUpdate(i).bits.loadWaitBit := io.lfst.resp(i).bits.shouldWait
+      fromRenameUpdate(i).bits.waitForRobIdx := io.lfst.resp(i).bits.robIdx
     } else {
-      updatedUop(i).loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
+      fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
