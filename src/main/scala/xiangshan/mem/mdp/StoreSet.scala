@@ -179,6 +179,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
     valid_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
     data_array.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
     data_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+
+    valid_array.io.ren.get(SSIT_UPDATE_LOAD_READ_PORT)  := true.B
+    valid_array.io.ren.get(SSIT_UPDATE_STORE_READ_PORT) := true.B
+    data_array.io.ren.get(SSIT_UPDATE_LOAD_READ_PORT)   := true.B
+    data_array.io.ren.get(SSIT_UPDATE_STORE_READ_PORT)  := true.B
   }
 
   // update stage 1: get ssit read result
