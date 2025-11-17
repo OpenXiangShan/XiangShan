@@ -231,7 +231,7 @@ class CtrlBlockImp(
   pcMem.io.raddr(pcMemRdIndexes("memPred").head) := memViolation.bits.stFtqIdx.value
   val memPredPCOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
-    memPredPCOffset := memViolation.bits.getPcOffset()
+    memPredPCOffset := memViolation.bits.getStPcOffset()
   }
   redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).toUInt + memPredPCOffset
 
