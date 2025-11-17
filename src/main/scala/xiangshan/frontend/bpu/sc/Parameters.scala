@@ -32,7 +32,7 @@ case class ScParameters(
     biasUseTageBitWidth: Int = 4, // use tage_taken and tage_low_conf bits as index bits
     ctrWidth:            Int = 6,
     weightCtrWidth:      Int = 6,
-    thresholdThresWidth: Int = 8,
+    thresholdThresWidth: Int = 10,
     NumTables:           Int = 2,
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,

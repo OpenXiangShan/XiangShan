@@ -27,14 +27,15 @@ class ScEntry(implicit p: Parameters) extends ScBundle {
   val ctr: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
 }
 class ScTageInfo(implicit p: Parameters) extends ScBundle {
-  val condTakenMask: Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
-  val condTakenCtr:  Vec[SaturateCounter] = Vec(NumBtbResultEntries, new SaturateCounter(tageTakenCtrWidth))
+  val condTakenMask: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+  val providerTakenCtr: Vec[Valid[SaturateCounter]] =
+    Vec(NumBtbResultEntries, Valid(new SaturateCounter(tageTakenCtrWidth)))
 }
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
 
-  def initVal: UInt = 6.U
+  def initVal: UInt = 140.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())
@@ -75,5 +76,7 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val scBiasResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
   val scGhr:           UInt           = UInt(GhrHistoryLength.W)
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
+  val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
+  val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
 }

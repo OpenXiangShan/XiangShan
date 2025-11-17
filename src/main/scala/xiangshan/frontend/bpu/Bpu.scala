@@ -240,13 +240,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
   // sc
-  sc.io.mbtbResult             := mbtb.io.result
-  sc.io.tageInfo.condTakenMask := tage.io.condTakenMask
-  sc.io.tageInfo.condTakenCtr := tage.io.condTakenMask.map { b =>
-    val ctr = Wire(new SaturateCounter(bpuParameters.tageParameters.TakenCtrWidth))
-    ctr.value := Mux(b, 4.U, 3.U)
-    ctr
-  }
+  sc.io.mbtbResult                := mbtb.io.result
+  sc.io.tageInfo.condTakenMask    := tage.io.condTakenMask
+  sc.io.tageInfo.providerTakenCtr := tage.io.providerTakenCtrVec
   // FIXME: need tage cond taken ctr
   sc.io.foldedPathHist      := phr.io.s1_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
