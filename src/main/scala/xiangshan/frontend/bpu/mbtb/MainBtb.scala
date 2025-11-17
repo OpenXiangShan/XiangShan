@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BtbInfo
@@ -53,21 +54,23 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    * send read request to alignBanks
    */
   s0_fire := io.stageCtrl.s0_fire && io.enable
-  private val s0_startVAddr        = io.startVAddr
-  private val s0_firstAlignBankIdx = getAlignBankIndex(s0_startVAddr)
-  private val s0_startVAddrVec = vecRotateRight(
+  private val s0_startVAddr = io.startVAddr
+  // rotate read addresses according to the first align bank index
+  // e.g. if NumAlignBanks = 4, startVAddr locates in alignBank 1,
+  // startVAddr + (i << FetchBlockAlignWidth) will be located in alignBank (1 + i) % 4,
+  // i.e. we have VecInit.tabulate(...)'s alignBankIdx = (1, 2, 3, 0),
+  // they always needs to goes to physical alignBank (0, 1, 2, 3),
+  // so we need to rotate it right by 1.
+  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startVAddr))
+  private val s0_startVAddrVec = s0_rotator.rotate(
     VecInit.tabulate(NumAlignBanks) { i =>
       if (i == 0)
         s0_startVAddr // keep lower bits for the first one
       else
         getAlignedAddr(s0_startVAddr + (i << FetchBlockAlignWidth).U) // use aligned for others
-    },
-    s0_firstAlignBankIdx
+    }
   )
-  private val s0_posHigherBitsVec = vecRotateRight(
-    VecInit.tabulate(NumAlignBanks)(i => i.U(AlignBankIdxLen.W)),
-    s0_firstAlignBankIdx
-  )
+  private val s0_posHigherBitsVec = s0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.read.req.startVAddr    := s0_startVAddrVec(i)
@@ -86,6 +89,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    */
   s2_fire := io.stageCtrl.s2_fire && io.enable
 
+  // we don't care about the order of alignBanks' responses,
+  // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
+  // (and we care about the full position when searching for a matching entry, not the bank it comes from)
+  // so here we just flatten them, without rotating them back to the original order
   io.result       := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info)))
   io.meta.entries := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.meta)))
 
@@ -101,11 +108,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_valid = RegNext(t0_valid) && io.enable
   private val t1_train = RegEnable(t0_train, t0_valid)
 
-  private val t1_startVAddr        = t1_train.startVAddr
-  private val t1_firstAlignBankIdx = getAlignBankIndex(t1_startVAddr)
-  private val t1_startVAddrVec = vecRotateRight(
-    VecInit.tabulate(NumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U)),
-    t1_firstAlignBankIdx
+  private val t1_startVAddr = t1_train.startVAddr
+  private val t1_rotator    = VecRotate(getAlignBankIndex(t1_startVAddr))
+  private val t1_startVAddrVec = t1_rotator.rotate(
+    VecInit.tabulate(NumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U))
   )
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_mispredictBranch = t1_train.mispredictBranch
@@ -118,11 +124,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
 
-  private val t1_writeAlignBankIdx = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
-  private val t1_writeAlignBankMask = vecRotateRight(
-    VecInit(UIntToOH(t1_writeAlignBankIdx).asBools),
-    t1_firstAlignBankIdx
-  )
+  private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
+  private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)

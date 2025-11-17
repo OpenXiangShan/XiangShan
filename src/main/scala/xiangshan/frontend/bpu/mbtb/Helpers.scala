@@ -21,11 +21,10 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CrossPageHelper
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.bpu.RotateHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMainBtbParameters
-    with HasXSParameter with TargetFixHelper with RotateHelper with HalfAlignHelper with CrossPageHelper {
+    with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
 
