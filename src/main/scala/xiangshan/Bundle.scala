@@ -226,6 +226,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
+  val stIsRVC  = Bool()
 
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
@@ -236,6 +237,12 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   def getPcOffset() = {
     val ftqOffset = (this.ftqOffset << instOffsetBits).asUInt
     val rvcOffset = Mux(this.isRVC, 0.U, 2.U)
+    val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
+    thisPcOffset
+  }
+  def getStPcOffset() = {
+    val ftqOffset = (this.stFtqOffset << instOffsetBits).asUInt
+    val rvcOffset = Mux(this.stIsRVC, 0.U, 2.U)
     val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
     thisPcOffset
   }
