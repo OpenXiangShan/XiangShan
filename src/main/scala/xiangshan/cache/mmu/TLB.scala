@@ -159,6 +159,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       pmm := 0.U
     } .elsewhen (premode(i) === ModeM) {
       pmm := csr.pmm.mseccfg
+    } .elsewhen (Mux(virt_in || req_in(i).bits.hyperinst, csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr)) {
+      pmm := 0.U
     } .elsewhen (!(virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
       pmm := csr.pmm.menvcfg
     } .elsewhen ((virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
