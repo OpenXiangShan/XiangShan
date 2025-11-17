@@ -303,8 +303,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
                in)
   }
 
-  io.toCSR.trapInstInfo.valid := hasIllegalInst && !io.redirect
-  io.toCSR.trapInstInfo.bits.fromDecodedInst(illegalInst)
+  io.toCSR.trapInstInfo.valid := RegNext(hasIllegalInst && !io.redirect)
+  io.toCSR.trapInstInfo.bits.fromDecodedInst(RegNext(illegalInst))
 
   val recoveryFlag = RegInit(false.B)
   when(io.redirect) {
