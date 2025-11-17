@@ -32,13 +32,13 @@ import xiangshan.frontend.bpu.SaturateCounter
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid:    Bool              = Input(Bool())
-    val overrideValid:    Bool              = Input(Bool())
-    val previousVAddr:    Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
-    val prediction:       Prediction        = Output(new Prediction)
-    val meta:             AheadBtbMeta      = Output(new AheadBtbMeta)
-    val debug_startVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
-    val debug_previousVAddr: PrunedAddr = Output(PrunedAddr(VAddrBits))
+    val redirectValid:       Bool              = Input(Bool())
+    val overrideValid:       Bool              = Input(Bool())
+    val previousVAddr:       Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
+    val prediction:          Prediction        = Output(new Prediction)
+    val meta:                AheadBtbMeta      = Output(new AheadBtbMeta)
+    val debug_startVAddr:    PrunedAddr        = Output(PrunedAddr(VAddrBits))
+    val debug_previousVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -140,10 +140,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - stage 3 is only for fast prediction when override is valid
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s3_setIdx = RegInit(0.U.asTypeOf(s1_setIdx))
-  private val s3_bankIdx = RegInit(0.U.asTypeOf(s1_bankIdx))
-  private val s3_bankMask = RegInit(0.U.asTypeOf(s1_bankMask))
-  private val s3_entries = RegInit(0.U.asTypeOf(s1_entries))
+  private val s3_setIdx     = RegInit(0.U.asTypeOf(s1_setIdx))
+  private val s3_bankIdx    = RegInit(0.U.asTypeOf(s1_bankIdx))
+  private val s3_bankMask   = RegInit(0.U.asTypeOf(s1_bankMask))
+  private val s3_entries    = RegInit(0.U.asTypeOf(s1_entries))
   private val s3_startVAddr = RegInit(0.U.asTypeOf(s1_startVAddr))
 
   private val s2_setIdx     = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
@@ -198,7 +198,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
 
   // used for check abtb output
-  io.debug_startVAddr := s2_startVAddr
+  io.debug_startVAddr    := s2_startVAddr
   io.debug_previousVAddr := s3_startVAddr
 
   replacers.zipWithIndex.foreach { case (r, i) =>
