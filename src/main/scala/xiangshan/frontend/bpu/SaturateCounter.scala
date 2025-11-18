@@ -75,4 +75,10 @@ class SaturateCounter(width: Int) extends Bundle {
     val weakTaken    = value(width - 1) && !value(width - 2, 0).orR
     weakNotTaken || weakTaken // for 3 bit ctr: 011 || 100
   }
+  def isMid: Bool = {
+    require(width >= 3)
+    val midNotTaken = !value(width - 1) && value(width - 2)
+    val midTaken    = value(width - 1) && value(width - 2, 0).orR
+    midNotTaken || midTaken // for 4 bit ctr: 0100 || 1011
+  }
 }
