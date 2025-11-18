@@ -401,8 +401,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val sbufferCtrl     = new SbufferCtrlIO
 
       val deqPtrExtNext   = Output(Vec(EnsbufferWidth, new SqPtr))
+      val rdataPtrMoveCnt  = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
       val sqDeqCnt        = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+      val rdataPtrExt     = Input(Vec(EnsbufferWidth, new SqPtr))
       val deqPtrExt       = Input(Vec(EnsbufferWidth, new SqPtr))
+      val pipelineConnectFire = Output(Vec(EnsbufferWidth, Bool()))
       val validCnt        = Input(UInt(log2Ceil(StoreQueueSize + 1).W))
       val fromUnalignQueue = Flipped(ValidIO(new Bundle {
         val paddr         = UInt(PAddrBits.W)
@@ -432,6 +435,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val headDataEntry    = dataEntries.head
     private val headCtrlEntry    = ctrlEntries.head
     private val headDeqPtr       = io.deqPtrExt.head
+    private val headrdataPtr     = io.rdataPtrExt.head
 
     /*============================================ force write sbuffer ===============================================*/
 //    io.sqCancelCnt := redirectCancelCount
@@ -573,11 +577,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     // requestor, to UncacheBuffer.
     private val brodenId = Wire(UInt(uncacheIdxBits.W))
-    if(uncacheIdxBits > headDeqPtr.value.getWidth){
-      brodenId := Cat(0.U((uncacheIdxBits - headDeqPtr.value.getWidth).W), headDeqPtr.value)
+    if(uncacheIdxBits > headrdataPtr.value.getWidth){
+      brodenId := Cat(0.U((uncacheIdxBits - headrdataPtr.value.getWidth).W), headrdataPtr.value)
     }
     else {
-      brodenId := headDeqPtr.value
+      brodenId := headrdataPtr.value
     }
     io.toUncacheBuffer.req.valid              := uncacheState === UncacheState.sendReq
     io.toUncacheBuffer.req.bits.cmd           := MemoryOpConstants.M_XWR
@@ -642,7 +646,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val writeSbufferPaddr = Wire(Vec(EnsbufferWidth , UInt(PAddrBits.W)))
     private val writeSbufferVaddr = Wire(Vec(EnsbufferWidth , UInt(VAddrBits.W)))
     private val headCross16B      = headCtrlEntry.cross16Byte
-    private val headCrossPage     = headDeqPtr === io.fromUnalignQueue.bits.sqIdx && io.fromUnalignQueue.valid
+    private val headCrossPage     = headrdataPtr === io.fromUnalignQueue.bits.sqIdx && io.fromUnalignQueue.valid
 
     // paddrHigh and vaddrHigh only for cross16Byte split
     private val paddrLow          = Cat(headDataEntry.paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W))
@@ -676,6 +680,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val unalignStall     = Wire(Vec(EnsbufferWidth, Bool()))
     private val cboStall         = Wire(Vec(EnsbufferWidth, Bool()))
     private val toSbufferValid   = Wire(Vec(EnsbufferWidth, Bool()))
+    // cross16B will occupy two write port, so only need to use port 0 fire.
+    private val cross16BDeqReg   = RegEnable(headCross16B, writeSbufferWire(0).fire)
 
     writeSbufferWire             := DontCare //// init , TODO: fix it!!!!!!
     // when deq is MMIO/NC/CMO request, don't need to write sbuffer.
@@ -702,21 +708,21 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       if(i == 0) {
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          (!headCross16B || io.writeToSbuffer.canAccept) && !unalignStall(i)
+          (!headCross16B || io.writeToSbuffer.canAccept) && !unalignStall(i) && ctrlEntry.committed
 
         unalignStall(i) := false.B // if first port is unalign, make it can write to sbuffer.
       }
       else if(i == 1) { // override port 1 to write second request of cross16B
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated ||
-          (headCross16B && toSbufferValid(0)) && !unalignStall(i)
+          (headCross16B && toSbufferValid(0)) && !unalignStall(i) && ctrlEntry.committed
 
         unalignStall(i) := ctrlEntry.cross16Byte && !headCross16B
       }
       else {
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          !unalignStall(i)
+          !unalignStall(i) && ctrlEntry.committed
 
         unalignStall(i) := ctrlEntry.cross16Byte || headCross16B
       }
@@ -735,7 +741,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       port.bits.wline    := dataEntry.wline
       port.bits.prefetch := ctrlEntry.prefetch
       port.bits.cmd      := MemoryOpConstants.M_XWR
-      port.bits.vecValid := !ctrlEntry.vecInactive || !ctrlEntry.isVec // vector used
+      port.bits.vecValid := !ctrlEntry.vecInactive || !ctrlEntry.isVec // vector used, will be remove in feature.
       port.valid         := toSbufferValid(i)
 
       XSError(ctrlEntry.vecInactive && !ctrlEntry.isVec, s"inactive element must be vector! ${i}")
@@ -753,8 +759,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /*
     * NOTE: Only when port 0 and port 1 are ready can write cross16B request, so only use io.writeToSbuffer.req.head.fire
     *       to caculate sbufferFireNum.
+    * deqPtr will move when request write to sbuffer.
+    * rdataPtr will move when nc request fire / write to SQ2SBPipelineConnect_i
+    * NOTE: when deq mmio/cbo, rdataPtr === deqPtr, because mmio/cbo need to execute at head of StoreQueue.
     * */
-    private val sbufferFireNum = Mux(headCross16B,
+    private val sbufferFireNum = Mux(cross16BDeqReg,
       Cat(io.writeToSbuffer.req.head.fire, 0.U),
       Cat(io.writeToSbuffer.req.map(_.fire)))
 
@@ -763,8 +772,32 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.sqDeqCnt := PopCount(VecInit(deqCount).asUInt)
     io.deqPtrExtNext := io.deqPtrExt.map(_ + io.sqDeqCnt)
 
+    private val pipelineConnectFireNum = Mux(headCross16B,
+      Cat(writeSbufferWire.head.fire, 0.U),
+      Cat(writeSbufferWire.map(_.fire)))
+    // nc/mmio/cbo deq
+    private val otherMove        = uncacheState === UncacheState.waitResp && io.toUncacheBuffer.req.fire && isNC ||
+      io.writeBack.fire
+    private val rdataMoveCnt = Cat(pipelineConnectFireNum, otherMove)
+
+    io.rdataPtrMoveCnt        := PopCount(rdataMoveCnt)
+
     /*============================================ other connection ==================================================*/
     io.perfMmioBusy := uncacheState =/= UncacheState.idle
+    io.pipelineConnectFire.zip(writeSbufferWire).map{case (sink, sourcePort) =>
+      sink := sourcePort.fire
+    }
+
+    /*=============================================== debug dontTouch =================================================*/
+    if(debugEn) {
+      dontTouch(toSbufferValid)
+      dontTouch(writeSbufferData)
+      dontTouch(writeSbufferMask)
+      dontTouch(writeSbufferPaddr)
+      dontTouch(writeSbufferVaddr)
+      dontTouch(unalignMask)
+      dontTouch(deqCount)
+    }
   }
   /*==================================================================================================================*/
   /* UnalignQueue will save the second physical address of the oldest SQUnalignQueueSize crossPage unaligned requests.*/
@@ -845,7 +878,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   }
 
   val io = IO(new StoreQueueIO)
-  io <> DontCare ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   println("StoreQueue: size:" + StoreQueueSize)
 
   // entries define
@@ -854,7 +886,20 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
   // ptr define
   val enqPtrExt          = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
+  // when io.writeToSbuffer_i.fire or writeback.fire, deqPtr will move.
+  //
+  // It should be noted that the deqPtr move is a store request at the end of the store queue lifecycle,
+  // whereas the rdataPtr move is not.
+  //
   val deqPtrExt          = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new SqPtr))))
+  // Because deq need multi cycle, use rdataPtr to read and split next EnsbufferWidth entries.
+  // when
+  // 1. head[Ctrl & Data]entries write to pipeline that between StoreQueue and Sbuffer.
+  // 2. nc send to uncacheBuffer.
+  // it will be move.
+  //
+  // rdataPtr may be equal to deqPtr when [MMIO/CBO].
+  val rdataPtrExt        = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt          = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val addrReadyPtrExt    = RegInit(0.U.asTypeOf(new SqPtr))
   val dataReadyPtrExt    = RegInit(0.U.asTypeOf(new SqPtr))
@@ -863,10 +908,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val allowEnqueue       = validCount <= (StoreQueueSize - LSQStEnqWidth).U
   val needCancel         = Wire(Vec(StoreQueueSize, Bool()))
 
-  val headDataEntries    = deqPtrExt.map{ case ptr =>
+  // the means of `head` is the next request that StoreQueue need to process.
+  val headDataEntries    = rdataPtrExt.map{ case ptr =>
     dataEntries(ptr.value)
   }
-  val headCtrlEntries    = deqPtrExt.map{ case ptr =>
+  val headCtrlEntries    = rdataPtrExt.map{ case ptr =>
     ctrlEntries(ptr.value)
   }
 
@@ -903,12 +949,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   io.sbufferCtrl                <> deqModule.io.sbufferCtrl
   deqModule.io.fromUnalignQueue <> unalignQueue.io.toDeqModule
   deqModule.io.deqPtrExt        := deqPtrExt
+  deqModule.io.rdataPtrExt      := rdataPtrExt
   deqModule.io.validCnt         := validCount
   io.exceptionInfo              := deqModule.io.exceptionInfo
 
   val deqPtrExtNext = deqModule.io.deqPtrExtNext
   val sqDeqCnt      = deqModule.io.sqDeqCnt
   val mmioBusy      = deqModule.io.perfMmioBusy
+  val pipelineConnectFire = deqModule.io.pipelineConnectFire
+  val rdataMoveCnt  = deqModule.io.rdataPtrMoveCnt
 
   // unalignQueue connection
   unalignQueue.io.redirect            := io.redirect
@@ -1250,7 +1299,10 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
   // deqPtr logic
   deqPtrExt := deqPtrExt.map(_ + sqDeqCnt)
+  rdataPtrExt := rdataPtrExt.map(_ + rdataMoveCnt)
 
+  XSError(deqPtrExt(0) > rdataPtrExt(0), "Why deqPtr > rdataPtr? something error!")
+  XSError(deqPtrExt(0) > enqPtrExt(0),   "Why deqPtr > enqPtr? something error!")
   /******************************************** store pipeline write **************************************************/
   for (i <- 0 until StorePipelineWidth) {
     val storeAddrIn   = io.fromStoreUnit.storeAddrIn(i)
@@ -1302,7 +1354,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
   for (i <- 0 until EnsbufferWidth) {
     val ptr = deqPtrExt(i).value
-    when(sqDeqCnt >= i.U) {
+    when(sqDeqCnt > i.U) {
       ctrlEntries(ptr).committed := false.B
     }
   }
@@ -1319,6 +1371,21 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   io.sqDeqPtr := deqPtrExt(0)
   io.sqDeqUopIdx := dataEntries(deqPtrExt(0).value).uop.uopIdx
   io.sqDeqRobIdx := dataEntries(deqPtrExt(0).value).uop.robIdx
+
+  // Currently, storeQueue will always safe, no other uncommitted instructions may precede the wfi instruction.
+  io.wfi.wfiSafe := true.B
+  io.sqEmpty     := deqPtrExt(0) === enqPtrExt(0)
+  io.sqCancelCnt := redirectCancelCount
+  io.sqDeq       := RegNext(sqDeqCnt)
+
+  /*=============================================== debug ============================================================*/
+  if(debugEn) {
+    dontTouch(enqNumber)
+    dontTouch(lastlastCycleRedirect)
+    dontTouch(enqPtrExt)
+    dontTouch(deqPtrExt)
+    dontTouch(dataEntries)
+  }
 
   /************************************************* Difftest *********************************************************/
   // Initialize when unenabled difftest.
@@ -1352,11 +1419,11 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 //     That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
     (0 until EnsbufferWidth).foreach { i =>
       // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
-      val ptr = deqPtrExt(i).value
-      io.diffStore.diffInfo(i).uop    := dataEntries(ptr).debugUop.get
-      io.diffStore.diffInfo(i).start  := dataEntries(ptr).debugVecUnalignedStart.get
-      io.diffStore.diffInfo(i).offset := dataEntries(ptr).debugVecUnalignedOffset.get
-      io.diffStore.pmaStore(i).valid  := io.writeToSbuffer.req(i).fire // TODO: need to fix when verify nc and pma memory.
+      val ptr = rdataPtrExt(i).value
+      io.diffStore.diffInfo(i).uop            := dataEntries(ptr).debugUop.get
+      io.diffStore.diffInfo(i).start          := dataEntries(ptr).debugVecUnalignedStart.get
+      io.diffStore.diffInfo(i).offset         := dataEntries(ptr).debugVecUnalignedOffset.get
+      io.diffStore.pmaStore(i).valid          := pipelineConnectFire(i)
       io.diffStore.pmaStore(i).bits.cmd       := MemoryOpConstants.M_XWR
       io.diffStore.pmaStore(i).bits.addr      := dataEntries(ptr).paddr
       io.diffStore.pmaStore(i).bits.vaddr     := dataEntries(ptr).vaddr
