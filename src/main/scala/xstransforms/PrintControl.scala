@@ -17,9 +17,7 @@
 
 package xiangshan.transforms
 
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class DisablePrintfAnnotation(m: String) extends firrtl.annotations.NoTargetAnnotation
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object DisablePrintfAnnotation extends firrtl.options.HasShellOptions{
 
   val options = Seq(
@@ -35,9 +33,7 @@ object DisablePrintfAnnotation extends firrtl.options.HasShellOptions{
 
 }
 
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class EnablePrintfAnnotation(m: String) extends firrtl.annotations.NoTargetAnnotation
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object EnablePrintfAnnotation extends firrtl.options.HasShellOptions {
   val options = Seq(
     new firrtl.options.ShellOption[String](
@@ -52,9 +48,7 @@ object EnablePrintfAnnotation extends firrtl.options.HasShellOptions {
 
 }
 
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 case class DisableAllPrintAnnotation() extends firrtl.annotations.NoTargetAnnotation
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 object DisableAllPrintAnnotation extends firrtl.options.HasShellOptions {
   val options = Seq(
     new firrtl.options.ShellOption[Unit](
@@ -67,9 +61,20 @@ object DisableAllPrintAnnotation extends firrtl.options.HasShellOptions {
   )
 }
 
+case class RemoveAssertAnnotation() extends firrtl.annotations.NoTargetAnnotation
+object RemoveAssertAnnotation extends firrtl.options.HasShellOptions{
+  val options = Seq(
+    new firrtl.options.ShellOption[Unit](
+      longOption = "remove-assert",
+      toAnnotationSeq = _ => Seq(RemoveAssertAnnotation()),
+      helpText = "All the 'assert' will be removed\n",
+      shortOption = None
+    )
+  )
+}
+
 import scala.collection.mutable
 
-@scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
 class PrintControl extends firrtl.options.Phase {
 
   override def invalidates(a: firrtl.options.Phase) = false
@@ -86,6 +91,9 @@ class PrintControl extends firrtl.options.Phase {
     }
     val disableAll = annotations.collectFirst {
       case DisableAllPrintAnnotation() => true
+    }.nonEmpty
+    val removeAssert = annotations.collectFirst{
+      case RemoveAssertAnnotation() => true
     }.nonEmpty
 
     assert(!(enableList.nonEmpty && (disableAll || disableList.nonEmpty)))
@@ -130,6 +138,8 @@ class PrintControl extends firrtl.options.Phase {
         val disable = disableAll || inRange(disableList) || !enable
         def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
           case _: firrtl.ir.Print if disable => firrtl.ir.EmptyStmt
+          case _: firrtl.ir.Stop if removeAssert => firrtl.ir.EmptyStmt
+          case _: firrtl.ir.Verification if removeAssert => firrtl.ir.EmptyStmt
           case other => other.mapStmt(onStmt)
         }
         m.mapStmt(onStmt)
