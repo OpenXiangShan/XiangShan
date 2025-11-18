@@ -31,11 +31,17 @@ class ScTageInfo(implicit p: Parameters) extends ScBundle {
   val providerTakenCtr: Vec[Valid[SaturateCounter]] =
     Vec(NumBtbResultEntries, Valid(new SaturateCounter(tageTakenCtrWidth)))
 }
+class TableCtrl extends Bundle {
+  val pathEnable:   Bool = Bool()
+  val globalEnable: Bool = Bool()
+  val biasEnable:   Bool = Bool()
+  // TODO: other ctrl signals
+}
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
 
-  def initVal: UInt = 140.U
+  def initVal: UInt = 280.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())

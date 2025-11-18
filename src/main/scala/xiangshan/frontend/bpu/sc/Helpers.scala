@@ -44,8 +44,7 @@ trait Helpers extends HasScParameters {
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
     (pc >> (BankWidth + FetchBlockSizeWidth))(log2Ceil(numSets) - 1, 0)
 
-  def getPercsum(arr: SInt): SInt =
-    (arr * 2.S) +& 1.S
+  def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
   def aboveThreshold(scSum: SInt, threshold: UInt): Bool = {
     val signedThres = threshold.zext
@@ -59,15 +58,22 @@ trait Helpers extends HasScParameters {
       oldEntries:    Vec[ScEntry],
       writeValidVec: Vec[Bool],
       takenMask:     Vec[Bool],
-      wayIdxVec:     Vec[UInt]
+      wayIdxVec:     Vec[UInt],
+      metaData:      ScMeta
   ): Vec[ScEntry] = {
+    require(
+      writeValidVec.length == takenMask.length &&
+        writeValidVec.length == wayIdxVec.length,
+      "Length of writeValidVec, takenMask and wayIdxVec should be the same"
+    )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
       val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).foldLeft(oldEntry.ctr) {
         case (prevCtr, ((writeValid, writeTaken), writeWayIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U
-          val nextValue  = prevCtr.getUpdate(writeTaken)
-          val nextCtr    = WireInit(prevCtr)
+          val needUpdate = writeValid && writeWayIdx === wayIdx.U &&
+            metaData.scPred(wayIdx) =/= writeTaken && metaData.tagePredValid(wayIdx)
+          val nextValue = prevCtr.getUpdate(writeTaken)
+          val nextCtr   = WireInit(prevCtr)
           nextCtr.value := nextValue
           Mux(needUpdate, nextCtr, prevCtr)
       }
