@@ -80,6 +80,6 @@ CVMParams:
   HasMEMencryption: false
   HasDelayNoencryption: false
 
-EnableBitmapCheck: true
+EnableBitmapCheck: false
 
 EnableBitmapCheckDefault: false
