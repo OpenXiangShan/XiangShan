@@ -632,7 +632,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // if a PfGen comes, new added request can be new_req = PfGen.region_bits & ~(pending)
   // Alloc:
   // new_req = PfGen.region_bits
-  val stream_pf_trace_debug_table = ChiselDB.createTable("StreamPFTrace" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceInEntry, basicDB = true)
+  val stream_pf_trace_debug_table = ChiselDB.createTable("StreamPFTrace" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceInEntry, basicDB = false)
   for (i <- 0 until BIT_VEC_WITDH) {
     // l1 enq log
     val hit_entry = l1_array(s0_l1_index)
@@ -863,7 +863,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l2_array(l2_pf_req_arb.io.chosen).sent_vec := l2_array(l2_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l2_pf_req_arb.io.out.bits.req.addr)
   }
 
-  val stream_out_debug_table = ChiselDB.createTable("StreamPFTraceOut" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceOutEntry, basicDB = true)
+  val stream_out_debug_table = ChiselDB.createTable("StreamPFTraceOut" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceOutEntry, basicDB = false)
   val l1_debug_data = Wire(new StreamPFTraceOutEntry)
   val l2_debug_data = Wire(new StreamPFTraceOutEntry)
   l1_debug_data.PFVaddr := l1_pf_req_arb.io.out.bits.debug_vaddr
