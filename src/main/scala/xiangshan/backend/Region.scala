@@ -829,8 +829,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wbDataPathToCtrlBlock = new Bundle {
     val writeback: MixedVec[ValidIO[ExuOutput]] = MixedVec(params.genExuOutputValidBundle.flatten)
   }
-  // val fromMemExuOutput = Flipped(Vec(params.issueBlockParams.filter(_.isMemBlockIQ).size, DecoupledIO(new MemExuOutput(params.isVecSchd))))
-  // val fromLduOutput = Option.when(params.isFpSchd)(Flipped(Vec(intSchdParam.issueBlockParams.filter(_.isLdAddrIQ).size, DecoupledIO(new MemExuOutput(params.isVecSchd)))))
   val memWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.genExuOutputDecoupledBundleMemBlock)
   val lduWriteback: Option[MixedVec[MixedVec[DecoupledIO[ExuOutput]]]] = Option.when(params.isFpSchd)(
     Flipped(MixedVec(intSchdParam.issueBlockParams.filter(_.isLdAddrIQ).map(_.genExuOutputDecoupledBundle)))

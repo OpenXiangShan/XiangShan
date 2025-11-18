@@ -432,7 +432,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   require(HyuCnt == 0) // HybridUnit is not supported for now
 
-  // val issueMem: Seq[DecoupledIO[ExuInput]] = (io.ooo_to_mem.intIssue ++ io.ooo_to_mem.vecIssue).flatten
   val intIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.intIssue.flatten
   val vecIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.vecIssue.flatten
   val issueLda = intIssue.filter(_.bits.params.hasLoadFu)
@@ -493,7 +492,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val vlMergeBuffer = Module(new VLMergeBufferImp)
   val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
   val vSegmentUnit  = Module(new VSegmentUnit(vsegParam))
-  val vfofBuffer    = Module(new VfofBuffer(vlduParams.head)) // ?
+  val vfofBuffer    = Module(new VfofBuffer(vlduParams.head))
 
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer(ldaParams.head))

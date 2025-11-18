@@ -586,7 +586,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
-  // val writeback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.memSchdParams.get.genExuOutputDecoupledBundle)
   val intWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] =
     Flipped(intSchdParams.genExuOutputDecoupledBundleMemBlock)
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] =
