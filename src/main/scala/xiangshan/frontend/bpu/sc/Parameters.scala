@@ -29,10 +29,10 @@ case class ScParameters(
       new ScTableInfo(1024, 16)
     ),
     biasTableSize:       Int = 1024,
-    biasUseTageBitWidth: Int = 4, // use tage_taken and tage_low_conf bits as index bits
+    biasUseTageBitWidth: Int = 2, // use tage_taken as index bits
     ctrWidth:            Int = 6,
     weightCtrWidth:      Int = 6,
-    thresholdThresWidth: Int = 10,
+    thresholdThresWidth: Int = 12,
     NumTables:           Int = 2,
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
@@ -55,8 +55,7 @@ trait HasScParameters extends HasBpuParameters {
   def GlobalTableSize:     Int              = GlobalTableInfos.length
   def BiasTableSize:       Int              = scParameters.biasTableSize
   def BiasUseTageBitWidth: Int              = scParameters.biasUseTageBitWidth
-  def BiasTableNumWays: Int =
-    NumWays * BiasUseTageBitWidth // add tage_taken and tage_low_conf bits as wayIdx
-  def WriteBufferSize: Int = scParameters.WriteBufferSize
-  def TagWidth:        Int = scParameters.TagWidth
+  def BiasTableNumWays:    Int              = NumWays * BiasUseTageBitWidth // add tage_taken bits as wayIdx
+  def WriteBufferSize:     Int              = scParameters.WriteBufferSize
+  def TagWidth:            Int              = scParameters.TagWidth
 }

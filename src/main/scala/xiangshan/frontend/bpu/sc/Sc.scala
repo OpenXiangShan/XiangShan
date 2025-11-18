@@ -51,6 +51,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
   private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
+  private val ctrl = WireInit(0.U.asTypeOf(new TableCtrl()))
+  ctrl.pathEnable   := true.B
+  ctrl.globalEnable := true.B
+  ctrl.biasEnable   := true.B
+
   /*
    *  instantiate tables
    */
@@ -67,7 +72,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ScThreshold(p)))
 
   private val resetDone = RegInit(false.B)
-  when(pathTable.map(_.io.req.ready).reduce(_ && _) && globalTable.map(_.io.req.ready).reduce(_ && _)) {
+  when(pathTable.map(_.io.req.ready).reduce(_ && _) &&
+    globalTable.map(_.io.req.ready).reduce(_ && _) &&
+    biasTable.io.req.ready) {
     resetDone := true.B
   }
   io.resetDone := resetDone
@@ -155,16 +162,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s0_biasIdx: UInt = getBiasTableIdx(s0_startPc, BiasTableSize)
 
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
-    table.io.req.valid := s0_fire
+    table.io.req.valid := s0_fire && ctrl.pathEnable
     table.io.req.bits  := idx
   }
 
   globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
-    table.io.req.valid := s0_fire && s0_ghr.valid // if ghr invalid not request global table
+    table.io.req.valid := s0_fire && s0_ghr.valid && ctrl.globalEnable // if ghr invalid not request global table
     table.io.req.bits  := idx
   }
 
-  biasTable.io.req.valid := s0_fire
+  biasTable.io.req.valid := s0_fire && ctrl.biasEnable
   biasTable.io.req.bits  := s0_biasIdx
 
   /*
@@ -172,16 +179,24 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  calculate each ctr's percsum
    */
   private val s1_startPc = RegEnable(io.startPc, s0_fire)
-  private val s1_pathResp: Vec[Vec[ScEntry]] = VecInit(pathTable.map(_.io.resp))
+  private val s1_pathResp: Vec[Vec[ScEntry]] = Mux(
+    ctrl.pathEnable,
+    VecInit(pathTable.map(_.io.resp)),
+    VecInit.fill(PathTableSize)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+  )
   // if s0_ghr invalid, global table resp is also invalid
   private val s1_globalResp: Vec[Vec[ScEntry]] =
     Mux(
-      s1_ghr.valid,
+      s1_ghr.valid && ctrl.globalEnable,
       VecInit(globalTable.map(_.io.resp)),
       VecInit.fill(GlobalTableSize)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
     )
-  private val s1_biasResp: Vec[ScEntry]      = biasTable.io.resp
-  private val s1_allResp:  Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
+  private val s1_biasResp: Vec[ScEntry] = Mux(
+    ctrl.biasEnable,
+    biasTable.io.resp,
+    VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry()))
+  )
+  private val s1_allResp: Vec[Vec[ScEntry]] = VecInit(s1_pathResp ++ s1_globalResp)
 
   private val s1_biasPercsum: Vec[SInt] = VecInit(s1_biasResp.map(entry => getPercsum(entry.ctr.value)))
   private val s1_allPercsum: Vec[Vec[SInt]] = VecInit(s1_allResp.map(entries =>
@@ -217,7 +232,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_providerCtr   = VecInit(io.tageInfo.providerTakenCtr.map(_.bits))
 
   private val s2_biasIdxLowBits = VecInit(s2_condTakenMask.zip(s2_providerValid).zip(s2_providerCtr).map {
-    case ((taken, valid), ctr) => Cat(!valid || ctr.isWeak, taken)
+    case ((taken, valid), ctr) => Cat(valid && ctr.isWeak, taken)
   })
   private val s2_totalPercsum: Vec[SInt] = WireInit(VecInit.fill(NumWays)(0.S(ctrWidth.W)))
   private val s2_hitMask:      Vec[Bool] = WireInit(VecInit.fill(NumWays)(false.B))
@@ -236,21 +251,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val s2_scPred: Vec[Bool] = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds = scThreshold.map(entry => entry.thres.value)
+  private val s2_thresholds = scThreshold.map(entry => entry.thres.value >> 3)
   private val s2_useScPred  = WireInit(VecInit.fill(NumWays)(false.B))
 
-  s2_useScPred.zip(s2_totalPercsum).zip(s2_thresholds).zip(s2_hitMask).zip(s2_providerCtr).map {
-    case ((((u, sum), thres), hit), ctr) =>
-      // val aboveThres   = aboveThreshold(sum, thres)
-      val signedThres  = thres.zext
+  s2_useScPred.zip(s2_totalPercsum).zip(s2_thresholds).zip(s2_hitMask).zip(s2_providerCtr).zip(s2_providerValid).map {
+    case (((((u, sum), thres), hit), ctr), providerValid) =>
       val tageConfHigh = ctr.isSaturatePositive || ctr.isSaturateNegative
+      val tageConfMid  = ctr.isMid
       val tageConfLow  = ctr.isWeak
-      val totalSum     = sum +& Cat(ctr.value ^ (1 << (tageTakenCtrWidth - 1)).U, 1.U(1.W), 0.U(3.W)).asSInt
-      when(hit && tageConfHigh) {
-        val conf = (sum > thres.zext) && pos(sum) || (sum < -thres.zext) && neg(totalSum)
+      when(hit && providerValid && tageConfHigh) {
+        val conf = (sum > (thres >> 1).zext) && pos(sum) || (sum < -(thres >> 1).zext) && neg(sum)
         u := Mux(conf, true.B, false.B)
-      }.elsewhen(hit && tageConfLow) {
-        val conf = (sum > (thres >> 1).zext) && pos(sum) || (sum < -(thres >> 1).zext) && neg(totalSum)
+      }.elsewhen(hit && providerValid && tageConfMid) {
+        val conf = (sum > (thres >> 2).zext) && pos(sum) || (sum < -(thres >> 2).zext) && neg(sum)
+        u := Mux(conf, true.B, false.B)
+      }.elsewhen(hit && providerValid && tageConfLow) {
+        val conf = (sum > (thres >> 3).zext) && pos(sum) || (sum < -(thres >> 3).zext) && neg(sum)
         u := Mux(conf, true.B, false.B)
       }
   }
@@ -269,11 +285,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.tagePred        := RegEnable(s2_condTakenMask, s2_fire)
   io.meta.tagePredValid   := RegEnable(s2_providerValid, s2_fire)
   io.meta.useScPred       := RegEnable(s2_useScPred, s2_fire)
-
-  dontTouch(s2_totalPercsum)
-  dontTouch(s2_hitMask)
-  dontTouch(s2_scPred)
-  dontTouch(s2_useScPred)
 
   /*
    *  train pipeline stage 1
@@ -318,21 +329,19 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       s"should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
   )
 
-  // Accumulate update information for multiple branches using update methods
-  private val t1_mismatchMask = WireInit(VecInit.fill(NumWays)(false.B))
   // calculate new thresholds
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
     val updated = t1_branchesWayIdxVec.zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
       case (prevThres, (branchWayIdx, taken)) =>
-        val shouldUpdate = branchWayIdx === wayIdx.U
-        val mismatch     = taken =/= t1_meta.scPred(wayIdx)
-        t1_mismatchMask(wayIdx) := mismatch && shouldUpdate
-        val nextThres = prevThres.update(mismatch)
+        val shouldUpdate =
+          (branchWayIdx === wayIdx.U) && (t1_meta.scPred(wayIdx) =/= t1_meta.tagePred(wayIdx)) &&
+            (t1_meta.scPred(wayIdx) =/= taken) && t1_meta.tagePredValid(wayIdx)
+        val updateDir = taken =/= t1_meta.scPred(wayIdx)
+        val nextThres = prevThres.update(updateDir)
         Mux(shouldUpdate, nextThres, prevThres)
     }
     WireInit(updated)
   })
-  dontTouch(t1_writeThresVec)
 
   // calculate pathTable and globalTable write wayMask
   private val t1_writeWayMask = WireInit(VecInit.fill(NumWays)(false.B))
@@ -349,7 +358,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   t1_oldPathCtrs.zip(t1_writePathEntryVec).foreach {
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
-      writeEntries := updateEntry(oldEntries, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec)
+      writeEntries := updateEntry(oldEntries, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec, t1_meta)
   }
 
   // calculate new global table entries
@@ -358,7 +367,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   t1_oldGlobalCtrs.zip(t1_writeGlobalEntryVec).foreach {
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
-      writeEntries := updateEntry(oldEntries, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec)
+      writeEntries := updateEntry(oldEntries, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec, t1_meta)
   }
 
   // calculate bias table new entries and wayMask
@@ -375,7 +384,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   // prediction used entries update
   private val t1_writeBiasUsedEntryVec =
-    updateEntry(t1_oldBiasCtrs, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec)
+    updateEntry(t1_oldBiasCtrs, t1_writeValidVec, t1_branchesTakenMask, t1_branchesWayIdxVec, t1_meta)
 
   t1_writeBiasUsedEntryVec.zipWithIndex.foreach { case (entry, wayIdx) =>
     val lowBits    = t1_oldBiasLowBits(wayIdx)
@@ -411,31 +420,41 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   if (EnableCommitGHistDiff) {
     val scCorrectVec = WireInit(VecInit.fill(NumWays)(false.B))
     val scWrongVec   = WireInit(VecInit.fill(NumWays)(false.B))
-    val tageCorrect  = WireInit(VecInit.fill(NumWays)(false.B))
+    val useTageVec   = WireInit(VecInit.fill(NumWays)(false.B))
     // val tagePredValid = t1_meta.tagePredValid
 
-    t1_branchesWayIdxVec.zip(t1_branchesTakenMask).zip(t1_writeValidVec).foreach {
-      case ((wayIdx, taken), writeValid) =>
+    t1_branchesWayIdxVec.zip(t1_branchesTakenMask).zip(t1_writeValidVec).zip(t1_branches).foreach {
+      case (((wayIdx, taken), writeValid), branch) =>
         val scCorrect = taken === t1_meta.scPred(wayIdx) && t1_meta.useScPred(wayIdx)
         val scWrong   = taken =/= t1_meta.scPred(wayIdx) && t1_meta.useScPred(wayIdx)
+        val useTage   = branch.bits.mispredict && branch.bits.attribute.isConditional && !t1_meta.useScPred(wayIdx)
         when(writeValid && scCorrect) {
           scCorrectVec(wayIdx) := true.B
         }
         when(writeValid && scWrong) {
           scWrongVec(wayIdx) := true.B
         }
+        when(writeValid && useTage) {
+          useTageVec(wayIdx) := true.B
+        }
     }
     for (i <- 0 until NumWays) {
       XSPerfAccumulate(s"sc_correct${i}", t1_writeValid && scCorrectVec(i))
       XSPerfAccumulate(s"sc_wrong${i}", t1_writeValid && scWrongVec(i))
+      XSPerfAccumulate(s"use_tage_wrong${i}", t1_writeValid && useTageVec(i))
       XSPerfAccumulate(s"use_sc${i}", t1_writeValid && t1_meta.useScPred(i))
     }
+    dontTouch(scCorrectVec)
+    dontTouch(scWrongVec)
+    dontTouch(useTageVec)
     XSPerfAccumulate(s"sc_train", t1_writeValid)
   }
+  dontTouch(s2_totalPercsum)
+  dontTouch(s2_hitMask)
+  dontTouch(s2_scPred)
+  dontTouch(s2_useScPred)
+  dontTouch(t1_writeThresVec)
 
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_ghr.valid)
   XSPerfAccumulate("sc_global_table_valid", s0_fire && s0_ghr.valid)
-  XSPerfAccumulate("sc_pred_wrong", t1_writeValid && t1_mismatchMask.reduce(_ || _))
-  // TODO: add more performance counters
-
 }
