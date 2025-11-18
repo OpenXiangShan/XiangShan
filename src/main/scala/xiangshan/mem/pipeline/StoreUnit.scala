@@ -135,7 +135,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // val s0_isLastElem   = s0_vecstin.isLastElem
   val s0_secondInv    = s0_vecstin.usSecondInv
   val s0_elemIdx      = s0_vecstin.elemIdx
-  val s0_alignedType  = s0_vecstin.alignedType
+  val s0_alignedType  = Mux(s0_use_flow_vec, s0_vecstin.alignedType, Cat(0.U, s0_uop.fuOpType(1, 0)))
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
