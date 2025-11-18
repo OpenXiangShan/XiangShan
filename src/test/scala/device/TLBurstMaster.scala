@@ -16,11 +16,13 @@
 
 package device
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy._
+import chiseltest._
+import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
-import org.chipsalliance.cde.config._
+import freechips.rocketchip.diplomacy._
 
 class TLBurstMaster
 (

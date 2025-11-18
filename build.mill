@@ -16,7 +16,7 @@
 package build
 
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
-import $ivy.`org.chipsalliance::chisel:7.3.0`
+import $ivy.`org.chipsalliance::chisel:6.7.0`
 import $ivy.`org.chipsalliance::firtool-resolver:2.0.1`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.io.BufferedReader
@@ -38,9 +38,9 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:7.3.0")
+  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:6.7.0")
 
-  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:7.3.0")
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:6.7.0")
 
   def resolveFirtoolDeps = T {
     firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
@@ -146,6 +146,10 @@ object xiangshan extends ChiselModule {
     def forkArgs: T[Seq[String]] = super.forkArgs
 
     def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Seq("-deprecation", "-feature")
+
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+      ivy"edu.berkeley.cs::chiseltest:6.0.0",
+    )
 
     val resourcesPath: String = pwd.toString() + "/src/main/resources"
     val envPath:       String = sys.env("PATH") + ":" + resourcesPath
