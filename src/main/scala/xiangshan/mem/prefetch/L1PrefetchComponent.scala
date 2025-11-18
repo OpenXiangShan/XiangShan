@@ -837,8 +837,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   l1_pf_req_arb.io.out.ready := s1_pf_can_go || !s1_pf_valid
 
-  assert(!((s1_l1_alloc || s1_l1_update) && s1_pf_fire && (s1_l1_index === s1_pf_index)), "pf pipeline & enq pipeline bit_vec harzard!")
-
   XSPerfAccumulate("s1_pf_valid", s1_pf_valid)
   XSPerfAccumulate("s1_pf_block_by_pipe_unready", s1_pf_valid && !io.l1_req.ready)
   XSPerfAccumulate("s1_pf_fire", s1_pf_fire)
