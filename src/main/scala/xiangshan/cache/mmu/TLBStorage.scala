@@ -126,9 +126,9 @@ class TLBFA(
     // Sector tlb may trigger multi-hit, see def "wbhit"
     XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
 
-    resp.valid := GatedValidRegNext(req.valid)
+    resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
-    val reqVpn   = RegEnable(vpn, 0.U, req.fire)
+    val reqVpn   = RegNext(vpn)
     val pbmt     = entries.map(_.pbmt)
     val gpbmt    = entries.map(_.g_pbmt)
     val perm     = entries.map(_.perm)
@@ -325,7 +325,7 @@ class TLBFakeFA(
     val pf = helper.pf
     val level = helper.level
 
-    resp.valid := GatedValidRegNext(req.valid)
+    resp.valid := RegNext(req.valid)
     resp.bits.hit := true.B
     for (d <- 0 until nDups) {
       resp.bits.perm(d).pf := pf
