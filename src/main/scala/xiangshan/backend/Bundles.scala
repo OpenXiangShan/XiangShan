@@ -58,7 +58,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val isRvc = Bool()
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
@@ -70,7 +70,7 @@ object Bundles {
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
-      this.isRvc := source.isRvc
+      this.isRVC := source.isRvc
       this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
@@ -87,7 +87,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val isRvc = Bool()
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
@@ -180,7 +180,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
@@ -254,7 +254,7 @@ object Bundles {
   class IssueQueueInUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -311,7 +311,7 @@ object Bundles {
     // TODO change these bundles to option bundles depend on issueBlockParam
     def numSrc = backendParams.numSrc
     // from frontend
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -378,7 +378,7 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
-    val preDecodeInfo   = new PreDecodeInfo
+    val isRVC           = Bool()
     val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
@@ -856,7 +856,7 @@ object Bundles {
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val preDecode     = if (params.hasPredecode || params.aluNeedPc)  Some(new PreDecodeInfo)             else None
+    val isRVC         = if (params.hasPredecode || params.aluNeedPc)  Some(Bool())                        else None
     val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needPc || params.aluNeedPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
@@ -888,7 +888,7 @@ object Bundles {
 
     def getPcOffset() = {
       val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
-      val rvcOffset = Mux(this.preDecode.get.isRVC, 0.U, 2.U)
+      val rvcOffset = Mux(this.isRVC.get, 0.U, 2.U)
       val thisPcOffset = SignExt(ftqOffset -& rvcOffset, VAddrBits)
       thisPcOffset
     }
@@ -920,7 +920,7 @@ object Bundles {
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)
-      this.preDecode     .foreach(_ := source.common.preDecode.get)
+      this.isRVC         .foreach(_ := source.common.isRVC.get)
       this.nextPcOffset  .foreach(_ := source.common.nextPcOffset.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
@@ -962,9 +962,9 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())         else None
     // uop info
-    val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
+    val isRVC        = if(params.hasPredecode)  Some(Bool())                  else None
     // vldu used only
     val vls = OptionWrapper(params.hasVLoadFu, new Bundle {
       val vpu = new VPUCtrlSignals

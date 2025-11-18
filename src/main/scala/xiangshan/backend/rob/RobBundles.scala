@@ -131,7 +131,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
-    robEntry.isRVC := robEnq.preDecodeInfo.isRVC
+    robEntry.isRVC := robEnq.isRVC
     robEntry.isVset := robEnq.isVset
     robEntry.isHls := robEnq.isHls
     robEntry.rfWen := robEnq.rfWen

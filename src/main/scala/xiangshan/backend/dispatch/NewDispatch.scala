@@ -175,7 +175,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
-    fromRenameUpdate(i).bits.preDecodeInfo.isRVC := fromRename(i).bits.lastIsRVC
+    fromRenameUpdate(i).bits.isRVC := fromRename(i).bits.lastIsRVC
   }
 
   val renameWidth = io.fromRename.size

@@ -42,7 +42,6 @@ import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
@@ -404,7 +403,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.debugInfo := source.bits.perfDebugInfo
     sink.bits.uop.debug_seqNum := source.bits.debug_seqNum
     sink.bits.uop.vpu := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
-    sink.bits.uop.preDecodeInfo := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
+    sink.bits.uop.isRVC := source.bits.isRVC.getOrElse(false.B)
     sink.bits.uop.numLsElem := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
     sink.bits.flowNum.foreach(_ := source.bits.numLsElem.get)
   }

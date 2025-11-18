@@ -1524,7 +1524,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.isMove
-        dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
+        dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.isRVC
         dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }
     }

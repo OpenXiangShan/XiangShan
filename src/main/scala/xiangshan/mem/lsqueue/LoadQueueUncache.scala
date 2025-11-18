@@ -554,7 +554,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := reqNeedCheck(i)
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := reqSelUops(i).preDecodeInfo.isRVC
+    redirect.bits.isRVC       := reqSelUops(i).isRVC
     redirect.bits.robIdx      := reqSelUops(i).robIdx
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset

@@ -196,10 +196,6 @@ class CtrlBlockImp(
     delayed
   }).toSeq
 
-  private val exuPredecode = VecInit(
-    io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
-  )
-
   private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
     val hasCSR = x.bits.params.hasCSR
     val out = Wire(Valid(new Redirect()))
@@ -221,7 +217,6 @@ class CtrlBlockImp(
   private val CSROH = VecInit(io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.params.hasCSR.B))
   private val oldestExuRedirectIsCSR = oldestOneHot === CSROH
   private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
-  private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
@@ -280,7 +275,7 @@ class CtrlBlockImp(
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
-      // memStPcRead.data is not right bucasue memStPcRead don't have isRvc
+      // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
       io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
     }
   } else {
@@ -329,8 +324,6 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
-  redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
-  redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
