@@ -53,6 +53,7 @@ class MainBtbAlignBank(
         // similar to Read.Req.startVAddr, calculated in MainBtb top
         val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
         val branchInfo: BranchInfo = new BranchInfo
+        val wayMask:    UInt       = UInt(NumWay.W)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -175,7 +176,7 @@ class MainBtbAlignBank(
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
-  private val t1_wayMask          = replacer.io.victim.wayMask
+  private val t1_wayMask = Mux(t1_branchInfo.attribute.isOtherIndirect, w.req.bits.wayMask, replacer.io.victim.wayMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
