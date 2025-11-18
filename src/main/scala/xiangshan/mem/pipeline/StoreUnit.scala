@@ -543,9 +543,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
 
   // mmio and exception TODO:
-    io.toLsqRe := DontCare // I don't Care rest signal
-    connectSamePort(io.toLsqRe, s2_out)
-    connectSamePort(io.toLsqRe, s2_out.uop)
+  io.toLsqRe := DontCare // I don't Care rest signal
+  connectSamePort(io.toLsqRe, s2_out)
+  connectSamePort(io.toLsqRe, s2_out.uop)
+  io.toLsqRe.isLastRequest := true.B // will be use in unalign
   io.toLsqRe.af := s2_out.af && s2_valid && !s2_kill
   io.toLsqRe.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
 
