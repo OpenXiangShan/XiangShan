@@ -714,15 +714,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
       else if(i == 1) { // override port 1 to write second request of cross16B
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
-          !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated ||
-          (headCross16B && toSbufferValid(0)) && !unalignStall(i) && ctrlEntry.committed
+          !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated && ctrlEntry.committed &&
+          toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0)) && !unalignStall(i)
 
         unalignStall(i) := ctrlEntry.cross16Byte && !headCross16B
       }
       else {
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          !unalignStall(i) && ctrlEntry.committed
+          !unalignStall(i) && ctrlEntry.committed && toSbufferValid(i - 1)
 
         unalignStall(i) := ctrlEntry.cross16Byte || headCross16B
       }
@@ -1339,18 +1339,29 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   /*
   * If store have interrupt, do not to commit !!!!!!!!!
   * At present don't have this situation.
+  * if is MMIO/NC/CBO, don't committed.
   * */
+  val commitVec = WireDefault(VecInit(Seq.fill(CommitWidth)(false.B))) // default is false.B
+
   for (i <- 0 until CommitWidth) {
     val ptr = cmtPtrExt(i).value
     val ctrlEntry = ctrlEntries(ptr)
     val dataEntry = dataEntries(ptr)
     when(isNotAfter(dataEntries(ptr).uop.robIdx, GatedRegNext(io.fromRob.pendingPtr)) && ctrlEntries(ptr).allocated &&
       !needCancel(ptr) && !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 && ctrlEntries(ptr).allValid) {
-
-      ctrlEntries(ptr).committed := true.B
-    }
+      if(i == 0) {
+        commitVec(i)               := true.B
+      }
+      else {
+        commitVec(i)               := commitVec(i - 1)
+      }
+    } // commitVec default is false.B
+    ctrlEntries(ptr).committed   := commitVec(i)
     XSError(!ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed, "commit not allocated entry!\n")
   }
+
+  val commitCount = PopCount(commitVec)
+  cmtPtrExt       := cmtPtrExt.map(_ + commitCount)
 
   for (i <- 0 until EnsbufferWidth) {
     val ptr = deqPtrExt(i).value
@@ -1385,6 +1396,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     dontTouch(enqPtrExt)
     dontTouch(deqPtrExt)
     dontTouch(dataEntries)
+    dontTouch(commitVec)
+    dontTouch(ctrlEntries)
   }
 
   /************************************************* Difftest *********************************************************/
