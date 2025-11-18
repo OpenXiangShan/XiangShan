@@ -464,7 +464,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       )
 
       outData(i)         := ParallelLookUp(selectOffset, selectData)
-      outMask(i)         := UIntToMask(dataEntries(i).byteEnd - dataEntries(i).byteStart, VLEN/8)
+      outMask(i)         := UIntToMask(dataEntries(i).byteEnd - dataEntries(i).byteStart + 1.U, VLEN/8)
     }
 
     /*================================================================================================================*/
@@ -1074,7 +1074,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       port.bits.isUnsalign && !port.bits.unalignWith16Byte && staValidSetVec(j)
     }.reduce(_ || _)
     val cboSetVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      LSUOpType.isCbo(port.bits.uop.fuOpType) && staValidSetVec(j)
+      LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
     }
     val isCboSet = cboSetVec.reduce(_ || _)
 
@@ -1324,8 +1324,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val stWbIdx       = storeDataIn.bits.sqIdx.value
     when(storeDataIn.fire){
       // if it's a cbo.zero, write zero.
-      dataEntries(stWbIdx).data  := Mux(isCboZero(storeDataIn.bits.fuOpType(1, 0)), 0.U, storeDataIn.bits.data)
-      dataEntries(stWbIdx).wline := isCboZero(storeDataIn.bits.fuOpType(1, 0))
+      dataEntries(stWbIdx).data  := Mux(storeDataIn.bits.fuOpType === LSUOpType.cbo_zero, 0.U, storeDataIn.bits.data)
+      dataEntries(stWbIdx).wline := storeDataIn.bits.fuOpType === LSUOpType.cbo_zero
 
       // debug signal
       dataEntries(stWbIdx).debugVecUnalignedStart.get  := io.storeDataIn(i).bits.vecDebug.get.start
