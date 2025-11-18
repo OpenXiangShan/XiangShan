@@ -776,7 +776,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       Cat(writeSbufferWire.head.fire, 0.U),
       Cat(writeSbufferWire.map(_.fire)))
     // nc/mmio/cbo deq
-    private val otherMove        = uncacheState === UncacheState.waitResp && io.toUncacheBuffer.req.fire && isNC ||
+    private val otherMove        = uncacheState === UncacheState.sendReq && io.toUncacheBuffer.req.fire && isNC ||
       io.writeBack.fire
     private val rdataMoveCnt = Cat(pipelineConnectFireNum, otherMove)
 
@@ -1112,8 +1112,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     val staReValid = (0 until staReValidVec.length).map { j =>
-      RegEnable(staReValidVec(j), io.fromStoreUnit.storeAddrIn(j).fire) &&
-        io.fromStoreUnit.storeAddrInRe(j).isLastRequest
+      RegNext(staReValidVec(j)) && io.fromStoreUnit.storeAddrInRe(j).isLastRequest
     }.reduce(_ || _)
 
     val prefetchSet     = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
