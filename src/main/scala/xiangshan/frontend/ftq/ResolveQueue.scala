@@ -27,10 +27,13 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
 
   class ResolveQueueIO extends Bundle {
-    val backendResolve:     Vec[Valid[Resolve]]       = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
-    val backendRedirect:    Bool                      = Input(Bool())
-    val backendRedirectPtr: FtqPtr                    = Input(new FtqPtr)
-    val bpuTrain:           DecoupledIO[ResolveEntry] = Decoupled(new ResolveEntry)
+    val backendResolve: Vec[Valid[Resolve]]       = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
+    val bpuTrain:       DecoupledIO[ResolveEntry] = Decoupled(new ResolveEntry)
+
+    val backendRedirect:    Bool   = Input(Bool())
+    val backendRedirectPtr: FtqPtr = Input(new FtqPtr)
+    val bpuEnqueue:         Bool   = Input(Bool())
+    val bpuEnqueuePtr:      FtqPtr = Input(new FtqPtr)
   }
 
   val io: ResolveQueueIO = IO(new ResolveQueueIO)
@@ -110,6 +113,12 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   when(backendRedirect.reduce(_ || _)) {
     mem.foreach(entry =>
       when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > backendRedirectPtr)
+    )
+  }
+
+  when(io.bpuEnqueue) {
+    mem.foreach(entry =>
+      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx === io.bpuEnqueuePtr)
     )
   }
 

@@ -175,6 +175,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     metaQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
   }
 
+  resolveQueue.io.bpuEnqueue    := bpuEnqueue
+  resolveQueue.io.bpuEnqueuePtr := predictionPtr
+
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
   // --------------------------------------------------------------------------------
