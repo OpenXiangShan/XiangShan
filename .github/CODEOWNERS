@@ -17,7 +17,7 @@ src/main/scala/xiangshan/frontend/NewFtq.scala @Gao-Zeyu
 src/main/scala/xiangshan/frontend/PreDecode.scala @ngc7331
 
 src/main/scala/xiangshan/cache/ @linjuanZ
-src/main/scala/xiangshan/cache/dcache/ @linjuanZ
+src/main/scala/xiangshan/cache/dcache/ @Maxpicca-Li @linjuanZ
 src/main/scala/xiangshan/cache/mmu/ @good-circle @cebarobot @linjuanZ
 src/main/scala/xiangshan/cache/wpu/ @Maxpicca-Li @linjuanZ
 
