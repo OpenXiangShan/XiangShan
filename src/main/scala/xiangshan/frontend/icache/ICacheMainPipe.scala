@@ -123,7 +123,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   fromWayLookup.ready := s0_fire
-  private val s0_waymasks          = VecInit(fromWayLookup.bits.waymask.map(_.asTypeOf(Vec(nWays, Bool()))))
+  private val s0_waymasks          = fromWayLookup.bits.waymask
   private val s0_pTag              = fromWayLookup.bits.pTag
   private val s0_gpAddr            = fromWayLookup.bits.gpAddr
   private val s0_isForVSnonLeafPTE = fromWayLookup.bits.isForVSnonLeafPTE
@@ -336,7 +336,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMetaFlush(i).bits.vSetIdx := s1_vSetIdx(i)
     // if is meta corrupt, clear all way (since waymask may be unreliable)
     // if is data corrupt, only clear the way that has error
-    toMetaFlush(i).bits.waymask := Mux(s1_metaCorrupt(i), Fill(nWays, true.B), s1_waymasks(i).asUInt)
+    toMetaFlush(i).bits.waymask := Mux(s1_metaCorrupt(i), Fill(nWays, true.B), s1_waymasks(i))
   }
   // PERF: count the number of data parity errors
   XSPerfAccumulate("data_corrupt_0", s1_dataCorrupt(0) && RegNext(s0_fire))

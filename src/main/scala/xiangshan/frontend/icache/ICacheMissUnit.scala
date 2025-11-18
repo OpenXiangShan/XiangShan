@@ -244,7 +244,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     data = respDataReg.asUInt,
     vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
-    bankIdx = mshrResp.vSetIdx(0),
     poison = false.B
   )
 

@@ -60,6 +60,12 @@ class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
   val code: UInt           = UInt(MetaEccBits.W)
 }
 
+class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
+  val data:    UInt = UInt(ICacheDataBits.W)
+  val code:    UInt = UInt(DataEccBits.W)
+  val padding: UInt = UInt(DataPaddingBits.W)
+}
+
 class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val waymask:     UInt = UInt(nWays.W)
   val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
@@ -92,19 +98,19 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
 
 // ICacheMissUnit <-> ICacheDataArray
 class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val data:    UInt = UInt(blockBits.W)
-    val vSetIdx: UInt = UInt(idxBits.W)
-    val waymask: UInt = UInt(nWays.W)
-    val bankIdx: Bool = Bool()
-    val poison:  Bool = Bool()
+  class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle with ICacheEccHelper {
+    val entries: Vec[ICacheDataEntry] = Vec(DataBanks, new ICacheDataEntry)
+    val vSetIdx: UInt                 = UInt(idxBits.W)
+    val waymask: UInt                 = UInt(nWays.W)
 
-    def generate(data: UInt, vSetIdx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.data    := data
+    def generate(data: UInt, vSetIdx: UInt, waymask: UInt, poison: Bool): Unit = {
+      (this.entries zip data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))).foreach { case (e, d) =>
+        e.data    := d
+        e.code    := encodeDataEccByBank(d, poison)
+        e.padding := 0.U // for better SRAM area
+      }
       this.vSetIdx := vSetIdx
       this.waymask := waymask
-      this.bankIdx := bankIdx
-      this.poison  := poison
     }
   }
   val req: DecoupledIO[DataWriteReqBundle] = DecoupledIO(new DataWriteReqBundle)
@@ -139,9 +145,9 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
 // ICacheMainPipe -> ICacheDataArray
 class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
   class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle {
-    val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
-    val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
-    val blkEndOffset: UInt           = UInt(log2Ceil(blockBytes).W)
+    val waymask:      Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+    val blkOffset:    UInt      = UInt(log2Ceil(blockBytes).W)
+    val blkEndOffset: UInt      = UInt(log2Ceil(blockBytes).W)
   }
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))

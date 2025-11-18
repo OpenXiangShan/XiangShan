@@ -181,7 +181,6 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       data = 0.U, // inject poisoned data, don't care actual data
       vSetIdx = iVSetIdx,
       waymask = iWaymask,
-      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 

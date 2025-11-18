@@ -141,8 +141,7 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def DataEccSegments: Int    = math.ceil(ICacheDataBits / DataEccUnit).toInt
   def DataEccBitsPerSegment: Int = DataCode.width(DataEccUnit) - DataEccUnit // ecc bits per segment
   def DataEccBits:           Int = DataEccSegments * DataEccBitsPerSegment
-  def DataEntryBits:         Int = ICacheDataBits + DataEccBits
-  def DataSramWidth:         Int = DataEntryBits + DataPaddingBits
+  def DataSramWidth:         Int = ICacheDataBits + DataEccBits + DataPaddingBits
 
   // submodule enable
   def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit

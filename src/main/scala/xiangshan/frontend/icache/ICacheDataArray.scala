@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -28,100 +28,46 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
 
   val io: ICacheDataArrayIO = IO(new ICacheDataArrayIO)
 
-  class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
-    val data: UInt = UInt(ICacheDataBits.W)
-    val code: UInt = UInt(DataEccBits.W)
-  }
+  // sanity check
+  require(DataSramWidth == (new ICacheDataEntry).getWidth)
 
-  private object ICacheDataEntry {
-    def apply(data: UInt, poison: Bool)(implicit p: Parameters): ICacheDataEntry = {
-      val entry = Wire(new ICacheDataEntry)
-      entry.data := data
-      entry.code := encodeDataEccByBank(data, poison)
-      entry
-    }
-  }
+  private val banks   = Seq.tabulate(DataBanks)(i => Module(new ICacheDataBank))
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIcacheData", hasMbist) // FIXME: maybe not correct
 
-  /**
-   ******************************************************************************
-   * data array
-   ******************************************************************************
-   */
-  private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
-  private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.req.bits.poison).asUInt)
-
-  private val bankSel =
+  /* *** read *** */
+  private val r0_valid  = io.read.req.valid
+  private val r0_setIdx = io.read.req.bits.vSetIdx
+  private val r0_bankSel =
     getBankSel(io.read.req.bits.blkOffset, io.read.req.bits.blkEndOffset, io.read.req.bits.isDoubleLine)
-  private val lineSel  = getLineSel(io.read.req.bits.blkOffset)
-  private val waymasks = io.read.req.bits.waymask
-  private val masks    = Wire(Vec(nWays, Vec(DataBanks, Bool())))
-  (0 until nWays).foreach { way =>
-    (0 until DataBanks).foreach { bank =>
-      masks(way)(bank) := Mux(
-        lineSel(bank),
-        waymasks(1)(way) && bankSel(1)(bank),
-        waymasks(0)(way) && bankSel(0)(bank)
-      )
-    }
+  private val r0_lineSel = getLineSel(io.read.req.bits.blkOffset)
+  private val r0_waymask = io.read.req.bits.waymask
+
+  io.read.req.ready := banks.map(_.io.read.req.ready).reduce(_ || _)
+  banks.zipWithIndex.foreach { case (b, i) =>
+    b.io.read.req.valid        := r0_valid && r0_bankSel(r0_lineSel(i))(i)
+    b.io.read.req.bits.setIdx  := r0_setIdx(r0_lineSel(i))
+    b.io.read.req.bits.waymask := r0_waymask(r0_lineSel(i))
   }
 
-  private val dataArrays = (0 until nWays).map { way =>
-    val banks = (0 until DataBanks).map { bank =>
-      val sramBank = Module(new SRAMTemplateWithFixedWidth(
-        UInt(DataEntryBits.W),
-        set = nSets,
-        width = DataSramWidth, // DataEntryBits + DataPaddingBits
-        shouldReset = true,
-        singlePort = true,
-        withClockGate = false, // enable signal timing is bad, no gating here
-        hasMbist = hasMbist,
-        hasSramCtl = hasSramCtl
-      ))
+  io.read.resp.datas := banks.map(_.io.read.resp.entry.data)
+  io.read.resp.codes := banks.map(_.io.read.resp.entry.code)
 
-      // read
-      sramBank.io.r.req.valid := io.read.req.valid && masks(way)(bank)
-      sramBank.io.r.req.bits.apply(setIdx =
-        Mux(lineSel(bank), io.read.req.bits.vSetIdx(1), io.read.req.bits.vSetIdx(0))
-      )
-      // write
-      sramBank.io.w.req.valid := io.write.req.valid && io.write.req.bits.waymask(way).asBool
-      sramBank.io.w.req.bits.apply(
-        data = writeEntries(bank),
-        setIdx = io.write.req.bits.vSetIdx,
-        // waymask is invalid when way of SRAMTemplate <= 1
-        waymask = 0.U
-      )
-      sramBank
-    }
-    MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeIcacheDataWay${way}", hasMbist)
-    banks
-  }
-
-  /**
-   ******************************************************************************
-   * read logic
-   ******************************************************************************
-   */
-  private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read.req.valid)
-  private val readDataWithCode = (0 until DataBanks).map { bank =>
-    Mux1H(VecInit(masksReg.map(_(bank))).asTypeOf(UInt(nWays.W)), dataArrays.map(_(bank).io.r.resp.asUInt))
-  }
-  private val readEntries = readDataWithCode.map(_.asTypeOf(new ICacheDataEntry()))
-  private val readDatas   = VecInit(readEntries.map(_.data))
-  private val readCodes   = VecInit(readEntries.map(_.code))
-
-  // TEST: force ECC to fail by setting readCodes to 0
+  // TEST: force ECC to fail by setting parity codes to 0
   if (ForceDataEccFail) {
-    readCodes.foreach(_ := 0.U)
+    io.read.resp.codes.foreach(_ := 0.U)
   }
 
-  /**
-   ******************************************************************************
-   * IO
-   ******************************************************************************
-   */
-  io.read.resp.datas := readDatas
-  io.read.resp.codes := readCodes
-  io.write.req.ready := true.B
-  io.read.req.ready  := !io.write.req.valid
+  /* *** write *** */
+  private val w0_valid   = io.write.req.valid
+  private val w0_setIdx  = io.write.req.bits.vSetIdx
+  private val w0_waymask = io.write.req.bits.waymask
+  private val w0_entries = io.write.req.bits.entries
+
+  io.write.req.ready := banks.map(_.io.write.req.ready).reduce(_ && _)
+  banks.zipWithIndex.foreach { case (b, i) =>
+    b.io.write.req.valid        := w0_valid
+    b.io.write.req.bits.setIdx  := w0_setIdx
+    b.io.write.req.bits.waymask := w0_waymask
+    b.io.write.req.bits.entry   := w0_entries(i)
+  }
 }

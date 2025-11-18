@@ -28,8 +28,9 @@ trait ICacheEccHelper extends HasICacheParameters {
   }
 
   // per-port
-  def checkMetaEccByPort(meta: ICacheMetadata, code: UInt, waymask: Vec[Bool], enable: Bool): Bool = {
+  def checkMetaEccByPort(meta: ICacheMetadata, code: UInt, waymask: UInt, enable: Bool): Bool = {
     require(code.getWidth == MetaEccBits)
+    require(waymask.getWidth == nWays)
     val hitNum = PopCount(waymask)
     // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
     // hit one way, but parity code does not match => ECC failure
@@ -43,14 +44,13 @@ trait ICacheEccHelper extends HasICacheParameters {
   def checkMetaEcc(
       metaVec:    Vec[ICacheMetadata],
       codeVec:    Vec[UInt],
-      waymaskVec: Vec[Vec[Bool]],
+      waymaskVec: Vec[UInt],
       enable:     Bool,
       doubleline: Bool
   ): Vec[Bool] = {
     require(metaVec.length == PortNumber)
     require(codeVec.length == PortNumber)
     require(waymaskVec.length == PortNumber)
-    require(waymaskVec.head.length == nWays)
     VecInit((metaVec zip codeVec zip waymaskVec).zipWithIndex.map { case (((meta, code), mask), i) =>
       val needThisLine = if (i == 0) true.B else doubleline
       checkMetaEccByPort(meta, code, mask, enable) && needThisLine
