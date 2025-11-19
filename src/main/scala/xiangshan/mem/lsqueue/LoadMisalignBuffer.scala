@@ -279,7 +279,7 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
     }
   }
 
-  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isvec, req.alignedType(1,0), LSUOpType.size(req.uop.fuOpType))
   val highAddress = LookupTree(alignedType, List(
     LB -> 0.U,
     LH -> 1.U,
@@ -506,8 +506,10 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
   // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
   val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)
   val reqIsHlvx = LSUOpType.isHlvx(req.uop.fuOpType)
-  io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitLoadReq.bits.alignedType  := Mux(req.isvec, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+
+  val scalaLdOpType = LSUOpType.makeLsUop(isHlv = reqIsHlv, isHlvx = reqIsHlvx, size = LSUOpType.size(splitLoadReqs(curPtr).uop.fuOpType))
+  io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, scalaLdOpType)
+  io.splitLoadReq.bits.alignedType  := Mux(req.isvec, LSUOpType.size(splitLoadReqs(curPtr).uop.fuOpType), req.alignedType)
 
   when (io.splitLoadResp.valid && bufferState === s_resp && req.uop.robIdx === io.splitLoadResp.bits.uop.robIdx) {
     val resp = io.splitLoadResp.bits

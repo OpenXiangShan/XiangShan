@@ -114,7 +114,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     false.B,
     s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
   )
-  val s0_size         = Mux(s0_use_non_prf_flow, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
+  val s0_size         = Mux(s0_use_non_prf_flow, LSUOpType.size(s0_uop.fuOpType), 0.U)// Todo: may broken if use it in feature
   val s0_mem_idx      = Mux(s0_use_non_prf_flow, s0_uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_non_prf_flow, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
   val s0_pc           = Mux(s0_use_non_prf_flow, s0_uop.pc, 0.U)
@@ -160,7 +160,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val cbo_assert_flag = LSUOpType.isCboAll(s0_out.uop.fuOpType)
   XSError(!s0_use_flow_rs && cbo_assert_flag && s0_valid, "cbo instruction selection error.")
 
-  val s0_alignType = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
+  val s0_alignType = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), LSUOpType.size(s0_uop.fuOpType))
   // exception check
   val s0_addr_aligned = LookupTree(s0_alignType, List(
     "b00".U   -> true.B,              //b
@@ -199,7 +199,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     io.misalign_stin.bits.mask,
     Mux(
       s0_use_flow_rs,
-      Mux(s0_isCbo, Fill(VLEN/8, 1.U(1.W)), genVWmask128(s0_saddr, s0_uop.fuOpType(2,0))),
+      Mux(s0_isCbo, Fill(VLEN/8, 1.U(1.W)), genVWmask128(s0_saddr, LSUOpType.size(s0_uop.fuOpType))),
       Mux(
         s0_use_flow_vec,
         s0_vecstin.mask,

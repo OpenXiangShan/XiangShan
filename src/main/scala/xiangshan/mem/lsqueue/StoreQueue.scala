@@ -625,7 +625,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         0.U,
         Mux(isVec,
           io.storeDataIn(i).bits.data,
-          genVWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.fuOpType(2,0)))
+          genVWdata(io.storeDataIn(i).bits.data, LSUOpType.size(io.storeDataIn(i).bits.fuOpType)))
       )
       dataModule.io.data.wen(i) := true.B
 
@@ -849,7 +849,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val mmioState = RegInit(s_idle)
   val uncacheUop = Reg(new DynInst)
   val cboFlushedSb = RegInit(false.B)
-  val cmoOpCode = uncacheUop.fuOpType(1, 0)
+  val cmoOpCode = LSUOpType.getCmoOpcode(uncacheUop.fuOpType)
   val mmioDoReq = io.uncache.req.fire && !io.uncache.req.bits.nc
   val cboMmioPAddr = Reg(UInt(PAddrBits.W))
   switch(mmioState) {

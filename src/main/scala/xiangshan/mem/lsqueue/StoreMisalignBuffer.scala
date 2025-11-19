@@ -341,7 +341,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isvec, req.alignedType(1,0), LSUOpType.size(req.uop.fuOpType))
 
   val highAddress = LookupTree(alignedType, List(
     SB -> 0.U,
@@ -550,8 +550,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   // Restore the information of H extension store
   // bit encoding: | hsv 1 | store 00 | size(2bit) |
   val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
-  io.splitStoreReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitStoreReq.bits.alignedType  := Mux(req.isvec, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  val scalaStOpType = LSUOpType.makeLsUop(isHlv = reqIsHsv, isHlvx = false.B, size = LSUOpType.size(splitStoreReqs(curPtr).uop.fuOpType))
+  io.splitStoreReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, scalaStOpType)
+  io.splitStoreReq.bits.alignedType  := Mux(req.isvec, LSUOpType.size(splitStoreReqs(curPtr).uop.fuOpType), req.alignedType)
   io.splitStoreReq.bits.isFinalSplit := curPtr(0)
 
   when (io.splitStoreResp.valid && bufferState === s_resp && req.uop.robIdx === io.splitStoreResp.bits.uop.robIdx) {
