@@ -405,12 +405,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val sqDeqCnt        = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
       val rdataPtrExt     = Input(Vec(EnsbufferWidth, new SqPtr))
       val deqPtrExt       = Input(Vec(EnsbufferWidth, new SqPtr))
-      val pipelineConnectFire = Output(Vec(EnsbufferWidth, Bool()))
       val validCnt        = Input(UInt(log2Ceil(StoreQueueSize + 1).W))
       val fromUnalignQueue = Flipped(ValidIO(new Bundle {
         val paddr         = UInt(PAddrBits.W)
         val sqIdx         = new SqPtr
       }))
+      // for debug
+      val pmaStore        = Vec(EnsbufferWidth, ValidIO(new DCacheWordReqWithVaddrAndPfFlag()))
+      // for perf
       val perfMmioBusy    = Output(Bool())
     })
 
@@ -656,21 +658,28 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     for (i <- 0 until EnsbufferWidth) {
       unalignMask(i)         := VecInit(Seq.fill(VLEN/8)(false.B)).asUInt >> dataEntries(i).vaddr(3, 0)
+      if(i == 0) {
+        writeSbufferData(i)  := outData(i)
+        writeSbufferMask(i)  := outMask(i) & unalignMask(i)
+        writeSbufferPaddr(i) := paddrLow
+        writeSbufferVaddr(i) := vaddrLow
+      }
       if(i == 1) {
         writeSbufferData(i)  := Mux(headCross16B, outData(0), outData(i))
         writeSbufferMask(i)  := Mux(headCross16B, outMask(0) & (~unalignMask(0)).asUInt, outMask(i))
         writeSbufferPaddr(i) := Mux(headCrossPage,
           io.fromUnalignQueue.bits.paddr,
-          Mux(headCross16B, paddrHigh, dataEntries(i).paddr))
+          Mux(headCross16B, paddrHigh, Cat(dataEntries(i).paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W))))
         // if unalign cross Page, it is must cross 16Byte
-        writeSbufferVaddr(i) := Mux(headCross16B, vaddrHigh, dataEntries(i).vaddr)
+        writeSbufferVaddr(i) := Mux(headCross16B,
+          vaddrHigh,
+          Cat(dataEntries(i).vaddr(headDataEntry.vaddr.getWidth - 1, 4), 0.U(4.W)))
       }
       else {
         writeSbufferData(i)  := outData(i)
-        writeSbufferMask(i)  := outMask(i) & unalignMask(i)
-        writeSbufferPaddr(i) := paddrLow
-        writeSbufferVaddr(i) := vaddrLow
-
+        writeSbufferMask(i)  := outMask(i)
+        writeSbufferPaddr(i) := Cat(dataEntries(i).paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
+        writeSbufferVaddr(i) := Cat(dataEntries(i).vaddr(headDataEntry.vaddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
       }
     }
 
@@ -784,8 +793,19 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     /*============================================ other connection ==================================================*/
     io.perfMmioBusy := uncacheState =/= UncacheState.idle
-    io.pipelineConnectFire.zip(writeSbufferWire).map{case (sink, sourcePort) =>
-      sink := sourcePort.fire
+
+    io.pmaStore := DontCare // TODO: fix in the future
+    for(i <- 0 until EnsbufferWidth){
+      io.pmaStore(i).valid          := writeSbufferWire(i).valid
+      io.pmaStore(i).bits.cmd       := MemoryOpConstants.M_XWR
+      io.pmaStore(i).bits.addr      := writeSbufferWire(i).bits.addr
+      io.pmaStore(i).bits.vaddr     := writeSbufferWire(i).bits.vaddr
+      io.pmaStore(i).bits.data      := writeSbufferWire(i).bits.data
+      io.pmaStore(i).bits.mask      := writeSbufferWire(i).bits.mask
+      io.pmaStore(i).bits.wline     := writeSbufferWire(i).bits.wline
+      io.pmaStore(i).bits.prefetch  := writeSbufferWire(i).bits.prefetch
+      io.pmaStore(i).bits.vecValid  := writeSbufferWire(i).bits.vecValid
+      io.pmaStore(i).bits.sqNeedDeq := true.B
     }
 
     /*=============================================== debug dontTouch =================================================*/
@@ -956,7 +976,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val deqPtrExtNext = deqModule.io.deqPtrExtNext
   val sqDeqCnt      = deqModule.io.sqDeqCnt
   val mmioBusy      = deqModule.io.perfMmioBusy
-  val pipelineConnectFire = deqModule.io.pipelineConnectFire
+  val diffPmaStore  = deqModule.io.pmaStore
   val rdataMoveCnt  = deqModule.io.rdataPtrMoveCnt
 
   // unalignQueue connection
@@ -1436,16 +1456,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       io.diffStore.diffInfo(i).uop            := dataEntries(ptr).debugUop.get
       io.diffStore.diffInfo(i).start          := dataEntries(ptr).debugVecUnalignedStart.get
       io.diffStore.diffInfo(i).offset         := dataEntries(ptr).debugVecUnalignedOffset.get
-      io.diffStore.pmaStore(i).valid          := pipelineConnectFire(i)
-      io.diffStore.pmaStore(i).bits.cmd       := MemoryOpConstants.M_XWR
-      io.diffStore.pmaStore(i).bits.addr      := dataEntries(ptr).paddr
-      io.diffStore.pmaStore(i).bits.vaddr     := dataEntries(ptr).vaddr
-      io.diffStore.pmaStore(i).bits.data      := outData(i)
-      io.diffStore.pmaStore(i).bits.mask      := outMask(i)
-      io.diffStore.pmaStore(i).bits.wline     := dataEntries(ptr).wline
-      io.diffStore.pmaStore(i).bits.prefetch  := ctrlEntries(ptr).prefetch
-      io.diffStore.pmaStore(i).bits.vecValid  := !ctrlEntries(ptr).vecInactive || !ctrlEntries(ptr).isVec
-      io.diffStore.pmaStore(i).bits.sqNeedDeq := true.B
+      io.diffStore.pmaStore(i).valid          := diffPmaStore(i).valid
+      io.diffStore.pmaStore(i).bits           := diffPmaStore(i).bits
     }
     io.diffStore.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
     io.diffStore.ncStore.bits := io.toUncacheBuffer.req.bits
