@@ -17,7 +17,7 @@ BUILD_DIR = $(abspath ./build)
 RTL_DIR = $(BUILD_DIR)/rtl
 
 MILL_ARGS = $(SIM_ARGS)
-MILL_ARGS += --target-dir $(RTL_DIR) --full-stacktrace
+MILL_ARGS += --target-dir $(RTL_DIR) --full-stacktrace --dump-fir
 
 NUM_CORES ?= 1
 ifeq ($(NUM_CORES),2)
