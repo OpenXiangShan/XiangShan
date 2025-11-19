@@ -481,8 +481,17 @@ class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
   val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
 }
 
+class DifftestPmaStoreIO(implicit p: Parameters) extends XSBundle {
+  val data           = UInt(VLEN.W)
+  val mask           = UInt((VLEN/8).W)
+  val addr           = UInt(PAddrBits.W)
+  val wline          = Bool()
+  val vecValid       = Bool()
+  val diffIsHighPart = Bool() // indicate whether valid data in high 64-bit, only for scalar store event!
+}
+
 class DiffStoreIO(implicit p: Parameters) extends XSBundle{
   val diffInfo = Vec(EnsbufferWidth, Flipped(new ToSbufferDifftestInfoBundle()))
-  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DCacheWordReqWithVaddrAndPfFlag())))
+  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DifftestPmaStoreIO)))
   val ncStore = Flipped(Valid(new UncacheWordReq()))
 }
