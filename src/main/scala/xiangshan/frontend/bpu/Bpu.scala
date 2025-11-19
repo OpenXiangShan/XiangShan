@@ -306,9 +306,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Mux(abtb.io.prediction.taken, abtb.io.prediction.cfiPosition, 0.U)
   )
 
-  s1_utageMeta                 := utage.io.meta.bits
-  s1_utageMeta.baseTaken       := baseBrTaken
-  s1_utageMeta.baseCfiPosition := baseBrCfiPosition
+  s1_utageMeta                  := utage.io.meta.bits
+  s1_utageMeta.testUseMicroTage := abtb.io.useMicroTage
+  s1_utageMeta.baseTaken        := baseBrTaken
+  s1_utageMeta.baseCfiPosition  := baseBrCfiPosition
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
@@ -543,6 +544,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_microTage", io.toFtq.prediction.fire && abtb.io.useMicroTage)
+  XSPerfAccumulate("fromFtq_redirect", io.fromFtq.redirect.valid)
   XSPerfAccumulate(
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
