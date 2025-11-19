@@ -213,7 +213,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
   storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
 //  storeQueue.io.maControl    <> io.maControl
-  io.diffStore                                := storeQueue.io.diffStore
+  storeQueue.io.diffStore.foreach(io.diffStore := _)
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
