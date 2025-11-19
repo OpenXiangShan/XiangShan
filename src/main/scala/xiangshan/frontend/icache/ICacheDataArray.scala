@@ -16,11 +16,9 @@
 package xiangshan.frontend.icache
 
 import chisel3._
-import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.mbist.MbistPipeline
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEccHelper with ICacheDataHelper {
+class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDataHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
     val write: DataWriteBundle = Flipped(new DataWriteBundle)
     val read:  DataReadBundle  = Flipped(new DataReadBundle)
@@ -31,8 +29,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   // sanity check
   require(DataSramWidth == (new ICacheDataEntry).getWidth)
 
-  private val banks   = Seq.tabulate(DataBanks)(i => Module(new ICacheDataBank))
-  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIcacheData", hasMbist) // FIXME: maybe not correct
+  private val banks = Seq.tabulate(DataBanks)(i => Module(new ICacheDataBank(i)))
 
   /* *** read *** */
   private val r0_valid  = io.read.req.valid

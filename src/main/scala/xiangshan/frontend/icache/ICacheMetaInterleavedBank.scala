@@ -18,11 +18,10 @@ package xiangshan.frontend.icache
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
 
-class ICacheMetaInterleavedBank(implicit p: Parameters) extends ICacheModule
-    with ICacheEccHelper
-    with ICacheAddrHelper {
+class ICacheMetaInterleavedBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheMetaInterleavedBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
@@ -70,8 +69,10 @@ class ICacheMetaInterleavedBank(implicit p: Parameters) extends ICacheModule
     singlePort = true,
     withClockGate = true,
     hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl
+    hasSramCtl = hasSramCtl,
+    suffix = Option("icache_meta")
   ))
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeICacheTag_bank$bankIdx", hasMbist)
 
   private val validArray = RegInit(VecInit.fill(NumInterleavedSet)(0.U(nWays.W)))
 

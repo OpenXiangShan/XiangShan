@@ -18,9 +18,10 @@ package xiangshan.frontend.icache
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.mbist.MbistPipeline
 import utility.sram.SRAMTemplate
 
-class ICacheDataBank(implicit p: Parameters) extends ICacheModule with ICacheEccHelper with ICacheDataHelper {
+class ICacheDataBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheDataBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
@@ -62,9 +63,11 @@ class ICacheDataBank(implicit p: Parameters) extends ICacheModule with ICacheEcc
       singlePort = true,
       withClockGate = false, // enable signal timing is bad, no gating here
       hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl
+      hasSramCtl = hasSramCtl,
+      suffix = Option("icache_data")
     ))
   }
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeICacheData_bank$bankIdx", hasMbist)
 
   /* *** read *** */
   io.read.req.ready := !io.write.req.valid && ways.map(_.io.r.req.ready).reduce(_ && _)

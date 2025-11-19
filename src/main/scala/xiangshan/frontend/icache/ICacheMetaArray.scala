@@ -19,12 +19,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import utility.mbist.MbistPipeline
 import utils.VecRotate
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheModule
-    with ICacheEccHelper
-    with ICacheAddrHelper {
+class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
     val write:    MetaWriteBundle = Flipped(new MetaWriteBundle)
     val read:     MetaReadBundle  = Flipped(new MetaReadBundle)
@@ -37,8 +34,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule
   // sanity check
   require(MetaEntryBits == (new ICacheMetaEntry).getWidth)
 
-  private val banks   = Seq.tabulate(PortNumber)(i => Module(new ICacheMetaInterleavedBank))
-  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIcacheTag", hasMbist)
+  private val banks = Seq.tabulate(PortNumber)(i => Module(new ICacheMetaInterleavedBank(i)))
 
   /* *** read *** */
   // vSetIdx(1) must be vSetIdx(0) + 1 if isDoubleLine, it's pre-computed in Ftq for better timing (maybe)
