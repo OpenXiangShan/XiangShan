@@ -473,7 +473,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr := src.vaddr
     out.paddr := src.paddr
-    out.mask := genVWmask(src.vaddr, src.uop.fuOpType(1,0))
+    out.mask := genVWmask(src.vaddr, LSUOpType.size(src.uop.fuOpType))
     out.uop := src.uop
     out.has_rob_entry := true.B
     out.sched_idx := src.schedIndex
@@ -487,7 +487,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromNormalReplaySource(src: LsPipelineBundle): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.mask          := Mux(src.isvec, src.mask, genVWmask(src.vaddr, src.uop.fuOpType(1, 0)))
+    out.mask          := Mux(src.isvec, src.mask, genVWmask(src.vaddr, LSUOpType.size(src.uop.fuOpType)))
     out.uop           := src.uop
     out.has_rob_entry := true.B
     out.rep_carry     := src.replayCarry
@@ -579,7 +579,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   def fromIntIssueSource(src: MemExuInput): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     val addr           = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
-    out.mask          := genVWmask(addr, src.uop.fuOpType(1,0))
+    out.mask          := genVWmask(addr, LSUOpType.size(src.uop.fuOpType))
     out.uop           := src.uop
     out.has_rob_entry := true.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
@@ -655,7 +655,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_tlb_vaddr))
   )
 
-  val s0_alignType = Mux(s0_sel_src.isvec, s0_sel_src.alignedType(1,0), s0_sel_src.uop.fuOpType(1, 0))
+  val s0_alignType = Mux(s0_sel_src.isvec, s0_sel_src.alignedType(1,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
 
   val s0_addr_aligned = LookupTree(s0_alignType, List(
     "b00".U   -> true.B,                   //b

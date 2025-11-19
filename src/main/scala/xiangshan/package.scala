@@ -609,6 +609,7 @@ package object xiangshan {
     def cbo_flush = "b1101".U
     def cbo_inval = "b1110".U
 
+    def getCmoOpcode(op: UInt): UInt = op(1, 0)
     def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
     def isCboAll(op: UInt): Bool = isCbo(op) || op(3,0) === cbo_zero
     def isCboClean(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_clean)
@@ -620,6 +621,8 @@ package object xiangshan {
     // since atomics use a different fu type
     // so we can safely reuse other load/store's encodings
     // bit encoding: | optype(4bit) | size (2bit) |
+    // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
+    // therefore the MSBs are reused to identify uopIdx of AMOCAS.[WDQ]
     def AMOFuOpWidth = 6
     def lr_w      = "b000010".U
     def sc_w      = "b000110".U
@@ -649,7 +652,30 @@ package object xiangshan {
 
     def amocas_q  = "b101100".U
 
+    def getAmocasUopIdx(opType: UInt): UInt = (opType >> this.AMOFuOpWidth).asUInt
+
     def size(op: UInt) = op(1,0)
+
+    def sizeIs(sz: this.type => Size)(op: UInt): Bool = {
+      op === sz(this).U
+    }
+
+    sealed abstract class Size(uint: UInt) {
+      def U: UInt = this.uint
+    }
+    case object B extends Size("b00".U(Size.width.W))
+    case object H extends Size("b01".U(Size.width.W))
+    case object W extends Size("b10".U(Size.width.W))
+    case object D extends Size("b11".U(Size.width.W))
+    // Todo: Use encode b100 when expending size field to 3bits in OpType.
+    case object Q extends Size("b00".U(Size.width.W))
+    object Size {
+      val width = 2
+    }
+
+    def makeLsUop(isHlv: Bool, isHlvx: Bool, size: UInt): UInt = {
+      Cat(isHlv, isHlvx, 0.U(1.W), size)
+    }
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
