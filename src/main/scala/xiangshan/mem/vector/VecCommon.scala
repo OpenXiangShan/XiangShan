@@ -222,6 +222,7 @@ abstract class VLSUModule(implicit p: Parameters) extends XSModule
 abstract class VLSUBundle(implicit p: Parameters) extends XSBundle
   with HasVLSUParameters
 
+
 class VLSUBundleWithMicroOp(implicit p: Parameters) extends VLSUBundle {
   val uop = new DynInst
 }

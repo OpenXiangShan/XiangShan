@@ -296,7 +296,7 @@ class StoreQueueIO(implicit p: Parameters) extends MemBlockBundle {
   val sqDeqUopIdx        = Output(UopIdx())
   val sqDeqRobIdx        = Output(new RobPtr)
   // for store difftest
-  val diffStore          = Flipped(new DiffStoreIO)
+  val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
 }
 
 
