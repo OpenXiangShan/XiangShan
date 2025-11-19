@@ -3,18 +3,13 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne, XSPerfAccumulate, XSPerfHistogram}
+import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.datapath.NewPipelineConnect
-import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 import utility.PerfCCT
@@ -31,7 +26,7 @@ class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) e
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
   val flush = Flipped(ValidIO(new Redirect))
-  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueueInUop)))
+  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueueInUop(params))))
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
@@ -1319,7 +1314,7 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
       enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
       // MemAddrIQ also handle vector insts
-      enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
+      enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem.get
 
       val isFirstLoad           = s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get
       val isVleff               = s0_enqBits(i).vpu.isVleff

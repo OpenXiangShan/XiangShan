@@ -791,6 +791,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         XSPerfAccumulate(s"INT_ExuId${exuParams.exuIdx}_src${i}_dataSource_regcache", exu.fire && exu.bits.common.dataSources(i).readRegCache)
         XSPerfAccumulate(s"INT_ExuId${exuParams.exuIdx}_src${i}_dataSource_reg",      exu.fire && exu.bits.common.dataSources(i).readReg)
         XSPerfAccumulate(s"INT_ExuId${exuParams.exuIdx}_src${i}_dataSource_zero",     exu.fire && exu.bits.common.dataSources(i).readZero)
+        XSPerfAccumulate(s"INT_ExuId${exuParams.exuIdx}_src${i}_dataSource_imm",      exu.fire && exu.bits.common.dataSources(i).readImm)
       }
     }
     if (exuParams.isMemExeUnit && exuParams.readIntRf) {
@@ -799,6 +800,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       XSPerfAccumulate(s"MEM_ExuId${exuParams.exuIdx}_src0_dataSource_regcache", exu.fire && exu.bits.common.dataSources(0).readRegCache)
       XSPerfAccumulate(s"MEM_ExuId${exuParams.exuIdx}_src0_dataSource_reg",      exu.fire && exu.bits.common.dataSources(0).readReg)
       XSPerfAccumulate(s"MEM_ExuId${exuParams.exuIdx}_src0_dataSource_zero",     exu.fire && exu.bits.common.dataSources(0).readZero)
+      XSPerfAccumulate(s"MEM_ExuId${exuParams.exuIdx}_src0_dataSource_imm",      exu.fire && exu.bits.common.dataSources(0).readImm)
     }
   })
 

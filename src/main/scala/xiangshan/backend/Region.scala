@@ -127,6 +127,16 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.valid := source.valid
       // TODO add option connect method
       connectSamePort(sink.bits, source.bits)
+      sink.bits.rfWen  := source.bits.rfWen .getOrElse(false.B)
+      sink.bits.fpWen  := source.bits.fpWen .getOrElse(false.B)
+      sink.bits.vecWen := source.bits.vecWen.getOrElse(false.B)
+      sink.bits.v0Wen  := source.bits.v0Wen .getOrElse(false.B)
+      sink.bits.vlWen  := source.bits.vlWen .getOrElse(false.B)
+      sink.bits.fpu := source.bits.fpu.getOrElse(0.U.asTypeOf(sink.bits.fpu))
+      sink.bits.vpu := source.bits.vpu.getOrElse(0.U.asTypeOf(sink.bits.vpu))
+      sink.bits.lastUop := source.bits.lastUop.getOrElse(false.B)
+      sink.bits.selImm  := source.bits.selImm.getOrElse(0.U)
+      sink.bits.imm     := source.bits.imm.getOrElse(0.U)
       sinks.io.vlFromIntIsZero := false.B
       sinks.io.vlFromIntIsVlmax := false.B
       sinks.io.vlFromVfIsZero := false.B
@@ -135,10 +145,21 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }}
   }}
   issueQueues.filterNot(_.param.StdCnt == 0).map { case stdiq => {
-      stdiq.io.vlFromIntIsZero := false.B
-      stdiq.io.vlFromIntIsVlmax := false.B
-      stdiq.io.vlFromVfIsZero := false.B
-      stdiq.io.vlFromVfIsVlmax := false.B
+    stdiq.io.enq.map( sink => {
+      // std don't need these signals
+      sink.bits.rfWen  := false.B
+      sink.bits.fpWen  := false.B
+      sink.bits.vecWen := false.B
+      sink.bits.v0Wen  := false.B
+      sink.bits.vlWen  := false.B
+      sink.bits.fpu := 0.U.asTypeOf(sink.bits.fpu)
+      sink.bits.vpu := 0.U.asTypeOf(sink.bits.vpu)
+      sink.bits.lastUop := false.B
+    })
+    stdiq.io.vlFromIntIsZero := false.B
+    stdiq.io.vlFromIntIsVlmax := false.B
+    stdiq.io.vlFromVfIsZero := false.B
+    stdiq.io.vlFromVfIsVlmax := false.B
     }
   }
   issueQueues.filter(_.param.needUncertainWakeupFromExu).zip(exuBlock.io.uncertainWakeupOut.get).map { case (iq, exuWakeUpIn) =>

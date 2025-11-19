@@ -273,6 +273,18 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
     source.ready := sink.ready
+    // numSrc are different
+    sink.bits.srcType.zip(source.bits.srcType).map(x => x._1 := x._2)
+    sink.bits.psrc.zip(source.bits.psrc).map(x => x._1 := x._2)
+    sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
+    sink.bits.srcLoadDependency.zip(source.bits.srcLoadDependency).map(x => x._1 := x._2)
+    sink.bits.fpu.foreach(_ := source.bits.fpu)
+    sink.bits.vpu.foreach(_ := source.bits.vpu)
+    sink.bits.rfWen.foreach(_ := source.bits.rfWen)
+    sink.bits.fpWen.foreach(_ := source.bits.fpWen)
+    sink.bits.vecWen.foreach(_ := source.bits.vecWen)
+    sink.bits.v0Wen.foreach(_ := source.bits.v0Wen)
+    sink.bits.vlWen.foreach(_ := source.bits.vlWen)
   }}
   println(s"[Backend] intRegion.io.memWriteback.size = ${intRegion.io.memWriteback.size}")
 
@@ -312,6 +324,16 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
     source.ready := sink.ready
+    // numSrc are different
+    sink.bits.srcType.zip(source.bits.srcType).map(x => x._1 := x._2)
+    sink.bits.psrc.zip(source.bits.psrc).map(x => x._1 := x._2)
+    sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
+    sink.bits.srcLoadDependency.zip(source.bits.srcLoadDependency).map(x => x._1 := x._2)
+    sink.bits.rfWen .foreach(_ := source.bits.rfWen )
+    sink.bits.fpWen .foreach(_ := source.bits.fpWen )
+    sink.bits.vecWen.foreach(_ := source.bits.vecWen)
+    sink.bits.v0Wen .foreach(_ := source.bits.v0Wen )
+    sink.bits.vlWen .foreach(_ := source.bits.vlWen )
   }
   }
   fpRegion.io.ldCancel := io.mem.ldCancel
