@@ -963,11 +963,16 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.robidx := io.diffStore.diffInfo(i).uop.robIdx.value
         difftestCommon.pc     := io.diffStore.diffInfo(i).uop.pc
 
-      } .elsewhen (!isWline) {
+      } .elsewhen (!isWline) { // if not vector, it need to select high 64-bit or low 64-bit.
+        val isHighPart        = io.diffStore.pmaStore(i).bits.diffIsHighPart
         val storeCommit       = io.diffStore.pmaStore(i).fire
-        val waddr             = ZeroExt(Cat(io.diffStore.pmaStore(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-        val sbufferMask       = shiftMaskToLow(io.diffStore.pmaStore(i).bits.addr, io.diffStore.pmaStore(i).bits.mask)
-        val sbufferData       = shiftDataToLow(io.diffStore.pmaStore(i).bits.addr, io.diffStore.pmaStore(i).bits.data)
+        val waddr             = ZeroExt(Cat(io.diffStore.pmaStore(i).bits.addr(PAddrBits - 1, 4), isHighPart, 0.U(3.W)), 64)
+        val sbufferMask       = Mux(isHighPart,
+          io.diffStore.pmaStore(i).bits.mask(io.diffStore.pmaStore(i).bits.mask.getWidth - 1, 8),
+          io.diffStore.pmaStore(i).bits.mask(7, 0))
+        val sbufferData       = Mux(isHighPart,
+          io.diffStore.pmaStore(i).bits.data(io.diffStore.pmaStore(i).bits.data.getWidth - 1, 64),
+          io.diffStore.pmaStore(i).bits.data(63, 0))
         val wmask             = sbufferMask
         val wdata             = sbufferData & MaskExpand(sbufferMask)
 
