@@ -3,9 +3,8 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import ujson.IndexedValue.True
 import utils.MathUtils
-import utility.{HasCircularQueuePtrHelper, XSError}
+import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
@@ -13,7 +12,6 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
@@ -93,7 +91,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val payload               = new IssueQueueInUop()
+    val payload               = new IssueQueueInUop(params)
   }
 
   class CommonInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {

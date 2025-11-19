@@ -36,20 +36,20 @@ object Bundles {
    *
    * Don't forget to connect the remaining ports!
    */
-  def connectSamePort (sinkBundle: Bundle, sourceBundle: Bundle):Unit = {
-    sinkBundle.elements.foreach { case (name, data) => {
-      val hasSameName = sourceBundle.elements.contains(name)
-      if (hasSameName) {
-        val sourceData = sourceBundle.elements(name)
-        val hasSameWidth = data.asUInt.getWidth == sourceData.asUInt.getWidth
-        if (hasSameWidth) {
-          data := sourceData
-        }
-        else {
-          println(s"[connectSamePort] ${name}'s width is different")
+  def connectSamePort(sinkBundle: Bundle, sourceBundle: Bundle): Unit = {
+    import chisel3.reflect.DataMirror
+    sinkBundle.elements.foreach { case (name, sinkData) =>
+      sourceBundle.elements.get(name).foreach { sourceData =>
+        val sinkWidth = DataMirror.widthOf(sinkData)
+        val sourceWidth = DataMirror.widthOf(sourceData)
+        if (sinkWidth == sourceWidth) {
+          sinkData := sourceData
+        } else {
+          println(s"[connectSamePort] [Warning]" +
+                  s" sinkBundle: ${sinkBundle.className} ${name}'s width is = ${sinkWidth}," +
+                  s" sourceBundle: ${sourceBundle.className} ${name}'s width is = ${sourceWidth}")
         }
       }
-    }
     }
   }
   // Frontend --[CtrlBlock]--> DecodeInUop
@@ -251,7 +251,7 @@ object Bundles {
     val debug_sim_trig = Bool()
   }
 
-  class IssueQueueInUop(implicit p: Parameters) extends XSBundle {
+  class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
@@ -299,7 +299,7 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
     val perfDebugInfo = new PerfDebugInfo
   }
-  class DispatchOutUop(implicit p: Parameters) extends IssueQueueInUop {
+  class DispatchOutUop(implicit p: Parameters) extends DispatchOutBaseUop {
     // for scheduler drop amocas sta
     val isDropAmocasSta = Bool()
   }
@@ -309,7 +309,54 @@ object Bundles {
   }
   class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     // TODO change these bundles to option bundles depend on issueBlockParam
-    def numSrc = backendParams.numSrc
+    def numSrc = params.numSrc
+    // from frontend
+    val preDecodeInfo = new PreDecodeInfo
+    val fixedTaken = Bool()
+    val predTaken = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    // from decode
+    val srcType = Vec(numSrc, SrcType())
+    val fuType = FuType()
+    val fuOpType = FuOpType()
+    val rfWen  = Option.when(params.needWriteIntRegFile)(Bool())
+    val fpWen  = Option.when(params.needWriteFpRegFile )(Bool())
+    val vecWen = Option.when(params.needWriteVecRegFile)(Bool())
+    val v0Wen  = Option.when(params.needWriteV0RegFile )(Bool())
+    val vlWen  = Option.when(params.needWriteVlRegFile )(Bool())
+    val selImm = Option.when(params.needImm)(SelImm())
+    val imm    = Option.when(params.needImm)(UInt(32.W))
+    val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val vpu = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val wfflags = Bool()
+    val uopIdx = UopIdx()
+    val lastUop = Option.when(params.inVfSchd)(Bool())
+    // from rename
+    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val robIdx = new RobPtr
+    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
+    // for mdp
+    val storeSetHit = Bool()
+    val waitForRobIdx = new RobPtr
+    val loadWaitBit = Bool()
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val srcState = Vec(numSrc, SrcState())
+    val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
+    val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val lqIdx = new LqPtr
+    val sqIdx = new SqPtr
+    // cas ctrl
+    val isDropAmocasSta = Bool()
+    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+  }
+
+  class IssueQueueInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
+    def numSrc = params.numSrc
+
     // from frontend
     val preDecodeInfo = new PreDecodeInfo
     val fixedTaken = Bool()
@@ -336,7 +383,7 @@ object Bundles {
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
-    val numLsElem = NumLsElem()
+    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     // for mdp
     val storeSetHit = Bool()
     val waitForRobIdx = new RobPtr
@@ -349,8 +396,6 @@ object Bundles {
     val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
-    // cas ctrl
-    val isDropAmocasSta = Bool()
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {

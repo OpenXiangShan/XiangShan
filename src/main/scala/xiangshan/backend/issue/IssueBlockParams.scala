@@ -104,6 +104,8 @@ case class IssueBlockParams(
 
   def writeFpRf: Boolean = exuBlockParams.map(_.writeFpRf).reduce(_ || _)
 
+  def writeFflags: Boolean = exuBlockParams.map(_.writeFflags).reduce(_ || _)
+
   def writeVecRf: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
 
   def writeV0Rf: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
@@ -211,6 +213,16 @@ case class IssueBlockParams(
   def needReadIntRegFile: Boolean = exuBlockParams.map(_.readIntRf).reduce(_ || _)
 
   def needReadFpRegFile: Boolean = exuBlockParams.map(_.readFpRf).reduce(_ || _)
+
+  def needWriteIntRegFile: Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
+
+  def needWriteFpRegFile: Boolean = exuBlockParams.map(_.writeFpRf).reduce(_ || _)
+
+  def needWriteVecRegFile: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
+
+  def needWriteV0RegFile: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
+
+  def needWriteVlRegFile: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
