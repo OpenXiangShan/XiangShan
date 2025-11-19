@@ -277,6 +277,8 @@ class VSegmentUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends V
   val exceptionInfo       = ValidIO(new MemExceptionInfo)
   //trigger
   val fromCsrTrigger      = Input(new CsrTriggerBundle)
+  //difftest
+  val diffPmaStore        = Option.when(debugEn)(ValidIO(new DifftestPmaStoreIO))
 }
 
 class VfofDataBuffIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{

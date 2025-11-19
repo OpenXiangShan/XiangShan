@@ -781,6 +781,16 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.vecDifftestInfo.bits.uop      := uopq(deqPtr.value).uop
   io.vecDifftestInfo.bits.start    := 0.U // only use in no-segment unit-stride
   io.vecDifftestInfo.bits.offset   := 0.U
+  io.diffPmaStore.foreach{case sink =>
+    sink.valid                     := io.sbuffer.valid
+    sink.bits.data                 := io.sbuffer.bits.data
+    sink.bits.addr                 := io.sbuffer.bits.addr
+    sink.bits.data                 := io.sbuffer.bits.data
+    sink.bits.mask                 := io.sbuffer.bits.mask
+    sink.bits.wline                := io.sbuffer.bits.wline
+    sink.bits.vecValid             := io.sbuffer.bits.vecValid
+    sink.bits.diffIsHighPart       := false.B  // only for scalar store event!
+  }
 
   /**
    * update ptr

@@ -1267,8 +1267,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       if(i == 0) {
         when(vSegmentUnit.io.sbuffer.valid) {
           sbuffer.io.diffStore.diffInfo(0) := vSegmentUnit.io.vecDifftestInfo.bits
-          sbuffer.io.diffStore.pmaStore(0).valid := vSegmentUnit.io.sbuffer.fire
-          sbuffer.io.diffStore.pmaStore(0).bits := vSegmentUnit.io.sbuffer.bits
+          sbuffer.io.diffStore.pmaStore(0) := vSegmentUnit.io.diffPmaStore.get
         }.otherwise{
           sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.diffInfo(0)
           sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.pmaStore(0)
