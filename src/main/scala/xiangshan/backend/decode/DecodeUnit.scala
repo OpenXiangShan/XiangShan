@@ -1059,7 +1059,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
   val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
   val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
-  val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
+  val positive_emulIsFrac = decodedInst.vpu.vlmul +& decodedInst.vpu.veew < decodedInst.vpu.vsew
+  val negative_emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 3.U +& decodedInst.vpu.vsew
+  val emulIsFrac = Mux(decodedInst.vpu.vlmul(2), negative_emulIsFrac, positive_emulIsFrac)
   val vstartIsNotZero = io.enq.vstart =/= 0.U
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
