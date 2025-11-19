@@ -129,10 +129,10 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // sbuffer is empty or not
   val sbuffer_empty = io.flush_sbuffer.empty
 
-  // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
+  // Only the least significant AMOFuOpWidth bits of fuOpType are used,
   // therefore the MSBs are reused to identify uopIdx
-  val stdUopIdxs = io.storeDataIn.map(_.bits.fuOpType >> LSUOpType.AMOFuOpWidth)
-  val staUopIdx = io.in.bits.fuOpType >> LSUOpType.AMOFuOpWidth
+  val stdUopIdxs = io.storeDataIn.map(x => LSUOpType.getAmocasUopIdx(x.bits.fuOpType))
+  val staUopIdx = LSUOpType.getAmocasUopIdx(io.in.bits.fuOpType)
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -209,8 +209,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
   assert(state === s_invalid ||
-    uop.fuOpType(1,0) === "b10".U ||
-    uop.fuOpType(1,0) === "b11".U ||
+    LSUOpType.sizeIs(_.W)(uop.fuOpType) ||
+    LSUOpType.sizeIs(_.D)(uop.fuOpType) ||
     LSUOpType.isAMOCASQ(uop.fuOpType),
     "Only word or doubleword or quadword is supported"
   )
@@ -260,10 +260,12 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       vaddr   := io.dtlb.resp.bits.fullva
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
-      val addrAligned = LookupTree(uop.fuOpType(1,0), List(
-        "b10".U -> (vaddr(1,0) === 0.U), // W
-        "b11".U -> (vaddr(2,0) === 0.U), // D
-        "b00".U -> (vaddr(3,0) === 0.U)  // Q
+      // Todo: Zabha extension contains AMOCAS.[B/H], so b00 should be used for B in the future.
+      //       The data type Q should use another encode, like b100
+      val addrAligned = LookupTree(LSUOpType.size(uop.fuOpType), List(
+        LSUOpType.W.U -> (vaddr(1,0) === 0.U), // W
+        LSUOpType.D.U -> (vaddr(2,0) === 0.U), // D
+        LSUOpType.Q.U -> (vaddr(3,0) === 0.U)  // Q
       ))
       exceptionVec(loadAddrMisaligned)  := !addrAligned && isLr
       exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
@@ -325,24 +327,26 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   }
 
   def genWdataAMO(data: UInt, sizeEncode: UInt): UInt = {
-    LookupTree(sizeEncode(1, 0), List(
-      "b10".U -> Fill(4, data(31, 0)),
-      "b11".U -> Fill(2, data(63, 0)),
-      "b00".U -> data(127, 0)
+    require(sizeEncode.getWidth == LSUOpType.Size.width)
+    LookupTree(sizeEncode, List(
+      LSUOpType.W.U -> Fill(4, data(31, 0)),
+      LSUOpType.D.U -> Fill(2, data(63, 0)),
+      LSUOpType.Q.U -> data(127, 0)
     ))
   }
 
   def genWmaskAMO(addr: UInt, sizeEncode: UInt): UInt = {
+    require(sizeEncode.getWidth == LSUOpType.Size.width)
     /**
       * `MainPipeReq` uses `word_idx` to recognize which 64-bits data bank to operate on. Double-word atomics are
       * always 8B aligned and quad-word atomics are always 16B aligned except for misaligned exception, therefore
       * `word_idx` is enough and there is no need to shift according address. Only word atomics needs LSBs of the
       * address to shift mask inside a 64-bits aligned range.
       */
-    LookupTree(sizeEncode(1, 0), List(
-      "b10".U -> (0xf.U << addr(2,0)), // W
-      "b11".U -> 0xff.U, // D
-      "b00".U -> 0xffff.U // Q
+    LookupTree(sizeEncode, List(
+      LSUOpType.W.U -> (0xf.U << addr(2,0)), // W
+      LSUOpType.D.U -> 0xff.U, // D
+      LSUOpType.Q.U -> 0xffff.U // Q
     ))
   }
 
@@ -392,10 +396,10 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     resp_data_wire := Mux(
       isSc,
       dcache_resp_data,
-      LookupTree(uop.fuOpType(1,0), List(
-        "b10".U -> SignExt(rdataSel(31, 0), QuadWordBits), // W
-        "b11".U -> SignExt(rdataSel(63, 0), QuadWordBits), // D
-        "b00".U -> rdataSel // Q
+      LookupTree(LSUOpType.size(uop.fuOpType), List(
+        LSUOpType.W.U -> SignExt(rdataSel(31, 0), QuadWordBits), // W
+        LSUOpType.D.U -> SignExt(rdataSel(63, 0), QuadWordBits), // D
+        LSUOpType.Q.U -> rdataSel // Q
       ))
     )
 
@@ -565,9 +569,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   pipe_req.addr   := get_block_addr(paddr)
   pipe_req.vaddr  := get_block_addr(vaddr)
   pipe_req.word_idx  := get_word(paddr)
-  pipe_req.amo_data := genWdataAMO(rs2, uop.fuOpType)
-  pipe_req.amo_mask := genWmaskAMO(paddr, uop.fuOpType)
-  pipe_req.amo_cmp  := genWdataAMO(rd, uop.fuOpType)
+  pipe_req.amo_data := genWdataAMO(rs2, LSUOpType.size(uop.fuOpType))
+  pipe_req.amo_mask := genWmaskAMO(paddr, LSUOpType.size(uop.fuOpType))
+  pipe_req.amo_cmp  := genWdataAMO(rd, LSUOpType.size(uop.fuOpType))
   pipe_req.miss_fail_cause_evict_btot := false.B
 
   if (env.EnableDifftest) {
