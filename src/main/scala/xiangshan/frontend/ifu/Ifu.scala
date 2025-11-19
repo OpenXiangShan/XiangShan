@@ -33,6 +33,7 @@ import utility.XSPerfHistogram
 import utils.EnumUInt
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.RedirectLevel
+import xiangshan.Resolve
 import xiangshan.RobCommitInfo
 import xiangshan.TopDownCounters
 import xiangshan.ValidUndirectioned
@@ -93,7 +94,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     // Backend: csr control
     val csrFsIsOff: Bool = Input(Bool())
 
-    val testResolve      = Vec(backendParams.BrhCnt, Valid(new Resolve))
+    val testResolve = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -849,11 +850,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 
   private val testResolve = io.testResolve
-  private val branches  = testResolve.map {
+  private val branches = testResolve.map {
     resolve => resolve.valid && resolve.bits.attribute.isConditional
   }
   private val takenBrances = testResolve.map {
-    resolve => resolve.valid && resolve.bits.attribute.isConditional && resolve.bits.attribute.taken
+    resolve => resolve.valid && resolve.bits.attribute.isConditional && resolve.bits.taken
   }
   private val misPredBranches = testResolve.map {
     resolve => resolve.valid && resolve.bits.attribute.isConditional && resolve.bits.mispredict

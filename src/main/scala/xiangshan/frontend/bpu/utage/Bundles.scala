@@ -35,6 +35,7 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
 
   // only for test and debug
   val testUseMicroTage:  Bool = Bool()
+  val testMismatchUbtb:  Bool = Bool()
   val testPredIdx0:      UInt = UInt(TestPredIdx0Width.W)
   val testPredTag0:      UInt = UInt(TestPredTag0Width.W)
   val testPredIdx1:      UInt = UInt(TestPredIdx1Width.W)

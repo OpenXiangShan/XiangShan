@@ -306,9 +306,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Mux(abtb.io.prediction.taken, abtb.io.prediction.cfiPosition, 0.U)
   )
 
-  s1_utageMeta                  := utage.io.meta.bits
+  s1_utageMeta := utage.io.meta.bits
   s1_utageMeta.testMismatchUbtb := (ubtb.io.prediction.taken ^ abtb.io.prediction.taken) ||
-   (ubtb.io.prediction.cfiPosition =/= abtb.io.prediction.cfiPosition)
+    (ubtb.io.prediction.cfiPosition =/= abtb.io.prediction.cfiPosition)
   s1_utageMeta.testUseMicroTage := abtb.io.useMicroTage
   s1_utageMeta.baseTaken        := baseBrTaken
   s1_utageMeta.baseCfiPosition  := baseBrCfiPosition

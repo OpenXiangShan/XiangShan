@@ -218,6 +218,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.toIBuffer <> ibuffer.io.in
 
   ftq.io.fromBackend <> io.backend.toFtq
+  ifu.io.testResolve := io.backend.toFtq.resolve
   io.backend.fromFtq := ftq.io.toBackend
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
