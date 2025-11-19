@@ -256,6 +256,15 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     t0_trainValid && t0_trainMeta.testUseMicroTage && io.fastTrain.get.bits.hasOverride
   )
   XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.testUseMicroTage)
+  XSPerfAccumulate(
+    "train_useMicroTage_misMathUbtb_fromFastTrain",
+    t0_trainValid && t0_trainMeta.testUseMicroTage && t0_trainMeta.testMismatchUbtb
+  )
+  XSPerfAccumulate(
+    "train_useMicroTage_misMathUbtb_and_override_fromFastTrain",
+    t0_trainValid && t0_trainMeta.testUseMicroTage && t0_trainMeta.testMismatchUbtb && io.fastTrain.get.bits.hasOverride
+  )
+
   XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.testPredIdx0 === trainIdx0))
   XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.testPredTag0 === trainTag0))
   XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.testPredIdx0 =/= trainIdx0))
