@@ -97,6 +97,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   predMeta.bits.histTableCfiPositionVec := histTableCfiPositionVec
   predMeta.bits.baseTaken               := false.B // no use, only for placeholder.
   predMeta.bits.baseCfiPosition         := 0.U     // no use, only for placeholder.
+  predMeta.bits.testUseMicroTage        := false.B
+  predMeta.bits.testMismatchUbtb        := false.B
   io.prediction := RegEnable(prediction, 0.U.asTypeOf(Valid(new MicroTagePrediction)), io.stageCtrl.s0_fire)
   io.meta       := RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
 
