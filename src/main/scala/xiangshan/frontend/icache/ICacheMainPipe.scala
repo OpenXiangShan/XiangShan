@@ -199,9 +199,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_sramHits  = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
   private val s1_sramDatas = fromData.datas
   private val s1_sramCodes = fromData.codes
+  private val s1_sramValid = VecInit(Seq(
+    RegNext(s0_fire),
+    RegNext(s0_fire) && s1_doubleline
+  ))
+  private val s1_bankSramValid = getBankValid(s1_sramValid, s1_offset)
 
   // mshr: valid when fromMiss.valid
-  private val s1_mshrHits = checkMshrHitVec(
+  private val s1_mshrValid = checkMshrHitVec(
     fromMiss,
     s1_vSetIdx,
     s1_pTag,
@@ -211,12 +216,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
 
   // select data
-  private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
+  private val s1_bankMshrValid = getBankValid(s1_mshrValid, s1_offset)
 
   private val s1_dataIsFromMshr = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(
-      s1_bankMshrHit(i),
-      s1_bankMshrHit(i) || RegNext(s0_fire)
+      s1_bankMshrValid(i),
+      s1_bankMshrValid(i) || s1_bankSramValid(i)
     )
   })
 
@@ -228,40 +233,40 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_hits = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(
-      s1_mshrHits(i) || s1_sramHits(i),
-      s1_mshrHits(i) || RegNext(s0_fire)
+      s1_mshrValid(i) || s1_sramHits(i),
+      s1_mshrValid(i) || s1_sramValid(i)
     )
   })
 
   private val s1_datas = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(
-      Mux(s1_bankMshrHit(i), s1_mshrDatas(i), s1_sramDatas(i)),
-      s1_bankMshrHit(i) || RegNext(s0_fire)
+      Mux(s1_bankMshrValid(i), s1_mshrDatas(i), s1_sramDatas(i)),
+      s1_bankMshrValid(i) || s1_bankSramValid(i)
     )
   })
 
   private val s1_maybeRvcMap = VecInit((0 until DataBanks).map { i =>
     DataHoldBypass(
       Mux(
-        s1_bankMshrHit(i),
+        s1_bankMshrValid(i),
         s1_mshrMaybeRvcMap(i),
         Mux(getLineSel(s1_offset)(i), s1_sramMaybeRvcMap(1)(i), s1_sramMaybeRvcMap(0)(i))
       ),
-      s1_bankMshrHit(i) || RegNext(s0_fire)
+      s1_bankMshrValid(i) || s1_bankSramValid(i)
     )
   })
 
   private val s1_tlCorrupt = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(
-      s1_mshrHits(i) && fromMiss.bits.corrupt,
-      s1_mshrHits(i) || RegNext(s0_fire)
+      s1_mshrValid(i) && fromMiss.bits.corrupt,
+      s1_mshrValid(i) || s1_sramValid(i)
     )
   })
 
   private val s1_tlDenied = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(
-      s1_mshrHits(i) && fromMiss.bits.denied,
-      s1_mshrHits(i) || RegNext(s0_fire)
+      s1_mshrValid(i) && fromMiss.bits.denied,
+      s1_mshrValid(i) || s1_sramValid(i)
     )
   })
 
@@ -352,7 +357,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_corruptRefetch = VecInit((0 until PortNumber).map { i =>
     ValidHoldBypass(
       (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire),
-      s1_mshrHits(i), // clear re-fetch flag when re-fetched from mshr
+      s1_mshrValid(i), // clear re-fetch flag when re-fetched from mshr
       s1_flush
     )
   })
