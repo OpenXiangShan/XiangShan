@@ -19,6 +19,7 @@ import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, Sched
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{IntPregParams, RfReadPortWithConfig, RfWritePortBundle}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rename.CompressType
 import xiangshan.backend.trace._
 import xiangshan.frontend._
 import xiangshan.frontend.ftq.FtqPtr
@@ -188,6 +189,10 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val hasLastInFtqEntry = UInt(2.W)
+    val compressType = CompressType()
+    val needFlush = UInt(2.W)
+    val interrupt_safe = Bool()
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -452,6 +457,10 @@ object Bundles {
     val canRobCompress  = Bool()
     val crossFtqCommit  = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
     val crossFtq        = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
+    val hasLastInFtqEntry = UInt(2.W)
+    val compressType    = CompressType()
+    val needFlush = UInt(2.W)
+    val interrupt_safe = Bool()
     val fusionNum       = UInt(2.W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
