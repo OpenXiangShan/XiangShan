@@ -197,6 +197,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
+      // TODO: enq
       connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
     }
   }
@@ -294,7 +295,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
-    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
+//    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + MuxLookup(rawInfo(i).hasLastInFtqEntry.asUInt, 0.U)(Seq(
+      "b00".U -> -1.S.asUInt,
+      "b01".U -> 0.U,
+      "b10".U -> 0.U,
+      "b11".U -> 1.U
+    ))
   }
 
   // data for debug
@@ -419,6 +426,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
+  // TODO: How about a lot of fence instr and XSTrap instr
+  val hasWB = VecInit(exuWBs.map(wb => wb.valid)).asUInt.orR
+  //  when(isEmpty || (hasBlockBackward && hasWB)) {
   when(isEmpty) {
     hasBlockBackward := false.B
   }
@@ -474,9 +484,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
         hasWFI := true.B
       }
-
-      robEntries(enqIndex).mmio := false.B
-      robEntries(enqIndex).vls := enqUop.vlsInstr
     }
   }
 
@@ -599,7 +606,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
-  val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
+  val deqNeedFlush = deqPtrEntry.needFlush.asUInt.orR && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
@@ -942,7 +949,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
   val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg
+  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush.asUInt.orR)).asUInt.orR || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   io.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(io.commits.commitValid)))
 
@@ -1183,11 +1190,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlush = robEntries(i).needFlush
     val needFlushWriteBack = Wire(Bool())
     needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
-    when(robEntries(i).valid){
-      needFlush := needFlush || needFlushWriteBack
+    val isFormer = Mux1H(canWbExceptionSeq, exceptionWBs.map(_.bits.robIdx.isFormer))
+    when(robEntries(i).valid && needFlushWriteBack){
+      needFlush := needFlush | Cat(!isFormer, isFormer)
+//      needFlush(0) := needFlush(0) || (needFlushWriteBack && isFormer)
+//      needFlush(1) := needFlush(1) || (needFlushWriteBack && !isFormer)
+//      when(isFormer) {
+//        needFlush(0) := needFlush(0) || needFlushWriteBack
+//      }.otherwise {
+//        needFlush(1) := needFlush(1) || needFlushWriteBack
+//      }
     }
 
-    when(robEntries(i).valid && (needFlush || needFlushWriteBack)) {
+    when(robEntries(i).valid && (needFlush.asUInt.orR || needFlushWriteBack)) {
       // exception flush
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
@@ -1219,6 +1234,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
     when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
+      // TODO: In the future, there are two itype in trace
       robEntries(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
@@ -1250,11 +1266,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlush = robBanksRdata(i).needFlush
     val needFlushWriteBack = Wire(Bool())
     needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
-    when(needUpdate(i).valid) {
-      needUpdate(i).needFlush := needFlush || needFlushWriteBack
+    val isFormer = Mux1H(canWbExceptionSeq, exceptionWBs.map(_.bits.robIdx.isFormer))
+    when(needUpdate(i).valid && needFlushWriteBack) {
+      needUpdate(i).needFlush := needFlush | Cat(!isFormer, isFormer)
+//      needUpdate(i).needFlush(0) := needUpdate(i).needFlush(0) || (needFlushWriteBack && isFormer)
+//      needUpdate(i).needFlush(1) := needUpdate(i).needFlush(1) || (needFlushWriteBack && !isFormer)
     }
 
-    when(needUpdate(i).valid && (needFlush || needFlushWriteBack)) {
+    when(needUpdate(i).valid && (needFlush.asUInt.orR || needFlushWriteBack)) {
       // exception flush
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
@@ -1285,22 +1304,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // end update robBanksRdata
 
   // interrupt_safe
-  for (i <- 0 until RenameWidth) {
-    when(canEnqueue(i)) {
-      // For now, we allow non-load-store instructions to trigger interrupts
-      // For MMIO instructions, they should not trigger interrupts since they may
-      // be sent to lower level before it writes back.
-      // However, we cannot determine whether a load/store instruction is MMIO.
-      // Thus, we don't allow load/store instructions to trigger an interrupt.
-      // TODO: support non-MMIO load-store instructions to trigger interrupts
-      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) &&
-                             !FuType.isFence(io.enq.req(i).bits.fuType) &&
-                             !FuType.isCsr(io.enq.req(i).bits.fuType) &&
-                             !FuType.isVset(io.enq.req(i).bits.fuType) &&
-                             !FuType.isAMO(io.enq.req(i).bits.fuType)
-      robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
-    }
-  }
+//  for (i <- 0 until RenameWidth) {
+//    when(canEnqueue(i)) {
+//      // For now, we allow non-load-store instructions to trigger interrupts
+//      // For MMIO instructions, they should not trigger interrupts since they may
+//      // be sent to lower level before it writes back.
+//      // However, we cannot determine whether a load/store instruction is MMIO.
+//      // Thus, we don't allow load/store instructions to trigger an interrupt.
+//      // TODO: support non-MMIO load-store instructions to trigger interrupts
+//      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) && !FuType.isFence(io.enq.req(i).bits.fuType) && !FuType.isCsr(io.enq.req(i).bits.fuType) && !FuType.isVset(io.enq.req(i).bits.fuType)
+//      robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
+//    }
+//  }
 
   /**
    * read and write of data modules
@@ -1820,6 +1835,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   generatePerfEvent()
 
   // max commit-stuck cycle
+  // TODO: Why Tell me Why?
+  // if mmio is only used to generate commitStuck, it is ok to use only 1 bit mmio in ROB entry
   val deqismmio = Mux(robEntries(deqPtr.value).valid, robEntries(deqPtr.value).mmio, false.B)
   val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
   val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))

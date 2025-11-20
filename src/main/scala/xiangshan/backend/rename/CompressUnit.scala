@@ -34,8 +34,129 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.EspressoMinimizer
 import freechips.rocketchip.rocket.DecodeLogic
+import xiangshan.ExceptionNO.{illegalInstr, selectFrontend, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
+
+object CompressType {
+  def NORMAL = "b00".U // Complex/Simple/Simplesss
+  def SC     = "b01".U // Simplesss + Complex
+  def CS     = "b10".U // Complex + Simplesss
+  def CC     = "b11".U // Complex + Complex
+
+  def apply() = UInt(2.W)
+
+  def isLoadStore(commitType: UInt): Bool = commitType(1)
+  def lsInstIsStore(commitType: UInt): Bool = commitType(0)
+  def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
+  def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1)
+}
+
+class NewCompressUnit(implicit p: Parameters) extends XSModule{
+  val io = IO(new Bundle {
+    val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))
+    val out = new Bundle {
+      val needRobFlags = Vec(RenameWidth, Output(Bool()))
+      val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
+      val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val hasLastInFtqEntry = Vec(RenameWidth, Output(UInt(2.W)))
+      val compressType = Vec(RenameWidth, CompressType())
+      val isFormer = Vec(RenameWidth, Output(Bool()))
+      val needFlush = Vec(RenameWidth, Output(UInt(2.W)))
+      val interrupt_safe = Vec(RenameWidth, Output(Bool()))
+      val isRVC = Vec(RenameWidth, Output(Bool()))
+    }
+  })
+
+  val needFlush = io.in.map{ x =>
+    Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(x.bits.trigger) || x.bits.flushPipe
+  }
+
+  val allow_interrupts = io.in.map{ x =>
+    !CommitType.isLoadStore(x.bits.commitType) && !FuType.isFence(x.bits.fuType) && !FuType.isCsr(x.bits.fuType) && !FuType.isVset(x.bits.fuType) && !FuType.isAMO(x.bits.fuType)
+  }
+
+  val cannotCompress = VecInit(io.in.map{ x =>
+    x.valid && (x.bits.waitForward || x.bits.blockBackward)
+  }).asUInt.orR
+
+  when(cannotCompress) {
+    for (i <- 0 until RenameWidth) {
+      io.out.needRobFlags(i)        := io.in(i).valid
+      io.out.instrSizes(i)          := 1.U
+      io.out.masks(i)               := 0x1.U << i
+      io.out.hasLastInFtqEntry(i)   := Cat(0.U(1.W), io.in(i).bits.isLastInFtqEntry)
+      io.out.compressType(i)        := CompressType.NORMAL
+      io.out.isFormer(i)            := true.B
+      io.out.needFlush(i)           := Cat(0.U(1.W), needFlush(i))
+      io.out.interrupt_safe(i)      := allow_interrupts(i)
+      io.out.isRVC(i)               := io.in(i).bits.isRVC
+    }
+  }.otherwise{
+    for (i <- 0 until RenameWidth/2) {
+      when(io.in(2*i).valid && io.in(2*i+1).valid) {
+        io.out.needRobFlags(2*i)   := false.B
+        io.out.needRobFlags(2*i+1) := true.B  // needRobFlags is true for the lastUop
+        io.out.instrSizes(2*i)     := 2.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0x3.U << (2*i)
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := Cat(io.in(2*i+1).bits.isLastInFtqEntry, io.in(2*i).bits.isLastInFtqEntry)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.CC
+        io.out.compressType(2*i+1)      := CompressType.CC
+        io.out.isFormer(2*i)            := true.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := Cat(needFlush(2*i+1), needFlush(2*i))
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := allow_interrupts(2*i) && allow_interrupts(2*i+1)
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.isRVC(2*i)               := io.in(2*i).bits.isRVC
+        io.out.isRVC(2*i+1)             := io.in(2*i+1).bits.isRVC
+      }.elsewhen(io.in(2*i).valid) {
+        io.out.needRobFlags(2*i)   := true.B
+        io.out.needRobFlags(2*i+1) := false.B
+        io.out.instrSizes(2*i)     := 1.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0x1.U << (2*i)
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := Cat(0.U(1.W), io.in(2*i).bits.isLastInFtqEntry)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.NORMAL
+        io.out.compressType(2*i+1)      := CompressType.NORMAL
+        io.out.isFormer(2*i)            := true.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := Cat(0.U(1.W), needFlush(2*i))
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := allow_interrupts(2*i)
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.isRVC(2*i)               := io.in(2*i).bits.isRVC
+        io.out.isRVC(2*i+1)             := false.B
+      }.otherwise {
+        io.out.needRobFlags(2*i)   := false.B
+        io.out.needRobFlags(2*i+1) := false.B
+        io.out.instrSizes(2*i)     := 0.U
+        io.out.instrSizes(2*i+1)   := 0.U
+        io.out.masks(2*i)          := 0.U
+        io.out.masks(2*i+1)        := 0.U
+        io.out.hasLastInFtqEntry(2*i)   := 0.U(2.W)
+        io.out.hasLastInFtqEntry(2*i+1) := 0.U(2.W)
+        io.out.compressType(2*i)        := CompressType.NORMAL
+        io.out.compressType(2*i+1)      := CompressType.NORMAL
+        io.out.isFormer(2*i)            := false.B
+        io.out.isFormer(2*i+1)          := false.B
+        io.out.needFlush(2*i)           := 0.U(2.W)
+        io.out.needFlush(2*i+1)         := 0.U(2.W)
+        io.out.interrupt_safe(2*i)      := true.B
+        io.out.interrupt_safe(2*i+1)    := true.B
+        io.out.isRVC(2*i)               := false.B
+        io.out.isRVC(2*i+1)             := false.B
+      }
+    }
+  }
+
+
+}
 
 class CompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {

@@ -34,7 +34,7 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType}
-import xiangshan.backend.rename.SnapshotGenerator
+import xiangshan.backend.rename.{SnapshotGenerator, CompressType}
 import xiangshan.backend.trace._
 
 import scala.collection.immutable.Nil
@@ -47,25 +47,29 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
     val valid = Bool()
 
+    val compressType = CompressType()
+
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
 
     val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W) // TODO: it could change to 'instrEndOffset'
     val crossFtqCommit = UInt(2.W) // 59 bit
+    val hasLastInFtqEntry = UInt(2.W)
 
     // some instructions are not allowed to trigger interrupts
     // They have side effects on the states of the processor before they write back
     val interrupt_safe = Bool()
-    val needFlush = Bool()
+    val needFlush = UInt(2.W) // double
 
     val commitType = CommitType()
 
     val vls = Bool()
     val isVset = Bool()
-    val isHls = Bool()
-    val mmio = Bool()
+    val isHls = Bool() // double
+    val mmio = Bool()  // double?
     val isRVC = Bool()
+    val predTaken = Bool() // for former
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
 
@@ -107,9 +111,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val hasLastInFtqEntry = UInt(2.W)
+
     val fpWen = Bool()
     val rfWen = Bool()
-    val needFlush = Bool()
+    val needFlush = UInt(2.W)
     val crossFtqCommit = UInt(2.W)
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
@@ -127,21 +133,43 @@ object RobBundles extends HasCircularQueuePtrHelper {
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: DynInst): Unit = {
-    robEntry.wflags := robEnq.wfflags
-    robEntry.commitType := robEnq.commitType
+    // TODO: change connect
+
+//    robEntry.valid
+
+    robEntry.compressType := robEnq.compressType // TODO
+
+//    robEntry.uopNum
+//    robEntry.realDestSize
+
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
-    robEntry.isRVC := robEnq.isRVC
+    robEntry.crossFtqCommit := robEnq.crossFtqCommit
+    robEntry.hasLastInFtqEntry := robEnq.hasLastInFtqEntry
+
+    robEntry.interrupt_safe := robEnq.interrupt_safe
+    // flushPipe needFlush but not exception
+//    robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
+    robEntry.needFlush := robEnq.needFlush
+
+    robEntry.commitType := robEnq.commitType
+
+    robEntry.vls := robEnq.vlsInstr
     robEntry.isVset := robEnq.isVset
     robEntry.isHls := robEnq.isHls
-    robEntry.rfWen := robEnq.rfWen
-    robEntry.fpWen := robEnq.dirtyFs
-    robEntry.dirtyVs := robEnq.dirtyVs
-    // flushPipe needFlush but not exception
-    robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
-    robEntry.crossFtqCommit := robEnq.crossFtqCommit
+    robEntry.mmio := false.B
+    robEntry.isRVC := robEnq.isRVC
+    robEntry.predTaken := robEnq.predTaken
+
     // trace
-    robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
+    robEntry.traceBlockInPipe := robEnq.traceBlockInPipe // TOOD
+    // debug
+    robEntry.fpWen := robEnq.dirtyFs
+    robEntry.rfWen := robEnq.rfWen
+    robEntry.wflags := robEnq.wfflags
+    robEntry.dirtyVs := robEnq.dirtyVs
+//    robEntry.fflags
+//    robEntry.vxsat
     robEntry.debug_pc.foreach(_ := robEnq.pc)
     robEntry.debug_instr.foreach(_ := robEnq.instr)
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
@@ -169,6 +197,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
+    robCommitEntry.hasLastInFtqEntry := robEntry.hasLastInFtqEntry
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
@@ -190,6 +219,8 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
 ) with HasCircularQueuePtrHelper {
 
+  val isFormer = Bool()
+
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RobSize)
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
@@ -204,6 +235,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     val out = Wire(new RobPtr)
     out.flag := this.flag
     out.value := Cat(this.value(this.PTR_WIDTH-1, log2Up(CommitWidth)), 0.U(log2Up(CommitWidth).W))
+    out.isFormer := false.B
     out
   }
 
@@ -214,6 +246,7 @@ object RobPtr {
     val ptr = Wire(new RobPtr)
     ptr.flag := f
     ptr.value := v
+    ptr.isFormer := false.B
     ptr
   }
 }
