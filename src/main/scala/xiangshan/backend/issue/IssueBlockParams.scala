@@ -212,6 +212,16 @@ case class IssueBlockParams(
 
   def needReadFpRegFile: Boolean = exuBlockParams.map(_.readFpRf).reduce(_ || _)
 
+  def needWriteIntRegFile: Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
+
+  def needWriteFpRegFile: Boolean = exuBlockParams.map(_.writeFpRf).reduce(_ || _)
+
+  def needWriteVecRegFile: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
+
+  def needWriteV0RegFile: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
+
+  def needWriteVlRegFile: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
+
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
   def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)

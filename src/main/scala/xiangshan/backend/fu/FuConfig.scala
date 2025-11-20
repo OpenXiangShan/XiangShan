@@ -101,7 +101,7 @@ case class FuConfig (
   def numV0Src  : Int = srcData.map(_.count(x => V0RegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numVlSrc  : Int = srcData.map(_.count(x => VlRegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numRegSrc : Int = srcData.map(_.count(x => RegSrcDataSet.contains(x))).fold(0)(_ max _)
-  def numSrc    : Int = srcData.map(_.length).fold(0)(_ max _)
+  def numSrc    : Int = (if (isSta) 2 else srcData.map(_.length).fold(0)(_ max _))
 
   def readFp: Boolean = numFpSrc > 0
 
