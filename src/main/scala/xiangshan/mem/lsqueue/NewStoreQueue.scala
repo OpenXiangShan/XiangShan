@@ -595,11 +595,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.req.bits.cmd           := MemoryOpConstants.M_XWR
     io.toUncacheBuffer.req.bits.vaddr         := headDataEntry.vaddr
     io.toUncacheBuffer.req.bits.addr          := headDataEntry.paddr
-    io.toUncacheBuffer.req.bits.data          := outData.head
-    io.toUncacheBuffer.req.bits.mask          := outMask.head
+    io.toUncacheBuffer.req.bits.data          := Mux(headDataEntry.vaddr(3), outData.head(VLEN - 1, 64), outData.head(63,0))
+    io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLEN/8 - 1 , 8), outMask.head(7,0))
     io.toUncacheBuffer.req.bits.robIdx        := headDataEntry.uop.robIdx
     io.toUncacheBuffer.req.bits.memBackTypeMM := isNC
-    io.toUncacheBuffer.req.bits.nc            := false.B
+    io.toUncacheBuffer.req.bits.nc            := isNC //TODO: remove it, why not use memBackTypeMM ?!
     io.toUncacheBuffer.req.bits.id            := brodenId
 
     // resp
@@ -826,6 +826,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       dontTouch(writeSbufferVaddr)
       dontTouch(unalignMask)
       dontTouch(deqCount)
+      dontTouch(outMask)
+      dontTouch(outData)
     }
   }
   /*==================================================================================================================*/
@@ -1212,6 +1214,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       dontTouch(staReValid)
       dontTouch(prefetchSet)
       dontTouch(hasExceptionSet)
+      dontTouch(ncSet)
+      dontTouch(memBackTypeSet)
     }
 
     /*================================================================================================================*/
