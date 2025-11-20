@@ -42,7 +42,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val hartId: UInt = Input(UInt(hartIdLen.W))
 
     /* *** internal interface *** */
-    val dataRead:      DataReadBundle               = new DataReadBundle
+    val dataRead:      Vec[DataReadBundle]          = Vec(FetchPorts, new DataReadBundle)
     val metaFlush:     MetaFlushBundle              = new MetaFlushBundle
     val replacerTouch: ReplacerTouchBundle          = new ReplacerTouchBundle
     val wayLookupRead: DecoupledIO[WayLookupBundle] = Flipped(DecoupledIO(new WayLookupBundle))
@@ -70,7 +70,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /* *** Input/Output port *** */
   private val (fromFtq, toIfu)   = (io.req, io.resp)
-  private val (toData, fromData) = (io.dataRead.req, io.dataRead.resp)
+  private val (toData, fromData) = (io.dataRead.map(_.req), io.dataRead.map(_.resp))
   private val toMetaFlush        = io.metaFlush.req
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
   private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
@@ -150,14 +150,20 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * data SRAM request
     ******************************************************************************
     */
-  toData.valid             := s0_valid
-  toData.bits.isDoubleLine := s0_doubleline
-  toData.bits.vSetIdx      := s0_vSetIdx
-  toData.bits.blkOffset    := s0_blkOffset
-  toData.bits.blkEndOffset := s0_blkEndOffset
-  toData.bits.waymask      := s0_waymasks
+  toData.head.valid             := s0_valid
+  toData.head.bits.isDoubleLine := s0_doubleline
+  toData.head.bits.vSetIdx      := s0_vSetIdx
+  toData.head.bits.blkOffset    := s0_blkOffset
+  toData.head.bits.blkEndOffset := s0_blkEndOffset
+  toData.head.bits.waymask      := s0_waymasks
 
-  private val s0_canGo = toData.ready && fromWayLookup.valid && s1_ready
+  // TODO: 2-fetch
+  toData.tail.foreach { port =>
+    port.valid := false.B
+    port.bits  := DontCare
+  }
+
+  private val s0_canGo = toData.head.ready && fromWayLookup.valid && s1_ready
   s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_fire  := s0_valid && s0_canGo && !s0_flush
 
@@ -196,9 +202,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    * Receive data from sram and mshr
    * ******************************************************************* */
   // sram: valid when RegNext(s0_fire)
-  private val s1_sramHits  = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
-  private val s1_sramDatas = fromData.datas
-  private val s1_sramCodes = fromData.codes
+  private val s1_sramHits = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
+  // TODO: 2-fetch
+  private val s1_sramDatas = fromData.head.datas
+  private val s1_sramCodes = fromData.head.codes
   private val s1_sramValid = VecInit(Seq(
     RegNext(s0_fire),
     RegNext(s0_fire) && s1_doubleline

@@ -26,8 +26,8 @@ import xiangshan.frontend.icache.ICacheModule
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDataHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
-    val write: DataWriteBundle = Flipped(new DataWriteBundle)
-    val read:  DataReadBundle  = Flipped(new DataReadBundle)
+    val write: DataWriteBundle     = Flipped(new DataWriteBundle)
+    val read:  Vec[DataReadBundle] = Vec(FetchPorts, Flipped(new DataReadBundle))
   }
 
   val io: ICacheDataArrayIO = IO(new ICacheDataArrayIO)
@@ -38,26 +38,28 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDa
   private val banks = Seq.tabulate(DataBanks)(i => Module(new ICacheDataBank(i)))
 
   /* *** read *** */
-  private val r0_valid  = io.read.req.valid
-  private val r0_setIdx = io.read.req.bits.vSetIdx
-  private val r0_bankSel =
-    getBankSel(io.read.req.bits.blkOffset, io.read.req.bits.blkEndOffset, io.read.req.bits.isDoubleLine)
-  private val r0_lineSel = getLineSel(io.read.req.bits.blkOffset)
-  private val r0_waymask = io.read.req.bits.waymask
+  io.read.zipWithIndex.foreach { case (port, portIdx) =>
+    val r0_valid   = port.req.valid
+    val r0_setIdx  = port.req.bits.vSetIdx
+    val r0_bankSel = getBankSel(port.req.bits.blkOffset, port.req.bits.blkEndOffset, port.req.bits.isDoubleLine)
+    val r0_lineSel = getLineSel(port.req.bits.blkOffset)
+    val r0_waymask = port.req.bits.waymask
 
-  io.read.req.ready := banks.map(_.io.read.req.ready).reduce(_ || _)
-  banks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid        := r0_valid && r0_bankSel(r0_lineSel(i))(i)
-    b.io.read.req.bits.setIdx  := r0_setIdx(r0_lineSel(i))
-    b.io.read.req.bits.waymask := r0_waymask(r0_lineSel(i))
+    port.req.ready := banks.map(_.io.read(portIdx).req.ready).reduce(_ || _)
+
+    banks.zipWithIndex.foreach { case (bank, bankIdx) =>
+      bank.io.read(portIdx).req.valid        := r0_valid && r0_bankSel(r0_lineSel(bankIdx))(bankIdx)
+      bank.io.read(portIdx).req.bits.setIdx  := r0_setIdx(r0_lineSel(bankIdx))
+      bank.io.read(portIdx).req.bits.waymask := r0_waymask(r0_lineSel(bankIdx))
+    }
+
+    port.resp.datas := banks.map(_.io.read(portIdx).resp.entry.data)
+    port.resp.codes := banks.map(_.io.read(portIdx).resp.entry.code)
   }
-
-  io.read.resp.datas := banks.map(_.io.read.resp.entry.data)
-  io.read.resp.codes := banks.map(_.io.read.resp.entry.code)
 
   // TEST: force ECC to fail by setting parity codes to 0
   if (ForceDataEccFail) {
-    io.read.resp.codes.foreach(_ := 0.U)
+    io.read.foreach(_.resp.codes.foreach(_ := 0.U))
   }
 
   /* *** write *** */

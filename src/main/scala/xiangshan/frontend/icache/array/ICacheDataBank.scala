@@ -46,8 +46,8 @@ class ICacheDataBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule 
       val req: DecoupledIO[Req] = Flipped(Decoupled(new Req))
     }
 
-    val read:  Read  = new Read
-    val write: Write = new Write
+    val read:  Vec[Read] = Vec(FetchPorts, new Read)
+    val write: Write     = new Write
   }
 
   val io: ICacheDataBankIO = IO(new ICacheDataBankIO)
@@ -72,18 +72,41 @@ class ICacheDataBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule 
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeICacheData_bank$bankIdx", hasMbist)
 
   /* *** read *** */
-  io.read.req.ready := !io.write.req.valid && ways.map(_.io.r.req.ready).reduce(_ && _)
-
+  // read sram
   ways.zipWithIndex.foreach { case (w, i) =>
-    w.io.r.req.valid := io.read.req.valid && io.read.req.bits.waymask(i)
+    // decide which port needs to read this way
+    // we allow more than 1 port reading the same way with same setIdx, so this can be more-than-one-hot
+    // in this case, Mux1H (mask0 & setIdx0 | mask1 & setIdx1) should still give the correct setIdx
+    // (setIdx0 | setIdx1 === setIdx0 when setIdx0 === setIdx1)
+    val reqValidVec = io.read.map(port => port.req.valid && port.req.bits.waymask(i))
+
+    w.io.r.req.valid := reqValidVec.reduce(_ || _)
     w.io.r.req.bits.apply(
-      setIdx = io.read.req.bits.setIdx
+      setIdx = Mux1H(reqValidVec, io.read.map(_.req.bits.setIdx))
+    )
+
+    // we disallow reading different setIdx, this should be guaranteed by ICacheDataArray or upper level
+    // do sanity check here, should not be included in the final hardware, so no worry about bad timing
+    val firstValidReq = Mux1H(PriorityEncoderOH(reqValidVec), io.read.map(_.req.bits))
+    assert(
+      // we require either: 1. reqValidVec is one-hot
+      PopCount(reqValidVec) <= 1.U ||
+        // or 2. all valid requests on this way have same setIdx
+        reqValidVec.zipWithIndex.map { case (v, portIdx) =>
+          !v || io.read(portIdx).req.bits.setIdx === firstValidReq.setIdx
+        }.reduce(_ && _),
+      s"DataArray bank$bankIdx way$i read conflict!"
     )
   }
 
-  private val readReqReg = RegEnable(io.read.req.bits, 0.U.asTypeOf(io.read.req.bits), io.read.req.fire)
+  io.read.zipWithIndex.foreach { case (port, i) =>
+    // ready
+    port.req.ready := !io.write.req.valid && ways.map(_.io.r.req.ready).reduce(_ && _)
 
-  io.read.resp.entry := Mux1H(readReqReg.waymask, ways.map(_.io.r.resp.data.head))
+    // send response
+    val reqReg = RegEnable(port.req.bits, 0.U.asTypeOf(port.req.bits), port.req.fire)
+    port.resp.entry := Mux1H(reqReg.waymask, ways.map(_.io.r.resp.data.head))
+  }
 
   /* *** write *** */
   io.write.req.ready := ways.map(_.io.w.req.ready).reduce(_ && _)
