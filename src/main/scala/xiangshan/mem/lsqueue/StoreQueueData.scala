@@ -202,7 +202,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 
   // destorequeue read data
   (0 until numRead).map(i => {
-      io.rdata(i) := data(GatedRegNext(io.raddr(i)))
+      io.rdata(i) := data(RegNext(io.raddr(i)))
   })
 
   // DataModuleTemplate should not be used when there're any write conflicts
