@@ -37,6 +37,8 @@ import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
+import xiangshan.frontend.bpu.utage.MicroTage
+import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
@@ -52,6 +54,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
   private val abtb        = Module(new AheadBtb)
+  private val utage       = Module(new MicroTage)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
   private val ittage      = Module(new Ittage)
@@ -64,6 +67,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     fallThrough,
     ubtb,
     abtb,
+    utage,
     mbtb,
     tage,
     sc,
@@ -80,6 +84,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtbEnable
   abtb.io.enable        := ctrl.abtbEnable
+  utage.io.enable       := true.B
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable
   sc.io.enable          := ctrl.scEnable
@@ -134,6 +139,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
+  // utage meta
+  // private val s1_utageMeta = utage.io.prediction.meta.bits
+  private val s1_utageMeta = Wire(new MicroTageMeta)
+  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
+  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -163,6 +174,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.startVAddr      := s3_pc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
+  fastTrain.bits.utageMeta       := s3_utageMeta
+  fastTrain.bits.hasOverride     := s3_override
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -182,6 +195,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.overrideValid       := s3_override
   abtb.io.previousVAddr.valid := s4_valid
   abtb.io.previousVAddr.bits  := s4_pc
+  abtb.io.microTagePred       := utage.io.prediction
+
+  // utage
+  utage.io.foldedPathHist         := phr.io.s0_foldedPhr
+  utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -257,14 +275,40 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // if ubtb or abtb find a taken branch, use the corresponding prediction
   // otherwise, use fall-through prediction
   // TODO: maybe need compare position？
+
+  // When microTAGE participates in prediction, it has the highest priority in stage S1.
+  // private val shouldUseUtage =
+  //   (ubtb.io.prediction.cfiPosition === utage.io.prediction.bits.cfiPosition) && utage.io.prediction.valid
+  // private val s1_realUbtbTaken = Mux(
+  //   shouldUseUtage,
+  //   utage.io.prediction.bits.taken,
+  //   ubtb.io.prediction.taken && !abtb.io.useMicroTage
+  // )
+  private val s1_realUbtbTaken = ubtb.io.prediction.taken && !abtb.io.useMicroTage
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        ubtb.io.prediction.taken -> ubtb.io.prediction,
+        s1_realUbtbTaken         -> ubtb.io.prediction,
         abtb.io.prediction.taken -> abtb.io.prediction
       )
     )
+
+  // ---------- Base Table Info for microTAGE Meta ----------
+  private val baseBrTaken = Mux(
+    ubtb.io.prediction.taken,
+    ubtb.io.prediction.attribute.isConditional,
+    Mux(abtb.io.prediction.taken, abtb.io.prediction.attribute.isConditional, false.B)
+  )
+  private val baseBrCfiPosition = Mux(
+    ubtb.io.prediction.taken,
+    ubtb.io.prediction.cfiPosition,
+    Mux(abtb.io.prediction.taken, abtb.io.prediction.cfiPosition, 0.U)
+  )
+
+  s1_utageMeta                 := utage.io.meta.bits
+  s1_utageMeta.baseTaken       := baseBrTaken
+  s1_utageMeta.baseCfiPosition := baseBrCfiPosition
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
@@ -348,6 +392,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
+  s3_meta.utage  := s3_utageMeta
   s3_meta.mbtb   := s3_mbtbMeta
   s3_meta.tage   := s3_tageMeta
   s3_meta.ras    := s3_rasMeta
@@ -497,6 +542,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_microTage", io.toFtq.prediction.fire && abtb.io.useMicroTage)
   XSPerfAccumulate(
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
