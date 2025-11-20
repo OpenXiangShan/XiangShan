@@ -497,6 +497,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
   XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate("fromFtq_redirect", io.fromFtq.redirect.valid)
+  private val testRedirect = io.fromFtq.redirect.valid
+  private val s1_testRedirect = RegEnable(testRedirect, s0_fire)
+  private val s2_testRedirect = RegEnable(s1_testRedirect, s1_fire)
+  private val s3_testRedirect = RegEnable(s2_testRedirect, s2_fire)
+  XSPerfAccumulate("fromFtq_override_after_Redirect", s3_testRedirect && io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
   XSPerfAccumulate(
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken

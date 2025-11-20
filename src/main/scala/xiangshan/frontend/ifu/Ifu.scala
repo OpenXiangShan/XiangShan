@@ -58,6 +58,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
+import xiangshan.Resolve
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with PreDecodeHelper
@@ -92,6 +93,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     // Backend: csr control
     val csrFsIsOff: Bool = Input(Bool())
+
+    val testResolve = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -845,4 +848,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s3_alignFetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s3_alignFetchBlock(1).startVAddr.toUInt
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
+
+  private val testResolve = io.testResolve
+  private val branches = testResolve.map {
+    resolve => resolve.valid && resolve.bits.attribute.isConditional
+  }
+  private val takenBrances = testResolve.map {
+    resolve => resolve.valid && resolve.bits.attribute.isConditional && resolve.bits.taken
+  }
+  private val misPredBranches = testResolve.map {
+    resolve => resolve.valid && resolve.bits.attribute.isConditional && resolve.bits.mispredict
+  }
+  XSPerfAccumulate("br_total_branches", PopCount(branches))
+  XSPerfAccumulate("br_total_misPredBranches", PopCount(misPredBranches))
+  XSPerfAccumulate("br_total_takenBranches", PopCount(takenBrances))
 }
