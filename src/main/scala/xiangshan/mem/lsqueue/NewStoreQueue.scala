@@ -1124,7 +1124,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       val setValid      = cboSetVec(j)
       when(setValid) {
         ctrlEntries(i).cboType   := Mux1H(List(
-          isCboClean(port.bits.uop.fuOpType(1, 0)) -> CboType.clean,
+          isCboClean(port.bits.uop.fuOpType(1, 0)) -> CboType.clean, // TODO: don't use (1, 0)
           isCboFlush(port.bits.uop.fuOpType(1, 0)) -> CboType.flush,
           isCboInval(port.bits.uop.fuOpType(1, 0)) -> CboType.inval,
           isCboZero(port.bits.uop.fuOpType(1, 0))  -> CboType.zero
@@ -1137,12 +1137,12 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     /*======================================= staInRe [sta Stage 2] ==================================================*/
 
     val staReValidVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      !port.bits.tlbMiss && staValidSetVec(j)
-    }
+      RegNext(!port.bits.tlbMiss && staValidSetVec(j)) //TODO: use valid of s1, will be remove in the future.
+    } // at s2 stage of storeUnit
 
     val staReValid = (0 until staReValidVec.length).map { j =>
-      RegNext(staReValidVec(j)) && io.fromStoreUnit.storeAddrInRe(j).isLastRequest
-    }.reduce(_ || _)
+      staReValidVec(j) && io.fromStoreUnit.storeAddrInRe(j).isLastRequest
+    }.reduce(_ || _) // at s2 stage of storeUnit
 
     val prefetchSet     = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
       port.cacheMiss && staReValidVec(j)
@@ -1158,7 +1158,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }.reduce(_ || _)
     val memBackTypeSet  = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
       port.memBackTypeMM && staReValidVec(j)
-    }.reduce(_ || _)
+    }.reduce(_ || _) // memBackTypeMM  = true.B means it is memory region , false.B means it is IO region.
 
     when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
       ctrlEntries(i).prefetch := prefetchSet
@@ -1186,7 +1186,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ctrlEntries(i).memoryType := Cat(mmioSet, ncSet || !memBackTypeSet)
     }//  don't need to set false for low power, it will be set every instruction.
 
-    XSError(!mmioSet && memBackTypeSet && staReValid, "mmio not set memBackTypeMM to zero! $i\n")
+    XSError(!mmioSet && !memBackTypeSet && staReValid, s"mmio not set but memBackTypeMM is zero! ${i}\n")
 
     /*================================================================================================================*/
     /*=============================================== std ctrl =======================================================*/
