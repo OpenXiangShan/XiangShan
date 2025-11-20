@@ -47,7 +47,7 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
   val taken:     Bool                  = Bool()
   val pc:        PrunedAddr            = PrunedAddr(VAddrBits)
   val target:    PrunedAddr            = PrunedAddr(VAddrBits)
-  val phrPtr:    PhrPtr                = new PhrPtr
+  val phrMeta:   PhrMeta               = new PhrMeta()
   val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
 }
 
@@ -63,8 +63,14 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   val s1_pc:         PrunedAddr = PrunedAddr(VAddrBits)
 
   val s3_override:   Bool       = Bool()
+  val s3_phrMeta:    PhrMeta    = new PhrMeta()
   val s3_prediction: Prediction = new Prediction()
   val s3_pc:         PrunedAddr = PrunedAddr(VAddrBits)
+}
+
+class PhrMeta(implicit p: Parameters) extends PhrBundle {
+  val phrPtr:     PhrPtr = new PhrPtr
+  val phrLowBits: UInt   = UInt(PathHashHighWidth.W)
 }
 
 // NOTE: Folded history maintenance logic reuse kmh-v2 ghr folded history management logic,
@@ -88,13 +94,13 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
     oldestBitToGetFromPhr.map(i => phr(i))
 
   // slow path, read bits from phr
-  def update(phr: Vec[Bool], histPtr: PhrPtr, num: Int, shiftBits: UInt): PhrFoldedHistory = {
+  def update(phr: Vec[Bool], histPtr: PhrPtr, hashHigh: UInt, num: Int, shiftBits: UInt): PhrFoldedHistory = {
     val oldestBits = VecInit(getOldestBitFromGhr(phr, histPtr))
-    update(oldestBits, num, shiftBits)
+    update(oldestBits, num, shiftBits, hashHigh)
   }
 
   // fast path, use pre-read oldest bits
-  def update(ob: Vec[Bool], num: Int, shiftBits: UInt): PhrFoldedHistory = {
+  def update(ob: Vec[Bool], num: Int, shiftBits: UInt, hashHigh: UInt): PhrFoldedHistory = {
     val newFoldedHist = if (needOldestBits) {
       val oldestBits = ob
       require(oldestBits.length == maxUpdateNum)
@@ -130,8 +136,11 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
       ((foldedHist << num).asUInt | shiftBits)(info.FoldedLength - 1, 0).asUInt
     }
 
-    val fh = WireInit(this)
-    fh.foldedHist := newFoldedHist
+    val fh         = WireInit(this)
+    val hashFolded = computeFoldedHash(Cat(hashHigh, 0.U(maxUpdateNum.W)), info.FoldedLength)(info.HistoryLength)
+    dontTouch(newFoldedHist)
+    dontTouch(hashFolded)
+    fh.foldedHist := newFoldedHist ^ hashFolded
     fh
   }
 }
@@ -173,7 +182,7 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
 // }
 
 class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
-    with HasPhrParameters {
+    with HasPhrParameters with Helpers {
 
   val hist: MixedVec[PhrFoldedHistory] =
     MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistory(info, Shamt)))
@@ -191,11 +200,11 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
     }
   }
 
-  def update(ghv: Vec[Bool], ptr: PhrPtr, shift: Int, shiftBits: UInt): PhrAllFoldedHistories = {
+  def update(ghv: Vec[Bool], ptr: PhrPtr, hashHigh: UInt, shift: Int, shiftBits: UInt): PhrAllFoldedHistories = {
     require(shiftBits.getWidth == shift)
     val res = WireInit(this)
     for (i <- this.hist.indices) {
-      res.hist(i) := this.hist(i).update(ghv, ptr, shift, shiftBits)
+      res.hist(i) := this.hist(i).update(ghv, ptr, hashHigh, shift, shiftBits)
     }
     res
   }
