@@ -40,6 +40,7 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BpuDebugMeta
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BranchAttribute
@@ -100,6 +101,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // speculationQueue stores speculation information needed by BPU when redirect happens.
   private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
 
+  // debugQueue stores information needed for debug
+  private val debugQueue = Reg(Vec(FtqSize, new BpuDebugMeta))
+
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Reg(Vec(FtqSize, new BpuMeta))
 
@@ -149,6 +153,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     bpTrainStallCnt < BpTrainStallLimit.U
   io.fromBpu.meta.ready            := true.B
   io.fromBpu.speculationMeta.ready := true.B
+  io.fromBpu.debugMeta.ready       := true.B
 
   private val prediction = io.fromBpu.prediction
 
@@ -173,19 +178,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
     entryQueue(predictionPtr.value).startVAddr     := prediction.bits.startVAddr
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
-    entryQueue(predictionPtr.value).predBranchInfo match {
-      case Some(info) =>
-        info.target    := prediction.bits.target
-        info.attribute := prediction.bits.attribute.getOrElse(BranchAttribute.None)
-      case None => { /* do nothing */ }
 
-    }
   }
 
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
 
   when(io.fromBpu.meta.valid) {
     metaQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.meta.bits
+  }
+
+  when(io.fromBpu.debugMeta.valid) {
+    debugQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.debugMeta.bits
   }
 
   // --------------------------------------------------------------------------------
@@ -377,147 +380,73 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTaken",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken)
+      redirect.bits.taken =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongPosition",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition)
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongAttribute",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-//      (redirectCfiOffset ===
-//        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-      //        0.U.asTypeOf(new BranchInfo)).cfiPosition) &&
-      !(redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute)
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      !(redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute)
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition) &&
-      (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute) &&
-      (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).target.toUInt)
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition &&
+      redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute &&
+      redirect.bits.target =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.target.toUInt
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_conditional",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition) &&
-      (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute) &&
-      (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).target.toUInt) &&
+      backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition &&
+      redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute &&
+      redirect.bits.target =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.target.toUInt &&
       redirect.bits.attribute.isConditional
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_direct",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition) &&
-      (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute) &&
-      (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).target.toUInt) &&
+      backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition &&
+      redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute &&
+      redirect.bits.target =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.target.toUInt &&
       redirect.bits.attribute.isDirect
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_indirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition) &&
-      (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute) &&
-      (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).target.toUInt) &&
+      backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition &&
+      redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute &&
+      redirect.bits.target =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.target.toUInt &&
       redirect.bits.attribute.isIndirect
   )
 
   XSPerfAccumulate(
     "squashCycles_bpWrong_redirect_wrongTarget_indirect_retCall",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      (redirect.bits.taken ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).taken) &&
-      (redirectCfiOffset ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).cfiPosition) &&
-      (redirect.bits.attribute ===
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).attribute) &&
-      (redirect.bits.target =/=
-        entryQueue(backendRedirectFtqIdx.bits.value).predBranchInfo.getOrElse(
-          0.U.asTypeOf(new BranchInfo)
-        ).target.toUInt) &&
+      backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.taken &&
+      redirectCfiOffset === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.cfiPosition &&
+      redirect.bits.attribute === debugQueue(backendRedirectFtqIdx.bits.value).bpPred.attribute &&
+      redirect.bits.target =/= debugQueue(backendRedirectFtqIdx.bits.value).bpPred.target.toUInt &&
       redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect
   )
 

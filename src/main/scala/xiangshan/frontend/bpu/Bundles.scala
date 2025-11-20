@@ -134,6 +134,26 @@ object BranchAttribute {
   def OtherIndirect: BranchAttribute = apply(BranchType.Indirect, RasAction.None)
 }
 
+class BpuPredictionSource extends Bundle {
+  val s1Source:   UInt = BpuPredictionSource.Stage1()
+  val s3Source:   UInt = BpuPredictionSource.Stage3()
+  val s3Override: Bool = Bool()
+}
+
+object BpuPredictionSource {
+  object Stage1 extends EnumUInt(3) {
+    def Ubtb:        UInt = 0.U(width.W)
+    def Abtb:        UInt = 1.U(width.W)
+    def FallThrough: UInt = 2.U(width.W)
+  }
+  object Stage3 extends EnumUInt(4) {
+    def Ras:         UInt = 0.U(width.W)
+    def ITTage:      UInt = 1.U(width.W)
+    def Mbtb:        UInt = 2.U(width.W)
+    def FallThrough: UInt = 3.U(width.W)
+  }
+}
+
 /* *** public *** */
 // Csr -> Bpu
 class BpuCtrl extends Bundle {
@@ -155,18 +175,12 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   // override valid
   val s3Override: Bool = Bool()
-  // for perf counters
-  val attribute: Option[BranchAttribute] = if (!env.FPGAPlatform) Some(new BranchAttribute) else None
 
   def fromStage(pc: PrunedAddr, prediction: Prediction): Unit = {
     this.startVAddr           := pc
     this.takenCfiOffset.valid := prediction.taken
     this.takenCfiOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
     this.target               := prediction.target
-    this.attribute match {
-      case Some(attr) => attr := prediction.attribute
-      case None       => /* do nothing */
-    }
   }
   // TODO: what else do we need?
 }
@@ -234,9 +248,17 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val phr:    PhrMeta     = new PhrMeta
   val sc:     ScMeta      = new ScMeta
   val ittage: IttageMeta  = new IttageMeta
+}
+
+class BpuDebugMeta(implicit p: Parameters) extends BpuBundle {
   // used for BpTrace
-  val debug_bpId:       UInt       = UInt(XLEN.W)
-  val debug_startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
+  val bpId:       UInt       = UInt(XLEN.W)
+  val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
+  // used for perf counters
+  val bpS1:     Prediction          = new Prediction
+  val bpS3:     Prediction          = new Prediction
+  val bpSource: BpuPredictionSource = new BpuPredictionSource
+  def bpPred:   Prediction          = Mux(bpSource.s3Override, bpS3, bpS1)
 }
 
 /* *** internal const & type *** */

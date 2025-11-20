@@ -28,6 +28,7 @@ import utils.EnumUInt
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.ghr.Ghr
 import xiangshan.frontend.bpu.history.ghr.GhrMeta
@@ -314,17 +315,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
 
   // used for performance counters
-  private object S1PredictionSource extends EnumUInt(3) {
-    def Ubtb:        UInt = 0.U(width.W)
-    def Abtb:        UInt = 1.U(width.W)
-    def FallThrough: UInt = 2.U(width.W)
-  }
-  private object S3PredictionSource extends EnumUInt(4) {
-    def Ras:         UInt = 0.U(width.W)
-    def ITTage:      UInt = 1.U(width.W)
-    def Mbtb:        UInt = 2.U(width.W)
-    def FallThrough: UInt = 3.U(width.W)
-  }
+  // see class BpuPredictionSource in Bundles.scala
   private val s1_predictionSource = PriorityEncoder(Seq(
     ubtb.io.prediction.taken,
     abtb.io.prediction.taken,
@@ -392,14 +383,23 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.ittage := s3_ittageMeta
   s3_meta.sc     := s3_scMeta
 
-  s3_meta.debug_startVAddr := s3_pc
-  s3_meta.debug_bpId       := debug_bpId
+  private val s3_debugMeta = Wire(new BpuDebugMeta)
+  s3_debugMeta.startVAddr          := s3_pc
+  s3_debugMeta.bpId                := debug_bpId
+  s3_debugMeta.bpS1                := s3_s1Prediction
+  s3_debugMeta.bpS3                := s3_prediction
+  s3_debugMeta.bpSource.s1Source   := s1_predictionSource
+  s3_debugMeta.bpSource.s3Source   := s3_predictionSource
+  s3_debugMeta.bpSource.s3Override := s3_override
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
 
   io.toFtq.speculationMeta.valid := s3_valid
   io.toFtq.speculationMeta.bits  := s3_speculationMeta
+
+  io.toFtq.debugMeta.valid := s3_valid
+  io.toFtq.debugMeta.bits  := s3_debugMeta
 
   s0_pc := MuxCase(
     s0_pcReg,
@@ -513,9 +513,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** perf pred *** */
 
-  private val s2_s1UseFallThrough = RegEnable(s1_predictionSource === S1PredictionSource.FallThrough, s1_fire)
-  private val s2_s1UseABTB        = RegEnable(s1_predictionSource === S1PredictionSource.Abtb, s1_fire)
-  private val s2_s1UseUBTB        = RegEnable(s1_predictionSource === S1PredictionSource.Ubtb, s1_fire)
+  private val s2_s1UseFallThrough = RegEnable(s1_predictionSource === BpuPredictionSource.Stage1.FallThrough, s1_fire)
+  private val s2_s1UseABTB        = RegEnable(s1_predictionSource === BpuPredictionSource.Stage1.Abtb, s1_fire)
+  private val s2_s1UseUBTB        = RegEnable(s1_predictionSource === BpuPredictionSource.Stage1.Ubtb, s1_fire)
   private val s3_s1UseFallThrough = RegEnable(s2_s1UseFallThrough, s2_fire)
   private val s3_s1UseABTB        = RegEnable(s2_s1UseABTB, s2_fire)
   private val s3_s1UseUBTB        = RegEnable(s2_s1UseUBTB, s2_fire)
@@ -630,7 +630,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.Mbtb
+      s3_s1UseUBTB && s3_predictionSource === BpuPredictionSource.Stage3.Mbtb
   )
   XSPerfAccumulate(
     "s3Override_targetMismatch_s3ITTage_s1uBTB",
@@ -639,7 +639,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.ITTage
+      s3_s1UseUBTB && s3_predictionSource === BpuPredictionSource.Stage3.ITTage
   )
   XSPerfAccumulate(
     "s3Override_targetMismatch_s3RAS_s1uBTB",
@@ -648,7 +648,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseUBTB && s3_predictionSource === S3PredictionSource.Ras
+      s3_s1UseUBTB && s3_predictionSource === BpuPredictionSource.Stage3.Ras
   )
   XSPerfAccumulate(
     "s3Override_targetMismatch_s3mBTB_s1aBTB",
@@ -657,7 +657,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.Mbtb
+      s3_s1UseABTB && s3_predictionSource === BpuPredictionSource.Stage3.Mbtb
   )
   XSPerfAccumulate(
     "s3Override_targetMismatch_s3ITTage_s1aBTB",
@@ -666,7 +666,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.ITTage
+      s3_s1UseABTB && s3_predictionSource === BpuPredictionSource.Stage3.ITTage
   )
   XSPerfAccumulate(
     "s3Override_targetMismatch_s3RAS_s1aBTB",
@@ -675,7 +675,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_s1UseABTB && s3_predictionSource === S3PredictionSource.Ras
+      s3_s1UseABTB && s3_predictionSource === BpuPredictionSource.Stage3.Ras
   )
 
   /* *** perf train *** */
