@@ -33,6 +33,7 @@ trait MachineLevel { self: NewCSR =>
       reg.BMA := BMAField.TestBMA
     }
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
+    reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
     .setAddr(Mbmc))  else  None
 
@@ -473,6 +474,7 @@ trait MachineLevel { self: NewCSR =>
 
 class MbmcBundle extends  CSRBundle {
   val BMA  = BMAField(63,6,null).withReset(BMAField.ResetBMA)
+  val KEYIDEN  = RW(3).withReset(0.U)
   val BME  = RW(2).withReset(0.U)
   val BCLEAR = RW(1).withReset(0.U)
   val CMODE  = RW(0).withReset(0.U)
