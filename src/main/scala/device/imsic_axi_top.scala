@@ -16,6 +16,7 @@
 
 package device
 
+import aia.AXIRegIMSIC_WRAP
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
@@ -53,7 +54,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
 
   // AXI4 Bus
-  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC(soc.IMSICParams, seperateBus = false)))
+  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, seperateBus = false)))
 
   val axi = axi_reg_imsic.map { axi_reg_imsic =>
     val axinode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -62,7 +63,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
         id = IdRange(0, 65536)
       ))
     )))
-    axi_reg_imsic.axi4tolite.head.node := AXI4Buffer() := axinode
+    axi_reg_imsic.imsic_xbar1to2 := AXI4Buffer() := axinode
     axinode
   }
 
