@@ -1160,7 +1160,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }.reduce(_ || _)
     val memBackTypeSet  = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
       port.memBackTypeMM && staReValidVec(j)
-    }.reduce(_ || _) // memBackTypeMM  = true.B means it is memory region , false.B means it is IO region.
+    }.reduce(_ || _) // memBackTypeMM  = true.B means it is main memory region , false.B means it is IO region.
 
     when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
       ctrlEntries(i).prefetch := prefetchSet
@@ -1186,6 +1186,21 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
          io:        "11".U // IO device
       */
       ctrlEntries(i).memoryType := Cat(mmioSet, ncSet || !memBackTypeSet)
+      /*
+       * [NOTE]: To explain the logical operations above, the truth table is as follows:
+       * The signal of [memBackTypeMM] means request is main memory region.
+       *
+       *           |  memBackTypeSet | !memBackTypeSet | ncSet | mmioSet | memoryType[1] | memoryType[0] |
+       * Cacheable |       1         |       0         |   0   |    0    |        0      |       0       |
+       * NC        |       1         |       0         |   1   |    0    |        0      |       1       |
+       * PbmtIO    |       1         |       0         |   0   |    1    |        1      |       0       |
+       * IO        |       0         |       1         |   0   |    1    |        1      |       1       |
+       *                                     |             |        |             ^              ^
+       *                                     |             |        +-------------+              |
+       *                                     +----- or ----+                                     |
+       *                                            |                                            |
+       *                                            +--------------------------------------------+
+       * */
     }//  don't need to set false for low power, it will be set every instruction.
 
     XSError(!mmioSet && !memBackTypeSet && staReValid, s"mmio not set but memBackTypeMM is zero! ${i}\n")
