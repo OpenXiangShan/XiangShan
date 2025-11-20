@@ -1088,7 +1088,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
     val staValidSetVec  = VecInit(io.fromStoreUnit.storeAddrIn.map{case port =>
       val index         = port.bits.uop.sqIdx.value
-      val setValid      = index === i.U && port.fire
+      val setValid      = index === i.U && port.fire && !needCancel(i)
       setValid
     }) // one-hot select vec
 
@@ -1194,12 +1194,12 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
     val dataValidSet = VecInit(io.storeDataIn.map{ case port =>
       val index = port.bits.sqIdx.value
-      index === i.U && port.fire
+      index === i.U && port.fire && !needCancel(i)
     }).asUInt.orR
 
     when(dataValidSet) {
       ctrlEntries(i).dataValid := true.B
-    }.elsewhen(deqCancel) {
+    }.elsewhen(deqCancel || needCancel(i)) {
       ctrlEntries(i).dataValid := false.B
     }
 
