@@ -563,6 +563,7 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    immType = Set(SelImm.IMM_OPIVIS, SelImm.IMM_OPIVIU),
   )
 
   val VimacCfg = FuConfig (
@@ -582,6 +583,7 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    immType = Set(SelImm.IMM_OPIVIS, SelImm.IMM_OPIVIU),
   )
 
   val VidivCfg = FuConfig (
@@ -599,6 +601,7 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    immType = Set(SelImm.IMM_OPIVIS, SelImm.IMM_OPIVIU),
   )
 
   val VppuCfg = FuConfig (
@@ -616,6 +619,7 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    immType = Set(SelImm.IMM_OPIVIS, SelImm.IMM_OPIVIU),
   )
 
   val VipuCfg: FuConfig = FuConfig (
@@ -634,6 +638,7 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    immType = Set(SelImm.IMM_OPIVIS, SelImm.IMM_OPIVIU),
   )
 
   val VmoveCfg = FuConfig (
