@@ -62,7 +62,7 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
     PrunedAddrInit(alignedAddr + brOffset)
   }
   def pathHash(pc: PrunedAddr, target: PrunedAddr): UInt = {
-    val hash = (((pc >> 1) & (Fill(9, true.B))) << 4) ^ ((target >> 2) & Fill(15, true.B))
+    val hash = Cat(pc(9, 1), 0.U(4.W)) ^ target(16, 2)
     hash(PathHashWidth - 1, 0)
   }
 
