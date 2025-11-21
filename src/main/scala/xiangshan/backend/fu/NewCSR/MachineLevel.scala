@@ -473,11 +473,11 @@ trait MachineLevel { self: NewCSR =>
 }
 
 class MbmcBundle extends  CSRBundle {
-  val BMA  = BMAField(63,6,null).withReset(BMAField.ResetBMA)
-  val KEYIDEN  = RW(3).withReset(0.U)
-  val BME  = RW(2).withReset(0.U)
-  val BCLEAR = RW(1).withReset(0.U)
-  val CMODE  = RW(0).withReset(0.U)
+  val BMA     = BMAField(63, 6, null).withReset(BMAField.ResetBMA)
+  val KEYIDEN = RW(3).withReset(0.U)
+  val BME     = RW(2).withReset(0.U)
+  val BCLEAR  = RW(1).withReset(0.U)
+  val CMODE   = RW(0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {
