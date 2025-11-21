@@ -3,7 +3,7 @@
 
 package pbus
 
-//import _root_.circt.stage.ChiselStage
+
 import chisel3._
 import device.standalone.StandAloneDebugModule
 import system.{HasSoCParameter, SoCParameters, SoCParamsKey}
@@ -17,6 +17,7 @@ import device.SYSCNTConsts
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.ValName
+import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.HeterogeneousBag
 //import org.chipsalliance.cde.config.{Config, Parameters}
@@ -26,6 +27,8 @@ import _root_.circt.stage._
 import aia.{AXI4IMSIC, IMSICParameKey, IMSICParameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.devices.debug.DebugModuleKey
+import chisel3.experimental.dataview._
+//import scala.collection.immutable._
 
 
 /**
@@ -343,7 +346,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     addrWidth = params.periParams.addrWidth,
     dataWidth = params.periParams.timedataBytes * 8,
     hartNum = params.NumHarts
-  ))
+  )(new Config((site, here, up) => {   case SoCParamsKey => SoCParameters()})))
+
   val peri_xbar = AXI4Xbar()
   val peri_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
@@ -385,6 +389,9 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     hartNum  = params.NumHarts
   )(new Config((site, here, up) => {
     case SoCParamsKey => SoCParameters()
+    case DebugModuleKey => p(DebugModuleKey).map(_.copy(
+      baseAddress = params.DebugAddrMap.base,hasBusMaster = true))
+    case MaxHartIdBits => log2Up(params.NumHarts) max 6
   })))
 
   val dmxbar = AXI4Xbar()
@@ -442,8 +449,14 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
     imsic_pbus_top.module.s_aplic <> aplic_top.module.aplic_m
     (cpu_mNodes.zip(cpu_s)).foreach { case (node, io) => node.out.head._1 <> io }
-    dm.axi4node.foreach(_ <> dm_sNode.in.head._1)
     dm_m.foreach(_ <> dm.axi4masternode.get)
+    dm.axi4node.foreach(_.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+//    dm.axi4node.foreach(_)
+//      val axi4Bundle = node.asInstanceOf[AXI4Bundle]  // 强制转换为 AXI4Bundle
+//      axi4Bundle <> dm_sNode.in.head._1
+//    }
+//    dm.axi4node.foreach(_.)
+
 //        dm_m <> dm.axi4masternode.get
     syscnt.axi4node.foreach(_ <> peri_s1Node.in.head._1)
     //msi_sNodes -> imsicPbusTop
@@ -490,6 +503,13 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 //    )
 //  )
 //)
+
+//trait HasUncoreParam {
+//  implicit val p: Parameters
+//  val debug = p(DebugModuleKey)
+//
+//  debug.get.
+//}
 object PbusGen extends App {
   // Example configuration with mixed input widths
   val aplicparams = AplicParams(
@@ -506,9 +526,11 @@ object PbusGen extends App {
   )
 
   val params = Pbus2Params(aplicParams=aplicparams,periParams=periParams)
-  implicit val p: Parameters = Parameters.empty.alterPartial({
-    case SoCParamsKey => SoCParameters()
-  }) //Parameters.empty
+  implicit val p: Parameters = Parameters.empty//.alterPartial({
+//    case SoCParamsKey => SoCParameters()
+//    case DebugModuleKey => p(DebugModuleKey).map(_.copy(baseAddress = params.DebugAddrMap.base,hasBusMaster = true))
+
+  //}) //Parameters.empty
 
   val pbusM = LazyModule(new uncoreTop(params))
 
