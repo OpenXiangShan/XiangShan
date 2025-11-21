@@ -285,7 +285,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val isJmp = Wire(Vec(RenameWidth, Bool()))
   isJmp zip io.in.map(_.bits) foreach {
-    case (auij, in) => auij := Mux(in.exceptionVec.asUInt.orR, false.B, (in.fuOpType === ALUOpType.jalr) || (in.fuOpType === ALUOpType.auipc))
+    case (auij, in) => auij := Mux(in.exceptionVec.asUInt.orR, false.B, ALUOpType.isJmp(in.fuOpType) && (in.numWB === 2.U))
+  }
+
+  val isStore = Wire(Vec(RenameWidth, Bool()))
+  isStore zip io.in.map(_.bits) foreach {
+    case (st, in) => st := Mux(in.exceptionVec.asUInt.orR, false.B, FuType.isStore(in.fuType))
   }
 
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
@@ -375,12 +380,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).ftqOffset := uops(i - 1).ftqOffset
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
-        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse))
+        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse))
+      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
