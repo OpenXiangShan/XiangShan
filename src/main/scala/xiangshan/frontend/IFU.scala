@@ -654,8 +654,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // last instuction finish
   val is_first_instr = RegInit(true.B)
 
-  val m_idle :: m_waitLastCmt :: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil =
-    Enum(11)
+  val m_idle :: m_waitLastCmt :: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_pmpResp :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil =
+    Enum(12)
   val mmio_state = RegInit(m_idle)
 
   // do mmio fetch only when pmp/pbmt shows it is a uncacheable address and no exception occurs
@@ -787,6 +787,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_sendPMP) {
+      mmio_state := m_pmpResp
+    }
+
+    is(m_pmpResp) {
       val pmp_exception = ExceptionType.fromPMPResp(io.pmp.resp)
       // if pmp re-check respond mismatch with previous check, must be access fault
       val mmio_mismatch_exception = Mux(
