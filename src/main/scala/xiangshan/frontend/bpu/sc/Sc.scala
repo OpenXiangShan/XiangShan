@@ -395,7 +395,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   // new entries write back to tables
   pathTable zip t1_pathSetIdx zip t1_writePathEntryVec foreach {
     case ((table, idx), writeEntries) =>
-      table.io.update.valid    := t1_writeValid
+      table.io.update.valid    := t1_writeValid && ctrl.pathEnable
       table.io.update.setIdx   := idx
       table.io.update.wayMask  := t1_writeWayMask
       table.io.update.entryVec := writeEntries
@@ -403,13 +403,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   globalTable zip t1_globalSetIdx zip t1_writeGlobalEntryVec foreach {
     case ((table, idx), writeEntries) =>
-      table.io.update.valid    := t1_writeValid
+      table.io.update.valid    := t1_writeValid && ctrl.globalEnable
       table.io.update.setIdx   := idx
       table.io.update.wayMask  := t1_writeWayMask
       table.io.update.entryVec := writeEntries
   }
 
-  biasTable.io.update.valid    := t1_writeValid
+  biasTable.io.update.valid    := t1_writeValid && ctrl.biasEnable
   biasTable.io.update.setIdx   := t1_biasSetIdx
   biasTable.io.update.wayMask  := t1_writeBiasWayMask
   biasTable.io.update.entryVec := t1_writeBiasEntryVec
