@@ -298,13 +298,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         (dataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB/8)) === s1QueryPaddr) && ctrlEntry.addrValid
       }).asUInt
 
-      val canForward1 = s1ForwardMask1 & allValidVec.asUInt
-      val canForward2 = s1ForwardMask2 & allValidVec.asUInt
-      val needForward = Mux(differentFlag, (~deqMask).asUInt | forwardMask, deqMask ^ forwardMask)
-
-      // origin select
-
-
       // new select
       /**
        * if canFoewardLow not zero, means High is not youngest
@@ -345,6 +338,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       addrInvalidSqIdx.value := OHToUInt(addrInvSelectOH)
       addrInvalidSqIdx.flag  := Mux(addrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
+      val forwardValid       = s1Valid && selectOH.orR // indicate whether forward is valid.
       val s2ByteSelectOffset = RegEnable(byteSelectOffset, s1Valid)
       val s2SelectDataEntry  = RegEnable(selectDataEntry, s1Valid)
       val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
@@ -355,7 +349,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
       val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
       val s2FullOverlap      = RegEnable((selectDataEntry.byteEnd >= s1LoadEnd && selectDataEntry.byteStart <= s1LoadStart), s1Valid)
-      val s2Valid            = RegNext(s1Valid)
+      val s2Valid            = RegNext(forwardValid)
       /*================================================== Stage 2 ===================================================*/
 
       val selectData         = (0 until VLEN/8).map(i =>
@@ -384,6 +378,23 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.matchInvalid     := 0.U
       s2Resp.valid                 := s2Valid
 
+      if(debugEn) {
+        dontTouch(overlapMask)
+        dontTouch(forwardMask1)
+        dontTouch(forwardMask2)
+        dontTouch(ageMaskLow)
+        dontTouch(ageMaskHigh)
+        dontTouch(paddrMatchVec)
+        dontTouch(canForwardLow)
+        dontTouch(canForwarHigh)
+        dontTouch(maskLowOH)
+        dontTouch(multiMatchLow)
+        dontTouch(maskHighOH)
+        dontTouch(multiMatchHigh)
+        dontTouch(addrInvLowOH)
+        dontTouch(addrInvHighOH)
+        dontTouch(selectOH)
+      }
     }
   }
 
