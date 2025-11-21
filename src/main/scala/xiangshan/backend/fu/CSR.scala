@@ -1171,6 +1171,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     difftest.coreid := csrio.hartId
+    difftest.valid := hasIntr || csrio.exception.valid
     difftest.interrupt := difftestIntrNO
     difftest.exception := Mux(csrio.exception.valid, causeNO, 0.U)
     difftest.exceptionPC := dexceptionPC
