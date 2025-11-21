@@ -562,7 +562,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     private val isNC             = isPbmtNC(headCtrlEntry.memoryType)
     private val uncacheCanHandle = !isCacheable(headCtrlEntry.memoryType) &&
-      headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated
+      headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated && headCtrlEntry.committed
     private val hasHardwareError = RegInit(false.B)
 
     when(uncacheState === UncacheState.waitResp) {
@@ -622,6 +622,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     connectSamePort(io.writeBack.bits.uop, dataEntries.head.uop)
     io.writeBack.bits.uop.exceptionVec(hardwareError) := hasHardwareError // override
     io.writeBack.bits.uop.flushPipe := cboState === CboState.writeback && !isCboZero(headCtrlEntry.cboType) // cbo need to use it
+    // for difftest, ref will skip mmio store
+    io.writeBack.bits.debug.isMMIO  := isMmio(ctrlEntries.head.memoryType) || isPbmtIO(ctrlEntries.head.memoryType)
 
     io.exceptionInfo.valid             := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
     io.exceptionInfo.bits.robIdx       := dataEntries.head.uop.robIdx
