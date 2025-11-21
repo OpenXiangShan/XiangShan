@@ -482,17 +482,6 @@ object Bundles {
       })
     }
 
-    def clearExceptions(
-      exceptionBits: Seq[Int] = Seq(),
-      flushPipe    : Boolean = false,
-      replayInst   : Boolean = false
-    ): DynInst = {
-      this.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
-      if (!flushPipe) { this.flushPipe := false.B }
-      if (!replayInst) { this.replayInst := false.B }
-      this
-    }
-
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
 
     def connectRenameOutUop(source: RenameOutUop): Unit = {
@@ -936,6 +925,38 @@ object Bundles {
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
     }
+
+    def toDynInst(): DynInst = {
+      val uop = Wire(new DynInst)
+      uop := 0.U.asTypeOf(uop)
+      uop.fuType         := this.fuType
+      uop.fuOpType       := this.fuOpType
+      uop.imm            := this.imm
+      uop.robIdx         := this.robIdx
+      uop.pdest          := this.pdest
+      uop.rfWen          := this.rfWen.getOrElse(false.B)
+      uop.fpWen          := this.fpWen.getOrElse(false.B)
+      uop.vecWen         := this.vecWen.getOrElse(false.B)
+      uop.v0Wen          := this.v0Wen.getOrElse(false.B)
+      uop.vlWen          := this.vlWen.getOrElse(false.B)
+      uop.flushPipe      := this.flushPipe.getOrElse(false.B)
+      uop.pc             := this.pc.getOrElse(0.U) + (this.ftqOffset.getOrElse(0.U) << instOffsetBits)
+      uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
+      uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
+      uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)
+      uop.loadWaitStrict := this.loadWaitStrict.getOrElse(false.B)
+      uop.ssid           := this.ssid.getOrElse(0.U(SSIDWidth.W))
+      uop.lqIdx          := this.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+      uop.sqIdx          := this.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+      uop.ftqPtr         := this.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
+      uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
+      uop.debugInfo      := this.perfDebugInfo
+      uop.debug_seqNum   := this.debug_seqNum
+      uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      uop.preDecodeInfo  := this.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
+      uop.numLsElem      := this.numLsElem.getOrElse(0.U)
+      uop
+    }
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
@@ -978,6 +999,9 @@ object Bundles {
       val isVecLoad = Bool()
       val isVlm = Bool()
     })
+    // LoadUnit only
+    // isFromLoadUnit indicates whether this ExuOutput is issued from LoadUnit (e.g., not so for atomics)
+    val isFromLoadUnit = if (params.hasLoadFu) Some(Bool()) else None
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
     val debug_seqNum = InstSeqNum()
@@ -1172,21 +1196,6 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
   }
 
-  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
-    val uop = new DynInst
-    val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
-    val iqIdx = UInt(log2Up(MemIQSizeMax).W)
-    val isFirstIssue = Bool()
-    val flowNum      = OptionWrapper(isVector, NumLsElem())
-
-    def src_rs1 = src(0)
-    def src_rs2 = src(1)
-    def src_stride = src(1)
-    def src_vs3 = src(2)
-    def src_mask = if (isVector) src(3) else 0.U
-    def src_vl = if (isVector) src(4) else 0.U
-  }
-
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
@@ -1198,6 +1207,43 @@ object Bundles {
     val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     def isVls = FuType.isVls(uop.fuType)
+
+    // TODO: delete this after MemExuOutput is thoroughly removed
+    def toExuOutput(param: ExeUnitParams): ExuOutput = {
+      val output = Wire(new ExuOutput(param))
+      output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
+      output.pdest  := this.uop.pdest
+      output.robIdx := this.uop.robIdx
+      output.intWen.foreach(_ := this.uop.rfWen)
+      output.fpWen.foreach(_ := this.uop.fpWen)
+      output.vecWen.foreach(_ := this.uop.vecWen)
+      output.v0Wen.foreach(_ := this.uop.v0Wen)
+      output.vlWen.foreach(_ := this.uop.vlWen)
+      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.flushPipe.foreach(_ := this.uop.flushPipe)
+      output.replay.foreach(_ := this.uop.replayInst)
+      output.debug := this.debug
+      output.debugInfo := this.uop.debugInfo
+      output.debug_seqNum := this.uop.debug_seqNum
+      output.lqIdx.foreach(_ := this.uop.lqIdx)
+      output.sqIdx.foreach(_ := this.uop.sqIdx)
+      output.predecodeInfo.foreach(_ := this.uop.preDecodeInfo)
+      output.vls.foreach(x => {
+        x.vdIdx := this.vdIdx.get
+        x.vdIdxInField := this.vdIdxInField.get
+        x.vpu   := this.uop.vpu
+        x.oldVdPsrc := this.uop.psrc(2)
+        x.isIndexed := VlduType.isIndexed(this.uop.fuOpType)
+        x.isMasked := VlduType.isMasked(this.uop.fuOpType)
+        x.isStrided := VlduType.isStrided(this.uop.fuOpType)
+        x.isWhole := VlduType.isWhole(this.uop.fuOpType)
+        x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
+        x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
+      })
+      output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
+      output.trigger.foreach(_ := this.uop.trigger)
+      output
+    }
   }
 
   object LoadShouldCancel {

@@ -32,10 +32,11 @@ import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.ExceptionNO._
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
+import xiangshan.backend.fu.vector.Bundles.{Vl, VType}
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
+import xiangshan.backend.exu.ExeUnitParams
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
 {
@@ -68,15 +69,16 @@ class VSegmentUop(implicit p: Parameters) extends VLSUBundle{
   val uop              = new DynInst
 }
 
-class VSegmentUnit (implicit p: Parameters) extends VLSUModule
+class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUModule
   with HasDCacheParameters
   with MemoryOpConstants
   with SdtrigExt
   with HasLoadHelper
 {
-  val io               = IO(new VSegmentUnitIO)
+  val io               = IO(new VSegmentUnitIO(param))
 
   val maxSize          = VSegmentBufferSize
+  override implicit val vsegParam: ExeUnitParams = param
 
   class VSegUPtr(implicit p: Parameters) extends CircularQueuePtr[VSegUPtr](maxSize){
   }
@@ -244,8 +246,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
-  val isEnqfof          = io.in.bits.uop.fuOpType === VlduType.vleff && io.in.valid
-  val isEnqFixVlUop     = isEnqfof && io.in.bits.uop.vpu.lastUop
+  val isEnqfof          = io.in.bits.fuOpType === VlduType.vleff && io.in.valid
+  val isEnqFixVlUop     = isEnqfof && io.in.bits.vpu.get.lastUop
   val nextBaseVaddr     = Wire(UInt(XLEN.W))
 
   // handle misalign sign
@@ -366,46 +368,49 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *                            enqueue logic
    *************************************************************************/
   io.in.ready                         := true.B
-  val fuOpType                         = io.in.bits.uop.fuOpType
-  val vtype                            = io.in.bits.uop.vpu.vtype
+  val fuOpType                         = io.in.bits.fuOpType
+  val vtype                            = io.in.bits.vpu.get.vtype
   val mop                              = fuOpType(6, 5)
   val instType                         = Cat(true.B, mop)
-  val eew                              = io.in.bits.uop.vpu.veew
+  val eew                              = io.in.bits.vpu.get.veew
   val sew                              = vtype.vsew
   val lmul                             = vtype.vlmul
   val emul                             = EewLog2(eew) - sew + lmul
   val vl                               = instMicroOp.vl
   val vm                               = instMicroOp.uop.vpu.vm
   val vstart                           = instMicroOp.uop.vpu.vstart
-  val srcMask                          = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true)
+  val srcMask                          = GenFlowMask(
+    Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src(v0Indice)),
+    vstart, vl, true
+  )
   // first uop enqueue, we need to latch microOp of segment instruction
   when(io.in.fire && !instMicroOpValid && !isEnqFixVlUop){
     // element number in a vd
     // TODO Rewrite it in a more elegant way.
     val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew, true), elemIdxBits)
-    instMicroOp.baseVaddr             := io.in.bits.src_rs1
+    instMicroOp.baseVaddr             := io.in.bits.src(rs1Indice)
     instMicroOpValid                  := true.B // if is first uop
     instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew)
-    instMicroOp.uop                   := io.in.bits.uop
+    instMicroOp.uop                   := io.in.bits.toDynInst()
     instMicroOp.mask                  := srcMask
     instMicroOp.vstart                := 0.U
     instMicroOp.uopFlowNum            := uopFlowNum
     instMicroOp.uopFlowNumMask        := GenVlMaxMask(uopFlowNum, elemIdxBits) // for merge data
-    instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
+    instMicroOp.vl                    := io.in.bits.src(vlIndice).asTypeOf(Vl())
     instMicroOp.exceptionVl.valid     := false.B
-    instMicroOp.exceptionVl.bits      := io.in.bits.src_vl.asTypeOf(VConfig()).vl
+    instMicroOp.exceptionVl.bits      := io.in.bits.src(vlIndice).asTypeOf(Vl())
     segmentOffset                     := 0.U
-    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVSegLoad(io.in.bits.uop.fuType)
-    instMicroOp.isVSegLoad            := FuType.isVSegLoad(io.in.bits.uop.fuType)
-    instMicroOp.isVSegStore           := FuType.isVSegStore(io.in.bits.uop.fuType)
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVSegLoad(io.in.bits.fuType)
+    instMicroOp.isVSegLoad            := FuType.isVSegLoad(io.in.bits.fuType)
+    instMicroOp.isVSegStore           := FuType.isVSegStore(io.in.bits.fuType)
     isMisalignReg                     := false.B
     notCross16ByteReg                 := false.B
   }
   // latch data
   when(io.in.fire && !isEnqFixVlUop){
-    data(enqPtr.value)                := io.in.bits.src_vs3
-    stride(enqPtr.value)              := io.in.bits.src_stride
-    uopq(enqPtr.value).uop            := io.in.bits.uop
+    data(enqPtr.value)                := io.in.bits.src(vs3Indice)
+    stride(enqPtr.value)              := io.in.bits.src(strideIndice)
+    uopq(enqPtr.value).uop            := io.in.bits.toDynInst()
   }
 
   // update enqptr, only 1 port
@@ -876,7 +881,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *************************************************************************/
 
   //Enq
-  when(isEnqFixVlUop && !fofBufferValid) { fofBuffer := io.in.bits.uop }
+  when(isEnqFixVlUop && !fofBufferValid) { fofBuffer := io.in.bits.toDynInst() }
   when(isEnqFixVlUop && !fofBufferValid) { fofBufferValid := true.B }
 
   //Deq
@@ -903,27 +908,64 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val writebackValid                   = (state === s_finish) && !isEmpty(enqPtr, deqPtr) || fofFixVlValid
 
   when(fofFixVlValid) {
-    writebackOut.uop                    := fofBuffer
-    writebackOut.uop.vpu.vl             := instMicroOp.exceptionVl.bits
-    writebackOut.data                   := instMicroOp.exceptionVl.bits
-    writebackOut.mask.get               := Fill(VLEN, 1.U)
-    writebackOut.uop.vpu.vmask          := Fill(VLEN, 1.U)
+    writebackOut.data := VecInit(Seq.fill(param.wbPathNum)(instMicroOp.exceptionVl.bits))
+    writebackOut.pdest := fofBuffer.pdest
+    writebackOut.robIdx := fofBuffer.robIdx
+    writebackOut.intWen.foreach(_ := fofBuffer.rfWen)
+    writebackOut.fpWen.foreach(_ := fofBuffer.fpWen)
+    writebackOut.vecWen.foreach(_ := fofBuffer.vecWen)
+    writebackOut.v0Wen.foreach(_ := fofBuffer.v0Wen)
+    writebackOut.vlWen.foreach(_ := fofBuffer.vlWen)
+    writebackOut.exceptionVec.foreach(_ := fofBuffer.exceptionVec)
+    writebackOut.flushPipe.foreach(_ := false.B)
+    writebackOut.replay.foreach(_ := false.B)
+    writebackOut.trigger.foreach(_ := fofBuffer.trigger)
+    writebackOut.vls.foreach(vls => {
+      vls.vpu := fofBuffer.vpu
+      vls.vpu.vl := instMicroOp.exceptionVl.bits
+      vls.vpu.vmask := Fill(VLEN, 1.U)
+      vls.oldVdPsrc := fofBuffer.psrc(2)
+      vls.isIndexed := VlduType.isIndexed(fofBuffer.fuOpType)
+      vls.isMasked := VlduType.isMasked(fofBuffer.fuOpType)
+      vls.isStrided := VlduType.isStrided(fofBuffer.fuOpType)
+      vls.isWhole := VlduType.isWhole(fofBuffer.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(fofBuffer.fuOpType)
+      vls.isVlm := VlduType.isMasked(fofBuffer.fuOpType) && VlduType.isVecLd(fofBuffer.fuOpType)
+    })
+    writebackOut.debugInfo := fofBuffer.debugInfo
+    writebackOut.debug_seqNum := fofBuffer.debug_seqNum
   }.otherwise{
-    writebackOut.uop                    := uopq(deqPtr.value).uop
-    writebackOut.uop.vpu                := instMicroOp.uop.vpu
-    writebackOut.uop.trigger            := instMicroOp.uop.trigger
-    writebackOut.uop.exceptionVec       := instMicroOp.uop.exceptionVec
-    writebackOut.mask.get               := instMicroOp.mask
-    writebackOut.data                   := data(deqPtr.value)
-    writebackOut.vdIdx.get              := vdIdxInField
-    writebackOut.uop.vpu.vl             := instMicroOp.vl
-    writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
-    writebackOut.uop.vpu.vmask          := maskUsed
-    writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
-    writebackOut.debug                  := DontCare
-    writebackOut.vdIdxInField.get       := vdIdxInField
-    writebackOut.uop.robIdx             := instMicroOp.uop.robIdx
-    writebackOut.uop.fuOpType           := instMicroOp.uop.fuOpType
+    writebackOut.data := VecInit(Seq.fill(param.wbPathNum)(data(deqPtr.value)))
+    writebackOut.pdest := uopq(deqPtr.value).uop.pdest
+    writebackOut.robIdx := instMicroOp.uop.robIdx
+    writebackOut.intWen.foreach(_ := uopq(deqPtr.value).uop.rfWen)
+    writebackOut.fpWen.foreach(_ := uopq(deqPtr.value).uop.fpWen)
+    writebackOut.vecWen.foreach(_ := uopq(deqPtr.value).uop.vecWen)
+    writebackOut.v0Wen.foreach(_ := uopq(deqPtr.value).uop.v0Wen)
+    writebackOut.vlWen.foreach(_ := uopq(deqPtr.value).uop.vlWen)
+    writebackOut.exceptionVec.foreach(_ := instMicroOp.uop.exceptionVec)
+    writebackOut.flushPipe.foreach(_ := false.B)
+    writebackOut.replay.foreach(_ := false.B)
+    writebackOut.trigger.foreach(_ := instMicroOp.uop.trigger)
+    writebackOut.vls.foreach(vls => {
+      vls.vpu := instMicroOp.uop.vpu
+      vls.vpu.vl := instMicroOp.vl
+      vls.vpu.vstart := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
+      vls.vpu.vmask := maskUsed
+      vls.vpu.vuopIdx := uopq(deqPtr.value).uop.vpu.vuopIdx
+      vls.oldVdPsrc := uopq(deqPtr.value).uop.psrc(2)
+      vls.vdIdx := vdIdxInField
+      vls.vdIdxInField := vdIdxInField
+      vls.isIndexed := VlduType.isIndexed(instMicroOp.uop.fuOpType)
+      vls.isMasked := VlduType.isMasked(instMicroOp.uop.fuOpType)
+      vls.isStrided := VlduType.isStrided(instMicroOp.uop.fuOpType)
+      vls.isWhole := VlduType.isWhole(instMicroOp.uop.fuOpType)
+      vls.isVecLoad := VlduType.isVecLd(instMicroOp.uop.fuOpType)
+      vls.isVlm := VlduType.isMasked(instMicroOp.uop.fuOpType) && VlduType.isVecLd(instMicroOp.uop.fuOpType)
+    })
+    writebackOut.debug := DontCare
+    writebackOut.debugInfo := uopq(deqPtr.value).uop.debugInfo
+    writebackOut.debug_seqNum := uopq(deqPtr.value).uop.debug_seqNum
   }
 
   io.uopwriteback.valid               := RegNext(writebackValid)

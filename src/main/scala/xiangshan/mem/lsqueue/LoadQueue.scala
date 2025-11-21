@@ -27,7 +27,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
@@ -153,6 +153,7 @@ class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {
 
 class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
+  with HasMemBlockParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
   with HasPerfEvents
@@ -170,7 +171,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)

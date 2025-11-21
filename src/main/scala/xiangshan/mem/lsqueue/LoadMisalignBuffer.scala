@@ -24,19 +24,20 @@ import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.mem.Bundles._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.Bundles.{ExuOutput, DynInst}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 
-class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
+class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasLoadHelper
   with HasTlbConst
@@ -120,10 +121,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val rob             = Flipped(new RobLsqIO)
     val splitLoadReq    = Decoupled(new LsPipelineBundle)
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
-    val writeBack       = Decoupled(new MemExuOutput)
+    val writeBack       = Decoupled(new ExuOutput(param))
     val vecWriteBack    = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
-    val loadOutValid    = Input(Bool())
-    val loadVecOutValid = Input(Bool())
     val overwriteExpBuf = Output(new XSBundle {
       val valid  = Bool()
       val vaddr  = UInt(XLEN.W)
@@ -549,27 +548,47 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) && !io.loadOutValid && !req.isvec
-  io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := DontCare
-  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
-  io.writeBack.bits.uop.rfWen := !globalException && !globalUncache && req.uop.rfWen
-  io.writeBack.bits.uop.fuType := FuType.ldu.U
-  io.writeBack.bits.uop.flushPipe := false.B
-  io.writeBack.bits.uop.replayInst := false.B
-  io.writeBack.bits.data := newRdataHelper(data_select, combinedData)
-  io.writeBack.bits.isFromLoadUnit := needWakeUpWB
-  // Misaligned accesses to uncache space trigger exceptions, so theoretically these signals won't do anything practical.
-  // But let's get them assigned correctly.
+  io.writeBack.valid := req_valid && bufferState === s_wb &&
+    (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) &&
+    !req.isvec
+  io.writeBack.bits := 0.U.asTypeOf(io.writeBack.bits)
+  io.writeBack.bits.data := VecInit(Seq.fill(param.wbPathNum)(newRdataHelper(data_select, combinedData)))
+  io.writeBack.bits.pdest := req.uop.pdest
+  io.writeBack.bits.robIdx := req.uop.robIdx
+  io.writeBack.bits.intWen.foreach(_ := !globalException && !globalUncache && req.uop.rfWen)
+  io.writeBack.bits.fpWen.foreach(_ := req.uop.fpWen)
+  io.writeBack.bits.vecWen.foreach(_ := req.uop.vecWen)
+  io.writeBack.bits.v0Wen.foreach(_ := req.uop.v0Wen)
+  io.writeBack.bits.vlWen.foreach(_ := req.uop.vlWen)
+  io.writeBack.bits.exceptionVec.foreach(excp => {
+    LduCfg.exceptionOut.foreach(no => excp(no) := (globalUncache || globalException) && exceptionVec(no))
+  })
+  io.writeBack.bits.flushPipe.foreach(_ := false.B)
+  io.writeBack.bits.replay.foreach(_ := false.B)
+  io.writeBack.bits.lqIdx.foreach(_ := req.uop.lqIdx)
+  io.writeBack.bits.sqIdx.foreach(_ := req.uop.sqIdx)
+  io.writeBack.bits.trigger.foreach(_ := req.uop.trigger)
+  io.writeBack.bits.predecodeInfo.foreach(_ := req.uop.preDecodeInfo)
+  io.writeBack.bits.vls.foreach(x => {
+    x.vpu := req.uop.vpu
+    x.oldVdPsrc := req.uop.psrc(2)
+    x.vdIdx := DontCare
+    x.vdIdxInField := DontCare
+    x.isIndexed := VlduType.isIndexed(req.uop.fuOpType)
+    x.isMasked := VlduType.isMasked(req.uop.fuOpType)
+    x.isStrided := VlduType.isStrided(req.uop.fuOpType)
+    x.isWhole := VlduType.isWhole(req.uop.fuOpType)
+    x.isVecLoad := VlduType.isVecLd(req.uop.fuOpType)
+    x.isVlm := VlduType.isMasked(req.uop.fuOpType) && VlduType.isVecLd(req.uop.fuOpType)
+  })
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
 
-
   // vector output
-  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isvec
+  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && req.isvec
 
   io.vecWriteBack.bits.alignedType          := req.alignedType
   io.vecWriteBack.bits.vecFeedback          := true.B

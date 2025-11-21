@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
@@ -56,6 +56,14 @@ class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
   val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
   val resp = Vec(LSQEnqWidth, Output(new SqPtr))
+}
+
+class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
+  val fuType = FuType()
+  val fuOpType = FuOpType()
+  val data = UInt(VLEN.W)
+  val sqIdx = new SqPtr
+  val vecDebug = new VecMissalignedDebugBundle
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
@@ -161,6 +169,7 @@ class GenerateInfoFromSBuffer extends Bundle{
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
+  with HasMemBlockParameters
   with HasCircularQueuePtrHelper
   with HasPerfEvents
   with HasVLSUParameters {
@@ -171,15 +180,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // store data, send to sq from rs
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
     val cmoOpReq  = DecoupledIO(new CMOReq)
     val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
-    val cboZeroStout = DecoupledIO(new MemExuOutput)
-    val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
-    val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true))
+    val cboZeroStout = DecoupledIO(new ExuOutput(staParams.head))
+    val mmioStout = DecoupledIO(new ExuOutput(staParams.head)) // writeback uncached store
+    val vecmmioStout = DecoupledIO(new ExuOutput(vstuParams.head))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     // TODO: scommit is only for scalar store
     val rob = Flipped(new RobLsqIO)
@@ -605,37 +614,30 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Now store data pipeline is actually 2 stages
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.data.wen(i) := false.B
-    val stWbIndex = io.storeDataIn(i).bits.uop.sqIdx.value
-    val isVec     = FuType.isVStore(io.storeDataIn(i).bits.uop.fuType)
+    val stWbIndex = io.storeDataIn(i).bits.sqIdx.value
+    val isVec     = FuType.isVStore(io.storeDataIn(i).bits.fuType)
     // sq data write takes 2 cycles:
     // sq data write s0
     when (io.storeDataIn(i).fire) {
       // send data write req to data module
       dataModule.io.data.waddr(i) := stWbIndex
-      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.fuOpType === LSUOpType.cbo_zero,
+      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.fuOpType === LSUOpType.cbo_zero,
         0.U,
         Mux(isVec,
           io.storeDataIn(i).bits.data,
-          genVWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.fuOpType(2,0)))
+          genVWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.fuOpType(2,0)))
       )
       dataModule.io.data.wen(i) := true.B
 
       debug_data(dataModule.io.data.waddr(i)) := dataModule.io.data.wdata(i)
-      debug_vec_unaligned_start(dataModule.io.data.waddr(i)) := io.storeDataIn(i).bits.vecDebug.get.start
-      debug_vec_unaligned_offset(dataModule.io.data.waddr(i)) := io.storeDataIn(i).bits.vecDebug.get.offset
+      debug_vec_unaligned_start(dataModule.io.data.waddr(i)) := io.storeDataIn(i).bits.vecDebug.start
+      debug_vec_unaligned_offset(dataModule.io.data.waddr(i)) := io.storeDataIn(i).bits.vecDebug.offset
     }
-    XSInfo(io.storeDataIn(i).fire,
-      "store data write to sq idx %d pc 0x%x data %x -> %x\n",
-      io.storeDataIn(i).bits.uop.sqIdx.value,
-      io.storeDataIn(i).bits.uop.pc,
-      io.storeDataIn(i).bits.data,
-      dataModule.io.data.wdata(i)
-    )
+
     // sq data write s1
     val lastStWbIndex = RegEnable(stWbIndex, io.storeDataIn(i).fire)
     when (
       RegNext(io.storeDataIn(i).fire) && allocated(lastStWbIndex)
-      // && !RegNext(io.storeDataIn(i).bits.uop).robIdx.needFlush(io.brqRedirect)
     ) {
       datavalid(lastStWbIndex) := true.B
     }
@@ -1051,12 +1053,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // (4) scalar store: writeback to ROB (and other units): mark as writebacked
   io.mmioStout.valid := mmioState === s_wb && !isVec(deqPtr)
-  io.mmioStout.bits.uop := uncacheUop
-  io.mmioStout.bits.uop.exceptionVec := ExceptionNO.selectByFu(uncacheUop.exceptionVec, StaCfg)
-  io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.flushPipe := deqCanDoCbo // flush Pipeline to keep order in CMO
-  io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
-  io.mmioStout.bits.isFromLoadUnit := DontCare
+  io.mmioStout.bits := 0.U.asTypeOf(io.mmioStout.bits)
+  io.mmioStout.bits.data := VecInit(Seq.fill(staParams.head.wbPathNum)(shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)))
+  io.mmioStout.bits.pdest := uncacheUop.pdest
+  io.mmioStout.bits.robIdx := uncacheUop.robIdx
+  io.mmioStout.bits.intWen.foreach(_ := uncacheUop.rfWen)
+  io.mmioStout.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(uncacheUop.exceptionVec, StaCfg))
+  io.mmioStout.bits.flushPipe.foreach(_ := deqCanDoCbo) // flush Pipeline to keep order in CMO
+  io.mmioStout.bits.sqIdx.foreach(_ := deqPtrExt(0))
+  io.mmioStout.bits.trigger.foreach(_ := uncacheUop.trigger)
+  io.mmioStout.bits.debugInfo := uncacheUop.debugInfo
+  io.mmioStout.bits.debug_seqNum := uncacheUop.debug_seqNum
   io.mmioStout.bits.debug.isMMIO := true.B
   io.mmioStout.bits.debug.isNCIO := false.B
   io.mmioStout.bits.debug.paddr := DontCare
@@ -1070,15 +1077,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // cbo Zero writeback to ROB
   io.cboZeroStout.valid                := cboZeroValid && !cboZeroWaitFlushSb
-  io.cboZeroStout.bits.uop             := cboZeroUop
-  io.cboZeroStout.bits.uop.sqIdx       := cboZeroSqIdx
-  io.cboZeroStout.bits.data            := DontCare
-  io.cboZeroStout.bits.isFromLoadUnit  := DontCare
-  io.cboZeroStout.bits.debug.isMMIO    := false.B
-  io.cboZeroStout.bits.debug.isNCIO      := false.B
-  io.cboZeroStout.bits.debug.paddr     := DontCare
-  io.cboZeroStout.bits.debug.isPerfCnt := false.B
-  io.cboZeroStout.bits.debug.vaddr     := DontCare
+  io.cboZeroStout.bits := 0.U.asTypeOf(io.cboZeroStout.bits)
+  io.cboZeroStout.bits.pdest := cboZeroUop.pdest
+  io.cboZeroStout.bits.robIdx := cboZeroUop.robIdx
+  io.cboZeroStout.bits.intWen.foreach(_ := cboZeroUop.rfWen)
+  io.cboZeroStout.bits.exceptionVec.foreach(_ := cboZeroUop.exceptionVec)
+  io.cboZeroStout.bits.flushPipe.foreach(_ := cboZeroUop.flushPipe) // false.B ?
+  io.cboZeroStout.bits.sqIdx.foreach(_ := cboZeroSqIdx)
+  io.cboZeroStout.bits.trigger.foreach(_ := cboZeroUop.trigger)
+  io.cboZeroStout.bits.debugInfo := cboZeroUop.debugInfo
+  io.cboZeroStout.bits.debug_seqNum := cboZeroUop.debug_seqNum
 
   when (cboZeroWaitFlushSb && io.flushSbuffer.empty) {
     cboZeroWaitFlushSb    := false.B
@@ -1096,16 +1104,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // (4) or vector store:
   // TODO: implement it!
-  io.vecmmioStout := DontCare
-  io.vecmmioStout.valid := false.B //mmioState === s_wb && isVec(deqPtr)
-  io.vecmmioStout.bits.uop := uop(deqPtr)
-  io.vecmmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.vecmmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
-  io.vecmmioStout.bits.debug.isMMIO := true.B
-  io.vecmmioStout.bits.debug.isNCIO   := false.B
-  io.vecmmioStout.bits.debug.paddr := DontCare
-  io.vecmmioStout.bits.debug.isPerfCnt := false.B
-  io.vecmmioStout.bits.debug.vaddr := DontCare
+  io.vecmmioStout.valid := false.B
+  io.vecmmioStout.bits := DontCare
   // Remove MMIO inst from store queue after MMIO request is being sent
   // That inst will be traced by uncache state machine
   when (io.vecmmioStout.fire) {
