@@ -74,20 +74,20 @@ package object xiangshan {
 
   object I2fType {
     // move/cvt ## i64/i32(input) ## f64/f32/f16(output) ## hassign
-    def fcvt_h_wu = BitPat("b0_0_00_0")
-    def fcvt_h_w  = BitPat("b0_0_00_1")
-    def fcvt_h_lu = BitPat("b0_1_00_0")
-    def fcvt_h_l  = BitPat("b0_1_00_1")
+    def fcvt_h_wu = BitPat("b0_0_10_0")
+    def fcvt_h_w  = BitPat("b0_0_10_1")
+    def fcvt_h_lu = BitPat("b0_1_10_0")
+    def fcvt_h_l  = BitPat("b0_1_10_1")
 
-    def fcvt_s_wu = BitPat("b0_0_01_0")
-    def fcvt_s_w  = BitPat("b0_0_01_1")
-    def fcvt_s_lu = BitPat("b0_1_01_0")
-    def fcvt_s_l  = BitPat("b0_1_01_1")
+    def fcvt_s_wu = BitPat("b0_0_00_0")
+    def fcvt_s_w  = BitPat("b0_0_00_1")
+    def fcvt_s_lu = BitPat("b0_1_00_0")
+    def fcvt_s_l  = BitPat("b0_1_00_1")
 
-    def fcvt_d_wu = BitPat("b0_0_10_0")
-    def fcvt_d_w  = BitPat("b0_0_10_1")
-    def fcvt_d_lu = BitPat("b0_1_10_0")
-    def fcvt_d_l  = BitPat("b0_1_10_1")
+    def fcvt_d_wu = BitPat("b0_0_01_0")
+    def fcvt_d_w  = BitPat("b0_0_01_1")
+    def fcvt_d_lu = BitPat("b0_1_01_0")
+    def fcvt_d_l  = BitPat("b0_1_01_1")
 
   }
   object VlduType {
