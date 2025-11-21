@@ -338,7 +338,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
     s0_vaddr         := src.vaddr
-    s0_mask          := genVWmask(src.vaddr, src.uop.fuOpType(1, 0))
+    s0_mask          := genVWmask(src.vaddr, LSUOpType.size(src.uop.fuOpType))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
@@ -374,7 +374,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   def fromIntIssueSource(src: MemExuInput) = {
     s0_vaddr         := src.src(0) + SignExt(src.uop.imm(11, 0), VAddrBits)
-    s0_mask          := genVWmask(s0_vaddr, src.uop.fuOpType(1,0))
+    s0_mask          := genVWmask(s0_vaddr, LSUOpType.size(src.uop.fuOpType))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
@@ -416,7 +416,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(s0_vaddr, io.ldu_io.ld_fast_fuOpType(1, 0))
+    s0_mask               := genVWmask(s0_vaddr, LSUOpType.size(io.ldu_io.ld_fast_fuOpType))
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
     s0_uop.fuOpType  := io.ldu_io.ld_fast_fuOpType
@@ -453,7 +453,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   // address align check
-  val s0_addr_aligned = LookupTree(Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType(1,0), s0_uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType(1,0), LSUOpType.size(s0_uop.fuOpType)), List(
     "b00".U   -> true.B,                   //b
     "b01".U   -> (s0_vaddr(0)    === 0.U), //h
     "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
@@ -719,11 +719,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ldu_io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
     // Case 1: the address is misaligned, kill s1
-    s1_addr_misaligned    := LookupTree(s1_in.uop.fuOpType(1, 0), List(
-                             "b00".U   -> false.B,                  //b
-                             "b01".U   -> (s1_vaddr(0)    =/= 0.U), //h
-                             "b10".U   -> (s1_vaddr(1, 0) =/= 0.U), //w
-                             "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
+    s1_addr_misaligned    := LookupTree(LSUOpType.size(s1_in.uop.fuOpType), List(
+                             LSUOpType.B.U   -> false.B,                  //b
+                             LSUOpType.H.U   -> (s1_vaddr(0)    =/= 0.U), //h
+                             LSUOpType.W.U   -> (s1_vaddr(1, 0) =/= 0.U), //w
+                             LSUOpType.D.U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
                           ))
     // Case 2: this load-load uop is cancelled
     s1_ptr_chasing_canceled := !io.lsin.valid || FuType.isStore(io.lsin.bits.uop.fuType)
