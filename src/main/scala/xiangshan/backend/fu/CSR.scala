@@ -893,6 +893,7 @@ class CSR extends FunctionUnit with HasCSRConst
   if (!env.FPGAPlatform) {
     val difftest = DifftestModule(new DiffArchEvent, delay = 1, dontCare = true)
     difftest.coreid := csrio.hartId
+    difftest.valid := raiseIntr || csrio.exception.valid
     difftest.interrupt := Mux(raiseIntr, causeNO, 0.U)
     difftest.exception := Mux(csrio.exception.valid, causeNO, 0.U)
   }
