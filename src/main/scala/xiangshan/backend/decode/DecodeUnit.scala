@@ -34,7 +34,7 @@ import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFi
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.Zimop._
-import yunsuan.{VfaluType, VfcvtType, FcmpOpCode}
+import yunsuan.{FcmpOpCode, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -860,7 +860,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fnmadd- b1001111
   private val isFMA = inst.OPCODE === BitPat("b100??11")
   private val isVppu = FuType.isVppu(decodedInst.fuType)
-  private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
@@ -1035,6 +1034,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFSLIDE1UP_VF, VFSLIDE1DOWN_VF,
   )
 
+  private val vectorFloatNarrow = Seq (
+    VFREDOSUM_VS, VFREDUSUM_VS, VFREDMAX_VS, VFREDMIN_VS, VFWREDOSUM_VS, VFWREDUSUM_VS,
+    VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W, VFNCVT_ROD_F_F_W,
+    VFMV_S_F,
+  )
+
+  private val isFmaNeedVd = FuType.isVecOPFFma(decodedInst.fuType) & (decodedInst.fuOpType(3, 0) =/= VfmaOpCode.vfmul)
+
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
@@ -1056,17 +1063,17 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
   val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
   val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
+  val isVfNarrow = vectorFloatNarrow.map(_ === inst.ALL).reduce(_ || _)
   val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
   val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
   val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
-  val positive_emulIsFrac = decodedInst.vpu.vlmul +& decodedInst.vpu.veew < decodedInst.vpu.vsew
-  val negative_emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 3.U +& decodedInst.vpu.vsew
-  val emulIsFrac = Mux(decodedInst.vpu.vlmul(2), negative_emulIsFrac, positive_emulIsFrac)
-  val vstartIsNotZero = io.enq.vstart =/= 0.U
+  val positiveEmulIsFrac = decodedInst.vpu.vlmul +& decodedInst.vpu.veew < decodedInst.vpu.vsew
+  val negativeEmulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 3.U +& decodedInst.vpu.vsew
+  val emulIsFrac = Mux(decodedInst.vpu.vlmul(2), negativeEmulIsFrac, positiveEmulIsFrac)
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
   decodedInst.vpu.isOpMask := isOpMask
-  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
+  decodedInst.vpu.isDependOldVd := isVppu || (isVfNarrow || isFmaNeedVd) || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
