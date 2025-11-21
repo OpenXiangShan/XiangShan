@@ -47,6 +47,18 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule
 
   val endPC = startPC + (PopCount(io.instRange) << 1.U)
 
+  val traceRangeVec = Wire(Vec(width, UInt(PredictWidth.W)))
+  val pdValidVec = Wire(Vec(PredictWidth, Bool()))
+  val positionHotMerge = positionHotVec.reduce(_ | _)
+  val traceRangeMerge = traceRangeVec.reduce(_ | _)
+  val halfIdx = Wire(Vec(PredictWidth, UInt(log2Ceil(PredictWidth + 1).W)))
+  pdValidVec.map(_ := false.B)
+
+  dontTouch(positionHotMerge)
+  dontTouch(traceRangeMerge)
+  dontTouch(halfIdx)
+  dontTouch(pdValidVec)
+
   dontTouch(startPC)
   dontTouch(consectiveWithLast)
   dontTouch(stillConsective)
@@ -64,35 +76,75 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule
     offsetVec(i) := (rawInsts(i).pcVA - startPC) >> 1.U
   }
 
-  val positionHotMerge = positionHotVec.reduce(_ | _)
-  dontTouch(positionHotMerge)
+  // contains the start slice *index* of each instruction
+  halfIdx(0) := Mux(io.lastHalfValid, 1.U, 0.U)
+  for (i <- 0 until width) {
+    when (halfIdx(i) < PredictWidth.U) {
+      pdValidVec(halfIdx(i)) := true.B
+    }
+    if (i + 1 < width) {
+      halfIdx(i + 1) := halfIdx(i) + Mux(isRVC(rawInsts(i).inst), 1.U, 2.U)
+    }
+  }
 
+  val icacheInstVec = Wire(Vec(CacheLineHalfWord-1, UInt(32.W)))
+  val actualIdxVec = Wire(Vec(PredictWidth, UInt(blockOffBits.W)))
+  val fetchInstVec = Wire(Vec(PredictWidth, UInt(32.W)))
+  icacheInstVec.zipWithIndex.foreach{ case (inst, idx) =>
+    val stride = 16
+    val instSize = 32
+    val rawData = Cat(io.icacheData.bits.data(1), io.icacheData.bits.data(0))
+    inst := rawData(idx*stride + instSize - 1 , idx*stride)
+  }
+
+  // fiil in cache inst value
+  (0 until PredictWidth).foreach { case idx =>
+    actualIdxVec(idx) := Cat(0.U(1.W), startPC(blockOffBits-2, 1)) + idx.U // Require C-Ext
+    fetchInstVec(idx) := icacheInstVec(actualIdxVec(idx))
+  }
+
+  // start filling traceRangeVec and cutInsts
   (0 until width).foreach{i =>
     // map to rawInsts
-    // check for the startPC
     stillConsective(i) := consectiveWithLast.take(i+1).foldRight(true.B) { (x, y) => x && y }
-    // check for the endPC
     addrInRange(i) := rawInsts(i).pcVA < endPC
 
     positionHotVec(i) := Mux(stillConsective(i) && addrInRange(i), UIntToOH(offsetVec(i), PredictWidth),
       0.U(PredictWidth.W))
 
-    // map to cutInsts
+    // adjust traceRange for 32'b inst
+    traceRangeVec(i) := Mux(
+      isRVC(rawInsts(i).inst),
+      positionHotVec(i),
+      positionHotVec(i) | ((positionHotVec(i) << 1)(PredictWidth-1, 0))
+    )
+
+    // cutInsts filling
     XSError(PopCount(positionHotVec.map(_(i))) > 1.U, s"Position hot vec has more than one hot bit at index $i")
-    io.cutInsts(i).bits := Mux1H(positionHotVec.map(_(i)), rawInsts)
+    io.cutInsts(i).bits := Mux(io.cutInsts(i).valid, Mux1H(positionHotVec.map(_(i)), rawInsts), (-1.S).asTypeOf(new TraceInstrBundle))
     io.cutInsts(i).valid := positionHotMerge(i) && io.instRange(i)
     taken2BVec(i) := io.cutInsts(i).valid && !isRVC(io.cutInsts(i).bits.inst) && (if (i == (width-1)) true.B else !io.instRange(i+1))
+
+    // for predecode
+    when (!io.cutInsts(i).valid) {
+      io.cutInsts(i).bits.pcVA := startPC + (i * 2).U
+    }
+
+    when (!io.cutInsts(i).valid && pdValidVec(i)) {
+      io.cutInsts(i).bits.inst := fetchInstVec(i)
+    }
   }
+
   // FIXME: positionHot has hole, full full hot, unlike instRange, so the traceRange is different with older edition
-  io.traceRange := positionHotMerge & io.instRange
-  io.pdValid := positionHotMerge & io.instRange
+  io.traceRange := traceRangeMerge & io.instRange
+  io.pdValid := pdValidVec.asUInt
 
   def isTaken2B(range: UInt): Bool = {
     val lastIdx = ParallelPosteriorityEncoder(range)
     !isRVC(io.cutInsts(lastIdx).bits.inst) && io.cutInsts(lastIdx).valid
   }
   io.traceRangeTaken2B := Cat(taken2BVec).orR
-  io.instRangeTaken2B := false.B
+  io.instRangeTaken2B := isTaken2B(io.instRange)
 
   io.traceForceJump := rawInsts.head.isForceJump
   when (io.traceForceJump) {
