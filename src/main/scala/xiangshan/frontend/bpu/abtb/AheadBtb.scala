@@ -32,12 +32,13 @@ import xiangshan.frontend.bpu.SaturateCounter
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid:    Bool              = Input(Bool())
-    val overrideValid:    Bool              = Input(Bool())
-    val previousVAddr:    Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
-    val prediction:       Prediction        = Output(new Prediction)
-    val meta:             AheadBtbMeta      = Output(new AheadBtbMeta)
-    val debug_startVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
+    val redirectValid:       Bool              = Input(Bool())
+    val overrideValid:       Bool              = Input(Bool())
+    val previousVAddr:       Valid[PrunedAddr] = Flipped(Valid(PrunedAddr(VAddrBits)))
+    val prediction:          Prediction        = Output(new Prediction)
+    val meta:                AheadBtbMeta      = Output(new AheadBtbMeta)
+    val debug_startVAddr:    PrunedAddr        = Output(PrunedAddr(VAddrBits))
+    val debug_previousVAddr: PrunedAddr        = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -85,9 +86,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s2_fire := io.enable && s2_valid && predictionSent
 
   s1_ready := s1_fire || !s1_valid
-  s2_ready := s2_fire || !s2_valid
+  s2_ready := s2_fire || !s2_valid || overrideValid
 
-  s2_flush := redirectValid || overrideValid
+  s2_flush := redirectValid
   s1_flush := s2_flush
 
   when(s0_fire)(s1_valid := true.B)
@@ -130,19 +131,34 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s1_entries = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
 
   /* --------------------------------------------------------------------------------------------------------------
-     predict pipeline stage 2
+     predict pipeline stage 2 / 3
      - get taken counter result
      - compare tag and get taken mask
      - compare positions and find first taken entry
      - get target from found entry
      - output prediction
+     - stage 3 is only for fast prediction when override is valid
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s2_setIdx     = RegEnable(s1_setIdx, s1_fire)
-  private val s2_bankIdx    = RegEnable(s1_bankIdx, s1_fire)
-  private val s2_bankMask   = RegEnable(s1_bankMask, s1_fire)
-  private val s2_entries    = RegEnable(s1_entries, s1_fire)
+  private val s3_setIdx     = RegInit(0.U.asTypeOf(s1_setIdx))
+  private val s3_bankIdx    = RegInit(0.U.asTypeOf(s1_bankIdx))
+  private val s3_bankMask   = RegInit(0.U.asTypeOf(s1_bankMask))
+  private val s3_entries    = RegInit(0.U.asTypeOf(s1_entries))
+  private val s3_startVAddr = RegInit(0.U.asTypeOf(s1_startVAddr))
+
+  private val s2_setIdx     = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
+  private val s2_bankIdx    = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
+  private val s2_bankMask   = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
+  private val s2_entries    = RegEnable(Mux(overrideValid, s3_entries, s1_entries), s1_fire)
   private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
+
+  when(s2_fire) {
+    s3_setIdx     := s2_setIdx
+    s3_bankIdx    := s2_bankIdx
+    s3_bankMask   := s2_bankMask
+    s3_entries    := s2_entries
+    s3_startVAddr := s2_startVAddr
+  }
 
   //  private val s2_entriesDelay1 = RegNext(s2_entries)
 
@@ -182,7 +198,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
 
   // used for check abtb output
-  io.debug_startVAddr := s2_startVAddr
+  io.debug_startVAddr    := s2_startVAddr
+  io.debug_previousVAddr := s3_startVAddr
 
   replacers.zipWithIndex.foreach { case (r, i) =>
     r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
