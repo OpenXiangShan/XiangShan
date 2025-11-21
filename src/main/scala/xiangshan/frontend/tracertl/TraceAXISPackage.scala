@@ -82,6 +82,14 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
   BoringUtils.addSink(outReady, "TraceRTLFPGATracesCollectReady")
   BoringUtils.addSource(outValid, "TraceRTLFPGATracesCollectValid")
   BoringUtils.addSource(out, "TraceRTLFPGATracesCollect")
+
+  // recv
+  // TODO: rm BoringUtils. use FrontendToCtrlIO.toFtq.rob_commits.instrSize
+  val commitValid = RegNext(io.in.valid, init = false.B)
+  val commitInstNumSeq = io.in.bits.map(x => Mux(x.valid, x.bits.instNum, 0.U))
+  val commitInstNum = RegNext(commitInstNumSeq.reduce(_ + _))
+  BoringUtils.addSource(commitValid, "TraceRTLFPGACommitValid")
+  BoringUtils.addSource(commitInstNum, "TraceRTLFPGACommitInstNum")
 }
 
 class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int)(implicit p: Parameters) extends Module {

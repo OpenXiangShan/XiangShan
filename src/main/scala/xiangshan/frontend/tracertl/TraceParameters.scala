@@ -43,11 +43,15 @@ case class TraceRTLParameters
   TraceOverrideTarget: Boolean = true,
   Trace2StageMMU: Boolean = false,
 
-  TraceFpgaHugeBufferSize: Int = 1 * 1024, // 1K
+  TraceFpgaHugeBufferSize: Int = 1 * 128, // 128 --> 1024
+  TraceFpgaHugeBufferWriteWidth: Int = 16, // 1K
+  TraceFpgaHugeBufferReadWidth: Int = 16, // 1K
   // TraceFpgaUnpackInstNum: Int = 128, // 16 * 8
   TraceFpgaUnpackInstNum: Int = 1 * 16, // 16 * 8
   TraceFpgaAxisWidth: Int = 512,
   TraceFpgaCollectWidth: Int = 128,
+
+  TraceFpgaSmallBufferSize: Int = 600, // TODO
 
   // TraceInstrFpgaBundleSize
   TraceVAddrWidth: Int = 50,
@@ -58,6 +62,9 @@ case class TraceRTLParameters
   TraceException: Int = 8,
   TraceBranchTaken: Int = 1,
 ) {
+  require(TraceFpgaHugeBufferWriteWidth == TraceFetchWidth, "They are different in the future")
+  require(TraceFpgaHugeBufferReadWidth == TraceFetchWidth, "They are different in the future")
+
   def TraceBufferSize = TraceFetchWidth * 4
   def TraceFpgaRecvWidth = TraceFetchWidth // set it same to TraceFetchWidth now
 }
