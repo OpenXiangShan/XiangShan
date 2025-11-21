@@ -41,7 +41,6 @@ case class OPIVV(
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
-
 case class OPIVX(
   fu: FuType.OHType,
   fuOp: BitPat,
