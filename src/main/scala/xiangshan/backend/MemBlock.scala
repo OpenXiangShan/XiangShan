@@ -75,6 +75,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val numIntWakeUpFp = outer.numIntWakeUpFp
 
   val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
     val fromIntBlock = Flipped(new IntBlockToMemBlockIO)
     val fromFpBlock = Flipped(new FpBlockToMemBlockIO)
@@ -227,6 +228,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
+
+  lsq.io.hartId := io.hartId
+  sbuffer.io.hartId := io.hartId
+  atomicsUnit.io.hartId := io.hartId
 
   // dtlb
   io.ptw         <> dtlb.io.ptw

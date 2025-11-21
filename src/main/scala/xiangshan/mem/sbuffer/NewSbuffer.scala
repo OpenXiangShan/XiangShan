@@ -87,6 +87,7 @@ class SbufferData extends XSModule with HasSbufferConst {
 
 class NewSbuffer extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
@@ -370,7 +371,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   if (!env.FPGAPlatform) {
     val difftest = DifftestModule(new DiffSbufferEvent)
-    difftest.coreid := 0.U
+    difftest.coreid := io.hartId
     difftest.index := 0.U
     difftest.valid := io.dcache.resp.fire
     difftest.addr := getAddr(tag(respId))

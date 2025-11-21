@@ -196,6 +196,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
 
 class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)
     val fromFpBlock = Flipped(new FpBlockToCtrlIO)
@@ -236,6 +237,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
   val roq = Module(new Roq(roqWbSize))
+  roq.io.hartId := io.hartId
 
   val backendRedirect = redirectGen.io.stage2Redirect
   val frontendRedirect = redirectGen.io.stage3Redirect

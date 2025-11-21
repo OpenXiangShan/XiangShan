@@ -26,6 +26,7 @@ import difftest._
 
 class AtomicsUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val in            = Flipped(Decoupled(new ExuInput))
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
@@ -265,7 +266,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   if (!env.FPGAPlatform) {
     val difftest = DifftestModule(new DiffAtomicEvent, dontCare = true)
-    difftest.coreid := 0.U
+    difftest.coreid := io.hartId
     difftest.valid := io.dcache.resp.fire
     difftest.addr := paddr_reg
     difftest.data := data_reg.asTypeOf(difftest.data)

@@ -259,6 +259,7 @@ class RoqFlushInfo extends XSBundle {
 
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RoqEnqIO
     val flushOut = ValidIO(new RoqFlushInfo)
@@ -880,7 +881,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val uop = debug_microOp(ptr)
 
     val difftest = DifftestModule(new DiffLrScEvent, delay = 1)
-    difftest.coreid := 0.U
+    difftest.coreid := io.hartId
     difftest.valid := io.commits.valid.head && !io.commits.isWalk && uop.ctrl.fuType === FuType.mou &&
       (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)
     difftest.success := uop.diffTestDebugLrScValid
@@ -889,7 +890,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
       val difftest = DifftestModule(new DiffInstrCommit, delay = 1, dontCare = true)
-      difftest.coreid   := 0.U
+      difftest.coreid   := io.hartId
       difftest.index    := i.U
 
       val ptr = deqPtrVec(i).value
@@ -908,7 +909,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
       val difftest = DifftestModule(new DiffLoadEvent)
-      difftest.coreid := 0.U
+      difftest.coreid := io.hartId
       difftest.index  := i.U
 
       val ptr = deqPtrVec(i).value
@@ -925,7 +926,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   if (!env.FPGAPlatform) {
     val difftest = DifftestModule(new DiffTrapEvent, dontCare = true)
-    difftest.coreid   := 0.U
+    difftest.coreid   := io.hartId
     difftest.hasTrap  := hitTrap
     difftest.code     := trapCode
     difftest.pc       := trapPC

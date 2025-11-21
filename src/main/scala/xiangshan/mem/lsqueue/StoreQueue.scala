@@ -48,6 +48,7 @@ class SqEnqIO extends XSBundle {
 // Store Queue
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -395,7 +396,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       val wmask = io.sbuffer(i).bits.mask
 
       val difftest = DifftestModule(new DiffStoreEvent, dontCare = true)
-      difftest.coreid := 0.U
+      difftest.coreid := io.hartId
       difftest.index  := i.U
       difftest.valid  := storeCommit
       difftest.addr   := Cat(waddr(63, 3), 0.U(3.W))

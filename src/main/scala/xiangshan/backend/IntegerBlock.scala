@@ -283,7 +283,7 @@ class IntegerBlock
       rport.addr := rat
     }
     val difftest = DifftestModule(new DiffArchIntRegState)
-    difftest.coreid := 0.U
+    difftest.coreid := io.csrio.hartId
     difftest.value  := VecInit(intRf.io.debug_rports.map(_.data))
   }
 

@@ -39,6 +39,7 @@ class FloatBlock
   slowWakeUpOut: Seq[ExuConfig],
 ) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
     val toMemBlock = new FpBlockToMemBlockIO
@@ -238,7 +239,7 @@ class FloatBlock
       rport.addr := rat
     }
     val difftest = DifftestModule(new DiffArchFpRegState)
-    difftest.coreid := 0.U
+    difftest.coreid := io.hartId
     difftest.value  := VecInit(fpRf.io.debug_rports.map(_.data))
   }
 }

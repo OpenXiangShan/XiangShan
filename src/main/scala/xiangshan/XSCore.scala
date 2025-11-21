@@ -369,6 +369,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
 
+  ctrlBlock.io.hartId := io.hartId
+  floatBlock.io.hartId := io.hartId
+  memBlock.io.hartId := io.hartId
+
   io.l1plus_error <> l1pluscache.io.error
   io.icache_error <> frontend.io.error
   io.dcache_error <> memBlock.io.error
