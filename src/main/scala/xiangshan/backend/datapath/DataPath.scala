@@ -649,7 +649,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           // and all vector arith exu should check success in og2 stage
           og1resp.bits.resp             := Mux(og1FailedVec2(iqIdx)(iuIdx),
             RespType.block,
-            if (toIU.issueQueueParams match { case x => x.isLdAddrIQ || x.isStAddrIQ || x.isHyAddrIQ || x.isVecLduIQ || x.isVecStuIQ || x.inVfSchd})
+            if (toIU.issueQueueParams match { case x => x.isStAddrIQ || x.isHyAddrIQ || x.isVecLduIQ || x.isVecStuIQ || x.inVfSchd})
               RespType.uncertain
             else
               RespType.success,
