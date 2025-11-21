@@ -53,7 +53,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og2Resp = Option.when(params.needOg2Resp)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val finalIssueResp = Option.when(params.LdExuCnt > 0 || params.VlduCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
-  val memAddrIssueResp = Option.when(params.LdExuCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val vecLoadIssueResp = Option.when(params.VlduCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle)
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle)
@@ -354,9 +353,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     if (params.isLdAddrIQ || params.isHyAddrIQ) {
       entriesIO.fromLoad.get.finalIssueResp.zipWithIndex.foreach { case (finalIssueResp, i) =>
         finalIssueResp                                          := io.finalIssueResp.get(i)
-      }
-      entriesIO.fromLoad.get.memAddrIssueResp.zipWithIndex.foreach { case (memAddrIssueResp, i) =>
-        memAddrIssueResp                                        := io.memAddrIssueResp.get(i)
       }
     }
     if (params.isVecLduIQ) {
