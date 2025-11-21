@@ -189,8 +189,8 @@ trait HasSoCParameter {
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
-    "HasMEMencryption most set with KeyIDBits > 0")
-  require((cvm.KeyIDBits == 0) || tiles.head.HasBitmapCheck, "KeyIDBits > 0 most set with HasBitmapCheck")
+    "HasMEMencryption must set with KeyIDBits > 0")
+  require((cvm.KeyIDBits == 0) || tiles.head.HasBitmapCheck, "KeyIDBits > 0 must set with HasBitmapCheck")
 }
 
 trait HasPeripheralRanges {
