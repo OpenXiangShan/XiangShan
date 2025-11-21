@@ -119,7 +119,6 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val vecLoadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
-  val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
@@ -281,13 +280,6 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       }
       else {
         finalIssueResp := 0.U.asTypeOf(finalIssueResp)
-      }
-    })
-    iq.io.memAddrIssueResp.foreach(_.zipWithIndex.foreach { case (memAddrIssueResp, j) =>
-      if (io.memAddrIssueResp(i).isDefinedAt(j)) {
-        memAddrIssueResp := io.memAddrIssueResp(i)(j)
-      } else {
-        memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
       }
     })
     iq.io.vecLoadIssueResp.foreach(_.zipWithIndex.foreach { case (resp, deqIdx) =>
