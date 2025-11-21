@@ -547,6 +547,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
   val VimacCfg = FuConfig (
@@ -568,6 +569,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
   val VidivCfg = FuConfig (
@@ -587,6 +589,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readVl = true,
     readV0 = true,
+    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
   val VppuCfg = FuConfig (
@@ -606,6 +609,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
   val VipuCfg: FuConfig = FuConfig (
@@ -626,6 +630,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
   val VmoveCfg = FuConfig (
