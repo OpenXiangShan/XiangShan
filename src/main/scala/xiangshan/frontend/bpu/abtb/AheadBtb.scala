@@ -86,7 +86,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s2_fire := io.enable && s2_valid && predictionSent
 
   s1_ready := s1_fire || !s1_valid
-  s2_ready := s2_fire || !s2_valid || overrideValid
+  s2_ready := s2_fire || !s2_valid || overrideValid || redirectValid
 
   s2_flush := redirectValid
   s1_flush := s2_flush
@@ -95,8 +95,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     .elsewhen(s1_flush)(s1_valid := false.B)
     .elsewhen(s1_fire)(s1_valid := false.B)
 
-  when(s2_flush)(s2_valid := false.B)
-    .elsewhen(s1_fire)(s2_valid := !s1_flush)
+  when(s1_fire)(s2_valid := true.B)
+    .elsewhen(s2_flush)(s2_valid := false.B)
     .elsewhen(s2_fire)(s2_valid := false.B)
 
   /* --------------------------------------------------------------------------------------------------------------
