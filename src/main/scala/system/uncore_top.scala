@@ -450,7 +450,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     imsic_pbus_top.module.s_aplic <> aplic_top.module.aplic_m
     (cpu_mNodes.zip(cpu_s)).foreach { case (node, io) => node.out.head._1 <> io }
     dm_m.foreach(_ <> dm.axi4masternode.get)
-    dm.axi4node.foreach(_.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
 //    dm.axi4node.foreach(_)
 //      val axi4Bundle = node.asInstanceOf[AXI4Bundle]  // 强制转换为 AXI4Bundle
 //      axi4Bundle <> dm_sNode.in.head._1
@@ -458,7 +458,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 //    dm.axi4node.foreach(_.)
 
 //        dm_m <> dm.axi4masternode.get
-    syscnt.axi4node.foreach(_ <> peri_s1Node.in.head._1)
+    syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
     //msi_sNodes -> imsicPbusTop
     imsic_pbus_top.module.s_cpu.zip(msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
     msi_m <> imsic_pbus_top.module.m
