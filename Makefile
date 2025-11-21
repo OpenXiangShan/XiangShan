@@ -62,6 +62,9 @@ TIME_CMD = time -a -o $(TIMELOG)
 help:
 	mill -i xiangshan.test.runMain top.XiangShanSim --help
 
+SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
+TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
+
 TOP_V = $(RTL_DIR)/XSTop.sv
 $(TOP_V): $(SCALA_FILE)
 	@mkdir -p $(@D)
