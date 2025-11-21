@@ -274,6 +274,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       fallThrough.io.prediction,
       Seq(
+        (ubtb.io.prediction.taken && abtb.io.prediction.taken) -> Mux(
+          ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
+          ubtb.io.prediction,
+          abtb.io.prediction
+        ),
         ubtb.io.prediction.taken -> ubtb.io.prediction,
         abtb.io.prediction.taken -> abtb.io.prediction
       )
@@ -440,11 +445,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   /* *** check abtb output *** */
-  when(abtb.io.prediction.taken) {
+  when(io.toFtq.prediction.fire && abtb.io.prediction.taken) {
     assert(abtb.io.debug_startVAddr === s1_pc)
-    // assert((abtb.io.debug_previousVAddr === s2_pc) || (abtb.io.debug_previousVAddr === s4_pc),
-    //   "abtb previousVAddr doesn't match"
-    // )
+    assert(
+      (abtb.io.debug_previousVAddr === s2_pc) || (abtb.io.debug_previousVAddr === s4_pc),
+      "abtb previousVAddr doesn't match"
+    )
   }
 
   /* *** Debug Meta *** */
@@ -532,11 +538,31 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     0,
     FetchBlockInstNum + 1
   )
-  XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
-  XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate(
+    "s1_use_ubtb",
+    io.toFtq.prediction.fire && ((ubtb.io.prediction.taken && abtb.io.prediction.taken && (ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition)) || (ubtb.io.prediction.taken && !abtb.io.prediction.taken))
+  )
+  XSPerfAccumulate(
+    "s1_use_abtb",
+    io.toFtq.prediction.fire && ((ubtb.io.prediction.taken && abtb.io.prediction.taken && (ubtb.io.prediction.cfiPosition > abtb.io.prediction.cfiPosition)) || (!ubtb.io.prediction.taken && abtb.io.prediction.taken))
+  )
   XSPerfAccumulate(
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
+  )
+  XSPerfAccumulate(
+    "s1_use_ubtb_abtb_both_taken",
+    io.toFtq.prediction.fire && ubtb.io.prediction.taken && abtb.io.prediction.taken && (ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition)
+  )
+  XSPerfAccumulate(
+    "s1_use_abtb_ubtb_both_taken",
+    io.toFtq.prediction.fire && ubtb.io.prediction.taken && abtb.io.prediction.taken && (ubtb.io.prediction.cfiPosition > abtb.io.prediction.cfiPosition)
+  )
+  XSPerfAccumulate(
+    "s1_use_ubtb_abtb_both_taken_diff",
+    io.toFtq.prediction.fire && ubtb.io.prediction.taken && abtb.io.prediction.taken && !ubtb.io.prediction.isIdentical(
+      abtb.io.prediction
+    )
   )
   XSPerfAccumulate(
     "s3_use_ittage",
