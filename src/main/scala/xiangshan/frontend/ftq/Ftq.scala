@@ -28,6 +28,8 @@ import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.ParallelPriorityMux
 import utility.XSError
+import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
@@ -38,10 +40,15 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.BpuDebugMeta
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 
 class Ftq(implicit p: Parameters) extends FtqModule
+    with HalfAlignHelper
     with HasPerfEvents
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
@@ -358,4 +365,156 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
+
+  // XSPerfCounters
+  private val redirectCfiOffset = getAlignedPosition(
+    PrunedAddrInit(redirect.bits.pc),
+    redirect.bits.ftqOffset
+  )._1
+  private val debugMeta = metaQueue(backendRedirectFtqIdx.bits.value).debug
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTaken",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken =/= debugMeta.bpPred.taken
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongPosition",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset =/= debugMeta.bpPred.cfiPosition
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongAttribute",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      !(redirect.bits.attribute === debugMeta.bpPred.attribute)
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTarget",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
+      redirect.bits.attribute === debugMeta.bpPred.attribute &&
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTarget_conditional",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
+      redirect.bits.attribute === debugMeta.bpPred.attribute &&
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
+      redirect.bits.attribute.isConditional
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTarget_direct",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
+      redirect.bits.attribute === debugMeta.bpPred.attribute &&
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
+      redirect.bits.attribute.isDirect
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTarget_indirect",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
+      redirect.bits.attribute === debugMeta.bpPred.attribute &&
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
+      redirect.bits.attribute.isIndirect
+  )
+
+  XSPerfAccumulate(
+    "squashCycles_bpWrong_redirect_wrongTarget_indirect_retCall",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirect.bits.taken === debugMeta.bpPred.taken &&
+      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
+      redirect.bits.attribute === debugMeta.bpPred.attribute &&
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
+      redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect
+  )
+
+  // TODO: use commit path information
+  XSPerfAccumulate(
+    "branchMispredicts_s1Fallthrough",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      !debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s1Fallthrough
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s1Ubtb",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      !debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s1Ubtb
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s1Abtb",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      !debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s1Abtb
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s3Fallthrough",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3Fallthrough
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s3Mbtb",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3Mbtb
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s3MbtbTage",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3MbtbTage
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s3ITTage",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3ITTage
+  )
+  XSPerfAccumulate(
+    "branchMispredicts_s3Ras",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3Ras
+  )
+
+  XSPerfHistogram(
+    "distance_bpuBtwCommit",
+    distanceBetween(bpuPtr(0), commitPtr(0)),
+    true.B,
+    0,
+    FtqSize + 1
+  )
+  XSPerfHistogram(
+    "distance_ifuBtwCommit",
+    distanceBetween(ifuPtr(0), commitPtr(0)),
+    true.B,
+    0,
+    FtqSize + 1
+  )
+  XSPerfHistogram(
+    "distance_bpuBtwIfu",
+    distanceBetween(bpuPtr(0), ifuPtr(0)),
+    true.B,
+    0,
+    FtqSize + 1
+  )
+  XSPerfAccumulate(
+    "totalCommits",
+    commit
+  )
 }
