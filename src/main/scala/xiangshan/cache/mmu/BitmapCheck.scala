@@ -102,11 +102,12 @@ class bitmapIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
 class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   def getRealPPN(ppn: UInt, vpn: UInt, level: UInt, n: Bool): UInt = {
     val nokeyid_ppn = Cat(0.U(KeyIDBits.W), ppn(ppnLen-KeyIDBits-1, 0))
+    val check_ppn = Mux(csr.mbmc.KEYIDEN.asBool, nokeyid_ppn, ppn)
     val effective_ppn = MuxLookup(level, 0.U)(Seq(
-      3.U -> Cat(nokeyid_ppn(nokeyid_ppn.getWidth - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(nokeyid_ppn(nokeyid_ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(nokeyid_ppn(nokeyid_ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(n === 0.U, nokeyid_ppn(nokeyid_ppn.getWidth - 1, 0), Cat(nokeyid_ppn(nokeyid_ppn.getWidth - 1, pteNapotBits), vpn(pteNapotBits - 1, 0)))
+      3.U -> Cat(check_ppn(ppnLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
+      2.U -> Cat(check_ppn(ppnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(check_ppn(ppnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+      0.U -> Mux(n === 0.U, check_ppn(ppnLen - 1, 0), Cat(check_ppn(ppnLen - 1, pteNapotBits), vpn(pteNapotBits - 1, 0)))
     ))
     effective_ppn
   }

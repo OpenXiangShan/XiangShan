@@ -142,7 +142,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   for (i <- pmp_check.indices) {
     if (HasBitmapCheck) {
-      pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      if (KeyIDBits > 0) {
+        pmp_check(i).apply(
+          tlbCsr.mbmc.KEYIDEN.asBool,
+          tlbCsr.mbmc.CMODE.asBool,
+          tlbCsr.priv.imode,
+          pmp.io.pmp,
+          pmp.io.pma,
+          pmp_req_vec(i)
+        )
+      } else {
+        pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      }
     } else {
       pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
     }

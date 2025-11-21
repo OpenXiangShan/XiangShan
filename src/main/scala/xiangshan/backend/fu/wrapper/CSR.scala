@@ -258,6 +258,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.mode    := csrMod.io.tlb.hgatp.MODE.asUInt
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
+  tlb.mbmc.KEYIDEN  := csrMod.io.tlb.mbmc.KEYIDEN.asUInt
   tlb.mbmc.BME      := csrMod.io.tlb.mbmc.BME.asUInt
   tlb.mbmc.CMODE    := csrMod.io.tlb.mbmc.CMODE.asUInt
   tlb.mbmc.BCLEAR   := csrMod.io.tlb.mbmc.BCLEAR.asUInt
