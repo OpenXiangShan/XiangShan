@@ -173,7 +173,6 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       maybeRvcMap = 0.U,
       vSetIdx = iVSetIdx,
       waymask = iWaymask,
-      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 
@@ -182,7 +181,6 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       data = 0.U, // inject poisoned data, don't care actual data
       vSetIdx = iVSetIdx,
       waymask = iWaymask,
-      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 
@@ -200,7 +198,7 @@ class ICacheCtrlUnit(implicit p: Parameters) extends LazyModule
       }
       is(InjectFsmState.ReadMetaResp) {
         // metaArray ensures resp is valid one cycle after req
-        val waymask = getWaymask(iPTag, io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
+        val waymask = getWaymask(iPTag, io.metaRead.resp.entries.head) // we need first port only
         iWaymask := waymask
         when(!waymask.orR) {
           // not hit, refuse to inject
