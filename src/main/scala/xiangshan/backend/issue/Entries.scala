@@ -32,9 +32,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val memEtyResps: Seq[ValidIO[EntryDeqRespBundle]] = {
     val resps =
       if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
-        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp)
+        Seq(io.fromLoad.get.finalIssueResp)
       else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
-        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
+        Seq(io.fromLoad.get.finalIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
       else if (params.isStAddrIQ)                                                                     //STU
         Seq(io.fromMem.get.slowResp)
       else if (params.isVecLduIQ && params.isVecStuIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
@@ -45,7 +45,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
         s"og0Resp: ${resps.contains(io.og0Resp)}, " +
         s"og1Resp: ${resps.contains(io.og1Resp)}, " +
         s"finalResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.finalIssueResp)}, " +
-        s"loadBorderResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.memAddrIssueResp)}, " +
         s"memFastResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.fastResp)}, " +
         s"memSlowResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.slowResp)}, " +
         s"vecLoadBorderResp: ${io.vecLdIn.nonEmpty && resps.contains(io.vecLdIn.get.resp)}, " +
@@ -559,7 +558,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // load/hybird only
   val fromLoad = OptionWrapper(params.isLdAddrIQ || params.isHyAddrIQ, new Bundle {
     val finalIssueResp    = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-    val memAddrIssueResp  = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   })
   // mem only
   val fromMem = OptionWrapper(params.isMemAddrIQ, new Bundle {

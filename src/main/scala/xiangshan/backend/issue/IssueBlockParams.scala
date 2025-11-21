@@ -62,7 +62,7 @@ case class IssueBlockParams(
 
   def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
 
-  def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
+  def needFeedBackLqIdx: Boolean = isVecMemIQ
 
   def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
