@@ -296,14 +296,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     p.bits.size := 3.U
     p.bits.cmd  := TlbCmd.exec
   }
-  private val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
-  private val s1_pmp_mmio      = VecInit(fromPMP.map(_.mmio))
-
-  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next
-  private val s1_exception_out = ExceptionType.merge(
-    s1_itlb_exception,
-    s1_pmp_exception
-  )
 
   /**
     ******************************************************************************
@@ -357,9 +349,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s2_req_isForVSnonLeafPTE =
     RegEnable(s1_req_isForVSnonLeafPTE, 0.U.asTypeOf(s1_req_isForVSnonLeafPTE), s1_fire)
   private val s2_doubleline       = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
-  private val s2_exception        = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)
+  private val s2_itlb_exception   = RegEnable(s1_itlb_exception, 0.U.asTypeOf(s1_itlb_exception), s1_fire)
   private val s2_backendException = RegEnable(s1_backendException, false.B, s1_fire)
-  private val s2_pmp_mmio         = RegEnable(s1_pmp_mmio, 0.U.asTypeOf(s1_pmp_mmio), s1_fire)
   private val s2_itlb_pbmt        = RegEnable(s1_itlb_pbmt, 0.U.asTypeOf(s1_itlb_pbmt), s1_fire)
   private val s2_waymasks         = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
@@ -372,6 +363,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s2_hits              = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   private val s2_datas             = RegInit(VecInit(Seq.fill(ICacheDataBanks)(0.U((blockBits / ICacheDataBanks).W))))
   private val s2_data_is_from_MSHR = RegInit(VecInit(Seq.fill(ICacheDataBanks)(false.B)))
+
+  // receive & hold pmp result
+  private val s2_pmp_exception = DataHoldBypass(VecInit(fromPMP.map(ExceptionType.fromPMPResp)), RegNext(s1_fire))
+  private val s2_pmp_mmio      = DataHoldBypass(VecInit(fromPMP.map(_.mmio)), RegNext(s1_fire))
+
+  // merge s2 itlb/pmp exceptions, itlb has the highest priority, pmp next
+  private val s2_exception = ExceptionType.merge(
+    s2_itlb_exception,
+    s2_pmp_exception
+  )
 
   /**
     ******************************************************************************
