@@ -56,7 +56,6 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val meta:            DecoupledIO[BpuMeta]            = Decoupled(new BpuMeta)
   val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
   // TODO: topdown, etc.
-  val debugMeta: DecoupledIO[BpuDebugMeta] = Decoupled(new BpuDebugMeta)
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {

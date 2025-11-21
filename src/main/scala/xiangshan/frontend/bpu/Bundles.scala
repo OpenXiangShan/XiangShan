@@ -138,19 +138,31 @@ class BpuPredictionSource extends Bundle {
   val s1Source:   UInt = BpuPredictionSource.Stage1()
   val s3Source:   UInt = BpuPredictionSource.Stage3()
   val s3Override: Bool = Bool()
+
+  def s1Ubtb:            Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
+  def s1Abtb:            Bool = s1Source === BpuPredictionSource.Stage1.Abtb
+  def s1Fallthrough:     Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
+  def s3Ras:             Bool = s3Source === BpuPredictionSource.Stage3.Ras
+  def s3ITTage:          Bool = s3Source === BpuPredictionSource.Stage3.ITTage
+  def s3MbtbTage:        Bool = s3Source === BpuPredictionSource.Stage3.MbtbTage
+  def s3Mbtb:            Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
+  def s3FallthroughTage: Bool = s3Source === BpuPredictionSource.Stage3.FallthroughTage
+  def s3Fallthrough:     Bool = s3Source === BpuPredictionSource.Stage3.Fallthrough
 }
 
 object BpuPredictionSource {
   object Stage1 extends EnumUInt(3) {
     def Ubtb:        UInt = 0.U(width.W)
     def Abtb:        UInt = 1.U(width.W)
-    def FallThrough: UInt = 2.U(width.W)
+    def Fallthrough: UInt = 2.U(width.W)
   }
-  object Stage3 extends EnumUInt(4) {
-    def Ras:         UInt = 0.U(width.W)
-    def ITTage:      UInt = 1.U(width.W)
-    def Mbtb:        UInt = 2.U(width.W)
-    def FallThrough: UInt = 3.U(width.W)
+  object Stage3 extends EnumUInt(6) {
+    def Ras:             UInt = 0.U(width.W)
+    def ITTage:          UInt = 1.U(width.W)
+    def MbtbTage:        UInt = 2.U(width.W)
+    def Mbtb:            UInt = 3.U(width.W)
+    def FallthroughTage: UInt = 4.U(width.W)
+    def Fallthrough:     UInt = 5.U(width.W)
   }
 }
 
@@ -242,23 +254,23 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:   MainBtbMeta = new MainBtbMeta
-  val tage:   TageMeta    = new TageMeta
-  val ras:    RasMeta     = new RasMeta
-  val phr:    PhrMeta     = new PhrMeta
-  val sc:     ScMeta      = new ScMeta
-  val ittage: IttageMeta  = new IttageMeta
+  val mbtb:   MainBtbMeta  = new MainBtbMeta
+  val tage:   TageMeta     = new TageMeta
+  val ras:    RasMeta      = new RasMeta
+  val phr:    PhrMeta      = new PhrMeta
+  val sc:     ScMeta       = new ScMeta
+  val ittage: IttageMeta   = new IttageMeta
+  val debug:  BpuDebugMeta = new BpuDebugMeta
 }
 
 class BpuDebugMeta(implicit p: Parameters) extends BpuBundle {
   // used for BpTrace
-  val bpId:       UInt       = UInt(XLEN.W)
-  val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
-  // used for perf counters
-  val bpS1:     Prediction          = new Prediction
-  val bpS3:     Prediction          = new Prediction
-  val bpSource: BpuPredictionSource = new BpuPredictionSource
-  def bpPred:   Prediction          = Mux(bpSource.s3Override, bpS3, bpS1)
+  val bpId:         UInt                = UInt(XLEN.W)
+  val startVAddr:   PrunedAddr          = new PrunedAddr(VAddrBits)
+  val s1Prediction: Prediction          = new Prediction
+  val s3Prediction: Prediction          = new Prediction
+  val bpSource:     BpuPredictionSource = new BpuPredictionSource
+  def bpPred:       Prediction          = Mux(bpSource.s3Override, s3Prediction, s1Prediction)
 }
 
 /* *** internal const & type *** */
