@@ -79,16 +79,19 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   // TODO: calculate the new ghr based on redirect info maybe need more cycles
   private val r0_updateGhr = getNewGhr(r0_metaGhr, r0_numLess, r0_numHit, r0_taken)
   // update from redirect or update
-  s0_ghr.valid := s3_fire && ghr.valid // gTable prediction can only begin when s3_fire
-  s0_ghr.value := ghr.value
   when(r0_valid) {
-    ghr.valid := true.B
-    ghr.value := r0_updateGhr // TODO: redirect ghr recovery can delay one/two cycle
+    ghr.valid    := false.B
+    ghr.value    := r0_updateGhr // TODO: redirect ghr recovery can delay one/two cycle
+    s0_ghr.valid := false.B
+    s0_ghr.value := r0_updateGhr
   }.elsewhen(s3_fire) {
     ghr.valid    := true.B
     ghr.value    := s3_updateGhr
     s0_ghr.valid := true.B // if s3_fire, ghr can be used
     s0_ghr.value := s3_updateGhr
+  }.otherwise {
+    s0_ghr.valid := (!r0_valid) && ghr.valid
+    s0_ghr.value := ghr.value
   }
 
   if (EnableCommitGHistDiff) {
