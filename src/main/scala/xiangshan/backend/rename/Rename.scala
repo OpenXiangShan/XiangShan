@@ -22,6 +22,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
+import difftest._
 
 class RenameBypassInfo extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -34,6 +35,7 @@ class RenameBypassInfo extends XSBundle {
 
 class Rename extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val roqCommits = Flipped(new RoqCommitIO)
@@ -44,8 +46,6 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
-    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -69,8 +69,6 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   val intRat = Module(new RenameTable(float = false)).io
   val fpRat = Module(new RenameTable(float = true)).io
   val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
-  intRat.debug_rdata <> io.debug_int_rat
-  fpRat.debug_rdata <> io.debug_fp_rat
 
   allPhyResource.map{ case (rat, freelist, _) =>
     rat.redirect := io.redirect.valid
@@ -293,5 +291,15 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
 
+  if (!env.FPGAPlatform) {
+    val difftest = DifftestModule(new DiffArchIntRenameTable(NRPhyRegs))
+    difftest.coreid := io.hartId
+    difftest.value := intRat.debug_rdata
+  }
 
+  if (!env.FPGAPlatform) {
+    val difftest = DifftestModule(new DiffArchFpRenameTable(NRPhyRegs))
+    difftest.coreid := io.hartId
+    difftest.value := fpRat.debug_rdata
+  }
 }

@@ -19,6 +19,7 @@ package xiangshan.backend.regfile
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import difftest._
 
 class RfReadPort(len: Int) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
@@ -36,12 +37,13 @@ class Regfile
   numReadPorts: Int,
   numWirtePorts: Int,
   hasZero: Boolean,
-  len: Int
+  len: Int,
+  difftestRead: Option[DiffPhyRegState],
 ) extends XSModule {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(64.W))
     val readPorts = Vec(numReadPorts, new RfReadPort(len))
     val writePorts = Vec(numWirtePorts, new RfWritePort(len))
-    val debug_rports = Vec(32, new RfReadPort(len))
   })
 
   val useBlackBox = false
@@ -57,9 +59,16 @@ class Regfile
       }
     }
 
-    for (rport <- io.debug_rports) {
-      val zero_rdata = Mux(rport.addr === 0.U, 0.U, mem(rport.addr))
-      rport.data := (if (hasZero) zero_rdata else mem(rport.addr))
+    // connect difftest
+    difftestRead.map{ phyRegState =>
+      if (!env.FPGAPlatform) {
+        val difftest = DifftestModule(phyRegState)
+        difftest.coreid := io.hartId
+        difftest.value := mem
+        if (hasZero) {
+          difftest.value(0) := 0.U
+        }
+      }
     }
   } else {
 
@@ -140,8 +149,6 @@ class Regfile
     io.readPorts(11).data := regfile.io.rdata11
     io.readPorts(12).data := regfile.io.rdata12
     io.readPorts(13).data := regfile.io.rdata13
-
-    io.debug_rports := DontCare
   }
 
 }

@@ -39,7 +39,6 @@ class CtrlToIntBlockIO extends XSBundle {
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
-  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -49,7 +48,6 @@ class CtrlToFpBlockIO extends XSBundle {
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
-  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
 class CtrlToLsBlockIO extends XSBundle {
@@ -328,6 +326,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       flushReg || io.frontend.redirect_cfiUpdate.valid)
   }
 
+  rename.io.hartId := io.hartId
   rename.io.redirect <> backendRedirect
   rename.io.flush := flushReg
   rename.io.roqCommits <> roq.io.commits
@@ -376,10 +375,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
   io.toIntBlock.flush <> flushReg
-  io.toIntBlock.debug_rat <> rename.io.debug_int_rat
   io.toFpBlock.redirect <> backendRedirect
   io.toFpBlock.flush <> flushReg
-  io.toFpBlock.debug_rat <> rename.io.debug_fp_rat
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> flushReg
 

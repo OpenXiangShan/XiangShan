@@ -25,7 +25,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
 import xiangshan.backend.regfile.Regfile
-import difftest._
+import difftest.DiffPhyIntRegState
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -122,8 +122,10 @@ class IntegerBlock
     numReadPorts = NRIntReadPorts,
     numWirtePorts = NRIntWritePorts,
     hasZero = true,
-    len = XLEN
+    len = XLEN,
+    difftestRead = Some(new DiffPhyIntRegState(NRPhyRegs)),
   ))
+  intRf.io.hartId := io.csrio.hartId
 
   val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
@@ -276,15 +278,4 @@ class IntegerBlock
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
-  intRf.io.debug_rports := DontCare
-
-  if (!env.FPGAPlatform) {
-    for ((rport, rat) <- intRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
-      rport.addr := rat
-    }
-    val difftest = DifftestModule(new DiffArchIntRegState)
-    difftest.coreid := io.csrio.hartId
-    difftest.value  := VecInit(intRf.io.debug_rports.map(_.data))
-  }
-
 }

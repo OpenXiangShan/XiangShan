@@ -889,7 +889,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
-      val difftest = DifftestModule(new DiffInstrCommit, delay = 1, dontCare = true)
+      val difftest = DifftestModule(new DiffInstrCommit(NRPhyRegs), delay = 1, dontCare = true)
       difftest.coreid   := io.hartId
       difftest.index    := i.U
 
@@ -902,7 +902,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       difftest.skip     := exuOut.isMMIO || exuOut.isPerfCnt
       difftest.isRVC    := uop.cf.pd.isRVC
       difftest.rfwen    := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
+      difftest.fpwen    := io.commits.valid(i) && uop.ctrl.fpWen
       difftest.wdest    := uop.ctrl.ldest
+      difftest.wpdest   := uop.pdest
       difftest.robIdx   := ptr
     }
   }
