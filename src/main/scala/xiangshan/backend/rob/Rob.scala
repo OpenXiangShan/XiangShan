@@ -1065,7 +1065,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
 
-      val difftest = DifftestModule(new DiffInstrCommit, delay = 3, dontCare = true)
+      val difftest = DifftestModule(new DiffInstrCommit(NRPhyRegs), delay = 3, dontCare = true)
       difftest.coreid  := io.hartId
       difftest.index   := i.U
       difftest.valid   := io.commits.commitValid(i) && io.commits.isCommit
