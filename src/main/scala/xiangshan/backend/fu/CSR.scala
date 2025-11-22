@@ -686,8 +686,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
-    (addr >= Cycle.U) && (addr <= Hpmcounter31.U) ||
-    addr === Mip.U
+    (addr >= Cycle.U) && (addr <= Hpmcounter31.U)
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
@@ -1196,12 +1195,30 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.mcause := mcause
     difftest.scause := scause
     difftest.satp := satp
-    difftest.mip := mipReg
+    difftest.mip := mip.asUInt
     difftest.mie := mie
     difftest.mscratch := mscratch
     difftest.sscratch := sscratch
     difftest.mideleg := mideleg
     difftest.medeleg := medeleg
+  }
+
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+     val interruptBits = csrio.externalInterrupt.asUInt
+     val interruptBitsReg = RegNext(interruptBits, 0.U)
+     val difftest = DifftestModule(new DiffNonRegInterruptPendingEvent)
+     difftest.coreid := csrio.hartId
+     difftest.valid := interruptBits =/= interruptBitsReg || (RegNext(reset.asBool) && !reset.asBool)
+     difftest.platformIRPMeip := csrio.externalInterrupt.meip
+     difftest.platformIRPMtip := csrio.externalInterrupt.mtip
+     difftest.platformIRPMsip := csrio.externalInterrupt.msip
+     difftest.platformIRPSeip := csrio.externalInterrupt.meip
+     difftest.platformIRPStip := false.B
+     difftest.platformIRPVseip := false.B
+     difftest.platformIRPVstip := false.B
+     difftest.fromAIAMeip := false.B
+     difftest.fromAIASeip := false.B
+     difftest.localCounterOverflowInterruptReq := false.B
   }
 
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
