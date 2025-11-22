@@ -101,7 +101,7 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   val nc              = Bool() // indicate request is none-cacheable.
   val mmio            = Bool()
   val mask            = UInt((VLEN/8).W)
-  val size            = UInt(log2Ceil(VLEN/8).W)
+  val size            = UInt(MemorySize.Size.width.W)
   val memBackTypeMM   = Bool() // 1: main memory, 0: IO.
   val hasException    = Bool() // indicate request has exception.
   val af              = Bool() // indicate access fault.
@@ -165,7 +165,7 @@ class ForwardQueryIO(implicit p: Parameters) extends MemBlockBundle {
     val vaddr            = UInt(VAddrBits.W)
     val uop              = new UopInfo
     val sqIdx            = new SqPtr
-    val size             = UInt(log2Ceil(log2Ceil(VLEN/8)+1).W) //
+    val size             = UInt(MemorySize.Size.width.W)
   }
 
   class ReqS1InfoBundle(implicit p: Parameters) extends MemBlockBundle {
