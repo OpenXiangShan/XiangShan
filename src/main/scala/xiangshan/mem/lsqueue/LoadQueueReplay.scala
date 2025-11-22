@@ -202,6 +202,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     //
     val sqEmpty = Input(Bool())
     val lqFull  = Output(Bool())
+    val lqThreshold  = Output(Bool())
     val ldWbPtr = Input(new LqPtr)
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
@@ -287,6 +288,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // select LoadPipelineWidth valid index.
   val lqFull = freeList.io.empty
+  val lqThreshold = (LoadQueueReplaySize.U - freeList.io.validCount) <= 12.U
   val lqFreeNums = freeList.io.validCount
 
   // replay logic
@@ -603,9 +605,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // init
   freeMaskVec.map(e => e := false.B)
 
-  // LoadQueueReplay can't backpressure.
-  // We think LoadQueueReplay can always enter, as long as it is the same size as VirtualLoadQueue.
-  assert(freeList.io.canAllocate.reduce(_ || _) || !io.enq.map(_.valid).reduce(_ || _), s"LoadQueueReplay Overflow")
 
   // Allocate logic
   needEnqueue.zip(newEnqueue).zip(io.enq).map {
@@ -757,6 +756,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   freeList.io.free := freeMaskVec.asUInt
 
   io.lqFull := lqFull
+  io.lqThreshold := lqThreshold
 
   // Topdown
   val robHeadVaddr = io.debugTopDown.robHeadVaddr
