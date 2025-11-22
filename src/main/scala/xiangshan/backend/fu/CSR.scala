@@ -312,15 +312,6 @@ class CSR extends FunctionUnit with HasCSRConst
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
-  val pmpcfg0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg3 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr3 = RegInit(UInt(XLEN.W), 0.U)
-
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
@@ -560,16 +551,29 @@ class CSR extends FunctionUnit with HasCSRConst
   )
 
   // PMP is unimplemented yet
-  val pmpMapping = Map(
-    MaskedRegMap(Pmpcfg0, pmpcfg0),
-    MaskedRegMap(Pmpcfg1, pmpcfg1),
-    MaskedRegMap(Pmpcfg2, pmpcfg2),
-    MaskedRegMap(Pmpcfg3, pmpcfg3),
-    MaskedRegMap(PmpaddrBase + 0, pmpaddr0),
-    MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
-    MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
-    MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
-  )
+  // TODO: Only registers exist but their function is not implemented
+  val numPMP = 16
+  val pmpMapping = (0 until numPMP / 8).flatMap { i =>
+    // Each pmpcfg register contains 8 entries, each entry is 8 bits
+    val pmpcfgReg = RegInit(0.U(XLEN.W)).suggestName(s"pmpcfg${i * 2}")
+    val pmpcfg = MaskedRegMap(PmpcfgBase + i * 2, pmpcfgReg)
+    val pmpaddr = (0 until 8).map { j =>
+      val pmpaddrReg = RegInit(0.U(XLEN.W)).suggestName(s"pmpaddr${i * 8 + j}")
+      // write mask is according to the physical address size
+      val wmask = ZeroExt(VecInit.fill(PAddrBits - 2)(true.B).asUInt, XLEN)
+      // read mask is according to the pmpcfg
+      val cfg = pmpcfgReg.asTypeOf(Vec(8, UInt(8.W)))(j)
+      val na4_napot = cfg(4, 3) === "b11".U || cfg(4, 3) === "b10".U
+      val rfn = (rdata: UInt) => {
+        val G = 12 - 2 // PlatformGrain (12) - PMPOffBits (2)
+        val set_low_bits = rdata | ZeroExt(VecInit.fill(G - 1)(true.B).asUInt, XLEN)
+        val clear_low_bits = rdata & (~ZeroExt(VecInit.fill(G)(true.B).asUInt, XLEN)).asUInt
+        Mux(na4_napot, set_low_bits, clear_low_bits)
+      }
+      MaskedRegMap(PmpaddrBase + i * 8 + j, pmpaddrReg, wmask = wmask, rfn = rfn)
+    }
+    pmpcfg +: pmpaddr
+  }
 
   var perfCntMapping = Map(
     MaskedRegMap(Mcountinhibit, mcountinhibit),
