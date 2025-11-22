@@ -197,11 +197,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
-  val readyCount        = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
-  val robCommitValidVec = io.backend.toFtq.rob_commits.map(_.valid)
-  val robCommitBitsVec  = io.backend.toFtq.rob_commits.map(_.bits)
-  val robCommitValid    = robCommitValidVec.reduce(_ || _)
-  val robCommitBits     = ParallelPosteriorityMux(robCommitValidVec, robCommitBitsVec)
+  val readyCount = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
 
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
@@ -230,11 +226,11 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   fetchHelper.io.redirectPc       := io.backend.toFtq.redirect.bits.pc + io.backend.toFtq.redirect.bits.getPcOffset()
   fetchHelper.io.redirectTarget   := io.backend.toFtq.redirect.bits.target
 
-  fetchHelper.io.robCommitValid    := robCommitValid
-  fetchHelper.io.robCommitFtqFlag  := robCommitBits.ftqIdx.flag
-  fetchHelper.io.robCommitFtqValue := robCommitBits.ftqIdx.value
+  fetchHelper.io.robCommitValid    := io.backend.toFtq.commit.valid
+  fetchHelper.io.robCommitFtqFlag  := io.backend.toFtq.commit.bits.flag
+  fetchHelper.io.robCommitFtqValue := io.backend.toFtq.commit.bits.value
 
-  io.backend.cfVec.zip(fetchHelper.io.out).zipWithIndex.map { case ((cfVec, fetchOut), idx) =>
+  io.backend.cfVec.zip(fetchHelper.io.out).zipWithIndex.foreach { case ((cfVec, fetchOut), idx) =>
     val rvcExpanders = Module(new RvcExpander)
 
     rvcExpanders.io.in      := fetchOut.instr
@@ -247,13 +243,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
     cfVec.bits.trigger := TriggerAction.None
 
-    cfVec.bits.pd.valid := fetchOut.preDecode(0)
-    cfVec.bits.pd.isRVC := fetchOut.preDecode(1)
-    cfVec.bits.pd.brAttribute := BranchAttribute(
-      fetchOut.preDecode(3, 2),
-      Cat(fetchOut.preDecode(4), fetchOut.preDecode(5)),
-      fetchOut.preDecode(0)
-    )
+    cfVec.bits.isRvc := fetchOut.preDecode(1)
 
     cfVec.bits.fixedTaken := fetchOut.preDecode(6)
     cfVec.bits.predTaken  := fetchOut.preDecode(6)

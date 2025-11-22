@@ -98,7 +98,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val exceptionVec = ExceptionVec()
   val backendException = Bool()
   val trigger = TriggerAction()
-  val pd = new PreDecodeInfo
+  val isRvc = Bool()
   val fixedTaken = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
@@ -306,6 +306,11 @@ class Resolve(implicit p: Parameters) extends XSBundle {
   val taken: Bool = Bool()
   val mispredict: Bool = Bool()
   val attribute: BranchAttribute = new BranchAttribute
+}
+
+class CallRetCommit(implicit p: Parameters) extends XSBundle {
+  val rasAction: UInt = BranchAttribute.RasAction()
+  val ftqPtr: FtqPtr = new FtqPtr
 }
 
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {

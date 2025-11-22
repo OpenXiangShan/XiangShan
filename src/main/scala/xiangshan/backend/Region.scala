@@ -422,7 +422,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits.debug_seqNum := source.bits.uop.debug_seqNum
       sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
       sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
-      sink.bits.predecodeInfo.foreach(_ := source.bits.uop.preDecodeInfo)
+      sink.bits.isRVC.foreach(_ := source.bits.uop.isRVC)
       sink.bits.vls.foreach(x => {
         x.vdIdx := source.bits.vdIdx.get
         x.vdIdxInField := source.bits.vdIdxInField.get
@@ -676,7 +676,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits.debug_seqNum := source.bits.uop.debug_seqNum
       sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
       sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
-      sink.bits.predecodeInfo.foreach(_ := source.bits.uop.preDecodeInfo)
+      sink.bits.isRVC.foreach(_ := source.bits.uop.isRVC)
       sink.bits.vls.foreach(x => {
         x.vdIdx := source.bits.vdIdx.get
         x.vdIdxInField := source.bits.vdIdxInField.get

@@ -39,15 +39,17 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
+import xiangshan.frontend.bpu.BranchAttribute
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
-  val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
-
   val redirect = Valid(new Redirect)
   val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
+
+  val commit = Valid(new FtqPtr)
+  val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -194,10 +196,6 @@ class CtrlBlockImp(
     delayed
   }).toSeq
 
-  private val exuPredecode = VecInit(
-    io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
-  )
-
   private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
     val hasCSR = x.bits.params.hasCSR
     val out = Wire(Valid(new Redirect()))
@@ -219,7 +217,6 @@ class CtrlBlockImp(
   private val CSROH = VecInit(io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.params.hasCSR.B))
   private val oldestExuRedirectIsCSR = oldestOneHot === CSROH
   private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
-  private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
@@ -278,7 +275,7 @@ class CtrlBlockImp(
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
-      // memStPcRead.data is not right bucasue memStPcRead don't have isRvc
+      // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
       io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
     }
   } else {
@@ -327,8 +324,6 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
-  redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
-  redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
@@ -351,16 +346,23 @@ class CtrlBlockImp(
   val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
   val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)
   val frontendFlushBits = RegEnable(s1_robFlushRedirect.bits, s1_robFlushRedirect.valid) // ??
+
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
   // Thus, we make all flush reasons to behave the same as exceptions for frontend.
-  for (i <- 0 until CommitWidth) {
-    // why flushOut: instructions with flushPipe are not commited to frontend
-    // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !s0_robFlushRedirect.valid
-    io.frontend.toFtq.rob_commits(i).valid := GatedValidRegNext(s1_isCommit)
-    io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
-  }
+  // why flushOut: instructions with flushPipe are not commited to frontend
+  // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
+  val frontendCommit = rob.io.commits.commitValid.reduce(_ || _) &&
+    rob.io.commits.isCommit && !s0_robFlushRedirect.valid
+  io.frontend.toFtq.commit.valid := RegNext(frontendCommit)
+  io.frontend.toFtq.commit.bits := RegEnable(
+    ParallelPriorityMux(
+      rob.io.commits.commitValid.reverse,
+      rob.io.commits.info.map(_.ftqIdx).reverse
+    ),
+    frontendCommit
+  )
+
   io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s6_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
   io.frontend.toFtq.ftqIdxSelOH.valid := s6_flushFromRobValid || redirectGen.io.stage2Redirect.valid
@@ -376,6 +378,14 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
 
+  for (i <- 0 until CommitWidth) {
+    val crc = io.frontend.toFtq.callRetCommit(i)
+    val blk = rob.io.trace.traceCommitInfo.blocks(i)
+    val vld = rob.io.commits.isCommit && rob.io.commits.commitValid(i)
+    crc.valid := GatedValidRegNext(vld)
+    crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
+    crc.bits.rasAction := RegEnable(Itype.isPop(blk.bits.tracePipe.itype) ## Itype.isPush(blk.bits.tracePipe.itype), vld)
+  }
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid
@@ -396,7 +406,6 @@ class CtrlBlockImp(
   val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
   val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
   when (s6_flushFromRobValid) {
-    io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
     io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
     io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)

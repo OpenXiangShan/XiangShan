@@ -1205,7 +1205,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   io.ldu_io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception && s3_ld_flow
   io.ldu_io.rollback.bits             := DontCare
-  io.ldu_io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
+  io.ldu_io.rollback.bits.isRVC       := s3_out.bits.uop.isRVC
   io.ldu_io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
   io.ldu_io.rollback.bits.ftqIdx      := s3_out.bits.uop.ftqPtr
   io.ldu_io.rollback.bits.ftqOffset   := s3_out.bits.uop.ftqOffset
