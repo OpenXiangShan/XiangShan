@@ -238,7 +238,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val forwardMask      = UIntToMask(io.query(i).req.lduStage0ToSq.bits.sqIdx.value, StoreQueueSize)
       // overlap judgement
       val loadStart        = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8), 0)
-      val loadEnd          = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8), 0) + io.query(i).req.lduStage0ToSq.bits.size
+      val byteOffset       = MemorySize.ByteOffset(io.query(i).req.lduStage0ToSq.bits.size)
+      val loadEnd          = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8), 0) + byteOffset
 
       val overlapMask      = VecInit((0 until StoreQueueSize).map(j =>
         io.dataEntriesIn(i).byteStart <= loadEnd && io.dataEntriesIn(i).byteEnd >= loadStart
@@ -1368,13 +1369,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val storeAddrIn   = io.fromStoreUnit.storeAddrIn(i)
     val storeAddrInRe = io.fromStoreUnit.storeAddrInRe(i)
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
-    val byteOffset    = LookupTree(storeAddrIn.bits.size, Seq(
-      "b000".U -> 1.U,
-      "b001".U -> 2.U,
-      "b010".U -> 4.U,
-      "b011".U -> 8.U,
-      "b100".U -> 16.U
-    ))
+    val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
     when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage)){
       // the second paddr of cross4KPage request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
