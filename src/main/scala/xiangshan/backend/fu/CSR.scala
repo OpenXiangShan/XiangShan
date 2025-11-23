@@ -275,6 +275,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
   val mstatus = RegInit("ha00002000".U(XLEN.W))
 
+  val menvcfg = RegInit(0.U(XLEN.W))
+  val mseccfg = RegInit(0.U(XLEN.W))
+
   // mstatus Value Table
   // | sd   |
   // | pad1 |
@@ -603,6 +606,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
+
+    //--- Machine Configuration ---
+    MaskedRegMap(Menvcfg, menvcfg, MaskedRegMap.UnwritableMask),
+    MaskedRegMap(Mseccfg, mseccfg, MaskedRegMap.UnwritableMask),
 
     //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),

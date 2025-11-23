@@ -110,6 +110,8 @@ trait HasCSRConst {
   val Mie           = 0x304
   val Mtvec         = 0x305
   val Mcounteren    = 0x306
+  val Menvcfg       = 0x30A
+  val Mseccfg       = 0x747
 
   // Machine Trap Handling
   val Mscratch      = 0x340
