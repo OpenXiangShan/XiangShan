@@ -24,7 +24,7 @@ import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
-import difftest.DiffPhyFpRegState
+import difftest._
 
 class FpBlockToCtrlIO extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
@@ -92,9 +92,12 @@ class FloatBlock
     numWirtePorts = NRFpWritePorts,
     hasZero = false,
     len = XLEN + 1,
-    difftestRead = Some(new DiffPhyFpRegState(NRPhyRegs)),
   ))
-  fpRf.io.hartId := io.hartId
+  if (!env.FPGAPlatform) {
+    val difftest = DifftestModule(new DiffPhyFpRegState(NRPhyRegs))
+    difftest.coreid := io.hartId
+    difftest.value := fpRf.io.backdoor.map(ieee(_))
+  }
 
   val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new FmacExeUnit))
   val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
