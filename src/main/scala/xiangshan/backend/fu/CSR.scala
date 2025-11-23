@@ -274,6 +274,9 @@ class CSR extends FunctionUnit with HasCSRConst
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), 0.U)
 
+  val menvcfg = RegInit(0.U(XLEN.W))
+  val mseccfg = RegInit(0.U(XLEN.W))
+
   // mstatus Value Table
   // | sd   |
   // | pad1 |
@@ -541,6 +544,10 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
     MaskedRegMap(Mcounteren, mcounteren),
+
+    //--- Machine Configuration ---
+    MaskedRegMap(Menvcfg, menvcfg, MaskedRegMap.UnwritableMask),
+    MaskedRegMap(Mseccfg, mseccfg, MaskedRegMap.UnwritableMask),
 
     //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),
