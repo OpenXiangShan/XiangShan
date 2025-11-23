@@ -153,7 +153,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   (pmpChecker zip pmpRequestor).foreach { case (checker, requestor) =>
     if (HasBitmapCheck) {
-      checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+      if (KeyIDBits > 0) {
+        checker.apply(
+          tlbCsr.mbmc.KEYIDEN.asBool,
+          tlbCsr.mbmc.CMODE.asBool,
+          tlbCsr.priv.imode,
+          pmp.io.pmp,
+          pmp.io.pma,
+          requestor.req
+        )
+      } else {
+        checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+      }
     } else {
       checker.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
     }

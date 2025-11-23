@@ -495,6 +495,7 @@ class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
 
 // add mbmc csr
 class MbmcStruct(implicit p: Parameters) extends XSBundle {
+  val KEYIDEN = UInt(1.W)
   val BME = UInt(1.W)
   val CMODE = UInt(1.W)
   val BCLEAR = UInt(1.W)
@@ -505,6 +506,7 @@ class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
   def apply(mbmc_value: UInt): Unit = {
     require(mbmc_value.getWidth == XLEN)
     val mc = mbmc_value.asTypeOf(new MbmcStruct)
+    KEYIDEN := mc.KEYIDEN
     BME := mc.BME
     CMODE := mc.CMODE
     BCLEAR := mc.BCLEAR
