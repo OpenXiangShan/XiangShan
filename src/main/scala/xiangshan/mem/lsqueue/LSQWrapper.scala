@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, UopIdx}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
@@ -64,7 +64,10 @@ class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
+class LsqWrapper(implicit p: Parameters) extends XSModule
+  with HasDCacheParameters
+  with HasMemBlockParameters
+  with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
@@ -82,7 +85,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
@@ -99,10 +102,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
-    val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
-    val cboZeroStout = DecoupledIO(new MemExuOutput)
-    // TODO: implement vector store
-    val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true)) // vec writeback uncached store
+    val mmioStout = DecoupledIO(new ExuOutput(staParams.head)) // writeback uncached store
+    val cboZeroStout = DecoupledIO(new ExuOutput(staParams.head))
+    val vecmmioStout = DecoupledIO(new ExuOutput(vstuParams.head)) // vec writeback uncached store
     val sqEmpty = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())

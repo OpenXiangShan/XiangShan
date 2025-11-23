@@ -831,7 +831,7 @@ object FuConfig {
     destDataBits = 128,
   )
 
-  val VseglduSeg: FuConfig = FuConfig (
+  val VseglduCfg: FuConfig = FuConfig (
     name = "vsegldu",
     fuType = FuType.vsegldu,
     fuGen = null,
@@ -874,7 +874,7 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )

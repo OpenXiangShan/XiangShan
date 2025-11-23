@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.exu.ExeUnitParams
 
 
 class VfofDataBundle(implicit p: Parameters) extends VLSUBundle{
@@ -35,9 +36,11 @@ class VfofDataBundle(implicit p: Parameters) extends VLSUBundle{
 }
 
 
-class VfofBuffer(implicit p: Parameters) extends VLSUModule{
-  val io = IO(new VfofDataBuffIO())
-  
+class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUModule{
+  val io = IO(new VfofDataBuffIO(param))
+
+  implicit val vfofParam: ExeUnitParams = param
+
   val entries = RegInit(0.U.asTypeOf(new VfofDataBundle()))
   val valid   = RegInit(false.B)
 
@@ -46,24 +49,24 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   //Enq
   io.in.map(_.ready := true.B)
   val enqIsfof = io.in.map { x =>
-    x.valid && x.bits.uop.vpu.isVleff
+    x.valid && x.bits.vpu.get.isVleff
   }
 
   val enqValid = enqIsfof.reduce(_ || _)
   val enqBits  = ParallelPriorityMux(enqIsfof, io.in.map(_.bits))
-  val enqNeedCancel = enqBits.uop.robIdx.needFlush(io.redirect)
-  val enqIsFixVl = enqBits.uop.vpu.isVleff && enqBits.uop.vpu.lastUop
+  val enqNeedCancel = enqBits.robIdx.needFlush(io.redirect)
+  val enqIsFixVl = enqBits.vpu.get.isVleff && enqBits.vpu.get.lastUop
 
-  XSError(entries.uop.robIdx.value =/= enqBits.uop.robIdx.value && valid && enqValid, "There should be no new fof instrction coming in!\n")
+  XSError(entries.uop.robIdx.value =/= enqBits.robIdx.value && valid && enqValid, "There should be no new fof instrction coming in!\n")
   XSError(entriesIsFixVl && valid && enqValid, "There should not new uop enqueue!\n")
 
   when(enqValid && !enqNeedCancel) {
     when(!valid){
-      entries.uop           := enqBits.uop
-      entries.vl            := enqBits.src_vl.asTypeOf(VConfig()).vl
+      entries.uop           := enqBits.toDynInst()
+      entries.vl            := enqBits.src(vlIndice).asTypeOf(Vl())
       entries.hasException  := false.B
     }.elsewhen(valid && enqIsFixVl){
-      entries.uop     := enqBits.uop
+      entries.uop     := enqBits.toDynInst()
     }
   }
 
@@ -133,15 +136,26 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
     entries.hasException          := wbHasException
   }
 
-  //Deq
-  io.uopWriteback.bits                  := 0.U.asTypeOf(new MemExuOutput(isVector = true))
-  io.uopWriteback.bits.uop              := entries.uop
-  io.uopWriteback.bits.uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-  io.uopWriteback.bits.data             := entries.vl
-  io.uopWriteback.bits.uop.vpu.vl       := entries.vl
-  io.uopWriteback.bits.mask.get         := Fill(VLEN, 1.U)
-  io.uopWriteback.bits.uop.vpu.vmask    := Fill(VLEN, 1.U)
-  io.uopWriteback.valid                 := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
-
+  // Deq
+  io.uopWriteback.valid := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
+  io.uopWriteback.bits := 0.U.asTypeOf(new ExuOutput(param))
+  io.uopWriteback.bits.data := VecInit(Seq.fill(param.wbPathNum)(entries.vl))
+  io.uopWriteback.bits.pdest := entries.uop.pdest
+  io.uopWriteback.bits.robIdx := entries.uop.robIdx
+  io.uopWriteback.bits.intWen.foreach(_ := entries.uop.rfWen)
+  io.uopWriteback.bits.fpWen.foreach(_ := entries.uop.fpWen)
+  io.uopWriteback.bits.vecWen.foreach(_ := entries.uop.vecWen)
+  io.uopWriteback.bits.v0Wen.foreach(_ := entries.uop.v0Wen)
+  io.uopWriteback.bits.vlWen.foreach(_ := entries.uop.vlWen)
+  io.uopWriteback.bits.exceptionVec.foreach(_ := 0.U.asTypeOf(ExceptionVec()))
+  io.uopWriteback.bits.lqIdx.foreach(_ := entries.uop.lqIdx)
+  io.uopWriteback.bits.sqIdx.foreach(_ := entries.uop.sqIdx)
+  io.uopWriteback.bits.vls.foreach(vls => {
+    vls.vpu := entries.uop.vpu
+    vls.vpu.vl := entries.vl
+    vls.vpu.vmask := Fill(VLEN, 1.U)
+  })
+  io.uopWriteback.bits.debugInfo := entries.uop.debugInfo
+  io.uopWriteback.bits.debug_seqNum := entries.uop.debug_seqNum
 
 }

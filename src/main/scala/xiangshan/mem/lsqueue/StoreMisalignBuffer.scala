@@ -41,6 +41,7 @@ class MisBuffertoVecSplitIO(implicit p: Parameters) extends XSBundle {
   val uopIdx = UopIdx()
 }
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
+  with HasMemBlockParameters
   with HasCircularQueuePtrHelper
 {
   private val enqPortNum = StorePipelineWidth
@@ -105,10 +106,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
-    val writeBack       = Decoupled(new MemExuOutput)
+    val writeBack       = Decoupled(new ExuOutput(staParams.head))
     val vecWriteBack    = Vec(VecStorePipelineWidth, Decoupled(new VecPipelineFeedbackIO(isVStore = true)))
-    val storeOutValid    = Input(Bool())
-    val storeVecOutValid = Input(Bool())
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
       val vaddr = UInt(XLEN.W)
@@ -597,23 +596,30 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isvec
-  io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := DontCare
-  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
-  io.writeBack.bits.uop.flushPipe := false.B
-  io.writeBack.bits.uop.replayInst := false.B
-  io.writeBack.bits.data := DontCare
-  io.writeBack.bits.isFromLoadUnit := DontCare
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && !req.isvec
+  io.writeBack.bits := 0.U.asTypeOf(io.writeBack.bits)
+  io.writeBack.bits.pdest := req.uop.pdest
+  io.writeBack.bits.robIdx := req.uop.robIdx
+  io.writeBack.bits.intWen.foreach(_ := req.uop.rfWen)
+  io.writeBack.bits.exceptionVec.foreach(x => {
+    x := 0.U.asTypeOf(x)
+    StaCfg.exceptionOut.map(no => x(no) := (globalUncache || globalException) && exceptionVec(no))
+  })
+  io.writeBack.bits.flushPipe.foreach(_ := false.B)
+  io.writeBack.bits.lqIdx.foreach(_ := req.uop.lqIdx)
+  io.writeBack.bits.sqIdx.foreach(_ := req.uop.sqIdx)
+  io.writeBack.bits.trigger.foreach(_ := req.uop.trigger)
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
+  io.writeBack.bits.debugInfo := req.uop.debugInfo
+  io.writeBack.bits.debug_seqNum := req.uop.debug_seqNum
 
   io.vecWriteBack.zipWithIndex.map{
     case (wb, index) => {
-      wb.valid := req_valid && (bufferState === s_wb) && req.isvec && !io.storeVecOutValid && UIntToOH(req.portIndex)(index)
+      wb.valid := req_valid && (bufferState === s_wb) && req.isvec && UIntToOH(req.portIndex)(index)
 
       wb.bits.mBIndex           := req.mbIndex
       wb.bits.hit               := true.B

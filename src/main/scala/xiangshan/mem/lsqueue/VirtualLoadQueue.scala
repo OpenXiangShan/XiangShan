@@ -24,7 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.FuType

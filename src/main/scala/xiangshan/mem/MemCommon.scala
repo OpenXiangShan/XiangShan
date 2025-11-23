@@ -24,7 +24,7 @@ import chisel3.util._
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuInput}
+import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer

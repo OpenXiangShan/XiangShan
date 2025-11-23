@@ -59,9 +59,6 @@ class CounterFilterQueryBundle(implicit p: Parameters) extends DCacheBundle {
 // they think they all prefetch hit, increment useful prefetch counter 3 times
 // so when load arrives at s3, save it's set&way to an FIFO, all loads will search this FIFO to avoid this case
 class CounterFilter()(implicit p: Parameters) extends DCacheModule {
-  private val LduCnt = backendParams.LduCnt
-  private val HyuCnt = backendParams.HyuCnt
-
   val io = IO(new Bundle() {
     // input, only from load for now
     val ld_in = Flipped(Vec(LoadPipelineWidth, ValidIO(new CounterFilterDataBundle())))

@@ -23,7 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle}
 import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, Resolve, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
@@ -443,41 +443,4 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
   }
 
   io.in.ready := Cat(io.out.map(_.ready)).andR
-}
-
-class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
-  val flush = Flipped(ValidIO(new Redirect()))
-  val in = Flipped(DecoupledIO(new MemExuInput()))
-  val out = DecoupledIO(new MemExuOutput())
-}
-
-class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSModule {
-  val io = IO(new MemExeUnitIO)
-  val fu = exuParams.fuConfigs.head.fuGen(p, exuParams.fuConfigs.head)
-  fu.io.flush             := io.flush
-  fu.io.in.valid          := io.in.valid
-  io.in.ready             := fu.io.in.ready
-
-  fu.io.in.bits.ctrl.robIdx    := io.in.bits.uop.robIdx
-  fu.io.in.bits.ctrl.pdest     := io.in.bits.uop.pdest
-  fu.io.in.bits.ctrl.fuOpType  := io.in.bits.uop.fuOpType
-  fu.io.in.bits.data.imm       := io.in.bits.uop.imm
-  fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
-  fu.io.in.bits.perfDebugInfo := io.in.bits.uop.debugInfo
-  fu.io.in.bits.debug_seqNum := io.in.bits.uop.debug_seqNum
-
-  io.out.valid            := fu.io.out.valid
-  fu.io.out.ready         := io.out.ready
-
-  io.out.bits             := 0.U.asTypeOf(io.out.bits) // dontCare other fields
-  io.out.bits.data        := fu.io.out.bits.res.data
-  io.out.bits.uop.robIdx  := fu.io.out.bits.ctrl.robIdx
-  io.out.bits.uop.pdest   := fu.io.out.bits.ctrl.pdest
-  io.out.bits.uop.fuType  := io.in.bits.uop.fuType
-  io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
-  io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx
-  io.out.bits.uop.debugInfo := fu.io.out.bits.perfDebugInfo
-  io.out.bits.uop.debug_seqNum := fu.io.out.bits.debug_seqNum
-
-  io.out.bits.debug       := 0.U.asTypeOf(io.out.bits.debug)
 }
