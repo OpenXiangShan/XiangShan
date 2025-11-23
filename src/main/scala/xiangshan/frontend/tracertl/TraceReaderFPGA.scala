@@ -108,6 +108,7 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
   val writePtr = RegInit(0.U.asTypeOf(new PingPongRamPtr(RAM_NUM)))
 
   val readRam = ram(readPtr.value)
+  val readRamData = ram(RegNext(readPtr.value)).readInsts
   val writeRam = ram(writePtr.value)
 
   val readReady = readRam.readReady
@@ -131,7 +132,7 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
     writePtr := writePtr + 1.U
   }
 
-  io.readInsts := readRam.readInsts
+  io.readInsts := readRamData
   io.writeReady := writeReady
   io.readReady := readReady
 
@@ -221,6 +222,10 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
     commitPtr := commitPtr + commitInstNum
   }
 
+  XSError(redirectNextPtr.value < trtl.TraceFpgaSmallBufferSize.U,
+    "SmallBuffer redirect error: redirectNextPtr out of range")
+  XSError(readPtr.value < trtl.TraceFpgaSmallBufferSize.U,
+    "SmallBuffer read error: readPtr out of range")
   XSError(io.redirect.valid && buffer(redirectNextPtr.value).InstID =/= io.redirect.bits,
     "SmallBuffer redirect error: InstID not match")
 
