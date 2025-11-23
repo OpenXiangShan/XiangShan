@@ -282,11 +282,9 @@ class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
 
 trait PMPMethod extends PMPConst {
   def pmp_init() : (Vec[UInt], Vec[UInt], Vec[UInt])= {
-    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(PMXLEN.W))))
-    val addr = Wire(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W)))
-    val mask = Wire(Vec(NumPMP, UInt(PMPAddrBits.W)))
-    addr := DontCare
-    mask := DontCare
+    val cfg = 0.U.asTypeOf(Vec(NumPMP/8, UInt(PMXLEN.W)))
+    val addr = 0.U.asTypeOf(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W)))
+    val mask = 0.U.asTypeOf(Vec(NumPMP, UInt(PMPAddrBits.W)))
     (cfg, addr, mask)
   }
 
@@ -363,13 +361,13 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
   val cmd = Output(TlbCmd())
 
-  def apply(addr: UInt, size: UInt, cmd: UInt) {
+  def apply(addr: UInt, size: UInt, cmd: UInt): Unit = {
     this.addr := addr
     this.size := size
     this.cmd := cmd
   }
 
-  def apply(addr: UInt) { // req minimal permission and req align size
+  def apply(addr: UInt): Unit = { // req minimal permission and req align size
     apply(addr, lgMaxSize.U, TlbCmd.read)
   }
 
