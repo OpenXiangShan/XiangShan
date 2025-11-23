@@ -57,9 +57,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   val instr_rm = uop.ctrl.fpu.rm
   i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.csrio.fpu.frm)
 
-  val isDouble = !uop.ctrl.isRVF
-
-
   io.out.bits.redirectValid := jmp.redirectOutValid
   io.out.bits.redirect := jmp.redirectOut
+  io.out.bits.debug.isPerfCnt := csr.io.out.valid && csr.csrio.isPerfCnt
 }
