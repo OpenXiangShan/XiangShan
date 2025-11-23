@@ -570,7 +570,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec, stvecMask, MaskedRegMap.NoSideEffect, stvecMask),
-    MaskedRegMap(Scounteren, scounteren),
+    MaskedRegMap(Scounteren, scounteren, ZeroExt(VecInit.fill(32)(true.B).asUInt, XLEN)),
 
     //--- Supervisor Trap Handling ---
     MaskedRegMap(Sscratch, sscratch),
