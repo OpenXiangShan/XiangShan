@@ -500,9 +500,9 @@ class CSR extends FunctionUnit with HasCSRConst
     // MaskedRegMap(Uip, uip),
 
     //--- User Counter/Timers ---
-    // MaskedRegMap(Cycle, cycle),
+    MaskedRegMap(Cycle, mcycle),
     // MaskedRegMap(Time, time),
-    // MaskedRegMap(Instret, instret),
+    MaskedRegMap(Instret, minstret),
 
     //--- Supervisor Trap Setup ---
     MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
@@ -672,7 +672,8 @@ class CSR extends FunctionUnit with HasCSRConst
     CSROpType.clri -> (rdata & (~csri).asUInt)
   ))
 
-  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
+    addr === Cycle.U || addr === Instret.U
   csrio.isPerfCnt := addrInPerfCnt
 
   // satp wen check
