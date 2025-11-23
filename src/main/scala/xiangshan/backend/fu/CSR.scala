@@ -539,7 +539,7 @@ class CSR extends FunctionUnit with HasCSRConst
     //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
-    MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
+    MaskedRegMap(Medeleg, medeleg, "hcf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
