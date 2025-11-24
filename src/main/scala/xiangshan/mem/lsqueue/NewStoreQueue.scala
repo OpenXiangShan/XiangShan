@@ -237,14 +237,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val differentFlag    = io.ctrlInfo.deqPtr.flag =/= io.query(i).req.lduStage0ToSq.bits.sqIdx.flag
       val forwardMask      = UIntToMask(io.query(i).req.lduStage0ToSq.bits.sqIdx.value, StoreQueueSize)
       // overlap judgement
-      val loadStart        = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8), 0)
+      val loadStart        = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
       val byteOffset       = MemorySize.ByteOffset(io.query(i).req.lduStage0ToSq.bits.size)
-      val loadEnd          = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8), 0) + byteOffset
+      val loadEnd          = loadStart + byteOffset
 
       val overlapMask      = VecInit((0 until StoreQueueSize).map(j =>
-        io.dataEntriesIn(i).byteStart <= loadEnd && io.dataEntriesIn(i).byteEnd >= loadStart
+        io.dataEntriesIn(j).byteStart <= loadEnd && io.dataEntriesIn(j).byteEnd >= loadStart
       )).asUInt
 
+      XSError(loadEnd < loadStart, "ByteStart > ByteEnd!\n")
       // mdp mask
       val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
       val storeSetHitVec = Mux(lfstEnable,
@@ -254,15 +255,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
           io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === io.query(i).req.lduStage0ToSq.bits.uop.ssid)))
       )
-
-      /**
-       *  forwardMask1:
-       *
-       *  forwardMask2:
-       *
-       * */
-      val forwardMask1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask).asUInt
-      val forwardMask2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W))
 
       /**
        *  ageMaskLow:
@@ -277,8 +269,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s1OverlapMask  = RegEnable(overlapMask, s0Valid)
       val s1LoadVaddr    = RegEnable(io.query(i).req.lduStage0ToSq.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB/8)), s0Valid)
       val s1deqMask      = RegEnable(deqMask, s0Valid)
-      val s1ForwardMask1 = RegEnable(forwardMask1, s0Valid)
-      val s1ForwardMask2 = RegEnable(forwardMask2, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
       val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
 
@@ -344,22 +334,25 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2SelectDataEntry  = RegEnable(selectDataEntry, s1Valid)
       val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(HasAddrInvalid, s1Valid)
-      val s2SelectByteMask   = RegEnable(UIntToMask(selectDataEntry.byteEnd - selectDataEntry.byteStart, VLEN/8), s1Valid)
-      val s2LoadMaskEnd      = RegEnable(UIntToMask(s1LoadEnd, VLEN/8), s1Valid)
+      val s2SelectByteMask   = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(selectDataEntry.byteStart, selectDataEntry.byteEnd), VLEN/8), s1Valid)
+      val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLEN/8), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(dataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
       val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
       val s2FullOverlap      = RegEnable((selectDataEntry.byteEnd >= s1LoadEnd && selectDataEntry.byteStart <= s1LoadStart), s1Valid)
       val s2Valid            = RegNext(forwardValid)
+      // debug
+      val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
+      XSError(selectOH.orR && !selectCtrlEntry.allocated, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
 
-      val selectData         = (0 until VLEN/8).map(i =>
-        i.U -> rotateByteRight(s2SelectDataEntry.data, i * 8)
+      val selectData         = (0 until VLEN/8).map(j =>
+        j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
       )
       val outData            = ParallelLookUp(s2ByteSelectOffset, selectData)
 
-      val selectMask         = (0 until VLEN/8).map(i =>
-        i.U -> rotateByteRight(s2SelectByteMask, i)
+      val selectMask         = (0 until VLEN/8).map(j =>
+        j.U -> rotateByteRight(s2SelectByteMask, j)
       )
       val outMask            = ParallelLookUp(s2ByteSelectOffset, selectMask) & s2LoadMaskEnd
 
@@ -367,10 +360,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       io.query(i).resp.sqToLduStage1 <> DontCare //TODO: need it?
       val s2Resp = io.query(i).resp.sqToLduStage2
-      s2Resp.bits.forwardData.zipWithIndex.map{case (sink, i) =>
-        sink := outData(i * 8, i)}
-      s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, i) =>
-        sink := outMask(i)}
+      s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
+        sink := outData((j + 1) * 8 - 1, j * 8)}
+      s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
+        sink := outMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
       s2Resp.bits.dataInvalid      := s2DataInValid
       s2Resp.bits.dataInvalidSqIdx := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid      := s2HasAddrInvalid
@@ -381,8 +374,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       if(debugEn) {
         dontTouch(overlapMask)
-        dontTouch(forwardMask1)
-        dontTouch(forwardMask2)
         dontTouch(ageMaskLow)
         dontTouch(ageMaskHigh)
         dontTouch(paddrMatchVec)
@@ -477,7 +468,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
-      val byteMask           = UIntToMask(dataEntries(i).byteEnd - dataEntries(i).byteStart, VLEN/8)
+      val byteMask           = UIntToMask(MemorySize.CaculateSelectMask(dataEntries(i).byteStart, dataEntries(i).byteEnd), VLEN/8)
       val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
@@ -1369,17 +1360,21 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val storeAddrIn   = io.fromStoreUnit.storeAddrIn(i)
     val storeAddrInRe = io.fromStoreUnit.storeAddrInRe(i)
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
+    val byteStart     = storeAddrIn.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
     when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage)){
       // the second paddr of cross4KPage request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
       dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
-      dataEntries(stWbIdx).byteStart := storeAddrIn.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
-      dataEntries(stWbIdx).byteEnd   := storeAddrIn.bits.vaddr(log2Ceil(VLEN/8) - 1, 0) + byteOffset
+      dataEntries(stWbIdx).byteStart := byteStart
+      dataEntries(stWbIdx).byteEnd   := byteStart + byteOffset
 
       // debug singal
       dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
     }
+    XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
+    (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage),
+     "ByteStart > ByteEnd! at pipeline ${i}\n")
   }
 
   for (i <- 0 until StorePipelineWidth) {
@@ -1478,12 +1473,12 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLEN/8).W)))
 
     for (i <- 0 until EnsbufferWidth) {
-      val selectOffset       = 0.U - dataEntries(i).vaddr(3, 0) // need to generate 0 align data and mask
+      val selectOffset       = 0.U - dataEntries(i).byteStart // need to generate 0 align data and mask
       val selectData         = (0 until VLEN/8).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
-      val byteMask           = UIntToMask(dataEntries(i).byteEnd - dataEntries(i).byteStart, VLEN/8)
+      val byteMask           = UIntToMask(MemorySize.CaculateSelectMask(dataEntries(i).byteStart, dataEntries(i).byteEnd), VLEN/8)
       val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
