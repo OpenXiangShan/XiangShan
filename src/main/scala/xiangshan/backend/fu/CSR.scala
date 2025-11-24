@@ -605,7 +605,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
-    MaskedRegMap(Mcounteren, mcounteren),
+    MaskedRegMap(Mcounteren, mcounteren, ZeroExt(VecInit.fill(32)(true.B).asUInt, XLEN)),
 
     //--- Machine Configuration ---
     MaskedRegMap(Menvcfg, menvcfg, MaskedRegMap.UnwritableMask),
