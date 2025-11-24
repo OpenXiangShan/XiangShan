@@ -18,7 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, SRAMTemplate, TimeOutAssert, XSError}
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, SRAMTemplate, TimeOutAssert, XSError, XSPerfAccumulate}
 import xiangshan.RedirectLevel
 import xiangshan.XSModule
 import chisel3.util.experimental.BoringUtils
@@ -136,8 +136,8 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
   io.writeReady := writeReady
   io.readReady := readReady
 
+  XSPerfAccumulate("writeNotReady", !io.writeReady)
   TimeOutAssert(!io.readReady, 5000, "TraceReaderFPGAHugeBuffer read not ready timeout")
-  XSPerfAccumulate(!io.writeReady, "writeNotReady")
   TimeOutAssert(!io.readValid, 5000, "TraceReaderFPGAHugeBuffer read not valid timeout")
   TimeOutAssert(!io.writeValid, 5000, "TraceReaderFPGAHugeBuffer write not valid timeout")
 
@@ -228,6 +228,12 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
     "SmallBuffer read error: readPtr out of range")
   XSError(io.redirect.valid && buffer(redirectNextPtr.value).InstID =/= io.redirect.bits,
     "SmallBuffer redirect error: InstID not match")
+
+  val commitInstIDRob = WireInit(0.U(64.W))
+  val commitInstIDSb = buffer(commitPtr.value).InstID
+  BoringUtils.addSink(commitInstIDRob, "TraceRTLFPGACommitInstID")
+  XSError(commitValid && (commitInstIDRob =/= commitInstIDSb),
+    "SmallBuffer commit error: InstID not match")
 
   val firstInstCheck = RegInit(true.B)
   when (RegNext(io.writeValid, init = false.B) && firstInstCheck) {

@@ -1539,6 +1539,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
         }
       }
+      traceCollectQueue.io.commitInstID := commitDebugUop(0).traceInfo.InstID
     } else if (!trtl.TraceRTLOnPLDM) {
       println(s"TraceRTL Mode: verilator enable TraceCollector")
 

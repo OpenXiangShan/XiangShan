@@ -39,6 +39,7 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(Vec(CommitWidth, Valid(new TraceFPGACollectBundle))))
+    val commitInstID = Input(UInt(64.W))
   })
 
   // must make sure 2^n
@@ -87,9 +88,14 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
   // TODO: rm BoringUtils. use FrontendToCtrlIO.toFtq.rob_commits.instrSize
   val commitValid = RegNext(io.in.valid, init = false.B)
   val commitInstNumSeq = io.in.bits.map(x => Mux(x.valid, x.bits.instNum, 0.U))
-  val commitInstNum = RegNext(commitInstNumSeq.reduce(_ + _))
+  val commitInstNum = RegNext(commitInstNumSeq.fold(0.U(log2Ceil(RenameWidth * CommitWidth + 1).W))(_ + _))
   BoringUtils.addSource(commitValid, "TraceRTLFPGACommitValid")
   BoringUtils.addSource(commitInstNum, "TraceRTLFPGACommitInstNum")
+
+  val commitInstID = RegNext(io.commitInstID)
+  BoringUtils.addSource(commitInstID, "TraceRTLFPGACommitInstID")
+
+  XSError(commitValid && (commitInstNum === 0.U), "TraceFPGACollectQueue: commitInstNum is 0")
 }
 
 class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int)(implicit p: Parameters) extends Module {
