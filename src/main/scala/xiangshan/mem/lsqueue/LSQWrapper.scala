@@ -117,8 +117,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val sqCanAccept = Output(Bool())
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
-    val sqDeqUopIdx = Output(UopIdx())
-    val sqDeqRobIdx = Output(new RobPtr)
+    val sqCommitPtr = Output(new SqPtr)
+    val sqCommitUopIdx = Output(UopIdx())
+    val sqCommitRobIdx = Output(new RobPtr)
     val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
     val misalignAllowSpec = Input(Bool())
@@ -162,8 +163,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   io.lqDeqPtr := loadQueue.io.lqDeqPtr
   io.sqDeqPtr := storeQueue.io.sqDeqPtr
-  io.sqDeqRobIdx := storeQueue.io.sqDeqRobIdx
-  io.sqDeqUopIdx := storeQueue.io.sqDeqUopIdx
+  io.sqCommitRobIdx := storeQueue.io.sqCommitRobIdx
+  io.sqCommitUopIdx := storeQueue.io.sqCommitUopIdx
+  io.sqCommitPtr    := storeQueue.io.sqCommitPtr
   io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
