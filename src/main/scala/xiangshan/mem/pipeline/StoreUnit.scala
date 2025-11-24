@@ -71,9 +71,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val misalign_enq = new MisalignBufferEnqIO
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
-    val sqDeqPtr       = Input(new SqPtr)
-    val sqDeqUopIdx    = Input(UopIdx())
-    val sqDeqRobIdx    = Input(new RobPtr())
+    val sqCommitPtr    = Input(new SqPtr)
+    val sqCommitUopIdx = Input(UopIdx())
+    val sqCommitRobIdx = Input(new RobPtr)
 
     val s0_s1_s2_valid = Output(Bool())
   })
@@ -180,7 +180,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   )) + s0_addr_low
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqDeqPtr || s0_uop.robIdx === io.sqDeqRobIdx && s0_uop.uopIdx === io.sqDeqUopIdx)
+  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
