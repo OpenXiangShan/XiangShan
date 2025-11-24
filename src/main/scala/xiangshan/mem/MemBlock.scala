@@ -1051,9 +1051,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(TlbStartVec(dtlb_st_idx) + i).resp
-    stu.io.sqDeqPtr     <> lsq.io.sqDeqPtr
-    stu.io.sqDeqUopIdx  <> lsq.io.sqDeqUopIdx
-    stu.io.sqDeqRobIdx  <> lsq.io.sqDeqRobIdx
+    stu.io.sqCommitPtr     <> lsq.io.sqCommitPtr
+    stu.io.sqCommitUopIdx  <> lsq.io.sqCommitUopIdx
+    stu.io.sqCommitRobIdx  <> lsq.io.sqCommitRobIdx
 
     // -------------------------
     // Store Triggers
