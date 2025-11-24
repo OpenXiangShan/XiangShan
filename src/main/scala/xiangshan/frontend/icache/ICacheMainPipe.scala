@@ -425,9 +425,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // tell ICache top when handling miss
   io.perf.pendingMiss := s1_valid && !s1_fetchFinish
 
-  XSPerfAccumulate("missUnitStall", toMiss.valid && !toMiss.ready)
-  XSPerfAccumulate("missBubble", s1_valid && !s1_fetchFinish)
-  XSPerfAccumulate("wayLookupBubble", s0_valid && !fromWayLookup.valid)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain", !s1_fire)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain_prefetch", s0_valid && !fromWayLookup.valid)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain_dataArray", s0_valid && !toData.ready)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain_missUnit", s1_valid && !s1_fetchFinish)
 
   // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
   //   val blkPAddr  = UInt((PAddrBits - blockOffBits).W)

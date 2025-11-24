@@ -166,6 +166,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     0,
     WayLookupSize
   )
+  XSPerfAccumulate("emptyHasBypass", empty && io.write.valid)
+  XSPerfAccumulate("emptyNoBypass", empty && !io.write.valid)
   // exception stall cycles
   XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
   XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
