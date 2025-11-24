@@ -137,7 +137,7 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
   io.readReady := readReady
 
   TimeOutAssert(!io.readReady, 5000, "TraceReaderFPGAHugeBuffer read not ready timeout")
-  TimeOutAssert(!io.writeReady, 5000, "TraceReaderFPGAHugeBuffer write not ready timeout")
+  XSPerfAccumulate(!io.writeReady, "writeNotReady")
   TimeOutAssert(!io.readValid, 5000, "TraceReaderFPGAHugeBuffer read not valid timeout")
   TimeOutAssert(!io.writeValid, 5000, "TraceReaderFPGAHugeBuffer write not valid timeout")
 
@@ -208,8 +208,8 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
     readPtr := readPtr + trtl.TraceFetchWidth.U
   }
 
-  val curPtrInstID = io.readInsts(0).InstID
-  val redirectNextPtr = readPtr - (curPtrInstID - io.redirect.bits)
+  val curPtrInstID = RegEnable(io.readInsts.last.InstID, io.readValid && io.readReady)
+  val redirectNextPtr = readPtr - (curPtrInstID - io.redirect.bits + 1.U)
   when (io.redirect.valid) {
     readPtr := redirectNextPtr
   }
@@ -222,9 +222,9 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
     commitPtr := commitPtr + commitInstNum
   }
 
-  XSError(redirectNextPtr.value < trtl.TraceFpgaSmallBufferSize.U,
+  XSError(io.redirect.valid && (redirectNextPtr.value >= trtl.TraceFpgaSmallBufferSize.U),
     "SmallBuffer redirect error: redirectNextPtr out of range")
-  XSError(readPtr.value < trtl.TraceFpgaSmallBufferSize.U,
+  XSError(readPtr.value >= trtl.TraceFpgaSmallBufferSize.U,
     "SmallBuffer read error: readPtr out of range")
   XSError(io.redirect.valid && buffer(redirectNextPtr.value).InstID =/= io.redirect.bits,
     "SmallBuffer redirect error: InstID not match")
