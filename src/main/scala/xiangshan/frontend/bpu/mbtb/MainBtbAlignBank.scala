@@ -51,9 +51,9 @@ class MainBtbAlignBank(
     class Write extends Bundle {
       class Req extends Bundle {
         // similar to Read.Req.startVAddr, calculated in MainBtb top
-        val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
-        val branchInfo: BranchInfo = new BranchInfo
-        val wayMask:    UInt       = UInt(NumWay.W)
+        val startVAddr: PrunedAddr            = new PrunedAddr(VAddrBits)
+        val branchInfo: BranchInfo            = new BranchInfo
+        val meta:       Vec[MainBtbMetaEntry] = Vec(NumWay, new MainBtbMetaEntry)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -176,7 +176,17 @@ class MainBtbAlignBank(
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
-  private val t1_wayMask = Mux(t1_branchInfo.attribute.isOtherIndirect, w.req.bits.wayMask, replacer.io.victim.wayMask)
+
+  // Decide wayMask:
+  // If not hit, use mbtb replacer's victim way
+  // If hit, use hit wayMask, but do write only if:
+  //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
+  //   No other cases for now
+  private val t1_hitMask = VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo)))
+  private val t1_hit     = t1_hitMask.reduce(_ || _)
+
+  private val t1_needWrite = !t1_hit || t1_branchInfo.attribute.isOtherIndirect
+  private val t1_wayMask   = Mux(t1_hit, t1_hitMask.asUInt, replacer.io.victim.wayMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
@@ -190,7 +200,7 @@ class MainBtbAlignBank(
   assert(!t1_valid || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid        := t1_valid && t1_internalBankMask(i)
+    b.io.write.req.valid        := t1_valid && t1_needWrite && t1_internalBankMask(i)
     b.io.write.req.bits.setIdx  := t1_setIdx
     b.io.write.req.bits.wayMask := t1_wayMask
     b.io.write.req.bits.entry   := t1_entry

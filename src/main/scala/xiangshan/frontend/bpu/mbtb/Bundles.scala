@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
 
@@ -54,8 +55,13 @@ class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
   val rawHit:    Bool            = Bool()
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
+
+  def hit(branch: BranchInfo): Bool =
+    rawHit &&
+      position === branch.cfiPosition &&
+      attribute === branch.attribute
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val entries: Vec[MainBtbMetaEntry] = Vec(NumBtbResultEntries, new MainBtbMetaEntry)
+  val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay, new MainBtbMetaEntry))
 }

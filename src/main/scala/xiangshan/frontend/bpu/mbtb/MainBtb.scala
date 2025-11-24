@@ -94,7 +94,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
   io.result       := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info)))
-  io.meta.entries := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.meta)))
+  io.meta.entries := VecInit(alignBanks.map(b => VecInit(b.io.read.resp.map(_.meta))))
 
   /* *** t0 ***
    * receive training data and latch
@@ -116,48 +116,27 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_mispredictBranch = t1_train.mispredictBranch
 
-  private val t1_entries = t1_meta.entries.grouped(NumWay).toSeq
-  require(t1_meta.entries.getWidth % NumWay == 0)
-
-  private val t1_mispredictBranchHitWayMaskVec = t1_entries.map { entriesPerAlignBank =>
-    entriesPerAlignBank.map { e =>
-      e.rawHit &&
-      e.position === t1_mispredictBranch.bits.cfiPosition &&
-      e.attribute === t1_mispredictBranch.bits.attribute
-    }
-  }
-  private val t1_hitMispredictBranch = t1_mispredictBranchHitWayMaskVec.flatten.reduce(_ || _)
-
-  private val t1_indirectMispredictWayMaskVec = VecInit(t1_mispredictBranchHitWayMaskVec.zip(t1_entries).map {
-    case (hitWayMask, entriesPerAlignBank) =>
-      VecInit(hitWayMask.zip(entriesPerAlignBank).map { case (hit, entry) =>
-        hit && entry.attribute.isOtherIndirect
-      }).asUInt
-  })
+  private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && t1_mispredictBranch.bits.taken
 
   private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
-
-  private val t1_indirectMispredictWayMaskOH = PriorityEncoderOH(t1_indirectMispredictWayMaskVec(t1_writeAlignBankIdx))
-
-  private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && t1_mispredictBranch.bits.taken &&
-    (!t1_hitMispredictBranch || t1_hitMispredictBranch && t1_mispredictBranch.bits.attribute.isOtherIndirect)
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)
     b.io.write.req.bits.startVAddr := t1_startVAddrVec(i)
     b.io.write.req.bits.branchInfo := t1_mispredictBranch.bits
-    b.io.write.req.bits.wayMask    := t1_indirectMispredictWayMaskOH
+    b.io.write.req.bits.meta       := t1_meta.entries(i)
   }
 
   /* *** statistics *** */
-  private val perf_s2HitMask = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info.valid)))
+  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info.valid)))
+  private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictBranch.bits)).reduce(_ || _)
+
   XSPerfAccumulate("total_train", t1_valid)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
   XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
   XSPerfAccumulate("train_write_new_entry", t1_writeValid)
   XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
-  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && t1_hitMispredictBranch)
+  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && perf_t1HitMispredictBranch)
   XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
-
 }
