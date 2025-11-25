@@ -13,7 +13,7 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.history.ghr
+package xiangshan.frontend.bpu.history.commonhr
 
 import chisel3._
 import chisel3.util._
@@ -21,26 +21,31 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.frontend.PrunedAddr
 
-class GhrEntry(implicit p: Parameters) extends GhrBundle {
+class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val valid: Bool = Bool()
-  val value: UInt = UInt(GhrHistoryLength.W)
+  val ghr:   UInt = UInt(GhrHistoryLength.W)
+  val bw:    UInt = UInt(BWHistoryLength.W)
 }
-class GhrUpdate(implicit p: Parameters) extends GhrBundle {
-  val taken:        Bool      = Bool()
-  val hitMask:      Vec[Bool] = Vec(NumBtbResultEntries, Bool())
-  val position:     Vec[UInt] = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val firstTakenOH: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
+  val taken:        Bool       = Bool()
+  val hitMask:      Vec[Bool]  = Vec(NumBtbResultEntries, Bool())
+  val position:     Vec[UInt]  = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val firstTakenOH: Vec[Bool]  = Vec(NumBtbResultEntries, Bool())
+  val startPc:      PrunedAddr = PrunedAddr(VAddrBits)
+  val target:       PrunedAddr = PrunedAddr(VAddrBits)
 }
 
-class GhrMeta(implicit p: Parameters) extends GhrBundle {
+class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:      UInt      = UInt(GhrHistoryLength.W)
+  val bw:       UInt      = UInt(BWHistoryLength.W)
   val hitMask:  Vec[Bool] = Vec(NumBtbResultEntries, Bool())
   val position: Vec[UInt] = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
 }
 
-class GhrRedirect(implicit p: Parameters) extends GhrBundle {
-  val valid: Bool       = Bool()
-  val cfiPc: PrunedAddr = PrunedAddr(VAddrBits)
-  val taken: Bool       = Bool()
-  val meta:  GhrMeta    = new GhrMeta
+class CommonHRRedirect(implicit p: Parameters) extends CommonHRBundle {
+  val valid:  Bool         = Bool()
+  val cfiPc:  PrunedAddr   = PrunedAddr(VAddrBits)
+  val taken:  Bool         = Bool()
+  val target: PrunedAddr   = PrunedAddr(VAddrBits)
+  val meta:   CommonHRMeta = new CommonHRMeta
 }
