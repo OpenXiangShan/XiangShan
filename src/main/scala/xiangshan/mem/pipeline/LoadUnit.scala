@@ -308,20 +308,27 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, nc_idx, lsq_rep_idx,
     high_pf_idx, vec_iss_idx, int_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
-  // load flow source valid
-  val s0_src_valid_vec = WireInit(VecInit(Seq(
+  val s0_ori_sec_valid_vec = WireInit(VecInit(Seq(
     io.misalign_ldin.valid,
-    io.replay.valid && io.replay.bits.forward_tlDchannel,
+    io.replay.valid,
     io.fast_rep_in.valid,
     io.lsq.uncache.valid,
     io.lsq.nc_ldin.valid,
-    io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
-    io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
+    io.replay.valid,
+    io.prefetch_req.valid,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
     io.l2l_fwd_in.valid,
-    io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U,
+    io.prefetch_req.valid,
   )))
+  // load flow source valid
+  val s0_src_valid_vec = WireInit(s0_ori_sec_valid_vec)
+
+  s0_src_valid_vec(super_rep_idx) := s0_ori_sec_valid_vec(super_rep_idx) && io.replay.bits.forward_tlDchannel
+  s0_src_valid_vec(lsq_rep_idx) := s0_ori_sec_valid_vec(lsq_rep_idx) && !io.replay.bits.forward_tlDchannel && !s0_rep_stall
+  s0_src_valid_vec(high_pf_idx) := s0_ori_sec_valid_vec(high_pf_idx) && io.prefetch_req.bits.confidence > 0.U
+  s0_src_valid_vec(low_pf_idx) := s0_ori_sec_valid_vec(low_pf_idx) && io.prefetch_req.bits.confidence === 0.U
+
   // load flow source ready
   val s0_src_ready_vec = Wire(Vec(SRC_NUM, Bool()))
   s0_src_ready_vec(0) := true.B
@@ -873,11 +880,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   val s0_wakeup_uop = ParallelPriorityMux(s0_wakeup_selector, s0_wakeup_format)
   io.wakeup.valid := s0_fire && !s0_sel_src.isvec && !s0_sel_src.frm_mabuf && (
-    s0_src_valid_vec(super_rep_idx) ||
-    s0_src_valid_vec(fast_rep_idx) ||
-    s0_src_valid_vec(lsq_rep_idx) ||
-    (s0_src_valid_vec(int_iss_idx) && !s0_sel_src.prf &&
-    !s0_src_valid_vec(vec_iss_idx) && !s0_src_valid_vec(high_pf_idx))
+    s0_ori_sec_valid_vec(super_rep_idx) ||
+      s0_ori_sec_valid_vec(fast_rep_idx) ||
+      s0_ori_sec_valid_vec(lsq_rep_idx) ||
+    (s0_ori_sec_valid_vec(int_iss_idx) && !s0_sel_src.prf &&
+    !s0_ori_sec_valid_vec(vec_iss_idx) && !s0_ori_sec_valid_vec(high_pf_idx))
   ) || s0_mmio_fire || s0_nc_fire || s0_misalign_wakeup_fire
   io.wakeup.bits := s0_wakeup_uop
 
