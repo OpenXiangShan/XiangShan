@@ -41,7 +41,7 @@ class TableCtrl extends Bundle {
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
 
-  def initVal: UInt = 280.U
+  def initVal: UInt = 56.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())
