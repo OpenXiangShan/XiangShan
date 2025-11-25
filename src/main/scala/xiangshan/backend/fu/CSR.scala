@@ -877,33 +877,31 @@ class CSR extends FunctionUnit with HasCSRConst
     priviledgeMode
   )
 
+  val deleg = Mux(raiseIntr, mideleg , medeleg)
+  val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
+
   // mtval write logic
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when (hasInstrPageFault || hasLoadPageFault || hasStorePageFault) {
-    val tval = Mux(
-      hasInstrPageFault,
-      Mux(
-        csrio.exception.bits.uop.cf.crossPageIPFFix,
-        SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
-      ),
-      memExceptionAddr
-    )
-    when (priviledgeMode === ModeM) {
-      mtval := tval
-    }.otherwise {
+  val tval = Mux(
+    hasInstrPageFault,
+    Mux(
+      csrio.exception.bits.uop.cf.crossPageIPFFix,
+      SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
+      SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
+    ),
+    memExceptionAddr
+  )
+
+  val memExceptions = hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned
+  when (memExceptions) {
+    when (delegS) {
       stval := tval
+    }.otherwise {
+      mtval := tval
     }
   }
 
-  when (hasLoadAddrMisaligned || hasStoreAddrMisaligned) {
-    mtval := memExceptionAddr
-  }
-
-  val deleg = Mux(raiseIntr, mideleg , medeleg)
-  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
-  val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
+  val tvalWen = !memExceptions || raiseIntr // TODO: need check
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
 
   // ctrl block will use theses later for flush
