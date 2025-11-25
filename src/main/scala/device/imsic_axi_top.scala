@@ -16,7 +16,7 @@
 
 package device
 
-import aia.AXIRegIMSIC_WRAP
+import aia.{AXIRegIMSIC_WRAP, MSITransBundle}
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
@@ -71,15 +71,21 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
 
   class imsic_bus_top_imp(wrapper: imsic_bus_top) extends LazyModuleImp(wrapper) {
     val msiio = IO(Flipped(new aia.MSITransBundle(soc.IMSICParams)))
+    val teemsiio = Option.when(soc.IMSICParams.HasTEEIMSIC)(IO(Flipped(new MSITransBundle(soc.IMSICParams))))
 
     // No Bus
     val msi = Option.when(soc.IMSICBusType == device.IMSICBusType.NONE)(
       IO(new aia.MSITransBundle(soc.IMSICParams))
     )
-
+    val teemsi = Option.when((soc.IMSICBusType == device.IMSICBusType.NONE) && (soc.IMSICParams.HasTEEIMSIC))(
+      IO(new aia.MSITransBundle(soc.IMSICParams))
+    )
     tl_reg_imsic.foreach(_.module.msiio <> msiio)
     axi_reg_imsic.foreach(_.module.msiio <> msiio)
+    axi_reg_imsic.foreach(imsicreg =>
+      teemsiio.foreach(teemsiio => imsicreg.module.teemsiio.get <> teemsiio))
     msi.foreach(_ <> msiio)
+    teemsi.foreach(_ <> teemsiio.get)
   }
 
   lazy val module = new imsic_bus_top_imp(this)
