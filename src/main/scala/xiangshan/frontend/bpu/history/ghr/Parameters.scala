@@ -18,5 +18,6 @@ package xiangshan.frontend.bpu.history.ghr
 import xiangshan.frontend.bpu.HasBpuParameters
 
 trait HasGhrParameters extends HasBpuParameters {
-  def StallQueueSize: Int = 2
+  def StallQueueSize:    Int = 2
+  def ImliHistoryLength: Int = 8
 }

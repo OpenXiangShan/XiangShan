@@ -26,6 +26,7 @@ import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.SignedSaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.history.ghr.GhrEntry
 
 object Counter extends SignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -72,8 +73,9 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val scPathResp:      Vec[Vec[UInt]] = Vec(NumPathTables, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scGlobalResp:    Vec[Vec[UInt]] = Vec(NumGlobalTables, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
+  val scImliResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
   val scBiasResp:      Vec[UInt]      = Vec(BiasTableNumWays, UInt(ScEntryWidth.W))
-  val scGhr:           UInt           = UInt(GhrHistoryLength.W)
+  val scGhr:           GhrEntry       = new GhrEntry
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())

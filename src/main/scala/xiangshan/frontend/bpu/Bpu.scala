@@ -365,7 +365,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
   private val s3_ghrMeta = WireInit(0.U.asTypeOf(new GhrMeta))
-  s3_ghrMeta.ghr      := ghr.io.ghist.value
+  s3_ghrMeta.ghr      := ghr.io.ghist.ghr
   s3_ghrMeta.hitMask  := VecInit(s3_mbtbResult.map(_.valid))
   s3_ghrMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
 
@@ -450,12 +450,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // ghr update
   ghr.io.stageCtrl           := stageCtrl
+  ghr.io.update.startPc      := s3_startPc
+  ghr.io.update.target       := s3_prediction.target
   ghr.io.update.taken        := s3_taken
   ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
   ghr.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   ghr.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
   ghr.io.redirect.valid      := redirect.valid
   ghr.io.redirect.cfiPc      := redirect.bits.cfiPc
+  ghr.io.redirect.target     := redirect.bits.target
   ghr.io.redirect.taken      := redirect.bits.taken
   ghr.io.redirect.meta       := redirect.bits.meta.ghr
   private val s0_ghist = ghr.io.s0_ghist

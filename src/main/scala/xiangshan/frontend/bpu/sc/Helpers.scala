@@ -49,6 +49,10 @@ trait Helpers extends HasScParameters with PhrHelper {
   }
 
   // get pc ^ ghr for index
+  def getImliTableIdx(pc: PrunedAddr, imli: UInt, numSets: Int): UInt =
+    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ imli)(log2Ceil(numSets) - 1, 0)
+
+  // get pc ^ ghr for index
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
     (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
 
