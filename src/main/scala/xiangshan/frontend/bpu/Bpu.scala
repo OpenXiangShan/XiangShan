@@ -295,8 +295,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_fallThroughPrediction.target,
       Seq(
 //        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
-        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
-        s3_taken                                                                -> s3_firstTakenBranch.bits.target
+//        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
+        s3_taken -> s3_firstTakenBranch.bits.target
       )
     )
 

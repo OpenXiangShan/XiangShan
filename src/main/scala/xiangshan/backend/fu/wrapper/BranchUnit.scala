@@ -36,7 +36,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.src(1) := io.in.bits.data.src(1) // rs2
   dataModule.io.func := io.in.bits.ctrl.fuOpType
   dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
-
+  when(io.in.fire) {
+    assert(io.in.bits.ctrl.predictInfo.get.fixedTaken === io.in.bits.ctrl.predictInfo.get.predTaken)
+  }
   val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
     SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
     ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)

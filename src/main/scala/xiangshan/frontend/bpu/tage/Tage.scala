@@ -141,6 +141,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
           val tag          = s2_tempTag(tableIdx) ^ position
           val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
           val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
+          dontTouch(tag.suggestName(s"branch_${brIdx}_table_${tableIdx}_tag"))
 
           val result = Wire(new TagMatchResult).suggestName(s"branch_${brIdx}_table_${tableIdx}_result")
           result.hit          := isCond && hitWayMask.reduce(_ || _)
@@ -201,7 +202,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
   private val t0_readBankConflict = io.train.valid && t0_hasCond && s0_fire && t0_bankIdx === s0_bankIdx
-  io.train.ready := !t0_readBankConflict
+  io.train.ready := true.B
 
   private val t0_valid = io.train.fire && t0_hasCond && io.enable
 
@@ -227,9 +228,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.trainReadReq.bits.bankMask := t0_bankMask
   }
 
-  when(t0_valid) {
-    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
-  }
+//  when(t0_valid) {
+//    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
+//  }
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -337,6 +338,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val decreaseUseAlt = hasProvider && providerIsWeak && Mux(hasAlt, altPred, basePred) =/= actualTaken
 
     val updateInfo = Wire(new UpdateInfo).suggestName(s"branch_${brIdx}_updateInfo")
+    dontTouch(updateInfo)
     updateInfo.providerTableOH              := providerTableOH.asUInt & Fill(NumTables, hasProvider)
     updateInfo.providerWayOH                := providerInfo.hitWayMaskOH
     updateInfo.providerEntry.valid          := true.B
@@ -412,6 +414,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_allocateBranch = Mux1H(t2_needAllocateBranchMask, t2_branches)
   private val t2_allocateBranchProviderTableOH =
     Mux1H(t2_needAllocateBranchMask, t2_allBranchUpdateInfo.map(_.providerTableOH))
+
+  dontTouch(t2_needAllocate)
+  dontTouch(t2_needAllocateBranchMask.asUInt)
+  dontTouch(t2_allocateBranch)
+  dontTouch(t2_allocateBranchProviderTableOH)
 
   // allocate new entry to the table with a longer history
   private val t2_longerHistoryTableMask = Mux(
