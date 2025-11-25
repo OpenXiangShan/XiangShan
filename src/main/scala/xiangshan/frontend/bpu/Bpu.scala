@@ -29,8 +29,8 @@ import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
-import xiangshan.frontend.bpu.history.ghr.Ghr
-import xiangshan.frontend.bpu.history.ghr.GhrMeta
+import xiangshan.frontend.bpu.history.commonhr.CommonHR
+import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
@@ -63,7 +63,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
-  private val ghr         = Module(new Ghr)
+  private val commonHR    = Module(new CommonHR)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -220,7 +220,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.s3_override         := s3_override
-  sc.io.ghr                 := ghr.io.s0_ghist
+  sc.io.commonHR            := commonHR.io.s0_commonHR
 
   s3_flush := redirect.valid
   s2_flush := s3_flush || s3_override
@@ -363,15 +363,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
-  private val s3_ghrMeta = WireInit(0.U.asTypeOf(new GhrMeta))
-  s3_ghrMeta.ghr      := ghr.io.ghist.value
-  s3_ghrMeta.hitMask  := VecInit(s3_mbtbResult.map(_.valid))
-  s3_ghrMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
+  s3_commonHRMeta.ghr      := commonHR.io.commonHR.ghr
+  s3_commonHRMeta.bw       := commonHR.io.commonHR.bw
+  s3_commonHRMeta.hitMask  := VecInit(s3_mbtbResult.map(_.valid))
+  s3_commonHRMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
 
   private val s3_redirectMeta = Wire(new BpuRedirectMeta)
-  s3_redirectMeta.phr := s3_phrMeta
-  s3_redirectMeta.ghr := s3_ghrMeta
-  s3_redirectMeta.ras := ras.io.redirectMeta
+  s3_redirectMeta.phr          := s3_phrMeta
+  s3_redirectMeta.commonHRMeta := s3_commonHRMeta
+  s3_redirectMeta.ras          := ras.io.redirectMeta
 
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
   s3_resolveMeta.mbtb   := RegEnable(mbtb.io.meta, s2_fire)
@@ -448,19 +449,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(phrBits)
 
   // ghr update
-  ghr.io.stageCtrl           := stageCtrl
-  ghr.io.update.taken        := s3_taken
-  ghr.io.update.firstTakenOH := s3_firstTakenBranchOH
-  ghr.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
-  ghr.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
-  ghr.io.redirect.valid      := redirect.valid
-  ghr.io.redirect.cfiPc      := redirect.bits.cfiPc
-  ghr.io.redirect.taken      := redirect.bits.taken
-  ghr.io.redirect.meta       := redirect.bits.meta.ghr
-  private val s0_ghist = ghr.io.s0_ghist
-  private val ghist    = ghr.io.ghist
-  dontTouch(s0_ghist)
-  dontTouch(ghist)
+  commonHR.io.stageCtrl           := stageCtrl
+  commonHR.io.update.startPc      := s3_startPc
+  commonHR.io.update.target       := s3_prediction.target
+  commonHR.io.update.taken        := s3_taken
+  commonHR.io.update.firstTakenOH := s3_firstTakenBranchOH
+  commonHR.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  commonHR.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
+  commonHR.io.redirect.valid      := redirect.valid
+  commonHR.io.redirect.cfiPc      := redirect.bits.cfiPc
+  commonHR.io.redirect.target     := redirect.bits.target
+  commonHR.io.redirect.taken      := redirect.bits.taken
+  commonHR.io.redirect.meta       := redirect.bits.meta.commonHRMeta
+  private val s0_commonHR   = commonHR.io.s0_commonHR
+  private val commonHRValue = commonHR.io.commonHR
+  dontTouch(s0_commonHR)
+  dontTouch(commonHRValue)
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)
