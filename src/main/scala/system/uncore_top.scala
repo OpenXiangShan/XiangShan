@@ -6,20 +6,24 @@ package pbus
 
 import chisel3._
 import device.standalone.StandAloneDebugModule
-import system.{HasSoCParameter, SoCParameters, SoCParamsKey}
-import device.{SYSCNT, SYSCNTParams}
+import system.{CVMParameters, CVMParamsKey, HasSoCParameter, SoCParameters, SoCParamsKey}
+import device.{EnableJtag, SYSCNT, SYSCNTConsts, SYSCNTParams}
 import chisel3.experimental.{ChiselAnnotation, annotate}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import device.standalone.StandAloneSYSCNT
 import chisel3.util._
 import freechips.rocketchip.diplomacy
-import device.SYSCNTConsts
 import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.debug.{APB, CJTAG, DMI, DebugAttachParams, DebugExportProtocol, DebugIO, DebugModuleParams, ExportDebug, JTAG, JtagDTMKey, ResetCtrlIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.ValName
-import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.subsystem.{CBUS, FBUS, TLBusWrapperLocation}
+import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.HeterogeneousBag
+import top.ArgParser
+import top.TopMain.args
+import xiangshan.{DFTOptions, DFTOptionsKey, DebugOptions, DebugOptionsKey, PMParameKey, PMParameters, XSCoreParameters, XSTileKey}
 //import org.chipsalliance.cde.config.{Config, Parameters}
 import org.chipsalliance.cde.config._
 import utils.VerilogAXI4Record
@@ -28,7 +32,6 @@ import aia.{AXI4IMSIC, IMSICParameKey, IMSICParameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import chisel3.experimental.dataview._
-//import scala.collection.immutable._
 
 
 /**
@@ -54,8 +57,9 @@ case class PeriParams(
     timedataBytes: Int = 8,
     addrWidth: Int = 32
                      )
+
 case class Pbus2Params(
-    NumHarts:    Int = 1, // number of cpus +1(aplic)+1(pcie msi)
+    NumHarts:    Int = 2, // number of cpus +1(aplic)+1(pcie msi)
     idBits: Int = 2,
     cpuAddrWidth: Int = 32,
     cpuDataWidth: Int = 64,
@@ -64,7 +68,8 @@ case class Pbus2Params(
 //  numOutputs: Int = 3, // This topology is fixed to 3 outputs
 //    APLICcfgAddr:  AddressSet = AddressSet(0x31100000L, 0x7fff),      // 32KB
     SYSCNTAddrMap: AddressSet = AddressSet(0x38040000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
-    DebugAddrMap: AddressSet = AddressSet(0x38020000L, 0x1000 - 1), // 4KB
+    DebugAddrMap: AddressSet = AddressSet(0x00010000L, 0x1000 - 1), // 4KB
+    dmsize: Int = 0x1000,
     IMSICAddrMap: Seq[AddressSet] = Seq(
       AddressSet(0x3a000000L, 0xffffff),
       AddressSet(0x3b000000L, 0xffffff)
@@ -90,10 +95,6 @@ case class Pbus2Params(
 ) {
   lazy val NumInputs = NumHarts + 0
   lazy val NumIntSrcs = 1 << IMSICParams.imsicIntSrcWidth
-//  require(NumInputs == 10, "ThishartNum imsic_pbus topology is fixed to 10 inputs.")
-//  require(inputDataWidths.length == NumInputs, s"inputDataWidths length must match NumInputs ($numInputs).")
-//  require(numOutputs == 3, "This imsic_pbus topology is fixed to 3 outputs.")
-//  require(outputAddrMap.length == numOutputs, s"outputAddrMap length must match numOutputs ($numOutputs).")
 }
 
 /**
@@ -346,7 +347,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     addrWidth = params.periParams.addrWidth,
     dataWidth = params.periParams.timedataBytes * 8,
     hartNum = params.NumHarts
-  )(new Config((site, here, up) => {   case SoCParamsKey => SoCParameters()})))
+  ))
 
   val peri_xbar = AXI4Xbar()
   val peri_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -387,12 +388,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     addrWidth = params.cpuAddrWidth,
     dataWidth = params.cpuDataWidth,
     hartNum  = params.NumHarts
-  )(new Config((site, here, up) => {
-    case SoCParamsKey => SoCParameters()
-    case DebugModuleKey => p(DebugModuleKey).map(_.copy(
-      baseAddress = params.DebugAddrMap.base,hasBusMaster = true))
-    case MaxHartIdBits => log2Up(params.NumHarts) max 6
-  })))
+  ))
 
   val dmxbar = AXI4Xbar()
   val dm_mNodes = Seq.fill(params.NumHarts) {
@@ -442,6 +438,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
 //    val dm_m = IO(new VerilogAXI4Record(dm.axi4masternode.get.params))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
+//    val resetCtrl = new ResetCtrlIO(numCores)(p)
+//    val debugIO = new DebugIO()(p)
     // dm sba ports
 //    dontTouch(peri_s)
 //    dontTouch(msi_m)
@@ -524,15 +522,36 @@ object PbusGen extends App {
     slaveDataBytes = 8,
     timedataBytes = 8
   )
+  val dmParams = DebugModuleParams(
+       baseAddress = 0x38020000L,
+       //nDMIAddrSize  : Int = 7,
+       //nProgramBufferWords: Int = 16,
+       nAbstractDataWords  = 2,
+       nScratch = 2,
+       hasBusMaster = true,
+       //clockGate : Boolean = true,
+       maxSupportedSBAccess  = 64,
+       //supportQuickAccess : Boolean = false,
+       //supportHartArray   : Boolean = true,
+       //nHaltGroups        : Int = 1,
+       //nExtTriggers       : Int = 0,
+       hasHartResets    = true,
+       //hasImplicitEbreak  = false,
+       //hasAuthentication  = false,
+       crossingHasSafeReset = false
+  )
+  val dmAtParams = DebugAttachParams(
+    protocols = Set(JTAG)
+  )
+  val params = Pbus2Params(aplicParams = aplicparams, periParams = periParams)
+  implicit val p: Parameters = Parameters.empty.alterPartial({
+      case SoCParamsKey => SoCParameters()
+      case DebugModuleKey => Some(dmParams)
+      case ExportDebug => dmAtParams
+      case MaxHartIdBits => log2Up(params.NumHarts) max 6
+    })
 
-  val params = Pbus2Params(aplicParams=aplicparams,periParams=periParams)
-  implicit val p: Parameters = Parameters.empty//.alterPartial({
-//    case SoCParamsKey => SoCParameters()
-//    case DebugModuleKey => p(DebugModuleKey).map(_.copy(baseAddress = params.DebugAddrMap.base,hasBusMaster = true))
-
-  //}) //Parameters.empty
-
-  val pbusM = LazyModule(new uncoreTop(params))
+  val pbusM = LazyModule(new uncoreTop(params)(p))
 
   println("Generating the Pbus SystemVerilog...")
     val path = """./build/rtl/"""
