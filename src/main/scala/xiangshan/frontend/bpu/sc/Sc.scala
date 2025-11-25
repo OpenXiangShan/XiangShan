@@ -251,7 +251,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val s2_scPred: Vec[Bool] = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds = scThreshold.map(entry => entry.thres.value >> 3)
+  private val s2_thresholds = scThreshold.map(entry => entry.thres.value)
   private val s2_useScPred  = WireInit(VecInit.fill(NumWays)(false.B))
 
   s2_useScPred.zip(s2_totalPercsum).zip(s2_thresholds).zip(s2_hitMask).zip(s2_providerCtr).zip(s2_providerValid).map {
