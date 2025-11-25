@@ -331,6 +331,20 @@ object Redirect extends HasCircularQueuePtrHelper {
     )).andR))
     resultOnehot
   }
+
+  def findOldestRedirect(in1: Valid[Redirect], in2: Valid[Redirect]): Valid[Redirect] = {
+    val out = Wire(chiselTypeOf(in1))
+    when(in1.valid && !in2.valid) {
+      out := in1
+    }.elsewhen(!in1.valid && in2.valid) {
+      out := in2
+    }.elsewhen(in1.valid && in2.valid) {
+      out := Mux(in1.bits.robIdx.isAfter(in1.bits.robIdx, in2.bits.robIdx), in2, in1)
+    }.otherwise(
+      out := in1
+    )
+    out
+  }
 }
 
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
