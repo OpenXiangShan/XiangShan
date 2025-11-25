@@ -395,8 +395,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_fetchFinish = !s1_shouldFetch.reduce(_ || _)
 
   // also raise af if l2 corrupt is detected
-  private val s1_tlException = (s1_tlCorrupt zip s1_tlDenied).map { case (corrupt, denied) =>
-    ExceptionType.fromTileLink(corrupt, denied, s1_valid) // s1_valid used only for assertion
+  private val s1_tlException = (s1_tlCorrupt zip s1_tlDenied).zipWithIndex.map { case ((corrupt, denied), i) =>
+    val portValid   = if (i == 0) true.B else s1_doubleline
+    val realCorrupt = corrupt && portValid
+    val realDenied  = denied && portValid
+    val canAssert   = s1_valid && portValid
+    ExceptionType.fromTileLink(realCorrupt, realDenied, canAssert)
   }.reduce(_ || _)
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
