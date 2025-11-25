@@ -311,10 +311,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // instvalid field
   val valid = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
   // writeback status
-  val writebacked = Mem(RobSize, Bool())
-  val store_data_writebacked = Mem(RobSize, Bool())
+  val writebacked = Reg(Vec(RobSize, Bool()))
+  val store_data_writebacked = Reg(Vec(RobSize, Bool()))
   // data for redirect, exception, etc.
-  val flagBkup = Mem(RobSize, Bool())
+  val flagBkup = Reg(Vec(RobSize, Bool()))
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
   val interrupt_safe = RegInit(VecInit(Seq.fill(RobSize)(true.B)))
@@ -1042,8 +1042,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   }
   else if (env.AlwaysBasicDiff) {
     // These are the structures used by difftest only and should be optimized after synthesis.
-    val dt_eliminatedMove = Mem(RobSize, Bool())
-    val dt_isRVC = Mem(RobSize, Bool())
+    val dt_eliminatedMove = Reg(Vec(RobSize, Bool()))
+    val dt_isRVC = Reg(Vec(RobSize, Bool()))
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
@@ -1099,7 +1099,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // Always instantiate basic difftest modules.
   if (env.EnableDifftest) {
-    val dt_isXSTrap = Mem(RobSize, Bool())
+    val dt_isXSTrap = Reg(Vec(RobSize, Bool()))
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
         dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
@@ -1119,7 +1119,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.hasWFI   := hasWFI
   }
   else if (env.AlwaysBasicDiff) {
-    val dt_isXSTrap = Mem(RobSize, Bool())
+    val dt_isXSTrap = Reg(Vec(RobSize, Bool()))
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
         dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
