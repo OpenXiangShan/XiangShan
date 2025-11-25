@@ -31,17 +31,17 @@ class TraceUnpackageBufferPtr(entries: Int) extends CircularQueuePtr[TraceUnpack
 // MAX_DATA_WIDTH = ~20000(maybe)
 class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INST_NUM: Int)(implicit p: Parameters) extends Module {
 
-  private val TRACE_INNER_INST_WIDTH = (new TraceInstrInnerBundle).getWidth
   private val TRACE_OUTER_INST_WIDTH = (new TraceInstrFpgaBundle).getWidth
 
-  private val BUS_CORE_DATA_WIDTH = TRACE_INNER_INST_WIDTH  * DUT_BUS_INST_NUM
+  // private val BUS_CORE_DATA_WIDTH = TRACE_INNER_INST_WIDTH  * DUT_BUS_INST_NUM
+  private val BUS_CORE_DATA_WIDTH = TRACE_OUTER_INST_WIDTH  * DUT_BUS_INST_NUM
   private val PACKET_INST_WIDTH = TRACE_OUTER_INST_WIDTH  * PACKET_INST_NUM
   private val PACKET_CYCLE_NUM = (PACKET_INST_WIDTH + AXIS_DATA_WIDTH - 1) / AXIS_DATA_WIDTH
   private val PLUS_EXTRA_WIDTH = PACKET_CYCLE_NUM * AXIS_DATA_WIDTH
 
   println(s"[TraceAXISUnpackage] PACKET_INST_NUM: $PACKET_INST_NUM AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH DUT_BUS_INST_NUM: $DUT_BUS_INST_NUM")
   println(s"BUS_CORE_DATA_WIDTH: $BUS_CORE_DATA_WIDTH PACKET_INST_WIDTH: $PACKET_INST_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
-  println(s"TRACE_INNER_INST_WIDTH $TRACE_INNER_INST_WIDTH TRACE_OUTER_INST_WIDTH $TRACE_OUTER_INST_WIDTH")
+  println(s"TRACE_OUTER_INST_WIDTH $TRACE_OUTER_INST_WIDTH")
 
   val io = IO(new Bundle {
     val axis = Flipped(new TraceRTLAXISIO(AXIS_DATA_WIDTH))
@@ -56,13 +56,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
   val recvIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
   val tranIdx = RegInit(0.U.asTypeOf(new TraceUnpackageBufferPtr(BufferNum)))
 
-  val instIDCounter = RegInit(1.U(p(TraceRTLParamKey).TraceInstIDWidth.W))
-
   // recv
-  // TODO: fsm seems not necessary
-  // val axi_IDLE :: axi_TRANSFER :: Nil = Enum(2)
-  // val state = RegInit(axi_IDLE)
-
   io.axis.tready := !bufferValid(recvIdx.value)
   val axis_fire = io.axis.tvalid && io.axis.tready
 
@@ -94,38 +88,10 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
     Vec(MAX_CORE_CYCLE, UInt((TRACE_OUTER_INST_WIDTH * DUT_BUS_INST_NUM).W)))
   val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
 
-  val dataOutOuterUInt = WireInit(dataOuterVecAtIndex.asTypeOf(Vec(DUT_BUS_INST_NUM, UInt(TRACE_OUTER_INST_WIDTH.W))))
-  val dataOutOuterFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrFpgaBundle))
-  dataOutOuterFormat.zip(dataOutOuterUInt).foreach { case (outer, uint) =>
-    outer := TraceInstrFpgaBundle.readRaw(uint, reverse=false)
-  }
-
-  val dataOutInnerUInt = Wire(Vec(DUT_BUS_INST_NUM, UInt(TRACE_INNER_INST_WIDTH.W)))
-  val dataOutInnerFormat = Wire(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
-  dataOutInnerFormat.zip(dataOutOuterFormat).zipWithIndex.foreach { case ((inner, outer), index) =>
-    inner := outer.toInnerBundle(instIDCounter + index.U)
-  }
-  dataOutInnerUInt.zip(dataOutInnerFormat).foreach { case (uint, inner) =>
-    uint := inner.asUInt
-  }
-
-  for (i <- 0 until (DUT_BUS_INST_NUM - 1)) {
-    when (io.data.valid) {
-      assert((dataOutInnerFormat(i).InstID + 1.U) === dataOutInnerFormat(i + 1).InstID,
-        s"ERROR in TraceAXISUnpackage, in one cycle, the ${i}th InstID not match the ${i+1}th InstID")
-      assert(dataOutInnerFormat(i).nextPC === dataOutInnerFormat(i + 1).pcVA,
-        s"ERROR in TraceAXISUnpackage, in one cycle, the ${i}th nextPC not match the ${i+1}th pcVA")
-    }
-  }
-
   dontTouch(dataOuterVec)
   dontTouch(dataOuterVecAtIndex)
-  dontTouch(dataOutOuterUInt)
-  dontTouch(dataOutOuterFormat)
-  dontTouch(dataOutInnerFormat)
-  dontTouch(dataOutInnerUInt)
 
-  io.data.bits := dataOutInnerFormat.asUInt
+  io.data.bits := dataOuterVecAtIndex
   io.data.valid := bufferValid(tranIdx.value)
 
   when (io.data.fire) {
@@ -133,7 +99,6 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
       bufferValid(tranIdx.value) := false.B
       tranIdx := tranIdx + 1.U
     }
-    instIDCounter := instIDCounter + DUT_BUS_INST_NUM.U
   }
 
   // assert the first instruction
@@ -145,16 +110,6 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
      assert(io.data.bits(39+48-1, 39) === 0x80000000L.U(48.W), "ERROR in TraceAXISUnpackage, the first instruction pcPA is not 0x80000000")
     }
   }
-
-  // debug
-  // val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
-  // val dataOuterTraceFormat = dataOuterVec(data_cycle_index).asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrFpgaBundle))
-  // val dataInnerTraceFormat = io.data.bits.asTypeOf(Vec(DUT_BUS_INST_NUM, new TraceInstrInnerBundle))
-
-  // dontTouch(dataFlatten)
-  // dontTouch(dataOuterVecAtIndex)
-  // dontTouch(dataOuterTraceFormat)
-  // dontTouch(dataInnerTraceFormat)
 
   dontTouch(io.data)
   dontTouch(io.axis)

@@ -1540,6 +1540,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         }
       }
       traceCollectQueue.io.commitInstID := commitDebugUop(0).traceInfo.InstID
+      traceCollectQueue.io.commitSbID := PriorityMux(
+        (0 until CommitWidth).map(i =>
+          io.commits.commitValid(i) -> commitDebugUop(i).traceInfo.sbID
+        ).reverse,
+      )
     } else if (!trtl.TraceRTLOnPLDM) {
       println(s"TraceRTL Mode: verilator enable TraceCollector")
 

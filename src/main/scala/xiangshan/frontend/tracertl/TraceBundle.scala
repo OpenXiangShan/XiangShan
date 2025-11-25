@@ -24,18 +24,15 @@ import xiangshan.cache.HasL1CacheParameters
 class TraceBundle(implicit p: Parameters) extends XSBundle
 class TraceModule(implicit p: Parameters) extends XSModule
 
-class TraceInstrInnerBundle extends Bundle {
-  def VAddrBits = 50
-  def PAddrBits = 48
-  def XLEN = 64
-  def TraceInstrWidth = 32
+class TraceInstrInnerBundle(implicit p: Parameters) extends Bundle {
+  def trtl = p(TraceRTLParamKey)
 
-  val pcVA = UInt(VAddrBits.W)
-  val pcPA = UInt(PAddrBits.W)
-  val memoryAddrVA = UInt(XLEN.W)
-  val memoryAddrPA = UInt(XLEN.W)
-  val target = UInt(VAddrBits.W)
-  val inst = UInt(TraceInstrWidth.W)
+  val pcVA = UInt(trtl.TraceVAddrWidth.W)
+  val pcPA = UInt(trtl.TracePAddrWidth.W)
+  val memoryAddrVA = UInt(trtl.TraceVAddrWidth.W)
+  val memoryAddrPA = UInt(trtl.TracePAddrWidth.W)
+  val target = UInt(trtl.TraceVAddrWidth.W)
+  val inst = UInt(trtl.TraceInstCodeWidth.W)
   val memoryType = UInt(4.W)
   val memorySize = UInt(4.W)
   val branchType = UInt(8.W)
@@ -43,7 +40,8 @@ class TraceInstrInnerBundle extends Bundle {
   val exception = UInt(8.W)
 
   val fastSimulation = UInt(8.W)
-  val InstID = UInt(64.W)
+  val InstID = UInt(trtl.TraceInstIDWidth.W)
+  val sbID = new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)
 
   def isFastSim = fastSimulation(0) === 1.U
   def arthiSrc0 = memoryAddrVA
@@ -65,7 +63,7 @@ object TraceInstrInnerBundle {
   def apply(pcVA: UInt, pcPA: UInt, memoryAddrVA: UInt, memoryAddrPA: UInt,
     target: UInt, inst: UInt, memoryType: UInt, memorySize: UInt,
     branchType: UInt, branchTaken: UInt,
-    InstID: UInt): TraceInstrInnerBundle = {
+    InstID: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
 
     val bundle = Wire(new TraceInstrInnerBundle)
     bundle.pcVA := pcVA
@@ -79,10 +77,11 @@ object TraceInstrInnerBundle {
     bundle.branchType := branchType
     bundle.branchTaken := branchTaken
     bundle.InstID := InstID
+    bundle.sbID := DontCare
     bundle
   }
 
-  def readRaw(raw: UInt): TraceInstrInnerBundle = {
+  def readRaw(raw: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
     val m = Wire(new TraceInstrInnerBundle)
     var offset = 0
     // m.getElements.reverse.foreach( elt => {
@@ -136,7 +135,7 @@ class TraceInstrFpgaBundle(implicit p: Parameters) extends Bundle {
   def isException = traceType === TraceInstType.Exception
   def isUnknownType = traceType === TraceInstType.Other
 
-  def nextPC = Mux(isException || branchTaken.asBool, target,
+  def nextPC = Mux(isException || (isBranch && branchTaken.asBool), target,
                Mux(inst(1,0) === 3.U, pcVA + 4.U, pcVA + 2.U))
   def toInnerBundle(instID: UInt): TraceInstrInnerBundle = {
     val inner = Wire(new TraceInstrInnerBundle)
@@ -156,6 +155,7 @@ class TraceInstrFpgaBundle(implicit p: Parameters) extends Bundle {
     inner.exception := exception
     inner.fastSimulation := 0.U
     inner.InstID := instID
+    inner.sbID := DontCare
 
     inner
   }

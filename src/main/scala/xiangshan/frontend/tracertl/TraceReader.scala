@@ -79,6 +79,7 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
     val insts = Output(Vec(trtl.TraceFetchWidth, new TraceInstrInnerBundle()))
     val redirect_valid = Input(Bool())
     val redirect_instID = Input(UInt(64.W))
+    val redirect_sbID = Input(new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize))
     val workingState = Input(Bool())
   })
 
@@ -114,7 +115,7 @@ class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule
     // FIXME: consider helper.io.instsToDut.valid
     helper.io.enable := io.enable
     helper.io.redirect.valid := io.redirect_valid
-    helper.io.redirect.bits := io.redirect_instID
+    helper.io.redirect.bits := io.redirect_sbID
     helper.io.workingState := io.workingState
     io.insts := helper.io.instsToDut
     io.instsReady := helper.io.instsValid
@@ -185,6 +186,8 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     trace_reader_helper.io.enable := readTraceEnableForHelper
     trace_reader_helper.io.redirect_valid := redirect.valid && workingState
     trace_reader_helper.io.redirect_instID := redirect.bits.traceInfo.InstID +
+      Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
+    trace_reader_helper.io.redirect_sbID := redirect.bits.traceInfo.sbID +
       Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
     trace_reader_helper.io.workingState := workingState
 

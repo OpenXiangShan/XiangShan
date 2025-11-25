@@ -25,13 +25,12 @@ import chisel3.util.experimental.BoringUtils
 
 class TraceReaderFPGAIO(implicit p: Parameters) extends TraceBundle {
   // fpga platform, from host, in trace format
-  // val tracesFromHost = Flipped(DecoupledIO((Vec(TraceRecvWidth, new TraceInstrInnerBundle()))))
 
   // normal trace reader io
   val enable = Input(Bool())
   val instsValid = Output(Bool())
   val instsToDut = Output(Vec(trtl.TraceFetchWidth, new TraceInstrInnerBundle))
-  val redirect = Input(Valid(UInt(64.W)))
+  val redirect = Input(Valid(new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)))
   val workingState = Input(Bool())
 }
 
@@ -40,18 +39,18 @@ class TraceReaderFPGAPingPongRam(EntryNum: Int)(implicit p: Parameters) extends 
   val io = IO(new Bundle {
     val readValid = Input(Bool())
     val readReady = Output(Bool())
-    val readInsts = Output(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrInnerBundle))
+    val readInsts = Output(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrFpgaBundle))
 
     val writeValid = Input(Bool())
     val writeReady = Output(Bool())
-    val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrInnerBundle))
+    val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrFpgaBundle))
 
     val last = Output(Bool())
   })
 
   require(trtl.TraceFpgaHugeBufferWriteWidth == trtl.TraceFpgaHugeBufferReadWidth)
-  val ram = Module(new SRAMTemplate[Vec[TraceInstrInnerBundle]](
-    gen = Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrInnerBundle),
+  val ram = Module(new SRAMTemplate[Vec[TraceInstrFpgaBundle]](
+    gen = Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrFpgaBundle),
     set = EntryNum,
     way = 1
   ))
@@ -88,11 +87,11 @@ class TraceReaderFPGAPingPongRam(EntryNum: Int)(implicit p: Parameters) extends 
 class TraceReaderFPGAHugeBufferIO(implicit p: Parameters) extends TraceBundle {
   val readValid = Input(Bool())
   val readReady = Output(Bool())
-  val readInsts = Output(Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrInnerBundle))
+  val readInsts = Output(Vec(trtl.TraceFpgaHugeBufferWriteWidth, new TraceInstrFpgaBundle))
 
   val writeValid = Input(Bool())
   val writeReady = Output(Bool())
-  val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrInnerBundle))
+  val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrFpgaBundle))
 }
 
 class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
@@ -146,22 +145,6 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
     firstInstCheck := false.B
     XSError(io.writeInsts(0).pcVA =/= 0x80000000L.U,
       "Error in Trace HugeBuffer write first: the first inst's PC is not 0x80000000")
-    for (i <- 0 until (trtl.TraceFpgaHugeBufferWriteWidth - 1)) {
-      XSError(io.writeInsts(i).InstID =/= (i + 1).U,
-        s"Error in Trace HugeBuffer write first: the ${i}th inst's InstID is not ${(i + 1)}")
-    }
-  }
-  when (io.writeValid) {
-    for (i <- 0 until trtl.TraceFpgaHugeBufferWriteWidth - 1) {
-      XSError((io.writeInsts(i).InstID + 1.U) =/= io.writeInsts(i+1).InstID,
-        s"Error in Trace HugeBuffer write: the ${i}th inst's InstID is not equal to ${i+1}th")
-    }
-  }
-  when (RegNext(io.readValid && io.readReady, init = false.B)) {
-    for (i <- 0 until trtl.TraceFpgaHugeBufferReadWidth - 1) {
-      XSError((io.readInsts(i).InstID + 1.U) =/= io.readInsts(i+1).InstID,
-        s"Error in Trace HugeBuffer read: the ${i}th inst's InstID + 1.U is not equal to ${i+1}th")
-    }
   }
 }
 
@@ -172,16 +155,17 @@ class TraceReaderFPGASmallBufferIO(implicit p: Parameters) extends TraceBundle {
 
   val writeValid = Input(Bool())
   val writeReady = Output(Bool())
-  val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrInnerBundle))
+  val writeInsts = Input(Vec(trtl.TraceFpgaHugeBufferReadWidth, new TraceInstrFpgaBundle))
 
-  val redirect = Input(Valid(UInt(64.W)))
+  val redirect = Input(Valid(new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)))
 }
+
+class SmallBufferPtr(entries: Int) extends CircularQueuePtr[SmallBufferPtr](entries) with HasCircularQueuePtrHelper{}
 
 class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderFPGASmallBufferIO)
 
-  class SmallBufferPtr(entries: Int) extends CircularQueuePtr[SmallBufferPtr](entries) with HasCircularQueuePtrHelper{}
   val buffer = Reg(Vec(trtl.TraceFpgaSmallBufferSize, new TraceInstrInnerBundle))
 
   val readPtr = RegInit(0.U.asTypeOf(new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)))
@@ -194,56 +178,43 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
     writePtr := writePtr + trtl.TraceFpgaHugeBufferReadWidth.U
   }
   val writePtrForWrite = RegNext(writePtr)
+  val instIDCounter = RegInit(1.U(trtl.TraceInstIDWidth.W))
   when (RegNext(writeFire, init = false.B)) {
     for (i <- 0 until trtl.TraceFpgaHugeBufferReadWidth) {
-      buffer((writePtrForWrite + i.U).value) := io.writeInsts(i)
+      buffer((writePtrForWrite + i.U).value) := io.writeInsts(i).toInnerBundle(instIDCounter + i.U)
     }
+    instIDCounter := instIDCounter + trtl.TraceFpgaHugeBufferReadWidth.U
   }
 
   io.readReady := distanceBetween(writePtrForWrite, readPtr) >= trtl.TraceFetchWidth.U
   (0 until trtl.TraceFetchWidth).foreach{ i =>
     io.readInsts(i) := buffer((readPtr + i.U).value)
+    io.readInsts(i).sbID := readPtr + i.U
   }
   when (io.readValid && io.readReady) {
     readPtr := readPtr + trtl.TraceFetchWidth.U
   }
 
-  val curPtrInstID = RegEnable(io.readInsts.last.InstID, io.readValid && io.readReady)
-  val redirectNextPtr = readPtr - (curPtrInstID - io.redirect.bits + 1.U)
   when (io.redirect.valid) {
-    readPtr := redirectNextPtr
+    readPtr := io.redirect.bits // sbID
   }
 
   val commitValid = WireInit(false.B)
-  val commitInstNum = WireInit(0.U(log2Ceil(CommitWidth*RenameWidth+1).W))
+  val commitSbID = WireInit(0.U(readPtr.getWidth.W))
   BoringUtils.addSink(commitValid, "TraceRTLFPGACommitValid")
-  BoringUtils.addSink(commitInstNum, "TraceRTLFPGACommitInstNum")
+  BoringUtils.addSink(commitSbID, "TraceRTLFPGACommitSbID")
   when (commitValid) {
-    commitPtr := commitPtr + commitInstNum
+    commitPtr := commitSbID.asTypeOf(commitPtr)
   }
 
-  XSError(io.redirect.valid && (redirectNextPtr.value >= trtl.TraceFpgaSmallBufferSize.U),
-    "SmallBuffer redirect error: redirectNextPtr out of range")
   XSError(readPtr.value >= trtl.TraceFpgaSmallBufferSize.U,
     "SmallBuffer read error: readPtr out of range")
-  XSError(io.redirect.valid && buffer(redirectNextPtr.value).InstID =/= io.redirect.bits,
-    "SmallBuffer redirect error: InstID not match")
-
-  val commitInstIDRob = WireInit(0.U(64.W))
-  val commitInstIDSb = buffer(commitPtr.value).InstID
-  BoringUtils.addSink(commitInstIDRob, "TraceRTLFPGACommitInstID")
-  XSError(commitValid && (commitInstIDRob =/= commitInstIDSb),
-    "SmallBuffer commit error: InstID not match")
 
   val firstInstCheck = RegInit(true.B)
   when (RegNext(io.writeValid, init = false.B) && firstInstCheck) {
     firstInstCheck := false.B
     XSError(io.writeInsts(0).pcVA =/= 0x80000000L.U,
       "Error in Trace SmallBuffer write first: the first inst's PC is not 0x80000000")
-    for (i <- 0 until (trtl.TraceFetchWidth - 1)) {
-      XSError(io.writeInsts(i).InstID =/= (i + 1).U,
-        s"Error in Trace SmallBuffer write first: the ${i}th inst's InstID is not ${(i + 1)}")
-    }
   }
   when (io.readValid && io.readReady) {
     for (i <- 0 until (trtl.TraceFetchWidth - 1)) {
@@ -257,9 +228,8 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderFPGAIO)
 
-  private val TraceInstWidth = (new TraceInstrInnerBundle).getWidth
 
-  val fpgaTraces = WireInit(0.U.asTypeOf(Vec(trtl.TraceFpgaRecvWidth, new TraceInstrInnerBundle)))
+  val fpgaTraces = WireInit(0.U.asTypeOf(Vec(trtl.TraceFpgaRecvWidth, new TraceInstrFpgaBundle)))
   val fpgaTracesValid = WireInit(false.B)
   val fpgaTracesReady = Wire(Bool())
   val fpgaTraces_tmp = WireInit(0.U(fpgaTraces.getWidth.W))
@@ -267,8 +237,10 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
   BoringUtils.addSink(fpgaTracesValid, "TraceRTLFPGATracesValid")
   BoringUtils.addSource(fpgaTracesReady, "TraceRTLFPGATracesReady")
   for (i <- 0 until trtl.TraceFpgaRecvWidth) {
-    fpgaTraces(i) := TraceInstrInnerBundle.readRaw(
-      fpgaTraces_tmp((i + 1) * TraceInstWidth - 1, i * TraceInstWidth))
+    val TraceInstWidth = (new TraceInstrFpgaBundle).getWidth
+    fpgaTraces(i) := TraceInstrFpgaBundle.readRaw(
+      fpgaTraces_tmp((i + 1) * TraceInstWidth - 1, i * TraceInstWidth),
+      reverse = false)
   }
 
   val hugeBuffer = Module(new TraceReaderFPGAHugeBuffer)
@@ -312,10 +284,6 @@ class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
     (0 until trtl.TraceFpgaRecvWidth-1).foreach(i => {
       XSError(fpgaTraces(i).nextPC =/= fpgaTraces(i + 1).pcVA,
         s"Error in TraceReaderFPGA. Fpga Recv: the ${i}th inst's nextPC is not equal to ${i+1}th inst's PC")
-    })
-    (0 until trtl.TraceFpgaRecvWidth-1).foreach(i => {
-      XSError((fpgaTraces(i).InstID+1.U) =/= fpgaTraces(i + 1).InstID,
-        s"Error in TraceReaderFPGA. Fpga Recv: the ${i}th inst's next instID is not equal to ${i+1}th inst's instID")
     })
   }
 }

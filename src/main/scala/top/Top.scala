@@ -40,7 +40,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import xiangshan.frontend.tracertl.{TraceInstrInnerBundle, TraceFPGACollectBundle, TraceRTLParamKey, TraceRTLParameters}
+import xiangshan.frontend.tracertl.{TraceInstrFpgaBundle, TraceFPGACollectBundle, TraceRTLParamKey, TraceRTLParameters}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -202,7 +202,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     // TODO: change the const to trait param
-    val gateWayInWidth = (new TraceInstrInnerBundle).getWidth * p(TraceRTLParamKey).TraceFpgaRecvWidth
+    val gateWayInWidth = (new TraceInstrFpgaBundle).getWidth * p(TraceRTLParamKey).TraceFpgaRecvWidth
     val gateWayOutWidth = (new TraceFPGACollectBundle).getWidth * p(TraceRTLParamKey).TraceFpgaCollectWidth
 
     if (p(DebugOptionsKey).TraceRTLMode) {
