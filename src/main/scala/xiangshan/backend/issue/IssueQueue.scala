@@ -934,8 +934,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     // deqBeforeDly.ready is always true
     deq.ready := true.B
     // for int scheduler fdiv has high priority than alu
-    if (params.inIntSchd && deqFuCfgs(i).contains(DivCfg)) {
-      // wakeupFromExu only one div
+    if (params.inIntSchd && (deqFuCfgs(i).contains(DivCfg) || deqFuCfgs(i).contains(CsrCfg))) {
+      // div and csr need wakeupFromExu
       io.wakeupFromExu.foreach(x => {
         deq.ready := !x.head.valid
         deqDly.valid := deq.valid && !x.head.valid
@@ -943,7 +943,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
     if (params.aluDeqNeedPickJump && deqFuCfgs(i).contains(JmpCfg)) {
       io.wakeupFromExu.foreach(x => {
-        deq.ready := !(entries.io.aluDeqSelectJump.get && x.head.valid)
+        deq.ready := !entries.io.aluDeqSelectJump.get
         deqDly.valid := deq.valid && !(entries.io.aluDeqSelectJump.get && x.head.valid)
       })
     }
