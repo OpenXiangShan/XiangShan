@@ -195,7 +195,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   // store queue wiring
   storeQueue.io.redirect                    <> io.brqRedirect
-//  storeQueue.io.vecFeedback   <> io.stvecFeedback
+  storeQueue.io.fromVMergeBuffer              <> io.stvecFeedback
   storeQueue.io.fromStoreUnit.unalignQueueReq <> io.sta.unalignQueueReq
   storeQueue.io.fromStoreUnit.storeAddrIn     <> io.sta.storeAddrIn // from store_s1
   storeQueue.io.fromStoreUnit.storeAddrInRe   <> io.sta.storeAddrInRe // from store_s2
