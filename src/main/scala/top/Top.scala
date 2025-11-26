@@ -203,7 +203,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // TODO: change the const to trait param
     val gateWayInWidth = (new TraceInstrFpgaBundle).getWidth * p(TraceRTLParamKey).TraceFpgaRecvWidth
-    val gateWayOutWidth = (new TraceFPGACollectBundle).getWidth * p(TraceRTLParamKey).TraceFpgaCollectWidth
+    val gateWayOutWidth = TraceFPGACollectBundle.alignWidth() * p(TraceRTLParamKey).TraceFpgaCollectWidth
 
     if (p(DebugOptionsKey).TraceRTLMode) {
       println(s"[XSTop] gateWayInWidth: $gateWayInWidth gateWayOutWidth: $gateWayOutWidth")

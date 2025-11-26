@@ -31,17 +31,20 @@ class TraceUnpackageBufferPtr(entries: Int) extends CircularQueuePtr[TraceUnpack
 // MAX_DATA_WIDTH = ~20000(maybe)
 class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INST_NUM: Int)(implicit p: Parameters) extends Module {
 
-  private val TRACE_OUTER_INST_WIDTH = (new TraceInstrFpgaBundle).getWidth
+  // private val TRACE_OUTER_INST_ALIGN_WIDTH = (new TraceInstrFpgaBundle).getWidth
+  private val TRACE_OUTER_INST_ALIGN_WIDTH = TraceInstrFpgaBundle.alignWidth()
+  private val TRACE_OUTER_INST_PURE_WIDTH = (new TraceInstrFpgaBundle).getWidth
 
   // private val BUS_CORE_DATA_WIDTH = TRACE_INNER_INST_WIDTH  * DUT_BUS_INST_NUM
-  private val BUS_CORE_DATA_WIDTH = TRACE_OUTER_INST_WIDTH  * DUT_BUS_INST_NUM
-  private val PACKET_INST_WIDTH = TRACE_OUTER_INST_WIDTH  * PACKET_INST_NUM
+  private val PACKET_INST_WIDTH = TRACE_OUTER_INST_ALIGN_WIDTH  * PACKET_INST_NUM
   private val PACKET_CYCLE_NUM = (PACKET_INST_WIDTH + AXIS_DATA_WIDTH - 1) / AXIS_DATA_WIDTH
   private val PLUS_EXTRA_WIDTH = PACKET_CYCLE_NUM * AXIS_DATA_WIDTH
 
+  private val BUS_CORE_DATA_WIDTH = TRACE_OUTER_INST_PURE_WIDTH  * DUT_BUS_INST_NUM
+
   println(s"[TraceAXISUnpackage] PACKET_INST_NUM: $PACKET_INST_NUM AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH DUT_BUS_INST_NUM: $DUT_BUS_INST_NUM")
   println(s"BUS_CORE_DATA_WIDTH: $BUS_CORE_DATA_WIDTH PACKET_INST_WIDTH: $PACKET_INST_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
-  println(s"TRACE_OUTER_INST_WIDTH $TRACE_OUTER_INST_WIDTH")
+  println(s"TRACE_OUTER_INST_ALIGN_WIDTH $TRACE_OUTER_INST_ALIGN_WIDTH TRACE_OUTER_INST_PURE_WIDTH $TRACE_OUTER_INST_PURE_WIDTH")
 
   val io = IO(new Bundle {
     val axis = Flipped(new TraceRTLAXISIO(AXIS_DATA_WIDTH))
@@ -85,13 +88,19 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
 
   val dataFlatten = buffer(tranIdx.value).asUInt
   val dataOuterVec = dataFlatten(PACKET_INST_WIDTH-1, 0).asTypeOf(
-    Vec(MAX_CORE_CYCLE, UInt((TRACE_OUTER_INST_WIDTH * DUT_BUS_INST_NUM).W)))
+    Vec(MAX_CORE_CYCLE, UInt((TRACE_OUTER_INST_ALIGN_WIDTH * DUT_BUS_INST_NUM).W)))
   val dataOuterVecAtIndex = WireInit(dataOuterVec(data_cycle_index))
+  val dataPureVec = Wire(Vec(DUT_BUS_INST_NUM, UInt(TRACE_OUTER_INST_PURE_WIDTH.W)))
+  for (i <- 0 until DUT_BUS_INST_NUM) {
+    dataPureVec(i) := dataOuterVecAtIndex((i+1) * TRACE_OUTER_INST_ALIGN_WIDTH - 1, i * TRACE_OUTER_INST_ALIGN_WIDTH)( TRACE_OUTER_INST_PURE_WIDTH - 1, 0)
+  }
 
   dontTouch(dataOuterVec)
   dontTouch(dataOuterVecAtIndex)
 
-  io.data.bits := dataOuterVecAtIndex
+  require(dataPureVec.asUInt.getWidth == io.data.bits.getWidth, s"ERROR in TraceAXISUnpackage, dataPureVec.asUInt.getWidth ${dataPureVec.asUInt.getWidth} != io.data.bits.getWidth ${io.data.bits.getWidth}")
+
+  io.data.bits := dataPureVec.asUInt
   io.data.valid := bufferValid(tranIdx.value)
 
   when (io.data.fire) {

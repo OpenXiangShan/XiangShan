@@ -21,12 +21,6 @@ import chisel3.util.experimental.BoringUtils
 import org.chipsalliance.cde.config.Parameters
 import utility._
 
-// size must be multiple of 8bit(byte)
-class TraceFPGACollectBundle(implicit p: Parameters) extends Bundle {
-  val instNum = UInt(3.W)
-  val pcVA = UInt(p(TraceRTLParamKey).TraceVAddrWidth.W)
-}
-
 class TraceCollectQueuePtr(entries: Int) extends CircularQueuePtr[TraceCollectQueuePtr](entries)
   with HasCircularQueuePtrHelper
 
@@ -35,7 +29,7 @@ class TraceCollectQueuePtr(entries: Int) extends CircularQueuePtr[TraceCollectQu
 class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters) extends TraceModule
   with HasCircularQueuePtrHelper {
 
-  private val TRACE_FPGA_COLLECT_WIDTH = (new TraceFPGACollectBundle).getWidth
+  private val TRACE_FPGA_COLLECT_ALIGN_WIDTH = TraceFPGACollectBundle.alignWidth()
 
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(Vec(CommitWidth, Valid(new TraceFPGACollectBundle))))
@@ -66,7 +60,7 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
   // output to XSTop by BoringUtil.addSink and addSource
   // wrap many instruction in one transaction
   val collectQueueReformat = WireInit(collectQueue.asTypeOf(
-    Vec(CollectBatchNum, UInt((TRACE_FPGA_COLLECT_WIDTH * CommitCheckWidth).W)
+    Vec(CollectBatchNum, UInt((TRACE_FPGA_COLLECT_ALIGN_WIDTH * CommitCheckWidth).W)
   )))
   val reformatReadIdx = WireInit(readPtr.value(readPtr.value.getWidth-1, log2Ceil(CommitCheckWidth)))
   val out = WireInit(collectQueueReformat(reformatReadIdx))
@@ -95,12 +89,14 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
 class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int)(implicit p: Parameters) extends Module {
 
   // PACKET_INST_NUM should be equal TraceCollectQueue.CommitCheckWidth
-  private val TRACE_FPGA_COLLECT_WIDTH = (new TraceFPGACollectBundle).getWidth
-  private val PACKET_INST_WIDTH = TRACE_FPGA_COLLECT_WIDTH * PACKET_INST_NUM
+  private val TRACE_FPGA_COLLECT_ALIGN_WIDTH = TraceFPGACollectBundle.alignWidth()
+
+  private val PACKET_INST_WIDTH = TRACE_FPGA_COLLECT_ALIGN_WIDTH * PACKET_INST_NUM
   private val PACKET_CYCLE_NUM = (PACKET_INST_WIDTH + AXIS_DATA_WIDTH - 1) / AXIS_DATA_WIDTH
   private val PLUS_EXTRA_WIDTH = PACKET_CYCLE_NUM * AXIS_DATA_WIDTH
   private val AXIS_DATA_BYTES = AXIS_DATA_WIDTH / 8
-  private val TRACE_COLLECT_BYTES = TRACE_FPGA_COLLECT_WIDTH / 8 // FIXME: when TRACE_FPGA_COLLECT_WIDTH not multiple of 8bit(byte)
+
+  private val TRACE_COLLECT_BYTES = TRACE_FPGA_COLLECT_ALIGN_WIDTH / 8
 
   println(s"[TraceAXISPackage] PACKET_INST_NUM: $PACKET_INST_NUM, PACKET_INST_WIDTH: $PACKET_INST_WIDTH, AXIS_DATA_WIDTH: $AXIS_DATA_WIDTH PACKET_CYCLE_NUM: $PACKET_CYCLE_NUM, PLUS_EXTRA_WIDTH: $PLUS_EXTRA_WIDTH")
 
@@ -147,9 +143,9 @@ class TraceAXISPackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int)(implicit p: P
     tranIdx := tranIdx + 1.U
   }
 
-  for (i <- 0 until (AXIS_DATA_WIDTH / TRACE_FPGA_COLLECT_WIDTH)) {
+  for (i <- 0 until (AXIS_DATA_WIDTH / TRACE_FPGA_COLLECT_ALIGN_WIDTH)) {
     when (io.axis.tvalid && io.axis.tkeep((i + 1) * TRACE_COLLECT_BYTES - 1, i * TRACE_COLLECT_BYTES) =/= 0.U) {
-      assert(io.axis.tdata((i+1)*TRACE_FPGA_COLLECT_WIDTH - 1, i * TRACE_FPGA_COLLECT_WIDTH) =/= 0.U, s"ERROR in TraceAXISPackage, tdata ${i} is zero but tkeep is not zero")
+      assert(io.axis.tdata((i+1)*TRACE_FPGA_COLLECT_ALIGN_WIDTH - 1, i * TRACE_FPGA_COLLECT_ALIGN_WIDTH) =/= 0.U, s"ERROR in TraceAXISPackage, tdata ${i} is zero but tkeep is not zero")
     }
   }
 

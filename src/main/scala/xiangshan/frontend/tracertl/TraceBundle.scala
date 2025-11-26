@@ -163,6 +163,11 @@ class TraceInstrFpgaBundle(implicit p: Parameters) extends Bundle {
 
 object TraceInstrFpgaBundle {
 
+  def upAlign(num: Int, align: Int): Int = {
+    ((num + align - 1) / align) * align
+  }
+  def alignWidth()(implicit p: Parameters) = upAlign((new TraceInstrFpgaBundle).getWidth, 8)
+
   def readRaw(rawBits: UInt, reverse: Boolean)(implicit p: Parameters): TraceInstrFpgaBundle = {
     val m = Wire(new TraceInstrFpgaBundle)
     var offset = 0
@@ -192,4 +197,26 @@ class TraceRTLAXISIO(DATA_WIDTH: Int) extends Bundle {
   val tlast = Output(Bool())
   val tvalid = Output(Bool())
   val tready = Input(Bool())
+}
+
+// size must be multiple of 8bit(byte)
+class TraceFPGACollectBundle(implicit p: Parameters) extends Bundle {
+  val instNum = UInt(8.W)
+  val pcVA = UInt(p(TraceRTLParamKey).TraceVAddrWidth.W)
+  val padding = UInt(6.W)
+}
+
+object TraceFPGACollectBundle {
+  def upAlign(num: Int, align: Int): Int = {
+    ((num + align - 1) / align) * align
+  }
+
+  def alignWidth()(implicit p: Parameters) = upAlign((new TraceFPGACollectBundle).getWidth, 8)
+
+  def apply(instNum: UInt, pcVA: UInt)(implicit p: Parameters): TraceFPGACollectBundle = {
+    val bundle = Wire(new TraceFPGACollectBundle)
+    bundle.instNum := instNum
+    bundle.pcVA := pcVA
+    bundle
+  }
 }

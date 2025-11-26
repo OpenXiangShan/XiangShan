@@ -104,13 +104,16 @@ object TraceRTLParameters {
     result +=
       s"""
          |#define TRACERTL_FPGA_AXIS_WIDTH (${trtl.TraceFpgaAxisWidth})
-         |#define TRACERTL_INST_BIT_WIDTH (${tOutBundle.getWidth})
          |#define TRACERTL_FPGA_PACKET_INST_NUM (${trtl.TraceFpgaUnpackInstNum})
          |#define TRACERTL_FPGA_PACKET_CYCLE_NUM (${TRACERTL_FPGA_PACKET_CYCLE_NUM})
          |
          |#define TRACERTL_FPGA_COLLECT_INST_WIDTH (${tCollectBundle.getWidth})
          |#define TRACERTL_FPGA_COLLECT_INST_NUM (${trtl.TraceFpgaCollectWidth})
          |#define TRACERTL_FPGA_COLLECT_CYCLE_NUM (${TRACERTL_FPGA_COLLECT_CYCLE_NUM})
+         |
+         |#define TRACERTL_INST_BIT_WIDTH (${tOutBundle.getWidth})
+         |#define TRACERTL_FPGA_INST_BIT_ALIGN_WIDTH (${TraceInstrFpgaBundle.alignWidth()})
+         |#define TRACERTL_FPGA_INST_BYTE_WIDTH (${TraceInstrFpgaBundle.alignWidth() / 8})
          |""".stripMargin
 
     // TraceFormat InstructionBundle
@@ -118,81 +121,11 @@ object TraceRTLParameters {
       result += s"#define TRACERTL_INST_${name}_BIT_WIDTH (${elt.getWidth})"
     }
 
-    result +=
-      s"""
-        |class BitWriter {
-        |public:
-        |  explicit BitWriter(size_t maxBytes) : buf_(maxBytes), bytePos_(0), bitPos_(0) {}
-        |  void write(uint64_t value, unsigned bits) {
-        |    if (bits == 0) return;
-        |    size_t maxBytes = buf_.size();
-        |    for (int bitIndex = 0; bitIndex < bits; bitIndex++) {
-        |      if (bytePos_ >= maxBytes) {
-        |        printf("Error: BitWriter bytePos_(%lu) out of range(%lu)\\n", bytePos_, maxBytes);
-        |        exit(1);
-        |      }
-        |      bool bit = (value >> bitIndex) & 1u;
-        |      if (bitPos_ == 0) buf_[bytePos_] = 0;
-        |      buf_[bytePos_] |= uint8_t(bit) << bitPos_;
-        |      if (++bitPos_ == 8) { bitPos_ = 0; ++bytePos_; }
-        |    }
-        |  }
-        |  const uint8_t* data() const { return buf_.data(); }
-        |  size_t byteSize() const { return bytePos_ + (bitPos_ > 0); }
-        |  void reset() {
-        |    // std::memset(buf_.data(), 0, buf_.size());
-        |    bytePos_ = 0;
-        |    bitPos_  = 0;
-        |  }
-        |
-        |private:
-        |  std::vector<uint8_t> buf_;
-        |  size_t bytePos_;
-        |  unsigned bitPos_;
-        |};
-        |
-        |class BitReader {
-        |public:
-        |  BitReader(const uint8_t* data, size_t bytes)
-        |    : data_(data), bytePos_(0), bitPos_(0), endByte_(bytes) {}
-        |  uint64_t read(unsigned bits) {
-        |    if (bits == 0) return 0;
-        |    uint64_t v = 0;
-        |    for (unsigned i = 0; i < bits; ++i) {
-        |      if (bytePos_ >= endByte_) {
-        |        printf("Error: BitReader bytePos_(%lu) out of range(%lu)\\n", bytePos_, endByte_);
-        |        exit(1);
-        |      }
-        |      uint64_t bit = (data_[bytePos_] >> bitPos_) & 1u;
-        |      v = v | (bit << i);
-        |      if (++bitPos_ == 8) { bitPos_ = 0; ++bytePos_; }
-        |    }
-        |    return v;
-        |  }
-        |  void reset() {
-        |    bytePos_ = 0;
-        |    bitPos_  = 0;
-        |  }
-        |private:
-        |  const uint8_t* data_;
-        |  size_t bytePos_;
-        |  unsigned bitPos_;
-        |  size_t endByte_;
-        |};
-        """.stripMargin
-
-
     // TraceFormat Struct
-    result += s"struct TraceFpgaInstruction {"
+    result += s"struct __attribute__((packed)) TraceFpgaInstruction {"
     tOutBundle.elements.foreach { case (name, elt) =>
       result += s"  ${bitLenToType(elt.getWidth)} ${name}:${elt.getWidth};"
     }
-    result +=
-      s"""
-         |  void serialize(BitWriter& writer) {
-         |    ${tOutBundle.elements.map { case (name, elt) => s"writer.write(${name}, ${elt.getWidth});" }.mkString("\n    ")}
-         |  }
-         |""".stripMargin
     result +=
       s"""
          |  void genFrom(Instruction &instruction) {
@@ -236,14 +169,15 @@ object TraceRTLParameters {
     // Trace Collect Module
     result +=
       s"""
-         |struct TraceFpgaCollectStruct {
-         |  uint64_t pcVA;
-         |  uint8_t instNum;
+         |#define TraceFpgaCollect_BIT_WIDTH (${tCollectBundle.getWidth})
+         |#define TraceFpgaCollect_BIT_ALIGN_WIDTH (${TraceFPGACollectBundle.alignWidth()})
+         |#define TraceFpgaCollect_BYTE_WIDTH (${TraceFPGACollectBundle.alignWidth() / 8})
+         |#define TraceFpgaCollect_PCVA_WIDTH ${tCollectBundle.pcVA.getWidth}
+         |#define TraceFpgaCollect_INSTNUM_WIDTH ${tCollectBundle.instNum.getWidth}
          |
-         |  void deserialize(BitReader& reader) {
-         |    pcVA = reader.read(${tCollectBundle.pcVA.getWidth});
-         |    instNum = reader.read(${tCollectBundle.instNum.getWidth});
-         |  }
+         |struct __attribute__((packed)) TraceFpgaCollectStruct {
+         |  uint64_t pcVA:${tCollectBundle.pcVA.getWidth};
+         |  uint8_t instNum:${tCollectBundle.instNum.getWidth};
          |
          |  void dump() {
          |    printf("pcVA: %lx, instNum: %d\\n", pcVA, instNum);

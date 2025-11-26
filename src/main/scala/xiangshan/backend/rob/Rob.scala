@@ -1533,7 +1533,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         traceCollectQueue.io.in.bits(i).valid := io.commits.commitValid(i)
         traceCollectQueue.io.in.bits(i).bits.pcVA := SignExt(uop.pc, XLEN)
         traceCollectQueue.io.in.bits(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
-        // traceCollectQueue.io.in.bits(i).bits.padding := 0.U
+        traceCollectQueue.io.in.bits(i).bits.padding := 0.U
 
         when (traceCollectQueue.io.in.valid && traceCollectQueue.io.in.bits(i).valid) {
           XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
