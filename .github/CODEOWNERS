@@ -37,5 +37,6 @@ huancun/ @linjuanZ
 
 src/main/scala/top/ @Tang-Haojin
 
+scripts/Makefile.pdb @yaozhicheng @forever043 @SFangYy @Tang-Haojin
 scripts/pdb-run.py @yaozhicheng @forever043 @SFangYy @Tang-Haojin 
-scripts/xspdb/ @yaozhicheng @forever043 @SFangYy @Tang-Haojin 
+scripts/xspdb/ @yaozhicheng @SFangYy 
