@@ -101,8 +101,7 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val dataValid          = Bool()
   val addrValid          = Bool()
   val memoryType         = MemoryType()
-  val waitStoreS2        = Bool() // will be remove in the feature
-  val completed          = Bool()
+  val waitStoreS2        = Bool() //TODO: will be remove in the feature
   val prefetch           = Bool()
   val isVec              = Bool() // TODO: need it ?
   // vecInactive indicate storage a inactive vector element, it will not write to Sbuffer. written when vector split.
@@ -114,6 +113,7 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val allocated          = Bool()
   val cboType            = CboType()
   val isCbo              = Bool()
+  val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
 
   //debug information
 
@@ -756,6 +756,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val port      = writeSbufferWire(i)
       val dataEntry = dataEntries(i)
       val ctrlEntry = ctrlEntries(i)
+      // if element is inactivate or Mask is all false, vecValid is false, inform sbuffer do not write.
+      val vecValid  = ctrlEntry.vecMbCommit && ctrlEntry.allValid && writeSbufferMask(i).orR || ctrlEntry.isVec
 
       port.bits.data     := writeSbufferData(i)
       port.bits.mask     := writeSbufferMask(i)
@@ -765,7 +767,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       port.bits.wline    := dataEntry.wline
       port.bits.prefetch := ctrlEntry.prefetch
       port.bits.cmd      := MemoryOpConstants.M_XWR
-      port.bits.vecValid := !ctrlEntry.vecInactive || !ctrlEntry.isVec // vector used, will be remove in feature.
+      port.bits.vecValid := vecValid // vector used, will be remove in feature.
       port.valid         := toSbufferValid(i)
 
       XSError(ctrlEntry.vecInactive && !ctrlEntry.isVec, s"inactive element must be vector! ${i}")
@@ -1027,6 +1029,10 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val enqUpBound  = io.enq.req.map(x => x.bits.uop.sqIdx + x.bits.uop.numLsElem)
   val enqCrossLoop = enqLowBound.zip(enqUpBound).map{case (low, up) => low.flag =/= up.flag}
 
+  // TODO: vecMbCommit will be remove in the future.
+  val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))
+  val vecCommit = Wire(Vec(StoreQueueSize, Bool()))
+
   for(i <- 0 until StoreQueueSize) {
 
     /*================================================================================================================*/
@@ -1228,6 +1234,40 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
     XSError(!ctrlEntries(i).allocated && deqCancel, s"double deq! index: ${i}\n")
 
+    /*================================================================================================================*/
+    /*============================================== vector ctrl =====================================================*/
+    /*================================================================================================================*/
+
+    when(entryCanEnq) {
+      ctrlEntries(i).isVec := true.B
+    }.elsewhen(deqCancel || needCancel(i)) {
+      ctrlEntries(i).isVec := false.B
+    }
+
+    // TODO: vecMbCommit will be remove in the future.
+    val fbk = io.fromVMergeBuffer
+    for (j <- 0 until VecStorePipelineWidth) {
+      vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
+        dataEntries(i).uop.robIdx === fbk(j).bits.robidx && dataEntries(i).uop.uopIdx === fbk(j).bits.uopidx &&
+        ctrlEntries(i).allocated
+    }
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _)
+
+    when (vecCommit(i)) {
+      ctrlEntries(i).vecMbCommit := true.B
+    }.elsewhen(deqCancel || needCancel(i)) {
+      ctrlEntries(i).vecMbCommit := false.B
+    }
+
+    ctrlEntries(i).vecInactive := false.B //TODO: will be use in the future
+
+    /*================================================================================================================*/
+    /*============================================== cancel ctrl =====================================================*/
+    /*================================================================================================================*/
+
+    needCancel(i) := !ctrlEntries(i).committed && dataEntries(i).uop.robIdx.needFlush(io.redirect) && ctrlEntries(i).allocated
+
+    // debug don't touch
     if(debugEn) {
       dontTouch(deqCancel)
       dontTouch(staSetValid)
@@ -1236,23 +1276,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       dontTouch(hasExceptionSet)
       dontTouch(ncSet)
       dontTouch(memBackTypeSet)
+      dontTouch(vecCommittmp)
+      dontTouch(vecCommit)
     }
-
-    /*================================================================================================================*/
-    /*============================================== vector ctrl =====================================================*/
-    /*================================================================================================================*/
-
-//    val isVecSet = io.fromVMergeBuffer(0).bits
-
-    ctrlEntries(i).isVec := false.B
-    ctrlEntries(i).vecInactive := false.B
-
-    /*================================================================================================================*/
-    /*============================================== cancel ctrl =====================================================*/
-    /*================================================================================================================*/
-
-    needCancel(i) := !ctrlEntries(i).committed && dataEntries(i).uop.robIdx.needFlush(io.redirect) && ctrlEntries(i).allocated
-
   }
 
   /*=============================================== update ptr =======================================================*/
@@ -1295,15 +1321,16 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val addrReadyLookupVec = (0 until IssuePtrMoveStride).map(addrReadyPtrExt + _.U)
   val addrReadyLookup = addrReadyLookupVec.map(ptr =>
 //    (MemoryType.isPMPIO(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).addrValid || ctrlEntries(ptr.value).vecInactive)
-      (ctrlEntries(ptr.value).addrValid || ctrlEntries(ptr.value).vecInactive) && ctrlEntries(ptr.value).allocated
-    && ptr =/= enqPtrExt(0))
+      (ctrlEntries(ptr.value).addrValid || ctrlEntries(ptr.value).vecInactive || ctrlEntries(ptr.value).vecMbCommit) &&
+        ctrlEntries(ptr.value).allocated && ptr =/= enqPtrExt(0))
   val nextAddrReadyPtr = addrReadyPtrExt + PriorityEncoder(VecInit(addrReadyLookup.map(!_) :+ true.B))
   addrReadyPtrExt := nextAddrReadyPtr
 
   val stAddrReadyVecWire = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
 //    stAddrReadyVecReg(i) := ctrlEntries(i).allocated && (mmio(i) || addrvalid(i) || (isVec(i) && vecMbCommit(i)))
-    stAddrReadyVecWire(i) := (ctrlEntries(i).addrValid || ctrlEntries(i).vecInactive) && ctrlEntries(i).allocated
+    stAddrReadyVecWire(i) := (ctrlEntries(i).addrValid || ctrlEntries(i).vecInactive || ctrlEntries(i).vecMbCommit) &&
+      ctrlEntries(i).allocated
   })
 
   when (io.redirect.valid) {
@@ -1324,7 +1351,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
       (ctrlEntries(ptr.value).addrValid &&
-        (isMmio(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) || isMmio(ctrlEntries(ptr.value).memoryType)) &&
+        (isMmio(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) || ctrlEntries(ptr.value).vecMbCommit) &&
       !ctrlEntries(ptr.value).unaligned && ctrlEntries(ptr.value).allocated &&
       ptr =/= enqPtrExt(0)
   )
@@ -1345,7 +1372,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
     stDataReadyVecReg(i) := (ctrlEntries(i).addrValid &&
-        (isMmio(ctrlEntries(i).memoryType) || ctrlEntries(i).dataValid) || (ctrlEntries(i).isVec && ctrlEntries(i).vecInactive)) &&
+        (isMmio(ctrlEntries(i).memoryType) || ctrlEntries(i).dataValid) || (ctrlEntries(i).isVec && ctrlEntries(i).vecMbCommit)) &&
       !ctrlEntries(i).unaligned && ctrlEntries(i).allocated
   })
 

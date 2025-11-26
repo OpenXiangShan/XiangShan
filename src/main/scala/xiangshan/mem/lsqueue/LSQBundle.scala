@@ -261,7 +261,7 @@ class StoreQueueIO(implicit p: Parameters) extends MemBlockBundle {
   // from dispatch
   val enq                = new StoreQueueEnqIO
   // when VStoreMergeBuffer writeback micro-op, storeQueue need to set `vecMbCommit`
-//  val fromVMergeBuffer   = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be use in the feature
+  val fromVMergeBuffer   = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be remove in the feature
   // from std
   val storeDataIn        = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
   // from storeUnit.
