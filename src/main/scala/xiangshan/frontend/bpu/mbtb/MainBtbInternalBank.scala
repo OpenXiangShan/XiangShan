@@ -114,9 +114,10 @@ class MainBtbInternalBank(
   }
 
   // io -> writeBuffer
+  private val conflict = w.req.valid && w.req.bits.setIdx === flush.req.bits.setIdx && w.req.bits.entry.tag === 0.U
   writeBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
     val writeValid = w.req.valid && w.req.bits.wayMask(i)
-    val flushValid = flush.req.valid && flush.req.bits.wayMask(i)
+    val flushValid = flush.req.valid && flush.req.bits.wayMask(i) && !conflict
     bufWrite.valid := writeValid || flushValid
     bufWrite.bits.setIdx := Mux(
       writeValid,
