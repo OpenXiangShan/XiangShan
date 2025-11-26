@@ -104,10 +104,10 @@ case class SoCParameters
   SeperateBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
-    imsicIntSrcWidth = 8,
+    imsicIntSrcWidth = 9,
     mAddr = 0x3A800000,
     sgAddr = 0x3B000000,
-    geilen = 5,
+    geilen = 7,
     vgeinWidth = 6,
     iselectWidth = 12,
     EnableImsicAsyncBridge = true,
