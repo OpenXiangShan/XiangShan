@@ -313,12 +313,12 @@ class CtrlBlockImp(
 
 
   redirectGen.io.hartId := io.fromTop.hartId
-  redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.valid := RegNext(oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.bits := RegNext(oldestExuRedirect.bits)
+  redirectGen.io.oldestExuRedirectIsCSR := RegNext(oldestExuRedirectIsCSR)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
-  redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
-  redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
+  redirectGen.io.oldestExuOutPredecode.valid := RegNext(oldestExuPredecode.valid)
+  redirectGen.io.oldestExuOutPredecode := RegNext(oldestExuPredecode)
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectOffset = Mux(memViolation.bits.flushItself(), 0.U, Mux(memViolation.bits.isRVC, 2.U, 4.U))
   val loadRedirectPcFtqOffset = RegEnable((memViolation.bits.ftqOffset << instOffsetBits).asUInt +& loadRedirectOffset, memViolation.valid)
