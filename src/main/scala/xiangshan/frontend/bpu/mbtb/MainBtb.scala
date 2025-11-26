@@ -122,7 +122,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     e.attribute === t1_mispredictBranch.bits.attribute
   }.reduce(_ || _)
 
-  private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch
+  private val t1_writeValid =
+    t1_valid && t1_mispredictBranch.valid && !t1_hitMispredictBranch && t1_mispredictBranch.bits.taken
 
   private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
