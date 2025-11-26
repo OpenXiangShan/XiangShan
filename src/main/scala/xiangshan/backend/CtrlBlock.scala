@@ -323,9 +323,9 @@ class CtrlBlockImp(
 
 
   redirectGen.io.hartId := io.fromTop.hartId
-  redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.valid := RegNext(oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.bits := RegNext(oldestExuRedirect.bits)
+  redirectGen.io.oldestExuRedirectIsCSR := RegNext(oldestExuRedirectIsCSR)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
