@@ -34,7 +34,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult:          Vec[Valid[BtbInfo]]   = Input(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
-    val tageInfo:            ScTageInfo            = Input(new ScTageInfo()) // s3 stage tage info
+    val tageInfo:            ScTageInfo            = Input(new ScTageInfo()) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s3_override:         Bool                  = Input(Bool())
     val ghr:                 GhrEntry              = Input(new GhrEntry())
@@ -261,13 +261,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       val tageConfMid  = ctr.isMid
       val tageConfLow  = ctr.isWeak
       when(hit && providerValid && tageConfHigh) {
-        val conf = (sum > (thres >> 1).zext) && pos(sum) || (sum < -(thres >> 1).zext) && neg(sum)
+        val conf = aboveThreshold(sum, thres >> 1)
         u := Mux(conf, true.B, false.B)
       }.elsewhen(hit && providerValid && tageConfMid) {
-        val conf = (sum > (thres >> 2).zext) && pos(sum) || (sum < -(thres >> 2).zext) && neg(sum)
+        val conf = aboveThreshold(sum, thres >> 2)
         u := Mux(conf, true.B, false.B)
       }.elsewhen(hit && providerValid && tageConfLow) {
-        val conf = (sum > (thres >> 3).zext) && pos(sum) || (sum < -(thres >> 3).zext) && neg(sum)
+        val conf = aboveThreshold(sum, thres >> 3)
         u := Mux(conf, true.B, false.B)
       }
   }
@@ -394,7 +394,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   // new entries write back to tables
-  pathTable zip t1_pathSetIdx zip t1_writePathEntryVec foreach {
+  pathTable.zip(t1_pathSetIdx).zip(t1_writePathEntryVec).foreach {
     case ((table, idx), writeEntries) =>
       table.io.update.valid    := t1_writeValid && ctrl.pathEnable
       table.io.update.setIdx   := idx
@@ -402,7 +402,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       table.io.update.entryVec := writeEntries
   }
 
-  globalTable zip t1_globalSetIdx zip t1_writeGlobalEntryVec foreach {
+  globalTable.zip(t1_globalSetIdx).zip(t1_writeGlobalEntryVec).foreach {
     case ((table, idx), writeEntries) =>
       table.io.update.valid    := t1_writeValid && ctrl.globalEnable
       table.io.update.setIdx   := idx
@@ -439,16 +439,29 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
           useTageVec(wayIdx) := true.B
         }
     }
+    val changeVec = VecInit.fill(NumWays)(false.B)
     for (i <- 0 until NumWays) {
+      val pChange = t1_oldPathCtrs.zip(t1_writePathEntryVec).map {
+        case (oldEntries, writeEntries) =>
+          oldEntries(i).ctr.value =/= writeEntries(i).ctr.value
+      }.reduce(_ || _)
+      val gChange = t1_oldGlobalCtrs.zip(t1_writeGlobalEntryVec).map {
+        case (oldEntries, writeEntries) =>
+          oldEntries(i).ctr.value =/= writeEntries(i).ctr.value
+      }.reduce(_ || _)
+      val bChange = t1_oldBiasCtrs(i).ctr.value =/= t1_writeBiasUsedEntryVec(i).ctr.value
+      changeVec(i) := (pChange || gChange || bChange) && t1_writeWayMask(i)
       XSPerfAccumulate(s"sc_correct${i}", t1_writeValid && scCorrectVec(i))
       XSPerfAccumulate(s"sc_wrong${i}", t1_writeValid && scWrongVec(i))
-      XSPerfAccumulate(s"use_tage_wrong${i}", t1_writeValid && useTageVec(i))
       XSPerfAccumulate(s"use_sc${i}", t1_writeValid && t1_meta.useScPred(i))
+      XSPerfAccumulate(s"path_table_change${i}", t1_writeValid && t1_writeWayMask(i) && pChange)
+      XSPerfAccumulate(s"global_table_change${i}", t1_writeValid && t1_writeWayMask(i) && gChange)
+      XSPerfAccumulate(s"bias_table_change${i}", t1_writeValid && t1_writeWayMask(i) && bChange)
     }
     dontTouch(scCorrectVec)
     dontTouch(scWrongVec)
     dontTouch(useTageVec)
-    XSPerfAccumulate(s"sc_train", t1_writeValid)
+    XSPerfAccumulate(s"sc_train", t1_writeValid && changeVec.reduce(_ || _))
   }
   dontTouch(s2_totalPercsum)
   dontTouch(s2_hitMask)
