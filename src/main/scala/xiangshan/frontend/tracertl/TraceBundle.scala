@@ -41,7 +41,7 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends Bundle {
 
   val fastSimulation = UInt(8.W)
   val InstID = UInt(trtl.TraceInstIDWidth.W)
-  val sbID = new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)
+  val sbID = if (trtl.TraceRTLOnFPGA) Some(new SmallBufferPtr(trtl.TraceFpgaSmallBufferSize)) else None
 
   def isFastSim = fastSimulation(0) === 1.U
   def arthiSrc0 = memoryAddrVA
@@ -65,6 +65,8 @@ object TraceInstrInnerBundle {
     branchType: UInt, branchTaken: UInt,
     InstID: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
 
+    def trtl = p(TraceRTLParamKey)
+
     val bundle = Wire(new TraceInstrInnerBundle)
     bundle.pcVA := pcVA
     bundle.pcPA := pcPA
@@ -77,7 +79,7 @@ object TraceInstrInnerBundle {
     bundle.branchType := branchType
     bundle.branchTaken := branchTaken
     bundle.InstID := InstID
-    bundle.sbID := DontCare
+    bundle.sbID.map(_ := DontCare)
     bundle
   }
 
@@ -155,7 +157,7 @@ class TraceInstrFpgaBundle(implicit p: Parameters) extends Bundle {
     inner.exception := exception
     inner.fastSimulation := 0.U
     inner.InstID := instID
-    inner.sbID := DontCare
+    inner.sbID.map(_ := DontCare)
 
     inner
   }

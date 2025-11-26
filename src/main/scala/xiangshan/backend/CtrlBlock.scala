@@ -322,7 +322,7 @@ class CtrlBlockImp(
       when ((actualLevel === RedirectLevel.flushAfter) ||
        (frontendFlushBits.traceInfo.hasException && (actualLevel === RedirectLevel.flush))) {
         io.frontend.toFtq.redirect.bits.traceInfo.InstID := frontendFlushBits.traceInfo.InstID + 1.U
-        io.frontend.toFtq.redirect.bits.traceInfo.sbID := frontendFlushBits.traceInfo.sbID + 1.U
+        io.frontend.toFtq.redirect.bits.traceInfo.sbID.map(_ := frontendFlushBits.traceInfo.sbID.get + 1.U)
       }
       XSError(io.frontend.toFtq.redirect.bits.cfiUpdate.target === 0.U, "Rob exception's target should not be zero")
     }

@@ -199,7 +199,7 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
   io.readReady := distanceBetween(writePtrForWrite, readPtr) >= trtl.TraceFetchWidth.U
   (0 until trtl.TraceFetchWidth).foreach{ i =>
     io.readInsts(i) := buffer((readPtr + i.U).value)
-    io.readInsts(i).sbID := readPtr + i.U
+    io.readInsts(i).sbID.map(_ := readPtr + i.U)
   }
   when (io.readValid && io.readReady) {
     readPtr := readPtr + trtl.TraceFetchWidth.U
