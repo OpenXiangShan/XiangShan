@@ -129,7 +129,3 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val allocateSetIdx: UInt = UInt(16.W)
   val allocWayIdx:    UInt = UInt(log2Ceil(NumWays).W)
 }
-
-class TageTrace(implicit p: Parameters) extends TageBundle {
-  val condTrace: Vec[Valid[ConditionalBranchTrace]] = Vec(ResolveEntryBranchNumber, Valid(new ConditionalBranchTrace))
-}
