@@ -26,7 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.dataview._
 import chisel3.util._
-import coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, VaddrKey}
+import coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, VaddrKey, WayKey}
 import difftest._
 import freechips.rocketchip.tilelink._
 import huancun.{AliasKey, DirtyKey, PrefetchKey}
@@ -102,6 +102,7 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   // refill_info for mainpipe req awake
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
+  val grant_way  = UInt(4.W)
   val error      = Bool()
   val refill_latency = UInt(LATENCY_WIDTH.W)
 }
@@ -504,6 +505,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+  val grant_way = Reg(UInt(4.W))
 
   // refill data with store data, this reg will be used to store:
   // 1. store data (if needed), before l2 refill data
@@ -647,6 +649,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
   when (io.mem_grant.fire) {
     w_grantfirst := true.B
+    grant_way := io.mem_grant.bits.user.lift(WayKey).getOrElse(0.U)
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
       // GrantData
@@ -689,6 +692,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       refill_latency := Mux(overflow, 0.U, time_delta)
     }
   }
+
+  require(io.mem_grant.bits.user.lift(WayKey).nonEmpty, "WayKey should be present on grant channel (TODO: remove this after parameterization)")
 
   when (io.mem_finish.fire) {
     s_grantack := true.B
@@ -915,6 +920,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
+  io.refill_info.bits.grant_way  := grant_way
   io.refill_info.bits.error      := error
   io.refill_info.bits.refill_latency := Mux(
     isFromL1Prefetch(req.pf_source),

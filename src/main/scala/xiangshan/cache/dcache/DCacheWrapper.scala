@@ -19,10 +19,10 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, VaddrField}
+import coupledL2.{IsKeywordKey, IsKeywordField, WayField, MemBackTypeMMField, MemPageTypeNCField, VaddrField, WayKey}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleFieldBase
+import freechips.rocketchip.util.{BundleFieldBase, BundleKeyBase}
 import huancun.{AliasField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
@@ -871,6 +871,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   override def shouldBeInlined: Boolean = false
 
   val reqFields: Seq[BundleFieldBase] = Seq(
+    WayField(),
     PrefetchField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
@@ -881,6 +882,9 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   val echoFields: Seq[BundleFieldBase] = Seq(
     IsKeywordField()
   )
+  val respKeys: Seq[BundleKeyBase] = Seq(
+    WayKey
+  )
 
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
@@ -889,7 +893,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = reqFields,
-    echoFields = echoFields
+    echoFields = echoFields,
+    responseKeys = respKeys
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -949,6 +954,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
   val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)))
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
+  val l2WayArray = Module(new L1L2WayArray(readPorts = 1, writePorts = 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
   val fdpMonitor =  Module(new FDPrefetcherMonitor)
@@ -1117,6 +1123,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }}
   }
 
+  // read extra meta (l2_way)
+  l2WayArray.io.read.head <> mainPipe.io.l2_way_read_req_s1
+  mainPipe.io.l2_way_read_resp_s2 := l2WayArray.io.resp.head
+
   if(LoadPrefetchL1Enabled) {
     // use last port to read prefetch and access flag
 //    prefetchArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
@@ -1181,6 +1191,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
+
+  val l2_way_write_ports = Seq(
+    mainPipe.io.l2_way_write
+  )
+  l2_way_write_ports.zip(l2WayArray.io.write).foreach { case (p, w) => w <> p }
 
   //----------------------------------------
   // tag array
