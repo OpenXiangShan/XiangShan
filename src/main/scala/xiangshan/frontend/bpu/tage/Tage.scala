@@ -439,8 +439,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   t2_allocateEntry.tag   := Mux1H(t2_allocateTableMaskOH, t2_tempTag) ^ t2_allocateBranch.bits.cfiPosition
   t2_allocateEntry.takenCtr.value := Mux(
     t2_allocateBranch.bits.taken,
-    (1 << (TakenCtrWidth - 1)).U,    // weak taken
-    (1 << (TakenCtrWidth - 1) - 1).U // weak not taken
+    (1 << (TakenCtrWidth - 1)).U,      // weak taken
+    ((1 << (TakenCtrWidth - 1)) - 1).U // weak not taken
   )
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
