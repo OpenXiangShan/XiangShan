@@ -131,5 +131,5 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
 }
 
 class TageTrace(implicit p: Parameters) extends TageBundle {
-  val condTrace: Vec[Valid[ConditionalBranchTrace]] = Vec(NumBtbResultEntries, Valid(new ConditionalBranchTrace))
+  val condTrace: Vec[Valid[ConditionalBranchTrace]] = Vec(ResolveEntryBranchNumber, Valid(new ConditionalBranchTrace))
 }
