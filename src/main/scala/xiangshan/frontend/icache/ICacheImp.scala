@@ -29,6 +29,7 @@ import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility.HasPerfEvents
 import utility.XSPerfAccumulate
+import utils.AddrField
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.WfiReqBundle
@@ -79,6 +80,21 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  CtrlUnit:")
   println(s"    Enabled: $EnableCtrlUnit")
   println(s"    Address: ${icacheParameters.ctrlUnitParameters.Address}")
+  println(s"  Address fields:")
+  AddrField(
+    Seq(
+      ("bankOffset", rowOffBits),
+      ("bankIdx", log2Ceil(DataBanks)),
+      ("(virtual) setIdx", idxBits),
+      ("(virtual) tag (unused)", vtagBits)
+    ),
+    maxWidth = Option(VAddrBits),
+    extraFields = Seq(
+      ("(physical) tag", pgUntagBits, tagBits),
+      ("blockOffset", 0, blockOffBits),
+      ("blockPAddr", blockOffBits, PAddrBits - blockOffBits)
+    ) ++ AliasTagBits.map(w => ("aliasTag", pgIdxBits, w))
+  ).show(indent = 4)
 
   val (bus, edge) = outer.clientNode.out.head
 
