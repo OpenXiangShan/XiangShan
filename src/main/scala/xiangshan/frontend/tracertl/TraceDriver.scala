@@ -66,6 +66,7 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   XSPerfAccumulate("FastSimFetchBlock", firstInstFastSim && fastSimMemAddrFinish)
   XSPerfAccumulate("FastSimFetchCycle", firstInstFastSim)
   XSPerfAccumulate("FastSimMemoryCycle", !fastSimMemAddrFinish)
+  XSPerfAccumulate("OtherBlock_TraceInvalid", io.otherBlock && !(pcMismatch || (!firstInstFastSim && !fastSimMemAddrFinish)))
 
   val finalRange = io.traceRange & io.ifuRange
 

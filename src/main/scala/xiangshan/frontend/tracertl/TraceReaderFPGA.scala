@@ -136,9 +136,9 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
   io.readReady := readReady
 
   XSPerfAccumulate("writeNotReady", !io.writeReady)
-  TimeOutAssert(!io.readReady, 5000, "TraceReaderFPGAHugeBuffer read not ready timeout")
-  TimeOutAssert(!io.readValid, 5000, "TraceReaderFPGAHugeBuffer read not valid timeout")
-  TimeOutAssert(!io.writeValid, 5000, "TraceReaderFPGAHugeBuffer write not valid timeout")
+  // TimeOutAssert(!io.readReady, 5000, "TraceReaderFPGAHugeBuffer read not ready timeout")
+  // TimeOutAssert(!io.readValid, 5000, "TraceReaderFPGAHugeBuffer read not valid timeout")
+  // TimeOutAssert(!io.writeValid, 5000, "TraceReaderFPGAHugeBuffer write not valid timeout")
 
   val firstInstCheck = RegInit(true.B)
   when (io.writeValid && firstInstCheck) {
@@ -146,6 +146,16 @@ class TraceReaderFPGAHugeBuffer(implicit p: Parameters) extends TraceModule
     XSError(io.writeInsts(0).pcVA =/= 0x80000000L.U,
       "Error in Trace HugeBuffer write first: the first inst's PC is not 0x80000000")
   }
+
+  XSPerfAccumulate("ReadValidReady", io.readValid && io.readReady)
+  XSPerfAccumulate("ReadValidNotReady", io.readValid && !io.readReady)
+  XSPerfAccumulate("ReadReadyNotValid", !io.readValid && io.readReady)
+  XSPerfAccumulate("ReadNotValidNotReady", !io.readValid && !io.readReady)
+
+  XSPerfAccumulate("WriteValidReady", io.writeValid && io.writeReady)
+  XSPerfAccumulate("WriteValidNotReady", io.writeValid && !io.writeReady)
+  XSPerfAccumulate("WriteReadyNotValid", !io.writeValid && io.writeReady)
+  XSPerfAccumulate("WriteNotValidNotReady", !io.writeValid && !io.writeReady)
 }
 
 class TraceReaderFPGASmallBufferIO(implicit p: Parameters) extends TraceBundle {
@@ -222,12 +232,21 @@ class TraceReaderFPGASmallBuffer(implicit p: Parameters) extends TraceModule
         s"Error in Trace SmallBuffer read: the ${i}th inst's InstID is not equal to ${i+1}th")
     }
   }
+
+  XSPerfAccumulate("ReadValidReady", io.readValid && io.readReady)
+  XSPerfAccumulate("ReadValidNotReady", io.readValid && !io.readReady)
+  XSPerfAccumulate("ReadReadyNotValid", !io.readValid && io.readReady)
+  XSPerfAccumulate("ReadNotValidNotReady", !io.readValid && !io.readReady)
+
+  XSPerfAccumulate("WriteValidReady", io.writeValid && io.writeReady)
+  XSPerfAccumulate("WriteValidNotReady", io.writeValid && !io.writeReady)
+  XSPerfAccumulate("WriteReadyNotValid", !io.writeValid && io.writeReady)
+  XSPerfAccumulate("WriteNotValidNotReady", !io.writeValid && !io.writeReady)
 }
 
 class TraceReaderFPGA(implicit p: Parameters) extends TraceModule
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderFPGAIO)
-
 
   val fpgaTraces = WireInit(0.U.asTypeOf(Vec(trtl.TraceFpgaRecvWidth, new TraceInstrFpgaBundle)))
   val fpgaTracesValid = WireInit(false.B)

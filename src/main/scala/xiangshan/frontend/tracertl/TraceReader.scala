@@ -18,7 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError, ParallelPriorityMux}
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError, ParallelPriorityMux, XSPerfAccumulate}
 import utils.OptionWrapper
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
@@ -197,6 +197,9 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       inst := traceBuffer(ptr)
     }
     io.traceInsts.valid := distanceBetween(enqPtr, deqPtr) >= FetchWidth.U
+
+    XSPerfAccumulate("TraceValid", io.traceInsts.valid)
+    XSPerfAccumulate("TraceNotValid", !io.traceInsts.valid)
 
     when(io.recv.valid) {
       deqPtr := deqPtr + io.recv.bits.instNum
