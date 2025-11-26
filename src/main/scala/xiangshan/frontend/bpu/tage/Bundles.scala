@@ -79,9 +79,12 @@ class TagMatchResult(implicit p: Parameters) extends TageBundle {
   val hitWayMaskOH: UInt            = UInt(MaxNumWays.W)
   val entry:        TageEntry       = new TageEntry
   val usefulCtr:    SaturateCounter = new SaturateCounter(UsefulCtrWidth)
+  // perf analysis only
+  val hitWayMask: UInt = UInt(MaxNumWays.W)
 }
 
 class UpdateInfo(implicit p: Parameters) extends TageBundle {
+  val valid:                Bool            = Bool()
   val providerTableOH:      UInt            = UInt(NumTables.W)
   val providerWayOH:        UInt            = UInt(MaxNumWays.W)
   val providerEntry:        TageEntry       = new TageEntry
@@ -100,6 +103,9 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val decreaseUseAlt: Bool = Bool()
 
   val needAllocate: Bool = Bool()
+  // perf analysis only
+  val hitTableMask: UInt = UInt(NumTables.W) // all the hit tables
+  val mispredicted: Bool = Bool()
 }
 
 class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
