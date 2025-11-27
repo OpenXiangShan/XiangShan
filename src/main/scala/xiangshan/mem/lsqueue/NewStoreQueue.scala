@@ -285,18 +285,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB / 8)) === s1LoadVaddr) && ctrlEntry.addrValid
       }).asUInt
-      val paddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
-        (dataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB/8)) === s1QueryPaddr) && ctrlEntry.addrValid
-      }).asUInt
 
       // new select
       /**
        * if canFoewardLow not zero, means High is not youngest
        * */
 
-      val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec & paddrMatchVec
+      val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
       val canForwarHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
-        vaddrMatchVec & paddrMatchVec
+        vaddrMatchVec
 
       // find youngest entry, which is one-hot
       val (maskLowOH, multiMatchLow)   = findYoungest(canForwardLow)
@@ -339,12 +336,16 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2DataInvalidSqIdx = RegEnable(dataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
       val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
+      val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
       val s2FullOverlap      = RegEnable((selectDataEntry.byteEnd >= s1LoadEnd && selectDataEntry.byteStart <= s1LoadStart), s1Valid)
       val s2Valid            = RegNext(forwardValid)
       // debug
       val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
       XSError(selectOH.orR && !selectCtrlEntry.allocated, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
+
+      //TODO: consumer need to choise whether use paddrNoMatch or not.
+      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB/8)) === s2LoadPaddr) && s2Valid
 
       val selectData         = (0 until VLEN/8).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -369,14 +370,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.addrInvalid      := s2HasAddrInvalid
       s2Resp.bits.addrInvalidSqIdx := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !safeForward
-      s2Resp.bits.matchInvalid     := 0.U
+      s2Resp.bits.matchInvalid     := paddrNoMatch
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
         dontTouch(overlapMask)
         dontTouch(ageMaskLow)
         dontTouch(ageMaskHigh)
-        dontTouch(paddrMatchVec)
         dontTouch(canForwardLow)
         dontTouch(canForwarHigh)
         dontTouch(maskLowOH)
