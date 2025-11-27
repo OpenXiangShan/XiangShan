@@ -118,6 +118,8 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
   SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  // when UsePrivateClint is true, private clint is used, Timer will be instanced and mtip is generated inside XSTileWrap
+  // when UsePrivateClint is false, mtip is from soc.
   UsePrivateClint: Boolean = false,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
@@ -128,7 +130,7 @@ case class SoCParameters
   )
   require(
     !UsePrivateClint || (SeperateBus != top.SeperatedBusType.NONE),
-    "SeperateBus should not be None when UsPrivateClint is true"
+    "SeperateBus should not be None when UsePrivateClint is true"
   )
   // L3 configurations
   val L3InnerBusWidth = 256
