@@ -207,7 +207,7 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.trainTouch.valid       := t1_valid
+  replacer.io.trainTouch.valid       := t1_valid && t1_needWrite
   replacer.io.trainTouch.bits.setIdx := getReplacerSetIndex(t1_startVAddr)
 
   /* *** multi-hit detection & flush *** */
