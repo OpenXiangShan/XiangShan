@@ -662,7 +662,6 @@ object FuConfig {
     piped = true,
     writeVecRf = true,
     writeV0Rf = true,
-    writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
     vconfigWakeUp = true,
