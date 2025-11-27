@@ -657,7 +657,7 @@ package object xiangshan {
     def size(op: UInt) = op(1,0)
 
     def sizeIs(sz: this.type => Size)(op: UInt): Bool = {
-      op === sz(this).U
+      op(Size.width - 1, 0) === sz(this).U
     }
 
     sealed abstract class Size(uint: UInt) {
