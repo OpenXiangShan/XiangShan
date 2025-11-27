@@ -338,6 +338,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
       val s2FullOverlap      = RegEnable((selectDataEntry.byteEnd >= s1LoadEnd && selectDataEntry.byteStart <= s1LoadStart), s1Valid)
+      val s2LoadStart        = RegEnable(s1LoadStart, s1Valid) // TODO: remove in the tuture
       val s2Valid            = RegNext(forwardValid)
       // debug
       val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
@@ -359,15 +360,23 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       val safeForward        = s2MultiMatch && s2FullOverlap
 
+      //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
+      val finalData          = outData << (s2LoadStart * 8.U)
+      val finalMask          = outMask << s2LoadStart
+
       io.query(i).resp.sqToLduStage1 <> DontCare //TODO: need it?
       val s2Resp = io.query(i).resp.sqToLduStage2
+//      s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
+//        sink := outData((j + 1) * 8 - 1, j * 8)}
+//      s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
+//        sink := outMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
       s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
-        sink := outData((j + 1) * 8 - 1, j * 8)}
+        sink := finalData((j + 1) * 8 - 1, j * 8)}
       s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
-        sink := outMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
-      s2Resp.bits.dataInvalid      := s2DataInValid
+        sink := finalMask(j) && s2Valid && safeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
+      s2Resp.bits.dataInvalid      := s2DataInValid || !safeForward
       s2Resp.bits.dataInvalidSqIdx := s2DataInvalidSqIdx
-      s2Resp.bits.addrInvalid      := s2HasAddrInvalid
+      s2Resp.bits.addrInvalid      := s2HasAddrInvalid || !safeForward
       s2Resp.bits.addrInvalidSqIdx := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !safeForward
       s2Resp.bits.matchInvalid     := paddrNoMatch
