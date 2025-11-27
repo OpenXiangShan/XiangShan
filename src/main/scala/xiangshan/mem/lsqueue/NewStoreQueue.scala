@@ -292,12 +292,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
        * */
 
       val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
-      val canForwarHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
+      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
         vaddrMatchVec
 
       // find youngest entry, which is one-hot
       val (maskLowOH, multiMatchLow)   = findYoungest(canForwardLow)
-      val (maskHighOH, multiMatchHigh) = findYoungest(canForwarHigh)
+      val (maskHighOH, multiMatchHigh) = findYoungest(canForwardHigh)
       val selectOH                     = maskLowOH | maskHighOH
       val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
       val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
@@ -306,7 +306,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // select offset generate
       val byteSelectOffset   = s1LoadStart - selectDataEntry.byteStart
 
-      val HasAddrInvalid = ((s1AgeMaskLow | canForwarHigh) & VecInit(addrValidVec.map(!_)).asUInt).orR
+      val HasAddrInvalid = ((s1AgeMaskLow | canForwardHigh) & VecInit(addrValidVec.map(!_)).asUInt).orR
 
       // find youngest addrInvalid store
       val addrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt
@@ -314,7 +314,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         VecInit(Seq.fill(StoreQueueSize)(!addrInvalidLow.orR)).asUInt
 
       val (addrInvLowOH, _)   = findYoungest(canForwardLow)
-      val (addrInvHighOH, _)  = findYoungest(canForwarHigh)
+      val (addrInvHighOH, _)  = findYoungest(canForwardHigh)
       val addrInvSelectOH     = addrInvLowOH | addrInvHighOH
 
       val dataInvalidSqIdx   = Wire(new SqPtr)
@@ -387,7 +387,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(ageMaskLow)
         dontTouch(ageMaskHigh)
         dontTouch(canForwardLow)
-        dontTouch(canForwarHigh)
+        dontTouch(canForwardHigh)
         dontTouch(maskLowOH)
         dontTouch(multiMatchLow)
         dontTouch(maskHighOH)
@@ -395,6 +395,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(addrInvLowOH)
         dontTouch(addrInvHighOH)
         dontTouch(selectOH)
+        dontTouch(safeForward)
       }
     }
   }
