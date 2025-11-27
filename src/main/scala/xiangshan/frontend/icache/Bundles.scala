@@ -55,29 +55,42 @@ object ICacheMetadata {
   }
 }
 
+class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
+  val meta: ICacheMetadata = new ICacheMetadata
+  val code: UInt           = UInt(MetaEccBits.W)
+}
+
+class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
+  val data:    UInt = UInt(ICacheDataBits.W)
+  val code:    UInt = UInt(DataEccBits.W)
+  val padding: UInt = UInt(DataPaddingBits.W)
+}
+
+class MetaInfo(implicit p: Parameters) extends ICacheBundle {
+  val waymask:     UInt = UInt(nWays.W)
+  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+  val metaCodes:   UInt = UInt(MetaEccBits.W)
+}
+
 /* ***** Array write ***** */
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val meta:    ICacheMetadata = new ICacheMetadata
-    val vSetIdx: UInt           = UInt(idxBits.W)
-    val waymask: UInt           = UInt(nWays.W)
-    val bankIdx: Bool           = Bool()
-    val poison:  Bool           = Bool()
+  class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle with ICacheEccHelper {
+    val entry:   ICacheMetaEntry = new ICacheMetaEntry
+    val vSetIdx: UInt            = UInt(idxBits.W)
+    val waymask: UInt            = UInt(nWays.W)
 
     def generate(
         phyTag:      UInt,
         maybeRvcMap: UInt,
         vSetIdx:     UInt,
         waymask:     UInt,
-        bankIdx:     Bool,
         poison:      Bool
     ): Unit = {
-      this.meta    := ICacheMetadata(phyTag, maybeRvcMap)
-      this.vSetIdx := vSetIdx
-      this.waymask := waymask
-      this.bankIdx := bankIdx
-      this.poison  := poison
+      this.entry.meta := ICacheMetadata(phyTag, maybeRvcMap)
+      this.entry.code := encodeMetaEccByPort(this.entry.meta, poison)
+      this.vSetIdx    := vSetIdx
+      this.waymask    := waymask
     }
   }
   val req: DecoupledIO[MetaWriteReqBundle] = DecoupledIO(new MetaWriteReqBundle)
@@ -85,19 +98,19 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
 
 // ICacheMissUnit <-> ICacheDataArray
 class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val data:    UInt = UInt(blockBits.W)
-    val vSetIdx: UInt = UInt(idxBits.W)
-    val waymask: UInt = UInt(nWays.W)
-    val bankIdx: Bool = Bool()
-    val poison:  Bool = Bool()
+  class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle with ICacheEccHelper {
+    val entries: Vec[ICacheDataEntry] = Vec(DataBanks, new ICacheDataEntry)
+    val vSetIdx: UInt                 = UInt(idxBits.W)
+    val waymask: UInt                 = UInt(nWays.W)
 
-    def generate(data: UInt, vSetIdx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.data    := data
+    def generate(data: UInt, vSetIdx: UInt, waymask: UInt, poison: Bool): Unit = {
+      (this.entries zip data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))).foreach { case (e, d) =>
+        e.data    := d
+        e.code    := encodeDataEccByBank(d, poison)
+        e.padding := 0.U // for better SRAM area
+      }
       this.vSetIdx := vSetIdx
       this.waymask := waymask
-      this.bankIdx := bankIdx
-      this.poison  := poison
     }
   }
   val req: DecoupledIO[DataWriteReqBundle] = DecoupledIO(new DataWriteReqBundle)
@@ -123,14 +136,7 @@ class ArrayReadReqBundle(implicit p: Parameters) extends ICacheBundle {
 class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
   class MetaReadRespBundle(implicit p: Parameters) extends ICacheBundle {
-    val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
-    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(MetaEccBits.W)))
-    val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
-    // for compatibility
-    def tags: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.phyTag))))
-    def maybeRvcMap: Vec[Vec[UInt]] =
-      VecInit(metas.map(port => VecInit(port.map(way => way.maybeRvcMap.getOrElse(0.U(MaxInstNumPerBlock.W))))))
+    val entries: Vec[Vec[Valid[ICacheMetaEntry]]] = Vec(PortNumber, Vec(nWays, Valid(new ICacheMetaEntry)))
   }
   val req:  DecoupledIO[MetaReadReqBundle] = DecoupledIO(new MetaReadReqBundle)
   val resp: MetaReadRespBundle             = Input(new MetaReadRespBundle)
@@ -139,9 +145,9 @@ class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
 // ICacheMainPipe -> ICacheDataArray
 class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
   class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle {
-    val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
-    val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
-    val blkEndOffset: UInt           = UInt(log2Ceil(blockBytes).W)
+    val waymask:      Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+    val blkOffset:    UInt      = UInt(log2Ceil(blockBytes).W)
+    val blkEndOffset: UInt      = UInt(log2Ceil(blockBytes).W)
   }
   class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
@@ -239,6 +245,20 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
   val pTag:        UInt      = UInt(tagBits.W)
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+
+  def getMetaInfo(i: Int): MetaInfo = {
+    val info = Wire(new MetaInfo)
+    info.waymask     := waymask(i)
+    info.maybeRvcMap := maybeRvcMap(i)
+    info.metaCodes   := metaCodes(i)
+    info
+  }
+
+  def updateMetaInfo(i: Int, info: MetaInfo): Unit = {
+    waymask(i)     := info.waymask
+    maybeRvcMap(i) := info.maybeRvcMap
+    metaCodes(i)   := info.metaCodes
+  }
 }
 
 class WayLookupExceptionEntry(implicit p: Parameters) extends ICacheBundle {

@@ -238,14 +238,12 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     maybeRvcMap = maybeRvcMap,
     vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
-    bankIdx = mshrResp.vSetIdx(0),
     poison = false.B
   )
   io.dataWrite.req.bits.generate(
     data = respDataReg.asUInt,
     vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
-    bankIdx = mshrResp.vSetIdx(0),
     poison = false.B
   )
 
