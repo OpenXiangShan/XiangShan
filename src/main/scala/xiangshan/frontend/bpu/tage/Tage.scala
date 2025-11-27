@@ -201,9 +201,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
   private val t0_readBankConflict = io.train.valid && t0_hasCond && s0_fire && t0_bankIdx === s0_bankIdx
-  io.train.ready := !t0_readBankConflict
+  io.train.ready := true.B
 
-  private val t0_valid = io.train.fire && t0_hasCond && io.enable
+  private val t0_valid = io.train.fire && t0_hasCond && io.enable && !t0_readBankConflict
 
   // TODO: dont save base table meta
   private val t0_baseTableCtrs = io.train.bits.meta.tage.baseTableCtrs
