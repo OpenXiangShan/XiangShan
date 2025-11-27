@@ -118,12 +118,17 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
   SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  UsePrivateClint: Boolean = false,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
     "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
+  )
+  require(
+    !UsePrivateClint || (SeperateBus != top.SeperatedBusType.NONE),
+    "SeperateBus should not be None when UsPrivateClint is true"
   )
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -181,6 +186,7 @@ trait HasSoCParameter {
   val SeperateBusAsyncBridge = if (SeperateBus != top.SeperatedBusType.NONE && soc.SeperateBusAsyncBridge.isDefined)
     soc.SeperateBusAsyncBridge else None
 
+  val UsePrivateClint = soc.UsePrivateClint
   // seperate TL bus
   val EnableSeperateBusAsync = SeperateBusAsyncBridge.isDefined
 
