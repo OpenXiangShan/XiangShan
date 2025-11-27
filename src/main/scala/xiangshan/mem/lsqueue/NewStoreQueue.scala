@@ -994,7 +994,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val deqPtrExtNext = deqModule.io.deqPtrExtNext
   val sqDeqCnt      = deqModule.io.sqDeqCnt
   val mmioBusy      = deqModule.io.perfMmioBusy
-  val diffPmaStore  = deqModule.io.pmaStore.get
+  val diffPmaStore  = deqModule.io.pmaStore
   val rdataMoveCnt  = deqModule.io.rdataPtrMoveCnt
 
   // unalignQueue connection
@@ -1397,7 +1397,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       dataEntries(stWbIdx).byteEnd   := byteStart + byteOffset
 
       // debug singal
-      dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
+      if(debugEn) {
+        dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
+      }
     }
     XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
     (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage),
@@ -1413,8 +1415,10 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       dataEntries(stWbIdx).wline := storeDataIn.bits.fuOpType === LSUOpType.cbo_zero
 
       // debug signal
-      dataEntries(stWbIdx).debugVecUnalignedStart.get  := io.storeDataIn(i).bits.vecDebug.get.start
-      dataEntries(stWbIdx).debugVecUnalignedOffset.get := io.storeDataIn(i).bits.vecDebug.get.offset
+      if(debugEn) {
+        dataEntries(stWbIdx).debugVecUnalignedStart.get  := io.storeDataIn(i).bits.vecDebug.get.start
+        dataEntries(stWbIdx).debugVecUnalignedOffset.get := io.storeDataIn(i).bits.vecDebug.get.offset
+      }
     }
   }
 
@@ -1494,7 +1498,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val deqDataEntries = deqPtrExt.map(x => dataEntries(x.value))
   val deqCanDoCbo = deqCtrlEntries.head.allValid && !deqCtrlEntries.head.hasException && deqCtrlEntries.head.allocated &&
     deqCtrlEntries.head.isCbo
-  if (env.EnableDifftest) {
+  if (debugEn) {
     /*=========================================== Data and Mask Generate =============================================*/
 
     val outData        = Wire(Vec(EnsbufferWidth , UInt(VLEN.W)))
@@ -1529,8 +1533,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         sink.diffInfo(i).uop            := dataEntries(ptr).debugUop.get
         sink.diffInfo(i).start          := dataEntries(ptr).debugVecUnalignedStart.get
         sink.diffInfo(i).offset         := dataEntries(ptr).debugVecUnalignedOffset.get
-        sink.pmaStore(i).valid          := diffPmaStore(i).valid
-        sink.pmaStore(i).bits           := diffPmaStore(i).bits
+        sink.pmaStore(i).valid          := diffPmaStore.get(i).valid
+        sink.pmaStore(i).bits           := diffPmaStore.get(i).bits
       }
     }
 
@@ -1597,7 +1601,7 @@ object NewStoreQueueMain extends App {
   Generator.execute(
     firrtlOpts :+ "--full-stacktrace" :+ "--target-dir" :+ "storeQueue" :+ "--throw-on-first-error",
     new NewStoreQueue()(defaultConfig),
-    firtoolOpts
+    firtoolOpts :+ "-O=release" :+ "--disable-annotation-unknown" :+ "--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
   )
 //  emitVerilog(new NewStoreQueue()(defaultConfig), Array("--target-dir", "build/storeQueue", "--full-stacktrace"))
 
