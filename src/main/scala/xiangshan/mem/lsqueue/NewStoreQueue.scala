@@ -889,8 +889,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     (0 until queueSize).map{i =>
-      when(needCancel(i)) {
-        allocated(i) := true.B
+      when(needCancel(i)) { // when redirect, unalignQueue not allow enqueue.
+        allocated(i) := false.B
       }.otherwise{
         allocated(i) := (i.U === enqPtr.value) && doEnq
       }
@@ -906,7 +906,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     when(io.redirect.valid) {
       enqPtr := enqPtr - redirectCount
     }.otherwise {
-      enqPtr := enqPtr + 1.U
+      when(doEnq) {
+        enqPtr := enqPtr + 1.U
+      }
     }
 
     when(io.toDeqModule.fire) {
