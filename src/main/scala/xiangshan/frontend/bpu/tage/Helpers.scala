@@ -45,14 +45,17 @@ trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper
 
   def getSetIndex(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
     val setIdxWidth = log2Ceil(numSets / NumBanks)
-    pc(setIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth) ^ hist
+    val offset      = BankIdxWidth + FetchBlockAlignWidth
+    pc(setIdxWidth - 1 + offset, offset) ^ hist
   }
 
   def getTag(pc: PrunedAddr, hist: UInt): UInt =
     pc(TagWidth, 1) ^ hist
 
-  def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
+  def getBankIndex(pc: PrunedAddr): UInt = {
+    val offset = FetchBlockAlignWidth
+    pc(BankIdxWidth - 1 + offset, offset)
+  }
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
