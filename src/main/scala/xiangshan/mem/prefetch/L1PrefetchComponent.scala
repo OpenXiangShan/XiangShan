@@ -365,7 +365,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val tag = UInt(HASH_TAG_WIDTH.W)
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
-  // NOTE: l1 will not use sent_vec, for making more prefetch reqs to l1 dcache
   val sent_vec = UInt(BIT_VEC_WITDH.W)
   val sink = UInt(SINK_BITS.W)
   val alias = UInt(2.W)
@@ -403,11 +402,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   }
 
   def can_send_pf(valid: Bool): Bool = {
-    Mux(
-      sink === SINK_L1,
-      !is_vaddr && bit_vec.orR,
-      !is_vaddr && (bit_vec & ~sent_vec).orR
-    ) && valid
+    !is_vaddr && (bit_vec & ~sent_vec).orR && valid
   }
 
   def may_be_replace(valid: Bool): Bool = {
@@ -419,20 +414,12 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     require(PAddrBits <= VAddrBits)
     require((region.getWidth + REGION_BITS + BLOCK_OFFSET) == VAddrBits)
 
-    val candidate = Mux(
-      sink === SINK_L1,
-      PriorityEncoder(bit_vec).asTypeOf(UInt(REGION_BITS.W)),
-      PriorityEncoder(bit_vec & ~sent_vec).asTypeOf(UInt(REGION_BITS.W))
-    )
+    val candidate = PriorityEncoder(bit_vec & ~sent_vec).asTypeOf(UInt(REGION_BITS.W))
     Cat(region, candidate, 0.U(BLOCK_OFFSET.W))
   }
 
   def get_pf_debug_vaddr(): UInt = {
-    val candidate = Mux(
-      sink === SINK_L1,
-      PriorityEncoder(bit_vec).asTypeOf(UInt(REGION_BITS.W)),
-      PriorityEncoder(bit_vec & ~sent_vec).asTypeOf(UInt(REGION_BITS.W))
-    )
+    val candidate = PriorityEncoder(bit_vec & ~sent_vec).asTypeOf(UInt(REGION_BITS.W))
     Cat(debug_va_region, candidate, 0.U(BLOCK_OFFSET.W))
   }
 
@@ -461,11 +448,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
 
   def invalidate() = {
     // disable sending pf req
-    when(sink === SINK_L1) {
-      bit_vec := 0.U(BIT_VEC_WITDH.W)
-    }.otherwise {
-      sent_vec := ~(0.U(BIT_VEC_WITDH.W))
-    }
+    sent_vec := ~(0.U(BIT_VEC_WITDH.W))
     // disable sending tlb req
     is_vaddr := false.B
   }
@@ -818,7 +801,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   for(i <- 0 until MLP_L1_SIZE) {
     val evict = s1_l1_alloc && (s1_l1_index === i.U)
-    l1_pf_req_arb.io.in(i).valid := l1_array(i).can_send_pf(l1_valids(i)) && !evict
+    l1_pf_req_arb.io.in(i).valid := l1_array(i).can_send_pf(l1_valids(i)) && l1_array(i).sink === SINK_L1 && !evict
     l1_pf_req_arb.io.in(i).bits.req.paddr := l1_array(i).get_pf_addr()
     l1_pf_req_arb.io.in(i).bits.req.alias := l1_array(i).alias
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
@@ -837,10 +820,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s1_pf_valid = Reg(Bool())
   val s1_pf_bits = RegEnable(l1_pf_req_arb.io.out.bits, l1_pf_req_arb.io.out.fire)
   val s1_pf_index = RegEnable(s0_pf_index, l1_pf_req_arb.io.out.fire)
-  val s1_pf_candidate_oh = RegEnable(s0_pf_candidate_oh, l1_pf_req_arb.io.out.fire)
-  val s1_pf_evict = s1_l1_alloc && (s1_l1_index === s1_pf_index)
-  val s1_pf_update = s1_l1_update && (s1_l1_index === s1_pf_index)
-  val s1_pf_can_go = io.l1_req.ready && !s1_pf_evict && !s1_pf_update
+  val s1_pf_can_go = io.l1_req.ready
   val s1_pf_fire = s1_pf_valid && s1_pf_can_go
 
   when(s1_pf_can_go) {
@@ -851,22 +831,14 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     s1_pf_valid := true.B
   }
 
-  when(s1_pf_fire) {
-    l1_array(s1_pf_index).bit_vec := l1_array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
-  }
-
   val in_pmem = PmemRanges.map(_.cover(s1_pf_bits.req.paddr)).reduce(_ || _)
-  io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && in_pmem && io.enable
+  io.l1_req.valid := s1_pf_valid && in_pmem && io.enable
   io.l1_req.bits := s1_pf_bits.req
 
   l1_pf_req_arb.io.out.ready := s1_pf_can_go || !s1_pf_valid
 
-  assert(!((s1_l1_alloc || s1_l1_update) && s1_pf_fire && (s1_l1_index === s1_pf_index)), "pf pipeline & enq pipeline bit_vec harzard!")
-
   XSPerfAccumulate("s1_pf_valid", s1_pf_valid)
   XSPerfAccumulate("s1_pf_block_by_pipe_unready", s1_pf_valid && !io.l1_req.ready)
-  XSPerfAccumulate("s1_pf_block_by_enq_alloc_harzard", s1_pf_valid && s1_pf_evict)
-  XSPerfAccumulate("s1_pf_block_by_enq_update_harzard", s1_pf_valid && s1_pf_update)
   XSPerfAccumulate("s1_pf_fire", s1_pf_fire)
 
   // l2 pf
