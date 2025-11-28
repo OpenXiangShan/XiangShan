@@ -469,7 +469,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ))
 
   private val s2_s1PredictionSource = RegEnable(s1_predictionSource, s1_fire)
-  private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s1_fire)
+  private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s2_fire)
 
   private val s3_debugMeta = Wire(new BpuDebugMeta)
   s3_debugMeta.startVAddr          := s3_pc
