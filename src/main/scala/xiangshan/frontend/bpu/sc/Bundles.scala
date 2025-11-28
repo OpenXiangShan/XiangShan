@@ -85,4 +85,5 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
+  val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
 }
