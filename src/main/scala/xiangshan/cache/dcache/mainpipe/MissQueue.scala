@@ -1288,10 +1288,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // prefetch related
   io.prefetch_stat.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
-  io.prefetch_stat.prefetch_refill := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
   io.prefetch_stat.pf_source := io.req.bits.pf_source
   io.prefetch_stat.demand_match_pfmshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
-  io.prefetch_stat.load_refill := io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad
+  io.prefetch_stat.load_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromLoad
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)

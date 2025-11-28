@@ -38,11 +38,11 @@ class MainPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 
 class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val late_miss_prefetch = Bool() // from missqueue, pf req match a existing mshr
-  val prefetch_refill = Bool() // from missqueue, pf req allocate a new mshr
+  val prefetch_miss = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
 
   val demand_match_pfmshr = Bool() // from missqueue, demand miss match a existing pf mshr, then clear pf flag
-  val load_refill = Bool() // from missqueue, load demand miss allocate a new mshr
+  val load_miss = Bool() // from missqueue, load demand miss allocate a new mshr
 }
 
 class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
@@ -89,8 +89,8 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   // demand accesses from different ldu may hit different prefetch blocks
   val good_prefetch = PopCount(prefetch_info.loadinfo.map(t => t.prefetch_hit))
   val bad_prefetch = io.maininfo.bad_prefetch
-  val prefetch_refill = io.missinfo.prefetch_refill
-  val load_refill = io.missinfo.load_refill
+  val prefetch_miss = io.missinfo.prefetch_miss
+  val load_miss = io.missinfo.load_miss
   val demand_match_pfmshr = io.missinfo.demand_match_pfmshr
   // ldu 0, 1, 2 can have multiple demand accesses at a time
   val demand_miss = PopCount(io.loadinfo.map(t => t.demand_miss))
@@ -102,8 +102,8 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   XSPerfAccumulate("late_miss_prefetch", late_miss_prefetch)
   XSPerfAccumulate("good_prefetch", good_prefetch)
   XSPerfAccumulate("bad_prefetch", bad_prefetch)
-  XSPerfAccumulate("prefetch_refill", prefetch_refill)
-  XSPerfAccumulate("load_refill", load_refill)
+  XSPerfAccumulate("prefetch_miss", prefetch_miss)
+  XSPerfAccumulate("load_miss", load_miss)
   XSPerfAccumulate("demand_match_pfmshr", demand_match_pfmshr)
   XSPerfAccumulate("demand_miss", demand_miss)
   XSPerfAccumulate("cache_pollution", pollution)
@@ -117,7 +117,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   
   XSPerfRolling(
     "L1PrefetchLatenessIns",
-    demand_match_pfmshr, prefetch_refill,
+    demand_match_pfmshr, prefetch_miss,
     1000, io.debugRolling.robTrueCommit, clock, reset
   )
 
@@ -187,6 +187,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val late_miss_prefetch = io.prefetch_info.missinfo.late_miss_prefetch && param.isMyType(io.prefetch_info.missinfo.pf_source)
   val good_prefetch = PopCount(io.prefetch_info.loadinfo.map(t => t.prefetch_hit && param.isMyType(t.hit_source)))
   val bad_prefetch = io.prefetch_info.maininfo.bad_prefetch && param.isMyType(io.prefetch_info.maininfo.pf_source)
+  val prefetch_miss = io.prefetch_info.missinfo.prefetch_miss && param.isMyType(io.prefetch_info.missinfo.pf_source)
 
   total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
   late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + late_hit_prefetch)
@@ -247,6 +248,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   XSPerfAccumulate(s"${param.name}_late_miss_prefetch", late_miss_prefetch)
   XSPerfAccumulate(s"${param.name}_good_prefetch", good_prefetch)
   XSPerfAccumulate(s"${param.name}_bad_prefetch", bad_prefetch)
+  XSPerfAccumulate(s"${param.name}_prefetch_miss", prefetch_miss)
   for(i <- (0 until DEPTH_BITS)) {
     val t = (1 << i)
     XSPerfAccumulate(s"${param.name}_depth${t}", depth === t.U)
