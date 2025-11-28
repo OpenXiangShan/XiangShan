@@ -66,8 +66,8 @@ trait Helpers extends HasScParameters {
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
       val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).foldLeft(oldEntry.ctr) {
         case (prevCtr, ((writeValid, writeTaken), writeWayIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U &&
-            metaData.scPred(wayIdx) =/= writeTaken && metaData.tagePredValid(wayIdx)
+          val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(wayIdx) &&
+            (metaData.scPred(wayIdx) =/= writeTaken || !metaData.sumAboveThres(wayIdx))
           val nextValue = prevCtr.getUpdate(writeTaken)
           val nextCtr   = WireInit(prevCtr)
           nextCtr.value := nextValue

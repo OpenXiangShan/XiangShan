@@ -251,25 +251,36 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val s2_scPred: Vec[Bool] = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds = scThreshold.map(entry => entry.thres.value)
-  private val s2_useScPred  = WireInit(VecInit.fill(NumWays)(false.B))
+  private val s2_thresholds    = scThreshold.map(entry => entry.thres.value)
+  private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
+  private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
-  s2_useScPred.zip(s2_totalPercsum).zip(s2_thresholds).zip(s2_hitMask).zip(s2_providerCtr).zip(s2_providerValid).map {
-    case (((((u, sum), thres), hit), ctr), providerValid) =>
-      val tageConfHigh = ctr.isSaturatePositive || ctr.isSaturateNegative
-      val tageConfMid  = ctr.isMid
-      val tageConfLow  = ctr.isWeak
-      when(hit && providerValid && tageConfHigh) {
-        val conf = aboveThreshold(sum, thres >> 1)
-        u := Mux(conf, true.B, false.B)
-      }.elsewhen(hit && providerValid && tageConfMid) {
-        val conf = aboveThreshold(sum, thres >> 2)
-        u := Mux(conf, true.B, false.B)
-      }.elsewhen(hit && providerValid && tageConfLow) {
-        val conf = aboveThreshold(sum, thres >> 3)
-        u := Mux(conf, true.B, false.B)
-      }
+  for (i <- 0 until NumWays) {
+    val hit          = s2_hitMask(i)
+    val valid        = s2_providerValid(i)
+    val sum          = s2_totalPercsum(i)
+    val thres        = s2_thresholds(i)
+    val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
+    val tageConfMid  = s2_providerCtr(i).isMid
+    val tageConfLow  = s2_providerCtr(i).isWeak
+    val conf         = WireInit(false.B)
+    when(hit && valid && tageConfHigh) {
+      conf            := aboveThreshold(sum, thres >> 1)
+      s2_useScPred(i) := Mux(conf, true.B, false.B)
+    }.elsewhen(hit && valid && tageConfMid) {
+      conf            := aboveThreshold(sum, thres >> 2)
+      s2_useScPred(i) := Mux(conf, true.B, false.B)
+    }.elsewhen(hit && valid && tageConfLow) {
+      conf            := aboveThreshold(sum, thres >> 3)
+      s2_useScPred(i) := Mux(conf, true.B, false.B)
+    }
+    s2_sumAboveThres(i) := aboveThreshold(sum, thres)
+    dontTouch(tageConfHigh)
+    dontTouch(tageConfMid)
+    dontTouch(tageConfLow)
+    dontTouch(conf)
   }
+
   private val s2_pred = s2_useScPred.zip(s2_condTakenMask).zip(s2_scPred).map { case ((use, tageTaken), scPred) =>
     Mux(use, scPred, tageTaken)
   }
@@ -285,6 +296,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.tagePred        := RegEnable(s2_condTakenMask, s2_fire)
   io.meta.tagePredValid   := RegEnable(s2_providerValid, s2_fire)
   io.meta.useScPred       := RegEnable(s2_useScPred, s2_fire)
+  io.meta.sumAboveThres   := RegEnable(s2_sumAboveThres, s2_fire)
 
   /*
    *  train pipeline stage 1
@@ -331,11 +343,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   // calculate new thresholds
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
-    val updated = t1_branchesWayIdxVec.zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
-      case (prevThres, (branchWayIdx, taken)) =>
-        val shouldUpdate =
-          (branchWayIdx === wayIdx.U) && (t1_meta.scPred(wayIdx) =/= t1_meta.tagePred(wayIdx)) &&
-            (t1_meta.scPred(wayIdx) =/= taken) && t1_meta.tagePredValid(wayIdx)
+    val updated = t1_writeValidVec.zip(t1_branchesWayIdxVec).zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
+      case (prevThres, ((writeValid, branchWayIdx), taken)) =>
+        val shouldUpdate = writeValid && branchWayIdx === wayIdx.U && t1_meta.tagePredValid(wayIdx) &&
+          (t1_meta.scPred(wayIdx) =/= taken || !t1_meta.sumAboveThres(wayIdx)) &&
+          t1_meta.scPred(wayIdx) =/= t1_meta.tagePred(wayIdx)
         val updateDir = taken =/= t1_meta.scPred(wayIdx)
         val nextThres = prevThres.update(updateDir)
         Mux(shouldUpdate, nextThres, prevThres)
