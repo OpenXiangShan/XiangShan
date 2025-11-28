@@ -237,6 +237,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val (s0_idxTable0, s0_tagTable0) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 0)
   private val (s0_idxTable1, s0_tagTable1) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 1)
 
+  predMeta.bits.testUseMicroTage  := false.B // no use, only for placeholder.
   predMeta.bits.testPredIdx0      := s0_idxTable0
   predMeta.bits.testPredTag0      := s0_tagTable0
   predMeta.bits.testPredIdx1      := s0_idxTable1
@@ -247,6 +248,12 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     computeHash(io.fastTrain.get.bits.startVAddr.toUInt, io.foldedPathHistForTrain, 0)
   private val (trainIdx1, trainTag1) =
     computeHash(io.fastTrain.get.bits.startVAddr.toUInt, io.foldedPathHistForTrain, 1)
+
+  XSPerfAccumulate(
+    "train_useMicroTage_and_override_fromFastTrain",
+    t0_trainValid && t0_trainMeta.testUseMicroTage && io.fastTrain.get.bits.hasOverride
+  )
+  XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.testUseMicroTage)
 
   XSPerfAccumulate("train_needAlloc", t0_trainValid && t0_histTableNeedAlloc)
   XSPerfAccumulate("train_needUpdate", t0_trainValid && t0_histTableNeedUpdate)
