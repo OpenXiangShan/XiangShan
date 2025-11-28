@@ -44,7 +44,8 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         shouldReset = true,
         withClockGate = true,
         hasMbist = hasMbist,
-        hasSramCtl = hasSramCtl
+        hasSramCtl = hasSramCtl,
+        suffix = Option("bpu_tage")
       )).suggestName(s"tage_entry_sram_bank${bankIdx}_way${wayIdx}")
     }
 

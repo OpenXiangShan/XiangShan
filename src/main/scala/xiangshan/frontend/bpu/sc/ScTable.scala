@@ -47,7 +47,8 @@ class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
       holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl
+      hasSramCtl = hasSramCtl,
+      suffix = Option("bpu_sc")
     ))
   )
 
