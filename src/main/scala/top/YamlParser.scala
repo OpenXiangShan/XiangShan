@@ -46,6 +46,7 @@ case class YamlConfig(
   SeperateDM: Option[Boolean],
   SeperateBus: Option[String],
   SeperateBusRanges: Option[List[AddressSet]],
+  UsePrivateClint: Option[Boolean],
   EnableSeperateBusAsyncBridge: Option[Boolean],
   IMSICBusType: Option[String],
   IMSICParams: Option[IMSICParams],
@@ -135,6 +136,11 @@ object YamlParser {
     yamlConfig.SeperateBusRanges.foreach { ranges =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(SeperateBusRanges = ranges)
+      })
+    }
+    yamlConfig.UsePrivateClint.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(UsePrivateClint = enable)
       })
     }
     yamlConfig.EnableSeperateBusAsyncBridge.foreach { enable =>
