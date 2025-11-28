@@ -40,6 +40,8 @@ SeperateDM: false
 
 SeperateBus: NONE
 
+UsePrivateClint: false
+
 SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
 
