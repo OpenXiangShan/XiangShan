@@ -290,43 +290,43 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // TODO: maybe need compare position？
 
   // When microTAGE participates in prediction, it has the highest priority in stage S1.
-  // private val shouldUseUtage =
-  //   (ubtb.io.prediction.cfiPosition === utage.io.prediction.bits.cfiPosition) && utage.io.prediction.valid
-  // private val s1_realUbtbTaken = Mux(
-  //   shouldUseUtage,
-  //   utage.io.prediction.bits.taken,
-  //   ubtb.io.prediction.taken && !abtb.io.useMicroTage
-  // )
   private val s1_realUbtbTaken = ubtb.io.prediction.taken && !abtb.io.useMicroTage
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        (ubtb.io.prediction.taken && abtb.io.prediction.taken) -> Mux(
+        (s1_realUbtbTaken && abtb.io.prediction.taken) -> Mux(
           ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
           ubtb.io.prediction,
           abtb.io.prediction
         ),
-        ubtb.io.prediction.taken -> ubtb.io.prediction,
+        s1_realUbtbTaken         -> ubtb.io.prediction,
         abtb.io.prediction.taken -> abtb.io.prediction
       )
     )
 
   // ---------- Base Table Info for microTAGE Meta ----------
-  private val baseBrTaken = Mux(
-    ubtb.io.prediction.taken,
-    ubtb.io.prediction.attribute.isConditional,
-    Mux(abtb.io.prediction.taken, abtb.io.prediction.attribute.isConditional, false.B)
-  )
+  // private val baseBrTaken = Mux(
+  //   ubtb.io.prediction.taken,
+  //   ubtb.io.prediction.attribute.isConditional,
+  //   Mux(abtb.io.basePrediction.taken, abtb.io.basePrediction.attribute.isConditional, false.B)
+  // )
+  // private val baseBrCfiPosition = Mux(
+  //   ubtb.io.prediction.taken,
+  //   ubtb.io.prediction.cfiPosition,
+  //   Mux(abtb.io.basePrediction.taken, abtb.io.basePrediction.cfiPosition, 0.U)
+  // )
+  private val baseBrTaken = abtb.io.basePrediction.taken && abtb.io.basePrediction.attribute.isConditional
   private val baseBrCfiPosition = Mux(
-    ubtb.io.prediction.taken,
-    ubtb.io.prediction.cfiPosition,
-    Mux(abtb.io.prediction.taken, abtb.io.prediction.cfiPosition, 0.U)
+    abtb.io.basePrediction.taken && abtb.io.basePrediction.attribute.isConditional,
+    abtb.io.basePrediction.cfiPosition,
+    0.U
   )
 
-  s1_utageMeta                 := utage.io.meta.bits
-  s1_utageMeta.baseTaken       := baseBrTaken
-  s1_utageMeta.baseCfiPosition := baseBrCfiPosition
+  s1_utageMeta                  := utage.io.meta.bits
+  s1_utageMeta.testUseMicroTage := abtb.io.useMicroTage
+  s1_utageMeta.baseTaken        := baseBrTaken
+  s1_utageMeta.baseCfiPosition  := baseBrCfiPosition
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask

@@ -38,6 +38,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val previousVAddr:       Valid[PrunedAddr]          = Flipped(Valid(PrunedAddr(VAddrBits)))
     val microTagePred:       Valid[MicroTagePrediction] = Input(Valid(new MicroTagePrediction))
     val prediction:          Prediction                 = Output(new Prediction)
+    val basePrediction:      Prediction                 = Output(new Prediction)
     val useMicroTage:        Bool                       = Output(Bool())
     val meta:                AheadBtbMeta               = Output(new AheadBtbMeta)
     val debug_startVAddr:    PrunedAddr                 = Output(PrunedAddr(VAddrBits))
@@ -210,6 +211,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.prediction.target      := Mux(useMicroTage, microTageTarget, s2_firstTakenTarget)
   io.prediction.attribute   := Mux(useMicroTage, microTageEntry.attribute, s2_firstTakenEntry.attribute)
   io.prediction.cfiPosition := Mux(useMicroTage, microTageEntry.position, s2_firstTakenEntry.position)
+
+  io.basePrediction.taken       := s2_valid && s2_taken
+  io.basePrediction.target      := DontCare
+  io.basePrediction.attribute   := s2_firstTakenEntry.attribute
+  io.basePrediction.cfiPosition := s2_firstTakenEntry.position
 
   io.meta.valid           := s2_valid
   io.meta.hitMask         := s2_hitMask
