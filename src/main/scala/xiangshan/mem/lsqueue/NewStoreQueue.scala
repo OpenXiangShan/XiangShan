@@ -236,16 +236,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val deqMask          = UIntToMask(io.ctrlInfo.deqPtr.value, StoreQueueSize)
       val differentFlag    = io.ctrlInfo.deqPtr.flag =/= io.query(i).req.lduStage0ToSq.bits.sqIdx.flag
       val forwardMask      = UIntToMask(io.query(i).req.lduStage0ToSq.bits.sqIdx.value, StoreQueueSize)
-      // overlap judgement
+      // generate load byte start and end
       val loadStart        = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
       val byteOffset       = MemorySize.ByteOffset(io.query(i).req.lduStage0ToSq.bits.size)
       val loadEnd          = loadStart + byteOffset
 
-      val overlapMask      = VecInit((0 until StoreQueueSize).map(j =>
-        io.dataEntriesIn(j).byteStart <= loadEnd && io.dataEntriesIn(j).byteEnd >= loadStart
-      )).asUInt
-
-      XSError(loadEnd < loadStart, "ByteStart > ByteEnd!\n")
       // mdp mask
       val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
       val storeSetHitVec = Mux(lfstEnable,
@@ -262,11 +257,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
        *  ageMaskHigh:
        *
        * */
-      val ageMaskLow  = deqMask & forwardMask & VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt & addrValidVec.asUInt
-      val ageMaskHigh = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask) & addrValidVec.asUInt
+      val ageMaskLow     = deqMask & forwardMask & VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt
+      val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
 
       val s1ForwardMask  = RegEnable(forwardMask, s0Valid)
-      val s1OverlapMask  = RegEnable(overlapMask, s0Valid)
       val s1LoadVaddr    = RegEnable(io.query(i).req.lduStage0ToSq.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB/8)), s0Valid)
       val s1deqMask      = RegEnable(deqMask, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
@@ -285,6 +279,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB / 8)) === s1LoadVaddr) && ctrlEntry.addrValid
       }).asUInt
+
+      val s1OverlapMask  = VecInit((0 until StoreQueueSize).map(j =>
+        io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart
+      )).asUInt
+
+      XSError(loadEnd < loadStart, "ByteStart > ByteEnd!\n")
 
       // new select
       /**
@@ -383,7 +383,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
-        dontTouch(overlapMask)
+        dontTouch(s1OverlapMask)
         dontTouch(ageMaskLow)
         dontTouch(ageMaskHigh)
         dontTouch(canForwardLow)
@@ -1226,7 +1226,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
        * */
     }//  don't need to set false for low power, it will be set every instruction.
 
-    XSError(!mmioSet && !memBackTypeSet && staReValid, s"mmio not set but memBackTypeMM is zero! ${i}\n")
+    XSError(!mmioSet && !memBackTypeSet && !hasExceptionSet && staReValid, s"mmio not set but memBackTypeMM is zero! ${i}\n")
 
     /*================================================================================================================*/
     /*=============================================== std ctrl =======================================================*/
