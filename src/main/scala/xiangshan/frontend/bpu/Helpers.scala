@@ -17,6 +17,8 @@ package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
+import scala.math.min
+import utility.ParallelXOR
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
@@ -159,4 +161,13 @@ trait TargetFixHelper extends HasBpuParameters {
       0.U(instOffsetBits.W) // (instOffsetBits - 1, 0)
     ))
   }
+}
+
+trait PhrHelper extends HasBpuParameters {
+  def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt =
+    if (histLen > 0) {
+      val nChunks     = (histLen + compLen - 1) / compLen
+      val hist_chunks = (0 until nChunks) map { i => hist(min((i + 1) * compLen, histLen) - 1, i * compLen) }
+      ParallelXOR(hist_chunks)
+    } else 0.U
 }
