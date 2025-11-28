@@ -33,14 +33,15 @@ class ScTable(
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / numWays).W)))
-    val resp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
-    val update: ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val req:       Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val resp:      Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update:    ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val resetDone: Bool              = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
 
-  def numRows: Int = numSets / NumBanks / numWays
+  def numRows: Int = numSets / numWays / NumBanks
 
   private val sram = Seq.fill(NumBanks)(
     Module(new SRAMTemplate(
@@ -67,16 +68,15 @@ class ScTable(
   )
 
   // read path table by setIndex
-  private val reqBankIdx  = io.req.bits(log2Ceil(NumBanks) - 1, 0)
-  private val reqSetIdx   = io.req.bits >> log2Ceil(NumBanks)
-  private val reqBankMask = UIntToOH(reqBankIdx, NumBanks)
+  private val reqSetIdx   = io.req.bits.setIdx
+  private val reqBankMask = io.req.bits.bankMask
   sram.zip(reqBankMask.asBools).foreach {
     case (bank, bankEnable) =>
       bank.io.r.req.valid       := io.req.valid && bankEnable
       bank.io.r.req.bits.setIdx := reqSetIdx
   }
 
-  io.req.ready := sram.map(_.io.r.req.ready).reduce(_ && _)
+  io.resetDone := sram.map(_.io.r.req.ready).reduce(_ && _)
 
   private val respBankMask = RegEnable(reqBankMask, io.req.valid)
   io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
@@ -85,8 +85,7 @@ class ScTable(
   private val updateValid    = io.update.valid
   private val updateIdx      = io.update.setIdx
   private val updateWayMask  = io.update.wayMask
-  private val updateBankIdx  = updateIdx(log2Ceil(NumBanks) - 1, 0)
-  private val updateBankMask = UIntToOH(updateBankIdx, NumBanks)
+  private val updateBankMask = io.update.bankMask
 
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>

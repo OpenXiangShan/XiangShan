@@ -65,9 +65,15 @@ class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parame
   val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
 }
 
+class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
+  val setIdx:   UInt = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val bankMask: UInt = UInt(NumBanks.W)
+}
+
 class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
   val valid:    Bool         = Bool()
-  val setIdx:   UInt         = UInt(log2Ceil(numSets / NumBanks).W)
+  val setIdx:   UInt         = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val bankMask: UInt         = UInt(NumBanks.W)
   val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
   val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
 }
