@@ -177,7 +177,8 @@ class IttageTable(
   private val writeBuffer = Module(new WriteBuffer(
     gen = new IttageWriteReq(tagLen, nRows, ittageEntrySz),
     numEntries = TableWriteBufferSize,
-    numPorts = 1
+    numPorts = 1,
+    nameSuffix = s"ittageTable$tableIdx"
   ))
 
   // read/write port of write buffer

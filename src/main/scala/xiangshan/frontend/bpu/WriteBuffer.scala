@@ -37,13 +37,15 @@ import xiangshan.XSModule
  * @param numPorts The number of write ports
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
+ * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:            T,
-    val numEntries: Int = 1,
-    val numPorts:   Int = 1,
-    val hasCnt:     Boolean = false,
-    val hasFlush:   Boolean = false
+    gen:        T,
+    numEntries: Int = 1,
+    numPorts:   Int = 1,
+    hasCnt:     Boolean = false,
+    hasFlush:   Boolean = false,
+    nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -92,7 +94,7 @@ class WriteBuffer[T <: WriteReqBundle](
         writePortBits(i).tag.getOrElse(0.U) === writePortBits(j).tag.getOrElse(0.U)
     XSError(
       writeSameEntry,
-      f"WriteBuffer can not support write same data on the same cycle, port${i} and port${j} write the same entry "
+      f"WriteBuffer cannot write same data simultaneously, WriteBuffer_$nameSuffix port$i and $j violated"
     )
   }
 
@@ -116,7 +118,7 @@ class WriteBuffer[T <: WriteReqBundle](
     // each write port can only hit at most one entry
     XSError(
       writeValid && PopCount(hitMask.flatten) > 1.U,
-      f"WriteBuffer port${portIdx}_hitMask should be no more than 1"
+      f"WriteBuffer_$nameSuffix port${portIdx}_hitMask should be no more than 1"
     )
 
     val hit          = hitMask.flatten.reduce(_ || _)         // whether this write port hits any entry

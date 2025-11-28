@@ -89,7 +89,12 @@ class MainBtbInternalBank(
     ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
   }
 
-  private val writeBuffer = Module(new WriteBuffer(new MainBtbSramWriteReq, WriteBufferSize, NumWay))
+  private val writeBuffer = Module(new WriteBuffer(
+    new MainBtbSramWriteReq,
+    numEntries = WriteBufferSize,
+    numPorts = NumWay,
+    nameSuffix = s"mbtbAlign${alignIdx}_Bank${bankIdx}"
+  ))
 
   private val resetDone = RegInit(false.B)
   when(ways.map(_.io.r.req.ready).reduce(_ && _)) {

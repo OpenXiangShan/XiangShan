@@ -45,7 +45,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** submodules *** */
   private val baseTable = Module(new TageBaseTable)
-  private val tables    = TableInfos.map(tableInfo => Module(new TageTable(tableInfo.NumSets)))
+  private val tables    = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(info.NumSets, i)) }
 
   // reset usefulCtr of all entries when usefulResetCtr saturated
   private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
