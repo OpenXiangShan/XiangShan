@@ -1349,9 +1349,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val clear_flag = VecInit(false.B, same_cycle_update_pf_flag_01, same_cycle_update_pf_flag_02 || same_cycle_update_pf_flag_12)
 
   for (w <- 0 until LoadPipelineWidth) {
-    prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_info
+    prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_stat
   }
-  prefetcherMonitor.io.missinfo := missQueue.io.prefetch_info
+  prefetcherMonitor.io.missinfo := missQueue.io.prefetch_stat
   prefetcherMonitor.io.debugRolling := io.debugRolling
   prefetcherMonitor.io.clear_flag := clear_flag
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl

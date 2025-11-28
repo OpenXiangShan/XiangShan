@@ -18,7 +18,7 @@ class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasS
   val confidence = UInt(1.W)
 }
 
-class LoadPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+class LoadPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val total_prefetch = Bool() // from loadpipe s2, pf req sent
   val late_hit_prefetch = Bool() // from loadpipe s2, pf req sent but hit
   val nack_prefetch = Bool() // from loadpipe s2, pf req miss but nack
@@ -31,12 +31,12 @@ class LoadPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with Has
   val pollution = Bool() // from loadpipe s2, bloom filter speculate pollution
 }
 
-class MainPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+class MainPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val bad_prefetch = Bool() // from mainpipe replace, prefetch block but not accessed
   val pf_source = UInt(L1PfSourceBits.W)
 }
 
-class MissPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val late_miss_prefetch = Bool() // from missqueue, pf req match a existing mshr
   val prefetch_refill = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
@@ -46,9 +46,9 @@ class MissPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with Has
 }
 
 class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
-  val loadinfo = Input(Vec(LoadPipelineWidth, new LoadPrefetchInfoBundle))
-  val missinfo = Input(new MissPrefetchInfoBundle)
-  val maininfo = Input(new MainPrefetchInfoBundle)
+  val loadinfo = Input(Vec(LoadPipelineWidth, new LoadPrefetchStatBundle))
+  val missinfo = Input(new MissPrefetchStatBundle)
+  val maininfo = Input(new MainPrefetchStatBundle)
 
   val clear_flag = Input(Vec(LoadPipelineWidth, Bool()))
 
@@ -135,9 +135,9 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 }
 
 class L1PrefetchStatisticBundle()(implicit p: Parameters) extends XSBundle {
-  val loadinfo = Vec(LoadPipelineWidth, new LoadPrefetchInfoBundle)
-  val missinfo = new MissPrefetchInfoBundle
-  val maininfo = new MainPrefetchInfoBundle
+  val loadinfo = Vec(LoadPipelineWidth, new LoadPrefetchStatBundle)
+  val missinfo = new MissPrefetchStatBundle
+  val maininfo = new MainPrefetchStatBundle
 }
 
 class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {

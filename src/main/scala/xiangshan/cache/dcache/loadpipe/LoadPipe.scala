@@ -87,7 +87,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val pseudo_tag_error_inj_done = Output(Bool())
     val pseudo_data_error_inj_done = Output(Bool())
 
-    val prefetch_info = Output(new LoadPrefetchInfoBundle)
+    val prefetch_stat = Output(new LoadPrefetchStatBundle)
 
     val bloom_filter_query = new Bundle {
       val query = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
@@ -493,16 +493,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val prefetch_hit = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
   
-  io.prefetch_info.total_prefetch := total_prefetch
-  io.prefetch_info.late_hit_prefetch := late_hit_prefetch
-  io.prefetch_info.nack_prefetch := s2_valid && s2_nack && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  io.prefetch_info.pf_source := s2_pf_source
+  io.prefetch_stat.total_prefetch := total_prefetch
+  io.prefetch_stat.late_hit_prefetch := late_hit_prefetch
+  io.prefetch_stat.nack_prefetch := s2_valid && s2_nack && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  io.prefetch_stat.pf_source := s2_pf_source
 
-  io.prefetch_info.prefetch_hit := prefetch_hit
-  io.prefetch_info.hit_source := hit_source
+  io.prefetch_stat.prefetch_hit := prefetch_hit
+  io.prefetch_stat.hit_source := hit_source
 
-  io.prefetch_info.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
-  io.prefetch_info.pollution := io.prefetch_info.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
+  io.prefetch_stat.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
+  io.prefetch_stat.pollution := io.prefetch_stat.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
