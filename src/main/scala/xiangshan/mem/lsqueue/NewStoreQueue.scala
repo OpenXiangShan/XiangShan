@@ -1162,7 +1162,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     /*======================================= staInRe [sta Stage 2] ==================================================*/
 
     val staReValidVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      RegNext(!port.bits.tlbMiss && staValidSetVec(j)) //TODO: use valid of s1, will be remove in the future.
+      RegNext(!port.bits.tlbMiss && staValidSetVec(j)) && !needCancel(i) //TODO: use valid of s1, will be remove in the future.
     } // at s2 stage of storeUnit
 
     val staReValid = (0 until staReValidVec.length).map { j =>
