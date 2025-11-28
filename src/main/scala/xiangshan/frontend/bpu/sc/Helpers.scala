@@ -20,12 +20,16 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-trait Helpers extends HasScParameters {
+trait Helpers extends HasScParameters with PhrHelper {
   def sign(x: SInt): Bool = x(x.getWidth - 1)
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
+
+  def getBankMask(pc: PrunedAddr): UInt =
+    UIntToOH((pc >> FetchBlockSizeWidth)(BankWidth - 1, 0))
 
   // get pc ^ foldedHist for index
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
@@ -37,8 +41,10 @@ trait Helpers extends HasScParameters {
     }
 
   // get pc ^ ghr for index
-  def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int): UInt =
-    ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ ghr)(log2Ceil(numSets) - 1, 0)
+  def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int, ghrLen: Int): UInt = {
+    val foldedGhr = computeFoldedHist(ghr, log2Ceil(numSets))(ghrLen)
+    ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
+  }
 
   // get pc ^ ghr for index
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =

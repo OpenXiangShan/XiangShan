@@ -72,9 +72,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ScThreshold(p)))
 
   private val resetDone = RegInit(false.B)
-  when(pathTable.map(_.io.req.ready).reduce(_ && _) &&
-    globalTable.map(_.io.req.ready).reduce(_ && _) &&
-    biasTable.io.req.ready) {
+  when(pathTable.map(_.io.resetDone).reduce(_ && _) &&
+    globalTable.map(_.io.resetDone).reduce(_ && _) &&
+    biasTable.io.resetDone) {
     resetDone := true.B
   }
   io.resetDone := resetDone
@@ -141,38 +141,43 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  predict pipeline stage 0
    */
-  private val s0_startPc = io.startPc
+  private val s0_startPc  = io.startPc
+  private val s0_bankMask = getBankMask(s0_startPc)
   private val s0_pathIdx: Seq[UInt] = PathTableInfos.map(info =>
     getPathTableIdx(
       s0_startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays))),
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays / NumBanks))),
       io.foldedPathHist,
-      info.Size / NumWays
+      info.Size / NumWays / NumBanks
     )
   )
 
   private val s0_globalIdx: Seq[UInt] = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
       s0_startPc,
-      s0_ghr.value.asUInt,
-      info.Size / NumWays
+      s0_ghr.value.asUInt(info.HistoryLength - 1, 0),
+      info.Size / NumWays / NumBanks,
+      info.HistoryLength
     )
   )
 
-  private val s0_biasIdx: UInt = getBiasTableIdx(s0_startPc, BiasTableSize)
+  private val s0_biasIdx: UInt = getBiasTableIdx(s0_startPc, BiasTableSize / BiasTableNumWays / NumBanks)
 
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
-    table.io.req.valid := s0_fire && ctrl.pathEnable
-    table.io.req.bits  := idx
+    table.io.req.valid         := s0_fire && ctrl.pathEnable
+    table.io.req.bits.setIdx   := idx
+    table.io.req.bits.bankMask := s0_bankMask
   }
 
   globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
-    table.io.req.valid := s0_fire && s0_ghr.valid && ctrl.globalEnable // if ghr invalid not request global table
-    table.io.req.bits  := idx
+    table.io.req.valid       := s0_fire && s0_ghr.valid && ctrl.globalEnable // if ghr invalid not request global table
+    table.io.req.bits.setIdx := idx
+    table.io.req.bits.bankMask := s0_bankMask
   }
 
-  biasTable.io.req.valid := s0_fire && ctrl.biasEnable
-  biasTable.io.req.bits  := s0_biasIdx
+  biasTable.io.req.valid         := s0_fire && ctrl.biasEnable
+  biasTable.io.req.bits.setIdx   := s0_biasIdx
+  biasTable.io.req.bits.bankMask := s0_bankMask
 
   /*
    *  predict pipeline stage 1
@@ -306,20 +311,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_branches   = t1_train.branches
   private val t1_meta       = t1_train.meta.sc
 
+  private val t1_bankMask = getBankMask(t1_train.startVAddr)
+
   private val t1_pathSetIdx = PathTableInfos.map(info =>
     getPathTableIdx(
       t1_train.startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays))),
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays / NumBanks))),
       RegEnable(io.trainFoldedPathHist, io.train.valid),
-      info.Size / NumWays
+      info.Size / NumWays / NumBanks
     )
   )
-
   private val t1_globalSetIdx = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
       t1_train.startPc,
-      t1_meta.scGhr,
-      info.Size / NumWays
+      t1_meta.scGhr(info.HistoryLength - 1, 0),
+      info.Size / NumWays / NumBanks,
+      info.HistoryLength
     )
   )
 
@@ -409,6 +416,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case ((table, idx), writeEntries) =>
       table.io.update.valid    := t1_writeValid && ctrl.pathEnable
       table.io.update.setIdx   := idx
+      table.io.update.bankMask := t1_bankMask
       table.io.update.wayMask  := t1_writeWayMask
       table.io.update.entryVec := writeEntries
   }
@@ -417,12 +425,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case ((table, idx), writeEntries) =>
       table.io.update.valid    := t1_writeValid && ctrl.globalEnable
       table.io.update.setIdx   := idx
+      table.io.update.bankMask := t1_bankMask
       table.io.update.wayMask  := t1_writeWayMask
       table.io.update.entryVec := writeEntries
   }
 
   biasTable.io.update.valid    := t1_writeValid && ctrl.biasEnable
   biasTable.io.update.setIdx   := t1_biasSetIdx
+  biasTable.io.update.bankMask := t1_bankMask
   biasTable.io.update.wayMask  := t1_writeBiasWayMask
   biasTable.io.update.entryVec := t1_writeBiasEntryVec
 
