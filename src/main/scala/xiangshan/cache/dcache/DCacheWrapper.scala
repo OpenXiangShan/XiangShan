@@ -951,7 +951,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
-  val fdpMonitor =  Module(new FDPrefetcherMonitor)
   val bloomFilter =  Module(new BloomFilter(BLOOM_FILTER_ENTRY_NUM, true))
   val counterFilter = Module(new CounterFilter)
   bankedDataArray.dump()
@@ -1145,9 +1144,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.valid := extra_flag_valid
-    prefetcherMonitor.io.validity.bits.access := extra_flag_access
-    prefetcherMonitor.io.validity.bits.pf_source := extra_flag_prefetch
+    prefetcherMonitor.io.maininfo.bad_prefetch := extra_flag_valid && !extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
+    prefetcherMonitor.io.maininfo.pf_source := extra_flag_prefetch
   }
 
   // write extra meta
@@ -1171,10 +1169,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } else {
     latency_flag_write_ports.foreach { case p => p.ready := true.B }
   }
-
-  // FIXME: add hybrid unit?
-  val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
-  XSPerfAccumulate("same_cycle_update_pf_flag", same_cycle_update_pf_flag)
 
   val access_flag_write_ports = ldu.map(_.io.access_flag_write) ++ Seq(
     mainPipe.io.access_flag_write
@@ -1349,21 +1343,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
+  val same_cycle_update_pf_flag_01 = (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
+  val same_cycle_update_pf_flag_02 = (ldu(0).io.prefetch_flag_write.bits.idx === ldu(2).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(2).io.prefetch_flag_write.bits.way_en)
+  val same_cycle_update_pf_flag_12 = (ldu(1).io.prefetch_flag_write.bits.idx === ldu(2).io.prefetch_flag_write.bits.idx) && (ldu(1).io.prefetch_flag_write.bits.way_en === ldu(2).io.prefetch_flag_write.bits.way_en)
+  val clear_flag = VecInit(false.B, same_cycle_update_pf_flag_01, same_cycle_update_pf_flag_02 || same_cycle_update_pf_flag_12)
 
   for (w <- 0 until LoadPipelineWidth) {
-    prefetcherMonitor.io.timely(w).total_prefetch := ldu(w).io.prefetch_info.naive.total_prefetch
-    prefetcherMonitor.io.timely(w).late_hit_prefetch := ldu(w).io.prefetch_info.naive.late_hit_prefetch
-    prefetcherMonitor.io.timely(w).pf_source := ldu(w).io.prefetch_info.naive.pf_source
-    prefetcherMonitor.io.timely(w).prefetch_hit := ldu(w).io.prefetch_info.naive.prefetch_hit
-    prefetcherMonitor.io.timely(w).hit_source := ldu(w).io.prefetch_info.naive.hit_source
-    prefetcherMonitor.io.timely(w).late_miss_prefetch := missQueue.io.prefetch_info.naive.late_miss_prefetch
-    prefetcherMonitor.io.timely(w).miss_source := missQueue.io.prefetch_info.naive.pf_source
+    prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_info
   }
+  prefetcherMonitor.io.missinfo := missQueue.io.prefetch_info
+  prefetcherMonitor.io.debugRolling := io.debugRolling
+  prefetcherMonitor.io.clear_flag := clear_flag
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
-  XSPerfAccumulate("useless_prefetch", ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _) && !(ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _)))
-  XSPerfAccumulate("useful_prefetch", ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _))
-  XSPerfAccumulate("late_prefetch_hit", ldu.map(_.io.prefetch_info.naive.late_prefetch_hit).reduce(_ || _))
-  XSPerfAccumulate("late_load_hit", ldu.map(_.io.prefetch_info.naive.late_load_hit).reduce(_ || _))
 
   /** LoadMissDB: record load miss state */
   val hartId = p(XSCoreParamsKey).HartId
@@ -1603,22 +1594,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire)
   }
-
-  //----------------------------------------
-  // Feedback Direct Prefetch Monitor
-  fdpMonitor.io.refill := missQueue.io.prefetch_info.fdp.prefetch_monitor_cnt
-  fdpMonitor.io.timely.late_prefetch := missQueue.io.prefetch_info.fdp.late_miss_prefetch
-  fdpMonitor.io.accuracy.total_prefetch := missQueue.io.prefetch_info.fdp.total_prefetch
-  for (w <- 0 until LoadPipelineWidth)  {
-    if(w == 0) {
-      fdpMonitor.io.accuracy.useful_prefetch(w) := ldu(w).io.prefetch_info.fdp.useful_prefetch
-    }else {
-      fdpMonitor.io.accuracy.useful_prefetch(w) := Mux(same_cycle_update_pf_flag, false.B, ldu(w).io.prefetch_info.fdp.useful_prefetch)
-    }
-  }
-  for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.cache_pollution(w) :=  ldu(w).io.prefetch_info.fdp.pollution }
-  for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.demand_miss(w) :=  ldu(w).io.prefetch_info.fdp.demand_miss }
-  fdpMonitor.io.debugRolling := io.debugRolling
 
   //----------------------------------------
   // Bloom Filter
