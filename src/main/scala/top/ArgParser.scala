@@ -206,6 +206,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(SeperateBus = SeperatedBusType.withName(value))
           }), tail)
+        case "--private-clint" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(UsePrivateClint = true)
+          }), tail)
         case "--seperate-dm" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)

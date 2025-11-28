@@ -205,6 +205,10 @@ object ArgParser {
     require(addrWidth >= 0, "addrWidth not specified correctly")
     require(dataWidth >= 0, "dataWidth not specified correctly")
     val device: StandAloneDevice = module match {
+      case "StandAloneCLINT" =>
+        DisableMonitors(p => LazyModule(new StandAloneCLINT(
+          useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size
+        )(p)))(p)
       case "StandAloneSYSCNT" =>
         DisableMonitors(p => LazyModule(new StandAloneSYSCNT(
           useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size

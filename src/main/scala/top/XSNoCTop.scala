@@ -136,16 +136,16 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     val isNormal = lpState === sIDLE
     val wfiGateClock = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val flitpend = io_chi.rx.snp.flitpend | io_chi.rx.rsp.flitpend | io_chi.rx.dat.flitpend
-    val msip_mux = socParams.SeperateBus match {
-      case SeperatedBusType.NONE =>
+    val msip_mux = socParams.UsePrivateClint match {
+      case false =>
         core_with_l2.clintIntNode.get.out.head._1(0)
-      case SeperatedBusType.TL | SeperatedBusType.AXI =>
+      case true =>
         core_with_l2.timer.get.intnode.out.head._1(0)
     }
-    val mtip_mux = socParams.SeperateBus match {
-      case SeperatedBusType.NONE =>
+    val mtip_mux = socParams.UsePrivateClint match {
+      case false =>
         core_with_l2.clintIntNode.get.out.head._1(1)
-      case SeperatedBusType.TL | SeperatedBusType.AXI =>
+      case true =>
         core_with_l2.timer.get.intnode.out.head._1(1)
     }
 
@@ -203,7 +203,7 @@ trait HasXSTile { this: BaseXSSoc =>
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
   })))
   // interrupts
-  val clintIntNode = Option.when(SeperateBus == SeperatedBusType.NONE)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
+  val clintIntNode = Option.when(!UsePrivateClint)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
