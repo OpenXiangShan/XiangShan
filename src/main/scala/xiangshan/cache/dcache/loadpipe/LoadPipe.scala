@@ -495,6 +495,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   
   io.prefetch_info.total_prefetch := total_prefetch
   io.prefetch_info.late_hit_prefetch := late_hit_prefetch
+  io.prefetch_info.nack_prefetch := s2_valid && s2_nack && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   io.prefetch_info.pf_source := s2_pf_source
 
   io.prefetch_info.prefetch_hit := prefetch_hit

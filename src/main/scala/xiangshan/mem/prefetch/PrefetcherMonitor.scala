@@ -21,6 +21,7 @@ class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasS
 class LoadPrefetchInfoBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val total_prefetch = Bool() // from loadpipe s2, pf req sent
   val late_hit_prefetch = Bool() // from loadpipe s2, pf req sent but hit
+  val nack_prefetch = Bool() // from loadpipe s2, pf req miss but nack
   val pf_source = UInt(L1PfSourceBits.W)
 
   val prefetch_hit = Bool() // from loadpipe s3, pf block hit by demand, clear pf flag
@@ -83,6 +84,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   // ldu 0, 1, 2 can only have one prefetch request at a time
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _)
   val late_hit_prefetch = io.loadinfo.map(t => t.late_hit_prefetch).reduce(_ || _)
+  val nack_prefetch = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _)
   val late_miss_prefetch = io.missinfo.late_miss_prefetch
   // demand accesses from different ldu may hit different prefetch blocks
   val good_prefetch = PopCount(prefetch_info.loadinfo.map(t => t.prefetch_hit))
@@ -96,6 +98,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   
   XSPerfAccumulate("total_prefetch", total_prefetch)
   XSPerfAccumulate("late_hit_prefetch", late_hit_prefetch)
+  XSPerfAccumulate("nack_prefetch", nack_prefetch)
   XSPerfAccumulate("late_miss_prefetch", late_miss_prefetch)
   XSPerfAccumulate("good_prefetch", good_prefetch)
   XSPerfAccumulate("bad_prefetch", bad_prefetch)
@@ -180,6 +183,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
 
   val total_prefetch = io.prefetch_info.loadinfo.map(t => t.total_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val late_hit_prefetch = io.prefetch_info.loadinfo.map(t => t.late_hit_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
+  val nack_prefetch = io.prefetch_info.loadinfo.map(t => t.nack_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val late_miss_prefetch = io.prefetch_info.missinfo.late_miss_prefetch && param.isMyType(io.prefetch_info.missinfo.pf_source)
   val good_prefetch = PopCount(io.prefetch_info.loadinfo.map(t => t.prefetch_hit && param.isMyType(t.hit_source)))
   val bad_prefetch = io.prefetch_info.maininfo.bad_prefetch && param.isMyType(io.prefetch_info.maininfo.pf_source)
@@ -239,6 +243,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
 
   XSPerfAccumulate(s"${param.name}_total_prefetch", total_prefetch)
   XSPerfAccumulate(s"${param.name}_late_hit_prefetch", late_hit_prefetch)
+  XSPerfAccumulate(s"${param.name}_nack_prefetch", nack_prefetch)
   XSPerfAccumulate(s"${param.name}_late_miss_prefetch", late_miss_prefetch)
   XSPerfAccumulate(s"${param.name}_good_prefetch", good_prefetch)
   XSPerfAccumulate(s"${param.name}_bad_prefetch", bad_prefetch)
