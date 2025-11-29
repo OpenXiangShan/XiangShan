@@ -1343,10 +1343,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
-  val same_cycle_update_pf_flag_01 = (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
-  val same_cycle_update_pf_flag_02 = (ldu(0).io.prefetch_flag_write.bits.idx === ldu(2).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(2).io.prefetch_flag_write.bits.way_en)
-  val same_cycle_update_pf_flag_12 = (ldu(1).io.prefetch_flag_write.bits.idx === ldu(2).io.prefetch_flag_write.bits.idx) && (ldu(1).io.prefetch_flag_write.bits.way_en === ldu(2).io.prefetch_flag_write.bits.way_en)
-  val clear_flag = VecInit(false.B, same_cycle_update_pf_flag_01, same_cycle_update_pf_flag_02 || same_cycle_update_pf_flag_12)
+  
+  val clear_flag = Wire(Vec(LoadPipelineWidth, Bool()))
+  clear_flag(0) := false.B
+  for (i <- 1 until LoadPipelineWidth) {
+    val conflictWithEarlier = (0 until i).map { j =>
+      (ldu(i).io.prefetch_flag_write.bits.idx === ldu(j).io.prefetch_flag_write.bits.idx) &&
+      (ldu(i).io.prefetch_flag_write.bits.way_en === ldu(j).io.prefetch_flag_write.bits.way_en)
+    }.reduce(_ || _)
+    clear_flag(i) := conflictWithEarlier
+  }
 
   for (w <- 0 until LoadPipelineWidth) {
     prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_stat
