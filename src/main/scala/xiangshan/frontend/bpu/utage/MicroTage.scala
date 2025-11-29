@@ -85,9 +85,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // but it's a double-edged sword: with limited capacity, entries may be evicted
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
-  // prediction.valid := histTableHitMap.reduce(_ || _) &&
-  //   (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
-  prediction.valid            := false.B
+  prediction.valid := histTableHitMap.reduce(_ || _) &&
+    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
+  // prediction.valid            := false.B
   prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
   prediction.bits.cfiPosition := finalPredCfiPosition
 
