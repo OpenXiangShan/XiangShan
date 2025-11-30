@@ -2,10 +2,10 @@ package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3._
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.DecodeField
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb2, SewPattern}
 import xiangshan.backend.vector.Decoder.Sews
+import xiangshan.backend.vector.Decoder.util.DecodeField
 
 object Src1SelectEnum extends Enumeration {
   import scala.language.implicitConversions

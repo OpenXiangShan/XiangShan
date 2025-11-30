@@ -2,10 +2,10 @@ package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.UInt
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.DecodeField
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.SrcRenType
 import xiangshan.backend.vector.Decoder.Types.DecodeSrcType.{FP, GP}
+import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt._
 
 object Src2Field extends DecodeField[InstPattern, SrcRenType] {

@@ -3,7 +3,9 @@ package xiangshan.backend.vector.Decoder
 import chisel3._
 import chisel3.util.BitPat
 import org.chipsalliance.cde.config.{Parameters => P}
+import utility.LookupTree
 import utils.NamedUInt
+import xiangshan.SrcType
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.BString._
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
@@ -13,6 +15,15 @@ import xiangshan.backend.vector.util.{NamedDef, NamedDefObj}
 object Types {
   class DecodeSrcType extends Bundle {
     val value = UInt(DecodeSrcType.width.W)
+
+    def toSrcType: UInt = {
+      LookupTree(value, Seq(
+        DecodeSrcType.IMM -> SrcType.imm,
+        DecodeSrcType.GP  -> SrcType.xp,
+        DecodeSrcType.FP  -> SrcType.fp,
+        DecodeSrcType.VP  -> SrcType.vp,
+      ))
+    }
   }
 
   object DecodeSrcType {
@@ -28,19 +39,19 @@ object Types {
   }
 
   object SelImm extends NamedUInt(4) {
-    def S  = b"0000"
-    def SB = b"0001"
-    def U  = b"0010"
-    def UJ = b"0011"
-    def I  = b"0100"
-    def Z  = b"0101"
-    def B6 = b"0110"
-    def LUI32     = b"0111"
+    def NO = b"0000"
+    def S  = b"0001"
+    def SB = b"0010"
+    def U  = b"0011"
+    def UJ = b"0100"
+    def I  = b"0101"
+    def Z  = b"0110"
     def OPIVIS    = b"1000"
     def OPIVIU    = b"1001"
     def VSETVLI   = b"1010"
     def VSETIVLI  = b"1011"
     def VRORVI    = b"1100"
+    def LUI32     = b"1110"
     def FI        = b"1111" // used by fli and it's fusion
   }
 
@@ -173,4 +184,13 @@ object Types {
   }
 
   object UopBufferNum extends NamedUInt(3)
+
+  object NumUop extends NamedUInt(3)
+
+  object VdDepElim extends NamedUInt(2) {
+    val Always = b"11"
+    val IfVlmax = b"10"
+    val IfMaskOne = b"01"
+    val IfVlmaxAndMaskOne = b"00"
+  }
 }

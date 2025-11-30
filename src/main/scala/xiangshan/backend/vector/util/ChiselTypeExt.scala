@@ -3,7 +3,6 @@ package xiangshan.backend.vector.util
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
-import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb2
 
 import scala.language.implicitConversions
 
@@ -69,6 +68,19 @@ object ChiselTypeExt {
       this.value.apply(this.value.getWidth - 1, n)
     }
 
+    /**
+     * Literal value cat
+     * @param that: a literal UInt value whose width is known
+     * @return a result of Literal value, the width is sum of two literal value.
+     */
+    def ###(that: UInt): UInt = {
+      require(this.value.widthKnown && that.value.widthKnown)
+      require(this.value.isLit && that.value.isLit)
+      val thisWidth = this.value.getWidth
+      val thatWidth = that.value.getWidth
+
+      ((this.value.litValue << thatWidth) | that.litValue).U((thisWidth + thatWidth).W)
+    }
   }
 
   class EnumTypeExt(val value: EnumType) {
@@ -77,16 +89,9 @@ object ChiselTypeExt {
     }
   }
 
-  class DecodePatternExt[T <: DecodePattern](dp: T) {
-    def ##[T2 <: DecodePattern](that: T2): DecodePatternComb2[T, T2] = {
-      new DecodePatternComb2[T, T2](dp, that)
-    }
-  }
-
   implicit def UIntToUIntField(uint: UInt): UIntExt = new UIntExt(uint)
   implicit def BitPatToExt(bitPat: BitPat): BitPatExt = new BitPatExt(bitPat)
   implicit def EnumTypeToExt(enum: EnumType): EnumTypeExt = new EnumTypeExt(enum)
-  implicit def DecodePatternToExt[T <: DecodePattern](dp: T): DecodePatternExt[T] = new DecodePatternExt[T](dp)
 
   class DecodeTableExt[I <: DecodePattern](val decodeTable: DecodeTable[I]) {
     def decode(minimizer: Minimizer, input: UInt): DecodeBundle =

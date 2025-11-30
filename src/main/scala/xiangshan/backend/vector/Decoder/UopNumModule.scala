@@ -39,7 +39,7 @@ class UopNumSegDecoder extends Module with HasVectorSettings {
     // b0010: numUop = 2
     // b0100: numUop = 4
     // b1000: numUop = 8
-    val numUopOH = UopNumOH()
+    val numUopOH = NumUopOH()
   }))
   val out = IO(Output(new Bundle {
     // b0001: numUop = 1
@@ -47,7 +47,7 @@ class UopNumSegDecoder extends Module with HasVectorSettings {
     // b0100: numUop = 4
     // b1000: numUop = 8
     // b0000: illegal or no input
-    val numUopOH = UopNumOH()
+    val numUopOH = NumUopOH()
 
     val validOH = UInt(8.W)
   }))
@@ -100,7 +100,7 @@ class NewUopNumNoSegDecoderInput extends Bundle {
 }
 
 class NewUopNumNoSegDecoderOutput extends Bundle {
-  val uopNumOH = UopNumOH()
+  val uopNumOH = NumUopOH()
 }
 
 /**
@@ -150,7 +150,7 @@ class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with Ha
     // b0100: numUop = 4
     // b1000: numUop = 8
     // b0000: illegal or no input
-    val uopNumOH = UopNumOH()
+    val uopNumOH = NumUopOH()
   }))
 
   val vlsNoSegDecoder = Module(new UopNumNoSegDecoder)
@@ -163,16 +163,16 @@ class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with Ha
   vlsSegDecoder.in.nf := in.nf
   vlsSegDecoder.in.numUopOH := vlsNoSegDecoder.out.uopNumOH
 
-  val lmulOH = Mux1HLookUp(in.lmul, UopNumOH.N1)(Seq(
-    EnumLMUL.M2 -> UopNumOH.N2,
-    EnumLMUL.M4 -> UopNumOH.N4,
-    EnumLMUL.M8 -> UopNumOH.N8,
+  val lmulOH = Mux1HLookUp(in.lmul, NumUopOH.N1)(Seq(
+    EnumLMUL.M2 -> NumUopOH.N2,
+    EnumLMUL.M4 -> NumUopOH.N4,
+    EnumLMUL.M8 -> NumUopOH.N8,
   ))
 
-  val lmulTimes2OH = Mux1HLookUp(in.lmul, UopNumOH.N1)(Seq(
-    EnumLMUL.M1 -> UopNumOH.N2,
-    EnumLMUL.M2 -> UopNumOH.N4,
-    EnumLMUL.M4 -> UopNumOH.N8,
+  val lmulTimes2OH = Mux1HLookUp(in.lmul, NumUopOH.N1)(Seq(
+    EnumLMUL.M1 -> NumUopOH.N2,
+    EnumLMUL.M2 -> NumUopOH.N4,
+    EnumLMUL.M4 -> NumUopOH.N8,
   ))
 
   if (splitTypeOneHot) {
@@ -195,14 +195,14 @@ class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with Ha
       ).map(_.litValue).map(i => in.splitTypeOH(i))).orR -> vlsSegDecoder.out.numUopOH,
       Cat(Seq(
         NONE,
-      ).map(_.litValue).map(i => in.splitTypeOH(i))).orR -> UopNumOH.N1,
+      ).map(_.litValue).map(i => in.splitTypeOH(i))).orR -> NumUopOH.N1,
     ))
   } else {
     out.uopNumOH := Mux1HLookUp(in.splitType, lmulOH, Seq(
       Seq(WVV, WVW, VVW, VWREDU, VWREDO) -> lmulTimes2OH,
       Seq(VLSIDX_DI_RATIO_1, VLSIDX_DI_RATIO_2, VLSIDX_DI_RATIO_4, VLSIDX_DI_RATIO_8,
         VLSIDX_DI_RATIO_F8, VLSIDX_DI_RATIO_F4, VLSIDX_DI_RATIO_F2) -> vlsSegDecoder.out.numUopOH,
-      Seq(NONE) -> UopNumOH.N1,
+      Seq(NONE) -> NumUopOH.N1,
     ))
   }
 
@@ -268,7 +268,7 @@ object Lmuls {
   }
 }
 
-object UopNumOH extends NamedUInt(4) {
+object NumUopOH extends NamedUInt(4) {
   def N0 = b"0000"
   def N1 = b"0001"
   def N2 = b"0010"

@@ -20,11 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
-import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.CustomInstructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
-import utils._
 import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
@@ -34,6 +31,8 @@ import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFi
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.Zimop._
+import xiangshan.backend.decode.isa.Instructions._
+import xiangshan.backend.decode.isa.PseudoInstructions._
 import yunsuan.{FcmpOpCode, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
 
 /**
@@ -58,7 +57,7 @@ trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  |  |  |  uopSplitType
     //   |          |          |          |         |           |  |  |  |  |  |  |  |               selImm
     //   |          |          |          |         |           |  |  |  |  |  |  |  |               |
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.X) // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -750,7 +749,6 @@ object ImmUnion {
   val U = Imm_U()
   val J = Imm_J()
   val Z = Imm_Z()
-  val B6 = Imm_B6()
   val OPIVIS = Imm_OPIVIS()
   val OPIVIU = Imm_OPIVIU()
   val VSETVLI = Imm_VSETVLI()
@@ -759,7 +757,7 @@ object ImmUnion {
   val VRORVI = Imm_VRORVI()
 
   // do not add special type lui32 to this, keep ImmUnion max len being 20.
-  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI, VRORVI)
+  val imms = Seq(I, S, B, U, J, Z, OPIVIS, OPIVIU, VSETVLI, VSETIVLI, VRORVI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -768,7 +766,6 @@ object ImmUnion {
     SelImm.IMM_U,
     SelImm.IMM_UJ,
     SelImm.IMM_Z,
-    SelImm.IMM_B6,
     SelImm.IMM_OPIVIS,
     SelImm.IMM_OPIVIU,
     SelImm.IMM_VSETVLI,
@@ -888,7 +885,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isAmocasQIllegal = isAmocasQ && (inst.RD(0) === 1.U || inst.RS2(0) === 1.U)
 
   private val exceptionII =
-    decodedInst.selImm === SelImm.INVALID_INSTR ||
     io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
     io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
     io.fromCSR.illegalInst.hfenceGVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_g ||

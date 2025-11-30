@@ -32,7 +32,7 @@ import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.dispatch.NewDispatch
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
+import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.PrunedAddr
@@ -40,6 +40,7 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.backend.vector.Decoder
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
@@ -84,6 +85,7 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
   override def shouldBeInlined: Boolean = false
 
   val rob = LazyModule(new Rob(params))
+  val decode = LazyModule(new Decoder.DecodeStage())
 
   lazy val module = new CtrlBlockImp(this)(p, params)
 
@@ -122,7 +124,7 @@ class CtrlBlockImp(
 
   val dispatch = Module(new NewDispatch)
   val gpaMem = wrapper.gpaMem.module
-  val decode = Module(new DecodeStage)
+  val decode = wrapper.decode.module
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
   val rename = Module(new Rename)
@@ -132,7 +134,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
+  private val disableFusion = decode.in.csrCtrl.singlestep || !decode.in.csrCtrl.fusion_enable
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -448,9 +450,8 @@ class CtrlBlockImp(
   }
 
   // vtype commit
-  decode.io.fromCSR := io.fromCSR.toDecode
-  decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.in.fromCSR := io.fromCSR.toDecode
+  decode.in.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
   io.frontend.toIBuf.resumingVType := rob.io.toDecode.isResumeVType
   io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
@@ -460,7 +461,7 @@ class CtrlBlockImp(
 
   // add decode Buf for in.ready better timing
   /**
-   * Decode buffer: when decode.io.in cannot accept all insts, use this buffer to temporarily store insts that cannot
+   * Decode buffer: when decode.in cannot accept all insts, use this buffer to temporarily store insts that cannot
    * be sent to DecodeStage.
    *
    * Decode buffer is a "DecodeWidth"-element long register Vector of DecodeInUop (in decodeBufBits), with valid signals
@@ -481,13 +482,13 @@ class CtrlBlockImp(
   val decodeFromFrontend = io.frontend.cfVec
 
   /** Insts in buffer that is not ready but valid in decodeBufValid */
-  val decodeBufNotAccept = VecInit(decodeBufValid.zip(decode.io.in).map(x => x._1 && !x._2.ready))
+  val decodeBufNotAccept = VecInit(decodeBufValid.zip(decode.in.mop).map(x => x._1 && !x._2.ready))
 
   /** Number of insts in decode buffer that is accepted. All accepted insts are before the first unaccepted one. */
   val decodeBufAcceptNum = PriorityMuxDefault(decodeBufNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
 
   /** Input valid insts from frontend that is not ready to be accepted, or decoder prefer insts in decode buffer */
-  val decodeFromFrontendNotAccept = VecInit(decodeFromFrontend.zip(decode.io.in).map(x => decodeBufValid(0) || x._1.valid && !x._2.ready))
+  val decodeFromFrontendNotAccept = VecInit(decodeFromFrontend.zip(decode.in.mop).map(x => decodeBufValid(0) || x._1.valid && !x._2.ready))
 
   /** Number of input insts that is accepted.
    * All accepted insts are before the first unaccepted one. */
@@ -521,7 +522,7 @@ class CtrlBlockImp(
    */
   for (i <- 0 until DecodeWidth) {
     // decodeBufValid update
-    when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+    when(decode.in.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.in.mop(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := false.B
     }.elsewhen(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := Mux(decodeBufAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeBufValid(i.U + decodeBufAcceptNum))
@@ -541,34 +542,57 @@ class CtrlBlockImp(
 
   /**
    * DecodeStage's input:
-   *   decode.io.in(i).valid:
+   *   decode.in(i).valid:
    *     decodeBufValid(0) is true : decodeBufValid(i)            | from decode buffer
    *                         false : decodeFromFrontend(i).valid  | from frontend
    *
    *   decodeFromFrontend(i).ready:
-   *     decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+   *     decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.in.redirect
    *     valid instr in input, no instr in decode buffer, decodeFromFrontend(i) is valid, no redirection
    *
-   *   decode.io.in(i).bits:
+   *   decode.in(i).bits:
    *     decodeBufValid(i) is true : decodeBufBits(i)             | from decode buffer
    *                         false : decodeConnectFromFrontend(i) | from frontend
    */
-  decode.io.in.zipWithIndex.foreach { case (decodeIn, i) =>
+  decode.in.mop.zipWithIndex.foreach { case (decodeIn, i) =>
     decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
-    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.in.redirect
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
   io.frontend.toIBuf.decodeCanAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
 
-  decode.io.csrCtrl := RegNext(io.csrCtrl)
-  decode.io.intRat <> rat.io.intReadPorts
-  decode.io.fpRat <> rat.io.fpReadPorts
-  decode.io.vecRat <> rat.io.vecReadPorts
-  decode.io.v0Rat <> rat.io.v0ReadPorts
-  decode.io.vlRat <> rat.io.vlReadPorts
-  decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
-  decode.io.stallReason.in <> io.frontend.stallReason
+  decode.in.csrCtrl := RegNext(io.csrCtrl)
+
+  Seq(
+    rat.io.intReadPorts -> decode.out.intRat,
+    rat.io.fpReadPorts  -> decode.out.fpRat,
+    rat.io.vecReadPorts -> decode.out.vecRat,
+  ).foreach {
+    case (readPort: Vec[Vec[RatReadPort]], decodeOut: Vec[Vec[RatReadPort]]) =>
+      for (i <- readPort.indices) {
+        for (j <- readPort(i).indices) {
+          readPort(i)(j).hold := decodeOut(i)(j).hold
+          readPort(i)(j).addr := decodeOut(i)(j).addr
+          decodeOut(i)(j).data := 0.U // Todo: remove useless bundle
+        }
+      }
+  }
+
+  Seq(
+    rat.io.v0ReadPorts  -> decode.out.v0Rat,
+    rat.io.vlReadPorts  -> decode.out.vlRat,
+  ).foreach {
+    case (readPort: Vec[RatReadPort], decodeOut: Vec[RatReadPort]) =>
+      for (i <- readPort.indices) {
+        readPort(i).hold := decodeOut(i).hold
+        readPort(i).addr := decodeOut(i).addr
+        decodeOut(i).data := 0.U // Todo: remove useless bundle
+      }
+  }
+
+  decode.in.fusion := 0.U.asTypeOf(decode.in.fusion) // Todo
+  decode.stallReason.in <> io.frontend.stallReason
 
   // snapshot check
   class CFIRobIdx extends Bundle {
@@ -619,20 +643,20 @@ class CtrlBlockImp(
   rat.io.snpt.snptSelect := snptSelect
   rat.io.snpt.flushVec := flushVec
 
-  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
+  val decodeHasException = decode.out.uop.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
   fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
-    fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !decodeHasException(i)
-    fusionDecoder.io.in(i).bits := decode.io.out(i).bits.instr
+    fusionDecoder.io.in(i).valid := decode.out.uop(i).valid && !decodeHasException(i)
+    fusionDecoder.io.in(i).bits := decode.out.uop(i).bits.instr
     if (i > 0) {
-      fusionDecoder.io.inReady(i - 1) := decode.io.out(i).ready
+      fusionDecoder.io.inReady(i - 1) := decode.out.uop(i).ready
     }
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodeOutUop)))
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready,
+    PipelineConnect(decode.out.uop(i), decodePipeRename(i), rename.io.in(i).ready,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
 
     decodePipeRename(i).ready := rename.io.in(i).ready
@@ -650,7 +674,7 @@ class CtrlBlockImp(
     rename.io.fusionInfo(i) := fusionDecoder.io.info(i)
 
     // update the first RenameWidth - 1 instructions
-    decode.io.fusion(i) := fusionDecoder.io.out(i).valid && rename.io.out(i).fire
+    decode.in.fusion(i) := fusionDecoder.io.out(i).valid && rename.io.out(i).fire
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
@@ -672,10 +696,10 @@ class CtrlBlockImp(
   private val mdpFlodPcVecVld = Wire(Vec(DecodeWidth, Bool()))
   private val mdpFlodPcVec = Wire(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
   for (i <- 0 until DecodeWidth) {
-    mdpFlodPcVecVld(i) := decode.io.out(i).fire || GatedValidRegNext(decode.io.out(i).fire)
+    mdpFlodPcVecVld(i) := decode.out.uop(i).fire || GatedValidRegNext(decode.out.uop(i).fire)
     mdpFlodPcVec(i) := Mux(
-      decode.io.out(i).fire,
-      decode.io.in(i).bits.foldpc,
+      decode.out.uop(i).fire,
+      decode.in.mop(i).bits.foldpc,
       rename.io.in(i).bits.foldpc
     )
   }
@@ -701,7 +725,7 @@ class CtrlBlockImp(
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
   rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
-  rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
+  rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.out.uop).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
   rename.io.ssit := memCtrl.io.ssit2Rename
@@ -725,7 +749,7 @@ class CtrlBlockImp(
   rename.io.debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
   rename.io.debug_v0_rat.foreach(_ := rat.io.debug_v0_rat.get)
   rename.io.debug_vl_rat.foreach(_ := rat.io.debug_vl_rat.get)
-  rename.io.stallReason.in <> decode.io.stallReason.out
+  rename.io.stallReason.in <> decode.stallReason.out
   rename.io.snpt.snptEnq := DontCare
   rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
@@ -831,7 +855,7 @@ class CtrlBlockImp(
   io.robio.csr <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
   rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.io.wfi_enable := decode.io.csrCtrl.wfi_enable
+  rob.io.wfi_enable := decode.in.csrCtrl.wfi_enable
 
   io.toTop.cpuHalt := DelayN(rob.io.cpu_halt, 5)
 
@@ -869,11 +893,11 @@ class CtrlBlockImp(
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
   // backend to decode
-  decode.io.vstart := io.toDecode.vstart
+  decode.in.vstart := io.toDecode.vstart
   // backend to rob
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
 
-  io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
+  io.toCSR.trapInstInfo := decode.out.toCSR.trapInstInfo
 
   io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
   io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo

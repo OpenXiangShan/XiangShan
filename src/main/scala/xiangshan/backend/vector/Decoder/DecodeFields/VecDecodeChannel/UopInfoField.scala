@@ -2,19 +2,19 @@ package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.DecodeField
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.SplitTable
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector.Decoder.Uop.VecUopDefines._
+import xiangshan.backend.vector.Decoder.util.DecodeField
 
 object UopInfoField extends DecodeField[
-  DecodePatternComb4[VecInstPattern, SewPattern, NfPattern, LmulPattern],
+  DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   Vec[ValidIO[UopInfoRename]]
 ] {
-  type Pattern = DecodePatternComb4[VecInstPattern, SewPattern, NfPattern, LmulPattern]
+  type Pattern = DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern]
 
   override def name: String = "uopInfo"
 
@@ -31,8 +31,14 @@ object UopInfoField extends DecodeField[
 
   val emptyUopBitPat: BitPat = BitPat.Y() ## BitPat.dontCare(UopInfoRename.width)
 
+  private val buffer = collection.mutable.Map[Pattern, Seq[UopBase]]()
+
   def genUopSeq(op: Pattern): Seq[UopBase] = {
-    val DecodePatternComb(instP, sewP, nfP, lmulP) = op
+    buffer.getOrElseUpdate(op, this.genUopSeqImpl(op))
+  }
+
+  def genUopSeqImpl(op: Pattern): Seq[UopBase] = {
+    val DecodePatternComb(instP, sewP, lmulP, nfP) = op
 
     instP match {
       case vai: VecArithInstPattern =>

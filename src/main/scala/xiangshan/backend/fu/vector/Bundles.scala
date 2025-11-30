@@ -15,7 +15,7 @@ object Bundles {
   /**
     * vtype bundle, should not used as csr reg
     */
-  class VType(implicit p: Parameters) extends Bundle {
+  class VType extends Bundle {
     val illegal = Bool()
     val vma     = Bool()
     val vta     = Bool()
@@ -39,7 +39,7 @@ object Bundles {
   }
 
   object VType {
-    def apply()(implicit p: Parameters) : VType = {
+    def apply() : VType = {
       new VType
     }
 

@@ -7,7 +7,10 @@ import firrtl.{AnnotationSeq, EmittedVerilogCircuitAnnotation}
 
 object Verilog {
   def emitVerilog(gen: => RawModule, args: Array[String] = Array.empty): String = {
-    val annotations = Array("--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none")
+    val annotations = Array(
+      "--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none",
+      "--default-layer-specialization=enable",
+    )
       .map(FirtoolOption.apply).toSeq
 
     (new ChiselStage)

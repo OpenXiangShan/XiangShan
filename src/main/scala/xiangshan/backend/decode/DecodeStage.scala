@@ -96,7 +96,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   if (backendParams.debugEn){
     io.in.zipWithIndex.foreach { case (d, i) =>
-      PerfCCT.updateInstPos(d.bits.debug.get.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
+      PerfCCT.updateInstPos(d.bits.debug.get.seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
     }
   }
 
@@ -112,13 +112,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   /** complex decoder */
   val decoderComp = Module(new DecodeUnitComp)
-
-  val decodeChannels = Module(new DecodeChannels(
-    mopWidth = DecodeWidth,
-    uopWidth = DecodeWidth,
-    instSeq = InstPattern.all,
-    numM2M4M8Channel = (6, 6, 6),
-  ))
 
   /** simple decoders in Seq of DecodeWidth */
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
@@ -248,7 +241,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       SrcType.isVp(s) && (l === 0.U)
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
-    inst.bits.debug.foreach(_.debug_seqNum.uopIdx := inst.bits.uopIdx)
+    inst.bits.debug.foreach(_.seqNum.uopIdx := inst.bits.uopIdx)
   }
 
   io.out.map(x =>

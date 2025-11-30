@@ -2,17 +2,24 @@ package xiangshan.backend.vector.Decoder
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.DecodePattern
-import xiangshan.backend.vector.Decoder.Split.SplitType
-import xiangshan.backend.vector.util.BString.BinaryStringHelper
-import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.Decoder.InstPattern._
+import xiangshan.backend.vector.Decoder.Split.SplitType
+import xiangshan.backend.vector.Decoder.util._
+import xiangshan.backend.vector.util.ChiselTypeExt._
+import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 
-import scala.beans.BeanProperty
 import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 
 object RVVDecodeUtil {
+  class DecodePatternUtil[T <: DecodePattern](dp: T) {
+    def ##[T2 <: DecodePattern](that: T2): DecodePatternComb2[T, T2] = {
+      new DecodePatternComb2[T, T2](dp, that)
+    }
+  }
+
+  implicit def DecodePatternToUtil[T <: DecodePattern](dp: T): DecodePatternUtil[T] = new DecodePatternUtil[T](dp)
+
   class DecodePatternComb2[
     P1 <: DecodePattern,
     P2 <: DecodePattern,
@@ -265,6 +272,54 @@ object RVVDecodeUtil {
     def all: Seq[SewPattern] = Sews.all.map(SewPattern.apply)
   }
 
+  abstract class BoolPattern extends DecodePattern {
+    def value: Boolean = bitPat.rawString match {
+      case "0" => false
+      case "1" => true
+    }
+  }
+
+  abstract class BoolPatternFactory[T <: BoolPattern](gen: BitPat => T) {
+    def apply(b: Boolean): T = gen(b.toBitPat)
+
+    def apply(b: Bool): T = gen(b.toBitPat)
+  }
+
+  case class MaPattern(bitPat: BitPat) extends BoolPattern
+  object MaPattern extends BoolPatternFactory[MaPattern](x => new MaPattern(x))
+
+  case class TaPattern(bitPat: BitPat) extends BoolPattern
+  object TaPattern extends BoolPatternFactory[TaPattern](x => new TaPattern(x))
+
+  case class VmPattern(bitPat: BitPat) extends BoolPattern
+  object VmPattern extends BoolPatternFactory[VmPattern](x => new VmPattern(x))
+
+//  case class MaPattern(bitPat: BitPat) extends DecodePattern {
+//    def maValue: Boolean = bitPat.rawString match {
+//      case "0" => false
+//      case "1" => true
+//    }
+//  }
+
+//  object MaPattern {
+//    def apply(b: Boolean): MaPattern = MaPattern(b.toBitPat)
+//
+//    def apply(b: Bool): MaPattern = MaPattern(b.toBitPat)
+//  }
+
+//  case class TaPattern(bitPat: BitPat) extends DecodePattern {
+//    def taValue: Boolean = bitPat.rawString match {
+//      case "0" => false
+//      case "1" => true
+//    }
+//  }
+//
+//  object TaPattern {
+//    def apply(b: Boolean): TaPattern = TaPattern(b.toBitPat)
+//
+//    def apply(b: Bool): TaPattern = TaPattern(b.toBitPat)
+//  }
+  
   case class UopNumOHsPattern(
     uopNumSeq: Seq[Int],
     mopWidth : Int,

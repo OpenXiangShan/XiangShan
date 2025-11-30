@@ -2,11 +2,11 @@ package xiangshan.backend.vector.Decoder.Select
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.UopNumOHsPattern
-import xiangshan.backend.vector.Decoder.Select.ChannelUopSelectUtil.{genDecodeOutPort2, genUopBufferPort2, genUopNumPatterns2}
+import xiangshan.backend.vector.Decoder.Select.ChannelUopSelectUtil.{genUopBufferPort2, genUopNumPatterns2}
 import xiangshan.backend.vector.Decoder.UopBufferCtrlDecoderUtil.{UopNumPattern, UopNumWithChannelUopNum, UopSelectBundle}
 import xiangshan.backend.vector.HasVectorSettings
-import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.Verilog
 
 import scala.collection.mutable.ArrayBuffer
@@ -91,7 +91,8 @@ object BufferSelectModuleMain extends App {
     case (uopPatterns: ArrayBuffer[ArrayBuffer[Int]], uopIdx) =>
       uopPatterns.map {
         pattern: ArrayBuffer[Int] =>
-          UopNumPattern(pattern(0)) ## UopNumOHsPattern(pattern.drop(1).toSeq, mopWidth)
+          val res: UopNumWithChannelUopNum = UopNumPattern(pattern(0)) ## UopNumOHsPattern(pattern.drop(1).toSeq, mopWidth)
+          res
       }.toSeq
   }.toSeq
 

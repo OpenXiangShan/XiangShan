@@ -2,13 +2,13 @@ package xiangshan.backend.vector.Decoder
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.{BoolDecodeField, DecodeField, DecodePattern, DecodeTable}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, UopNumOHsPattern}
 import xiangshan.backend.vector.Decoder.Select.ChannelUopSelectUtil.{genDecodeOutPort2, genUopBufferPort2, genUopNumPatterns2}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.ScalaTypeExt._
 import xiangshan.backend.vector.util.Verilog
+import xiangshan.backend.vector.Decoder.util._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
@@ -27,7 +27,7 @@ class UopBufferCtrlDecoder(
 
   val in = IO(Input(new Bundle {
     val uopBufferNum = UInt(3.W)
-    val channelUopNum = Vec(mopWidth, UopNumOH())
+    val channelUopNum = Vec(mopWidth, NumUopOH())
   }))
   val out = IO(Output(new Bundle {
     val uopValids = Vec(uopWidth, Bool())

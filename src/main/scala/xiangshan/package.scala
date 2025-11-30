@@ -26,6 +26,7 @@ import xiangshan.backend.fu.vector._
 import xiangshan.backend.issue._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.decode.{Imm, ImmUnion}
+import xiangshan.backend.vector.util.BString.BinaryStringHelper
 
 package object xiangshan {
   object SrcType {
@@ -65,9 +66,10 @@ package object xiangshan {
     def isBusy(state: UInt): Bool = state === this.busy
   }
 
-  def FuOpTypeWidth = 9
   object FuOpType {
-    def apply() = UInt(FuOpTypeWidth.W)
+    def width = 9
+
+    def apply() = UInt(width.W)
     def X     = BitPat("b0_0000_0000")
     def FMVXF = BitPat("b1_1000_0000") //for fmv_x_d & fmv_x_w
   }
@@ -162,13 +164,12 @@ package object xiangshan {
     def FMX_H_X   =  "b0_01_01".U
   }
 
-  object CommitType {
-    def NORMAL = "b00".U  // int/fp
-    def BRANCH = "b01".U  // branch
-    def LOAD   = "b10".U  // load
-    def STORE  = "b11".U  // store
+  object CommitType extends NamedUInt(2) {
+    def NORMAL = b"00"  // int/fp
+    def BRANCH = b"01"  // branch
+    def LOAD   = b"10"  // load
+    def STORE  = b"11"  // store
 
-    def apply() = UInt(2.W)
     def isLoadStore(commitType: UInt): Bool = commitType(1)
     def lsInstIsStore(commitType: UInt): Bool = commitType(0)
     def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
@@ -401,7 +402,7 @@ package object xiangshan {
     def isZicond(func: UInt): Bool = func(6, 4).andR && !func(3)
     def isJmp(func: UInt): Bool = func(6, 3).andR & !func(2)
 
-    def apply() = UInt(FuOpTypeWidth.W)
+    def apply() = UInt(FuOpType.width.W)
   }
 
   object VSETOpType {
@@ -749,22 +750,19 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b0111".U
-    def IMM_S  = "b1110".U
-    def IMM_SB = "b0001".U
-    def IMM_U  = "b0010".U
-    def IMM_UJ = "b0011".U
-    def IMM_I  = "b0100".U
-    def IMM_Z  = "b0101".U
-    def INVALID_INSTR = "b0110".U
-    def IMM_B6 = "b1000".U
+    def IMM_S  = "b0001".U
+    def IMM_SB = "b0010".U
+    def IMM_U  = "b0011".U
+    def IMM_UJ = "b0100".U
+    def IMM_I  = "b0101".U
+    def IMM_Z  = "b0110".U
 
-    def IMM_OPIVIS = "b1001".U
-    def IMM_OPIVIU = "b1010".U
-    def IMM_VSETVLI   = "b1100".U
-    def IMM_VSETIVLI  = "b1101".U
-    def IMM_LUI32 = "b1011".U
-    def IMM_VRORVI = "b1111".U
+    def IMM_OPIVIS    = "b1000".U
+    def IMM_OPIVIU    = "b1001".U
+    def IMM_VSETVLI   = "b1010".U
+    def IMM_VSETIVLI  = "b1011".U
+    def IMM_VRORVI    = "b1100".U
+    def IMM_LUI32     = "b1110".U
 
     def X      = BitPat("b0000")
 
@@ -778,14 +776,12 @@ package object xiangshan {
         IMM_UJ.litValue        -> "UJ",
         IMM_I.litValue         -> "I",
         IMM_Z.litValue         -> "Z",
-        IMM_B6.litValue        -> "B6",
         IMM_OPIVIS.litValue    -> "VIS",
         IMM_OPIVIU.litValue    -> "VIU",
         IMM_VSETVLI.litValue   -> "VSETVLI",
         IMM_VSETIVLI.litValue  -> "VSETIVLI",
         IMM_LUI32.litValue     -> "LUI32",
         IMM_VRORVI.litValue    -> "VRORVI",
-        INVALID_INSTR.litValue -> "INVALID",
       )
       strMap(immType.litValue)
     }
@@ -798,7 +794,6 @@ package object xiangshan {
         IMM_UJ.litValue        -> ImmUnion.J,
         IMM_I.litValue         -> ImmUnion.I,
         IMM_Z.litValue         -> ImmUnion.Z,
-        IMM_B6.litValue        -> ImmUnion.B6,
         IMM_OPIVIS.litValue    -> ImmUnion.OPIVIS,
         IMM_OPIVIU.litValue    -> ImmUnion.OPIVIU,
         IMM_VSETVLI.litValue   -> ImmUnion.VSETVLI,

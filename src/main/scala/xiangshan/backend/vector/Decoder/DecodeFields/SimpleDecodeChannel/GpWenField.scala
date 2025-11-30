@@ -1,11 +1,11 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
-import freechips.rocketchip.rocket.Instructions.{VCPOP_M, VFIRST_M, VMV_X_S}
+import xiangshan.backend.decode.isa.Instructions.{VCPOP_M, VFIRST_M, VMV_X_S}
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
 object GpWenField extends BoolDecodeField[InstPattern] {
   override def name: String = "gpWen"

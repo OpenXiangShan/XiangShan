@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utils.BundleUtils.makeValid
-import utils.OptionWrapper
+import utils.{NamedUInt, OptionWrapper}
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
@@ -79,12 +79,12 @@ object Bundles {
       this.vtype            := source.vtype
       this.specvtype        := source.specvtype
       this.debug.foreach(_.pc := source.pc)
-      this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
+      this.debug.foreach(_.seqNum := source.debug_seqNum)
     }
   }
   class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val debug_seqNum = InstSeqNum()
+    val seqNum = InstSeqNum()
   }
 
   // DecodeInUop --[Decode]--> DecodeOutUop
@@ -131,7 +131,7 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
+    val numWB = NumWB() // rob need this
     val needFrm = new NeedFrmBundle
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
@@ -158,7 +158,7 @@ object Bundles {
   }
   class DecodeOutUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val debug_seqNum = InstSeqNum()
+    val seqNum = InstSeqNum()
   }
 
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
@@ -217,7 +217,7 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
+    val numWB = NumWB() // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
@@ -471,7 +471,7 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
+    val numWB           = NumWB() // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
@@ -1188,8 +1188,16 @@ object Bundles {
     val isForVSnonLeafPTE = Bool()
   }
 
-  object UopIdx {
-    def apply()(implicit p: Parameters): UInt = UInt(log2Up(p(XSCoreParamsKey).MaxUopSize + 1).W)
+  object UopIdx extends NamedUInt(3)
+
+  object NumWB extends {
+    def apply()(implicit p: Parameters): UInt = {
+      UInt(width.W)
+    }
+
+    def width(implicit p: Parameters): Int = {
+      p(XSCoreParamsKey).MaxUopSize + 1
+    }
   }
 
   object FuLatency {

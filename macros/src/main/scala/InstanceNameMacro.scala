@@ -26,6 +26,28 @@ object InstanceNameMacro {
     q"_root_.scala.collection.immutable.Seq(..$names)"
   }
 
+  def withName[T](x: T): (T, String) = macro withNameImpl[T]
+
+  def withNameImpl[T: c.WeakTypeTag](c: blackbox.Context)(x: c.Tree): c.Tree = {
+    import c.universe._
+
+    val name = this.extractName(c)(x)
+    q"($x, $name)"
+  }
+
+  def withNameSeq[T](xs: T*): Seq[(T, String)] = macro withNameSeqImpl[T]
+
+  def withNameSeqImpl[T: c.WeakTypeTag](c: blackbox.Context)(xs: c.Expr[T]*): c.Tree = {
+    import c.universe._
+
+    val tuples: Seq[Tree] = xs.map { expr =>
+      val name = extractName(c)(expr.tree)
+      q"($expr, $name)"
+    }
+
+    q"Seq(..$tuples)"
+  }
+
   private def extractName(c: blackbox.Context)(tree: c.Tree): String = {
     import c.universe._
     tree match {

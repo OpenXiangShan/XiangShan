@@ -102,7 +102,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   io.in.zipWithIndex.map { case (o, i) =>
     o.bits.debug.foreach{ x =>
-      PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+      PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
     }
   }
 

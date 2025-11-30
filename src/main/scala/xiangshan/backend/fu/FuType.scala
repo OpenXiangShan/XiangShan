@@ -9,14 +9,15 @@ import xiangshan.XSCoreParamsKey
 import scala.language.implicitConversions
 
 object FuType extends OHEnumeration {
-  class OHType(i: Int, name: String) extends super.OHVal(i: Int, name: String)
+  outer =>
+
+  class OHType(i: Int, name: String) extends super.OHVal(i: Int, name: String) {
+    lazy val size: Int = outer.values.size
+    def U: UInt = ohid.U(size.W)
+    def U(width: Width): UInt = ohid.U(width)
+  }
 
   def OHType(i: Int, name: String): OHType = new OHType(i, name)
-
-  implicit class fromOHValToLiteral(x: OHType) {
-    def U: UInt = x.ohid.U
-    def U(width: Width): UInt = x.ohid.U(width)
-  }
 
   private var initVal = 0
 

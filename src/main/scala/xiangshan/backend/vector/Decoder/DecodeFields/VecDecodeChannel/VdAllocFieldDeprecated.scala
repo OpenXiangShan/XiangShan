@@ -2,10 +2,10 @@ package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3._
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.DecodeField
 import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.{SplitTypeOHPattern, UopLmulNfSplitOHPattern}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb3, LmulPattern, NfPattern}
 import xiangshan.backend.vector.Decoder.Split.SplitType
+import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 

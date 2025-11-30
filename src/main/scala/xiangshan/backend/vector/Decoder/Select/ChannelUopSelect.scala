@@ -2,9 +2,9 @@ package xiangshan.backend.vector.Decoder.Select
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.{DecodeField, DecodeTable}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{UopNumOHsPattern, UopNumOHsPatterns}
-import xiangshan.backend.vector.Decoder.UopNumOH
+import xiangshan.backend.vector.Decoder.NumUopOH
+import xiangshan.backend.vector.Decoder.util.{DecodeField, DecodeTable}
 import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.Verilog
@@ -20,7 +20,7 @@ class ChannelUopSelectVectorModule(
   import ChannelUopSelectUtil._
 
   val in = IO(Input(new Bundle {
-    val uopNumOHs = Vec(mopWidth, UopNumOH())
+    val uopNumOHs = Vec(mopWidth, NumUopOH())
   }))
   val out = IO(Output(new Bundle {
     // uopSel(i)(j): uop(i) select decoder(j)'s k-th port
@@ -139,7 +139,7 @@ class ChannelUopSelectModule[T <: Data](
 
   val in =  IO(Input(new Bundle {
     val channelOut = Vec(mopWidth, Vec(8, gen))
-    val uopNumOHs = Vec(mopWidth, UopNumOH())
+    val uopNumOHs = Vec(mopWidth, NumUopOH())
   }))
   val out = IO(Output(new Bundle {
     val channelUopSel = Vec(uopWidth + uopBufferSize, Vec(mopWidth, Vec(maxSplitUopNum, Bool())))

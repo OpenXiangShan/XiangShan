@@ -3,19 +3,23 @@ package xiangshan.backend.vector.Decoder.DecodeChannel
 import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
-import chisel3.util.experimental.decode.{DecodeBundle, DecodePattern, DecodeTable}
-import freechips.rocketchip.rocket.Instructions
+import xiangshan.backend.Bundles.UopIdx
+import xiangshan.backend.decode.isa.Instructions
+import xiangshan.{CommitType, FuOpType}
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
-import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
-import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.InstNfLmulSewPattern
-import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{EewField, FpWenField, GpWenField, Src12RevField, VdAllocFieldDeprecated, VdEew1bField, VpWenField, VxsatWenField}
+import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, VType}
+import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.InstSewLmulNfPattern
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{UopInfoField, _}
 import xiangshan.backend.vector.Decoder.DecodeFields._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.{SplitType, SplitTypeOH}
-import xiangshan.backend.vector.Decoder.Types.EnumLMUL
+import xiangshan.backend.vector.Decoder.Types.{EnumLMUL, NumUop, VdDepElim}
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameWithIllegal
-import xiangshan.backend.vector.Decoder._
+import xiangshan.backend.vector.Decoder.util._
+import xiangshan.backend.vector.Decoder.{util, _}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.Verilog
@@ -42,7 +46,7 @@ class VecDecodeChannel(
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(new Bundle {
     val uop = Vec(numUopOut, ValidIO(new VecDecodeChannelOutputUop))
-    val uopNumOH = UopNumOH()
+    val uopNumOH = NumUopOH()
   }))
   val instField: Riscv32BitInst with BitFieldsVec = in.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec)
 
@@ -59,7 +63,7 @@ class VecDecodeChannel(
       RVVInstWithConfigPattern(allInPatterns(i), Sews.all(j).toBitPat)
   }.flatten
 
-  val allFields = Seq(
+  val allFields: Seq[util.BoolDecodeField[VecInstPattern]] = Seq(
     Src12RevField,
     VdEew1bField,
   )
@@ -109,7 +113,6 @@ class VecDecodeChannel(
 
     out.uop(i).bits.src        := Mux(vsetDecoder.out.renameInfo.valid, vsetDecoder.out.src, splitCtrlDecoder.out.uopSrc(i))
     out.uop(i).bits.uopDepend  := Mux(vsetDecoder.out.renameInfo.valid, false.B, splitCtrlDecoder.out.uopDepend(i))
-//    out.uop(i).bits.vdAlloc    := splitCtrlDecoder.out.vdAlloc(i)
     out.uop(i).bits.src12Rev   := Mux(vsetDecoder.out.renameInfo.valid, false.B, decodeResult(Src12RevField))
     out.uop(i).bits.vdEew1b    := decodeResult(VdEew1bField)
     out.uop(i).bits.uopIdx     := i.U
@@ -121,18 +124,32 @@ class VecDecodeChannel(
 
 class DecodeChannelInput extends Bundle {
   val rawInst = UInt(32.W)
-  val sew = VSew()
-  val lmul = VLmul()
+  val vtype = VType()
+  def sew: UInt = vtype.vsew
+  def lmul: UInt = vtype.vlmul
+  def ma: Bool = vtype.vma
+  def ta: Bool = vtype.vta
 }
 
 class VecDecodeChannelOutputUop extends Bundle with HasVectorSettings {
+  val fuType: UInt = FuType()
+  val opcode: UInt = Opcode()
   val renameInfo = new UopInfoRenameWithIllegal
   val src = new UopSrcBundle
+  val frmRen = Bool()
+  val fflagsWen = Bool()
   val uopDepend = Bool()
   val src12Rev = Bool()
   val vdEew1b = Bool()
-  val uopIdx = UInt(3.W)
+  // 0~7: 1~8 uops
+  val numUop = NumUop()
+  val uopIdx = UopIdx()
+  val isFirstUop = Bool()
   val isLastUop = Bool()
+  val commitType = CommitType()
+  val vdDepElim = VdDepElim()
+  val isWritePartVd = Bool()
+  val isVset = Bool()
 }
 
 class SplitCtlDecoder(
@@ -192,11 +209,11 @@ class SplitCtlDecoder(
     new DecodeTable(allInPatterns, allFields)
   }.decode(in.lmul ## instField.NF ## in.splitTypeOH.asUInt)
 
-  val arithInstPattern: Seq[InstNfLmulSewPattern] = for {
+  val arithInstPattern: Seq[InstSewLmulNfPattern] = for {
     inst <- instSeq.collect { case x: VecArithInstPattern => x }
     lmul <- Lmuls.all
   } yield {
-    InstNfLmulSewPattern(inst, NfPattern.dontCare, LmulPattern(lmul), SewPattern.dontCare)
+    InstSewLmulNfPattern(inst, SewPattern.dontCare, LmulPattern(lmul), NfPattern.dontCare)
   }
 
   val memWholeInstPattern = for {
@@ -204,7 +221,7 @@ class SplitCtlDecoder(
       case x: VecMemWhole => x
     }
   } yield {
-    InstNfLmulSewPattern(inst, NfPattern.dontCare, LmulPattern.dontCare, SewPattern.dontCare)
+    InstSewLmulNfPattern(inst, SewPattern.dontCare, LmulPattern.dontCare, NfPattern.dontCare)
   }
 
   val memMaskInstPattern = for {
@@ -212,10 +229,10 @@ class SplitCtlDecoder(
       case x: VecMemMask => x
     }
   } yield {
-    InstNfLmulSewPattern(inst, NfPattern.dontCare, LmulPattern.dontCare, SewPattern.dontCare)
+    InstSewLmulNfPattern(inst, SewPattern.dontCare, LmulPattern.dontCare, NfPattern.dontCare)
   }
 
-  val memSegInstPattern: Seq[InstNfLmulSewPattern] = (
+  val memSegInstPattern: Seq[InstSewLmulNfPattern] = (
     for {
       inst <- instSeq.collect {
         case x: VecMemInstPattern if !x.isInstanceOf[VecMemWhole] && !x.isInstanceOf[VecMemMask] => x
@@ -232,13 +249,13 @@ class SplitCtlDecoder(
         val iEmul = emul
         val uopNum = (1.0 max iEmul max dEmul).toInt * seg
         if (iEmul >= 0.125 && uopNum <= 8)
-          InstNfLmulSewPattern(inst, NfPattern(nf), LmulPattern(lmul), SewPattern(sew))
+          InstSewLmulNfPattern(inst, SewPattern(sew), LmulPattern(lmul), NfPattern(nf))
         else
           null
       }
       else {
         if (seg * emul.max(1.0) <= 8)
-          InstNfLmulSewPattern(inst, NfPattern(nf), LmulPattern(lmul), SewPattern(sew))
+          InstSewLmulNfPattern(inst, SewPattern(sew), LmulPattern(lmul), NfPattern(nf))
         else
           null
       }
@@ -246,7 +263,7 @@ class SplitCtlDecoder(
   ).filter(_ != null)
 
   val uopCtlResult: DecodeBundle = {
-    val allInPatterns: Seq[InstNfLmulSewPattern] = arithInstPattern ++ memWholeInstPattern ++ memMaskInstPattern ++ memSegInstPattern
+    val allInPatterns: Seq[InstSewLmulNfPattern] = arithInstPattern ++ memWholeInstPattern ++ memMaskInstPattern ++ memSegInstPattern
 
     val allFields = Seq(
       UopInfoField
@@ -313,19 +330,19 @@ object SplitCtlDecoderUtil {
     }
   }
 
-  type InstNfLmulSewPattern = DecodePatternComb4[VecInstPattern, NfPattern, LmulPattern, SewPattern]
+  type InstSewLmulNfPattern = DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern]
 
-  object InstNfLmulSewPattern {
-    type Type = InstNfLmulSewPattern
+  object InstSewLmulNfPattern {
+    type Type = InstSewLmulNfPattern
 
     def apply(
       inst: VecInstPattern,
-      nf: NfPattern,
-      lmul: LmulPattern,
       sew: SewPattern,
-    ): DecodePatternComb4[VecInstPattern, NfPattern, LmulPattern, SewPattern] = inst ## nf ## lmul ## sew
+      lmul: LmulPattern,
+      nf: NfPattern,
+    ): DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern] = inst ## sew ## lmul ## nf
 
-    def unapply(arg: Type): Option[(VecInstPattern, NfPattern, LmulPattern, SewPattern)] = {
+    def unapply(arg: Type): Option[(VecInstPattern, SewPattern, LmulPattern, NfPattern)] = {
       Some((
         arg.p1,
         arg.p2,
@@ -367,10 +384,6 @@ object VecDecoderChannel {
       VxsatWenField,
       AlwaysReadVdField,
     )
-
-    for (field <- fields) {
-      println(s"${field.name} = ${field.genTable(inst)}")
-    }
   }
 }
 
@@ -386,15 +399,15 @@ object SplitCtlDecoderMain extends App {
   inst.setName(getVariableName(Instructions.VWREDSUMU_VS))
   val lmul = LmulPattern(VLmul.m4.toBitPat)
 
-  checkFields(inst, NfPattern.dontCare, LmulPattern(VLmul.m4), SewPattern(VSew.e8))
+  checkFields(inst, SewPattern(VSew.e8), LmulPattern(VLmul.m4), NfPattern.dontCare)
 
-  def checkFields(inst: VecInstPattern, nf: NfPattern, lmul: LmulPattern, sew: SewPattern) = {
+  def checkFields(inst: VecInstPattern, sew: SewPattern, lmul: LmulPattern, nf: NfPattern) = {
     val fields = Seq(
       UopInfoField
     )
 
     for (field <- fields) {
-      field.genUopSeq(InstNfLmulSewPattern(inst, nf, lmul, sew)).map(_.uopInfoRenameString).foreach(println)
+      field.genUopSeq(InstSewLmulNfPattern(inst, sew, lmul, nf)).map(_.uopInfoRenameString).foreach(println)
     }
   }
 }

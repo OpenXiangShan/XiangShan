@@ -2,11 +2,11 @@ package xiangshan.backend.vector.Decoder
 
 import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
-import chisel3.util.experimental.decode.{DecodeBundle, DecodeTable}
 import xiangshan.backend.vector.Decoder.DecodeChannel.DecodeChannelInput
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
+import xiangshan.backend.vector.Decoder.util.{DecodeBundle, DecodeTable}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.Verilog
 

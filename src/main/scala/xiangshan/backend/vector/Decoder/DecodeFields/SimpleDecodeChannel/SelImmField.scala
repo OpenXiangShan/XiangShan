@@ -1,13 +1,12 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.UInt
-import chisel3.util.experimental.decode.DecodeField
 import chisel3.util.{BitPat, ValidIO}
-import freechips.rocketchip.rocket.Instructions._
-import xiangshan.backend.decode.Zvbb.VROR_VI
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern.Category
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.Types.SelImm
+import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
@@ -24,8 +23,16 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
       case int: IntInstPattern => int match {
         case _: IntRTypePattern => null
         case intI: IntITypePattern => intI match {
+          case IntImmInstPattern() => SelImm.I
+          case IntLoadInstPattern() => SelImm.I
+          case JalrPattern() => SelImm.I
+          case SystemInstPattern() => SelImm.I
+          case HyperLoadInstPattern() => SelImm.I
           case CSRInstPattern() => SelImm.Z
-          case _ => null
+          case AmoLrInstPattern() => null
+          case CboInstPattern() => SelImm.S
+          case FenceInstPattern() => null
+          case FenceiInstPattern() => null
         }
         case _: IntSTypePattern => SelImm.S
         case IntBTypePattern() => SelImm.SB
@@ -45,7 +52,7 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
       case vec: VecInstPattern => vec match {
         case _: VecMemInstPattern => null
         case vecArith: VecArithInstPattern =>
-          if (vecArith.category.rawString == Category.OPIVI) {
+          if (vecArith.category.rawString == Category.OPIVI.str) {
             if (getVariableName(VROR_VI) == vecArith.name)
               SelImm.VRORVI
             else if (unsignedImmVecInst.contains(vecArith.name))

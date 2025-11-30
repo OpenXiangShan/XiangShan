@@ -2,18 +2,20 @@ package xiangshan.backend.vector.Decoder
 
 import chisel3._
 import chisel3.experimental.hierarchy.core.{Definition, Instance}
-import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utils.BundleUtils.makeValid
-import xiangshan.{ExceptionVec, TriggerAction, XSBundle, XSCoreParamsKey, XSTileKey}
+import xiangshan._
+import xiangshan.backend.Bundles.{DecodeInUopDebug, UopIdx}
+import xiangshan.backend.decode.isa.Extensions.{A, D, ExtBase, F, I, M, S, System, V, Za64rs, Zawrs, Zba, Zbb, Zbc, Zbkb, Zbkc, Zbkx, Zbs, Zicsr}
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.DecodeChannel._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.Select.{BufferSelectModule, UopSelectModule}
 import xiangshan.backend.vector.Decoder.Split.VecUopSplitModule
-import xiangshan.backend.vector.Decoder.Types.{DecodeSrcType, MaskTypeChiselEnum, OperandType, SelImm}
+import xiangshan.backend.vector.Decoder.Types.{SelImm, _}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Verilog
@@ -25,7 +27,7 @@ import scala.language.implicitConversions
 class DecodeChannels(
   mopWidth: Int,
   uopWidth: Int,
-  val instSeq: Seq[InstPattern],
+  extensions: Seq[ExtBase],
   numM2M4M8Channel: (Int, Int, Int) = (8, 8, 8),
 )(
   implicit p: Parameters
@@ -39,9 +41,21 @@ class DecodeChannels(
     s"_MOP${mopWidth}_UOP${uopWidth}" +
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
+  val simpleExts: Seq[ExtBase] = extensions.filterNot(Seq(V).contains)
+  val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
+  val simpleTable = simpleExts.map(_.table).reduce(_ ++ _)
+
+  val vectorExts = extensions.filter(Seq(V).contains)
+  val vectorInsts = InstPattern.extensionInsts(vectorExts: _*).map(_.asInstanceOf[VecInstPattern])
+  for (inst <- vectorInsts) {
+    println(inst)
+  }
+
   val uopBufferSize = maxSplitUopNum - 1
 
   val in = IO(new Bundle {
+    // used to flush UopBuffer
+    val redirect = Input(Bool())
     val mops = Flipped(Vec(mopWidth, DecoupledIO(new Bundle {
       val info = new DecodeChannelInput
       val ctrl = new MopCtrlBundle
@@ -59,17 +73,14 @@ class DecodeChannels(
   val insts: Seq[Riscv32BitInst with BitFieldsVec] = in.mops.map(_.bits.info.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec))
   val inMopCtrl: Seq[MopCtrlBundle] = in.mops.map(_.bits.ctrl)
 
-  val vecInstPatterns = instSeq.collect{ case x: VecInstPattern => x }
-  val nonVecInstPatterns = instSeq.filterNot(_.isInstanceOf[VecInstPattern])
-
-  val vecDecodeChannelM8: Definition[VectorDecodeChannel] = Definition(new VectorDecodeChannel(vecInstPatterns))
+  val vecDecodeChannelM8: Definition[VectorDecodeChannel] = Definition(new VectorDecodeChannel(vectorInsts))
 
 //  lazy val vecDecodeChannelM8: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, true)))
 //  lazy val vecDecodeChannelM4: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, true, false)))
 //  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
 //  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
-  val simpleDecodeChannel: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(nonVecInstPatterns))
+  val simpleDecodeChannel: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, simpleTable))
 
   val vecDecodeChannels: Seq[Instance[VectorDecodeChannel]] = Seq.tabulate(mopWidth) {
     i => Instance(vecDecodeChannelM8)
@@ -101,14 +112,16 @@ class DecodeChannels(
 
   // should be 0~7
   val uopBufferNumNext = Wire(UInt(log2Up(uopBufferSize).W))
-  val uopBufferNum = RegEnable(uopBufferNumNext, 0.U(log2Up(uopBufferSize).W), uopBufferUpdate)
+  val uopBufferNum = RegEnable(uopBufferNumNext, 0.U(log2Up(uopBufferSize).W), uopBufferUpdate || in.redirect)
 
   val uopBufferValid = Wire(Vec(uopBufferSize, Bool()))
   val uopBufferNext = Wire(Vec(uopBufferSize, new DecodeChannelOutput))
-  val uopBuffer = (uopBufferNext zip uopBufferUpdateVec).map {
+  val uopBuffer: Seq[DecodeChannelOutput] = (uopBufferNext zip uopBufferUpdateVec).map {
     case (next, update) =>
       RegEnable(next, update)
   }
+
+
   val bufferedMopCtrlNext = Wire(new MopCtrlBundle)
   val bufferedMopCtrl = RegEnable(bufferedMopCtrlNext, uopBufferUpdate)
 
@@ -144,15 +157,13 @@ class DecodeChannels(
   val vecDecodeChannelsIn: Seq[DecodeChannelInput] = vecDecodeChannels.map(_.in)
   vecDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
-    modIn.sew := in.mops(i).bits.info.sew
-    modIn.lmul := in.mops(i).bits.info.lmul
+    modIn.vtype := in.mops(i).bits.info.vtype
   }
 
   val simDecodeChannelsIn: Seq[DecodeChannelInput] = simpleDecodeChannels.map(_.in)
   simDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
-    modIn.sew := in.mops(i).bits.info.sew
-    modIn.lmul := in.mops(i).bits.info.lmul
+    modIn.vtype := in.mops(i).bits.info.vtype
   }
 
   /**
@@ -167,12 +178,12 @@ class DecodeChannels(
         Mux(
           vecChannelSelectVec(i),
           vecDecodeChannels(i).out.uopNumOH,
-          UopNumOH.N1,
+          NumUopOH.N1,
         ),
-        UopNumOH.N0
+        NumUopOH.N0
       )
   )
-  uopBufferNumNext := uopBufferCtrlDecoder.out.uopBufferNum
+  uopBufferNumNext := Mux(in.redirect, 0.U, uopBufferCtrlDecoder.out.uopBufferNum)
   uopBufferUpdateVec := uopBufferCtrlDecoder.out.bufferValids
   uopBufferValid := uopBufferCtrlDecoder.out.bufferValids
 
@@ -221,6 +232,10 @@ class DecodeChannels(
 }
 
 class DecodeChannelOutput extends Bundle {
+  val fuType: UInt = FuType()
+  val opcode: UInt = FuOpType()
+  val isVset: Bool = Bool()
+
   val src1Ren = Bool()
   val src1Type = DecodeSrcType()
   val src2Ren = Bool()
@@ -232,6 +247,7 @@ class DecodeChannelOutput extends Bundle {
   val lsrc3 = UInt(5.W)
   val vlRen = Bool()
   val v0Ren = Bool()
+  val frmRen = Bool()
   val maskType = MaskTypeChiselEnum()
   val intRmRen = Bool()
 
@@ -242,16 +258,32 @@ class DecodeChannelOutput extends Bundle {
 
   val vlWen = Bool()
   val vxsatWen = Bool()
+  val fflagsWen = Bool()
 
   val noSpec = Bool()
   val blockBack = Bool()
   val flushPipe = Bool()
   val selImm = ValidIO(SelImm())
+  val imm = UInt(32.W)
+  val commitType = CommitType()
+  val vdDepElim = VdDepElim()
+  val isWritePartVd = Bool()
+
+  val canRobCompress = Bool()
+
+  val numUop = NumUop()
+  val uopIdx = UopIdx()
+  val isFirstUop = Bool()
+  val isLastUop = Bool()
 }
 
 object DecodeChannelOutput {
   def fromVecChannelUop(vuop: VecDecodeChannelOutputUop): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
+
+    uop.fuType := 0.U
+    uop.opcode := 0.U
+    uop.isVset := vuop.isVset
 
     uop.src1Ren := vuop.renameInfo.uop.src1Ren
     uop.src1Type := vuop.renameInfo.uop.src1Type
@@ -264,6 +296,7 @@ object DecodeChannelOutput {
     uop.lsrc3 := vuop.src.dest
     uop.vlRen := vuop.renameInfo.uop.vlRen
     uop.v0Ren := vuop.renameInfo.uop.v0Ren
+    uop.frmRen := vuop.frmRen
     uop.maskType := vuop.renameInfo.uop.maskType
     uop.intRmRen := vuop.renameInfo.uop.intRmRen
     uop.gpWen := vuop.renameInfo.uop.gpWen
@@ -273,17 +306,33 @@ object DecodeChannelOutput {
 
     uop.vlWen := vuop.renameInfo.uop.vlWen
     uop.vxsatWen := vuop.renameInfo.uop.vxsatWen
+    uop.fflagsWen := vuop.fflagsWen
 
     uop.noSpec := false.B
     uop.blockBack := false.B
     uop.flushPipe := false.B
     uop.selImm.valid := false.B
     uop.selImm.bits := SelImm.OPIVIU // Todo
+    uop.imm := 0.U
+    uop.commitType := vuop.commitType
+    uop.vdDepElim := vuop.vdDepElim
+    uop.isWritePartVd := vuop.isWritePartVd
+
+    uop.canRobCompress := false.B
+
+    uop.numUop := vuop.numUop
+    uop.uopIdx := vuop.uopIdx
+    uop.isFirstUop := vuop.isFirstUop
+    uop.isLastUop := vuop.isLastUop
+
     uop
   }
 
   def fromSimpleChannelUop(suop: SimpleDecodeChannelOutput): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
+    uop.fuType := suop.fuType
+    uop.opcode := suop.opcode
+    uop.isVset := false.B
 
     uop.src1Ren := suop.src1RenType.ren
     uop.src1Type := suop.src1RenType.typ
@@ -296,6 +345,7 @@ object DecodeChannelOutput {
     uop.lsrc3 := suop.lsrc3
     uop.vlRen := false.B
     uop.v0Ren := false.B
+    uop.frmRen := suop.frmRen
     uop.maskType := DontCare
     uop.intRmRen := DontCare
     uop.gpWen := suop.gpWen
@@ -305,28 +355,42 @@ object DecodeChannelOutput {
 
     uop.vlWen := false.B
     uop.vxsatWen := false.B
+    uop.fflagsWen := suop.fflagsWen
 
     uop.noSpec := suop.noSpec
     uop.blockBack := suop.blockBack
     uop.flushPipe := suop.flushPipe
     uop.selImm := suop.selImm
+    uop.imm := suop.imm
+    uop.commitType := suop.commitType
+    uop.vdDepElim := VdDepElim.Always // never used
+    uop.isWritePartVd := false.B
+
+    uop.canRobCompress := suop.canRobCompress
+
+    uop.numUop := suop.numUop
+    uop.uopIdx := 0.U
+    uop.isFirstUop := true.B
+    uop.isLastUop := true.B
 
     uop
   }
 }
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
-  val pc               = UInt(VAddrBits.W)
   val foldpc           = UInt(MemPredPCWidth.W)
   val exceptionVec     = ExceptionVec()
   val isFetchMalAddr   = Bool()
   val trigger          = TriggerAction()
-  val preDecodeInfo    = new PreDecodeInfo
-  val pred_taken       = Bool()
+  val isRVC            = Bool()
+  val fixedTaken       = Bool()
+  val predTaken        = Bool()
   val crossPageIPFFix  = Bool()
   val ftqPtr           = new FtqPtr
   val ftqOffset        = UInt(log2Up(FetchBlockInstOffsetWidth).W)
   val isLastInFtqEntry = Bool()
+  val rawInst          = UInt(32.W)
+  val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())
 }
 
 class SrcInfo extends Bundle {
@@ -364,11 +428,21 @@ object DecodeChannelsMain extends App {
     case XSVectorParamKey => XSVectorParameters(128)
   })
 
+  val extensions: Seq[ExtBase] = Seq(
+    I, M, A, F, D, Zicsr,
+    System, S,
+    Za64rs, /*Zacas,*/ Zawrs,
+    Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
+    V,
+    // Zcb, Zcmop,
+    // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
+  )
+
   Verilog.emitVerilog(
     new DecodeChannels(
       mopWidth = 8,
       uopWidth = 8,
-      instSeq = InstPattern.all,
+      extensions = extensions,
       numM2M4M8Channel = (8, 8, 8),
     )(defaultConfig),
     Array(

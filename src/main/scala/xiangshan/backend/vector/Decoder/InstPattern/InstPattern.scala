@@ -1,10 +1,12 @@
 package xiangshan.backend.vector.Decoder.InstPattern
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.DecodePattern
+import xiangshan.backend.decode.isa.Extensions.{ExtBase, HasInst}
+import xiangshan.backend.decode.isa.Instructions
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, SewPattern}
 import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
+import xiangshan.backend.vector.Decoder.util._
 
 import scala.beans.BeanProperty
 import scala.collection.mutable.ArrayBuffer
@@ -25,6 +27,33 @@ sealed trait InstPattern extends DecodePattern {
   def rs2: BitPat = this.rawInst(24, 20)
 
   def opcode7: BitPat = this.rawInst(6, 0)
+
+  def hasRd: Boolean = {
+    this match {
+      case int: IntInstPattern => int match {
+        case pattern: IntRTypePattern => true
+        case pattern: IntITypePattern => true
+        case pattern: IntSTypePattern => false
+        case IntBTypePattern() => false
+        case IntUTypePattern() => true
+        case IntJTypePattern() => true
+      }
+      case fp: FpInstPattern => fp match {
+        case pattern: FpITypeInstPattern => true
+        case pattern: FpRTypeInstPattern => true
+        case FpR4TypeInstPattern() => true
+        case FpSTypeInstPattern() => false
+      }
+      case vec: VecInstPattern => vec match {
+        case pattern: VecArithInstPattern => true
+        case VecConfigInstPattern() => true
+        case vmi: VecMemInstPattern => vmi match {
+          case vli: VecLoadInstPattern => true
+          case vsi: VecStoreInstPattern => false
+        }
+      }
+    }
+  }
 }
 
 sealed abstract class IntInstPattern(implicit val rawInst: BitPat) extends InstPattern
@@ -53,21 +82,19 @@ object IntRTypePattern {
 
 sealed class IntITypePattern(implicit rawInst: BitPat) extends IntInstPattern
 
-object IntITypePattern {
-  def apply()(implicit rawInst: BitPat): IntITypePattern = new IntITypePattern
-}
-
 sealed class IntSTypePattern(implicit rawInst: BitPat) extends IntInstPattern
-
-object IntSTypePattern {
-  def apply()(implicit rawInst: BitPat): IntSTypePattern = new IntSTypePattern
-}
 
 case class IntBTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
 
 case class IntUTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
 
 case class IntJTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
+
+case class IntImmInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
+
+case class IntLoadInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
+
+case class JalrPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class SystemInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
@@ -84,6 +111,8 @@ case class FenceInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 case class FenceiInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class AmoInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
+
+case class IntStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePattern
 
 case class HyperStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePattern
 
@@ -276,7 +305,7 @@ object InstPattern {
 
     val res: InstPattern = opcode5.rawString match {
       // inst[6:5] == b"00"
-      case LOAD => IntITypePattern()
+      case LOAD => IntLoadInstPattern()
       case LOAD_FP =>
         width.rawString match {
           case "000" | "101" | "110" | "111" => VecLoadInstPattern()
@@ -291,13 +320,13 @@ object InstPattern {
           case "010" => CboInstPattern()  // CBO
           case _ => null
         }
-      case OP_IMM => IntITypePattern()
+      case OP_IMM => IntImmInstPattern()
       case AUIPC => IntUTypePattern()
-      case OP_IMM_32 => IntITypePattern()
+      case OP_IMM_32 => IntImmInstPattern()
       case INST48b_0 => null
 
       // inst[6:5] == b"01"
-      case STORE => IntSTypePattern()
+      case STORE => IntStoreInstPattern()
       case STORE_FP =>
         width.rawString match {
           case "000" | "101" | "110" | "111" => VecStoreInstPattern()
@@ -345,7 +374,7 @@ object InstPattern {
 
       // inst[6:5] == b"11"
       case BRANCH => IntBTypePattern()
-      case JALR => IntITypePattern()
+      case JALR => JalrPattern()
       case RESERVED => null
       case JAL => IntJTypePattern()
       case SYSTEM =>
@@ -371,11 +400,11 @@ object InstPattern {
   lazy val all: Seq[InstPattern] = {
     import scala.reflect.runtime.currentMirror
     import scala.reflect.runtime.universe._
-    val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
+    val objectType = typeOf[xiangshan.backend.decode.isa.Instructions.type]
     val methods: Iterable[MethodSymbol] = objectType.decls.collect {
       case m: MethodSymbol if m.returnType =:= typeOf[BitPat] && m.paramLists.isEmpty => m
     }
-    val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
+    val instanceMirror = currentMirror.reflect(xiangshan.backend.decode.isa.Instructions)
 
     val instMethods = ArrayBuffer.empty[MethodSymbol]
 
@@ -389,6 +418,19 @@ object InstPattern {
       pattern.foreach(_.setName(method.name.toString))
       pattern
     }.filter(_.nonEmpty).map(_.get).toSeq
+  }
+
+  def extensionInsts(exts: ExtBase*): Seq[InstPattern] = {
+    val extTypes: Seq[Instructions.InstType] = exts.flatMap(_.types)
+
+    val instWithNames: Seq[(BitPat, String)] = extTypes.flatMap(_.allWithNames)
+
+    instWithNames.map {
+      case (bp, name) =>
+        val pattern = InstPattern(bp)
+        pattern.foreach(_.setName(name))
+        pattern
+    }.filter(_.nonEmpty).map(_.get).distinctBy(_.bitPat)
   }
 
   object Opcode5 {
@@ -457,11 +499,11 @@ object VecInstPattern {
   val all: Seq[VecInstPattern] = {
     import scala.reflect.runtime.currentMirror
     import scala.reflect.runtime.universe._
-    val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
+    val objectType = typeOf[xiangshan.backend.decode.isa.Instructions.VType.type]
     val methods: Iterable[MethodSymbol] = objectType.decls.collect {
       case m: MethodSymbol if m.returnType =:= typeOf[BitPat] && m.paramLists.isEmpty => m
     }
-    val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
+    val instanceMirror = currentMirror.reflect(xiangshan.backend.decode.isa.Instructions.VType)
 
     val vectorInstMethods = ArrayBuffer.empty[MethodSymbol]
 
@@ -486,6 +528,7 @@ object VecInstPattern {
   }
 
   def withSew(insts: Seq[VecInstPattern]): Seq[DecodePatternComb2[VecInstPattern, SewPattern]] = {
+    require(insts.nonEmpty)
     val sewDependentInsts: Map[Boolean, Seq[VecInstPattern]] = insts.groupBy {
       case x: VecArithInstPattern if !x.isInstanceOf[VecGatherEI16Pattern] => false
       case _: VecConfigInstPattern => false
@@ -530,13 +573,13 @@ object VecInstPattern {
 object RVVInstPatternMain extends App {
   import scala.reflect.runtime.currentMirror
   import scala.reflect.runtime.universe._
-  val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
+  val objectType = typeOf[xiangshan.backend.decode.isa.Instructions.type]
 
   val methods: Iterable[MethodSymbol] = objectType.decls.collect {
     case m: MethodSymbol if m.returnType =:= typeOf[BitPat] && m.paramLists.isEmpty => m
   }
 
-  val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
+  val instanceMirror = currentMirror.reflect(xiangshan.backend.decode.isa.Instructions)
 
   val vectorInstMethods = ArrayBuffer.empty[MethodSymbol]
 
@@ -560,13 +603,13 @@ object RVVInstPatternMain extends App {
 object InstPatternMain extends App {
   import scala.reflect.runtime.currentMirror
   import scala.reflect.runtime.universe._
-  val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
+  val objectType = typeOf[xiangshan.backend.decode.isa.Instructions.type]
 
   val methods: Iterable[MethodSymbol] = objectType.decls.collect {
     case m: MethodSymbol if m.returnType =:= typeOf[BitPat] && m.paramLists.isEmpty => m
   }
 
-  val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
+  val instanceMirror = currentMirror.reflect(xiangshan.backend.decode.isa.Instructions)
 
   val instMethods = ArrayBuffer.empty[MethodSymbol]
 

@@ -1,9 +1,9 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
-import freechips.rocketchip.rocket.Instructions.VFMV_F_S
+import xiangshan.backend.decode.isa.Instructions.VFMV_F_S
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableName
 
 object FpWenField extends BoolDecodeField[VecInstPattern] {

@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.decode.{DecodeField, DecodeTable}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{UopNumOHsPattern, UopNumOHsPatterns}
 import xiangshan.backend.vector.Decoder.Types.UopBufferNum
-import xiangshan.backend.vector.Decoder.UopNumOH
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.Verilog

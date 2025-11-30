@@ -3,13 +3,14 @@ package xiangshan.backend.vector.Decoder.DecodeChannel
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import chisel3.util.experimental.decode._
-import freechips.rocketchip.rocket.Instructions
+import xiangshan.backend.decode.isa.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
+import xiangshan.backend.vector.Decoder.DecodePatterns.{RdZeroPattern, Rs1ZeroPattern}
 import xiangshan.backend.vector.Decoder.InstPattern._
-import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb2, DecodePatternComb5, LmulPattern, SewPattern}
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, VecUopDefines}
+import xiangshan.backend.vector.Decoder.util.{BoolDecodeField, DecodeField, DecodePattern, DecodeTable}
 import xiangshan.backend.vector.Decoder.{Lmuls, Sews}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import xiangshan.backend.vector.util.ChiselTypeExt._
@@ -147,14 +148,6 @@ object VsetDecoderUtil {
       case None => BitPat("b?")
     }
   }
-
-  case class RdZeroPattern(
-    rdZero: Option[Boolean]
-  ) extends BoolPattern(rdZero)
-
-  case class Rs1ZeroPattern(
-    rs1Zero: Option[Boolean]
-  ) extends BoolPattern(rs1Zero)
 
   case class VsetvliVtypeiLegalHead(
     zimm11bHead3Zero: Option[Boolean]
@@ -353,7 +346,6 @@ object VsetDecoderUtil {
 
 object VsetDecoderMain {
   def main(args: Array[String]): Unit = {
-    import VsetDecoderUtil._
 
 //    val patterns = vsetvlPattern ++ vsetvliPattern ++ vsetivliPattern
 //

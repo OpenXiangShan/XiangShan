@@ -1,6 +1,6 @@
 package xiangshan.backend.vector.Decoder.Uop
 
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.vector.Decoder.Types.Sign
 import xiangshan.backend.vector.Decoder.Uop.UopTrait._
 

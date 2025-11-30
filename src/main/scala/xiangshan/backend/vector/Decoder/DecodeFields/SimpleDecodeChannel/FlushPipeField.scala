@@ -1,13 +1,14 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
+import xiangshan.backend.decode.isa.PseudoInstructions.PAUSE
 import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
 object FlushPipeField extends BoolDecodeField[InstPattern] {
-  import freechips.rocketchip.rocket.Instructions._
+  import xiangshan.backend.decode.isa.Instructions._
 
   override def name: String = "flushPipe"
 

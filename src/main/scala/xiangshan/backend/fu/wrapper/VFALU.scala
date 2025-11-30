@@ -361,7 +361,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
 
-  val outVuopidxForRed = outVecCtrl.vuopIdx(3, 0) // lmul=8 sew=16, (4+2+1)(vector)+(1+1+1)(fold)+(1)(scala) max vuopIdx=10
+  val outVuopidxForRed = outVecCtrl.vuopIdx(2, 0) // lmul=8 sew=16, (4+2+1)(vector)+(1+1+1)(fold)+(1)(scala) max vuopIdx=10
   val outIsFisrtGroup = outVuopidxForRed === 0.U ||
     (outVuopidxForRed === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidxForRed === 2.U || outVuopidxForRed === 3.U) && outVlmul === VLmul.m8)

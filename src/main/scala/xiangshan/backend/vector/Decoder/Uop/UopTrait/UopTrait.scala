@@ -1,6 +1,9 @@
 package xiangshan.backend.vector.Decoder.Uop.UopTrait
 
+import chisel3._
 import chisel3.util.BitPat
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.FuType.OHType
 import xiangshan.backend.vector.Decoder.Types._
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 
@@ -68,6 +71,20 @@ object VxrmRen extends CtrlRen
 object Order extends UopTrait
 
 abstract class UopBase(baseTraits: UopTrait*) {
+
+  var fuType: UInt = null
+
+  var opcode: UInt = null
+
+  def setFuType(ohType: OHType): this.type = {
+    this.fuType = ohType.U(ohType.size.W)
+    this
+  }
+
+  def setOpcode(opcode: UInt): this.type = {
+    this.opcode = opcode
+    this
+  }
 
   def allowedTraits: Set[UopTrait] = Set()
 
@@ -190,6 +207,8 @@ abstract class UopBase(baseTraits: UopTrait*) {
     }
   }
 }
+
+case class ScalaUop(baseTrais: UopTrait*) extends UopBase(baseTrais: _*)
 
 abstract class VecUop(baseTraits: UopTrait*) extends UopBase(baseTraits: _*) {
   var maskType: MutableRef[MaskType] = new MutableRef(DestMask)

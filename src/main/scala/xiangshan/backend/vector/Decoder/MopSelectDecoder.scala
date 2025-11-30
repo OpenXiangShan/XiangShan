@@ -18,7 +18,7 @@ class MopSelectDecoder(
 
   val in = IO(Input(new Bundle {
     val uopBufferNum = UInt(3.W)
-    val channelUopNum = Vec(mopWidth, UopNumOH())
+    val channelUopNum = Vec(mopWidth, NumUopOH())
   }))
   val out = IO(Output(new Bundle {
     val uopBufferNum = UInt(3.W)

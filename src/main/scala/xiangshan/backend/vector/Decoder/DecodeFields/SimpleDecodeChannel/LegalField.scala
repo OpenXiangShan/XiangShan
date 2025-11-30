@@ -1,8 +1,8 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
 import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
 object LegalField extends BoolDecodeField[InstPattern] {
 

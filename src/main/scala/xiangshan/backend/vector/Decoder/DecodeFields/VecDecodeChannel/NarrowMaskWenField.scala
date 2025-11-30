@@ -1,8 +1,8 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.StringToExt
 
 /**

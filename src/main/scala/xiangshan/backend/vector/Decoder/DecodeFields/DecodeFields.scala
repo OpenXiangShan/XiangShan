@@ -2,16 +2,16 @@ package xiangshan.backend.vector.Decoder.DecodeFields
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.{BoolDecodeField, DecodeField}
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.SrcType
-import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.{InstNfLmulSewPattern, UopLmulNfSplitOHPattern}
+import xiangshan.backend.vector.Decoder.DecodeChannel.SplitCtlDecoderUtil.{InstSewLmulNfPattern, UopLmulNfSplitOHPattern}
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.SplitTable._
 import xiangshan.backend.vector.Decoder.Split.{SplitType, SplitTypeOH}
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector.Decoder.Uop._
+import xiangshan.backend.vector.Decoder.util._
 import xiangshan.backend.vector.Decoder.{Lmuls, Sews}
 import xiangshan.backend.vector.util.BString._
 import xiangshan.backend.vector.util.ChiselTypeExt._
@@ -903,7 +903,7 @@ object UopDependField extends DecodeField[UopLmulNfSplitOHPattern, UInt] {
   }
 }
 
-object UopInfoField extends DecodeField[InstNfLmulSewPattern, Vec[ValidIO[UopInfoRenameWithIllegal]]] {
+object UopInfoField extends DecodeField[InstSewLmulNfPattern, Vec[ValidIO[UopInfoRenameWithIllegal]]] {
   import VecUopDefines._
 
   //                                  valid          illegal
@@ -916,9 +916,9 @@ object UopInfoField extends DecodeField[InstNfLmulSewPattern, Vec[ValidIO[UopInf
 
   override def chiselType: Vec[ValidIO[UopInfoRenameWithIllegal]] = Vec(8, ValidIO(new UopInfoRenameWithIllegal))
 
-  override def genTable(op: InstNfLmulSewPattern): BitPat = {
+  override def genTable(op: InstSewLmulNfPattern): BitPat = {
     val uopSeq: Seq[UopBase] = genUopSeq(op)
-    val InstNfLmulSewPattern(instP: VecInstPattern, nfP: NfPattern, lmulP: LmulPattern, sewP: SewPattern) = op
+    val DecodePatternComb(instP: VecInstPattern, sewP: SewPattern, lmulP: LmulPattern, _: NfPattern) = op
 
     (
       if (uopSeq.nonEmpty) {
@@ -933,8 +933,8 @@ object UopInfoField extends DecodeField[InstNfLmulSewPattern, Vec[ValidIO[UopInf
     ).reverse.reduce(_ ## _)
   }
 
-  def genUopSeq(op: InstNfLmulSewPattern): Seq[UopBase] = {
-    val InstNfLmulSewPattern(instP: VecInstPattern, nfP: NfPattern, lmulP: LmulPattern, sewP: SewPattern) = op
+  def genUopSeq(op: InstSewLmulNfPattern): Seq[UopBase] = {
+    val DecodePatternComb(instP: VecInstPattern, sewP: SewPattern, lmulP: LmulPattern, nfP: NfPattern) = op
     println(s"${instP}, ${nfP}, ${lmulP}, ${sewP}")
 
     instP match {

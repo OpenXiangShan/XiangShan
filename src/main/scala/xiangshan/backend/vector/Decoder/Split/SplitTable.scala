@@ -1,7 +1,7 @@
 package xiangshan.backend.vector.Decoder.Split
 
 import chisel3.util.BitPat
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecInstPattern, VecIntVVVPattern}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.LmulPattern
 import xiangshan.backend.vector.Decoder.Types.{NoMask, Src12Mask, Src2Mask}
@@ -18,11 +18,11 @@ object SplitTable {
 
     import scala.reflect.runtime.currentMirror
     import scala.reflect.runtime.universe._
-    val objectType = typeOf[freechips.rocketchip.rocket.Instructions.type]
+    val objectType = typeOf[xiangshan.backend.decode.isa.Instructions.type]
     val methods: Iterable[MethodSymbol] = objectType.decls.collect {
       case m: MethodSymbol if m.returnType =:= typeOf[BitPat] && m.paramLists.isEmpty => m
     }
-    val instanceMirror = currentMirror.reflect(freechips.rocketchip.rocket.Instructions)
+    val instanceMirror = currentMirror.reflect(xiangshan.backend.decode.isa.Instructions)
 
     val insts = methods.map { method: MethodSymbol =>
       val methodMirror: MethodMirror = instanceMirror.reflectMethod(method)

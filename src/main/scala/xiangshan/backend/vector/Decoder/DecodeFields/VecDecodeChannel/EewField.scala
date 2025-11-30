@@ -2,9 +2,9 @@ package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3.UInt
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.DecodeField
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.vector.Decoder.InstPattern.{VecInstPattern, VecMemInstPattern}
+import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
 object EewField extends DecodeField[VecInstPattern, UInt] {

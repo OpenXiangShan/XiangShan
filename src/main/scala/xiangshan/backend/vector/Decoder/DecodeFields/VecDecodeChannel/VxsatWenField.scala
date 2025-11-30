@@ -1,9 +1,9 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3.util.BitPat
-import chisel3.util.experimental.decode.BoolDecodeField
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
+import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.StringToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
