@@ -184,6 +184,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci zcb-test 2> /dev/zero
       - name: Generate summary
+        if: always()
         run: |
           echo "## Emu - Basics summary" >> $GITHUB_STEP_SUMMARY
           echo "| Testcase | IPC |" >> $GITHUB_STEP_SUMMARY
@@ -332,6 +333,7 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/astar.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Generate summary
+        if: always()
         run: |
           echo "## Emu - Performance summary" >> $GITHUB_STEP_SUMMARY
           echo "| Testcase | IPC |" >> $GITHUB_STEP_SUMMARY
@@ -400,6 +402,7 @@ jobs:
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
 
       - name: Generate summary
+        if: always()
         run: |
           echo "## Emu - SimFrontend summary" >> $GITHUB_STEP_SUMMARY
           echo "| Testcase | IPC |" >> $GITHUB_STEP_SUMMARY
