@@ -283,11 +283,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits := source.bits
   }
   intRegion.io.wakeUpFromFp.foreach(x => x := fpRegion.io.wakeUpToDispatch)
-  intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
   fpRegion.io.wakeUpFromInt.foreach(x => x := intRegion.io.wakeUpToDispatch)
-  fpRegion.io.I2FWakeupIn.foreach(x => x := intRegion.io.I2FWakeupOut.get)
-  fpRegion.io.wakeupFromI2F.foreach(x => x := intRegion.io.I2FWakeupOut.get)
-  intRegion.io.F2IWakeupIn.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
+  intRegion.io.wakeupFromF2I.foreach(x  => x := fpRegion.io.F2IWakeupOut.get)
+  fpRegion.io.wakeupFromI2F.foreach(x   => x := intRegion.io.I2FWakeupOut.get)
+  vecRegion.io.wakeupFromI2V.foreach(x  => x := intRegion.io.I2VWakeupOut.get)
+  vecRegion.io.wakeupFromI2V0.foreach(x => x := intRegion.io.I2V0WakeupOut.get)
+  vecRegion.io.wakeupFromF2V.foreach(x  => x := fpRegion.io.F2VWakeupOut.get)
+  vecRegion.io.wakeupFromF2V0.foreach(x => x := fpRegion.io.F2V0WakeupOut.get)
+  intRegion.io.wakeupFromV2I.foreach(x  => x := vecRegion.io.V2IWakeupOut.get)
+  fpRegion.io.wakeupFromV2F.foreach(x   => x := vecRegion.io.V2FWakeupOut.get)
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
   intRegion.io.staFeedback.foreach(x => x := io.mem.staIqFeedback)
   vecRegion.io.vstuFeedback.foreach(x => x := io.mem.vstuIqFeedback)
@@ -423,8 +427,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val fenceio = intRegion.io.fenceio.get
   io.fenceio <> fenceio
 
-  fpRegion.io.I2FDataIn.get := intRegion.io.I2FDataOut.get
-  intRegion.io.F2IDataIn.get := fpRegion.io.F2IDataOut.get
+  fpRegion.io.I2FDataIn.get   := intRegion.io.I2FDataOut.get
+  intRegion.io.F2IDataIn.get  := fpRegion.io.F2IDataOut.get
+  vecRegion.io.I2VDataIn.get  := intRegion.io.I2VDataOut.get
+  vecRegion.io.I2V0DataIn.get := intRegion.io.I2V0DataOut.get
+  vecRegion.io.F2VDataIn.get  := fpRegion.io.F2VDataOut.get
+  vecRegion.io.F2V0DataIn.get := fpRegion.io.F2V0DataOut.get
+  intRegion.io.V2IDataIn.get  := vecRegion.io.V2IDataOut.get
+  fpRegion.io.V2FDataIn.get   := vecRegion.io.V2FDataOut.get
 
   intRegion.io.frm := csrio.fpu.frm
   intRegion.io.vxrm := csrio.vpu.vxrm

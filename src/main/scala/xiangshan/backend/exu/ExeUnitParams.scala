@@ -92,6 +92,7 @@ case class ExeUnitParams(
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VecScheduler] && name.contains("VFEX")
   val isMemExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && !name.contains("ALU") && !name.contains("BJU") || schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
 
+  // I2F includes i2fCfg and i2vCfg
   def needDataFromI2F: Boolean = {
     val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
     if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2F)) false
@@ -103,6 +104,37 @@ case class ExeUnitParams(
     if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I)) false
     else this.getIntWBPort.get.port == exuF2IWBPort
   }
+  def needDataFromI2V: Boolean = {
+    val exuI2VWBPort = backendParam.allRealExuParams(backendParam.getExuIdxI2V).getVfWBPort.get.port
+    if (this.getVfWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2V)) false
+    else this.getVfWBPort.get.port == exuI2VWBPort
+  }
+  def needDataFromI2V0: Boolean = {
+    val exuI2VWBPort = backendParam.allRealExuParams(backendParam.getExuIdxI2V).getV0WBPort.get.port
+    if (this.getV0WBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2V)) false
+    else this.getV0WBPort.get.port == exuI2VWBPort
+  }
+  def needDataFromF2V: Boolean = {
+    val exuF2VWBPort = backendParam.allRealExuParams(backendParam.getExuIdxF2V).getVfWBPort.get.port
+    if (this.getVfWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2V)) false
+    else this.getVfWBPort.get.port == exuF2VWBPort
+  }
+  def needDataFromF2V0: Boolean = {
+    val exuF2VWBPort = backendParam.allRealExuParams(backendParam.getExuIdxF2V).getV0WBPort.get.port
+    if (this.getV0WBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2V)) false
+    else this.getV0WBPort.get.port == exuF2VWBPort
+  }
+  def needDataFromV2I: Boolean = {
+    val exuV2IWBPort = backendParam.allRealExuParams(backendParam.getExuIdxV2I).getIntWBPort.get.port
+    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxV2I)) false
+    else this.getIntWBPort.get.port == exuV2IWBPort
+  }
+  def needDataFromV2F: Boolean = {
+    val exuV2FWBPort = backendParam.allRealExuParams(backendParam.getExuIdxV2F).getFpWBPort.get.port
+    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxV2F)) false
+    else this.getFpWBPort.get.port == exuV2FWBPort
+  }
+
   def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
@@ -292,6 +324,12 @@ case class ExeUnitParams(
   def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)
 
   def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
+
+  def hasf2vFu = fuConfigs.map(_.fuType == FuType.f2v).reduce(_ || _)
+
+  def hasv2iFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vipu, FuType.vmove))).reduce(_ || _)
+  
+  def hasv2fFu = fuConfigs.map(_.fuType == FuType.vmove).reduce(_ || _)
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 

@@ -9,7 +9,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, Resolve, XSBundle}
 import utility._
-import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
+import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg, I2vCfg, F2vCfg, VipuCfg, VmoveCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
@@ -33,6 +33,12 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     exu.io.csrin.foreach(exuio => io.csrin.get <> exuio)
     exu.io.I2FDataIn.foreach(exuio => io.I2FDataIn.get <> exuio)
     exu.io.F2IDataIn.foreach(exuio => io.F2IDataIn.get <> exuio)
+    exu.io.I2VDataIn.foreach(exuio => io.I2VDataIn.get <> exuio)
+    exu.io.I2V0DataIn.foreach(exuio => io.I2V0DataIn.get <> exuio)
+    exu.io.F2VDataIn.foreach(exuio => io.F2VDataIn.get <> exuio)
+    exu.io.F2V0DataIn.foreach(exuio => io.F2V0DataIn.get <> exuio)
+    exu.io.V2IDataIn.foreach(exuio => io.V2IDataIn.get <> exuio)
+    exu.io.V2FDataIn.foreach(exuio => io.V2FDataIn.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
@@ -67,10 +73,75 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.bits.rfWen := exuF2IIn.bits.rfWen.get
     x.bits.pdest := exuF2IIn.bits.pdest
   }
+  io.I2VWakeupOut.foreach { x =>
+    val exuI2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(I2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuI2VIn.valid && exuI2VIn.bits.vecWen.get
+    x.bits.vecWen := exuI2VIn.bits.vecWen.get
+    x.bits.pdest  := exuI2VIn.bits.pdest
+  }
+  io.I2V0WakeupOut.foreach { x =>
+    val exuI2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(I2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuI2VIn.valid && exuI2VIn.bits.v0Wen.get
+    x.bits.v0Wen := exuI2VIn.bits.v0Wen.get
+    x.bits.pdest  := exuI2VIn.bits.pdest
+  }
+  io.F2VWakeupOut.foreach { x =>
+    val exuF2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(F2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuF2VIn.valid && exuF2VIn.bits.vecWen.get
+    x.bits.vecWen := exuF2VIn.bits.vecWen.get
+    x.bits.pdest  := exuF2VIn.bits.pdest
+  }
+  io.F2V0WakeupOut.foreach { x =>
+    val exuF2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(F2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuF2VIn.valid && exuF2VIn.bits.v0Wen.get
+    x.bits.v0Wen := exuF2VIn.bits.v0Wen.get
+    x.bits.pdest := exuF2VIn.bits.pdest
+  }
+  io.V2IWakeupOut.foreach { x =>
+    val exuV2IIn = exus.filter(x => x.exuParams.fuConfigs.contains(VmoveCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuV2IIn.valid && exuV2IIn.bits.rfWen.get
+    x.bits.rfWen := exuV2IIn.bits.rfWen.get
+    x.bits.pdest := exuV2IIn.bits.pdest
+  }
+  io.V2FWakeupOut.foreach { x =>
+    val exuV2FIn = exus.filter(x => x.exuParams.fuConfigs.contains(VmoveCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuV2FIn.valid && exuV2FIn.bits.fpWen.get
+    x.bits.fpWen := exuV2FIn.bits.fpWen.get
+    x.bits.pdest := exuV2FIn.bits.pdest
+  }
   io.uncertainWakeupOut.foreach{ x =>
     x.zip(exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)).map{ case (sink, source) =>
       sink <> source
     }
+  }
+  val vlDataIdx = 5
+  val v0DataIdx = 4
+  io.I2V0DataOut.foreach { x =>
+    val i2v0FuOut = exus.filter(exu => exu.exuParams.hasi2vFu).head.io.out
+    x.valid := i2v0FuOut.valid && i2v0FuOut.bits.v0Wen.get
+    x.bits := i2v0FuOut.bits.data(v0DataIdx)  
+  }
+  io.F2V0DataOut.foreach { x =>
+    val f2v0FuOut = exus.filter(exu => exu.exuParams.hasf2vFu).head.io.out
+    x.valid := f2v0FuOut.valid && f2v0FuOut.bits.v0Wen.get
+    x.bits := f2v0FuOut.bits.data(v0DataIdx)
+  }
+  val vfDataIdx = 3
+  io.I2VDataOut.foreach { x =>
+    val i2vFuOut = exus.filter(exu => exu.exuParams.hasi2vFu).head.io.out
+    x.valid := i2vFuOut.valid && i2vFuOut.bits.vecWen.get
+    x.bits  := i2vFuOut.bits.data(vfDataIdx)
+  }
+  io.F2VDataOut.foreach { x =>
+    val f2vFuOut = exus.filter(exu => exu.exuParams.hasf2vFu).head.io.out
+    x.valid := f2vFuOut.valid && f2vFuOut.bits.vecWen.get
+    x.bits  := f2vFuOut.bits.data(vfDataIdx)  
   }
   val fpDataIdx = 2
   io.I2FDataOut.foreach { x =>
@@ -78,11 +149,21 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.valid := i2fFuOut.valid && i2fFuOut.bits.fpWen.get
     x.bits := i2fFuOut.bits.data(fpDataIdx)
   }
+  io.V2FDataOut.foreach { x =>
+    val v2fFuOut = exus.filter(exu => exu.exuParams.hasv2fFu).head.io.out
+    x.valid := v2fFuOut.valid && v2fFuOut.bits.fpWen.get
+    x.bits := v2fFuOut.bits.data(fpDataIdx)
+  }
   val intDataIdx = 1
   io.F2IDataOut.foreach { x =>
     val f2iFuOut = exus.filter(exu => exu.exuParams.hasf2iFu).head.io.out
     x.valid := f2iFuOut.valid && f2iFuOut.bits.intWen.get
     x.bits := f2iFuOut.bits.data(intDataIdx)
+  }
+  io.V2IDataOut.foreach { x =>
+    val v2iFuOut = exus.filter(exu => exu.exuParams.hasv2iFu).head.io.out
+    x.valid := v2iFuOut.valid && v2iFuOut.bits.intWen.get
+    x.bits := v2iFuOut.bits.data(intDataIdx)
   }
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
@@ -109,12 +190,30 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundleNoMemBlock
   val uncertainWakeupOut = Option.when(params.issueBlockParams.map(_.needUncertainWakeupFromExu).reduce(_ ||_))(params.genExuWakeUpOutValidBundle)
-  val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
+  val I2FWakeupOut  = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
+  val F2IWakeupOut  = Option.when(params.isFpSchd)( ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
+  val I2VWakeupOut  = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+  val I2V0WakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+  val F2VWakeupOut  = Option.when(params.isFpSchd)( ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+  val F2V0WakeupOut = Option.when(params.isFpSchd)( ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+  val V2IWakeupOut  = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam)))
+  val V2FWakeupOut  = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam)))
   val I2FDataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
-  val I2FDataIn= Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
-  val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
-  val F2IDataOut = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
+  val F2IDataOut = Option.when(params.isFpSchd)( ValidIO(UInt(XLEN.W)))
+  val I2VDataOut  = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
+  val I2V0DataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
+  val F2VDataOut  = Option.when(params.isFpSchd)( ValidIO(UInt(XLEN.W)))
+  val F2V0DataOut = Option.when(params.isFpSchd)( ValidIO(UInt(XLEN.W)))
+  val V2IDataOut  = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+  val V2FDataOut  = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+  val I2FDataIn = Option.when(params.isFpSchd)( Flipped(ValidIO(UInt(XLEN.W))))
   val F2IDataIn = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val I2VDataIn  = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val I2V0DataIn = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2VDataIn  = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2V0DataIn = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val V2IDataIn  = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val V2FDataIn  = Option.when(params.isFpSchd)( Flipped(ValidIO(UInt(XLEN.W))))
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrin = Option.when(params.hasCSR)(new CSRInput)

@@ -218,9 +218,26 @@ case class IssueBlockParams(
 
   def needWakeupFromI2F: Boolean = {
     val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
+    val exuI2VFWBPort = backendParam.allExuParams(backendParam.getExuIdxI2V).getFpWBPort.get.port
     exuBlockParams.map{ x =>
       if (x.getFpWBPort.isEmpty) false
-      else (x.getFpWBPort.get.port == exuI2FWBPort) && x.isFpExeUnit
+      else (x.getFpWBPort.get.port == exuI2FWBPort || x.getFpWBPort.get.port == exuI2VFWBPort) && x.isFpExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromI2V: Boolean = {
+    val exuI2VfWBPort = backendParam.allExuParams(backendParam.getExuIdxI2V).getVfWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getVfWBPort.isEmpty) false
+      else (x.getVfWBPort.get.port == exuI2VfWBPort) && x.isVfExeUnit  
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromI2V0: Boolean = {
+    val exuI2V0WBPort = backendParam.allExuParams(backendParam.getExuIdxI2V).getV0WBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getV0WBPort.isEmpty) false
+      else (x.getV0WBPort.get.port == exuI2V0WBPort) && x.isVfExeUnit  
     }.reduce(_ || _)
   }
 
@@ -229,6 +246,38 @@ case class IssueBlockParams(
     exuBlockParams.map { x =>
       if (x.getIntWBPort.isEmpty) false
       else (x.getIntWBPort.get.port == exuF2IWBPort) && x.isIntExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromF2V: Boolean = {
+    val exuI2VfWBPort = backendParam.allExuParams(backendParam.getExuIdxF2V).getVfWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getVfWBPort.isEmpty) false
+      else (x.getVfWBPort.get.port == exuI2VfWBPort) && x.isVfExeUnit  
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromF2V0: Boolean = {
+    val exuI2V0WBPort = backendParam.allExuParams(backendParam.getExuIdxF2V).getV0WBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getV0WBPort.isEmpty) false
+      else (x.getV0WBPort.get.port == exuI2V0WBPort) && x.isVfExeUnit  
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromV2I: Boolean = {
+    val exuV2IWBPort = backendParam.allExuParams(backendParam.getExuIdxV2I).getIntWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getIntWBPort.isEmpty) false
+      else (x.getIntWBPort.get.port == exuV2IWBPort) && x.isIntExeUnit  
+    }.reduce(_ || _)
+  }
+  
+  def needWakeupFromV2F: Boolean = {
+    val exuV2FWBPort = backendParam.allExuParams(backendParam.getExuIdxV2F).getFpWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getFpWBPort.isEmpty) false
+      else (x.getFpWBPort.get.port == exuV2FWBPort) && x.isFpExeUnit
     }.reduce(_ || _)
   }
   /**

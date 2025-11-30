@@ -42,6 +42,12 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val toFrontendBJUResolve = Option.when(params.hasBrhFu)(Valid(new Resolve))
   val I2FDataIn = Option.when(params.needDataFromI2F)(Flipped(ValidIO(UInt(XLEN.W))))
   val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped(ValidIO(UInt(XLEN.W))))
+  val I2VDataIn  = Option.when(params.needDataFromI2V)( Flipped(ValidIO(UInt(XLEN.W))))
+  val I2V0DataIn = Option.when(params.needDataFromI2V0)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2VDataIn  = Option.when(params.needDataFromF2V)( Flipped(ValidIO(UInt(XLEN.W))))
+  val F2V0DataIn = Option.when(params.needDataFromF2V0)(Flipped(ValidIO(UInt(XLEN.W))))
+  val V2IDataIn  = Option.when(params.needDataFromV2I)( Flipped(ValidIO(UInt(XLEN.W))))
+  val V2FDataIn  = Option.when(params.needDataFromV2F)( Flipped(ValidIO(UInt(XLEN.W))))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
@@ -283,6 +289,9 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       if (exuParams.needDataFromF2I) {
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.bits)
       }
+      else if (exuParams.needDataFromV2I) {
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.V2IDataIn.get.bits)
+      }
       else {
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data })
       }
@@ -291,24 +300,49 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       if (exuParams.needDataFromI2F){
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeFpRf }.map{ case (_, fuout) => fuout.data} :+ io.I2FDataIn.get.bits)
       }
+      else if (exuParams.needDataFromV2F) {
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeFpRf }.map{ case (_, fuout) => fuout.data} :+ io.V2FDataIn.get.bits)
+      }
       else{
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeFpRf }.map{ case (_, fuout) => fuout.data})
       }
     },
-    Option.when(funcUnits.exists(_.cfg.writeVecRf))
-      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuout) => fuout.data}),
-    Option.when(funcUnits.exists(_.cfg.writeV0Rf))
-      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeVecRf)) {
+      if (exuParams.needDataFromI2V) {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf }.map{ case(_, fuout) => fuout.data } :+ io.I2VDataIn.get.bits)
+      }
+      else if (exuParams.needDataFromF2V) {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf }.map{ case(_, fuout) => fuout.data } :+ io.F2VDataIn.get.bits)
+      }
+      else {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf }.map{ case(_, fuout) => fuout.data })
+      }
+    },
+    Option.when(funcUnits.exists(_.cfg.writeV0Rf)) {
+      if (exuParams.needDataFromI2V0) {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf }.map{ case(_, fuout) => fuout.data } :+ io.I2V0DataIn.get.bits)
+      }
+      else if (exuParams.needDataFromF2V0) {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf }.map{ case(_, fuout) => fuout.data } :+ io.F2V0DataIn.get.bits)
+      }
+      else {
+        (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf }.map{ case(_, fuout) => fuout.data })
+      }
+    },
     Option.when(funcUnits.exists(_.cfg.writeVlRf))
       (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuout) => fuout.data}),
   ).flatten
   private val outDataValidOH = Seq(
     Some(fuOutValidOH),
     Option.when(funcUnits.exists(_.cfg.writeIntRf)) {
-      // io.F2IDataIn.get.valid and funcUnits may valid at same time when they write different reg file
+      // io.F2IDataIn.get.valid and io.V2IDataIn.get.valid and funcUnits may valid at same time when they write different reg file
       if (exuParams.needDataFromF2I) {
         (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuoutOH) => !io.F2IDataIn.get.valid && fuoutOH } :+ io.F2IDataIn.get.valid)
-      } else {
+      } 
+      else if (exuParams.needDataFromV2I) {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuoutOH) => !io.V2IDataIn.get.valid && fuoutOH } :+ io.V2IDataIn.get.valid)
+      }
+      else {
         (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuoutOH) => fuoutOH })
       }
     },
@@ -316,14 +350,35 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       if (exuParams.needDataFromI2F) {
         (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeFpRf }.map { case (_, fuoutOH) => !io.I2FDataIn.get.valid && fuoutOH } :+ io.I2FDataIn.get.valid)
       }
+      else if (exuParams.needDataFromV2F) {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeFpRf }.map { case (_, fuoutOH) => !io.V2FDataIn.get.valid && fuoutOH } :+ io.V2FDataIn.get.valid)
+      }
       else {
         (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeFpRf }.map { case (_, fuoutOH) => fuoutOH})
       }
     },
-    Option.when(funcUnits.exists(_.cfg.writeVecRf))
-      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => fuoutOH}),
-    Option.when(funcUnits.exists(_.cfg.writeV0Rf))
-      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeVecRf)) {
+      if (exuParams.needDataFromI2V) {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => !io.I2VDataIn.get.valid && fuoutOH } :+ io.I2VDataIn.get.valid)
+      }
+      else if (exuParams.needDataFromF2V) {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => !io.F2VDataIn.get.valid && fuoutOH } :+ io.F2VDataIn.get.valid)
+      }
+      else {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => fuoutOH })
+      }
+    },
+    Option.when(funcUnits.exists(_.cfg.writeV0Rf)) {
+      if (exuParams.needDataFromI2V0) {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => !io.I2V0DataIn.get.valid && fuoutOH } :+ io.I2V0DataIn.get.valid)
+      }
+      else if (exuParams.needDataFromF2V0) {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => !io.F2V0DataIn.get.valid && fuoutOH } :+ io.F2V0DataIn.get.valid)
+      }
+      else {
+        (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => fuoutOH })
+      }
+    },
     Option.when(funcUnits.exists(_.cfg.writeVlRf))
       (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
   ).flatten
@@ -374,11 +429,16 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
+  val I2FFpWen  = io.I2FDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
   val F2IIntWen = io.F2IDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val I2VVecWen = io.I2VDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val I2V0Wen   = io.I2V0DataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val F2VVecWen = io.F2VDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val F2V0Wen   = io.F2V0DataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec) || F2IIntWen)
-  io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
-  io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
-  io.out.bits.v0Wen.foreach(x => x := Mux1H(fuOutValidOH, fuV0WenVec))
+  io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec) || I2FFpWen)
+  io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec) || I2VVecWen || F2VVecWen)
+  io.out.bits.v0Wen.foreach(x => x := Mux1H(fuOutValidOH, fuV0WenVec) || I2V0Wen || F2V0Wen)
   io.out.bits.vlWen.foreach(x => x := Mux1H(fuOutValidOH, fuVlWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
   io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
