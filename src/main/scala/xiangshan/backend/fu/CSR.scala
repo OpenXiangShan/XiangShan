@@ -509,7 +509,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
-    MaskedRegMap(Stvec, stvec),
+    MaskedRegMap(Stvec, stvec, ~3.U(64.W)),
     MaskedRegMap(Scounteren, scounteren, ZeroExt(VecInit.fill(32)(true.B).asUInt, XLEN)),
 
     //--- Supervisor Trap Handling ---
@@ -542,7 +542,7 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Medeleg, medeleg, "hcf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
-    MaskedRegMap(Mtvec, mtvec),
+    MaskedRegMap(Mtvec, mtvec, ~3.U(64.W)),
     MaskedRegMap(Mcounteren, mcounteren, ZeroExt(VecInit.fill(32)(true.B).asUInt, XLEN)),
 
     //--- Machine Configuration ---
