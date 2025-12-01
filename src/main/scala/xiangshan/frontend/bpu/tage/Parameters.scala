@@ -25,14 +25,14 @@ case class TageParameters(
     BaseTableTakenCtrWidth: Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
       // TageTableInfo(NumSets, HistoryLength)
-      new TageTableInfo(1024, 6),
-      new TageTableInfo(1024, 9),
-      new TageTableInfo(1024, 17),
-      new TageTableInfo(1024, 31),
-      new TageTableInfo(1024, 58),
-      new TageTableInfo(1024, 109),
-      new TageTableInfo(1024, 211),
-      new TageTableInfo(1024, 407)
+      new TageTableInfo(2048, 4),
+      new TageTableInfo(2048, 9),
+      new TageTableInfo(2048, 17),
+      new TageTableInfo(2048, 29),
+      new TageTableInfo(2048, 56),
+      new TageTableInfo(2048, 109),
+      new TageTableInfo(2048, 211),
+      new TageTableInfo(2048, 397)
     ),
     NumWays:             Int = 2,
     NumBanks:            Int = 4, // to alleviate read-write conflicts in single-port SRAM
@@ -41,8 +41,8 @@ case class TageParameters(
     UsefulCtrWidth:      Int = 2,
     UsefulCtrInitValue:  Int = 0,
     WriteBufferSize:     Int = 4,
-    UsefulResetCtrWidth: Int = 6,
-    UseAltCtrWidth:      Int = 4,
+    UsefulResetCtrWidth: Int = 8,
+    UseAltCtrWidth:      Int = 7,
     NumUseAltCtrs:       Int = 128,
     EnableTageTrace:     Boolean = false
 ) {}
