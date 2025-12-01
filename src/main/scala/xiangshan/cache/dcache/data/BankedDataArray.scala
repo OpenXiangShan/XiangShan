@@ -57,7 +57,6 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
   val addr = Bits(PAddrBits.W)
   val addr_dup = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
-  val kill = Bool()
   val lqIdx = new LqPtr
 }
 

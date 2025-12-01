@@ -86,6 +86,8 @@ case class DCacheParameters
 
 // Default DCache size = 64 sets * 8 ways * 8 banks * 8 Byte = 32K Byte
 
+
+// TODO: do we really need so many traits?
 trait HasDCacheParameters
   extends HasMemBlockParameters
   with HasL1PrefetchSourceParameter
@@ -408,6 +410,7 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 
 class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
+  // TODO: Signals from different stages should not be in the same bundle
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
   val refill_latency = UInt(LATENCY_WIDTH.W)
@@ -576,7 +579,6 @@ class CMOResp(implicit p: Parameters) extends Bundle {
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
-  val s1_kill_data_read = Output(Bool()) // only kill bandedDataRead at s1
   val s1_kill           = Output(Bool()) // kill loadpipe req at s1
   val s2_kill           = Output(Bool())
   val s0_pc             = Output(UInt(VAddrBits.W))
@@ -627,6 +629,7 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp)
 }
 
+// TODO: remove this
 // forward tilelink channel D's data to ldu
 class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
   val valid = Bool()
@@ -722,6 +725,31 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
 
     (forward_mshr, forwardData)
   }
+}
+
+class DCacheForwardReqS0(implicit p: Parameters) extends DCacheBundle {
+  val vaddr = UInt(VAddrBits.W)
+  val size = UInt(3.W)
+  val mshrId = UInt(log2Up(cfg.nMissEntries).W)
+}
+
+class DCacheForwardReqS1(implicit p: Parameters) extends DCacheBundle {
+  val paddr = UInt(PAddrBits.W)
+}
+
+class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
+  val matchInvalid = Bool()
+  val forwardMask = Vec((VLEN/8), Bool())
+  val forwardData = Vec((VLEN/8), UInt(8.W))
+  val denied = Bool()
+  val corrupt = Bool()
+}
+
+class DCacheForward(implicit p: Parameters) extends DCacheBundle {
+  val s0Req = ValidIO(new DCacheForwardReqS0)
+  val s1Req = Output(new DCacheForwardReqS1)
+  val s1Kill = Output(Bool())
+  val s2Resp = Flipped(ValidIO(new DCacheForwardResp))
 }
 
 // forward mshr's data to ldu
