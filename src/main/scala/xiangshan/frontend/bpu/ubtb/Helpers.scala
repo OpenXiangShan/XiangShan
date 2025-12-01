@@ -28,5 +28,5 @@ trait Helpers extends HasMicroBtbParameters with TargetFixHelper {
     vAddr(VAddrBits - 1, TargetWidth + instOffsetBits)
 
   def getEntryTarget(fullTarget: PrunedAddr): UInt =
-    fullTarget(TargetWidth, instOffsetBits)
+    fullTarget(TargetWidth + instOffsetBits - 1, instOffsetBits)
 }

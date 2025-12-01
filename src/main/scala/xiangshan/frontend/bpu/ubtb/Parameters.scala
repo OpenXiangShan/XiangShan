@@ -23,7 +23,6 @@ case class MicroBtbParameters(
     TagWidth:       Int = 22,
     TargetWidth:    Int = 22, // 2B aligned
     UsefulCntWidth: Int = 2,
-    TakenCntWidth:  Int = 2,
     Replacer:       String = "plru",
     // use s3 prediction to train ubtb
     UseFastTrain: Boolean = true,
@@ -39,7 +38,6 @@ trait HasMicroBtbParameters extends HasBpuParameters {
   def TagWidth:       Int    = ubtbParameters.TagWidth
   def TargetWidth:    Int    = ubtbParameters.TargetWidth
   def UsefulCntWidth: Int    = ubtbParameters.UsefulCntWidth
-  def TakenCntWidth:  Int    = ubtbParameters.TakenCntWidth
   def Replacer:       String = ubtbParameters.Replacer
 
   def UseFastTrain:    Boolean = ubtbParameters.UseFastTrain
