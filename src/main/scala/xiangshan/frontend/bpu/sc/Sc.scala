@@ -257,7 +257,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val s2_scPred: Vec[Bool] = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds    = scThreshold.map(entry => entry.thres.value)
+  private val s2_thresholds    = scThreshold.map(entry => entry.thres.value >> 3)
   private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
@@ -353,10 +353,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
     val updated = t1_writeValidVec.zip(t1_branchesWayIdxVec).zip(t1_branchesTakenMask).foldLeft(scThreshold(wayIdx)) {
       case (prevThres, ((writeValid, branchWayIdx), taken)) =>
-        val shouldUpdate = writeValid && branchWayIdx === wayIdx.U && t1_meta.tagePredValid(wayIdx) &&
-          (t1_meta.scPred(wayIdx) =/= taken || !t1_meta.sumAboveThres(wayIdx)) &&
-          t1_meta.scPred(wayIdx) =/= t1_meta.tagePred(wayIdx)
         val updateDir = taken =/= t1_meta.scPred(wayIdx)
+        val shouldUpdate = writeValid && branchWayIdx === wayIdx.U && t1_meta.tagePredValid(wayIdx) &&
+          (updateDir || !t1_meta.sumAboveThres(wayIdx)) && t1_meta.scPred(wayIdx) =/= t1_meta.tagePred(wayIdx)
         val nextThres = prevThres.update(updateDir)
         Mux(shouldUpdate, nextThres, prevThres)
     }
@@ -489,6 +488,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(s2_hitMask)
   dontTouch(s2_scPred)
   dontTouch(s2_useScPred)
+  dontTouch(t1_branchesWayIdxVec)
   dontTouch(t1_writeThresVec)
 
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_ghr.valid)
