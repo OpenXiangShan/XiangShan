@@ -51,11 +51,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
   private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
-  private val pathTable =
-    PathTableInfos.map(tableInfo => Module(new ScTable(tableInfo.Size, tableInfo.HistoryLength)))
+  private val pathTable = PathTableInfos.zipWithIndex.map { case (info, i) =>
+    Module(new ScTable(info.Size, info.HistoryLength, "pathTable", i))
+  }
 
-  private val globalTable =
-    GlobalTableInfos.map(tableInfo => Module(new ScTable(tableInfo.Size, tableInfo.HistoryLength)))
+  private val globalTable = GlobalTableInfos.zipWithIndex.map { case (info, i) =>
+    Module(new ScTable(info.Size, info.HistoryLength, "globalTable", i))
+  }
 
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ScThreshold(p)))
 

@@ -25,7 +25,12 @@ import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
+class ScTable(
+    numSets:   Int,
+    histLen:   Int,
+    tableType: String,
+    tableIdx:  Int
+)(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
     val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / NumWays).W)))
@@ -51,11 +56,12 @@ class ScTable(val numSets: Int, val histLen: Int)(implicit p: Parameters)
     ))
   )
 
-  private val writeBuffer = Seq.fill(NumBanks)(
+  private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
     Module(new WriteBuffer(
       new PathTableSramWriteReq(numRows),
       WriteBufferSize,
-      numPorts = 1
+      numPorts = 1,
+      nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
 

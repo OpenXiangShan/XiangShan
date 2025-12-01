@@ -22,7 +22,7 @@ import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
-class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule with Helpers {
+class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends TageModule with Helpers {
   class TageTableIO extends TageBundle {
     val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
     val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
@@ -67,7 +67,8 @@ class TageTable(val numSets: Int)(implicit p: Parameters) extends TageModule wit
         new EntrySramWriteReq(numSets),
         WriteBufferSize,
         numPorts = NumWays,
-        hasCnt = false // FIXME: set to true when bug fixed
+        hasCnt = false, // FIXME: set to true when bug fixed
+        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
       )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
     }
 

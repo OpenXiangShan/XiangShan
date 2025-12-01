@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.WriteBuffer
 /**
   * This module stores the ahead BTB entries.
   */
-class AheadBtbBank(implicit p: Parameters) extends AheadBtbModule {
+class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule {
   class BankIO(implicit p: Parameters) extends AheadBtbBundle {
     val readReq:   DecoupledIO[BankReadReq] = Flipped(Decoupled(new BankReadReq))
     val readResp:  BankReadResp             = Output(new BankReadResp)
@@ -63,7 +63,12 @@ class AheadBtbBank(implicit p: Parameters) extends AheadBtbModule {
   // single port SRAM can not be written and read at the same time
   // read has higher priority than write
   // we use a write buffer to store the write requests when read and write are both valid
-  private val writeBuffer = Module(new WriteBuffer(new BankWriteReq, WriteBufferSize, numPorts = 1))
+  private val writeBuffer = Module(new WriteBuffer(
+    new BankWriteReq,
+    WriteBufferSize,
+    numPorts = 1,
+    nameSuffix = s"abtbBank$bandIdx"
+  ))
 
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
   writeBuffer.io.write.head.valid := io.writeReq.valid
