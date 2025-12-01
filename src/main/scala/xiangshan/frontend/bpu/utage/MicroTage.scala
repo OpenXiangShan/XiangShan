@@ -86,9 +86,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // but it's a double-edged sword: with limited capacity, entries may be evicted
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
-  // prediction.valid := histTableHitMap.reduce(_ || _) &&
-  //   (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
-  prediction.valid            := false.B
+  prediction.valid := io.enable && histTableHitMap.reduce(_ || _) &&
+    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
+  // prediction.valid            := false.B
   prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
   prediction.bits.cfiPosition := finalPredCfiPosition
 
@@ -103,7 +103,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   io.meta       := RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
-  private val t0_fire                    = io.fastTrain.get.valid
+  private val t0_fire                    = io.fastTrain.get.valid && io.enable
   private val t0_trainMeta               = io.fastTrain.get.bits.utageMeta
   private val t0_trainData               = io.fastTrain.get.bits.finalPrediction
   private val t0_trainStartPc            = io.fastTrain.get.bits.startPc
@@ -131,7 +131,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   )
 
   private val t0_histMissHitMisPred =
-    !t0_predHit && t0_trainData.attribute.isConditional && t0_trainData.taken && io.fastTrain.get.bits.hasOverride
+    !t0_predHit && t0_trainData.attribute.isConditional &&
+      t0_trainData.taken && t0_fire && io.fastTrain.get.bits.hasOverride
 
   private val t0_misPred             = t0_histHitMisPred || t0_histMissHitMisPred
   private val t0_histTableNeedAlloc  = t0_misPred && t0_fire
@@ -246,9 +247,16 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val trainIdx0 = debug_tableMetas(0).debug_idx
   private val trainTag0 = debug_tableMetas(0).debug_tag
 
+  private val positionLT = t0_predCfiPosition < t0_trainData.cfiPosition
+  private val positionGT = t0_predCfiPosition > t0_trainData.cfiPosition
+  private val positionEQ = t0_predCfiPosition === t0_trainData.cfiPosition
   XSPerfAccumulate("train_needAlloc", t0_fire && t0_histTableNeedAlloc)
   XSPerfAccumulate("train_needUpdate", t0_fire && t0_histTableNeedUpdate)
   XSPerfAccumulate("train_histHitMisPred", t0_fire && t0_histHitMisPred)
+  XSPerfAccumulate("train_histHitMisPred_LT", t0_fire && t0_histHitMisPred && positionLT)
+  XSPerfAccumulate("train_histHitMisPred_GT", t0_fire && t0_histHitMisPred && positionGT)
+  XSPerfAccumulate("train_histHitMisPred_EQ", t0_fire && t0_histHitMisPred && positionEQ)
+  XSPerfAccumulate("train_missHit_needAlloc", t0_fire && t0_histMissHitMisPred)
   if (EnableTraceAndDebug) {
     XSPerfAccumulate(
       "train_useMicroTage_and_override_fromFastTrain",
