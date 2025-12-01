@@ -87,7 +87,8 @@ class MicroTageTable(
     val tagFh       = allFh.getHistWithInfo(tagFhInfo).foldedHist
     val altTagFh    = allFh.getHistWithInfo(altTagFhInfo).foldedHist
     val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
-      (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
+      // (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
+      (unhashedIdx ^ Cat(0.U(3.W), idxFh) ^ (idxFh << 3))(log2Ceil(numSets) - 1, 0)
     } else {
       (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
     }
@@ -123,7 +124,8 @@ class MicroTageTable(
   updateEntry.tag   := trainTag
   updateEntry.takenCtr.value := Mux(
     io.update.bits.allocValid,
-    oldTakenCtr.getNeutral,
+    // oldTakenCtr.getNeutral,
+    Mux(io.update.bits.allocTaken, oldTakenCtr.getWeakPositive, oldTakenCtr.getWeakNegative),
     oldTakenCtr.getUpdate(io.update.bits.updateTaken)
   )
 
@@ -135,7 +137,7 @@ class MicroTageTable(
 
   private val updateUseful = Mux(
     io.update.bits.allocValid,
-    oldUseful.getNeutral,
+    oldUseful.getWeakPositive,
     oldUseful.getUpdate(io.update.bits.usefulCorrect)
   )
 
