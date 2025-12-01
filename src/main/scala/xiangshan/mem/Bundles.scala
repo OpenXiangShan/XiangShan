@@ -26,6 +26,8 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.mem.prefetch.{PrefetchReqBundle, TrainReqBundle}
 
 import scala.math._
@@ -188,6 +190,56 @@ object Bundles {
     val need_rep = Bool()
   }
 
+  class StoreForwardReqS0(implicit p: Parameters) extends XSBundle {
+    val vaddr = UInt(VAddrBits.W)
+    val sqIdx = new SqPtr // TODO: remove this, sqIdx is included in uop
+    val size = UInt(3.W) // TODO: parameterize this @LWD
+    val uop = new DynInst // TODO: only MDP involved signals are needed
+  }
+
+  class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {
+    val paddr = UInt(PAddrBits.W)
+  }
+
+  class SbufferForwardResp(implicit p: Parameters) extends XSBundle {
+    val forwardMask = Vec((VLEN/8), Bool())
+    val forwardData = Vec((VLEN/8), UInt(8.W))
+    val matchInvalid = Bool()
+  }
+
+  class SQForwardResp(implicit p: Parameters) extends XSBundle {
+    val forwardMask = Vec((VLEN/8), Bool())
+    val forwardData = Vec((VLEN/8), UInt(8.W))
+    val forwardInvalid = Bool()
+    val matchInvalid = Bool()
+    val addrInvalid = Valid(new SqPtr)
+    val dataInvalid = Valid(new SqPtr)
+  }
+
+  class UncacheForwardResp(implicit p: Parameters) extends SbufferForwardResp // ?
+
+  class SbufferForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s2Resp = Flipped(ValidIO(new SbufferForwardResp))
+  }
+
+  class SQForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s2Resp = Flipped(ValidIO(new SQForwardResp))
+  }
+
+  class UncacheForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s2Resp = Flipped(ValidIO(new UncacheForwardResp))
+  }
+
+  // TODO: LoadForwardQueryIO = LoadForwardReq + LoadForwardResp
   class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
     val vaddr = Output(UInt(VAddrBits.W))
     val paddr = Output(UInt(PAddrBits.W))
@@ -235,6 +287,9 @@ object Bundles {
     val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
   }
 
+
+  // TODO: remove these
+
   // Query load queue for ld-ld violation
   //
   // Req should be send in load_s1
@@ -249,6 +304,7 @@ object Bundles {
 
     // paddr: load's paddr.
     val paddr      = UInt(PAddrBits.W)
+    // TODO: remove data_valid
     // dataInvalid: load data is invalid.
     val data_valid = Bool()
     // nc: is NC access
@@ -266,7 +322,35 @@ object Bundles {
     val revoke = Output(Bool())
   }
 
-  class StoreNukeQueryBundle(implicit p: Parameters) extends XSBundle {
+  class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val paddr = UInt(PAddrBits.W)
+    val lqIdx = new LqPtr
+    val sqIdx = new SqPtr
+    val nc = Bool() // always mark a writebacked NC load as released in RAR
+    val mask = UInt((VLEN/8).W)
+    val preDecodeInfo = new PreDecodeInfo
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+  }
+
+  class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
+    val nuke = Bool()
+  }
+
+  class LoadRARNukeQuery(implicit p: Parameters) extends XSBundle {
+    val req = DecoupledIO(new LoadNukeQueryReq)
+    val resp = Flipped(ValidIO(new LoadNukeQueryResp))
+    val revoke = Output(Bool())
+  }
+
+  class LoadRAWNukeQuery(implicit p: Parameters) extends XSBundle {
+    // RAW nuke is generated in LoadQueueRAW, therefore there is no response to LDU
+    val req = DecoupledIO(new LoadNukeQueryReq)
+    val revoke = Output(Bool())
+  }
+
+  class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
     //  robIdx: Requestor's (a store instruction) rob index for match logic.
     val robIdx = new RobPtr
 
