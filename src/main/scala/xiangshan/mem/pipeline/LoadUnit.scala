@@ -169,7 +169,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     val ldCancel = Output(new LoadCancelIO()) // use to cancel the uops waked by this load, and cancel load
 
     // schedule error query
-    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
+    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryReq)))
 
     // queue-based replay
     val replay       = Flipped(Decoupled(new LsPipelineBundle))
@@ -905,7 +905,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
   io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
   io.dcache.s1_kill             := s1_kill || s1_dly_err || s1_tlb_miss || s1_exception
-  io.dcache.s1_kill_data_read   := s1_kill || s1_dly_err || s1_tlb_fast_miss
 
   // store to load forwarding
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)

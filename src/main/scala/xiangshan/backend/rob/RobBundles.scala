@@ -30,7 +30,6 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, Enq
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
-import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType}
 import xiangshan.backend.rename.SnapshotGenerator
@@ -60,7 +59,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needVTB = Bool()
     val isHls = Bool()
     // data end
-    
+
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // status begin
