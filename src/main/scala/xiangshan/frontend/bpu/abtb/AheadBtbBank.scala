@@ -43,7 +43,8 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     holdRead = true,
     withClockGate = true,
     hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl
+    hasSramCtl = hasSramCtl,
+    suffix = Option("bpu_abtb")
   ))
 
   /* --------------------------------------------------------------------------------------------------------------

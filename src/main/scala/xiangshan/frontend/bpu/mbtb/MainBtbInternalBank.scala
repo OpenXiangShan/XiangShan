@@ -84,7 +84,8 @@ class MainBtbInternalBank(
         holdRead = true,
         withClockGate = true,
         hasMbist = hasMbist,
-        hasSramCtl = hasSramCtl
+        hasSramCtl = hasSramCtl,
+        suffix = Option("bpu_mbtb")
       )
     ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
   }

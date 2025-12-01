@@ -52,7 +52,8 @@ class ScTable(
       holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl
+      hasSramCtl = hasSramCtl,
+      suffix = Option("bpu_sc")
     ))
   )
 

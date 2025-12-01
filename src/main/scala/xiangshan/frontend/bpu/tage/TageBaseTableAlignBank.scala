@@ -75,7 +75,8 @@ class TageBaseTableAlignBank(
       holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl
+      hasSramCtl = hasSramCtl,
+      suffix = Option("bpu_tage_base")
     )).suggestName(s"tage_sram_align${alignIdx}_bank${i}")
   }
 

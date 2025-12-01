@@ -128,7 +128,8 @@ class IttageTable(
     useBitmask = true,
     withClockGate = true,
     hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl
+    hasSramCtl = hasSramCtl,
+    suffix = Option("bpu_ittage")
   ))
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   table.io.r.req.valid       := io.req.fire
