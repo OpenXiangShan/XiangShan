@@ -494,6 +494,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s2_valid := false.B
   }
   s2_ready := !s2_valid || s2_can_go
+  val s2_valid_to_s3 = s2_valid && s3_ready
   val replay = !io.miss_req.ready || io.wbq_block_miss_req
 
   io.data_readline_can_go := GatedValidRegNext(s1_fire)
@@ -520,10 +521,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
-  val s3_req = RegEnable(s2_req, s2_valid && s3_ready)
-  val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_valid && s3_ready)
+  val s3_req = RegEnable(s2_req, s2_valid_to_s3)
+  val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_valid_to_s3)
   val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
-  val s3_tag = RegEnable(s2_tag, s2_valid && s3_ready)
+  val s3_tag = RegEnable(s2_tag, s2_valid_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
   val s3_hit = RegEnable(s2_hit, s2_fire_to_s3)
