@@ -296,7 +296,7 @@ class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
 {
-  val error = Bool() // cache line has been marked as corrupted by l2 / ecc error detected when store
+  val error = new TLError() // cache line has been marked as denieded/corrupted by
   val prefetch = UInt(L1PfSourceBits.W) // cache line is first required by prefetch
   val access = Bool() // cache line has been accessed by load / store
   val latency = UInt(LATENCY_WIDTH.W)
@@ -416,6 +416,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
   val real_miss = Bool()
   // s3: 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
+  val tl_error_delayed = new TLError()
   val replacementUpdated = Bool()
 }
 
@@ -515,6 +516,8 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
   val tag_error = Bool()
   val error     = Bool()
   val nderr     = Bool()
+  val denied    = Bool()
+  val corrupt   = Bool()
   val replayCarry = new ReplayCarry(nWays)
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
@@ -540,6 +543,7 @@ class MainPipeResp(implicit p: Parameters) extends DCacheBundle {
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val replay  = Bool()
   val error   = Bool()
+  val tl_error = new TLError()
 
   val ack_miss_queue = Bool()
 
@@ -564,6 +568,8 @@ class CMOReq(implicit p: Parameters) extends Bundle {
 class CMOResp(implicit p: Parameters) extends Bundle {
   val address = UInt(64.W)
   val nderr   = Bool()
+  val denied  = Bool()
+  val corrupt = Bool()
 }
 
 // used by load unit
@@ -627,6 +633,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
   val data = UInt(l1BusDataWidth.W)
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val last = Bool()
+  val denied = Bool()
   val corrupt = Bool()
 
   def apply(d: DecoupledIO[TLBundleD], edge: TLEdgeOut) = {
@@ -636,7 +643,8 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     data := d.bits.data
     mshrid := d.bits.source
     last := isKeyword ^ done
-    corrupt := d.bits.corrupt || d.bits.denied
+    denied := d.bits.denied
+    corrupt := d.bits.corrupt
   }
 
   def dontCare() = {
@@ -644,6 +652,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     data := DontCare
     mshrid := DontCare
     last := DontCare
+    denied := false.B
     corrupt := false.B
   }
 
@@ -653,6 +662,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
                 req_paddr(log2Up(refillBytes)) === last
     val forward_D = RegInit(false.B)
     val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
+    val forwardDenied = RegInit(false.B)
     val forwardCorrupt = RegInit(false.B)
 
     val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
@@ -670,10 +680,11 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
       }
     }
     when (all_match) {
+      forwardDenied := denied
       forwardCorrupt := corrupt
     }
 
-    (forward_D, forwardData, forwardCorrupt)
+    (forward_D, forwardData, forwardDenied, forwardCorrupt)
   }
 }
 
@@ -683,6 +694,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val raw_data = Vec(blockRows, UInt(rowBits.W))
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
+  val denied = Bool()
   val corrupt = Bool()
 
   // check if we can forward from mshr or D channel
@@ -723,6 +735,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val forward_mshr = Output(Bool())
   val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
+  val denied = Output(Bool())
   val corrupt = Output(Bool())
 
   // Why? What is the purpose of `connect`???
@@ -733,11 +746,12 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
     forward_mshr := sink.forward_mshr
     forwardData := sink.forwardData
     forward_result_valid := sink.forward_result_valid
+    denied := sink.denied
     corrupt := sink.corrupt
   }
 
   def forward() = {
-    (forward_result_valid, forward_mshr, forwardData, corrupt)
+    (forward_result_valid, forward_mshr, forwardData, denied, corrupt)
   }
 }
 
@@ -949,7 +963,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
-  val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
+  val errorArray = Module(new L1ErrorMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
   val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)))
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))

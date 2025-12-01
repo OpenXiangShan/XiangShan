@@ -33,6 +33,11 @@ object Meta {
   }
 }
 
+class TLError(implicit p: Parameters) extends DCacheBundle {
+  val tl_denied = Bool()
+  val tl_corrupt = Bool()
+}
+
 class MetaReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
   val way_en = UInt(nWays.W)
@@ -44,6 +49,10 @@ class CohMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
 
 class FlagMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
   val flag = Bool()
+}
+
+class ErrorMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
+  val error = new TLError()
 }
 
 class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true)(implicit p: Parameters) extends DCacheModule {
@@ -173,6 +182,74 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int, enableBypass: Boolean = f
           s0_way_wen(way)(wport) := write.valid && wen
           s0_way_waddr(way)(wport) := write.bits.idx
           s0_way_wdata(way)(wport) := write.bits.flag
+          s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
+          s1_way_waddr(way)(wport) := RegEnable(s0_way_waddr(way)(wport), s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(s0_way_wdata(way)(wport), s0_way_wen(way)(wport))
+          when (s1_way_wen(way)(wport)) {
+            meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
+          }
+      }
+  }
+}
+
+class L1ErrorMetaArray(readPorts: Int, writePorts: Int, enableBypass: Boolean = true)(implicit p: Parameters) extends DCacheModule {
+  val io = IO(new Bundle() {
+    val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
+    val resp = Output(Vec(readPorts, Vec(nWays, new TLError())))
+    val write = Vec(writePorts, Flipped(DecoupledIO(new ErrorMetaWriteReq())))
+  })
+
+  val meta_array = RegInit(
+    VecInit(Seq.fill(nSets)(
+      VecInit(Seq.fill(nWays)(0.U.asTypeOf(new TLError())))
+    ))
+  )
+
+  val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s0_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s0_way_wdata = Wire(Vec(nWays, Vec(writePorts, new TLError())))
+  val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, new TLError())))
+
+  (io.read.zip(io.resp)).zipWithIndex.foreach {
+    case ((read, resp), i) =>
+      read.ready := true.B
+      (0 until nWays).map(way => {
+        val read_way_bypass = WireInit(false.B)
+        val bypass_data = Wire(new TLError())
+        bypass_data := DontCare
+        (0 until writePorts).map { wport =>
+          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx) {
+            read_way_bypass := true.B
+            bypass_data := s1_way_wdata(way)(wport)
+          }
+          when(s0_way_wen(way)(wport) && s0_way_waddr(way)(wport) === read.bits.idx) {
+            read_way_bypass := true.B
+            bypass_data := s0_way_wdata(way)(wport)
+          }
+        }
+
+        if (enableBypass) {
+          resp(way) := Mux(
+            RegEnable(read_way_bypass, read.valid),
+            RegEnable(bypass_data, read_way_bypass),
+            meta_array(RegEnable(read.bits.idx, read.valid))(way)
+          )
+        } else {
+          resp(way) := meta_array(RegEnable(read.bits.idx, read.valid))(way)
+        }
+      })
+  }
+
+  io.write.zipWithIndex.foreach {
+    case (write, wport) =>
+      write.ready := true.B
+      write.bits.way_en.asBools.zipWithIndex.foreach {
+        case (wen, way) =>
+          s0_way_wen(way)(wport) := write.valid && wen
+          s0_way_waddr(way)(wport) := write.bits.idx
+          s0_way_wdata(way)(wport) := write.bits.error
           s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
           s1_way_waddr(way)(wport) := RegEnable(s0_way_waddr(way)(wport), s0_way_wen(way)(wport))
           s1_way_wdata(way)(wport) := RegEnable(s0_way_wdata(way)(wport), s0_way_wen(way)(wport))

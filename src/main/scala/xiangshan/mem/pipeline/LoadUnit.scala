@@ -1128,8 +1128,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
                      s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_uncache
-  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
-  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_corrupt) = io.forward_mshr.forward()
+  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_denied, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
+  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_denied, s2_mshr_corrupt) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
 
   // writeback access fault caused by ecc error / bus error
@@ -1233,8 +1233,12 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
   s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_uncache && !s2_isvec
   s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
-    s2_fwd_frm_d_chan && s2_d_corrupt ||
-    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt
+    s2_fwd_frm_d_chan && s2_d_denied ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied
+  s2_real_exceptionVec(hardwareError) := s2_exception_vec(hardwareError) ||
+    s2_fwd_frm_d_chan && s2_d_corrupt && !s2_d_denied ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied
+
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
 
@@ -1479,8 +1483,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // Int load, if hit, will be writebacked at s3
   s3_out.valid := s3_valid && s3_safe_writeback && !toMisalignBufferValid
   s3_out.bits := s3_in
-  s3_out.bits.uop.exceptionVec(loadAccessFault) := s3_in.uop.exceptionVec(loadAccessFault) && s3_vecActive
-  s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err) && s3_vecActive
+  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
+  s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err ||
+                                                 io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
 

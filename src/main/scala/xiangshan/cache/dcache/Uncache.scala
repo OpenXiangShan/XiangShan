@@ -65,6 +65,9 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
 
   val resp_nderr = Bool()
 
+  val resp_denied = Bool()
+  val resp_corrupt = Bool()
+
   /* NOTE: if it support the internal forward logic, here can uncomment */
   // val fwd_data = UInt(XLEN.W)
   // val fwd_mask = UInt(DataBytes.W)
@@ -99,6 +102,8 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
       data := x.data
     }
     resp_nderr := x.denied || x.corrupt
+    resp_denied := x.denied
+    resp_corrupt := x.corrupt
   }
 
   // def update(forwardData: UInt, forwardMask: UInt): Unit = {
@@ -116,6 +121,8 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     r.data := resp_fwd_data
     r.id := eid
     r.nderr := resp_nderr
+    r.denied := resp_denied
+    r.corrupt := resp_corrupt
     r.nc := nc
     r.is2lq := cmd === MemoryOpConstants.M_XRD
     r.miss := false.B
