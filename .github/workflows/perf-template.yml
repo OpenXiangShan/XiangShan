@@ -107,6 +107,7 @@ jobs:
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
 
       - name: Report SPEC CPU2006 score
+        if: always()
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
@@ -120,6 +121,7 @@ jobs:
           # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
       - name: Summary result
+        if: always()
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
