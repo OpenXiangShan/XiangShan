@@ -46,53 +46,6 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   private val full = distanceBetween(enqPtr, deqPtr) >= (ResolveQueueSize - 4).U
 
-  private val hit = io.backendResolve.map { branch =>
-    mem.map(entry =>
-      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
-    ).reduce(_ || _)
-  }
-  private val hitIndex = io.backendResolve.map { branch =>
-    mem.indexWhere(entry =>
-      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
-    )
-  }
-  private val hitPrevious = io.backendResolve.zipWithIndex.map { case (branch, i) =>
-    io.backendResolve.take(i).map(previousBranch =>
-      previousBranch.valid && branch.valid && previousBranch.bits.ftqIdx === branch.bits.ftqIdx
-    )
-  }
-  private val needNewEntry = io.backendResolve.zipWithIndex.map { case (branch, i) =>
-    branch.valid && !hit(i) && !hitPrevious(i).fold(false.B)(_ || _)
-  }
-
-  private val enqIndex = WireDefault(VecInit.fill(backendParams.BrhCnt)(0.U(log2Ceil(ResolveQueueSize).W)))
-  enqIndex := VecInit((0 until backendParams.BrhCnt).map { i =>
-    val newIndex = MuxCase(
-      (enqPtr + PopCount(needNewEntry.take(i))).value,
-      hitPrevious(i).zipWithIndex.map { case (hit, j) => (hit, enqIndex(j)) }
-    )
-
-    Mux(hit(i), hitIndex(i), newIndex)
-  })
-  when(!full)(enqPtr := enqPtr + PopCount(needNewEntry))
-
-  io.backendResolve.zipWithIndex.foreach { case (branch, i) =>
-    when(branch.valid && !full) {
-      mem(enqIndex(i)).valid           := true.B
-      mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
-      mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
-
-      val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
-      val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))
-      branchSlot.valid            := true.B
-      branchSlot.bits.target      := branch.bits.target
-      branchSlot.bits.taken       := branch.bits.taken
-      branchSlot.bits.cfiPosition := getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
-      branchSlot.bits.attribute   := branch.bits.attribute
-      branchSlot.bits.mispredict  := branch.bits.mispredict
-    }
-  }
-
   // Branches that have been issued to functional units cannot be flushed by redirects. Therefore, these branches will
   // be resolved. However, the meta of these branches may already be overwritten by new branches, which means they
   // cannot be updated by BPU. To handle this case, backend redirect will be propagated for several cycles to make sure
@@ -111,19 +64,70 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     "Backend resolves branches that should have been flushed\n"
   )
 
-  when(backendRedirect.reduce(_ || _)) {
-    mem.foreach(entry =>
-      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx > backendRedirectPtr)
-    )
+  private val resolve = io.backendResolve.map { backendResolve =>
+    val filteredResolve = Wire(Valid(new Resolve))
+    filteredResolve.valid := backendResolve.valid &&
+      !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
+    filteredResolve.bits := backendResolve.bits
+    filteredResolve
   }
 
-  when(io.bpuEnqueue) {
-    mem.foreach(entry =>
-      when(entry.valid)(entry.bits.flushed := entry.bits.flushed || entry.bits.ftqIdx === io.bpuEnqueuePtr)
+  private val hit = resolve.map { branch =>
+    mem.map(entry =>
+      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
+    ).reduce(_ || _)
+  }
+  private val hitIndex = resolve.map { branch =>
+    mem.indexWhere(entry =>
+      branch.valid && entry.valid && !entry.bits.flushed && entry.bits.ftqIdx === branch.bits.ftqIdx
     )
   }
+  private val hitPrevious = resolve.zipWithIndex.map { case (branch, i) =>
+    resolve.take(i).map(previousBranch =>
+      previousBranch.valid && branch.valid && previousBranch.bits.ftqIdx === branch.bits.ftqIdx
+    )
+  }
+  private val needNewEntry = resolve.zipWithIndex.map { case (branch, i) =>
+    branch.valid && !hit(i) && !hitPrevious(i).fold(false.B)(_ || _)
+  }
 
-  private val deqValid = mem(deqPtr.value).valid && !io.backendResolve.map(branch =>
+  private val enqIndex = WireDefault(VecInit.fill(backendParams.BrhCnt)(0.U(log2Ceil(ResolveQueueSize).W)))
+  enqIndex := VecInit((0 until backendParams.BrhCnt).map { i =>
+    val newIndex = MuxCase(
+      (enqPtr + PopCount(needNewEntry.take(i))).value,
+      hitPrevious(i).zipWithIndex.map { case (hit, j) => (hit, enqIndex(j)) }
+    )
+
+    Mux(hit(i), hitIndex(i), newIndex)
+  })
+  when(!full)(enqPtr := enqPtr + PopCount(needNewEntry))
+
+  resolve.zipWithIndex.foreach { case (branch, i) =>
+    when(branch.valid && !full) {
+      mem(enqIndex(i)).valid           := true.B
+      mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
+      mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
+
+      val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
+      val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))
+      branchSlot.valid            := true.B
+      branchSlot.bits.target      := branch.bits.target
+      branchSlot.bits.taken       := branch.bits.taken
+      branchSlot.bits.cfiPosition := getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
+      branchSlot.bits.attribute   := branch.bits.attribute
+      branchSlot.bits.mispredict  := branch.bits.mispredict
+    }
+  }
+
+  mem.foreach { entry =>
+    when(entry.valid &&
+      (backendRedirect.reduce(_ || _) && entry.bits.ftqIdx > backendRedirectPtr ||
+        io.bpuEnqueue && entry.bits.ftqIdx === io.bpuEnqueuePtr)) {
+      entry.bits.flushed := true.B
+    }
+  }
+
+  private val deqValid = mem(deqPtr.value).valid && !resolve.map(branch =>
     branch.valid && branch.bits.ftqIdx === mem(deqPtr.value).bits.ftqIdx
   ).reduce(_ || _)
 
