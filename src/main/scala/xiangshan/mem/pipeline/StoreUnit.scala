@@ -470,7 +470,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     s2_in.uop.exceptionVec(storeGuestPageFault)
   )
   // This real physical address is located in uncache space.
-  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
+  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
   val s2_isCbo  = RegEnable(s1_isCbo, s1_fire) // all cbo instr
   val s2_isCbo_noZero = LSUOpType.isCbo(s2_in.uop.fuOpType)
 

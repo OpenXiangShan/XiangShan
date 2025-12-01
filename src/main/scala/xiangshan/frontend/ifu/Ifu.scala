@@ -388,7 +388,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
   }.elsewhen(uncacheRedirect.valid) {
     s2_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
-  }.elsewhen(s2_fire && !s2_icacheMeta(0).isUncache) {
+  }.elsewhen(s2_fire) {
     s2_prevIBufEnqPtr := s2_prevIBufEnqPtr + s2_instrCount
   }
 
