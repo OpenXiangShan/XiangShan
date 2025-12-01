@@ -387,7 +387,6 @@ class Sbuffer(implicit p: Parameters)
 
   io.in.req(0).ready := firstCanInsert
   io.in.req(1).ready := secondCanInsert && io.in.req(0).ready
-  io.in.canAccept := evenCanInsert && oddCanInsert && sbuffer_state =/= x_drain_sbuffer
 
   for (i <- 0 until EnsbufferWidth) {
     // train

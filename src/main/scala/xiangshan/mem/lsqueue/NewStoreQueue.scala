@@ -60,6 +60,20 @@ object UqPtr {
   }
 }
 
+class DataQueuePtr(implicit p: Parameters) extends CircularQueuePtr[DataQueuePtr](
+  p => p(XSCoreParamsKey).EnsbufferWidth
+){
+}
+
+object DataQueuePtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): DataQueuePtr = {
+    val ptr = Wire(new DataQueuePtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
+
 
 // don't need to initial
 class SQEntryBundle(implicit p: Parameters) extends MemBlockBundle {
@@ -125,6 +139,18 @@ class UnalignBufferEntry(implicit p: Parameters) extends MemBlockBundle {
   def paddr :UInt        = Cat(paddrHigh, 0.U(pageOffset.W))
   val robIdx             = new RobPtr
   val sqIdx              = new SqPtr
+}
+
+class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
+  val addr         = UInt(PAddrBits.W)
+  val prefetch     = Bool()
+  val vecValid     = Bool() //TODO: need to remove.
+  val wline        = Bool()
+  val vaddr        = UInt(VAddrBits.W)
+  val data         = UInt(VLEN.W)
+  val mask         = UInt((VLEN/8).W)
+  // debug signal
+  val debug_robIdx = Option.when(debugEn)(new RobPtr)
 }
 
 abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
@@ -400,6 +426,121 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
   }
 
+  /*
+  * EnterSbufferQueue is a sequentially written data buffer for eliminating timing paths between the Sbuffer and StoreQueue.
+  *
+  * [NOTES]: Ideally, the n data at the StoreQueue head can be written into the Sbuffer, EnterSbufferQueue is a pipeline.
+  *          However, when the sbuffer becomes unable to write the n data in a single cycle,
+  *          the EnterSbufferQueue ensures that the n data are written into the Sbuffer in the correct order
+  *          while they are in EnterSbufferQueue.
+  *
+  * The structure of StoreQueue write to Sbuffer are as shown below:
+  *     +------------+                        +-------------------+
+  *     | StoreQueue |                        |                   |
+  *     +------------+                        |                   |
+  *     |      .     |                        | EnterSbufferQueue |
+  *     |      .     |                        |                   |
+  *     |      .     |                        |                   |
+  *     +------------+  [n = EnsbufferWidth]  +-------------------+               +-------------------+
+  *     |   head n   | ---------------------->|      Entry n      | ------------> |                   |
+  *     +------------+                        +-------------------+               |                   |
+  *     |      .     |                        |         .         |               |                   |
+  *     |      .     |                        |         .         |               |       Sbuffer     |
+  *     |      .     |                        |         .         |               |                   |
+  *     +------------+                        +-------------------+               |                   |
+  *     |   head 0   |----------------------> |      Entry 0      | ------------> |                   |
+  *     +------------+                        +-------------------+               +-------------------+
+  * */
+  private class EnterSbufferQueue(implicit  p: Parameters) extends LSQModule {
+    val io = IO(new Bundle {
+      val fromDeqModule = Vec(EnsbufferWidth, Flipped(DecoupledIO(new WriteToSbufferReqEntry)))
+      val toSbuffer     = new SbufferWriteIO
+      val empty         = Output(Bool())
+      val full          = Output(Bool())
+      val freeCount     = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    })
+    def ToSbufferConnect(source: WriteToSbufferReqEntry, sink: DCacheWordReqWithVaddrAndPfFlag) = {
+      sink          := WireInit(0.U.asTypeOf(new DCacheWordReqWithVaddrAndPfFlag)) // TODO: init here.
+      sink.data     := source.data
+      sink.mask     := source.mask
+      sink.vaddr    := source.vaddr
+      sink.wline    := source.wline
+      sink.addr     := source.addr
+      sink.vecValid := source.vecValid
+      sink.prefetch := source.prefetch
+      sink
+    }
+
+    private val enqWidth: Int  = io.fromDeqModule.length
+    private val queueSize: Int = EnsbufferWidth
+
+    private val entries    = Reg(Vec(queueSize, new WriteToSbufferReqEntry)) // no need to reset!
+    private val allocated  = RegInit(VecInit(Seq.fill(queueSize)(false.B)))
+    private val enqPtrVec  = RegInit(VecInit((0 until io.fromDeqModule.length).map(_.U.asTypeOf(new DataQueuePtr))))
+    private val deqPtrVec  = RegInit(VecInit((0 until io.fromDeqModule.length).map(_.U.asTypeOf(new DataQueuePtr))))
+    private val headEntry  = entries(deqPtrVec.head.value)
+
+    private val empty      = enqPtrVec.head.value === deqPtrVec.head.value && enqPtrVec.head.flag === deqPtrVec.head.flag
+    private val full       = enqPtrVec.head.value === deqPtrVec.head.value && enqPtrVec.head.flag =/= deqPtrVec.head.flag
+
+    // enq
+    private val canEnq    = io.fromDeqModule.map(_.fire)
+    private val enqReq    = io.fromDeqModule.map(_.bits)
+
+    deqPtrVec.zip(canEnq).zipWithIndex.map{case ((ptr, v), i) =>
+      when(v) {
+        entries(ptr.value) := enqReq(i)
+      }
+    }
+
+    private val deqSameCycle   = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+
+    (0 until EnsbufferWidth).map {i =>
+      deqSameCycle(i) := deqPtrVec.zipWithIndex.map{case (ptr, j) =>
+        ptr.value === i.U && io.toSbuffer.req(j).fire
+      }.reduce(_ || _)
+    }
+
+    (0 until queueSize).map{i =>
+      val deqCancel = deqPtrVec.zipWithIndex.map{case (ptr, j) =>
+        ptr.value === i.U && io.toSbuffer.req(j).fire
+      }.reduce(_ || _)
+      val enqSet    = enqPtrVec.zipWithIndex.map{case (ptr, j) =>
+        ptr.value === i.U && io.fromDeqModule(j).fire
+      }.reduce(_ || _)
+
+      when(enqSet) { // enq has high priority.
+        allocated(i) := true.B
+      }.elsewhen(deqCancel) {
+        allocated(i) := false.B
+      }
+    }
+
+    enqPtrVec.map(ptr => ptr.value + PopCount(canEnq))
+
+    // deq
+    private val doDeq = io.toSbuffer.req.map(_.fire)
+    deqPtrVec.map(ptr => ptr.value + PopCount(doDeq))
+
+    XSError(enqPtrVec.head < deqPtrVec.head, s"Something wrong in DataBufferQueue!\n")
+
+    // connection
+    for (i <- 0 until EnsbufferWidth) {
+      io.fromDeqModule(i).ready := !allocated(enqPtrVec(i).value) || deqSameCycle(enqPtrVec(i).value)
+    }
+
+    for (i <- 0 until EnsbufferWidth) {
+      ToSbufferConnect(entries(deqPtrVec(i).value), io.toSbuffer.req(i).bits)
+      io.toSbuffer.req(i).valid := allocated(deqPtrVec(i).value)
+      if(i > 0){
+        XSError(io.toSbuffer.req(i).valid && !io.toSbuffer.req(i - 1).valid, s"low port is invalid, but ${i} port is valid!\n")
+      }
+    }
+
+    io.freeCount := PopCount((~allocated.asUInt).asUInt)
+
+  }
+
   private class DeqModule(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val headDataEntries = Vec(EnsbufferWidth, Input(new SQEntryBundle))
@@ -444,6 +585,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val waitResp  = Value
       val writeback = Value
     }
+
+    private val dataQueue        = Module(new EnterSbufferQueue)
 
     private val dataEntries      = io.headDataEntries
     private val ctrlEntries      = io.headCtrlEntries
@@ -709,7 +852,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     /*---------------------------------------- Write to Sbuffer Interface --------------------------------------------*/
-    private val writeSbufferWire = Wire(Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddrAndPfFlag)))
+    private val writeSbufferWire = Wire(Vec(EnsbufferWidth, DecoupledIO(new WriteToSbufferReqEntry)))
     private val uncacheStall     = Wire(Vec(EnsbufferWidth, Bool()))
     private val unalignStall     = Wire(Vec(EnsbufferWidth, Bool()))
     private val cboStall         = Wire(Vec(EnsbufferWidth, Bool()))
@@ -717,7 +860,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     // cross16B will occupy two write port, so only need to use port 0 fire.
     private val cross16BDeqReg   = RegEnable(headCross16B, writeSbufferWire(0).fire)
 
-    writeSbufferWire             := DontCare //// init , TODO: fix it!!!!!!
     // when deq is MMIO/NC/CMO request, don't need to write sbuffer.
     for (i <- 0 until EnsbufferWidth) {
       val ctrlEntry = ctrlEntries(i)
@@ -733,20 +875,28 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
     // generate to sbuffer valid
     /*
-    * NOTE: [1] only two port of sbuffer is ready, the request of cross16B can write to sbuffer.
-    *       [2] canAccept means sbuffer can enter two request at same time.
+    * NOTE: [1] only two port of dataQueue is ready, the request of cross16B can write to dataQueue.
+    *       [2] dataQueue.io.empty means dataQueue can enter two request at same time.
     */
+
+    // toSbufferValid(0) use dataQueue.io.empty to judge unalign split valid, need to modify if  EnsbufferWifth > 2,
+    // can use dataQueue.io.freeCount
+    require(EnsbufferWidth == 2)
 
     for(i <- 0 until EnsbufferWidth) {
       val ctrlEntry = ctrlEntries(i)
       if(i == 0) {
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          (!headCross16B || io.writeToSbuffer.canAccept) && !unalignStall(i) && ctrlEntry.committed
+          (!headCross16B || dataQueue.io.empty) && !unalignStall(i) && ctrlEntry.committed
+        // [NOTE]: here I use dataQueue.io.empty because EnsbufferWifth == 2, if EnsbufferWifth > 2, need to modify.
 
         unalignStall(i) := false.B // if first port is unalign, make it can write to sbuffer.
       }
       else if(i == 1) { // override port 1 to write second request of cross16B
+        // Regarding writing to port 1's Sbuffer, only the following two scenarios permit writing:
+        //  1. Port 0 write a unaligned request cross 16 bytes, preempting port 1's write port.
+        //  2. Port 0 is ready, and the Sbuffer can process two write requests simultaneously.
         toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
           !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated && ctrlEntry.committed &&
           toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0)) && !unalignStall(i)
@@ -776,20 +926,17 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       port.bits.wline    := dataEntry.wline
       port.bits.prefetch := ctrlEntry.prefetch
-      port.bits.cmd      := MemoryOpConstants.M_XWR
       port.bits.vecValid := vecValid // vector used, will be remove in feature.
       port.valid         := toSbufferValid(i)
 
       XSError(ctrlEntry.vecInactive && !ctrlEntry.isVec, s"inactive element must be vector! ${i}")
     }
 
-    io.writeToSbuffer.req.zip(writeSbufferWire).zipWithIndex.map{case ((sink, source), i) =>
-      NewPipelineConnect(
-        source, sink, sink.fire,
-        false.B,
-        Option(s"SQ2SBPipelineConnect${i}")
-      )
+    dataQueue.io.fromDeqModule.zip(writeSbufferWire).map{ case (sink, source) =>
+      sink               <> source
     }
+
+    io.writeToSbuffer    <> dataQueue.io.toSbuffer
 
     /*============================================ deqPtr generate ===================================================*/
     /*
@@ -825,7 +972,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     // [NOTE]: low 4 bit of addr/vaddr will be omitted in the sbuffer, but it will be used for difftest.
     for(i <- 0 until EnsbufferWidth){
       io.pmaStore.foreach { case sink =>
-        sink(i).valid          := writeSbufferWire(i).valid
+        sink(i).valid          := writeSbufferWire(i).fire
         sink(i).bits.addr      := writeSbufferWire(i).bits.addr
         sink(i).bits.data      := writeSbufferWire(i).bits.data
         sink(i).bits.mask      := writeSbufferWire(i).bits.mask
@@ -846,6 +993,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       dontTouch(deqCount)
       dontTouch(outMask)
       dontTouch(outData)
+      dontTouch(writeSbufferWire)
     }
   }
   /*==================================================================================================================*/

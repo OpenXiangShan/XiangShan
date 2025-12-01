@@ -250,7 +250,6 @@ class StoreQueueToLoadQueueIO(implicit p: Parameters) extends XSBundle {
 }
 
 class SbufferWriteIO(implicit p : Parameters) extends XSBundle {
-  val canAccept          = Input(Bool()) // canAccept means sbuffer can enter two request at same time.
   val req                = Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddrAndPfFlag))
 }
 
