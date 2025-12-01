@@ -21,6 +21,7 @@ object BlockBackField extends BoolDecodeField[InstPattern] {
           case AmoLrInstPattern() => y
           case FenceInstPattern() => y
           case FenceiInstPattern() => y
+          case CustomTrapPattern() => y
           case _ => n
         }
         case _ => n

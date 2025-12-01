@@ -116,6 +116,8 @@ case class IntStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePatte
 
 case class HyperStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePattern
 
+case class CustomTrapPattern()(implicit rawInst: BitPat) extends IntITypePattern
+
 sealed class FpITypeInstPattern(implicit rawInst: BitPat) extends FpInstPattern
 
 object FpITypeInstPattern {
@@ -290,6 +292,7 @@ object InstPattern {
     val funct5 = rawInst(31, 27)
     val rs2 = rawInst(24, 20)
     val width = func3
+    val imm12 = rawInst(31, 20)
 
     // filter not C extension
     if (opcode2.rawString != "11") {
@@ -375,7 +378,16 @@ object InstPattern {
       // inst[6:5] == b"11"
       case BRANCH => IntBTypePattern()
       case JALR => JalrPattern()
-      case RESERVED => null
+      case RESERVED =>
+        func3.rawString match {
+          case "000" =>
+            imm12.rawString match {
+              case "000000000000" =>
+                CustomTrapPattern()
+              case _ => null
+            }
+          case _ => null
+        }
       case JAL => IntJTypePattern()
       case SYSTEM =>
         func3.rawString match {

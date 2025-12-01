@@ -403,11 +403,7 @@ object ScalaUopTable {
   def tableSExt = {
   }
 
-  def table(): Map[BitPat, Opcode] = Seq(
-    tableI, tableM, tableA, tableF, tableD, tableZicsr,
-    tableSystem, tableS,
-    tableZba, tableZbb, tableZbc, tableZbs, tableZawrs,
-
-
-  ).fold(Map[BitPat, Opcode]())(_ ++ _)
+  val tableXSTrap = Map(
+    xiangshan.backend.decode.isa.CustomInstructions.TRAP -> xstrap
+  )
 }

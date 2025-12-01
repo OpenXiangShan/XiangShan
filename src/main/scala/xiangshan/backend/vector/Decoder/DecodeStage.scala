@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.decode.isa.Extensions.{A, D, ExtBase, F, I, M, S, System, V, Za64rs, Zawrs, Zba, Zbb, Zbc, Zbkb, Zbkc, Zbkx, Zbs, Zicsr}
+import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.vector.Bundles.Vl
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -32,6 +32,7 @@ class DecodeStageImp(
     Za64rs, /*Zacas,*/ Zawrs,
     Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
     V,
+    XSTrap,
     // Zcb, Zcmop,
     // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
   )

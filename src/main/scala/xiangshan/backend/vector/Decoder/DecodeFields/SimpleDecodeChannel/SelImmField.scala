@@ -33,6 +33,7 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
           case CboInstPattern() => SelImm.S
           case FenceInstPattern() => null
           case FenceiInstPattern() => null
+          case CustomTrapPattern() => null
         }
         case _: IntSTypePattern => SelImm.S
         case IntBTypePattern() => SelImm.SB

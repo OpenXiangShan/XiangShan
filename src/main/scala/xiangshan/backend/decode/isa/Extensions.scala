@@ -1,11 +1,9 @@
 package xiangshan.backend.decode.isa
 
-import chisel3.ChiselEnum
 import chisel3.util.BitPat
+import xiangshan.backend.decode.isa.CustomInstructions.XSTrapType
 import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.decode.opcode.Opcode
-
-import scala.reflect.runtime.universe._
 import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable._
 
 object Extensions {
@@ -119,6 +117,8 @@ object Extensions {
   case object C extends UnprivExt {
     override val types: Seq[InstType] = Seq(CType, C64Type)
   }
+
+  case object XSTrap extends UnprivExt(Seq(XSTrapType), tableXSTrap)
 
   trait HasInst { self: ExtBase =>
     val types: Seq[InstType]
