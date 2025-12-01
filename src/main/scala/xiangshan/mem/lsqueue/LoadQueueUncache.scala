@@ -69,6 +69,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val uncacheState = RegInit(s_idle)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
+  val denied = RegInit(false.B)
+  val corrupt = RegInit(false.B)
 
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
   val slaveAck = req_valid && io.uncache.idResp.valid && io.uncache.idResp.bits.mid === entryIndex.U
@@ -97,6 +99,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     slaveAccept := false.B
     req := io.req.bits
     nderr := false.B
+    denied := false.B
+    corrupt := false.B
   } .elsewhen(slaveAck) {
     slaveAccept := true.B
     slaveId := io.uncache.idResp.bits.sid
@@ -184,6 +188,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   when (io.uncache.resp.fire) {
     uncacheData := io.uncache.resp.bits.data
     nderr := io.uncache.resp.bits.nderr
+    denied := io.uncache.resp.bits.denied
+    corrupt := io.uncache.resp.bits.corrupt
   }
 
   /* uncache writeback */
@@ -198,7 +204,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits := DontCare
     io.ncOut.bits.uop := req.uop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.ncOut.bits.uop.exceptionVec(hardwareError) := nderr
+    io.ncOut.bits.uop.exceptionVec(hardwareError) := corrupt && !denied
+    io.ncOut.bits.uop.exceptionVec(loadAccessFault) := denied
     io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
     io.ncOut.bits.vaddr := req.vaddr
@@ -213,7 +220,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioOut.bits := DontCare
     io.mmioOut.bits.uop := req.uop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.mmioOut.bits.uop.exceptionVec(hardwareError) := nderr
+    io.mmioOut.bits.uop.exceptionVec(hardwareError) := corrupt && !denied
+    io.mmioOut.bits.uop.exceptionVec(loadAccessFault) := denied
     io.mmioOut.bits.data := uncacheData
     io.mmioOut.bits.debug.isMMIO := true.B
     io.mmioOut.bits.debug.isNCIO := false.B
@@ -226,7 +234,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   io.exception.valid := writeback
   io.exception.bits := req
-  io.exception.bits.uop.exceptionVec(hardwareError) := nderr
+  io.exception.bits.uop.exceptionVec(hardwareError) := corrupt && !denied
+  io.exception.bits.uop.exceptionVec(loadAccessFault) := denied
 
   /* debug log */
   XSDebug(io.uncache.req.fire,

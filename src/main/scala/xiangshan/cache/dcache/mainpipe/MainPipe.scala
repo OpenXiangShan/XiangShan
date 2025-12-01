@@ -162,7 +162,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val meta_resp = Input(Vec(nWays, new Meta))
     val meta_write = DecoupledIO(new CohMetaWriteReq)
     val extra_meta_resp = Input(Vec(nWays, new DCacheExtraMeta))
-    val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val error_flag_write = DecoupledIO(new ErrorMetaWriteReq)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val latency_flag_write = DecoupledIO(new LatencyMetaWriteReq)
@@ -439,9 +439,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
-  val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
+  val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, 0.U.asTypeOf(new TLError()))
   val s2_refill_latency = Mux(io.refill_info.valid && isFromL1Prefetch(s2_req.pf_source), io.refill_info.bits.refill_latency, 0.U)
-  val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
+  val s2_error = s2_flag_error.asUInt.orR || s2_tag_error || s2_l2_error.asUInt.orR // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
 
@@ -880,6 +880,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_hit_resp.miss := false.B
   atomic_hit_resp.miss_id := s3_req.miss_id
   atomic_hit_resp.error := s3_error_wb
+  atomic_hit_resp.tl_error := (s3_l2_error_wb.asUInt | s3_flag_error_beu.asUInt).asTypeOf(new TLError())
   atomic_hit_resp.replay := false.B
   atomic_hit_resp.ack_miss_queue := s3_req.miss
   atomic_hit_resp.id := lrsc_valid
@@ -889,6 +890,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.miss := true.B
   atomic_replay_resp.miss_id := DontCare
   atomic_replay_resp.error := false.B
+  atomic_replay_resp.tl_error := 0.U.asTypeOf(new TLError())
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
@@ -907,10 +909,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.meta.coh := new_coh
 
-  io.error_flag_write.valid := s3_fire && update_meta && (s3_l2_error_wb || s3_req.miss)
+  io.error_flag_write.valid := s3_fire && update_meta && (s3_l2_error_wb.asUInt.orR || s3_req.miss)
   io.error_flag_write.bits.idx := s3_idx
   io.error_flag_write.bits.way_en := s3_way_en
-  io.error_flag_write.bits.flag := s3_l2_error_wb
+  io.error_flag_write.bits.error := s3_l2_error_wb
 
   // if we use (prefetch_flag && meta =/= ClientStates.Nothing) for prefetch check
   // prefetch_flag_write can be omited
@@ -1070,7 +1072,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.error.bits.paddr := s3_error_paddr_beu
   io.error.bits.source.tag := s3_tag_error_beu
   io.error.bits.source.data := s3_data_error_beu
-  io.error.bits.source.l2 := s3_flag_error_beu || s3_l2_error_beu
+  io.error.bits.source.l2 := s3_flag_error_beu.asUInt.orR || s3_l2_error_beu.asUInt.orR
   io.error.bits.opType.store := RegEnable(s2_req.isStore && !s2_req.probe, s2_fire)
   io.error.bits.opType.probe := RegEnable(s2_req.probe, s2_fire)
   io.error.bits.opType.release := RegEnable(s2_req.replace, s2_fire)
