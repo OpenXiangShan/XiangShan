@@ -478,9 +478,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      TAGE Trace
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val tageTraceTable = ChiselDB.createTable("TageTrace", new TageTrace, EnableTageTrace)
-  private val tageTrace      = Wire(new TageTrace)
-  tageTrace.condTrace.zipWithIndex.foreach { case (trace, i) =>
+  private val condTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ConditionalBranchTrace)))
+  condTraceVec.zipWithIndex.foreach { case (trace, i) =>
     trace.valid                  := t2_condMask(i)
     trace.bits.startVAddr        := t2_startVAddr
     trace.bits.branchVAddr       := t2_branchesVAddr(i)
@@ -506,12 +505,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trace.bits.allocWayIdx       := OHToUInt(t2_allocateWayMaskOH)
   }
 
-  tageTraceTable.log(
-    data = tageTrace,
-    en = t2_valid,
-    clock = clock,
-    reset = reset
-  )
+  private val tageTraceDBTables = (0 until NumTables).map { i =>
+    ChiselDB.createTable(s"CondTrace_${i}", new ConditionalBranchTrace, EnableTageTrace)
+  }
+  tageTraceDBTables.zip(condTraceVec).foreach { case (dbTable, condTrace) =>
+    dbTable.log(
+      data = condTrace.bits,
+      en = t2_valid && condTrace.valid,
+      clock = clock,
+      reset = reset
+    )
+  }
 
   /* --------------------------------------------------------------------------------------------------------------
      performance counter
