@@ -261,7 +261,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
 
       val s1ForwardMask  = RegEnable(forwardMask, s0Valid)
-      val s1LoadVaddr    = RegEnable(io.query(i).req.lduStage0ToSq.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB/8)), s0Valid)
+      val s1LoadVaddr    = RegEnable(io.query(i).req.lduStage0ToSq.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB)), s0Valid)
       val s1deqMask      = RegEnable(deqMask, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
       val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
@@ -274,10 +274,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       /*================================================== Stage 1 ===================================================*/
 
-      val s1QueryPaddr = io.query(i).req.lduStage1ToSq.paddr(PAddrBits - 1, log2Ceil(VLENB/8))
+      val s1QueryPaddr = io.query(i).req.lduStage1ToSq.paddr(PAddrBits - 1, log2Ceil(VLENB))
       // prevent X-state
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
-        (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB / 8)) === s1LoadVaddr) && ctrlEntry.addrValid
+        (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB)) === s1LoadVaddr) && ctrlEntry.addrValid
       }).asUInt
 
       val s1OverlapMask  = VecInit((0 until StoreQueueSize).map(j =>
@@ -313,8 +313,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val addrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt &
         VecInit(Seq.fill(StoreQueueSize)(!addrInvalidLow.orR)).asUInt
 
-      val (addrInvLowOH, _)   = findYoungest(canForwardLow)
-      val (addrInvHighOH, _)  = findYoungest(canForwardHigh)
+      val (addrInvLowOH, _)   = findYoungest(addrInvalidLow)
+      val (addrInvHighOH, _)  = findYoungest(addrInvalidHigh)
       val addrInvSelectOH     = addrInvLowOH | addrInvHighOH
 
       val dataInvalidSqIdx   = Wire(new SqPtr)
@@ -346,7 +346,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       /*================================================== Stage 2 ===================================================*/
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB/8)) === s2LoadPaddr) && s2Valid
+      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB)) === s2LoadPaddr) && s2Valid
 
       val selectData         = (0 until VLEN/8).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -800,9 +800,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     * NOTE: when deq mmio/cbo, rdataPtr === deqPtr, because mmio/cbo need to execute at head of StoreQueue.
     * */
     private val sbufferFireNum = Mux(cross16BDeqReg,
-      Cat(io.writeToSbuffer.req.head.fire, 0.U),
-      Cat(io.writeToSbuffer.req.map(_.fire)))
+      Cat(RegNext(io.writeToSbuffer.req.head.fire), 0.U),
+      Cat(io.writeToSbuffer.req.map{case p => RegNext(p.fire)}))
 
+    // sbufferFireNum need to RegNext, because write to sbuffer need 2 cycle, storeQueue need to forward 1 more cycle
     val deqCount = Cat(sbufferFireNum, io.writeBack.fire) // timing is ok ?
 
     io.sqDeqCnt := PopCount(VecInit(deqCount).asUInt)
