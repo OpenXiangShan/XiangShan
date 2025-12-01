@@ -871,14 +871,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         noPending := true.B
         mmioState := s_wb
 
-        when (io.uncache.resp.bits.nderr || io.cmoOpResp.bits.nderr) {
+        when (io.uncache.resp.bits.denied || io.cmoOpResp.bits.denied) {
+          uncacheUop.exceptionVec(storeAccessFault) := true.B
+        }
+
+        when (io.uncache.resp.bits.corrupt && !io.uncache.resp.bits.denied ||
+              io.cmoOpResp.bits.corrupt && !io.cmoOpResp.bits.denied) {
           uncacheUop.exceptionVec(hardwareError) := true.B
         }
       }
     }
     is(s_wb) {
       when (io.mmioStout.fire || io.vecmmioStout.fire) {
-        when (uncacheUop.exceptionVec(hardwareError)) {
+        when (ExceptionNO.selectByFu(uncacheUop.exceptionVec, StaCfg).asUInt.orR) {
           mmioState := s_idle
         }.otherwise {
           mmioState := s_wait

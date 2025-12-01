@@ -316,8 +316,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.bits.lqIdx := s1_req.lqIdx
   io.is128Req := s1_load128Req
 
-  // check ecc error
-  val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
+  // check tl error
+  val s1_tl_error = Mux(s1_need_replacement, 0.U.asTypeOf(new TLError()), s1_hit_error) // error reported by exist dcache error bit
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -407,7 +407,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_instrtype = s2_req.instrtype
 
   val s2_tag_error = WireInit(false.B)
-  val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
+  val s2_tl_error = RegEnable(s1_tl_error, s1_fire)
 
   val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
   val s2_hit_access = RegEnable(s1_hit_access, s1_fire)
@@ -547,12 +547,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_banked_data_resp_word = RegEnable(s2_resp_data, s2_fire)
   val s3_data_error = Mux(s3_load128Req, io.read_error_delayed.asUInt.orR, io.read_error_delayed(0)) && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
-  val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
+  val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
+  val s3_flag_error = s3_tl_error.asUInt.orR
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
+  resp.bits.tl_error_delayed.tl_denied := s3_tl_error.tl_denied & s3_valid
+  resp.bits.tl_error_delayed.tl_corrupt := s3_tl_error.tl_corrupt & s3_valid
   resp.bits.data_delayed := s3_banked_data_resp_word
   resp.bits.replacementUpdated := io.replace_access.valid
 

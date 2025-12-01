@@ -108,7 +108,7 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   // refill_info for mainpipe req awake
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
-  val error      = Bool()
+  val error      = new TLError()
 }
 
 class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
@@ -310,6 +310,8 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val state_next = WireInit(state)
   val req = RegEnable(io.req.bits, io.req.fire)
   val nderr = RegInit(false.B)
+  val denied = RegInit(false.B)
+  val corrupt = RegInit(false.B)
   val no_pending = RegInit(true.B)
 
   state := state_next
@@ -319,6 +321,8 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       when (io.req.fire) {
         state_next := s_sreq
         nderr := false.B
+        denied := false.B
+        corrupt := false.B
       }
     }
     is(s_sreq) {
@@ -331,6 +335,8 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       when (io.resp_chanD.fire) {
         state_next := s_lsq_resp
         nderr := io.resp_chanD.bits.denied || io.resp_chanD.bits.corrupt
+        denied := io.resp_chanD.bits.denied
+        corrupt := io.resp_chanD.bits.corrupt
         no_pending := true.B
       }
     }
@@ -357,6 +363,8 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.resp_to_lsq.valid := state === s_lsq_resp
   io.resp_to_lsq.bits.address := req.address
   io.resp_to_lsq.bits.nderr   := nderr
+  io.resp_to_lsq.bits.denied  := denied
+  io.resp_to_lsq.bits.corrupt := corrupt
 
   assert(!(state =/= s_idle && io.req.valid))
   assert(!(state =/= s_wresp && io.resp_chanD.valid))
@@ -495,7 +503,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
 
-  val error = RegInit(false.B)
+  val denied = RegInit(false.B)
+  val corrupt = RegInit(false.B)
   val prefetch = RegInit(false.B)
   val access = RegInit(false.B)
 
@@ -580,7 +589,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
 
     should_refill_data_reg := miss_req_pipe_reg_bits.isFromLoad
-    error := false.B
+    denied := false.B
+    corrupt := false.B
     prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
     access := false.B
     secondary_fired := false.B
@@ -677,7 +687,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       hasData := false.B
     }
 
-    error := io.mem_grant.bits.denied || io.mem_grant.bits.corrupt || error
+    denied := io.mem_grant.bits.denied || denied
+    corrupt := io.mem_grant.bits.corrupt || corrupt
 
     refill_data_raw(refill_count ^ isKeyword) := io.mem_grant.bits.data
     isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
@@ -908,7 +919,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
-  io.refill_info.bits.error      := error
+  io.refill_info.bits.error.tl_denied  := denied
+  io.refill_info.bits.error.tl_corrupt := corrupt
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
@@ -922,7 +934,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.forwardInfo.raw_data := refill_and_store_data
   io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
   io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
-  io.forwardInfo.corrupt := error
+  io.forwardInfo.denied := denied
+  io.forwardInfo.corrupt := corrupt
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
   io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
@@ -1127,6 +1140,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.forward(i).forward_mshr := forward_mshr
     io.forward(i).forwardData := forwardData
     io.forward(i).corrupt := RegNext(forwardInfo_vec(id).corrupt)
+    io.forward(i).denied := RegNext(forwardInfo_vec(id).denied)
   })
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
