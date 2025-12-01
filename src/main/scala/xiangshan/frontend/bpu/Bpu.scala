@@ -694,11 +694,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val t0_mispredictBranch = train.bits.mispredictBranch
   private val t0_mbtbMeta         = train.bits.meta.mbtb
   private val t0_branches         = train.bits.branches
-  private val t0_mbtbHit = t0_mbtbMeta.entries.map { e =>
-    e.rawHit &&
-    e.position === t0_mispredictBranch.bits.cfiPosition &&
-    e.attribute === t0_mispredictBranch.bits.attribute
-  }.reduce(_ || _)
+  private val t0_mbtbHit          = t0_mbtbMeta.entries.flatten.map(_.hit(t0_mispredictBranch.bits)).reduce(_ || _)
 
   private val perf_conditionalMispredict =
     train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional
