@@ -596,16 +596,18 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
 
 
   // HardwareError response will be one beat late
+  val rdcache_resp_error = if (EnableAccurateLoadError) io.rdcache.resp.bits.error_delayed else io.rdcache.resp.bits.tl_error_delayed.asUInt.orR
   when(
     (state === s_latch_and_merge_data || state === s_misalign_merge_data) &&
-    io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
+      rdcache_resp_error && GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
     segmentActive
   ) {
     exception_pa := true.B
     instMicroOp.exception_pa := true.B
 
     when(canTriggerException) {
-      exceptionVec(hardwareError) := true.B
+      exceptionVec(hardwareError) := io.rdcache.resp.bits.tl_error_delayed.tl_corrupt && !io.rdcache.resp.bits.tl_error_delayed.tl_denied || EnableAccurateLoadError.B
+      exceptionVec(loadAccessFault)  := io.rdcache.resp.bits.tl_error_delayed.tl_denied && isVSegLoad
       instMicroOp.exceptionVstart := segmentIdx // for exception
     }.otherwise {
       instMicroOp.exceptionVl.valid := true.B

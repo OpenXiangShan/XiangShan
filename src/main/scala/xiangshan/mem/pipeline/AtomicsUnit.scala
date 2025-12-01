@@ -32,7 +32,7 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
-import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
+import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants, TLError}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 
@@ -356,7 +356,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   val dcache_resp_data  = Reg(UInt())
   val dcache_resp_id    = Reg(UInt())
-  val dcache_resp_error = Reg(Bool())
+  val dcache_resp_tl_error = Reg(new TLError())
 
   when (state === s_cache_resp) {
     // when not miss
@@ -376,7 +376,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       }.otherwise {
         dcache_resp_data := io.dcache.resp.bits.data
         dcache_resp_id := io.dcache.resp.bits.id
-        dcache_resp_error := io.dcache.resp.bits.error
+        dcache_resp_tl_error := io.dcache.resp.bits.tl_error
         state := s_cache_resp_latch
       }
     }
@@ -401,11 +401,10 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       ))
     )
 
-    when (dcache_resp_error && io.csrCtrl.cache_error_enable) {
-      exceptionVec(loadAccessFault)  := isLr
-      exceptionVec(storeAccessFault) := !isLr
-      assert(!exceptionVec(loadAccessFault))
-      assert(!exceptionVec(storeAccessFault))
+    when (dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable) {
+      exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tl_denied
+      exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tl_denied
+      exceptionVec(hardwareError)    := dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
     }
 
     resp_data := resp_data_wire
