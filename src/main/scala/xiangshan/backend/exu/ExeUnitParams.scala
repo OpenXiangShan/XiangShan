@@ -157,6 +157,7 @@ case class ExeUnitParams(
   }
 
   def wbPregIdxWidth: Int = {
+    require(backendParam != null, "backendParam is null")
     this.pregWbDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)
   }
 
