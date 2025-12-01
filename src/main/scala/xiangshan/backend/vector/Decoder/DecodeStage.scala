@@ -70,7 +70,7 @@ class DecodeStageImp(
     val inMopBits = in.mop(i).bits
 
     decodeChannels.in.redirect := in.redirect
-
+    decodeChannels.in.renameCanAccept := out.uop.head.ready
     decodeChannels.in.mops(i).valid := in.mop(i).valid
     decodeChannels.in.mops(i).bits.info match {
       case info =>
@@ -203,7 +203,8 @@ object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
     val redirect = Input(Bool())
 
-    // uop from IBuffer
+    // The ready of mop means this mop is accepted by DecodeStage
+    // Ready signal depends on valid
     val mop = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
     // from FusionDecoder
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))

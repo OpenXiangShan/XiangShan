@@ -56,6 +56,8 @@ class DecodeChannels(
   val in = IO(new Bundle {
     // used to flush UopBuffer
     val redirect = Input(Bool())
+    // if rename can accept all UopWidth uops
+    val renameCanAccept = Input(Bool())
     val mops = Flipped(Vec(mopWidth, DecoupledIO(new Bundle {
       val info = new DecodeChannelInput
       val ctrl = new MopCtrlBundle
@@ -221,7 +223,7 @@ class DecodeChannels(
 
 
   for (i <- 0 until mopWidth) {
-    in.mops(i).ready := uopBufferCtrlDecoder.out.acceptVec(i)
+    in.mops(i).ready := uopBufferCtrlDecoder.out.acceptVec(i) && in.renameCanAccept
   }
 
   for (i <- 0 until uopWidth) {
