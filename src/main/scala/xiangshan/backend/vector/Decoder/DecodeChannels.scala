@@ -389,7 +389,7 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val predTaken        = Bool()
   val crossPageIPFFix  = Bool()
   val ftqPtr           = new FtqPtr
-  val ftqOffset        = UInt(log2Up(FetchBlockInstOffsetWidth).W)
+  val ftqOffset        = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
   val rawInst          = UInt(32.W)
   val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())

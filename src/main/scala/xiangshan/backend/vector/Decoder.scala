@@ -28,6 +28,6 @@ package object Decoder {
 
   class FtqInfo(implicit p: P) extends XSBundle {
     val ftqPtr          = new FtqPtr
-    val ftqOffset       = UInt(log2Up(FetchBlockInstOffsetWidth).W)
+    val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
   }
 }
