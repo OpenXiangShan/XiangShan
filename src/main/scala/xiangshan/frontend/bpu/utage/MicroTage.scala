@@ -85,9 +85,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // but it's a double-edged sword: with limited capacity, entries may be evicted
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
-  // prediction.valid := histTableHitMap.reduce(_ || _) &&
-  //   (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
-  prediction.valid            := false.B
+  prediction.valid := io.enable && histTableHitMap.reduce(_ || _) &&
+    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
+  // prediction.valid            := false.B
   prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
   prediction.bits.cfiPosition := finalPredCfiPosition
 
@@ -104,7 +104,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_trainMeta               = io.fastTrain.get.bits.utageMeta
   private val t0_trainData               = io.fastTrain.get.bits.finalPrediction
-  private val t0_trainValid              = io.fastTrain.get.valid
+  private val t0_trainValid              = io.fastTrain.get.valid && io.enable
   private val t0_trainOverride           = io.fastTrain.get.bits.hasOverride
   private val t0_histTableTakenMap       = t0_trainMeta.histTableTakenMap
   private val t0_histTableHitMap         = t0_trainMeta.histTableHitMap

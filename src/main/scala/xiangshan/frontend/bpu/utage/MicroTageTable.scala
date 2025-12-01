@@ -150,8 +150,8 @@ class MicroTageTable(
   }
 
   // Per-index access distribution
-  for (i <- 0 until numSets) {
-    XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
-    XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.allocValid)
-  }
+  // for (i <- 0 until numSets) {
+  //   XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
+  //   XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.allocValid)
+  // }
 }

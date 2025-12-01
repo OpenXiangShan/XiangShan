@@ -25,7 +25,8 @@ case class MicroTageParameters(
     TableInfos: Seq[MicroTageInfo] = Seq(
       new MicroTageInfo(512, 9, 9, 15), // 3Taken maybe better than 2Taken
       // new MicroTageInfo(64, 16, 8, 18),
-      new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
+      // new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
+      new MicroTageInfo(512, 17, 9, 15) // follow Tage.
       // new MicroTageInfo(128, 32, 16, 24)
     ),
     TakenCtrWidth: Int = 3,
