@@ -1287,7 +1287,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   // prefetch related
-  io.prefetch_stat.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+  io.prefetch_stat.late_miss_prefetch := io.req.valid && io.req.bits.isFromPrefetch && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
   io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
   io.prefetch_stat.pf_source := io.req.bits.pf_source
   io.prefetch_stat.demand_match_pfmshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
