@@ -709,7 +709,6 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
   io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
   io.rdcache.s1_kill                := false.B
-  io.rdcache.s1_kill_data_read      := false.B
   io.rdcache.s2_kill                := false.B
   if (env.FPGAPlatform){
     io.rdcache.s0_pc                := DontCare
