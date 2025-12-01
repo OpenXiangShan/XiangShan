@@ -43,29 +43,11 @@ import chisel3.stage.ChiselGeneratorAnnotation
 //    NumIntSrcs:     Int = 512
 //)
 
-class aplic_top(params: AplicParams)(implicit p: Parameters) extends LazyModule {
-//  val o_axi4 = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-//    Seq(AXI4MasterParameters(
-//      name = "s_axi_",
-//      id = IdRange(0, 1 << params.CFG_ID_WIDTH)
-//    ))
-//  )))
-//
-//  val i_axi4 = AXI4SlaveNode(Seq(
-//    AXI4SlavePortParameters(
-//      slaves = Seq(AXI4SlaveParameters(
-//        address = Seq(params.APLICAddrMap),
-//        regionType = RegionType.UNCACHED,
-//        executable = false,
-//        supportsWrite = TransferSizes(1, params.CFG_DATA_WIDTH / 8),
-//        supportsRead = TransferSizes(1, params.CFG_DATA_WIDTH / 8)
-
-  lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) {
+class aplic_top(params: AplicParams)(implicit p: Parameters) extends Module {
+  // instance aplic
+    val u_aplic = Module(new apic_aplic_top(params))
     val i_dft_icg_scan_en    = IO(Input(Bool()))
     val i_aplic_wire_int_vld = IO(Input(UInt(params.NumIntSrcs.W)))
-    // instance aplic
-    val u_aplic = Module(new apic_aplic_top(params))
     // connect aplic
     // imsic axi4 io
     val aplic_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
@@ -151,8 +133,6 @@ class aplic_top(params: AplicParams)(implicit p: Parameters) extends LazyModule 
     u_aplic.io.i_dft_icg_scan_en    := i_dft_icg_scan_en
     u_aplic.io.aclk                 := clock
     u_aplic.io.arst_n               := (!reset.asBool).asAsyncReset
-
-  }
 }
 
 class apic_aplic_top(params: AplicParams) extends BlackBox {
@@ -229,7 +209,7 @@ object AplicGen extends App {
   val params = AplicParams()
   implicit val p: Parameters = Parameters.empty
 
-  val pbusM = LazyModule(new aplic_top(params)(p))
+  val pbusM = Module(new aplic_top(params)(p))
   println("Generating the Pbus SystemVerilog...")
   val path = """./build/rtl/"""
   (new ChiselStage).execute(
@@ -238,7 +218,7 @@ object AplicGen extends App {
       "--split-verilog"
     ),
     Seq(
-      ChiselGeneratorAnnotation(() => pbusM.module),
+      ChiselGeneratorAnnotation(() => pbusM),
       FirtoolOption("--disable-all-randomization"),
       FirtoolOption("--disable-annotation-unknown"),
       FirtoolOption("--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"),

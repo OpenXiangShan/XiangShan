@@ -4,7 +4,7 @@
 package pbus
 
 
-import chisel3._
+import chisel3.{IO, _}
 import device.standalone.StandAloneDebugModule
 import system.{CVMParameters, CVMParamsKey, HasSoCParameter, SoCParameters, SoCParamsKey}
 import device.{EnableJtag, SYSCNT, SYSCNTConsts, SYSCNTParams}
@@ -17,6 +17,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.{APB, CJTAG, DMI, DebugAttachParams, DebugExportProtocol, DebugIO, DebugModuleParams, ExportDebug, JTAG, JtagDTMKey, ResetCtrlIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.ValName
+import freechips.rocketchip.interrupts.IntSinkParameters
 import freechips.rocketchip.subsystem.{CBUS, FBUS, TLBusWrapperLocation}
 import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
 import freechips.rocketchip.tilelink._
@@ -339,7 +340,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   }
   // instance modules
   private val clintParam = SYSCNTParams(params.SYSCNTAddrMap.base)
-  val aplic_top = LazyModule(new aplic_top(params.aplicParams))
   val imsic_pbus_top = LazyModule(new imsicPbusTop(params))
   val syscnt = LazyModule(new StandAloneSYSCNT(
     useTL = false,
@@ -436,26 +436,22 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val cpu_s = IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
     // instance debugModule sba port
     val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
-//    val dm_m = IO(new VerilogAXI4Record(dm.axi4masternode.get.params))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
-//    val resetCtrl = new ResetCtrlIO(numCores)(p)
-//    val debugIO = new DebugIO()(p)
-    // dm sba ports
-//    dontTouch(peri_s)
-//    dontTouch(msi_m)
+    val dmint = IO(Output(Vec(params.NumHarts,Bool())))
+    //instance aplic
+    withClockAndReset(clock, reset){
+      val aplic_top = Module(new aplic_top(params.aplicParams))
+      // aplic
+      aplic_top.i_aplic_wire_int_vld := i_aplic_wire_int_vld
+      aplic_top.i_dft_icg_scan_en := i_dft_icg_scan_en
+      aplic_top.aplic_s <> peri_sNode.in.head._1
+      imsic_pbus_top.module.s_aplic <> aplic_top.aplic_m
+    }
     // connect io
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
-    imsic_pbus_top.module.s_aplic <> aplic_top.module.aplic_m
     (cpu_mNodes.zip(cpu_s)).foreach { case (node, io) => node.out.head._1 <> io }
     dm_m.foreach(_ <> dm.axi4masternode.get)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
-//    dm.axi4node.foreach(_)
-//      val axi4Bundle = node.asInstanceOf[AXI4Bundle]  // 强制转换为 AXI4Bundle
-//      axi4Bundle <> dm_sNode.in.head._1
-//    }
-//    dm.axi4node.foreach(_.)
-
-//        dm_m <> dm.axi4masternode.get
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
     //msi_sNodes -> imsicPbusTop
     imsic_pbus_top.module.s_cpu.zip(msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
@@ -464,10 +460,10 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       dm_mNodes(i).out.head._1 <> dm_sNodes(i).in.head._1
     }
     dmio <> dm.module.io
-    // aplic
-    aplic_top.module.i_aplic_wire_int_vld := i_aplic_wire_int_vld
-    aplic_top.module.i_dft_icg_scan_en := i_dft_icg_scan_en
-    aplic_top.module.aplic_s <> peri_sNode.in.head._1
+    val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
+    val dmintsig = dmintSrc.getElements.map(_.asInstanceOf[Vec[Bool]]).flatMap(_.toSeq)
+    require(dmintsig.size == params.NumHarts, "信号数量不匹配！")
+    (dmintsig zip dmint).foreach { case (dms, io) => io := dms }
     // syscnt connect
     syscnt.module.rtc_clock := rtc_clock
     syscnt.module.rtc_reset := rtc_reset
@@ -483,31 +479,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 /**
  * Main object to generate SystemVerilog for the IMSICPbus module.
  */
-
-//import org.chipsalliance.cde.config.{Config, Parameters}
-
-// 定义具体参数结构
-//case class SoCParameters(numCores: Int, addrWidth: Int)
-//
-//// 定义配置键
-//case object SoCParamsKey extends Field[SoCParameters]
-
-// 定义配置类，为 SoCParamsKey 赋值
-//class DefaultConfig extends Config(
-//  (site, here, up) => Map(
-//    SoCParamsKey -> SoCParameters(
-//      numCores = 4,
-//      addrWidth = 32
-//    )
-//  )
-//)
-
-//trait HasUncoreParam {
-//  implicit val p: Parameters
-//  val debug = p(DebugModuleKey)
-//
-//  debug.get.
-//}
 object PbusGen extends App {
   // Example configuration with mixed input widths
   val aplicparams = AplicParams(
