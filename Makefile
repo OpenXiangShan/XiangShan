@@ -148,8 +148,7 @@ endif
 
 # public args sumup
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
-DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
-override PLDM_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+override DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -197,12 +196,14 @@ endif
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
-DEBUG_ARGS   += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
-override PLDM_ARGS += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
+override DEBUG_ARGS += --firtool-opt "--default-layer-specialization=enable"
+ifeq ($(FPGA), 1)
+override DEBUG_ARGS	+= --fpga-platform --disable-all --remove-assert
+else
+override DEBUG_ARGS	+= --enable-difftest
+endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
-else ifeq ($(PLDM),1)
-override SIM_ARGS += $(PLDM_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
 endif
@@ -215,8 +216,8 @@ override SIM_ARGS += $(foreach c,$(call splitcomma,$(FIRRTL_COVER)),--extract-$(
 endif
 
 # use RELEASE_ARGS for TopMain by default
-ifeq ($(PLDM), 1)
-TOPMAIN_ARGS += $(PLDM_ARGS)
+ifeq ($(or $(PLDM),$(FPGA)), 1)
+TOPMAIN_ARGS += $(DEBUG_ARGS)
 else
 TOPMAIN_ARGS += $(RELEASE_ARGS)
 endif
