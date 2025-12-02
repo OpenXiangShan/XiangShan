@@ -2,29 +2,15 @@ package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util.BitPat
-import utils.EnumUtils.OHEnumeration
+import utils.EnumUtils._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 
 import scala.language.implicitConversions
 
-object FuType extends OHEnumeration {
-  class OHType(i: Int, name: String) extends super.OHVal(i: Int, name: String)
-
-  def OHType(i: Int, name: String): OHType = new OHType(i, name)
-
-  implicit class fromOHValToLiteral(x: OHType) {
-    def U: UInt = x.ohid.U
-    def U(width: Width): UInt = x.ohid.U(width)
-  }
-
-  private var initVal = 0
-
-  private def addType(name: String): OHType = {
-    val ohval = OHType(initVal, name)
-    initVal += 1
-    ohval
-  }
+object FuType extends ChiselOHEnum {
+  type OHType = super.OHType
+  val FuTypeOrR: IsOneOf.type = IsOneOf
 
   // int
   val jmp = addType(name = "jmp")
@@ -222,24 +208,6 @@ object FuType extends OHEnumeration {
   def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
 
   def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
-
-  object FuTypeOrR {
-    def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
-      apply(fuType, fu0 +: fus)
-    }
-
-    def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
-      fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
-    }
-
-    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = {
-      apply(fuType, fu0 +: fus)
-    }
-
-    def apply(fuTupe: OHType, fus: Seq[OHType]): Boolean = {
-      fus.map(x => x == fuTupe).fold(false)(_ || _)
-    }
-  }
 
   val functionNameMap = Map(
     jmp -> "jmp",
