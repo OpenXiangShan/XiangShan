@@ -86,7 +86,7 @@ class XSPdb(pdb.Pdb):
         self.df.InitFlash("")
         self.xspdb_init_bin = "xspdb_flash_init.bin"
         self.flash_bin_file = None
-        self.df.difftest_init()
+        self.df.difftest_init(False, self.mem_size)
         self.difftest_stat =  df.GetDifftest(0).dut
         self.difftest_flash = df.GetFlash()
         self.register_map = OrderedDict()
@@ -101,17 +101,17 @@ class XSPdb(pdb.Pdb):
     def check_is_need_trace(self):
         if getattr(self, "__xspdb_need_fast_trace__", False) is True:
             setattr(self, "__xspdb_need_fast_trace__" ,False)
-            info("Force set trace") 
+            info("Force set trace")
             self.set_trace()
         if self.interrupt is True:
             if getattr(self, "__xspdb_set_traced__", None) is None:
-                self.setattr(self, "__xspdb_set_traced__", True) 
+                self.setattr(self, "__xspdb_set_traced__", True)
                 info("Find interrupt, set trace")
                 self.set_trace()
         return False
 
     def __init_pdb(self, args):
-        if args.log: 
+        if args.log:
             self.api_log_enable_log(True)
         if args.log_file:
             self.api_log_set_log_file(args.log_file)
