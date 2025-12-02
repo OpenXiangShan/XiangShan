@@ -24,12 +24,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
-import utility.DelayN
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfPriorityAccumulate
 import xiangshan.RedirectLevel
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
@@ -40,11 +40,9 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.BpuDebugMeta
 import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuSpeculationMeta
-import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.ras.RasMeta
 
@@ -375,24 +373,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )._1
   private val debugMeta = metaQueueResolve(backendRedirectFtqIdx.bits.value).debug
 
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongTaken",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken =/= debugMeta.bpPred.taken
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongPosition",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      redirectCfiOffset =/= debugMeta.bpPred.cfiPosition
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongAttribute",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      !(redirect.bits.attribute === debugMeta.bpPred.attribute)
+  XSPerfPriorityAccumulate(
+    "squashCycles_bpWrong_redirect",
+    backendRedirect.valid && backendRedirect.bits.isMisPred,
+    Seq(
+      ("wrongTaken", redirect.bits.taken =/= debugMeta.bpPred.taken),
+      ("wrongPosition", redirectCfiOffset =/= debugMeta.bpPred.cfiPosition),
+      ("wrongAttribute", !(redirect.bits.attribute === debugMeta.bpPred.attribute)),
+      ("wrongTarget", redirect.bits.target =/= debugMeta.bpPred.target.toUInt)
+    )
   )
 
   XSPerfAccumulate(
@@ -401,103 +390,29 @@ class Ftq(implicit p: Parameters) extends FtqModule
       redirect.bits.taken === debugMeta.bpPred.taken &&
       redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
       redirect.bits.attribute === debugMeta.bpPred.attribute &&
-      redirect.bits.target =/= debugMeta.bpPred.target.toUInt
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongTarget_conditional",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
-      redirect.bits.attribute === debugMeta.bpPred.attribute &&
-      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
-      redirect.bits.attribute.isConditional
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongTarget_direct",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
-      redirect.bits.attribute === debugMeta.bpPred.attribute &&
-      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
-      redirect.bits.attribute.isDirect
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongTarget_indirect",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
-      redirect.bits.attribute === debugMeta.bpPred.attribute &&
-      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
-      redirect.bits.attribute.isIndirect
-  )
-
-  XSPerfAccumulate(
-    "squashCycles_bpWrong_redirect_wrongTarget_indirect_retCall",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      redirect.bits.taken === debugMeta.bpPred.taken &&
-      redirectCfiOffset === debugMeta.bpPred.cfiPosition &&
-      redirect.bits.attribute === debugMeta.bpPred.attribute &&
-      redirect.bits.target =/= debugMeta.bpPred.target.toUInt &&
-      redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect
+      redirect.bits.target =/= debugMeta.bpPred.target.toUInt,
+    Seq(
+      ("conditional", redirect.bits.attribute.isConditional),
+      ("direct", redirect.bits.attribute.isDirect),
+      ("indirect", redirect.bits.attribute.isIndirect),
+      ("indirect_retCall", redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect)
+    )
   )
 
   // TODO: use commit path information
+  private val perf_mispredS1SourceVec = BpuPredictionSource.Stage1.getValidSeq(debugMeta.bpSource.s1Source)
+  private val perf_mispredS3SourceVec = BpuPredictionSource.Stage3.getValidSeq(debugMeta.bpSource.s3Source)
+
   XSPerfAccumulate(
-    "branchMispredicts_s1Fallthrough",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      !debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s1Fallthrough
+    "branchMisPredicts_s1",
+    backendRedirect.valid && backendRedirect.bits.isMisPred && !debugMeta.bpSource.s3Override,
+    perf_mispredS1SourceVec
   )
+
   XSPerfAccumulate(
-    "branchMispredicts_s1Ubtb",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      !debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s1Ubtb
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s1Abtb",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      !debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s1Abtb
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3Fallthrough",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3Fallthrough
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3FallthroughTage",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3FallthroughTage
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3Mbtb",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3Mbtb
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3MbtbTage",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3MbtbTage
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3ITTage",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3ITTage
-  )
-  XSPerfAccumulate(
-    "branchMispredicts_s3Ras",
-    backendRedirect.valid && backendRedirect.bits.isMisPred &&
-      debugMeta.bpSource.s3Override &&
-      debugMeta.bpSource.s3Ras
+    "branchMisPredicts_s3",
+    backendRedirect.valid && backendRedirect.bits.isMisPred && debugMeta.bpSource.s3Override,
+    perf_mispredS3SourceVec
   )
 
   XSPerfHistogram(
