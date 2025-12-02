@@ -311,7 +311,6 @@ object Bundles {
     val singleStep = Bool()
   }
   class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
-    // TODO change these bundles to option bundles depend on issueBlockParam
     def numSrc = params.numSrc
     // from frontend
     val isRVC = Option.when(params.needIsRVC)(Bool())
