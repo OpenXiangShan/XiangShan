@@ -470,6 +470,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
       debugMeta.bpSource.s3Fallthrough
   )
   XSPerfAccumulate(
+    "branchMispredicts_s3FallthroughTage",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      debugMeta.bpSource.s3Override &&
+      debugMeta.bpSource.s3FallthroughTage
+  )
+  XSPerfAccumulate(
     "branchMispredicts_s3Mbtb",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       debugMeta.bpSource.s3Override &&
