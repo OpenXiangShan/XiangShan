@@ -160,11 +160,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
   val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
 
-  private val Seq(bothOff, strideOnBertiOff, strideOffBertiOn, bothOn) = Seq(0, 1, 2, 3)
-  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOnBertiOff)
-  val strideModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOffBertiOn.U && HasBerti.B)
-  val bertiModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOnBertiOff.U && HasStreamStride.B)
-
   val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
     val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
@@ -224,7 +219,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
-    pf.strideEnable := strideModeEnable
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
@@ -261,8 +255,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableBerti && l1D_pf_enable &&
-      GatedRegNextN(io.pfCtrlFromCSR.berti_enable, 2, Some(false.B)) &&
-      bertiModeEnable
+      GatedRegNextN(io.pfCtrlFromCSR.berti_enable, 2, Some(false.B))
 
     for(i <- 0 until LD_TRAIN_WIDTH){
       val source = io.trainSource.s3_load(i)
