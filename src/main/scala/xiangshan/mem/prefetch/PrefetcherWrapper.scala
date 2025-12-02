@@ -219,6 +219,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
+    pf.strideEnable := true.B
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
