@@ -171,11 +171,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(s2_branchesUseAltIdx(brIdx)).isPositive
 
       // get prediction for each branch
-      isCond && Mux(
-        useAlt,
-        altPred,
-        Mux(hasProvider, pred, basePred)
-      )
+//      isCond && Mux(
+//        useAlt,
+//        altPred,
+//        Mux(hasProvider, pred, basePred)
+//      )
+      isCond && basePred
   }
 
   io.condTakenMask       := s2_condTakenMask
@@ -543,4 +544,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     XSPerfAccumulate(s"table_${i}_allocate", t2_valid && t2_allocateTableMaskOH(i))
   }
   // TODO: add more
+
+  for (i <- 0 until NumBanks) {
+    XSPerfAccumulate(
+      s"tage_bank_${i}_read_conflict",
+      io.train.valid && t0_hasCond && s0_fire && t0_bankIdx === s0_bankIdx && t0_bankIdx === i.U
+    )
+  }
 }
