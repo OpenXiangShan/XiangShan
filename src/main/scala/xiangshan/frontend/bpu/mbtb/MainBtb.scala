@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import utils.AddrField
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -39,21 +38,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   println(f"MainBtb:")
   println(f"  Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = $NumEntries")
   println(f"  Address fields:")
-  AddrField(
-    Seq(
-      ("alignOffset", FetchBlockAlignWidth),
-      ("alignBankIdx", AlignBankIdxLen),
-      ("internalBankIdx", InternalBankIdxLen),
-      ("setIdx", SetIdxLen),
-      ("tag", TagWidth)
-    ),
-    maxWidth = Option(VAddrBits),
-    extraFields = Seq(
-      ("replacerSetIdx", FetchBlockAlignWidth, SetIdxLen),
-      ("targetLower", instOffsetBits, TargetWidth),
-      ("position", instOffsetBits, FetchBlockAlignWidth)
-    )
-  ).show(indent = 4)
+  addrFields.show(indent = 4)
 
   /* *** submodules *** */
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))

@@ -74,7 +74,6 @@ trait HalfAlignHelper extends HasBpuParameters {
 
   def getFtqOffset(startVAddr: PrunedAddr, position: UInt): UInt = {
     // given a 5-bit position, calculate the ftqOffset
-    // TODO: select from two 4-bit position? (startVAddr -> mbtb & startVAddr+32 -> mbtb)
     require(
       position.getWidth == CfiPositionWidth,
       s"position width should be $CfiPositionWidth, but got ${position.getWidth}"

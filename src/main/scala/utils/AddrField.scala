@@ -15,6 +15,9 @@
 
 package utils
 
+import chisel3._
+import xiangshan.frontend.PrunedAddr // TODO: move this to utility?
+
 /** Utility to print fields(i.e. tag, setIdx, offset) extracted from an address
  *
  * @example {{{
@@ -70,8 +73,11 @@ class AddrField(
       else
         f" $endString${"." * ((fieldLength - startString.length - endString.length) max 1)}$startString "
 
+    def formatList(indent: Int = 0): String =
+      String.format(s"%s%${maxNameLength}s: [%d:%d]", " " * indent, name, end, start)
+
     override def toString: String =
-      String.format(s"%${maxNameLength}s: [%d:%d]", name, end, start)
+      s"$name (addr[$end:$start])"
   }
 
   private var currentStart = 0
@@ -124,8 +130,65 @@ class AddrField(
   def show(indent: Int = 0): Unit =
     println(format(indent).mkString("\n"))
 
-  def showList(): Unit =
-    (fieldInstances ++ extraFieldInstances).foreach(println)
+  def formatList(indent: Int = 0): Seq[String] = {
+    (fieldInstances ++ extraFieldInstances).map(_.formatList(indent))
+  }
+
+  def showList(indent: Int = 0): Unit =
+    println(formatList(indent).mkString("\n"))
+
+  private def getField(name: String): Field =
+    (fieldInstances ++ extraFieldInstances).find(_.name == name).get
+
+  def getStart(name: String): Int =
+    getField(name).start
+
+  def getEnd(name: String): Int =
+    getField(name).end
+
+  def getWidth(name: String): Int =
+    getField(name).width
+
+  def extract(name: String, addr: UInt): UInt = {
+    val field = getField(name)
+    addr(field.end, field.start)
+  }
+
+  def extract(name: String, addr: PrunedAddr): UInt = {
+    val field = getField(name)
+    addr(field.end, field.start)
+  }
+
+  /** extract field from another field
+   *
+   * @example {{{
+   *   val fields = ...
+   *   fields.show()
+   *   // 50| 49..31 | 30..15 | 14...7 | 6.............5 | ...........4 | 3.........0 |
+   *   //   | unused |    tag | setIdx | internalBankIdx | alignBankIdx | alignOffset |
+   *   //                | 20....................................................1 |
+   *   //                |                                                  target |
+   *
+   *   val target = UInt(20.W)
+   *
+   *   val alignBankIdx = fields.extractFrom("target", "alignBankIdx", target)
+   *   // alignBankIdx = target(3, 3)
+   *   val setIdx = fields.extractFrom("target", "setIdx", target)
+   *   // setIdx = target(13, 6)
+   *
+   *   val tag = fields.extractFrom("target", "tag", target)
+   *   // Requirement Failed: cannot get tag (addr[30:15]) from target (addr[20:1])
+   * }}}
+   */
+  def extractFrom(thatName: String, name: String, that: UInt): UInt = {
+    val thatField = getField(thatName)
+    val field = getField(name)
+    require(
+      field.start >= thatField.start && field.end <= thatField.end,
+      s"cannot get $field from $thatField"
+    )
+    that(field.end - thatField.start, field.start - thatField.start)
+  }
 }
 
 object AddrField {
