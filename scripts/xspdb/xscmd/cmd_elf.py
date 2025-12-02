@@ -89,6 +89,41 @@ class CmdEfl:
             error(f"Failed to read ELF file: {e.output.decode()}")
             return None
 
+    def api_is_efl_file(self, file_path):
+        """Check if the file is an ELF file
+
+        Args:
+            file_path (string): Path to the file
+        """
+        if not os.path.exists(file_path):
+            error(f"{file_path} not found")
+            return False
+        with open(file_path, "rb") as f:
+            header = f.read(4)
+            if header == b"\x7fELF":
+                return True
+            else:
+                error(f"{file_path} is not an ELF file")
+                return False
+        return True
+
+    def api_update_local_elf_symbol_dict(self):
+        """Update the symbol dictionary from loaded ELF file"""
+        if not self.exec_bin_file:
+            error("exec_bin_file not loaded, please xload it first")
+            return False
+        if not os.path.exists(self.exec_bin_file):
+            error(f"{self.exec_bin_file} not found")
+            return False
+        self.elf_current_exe_bin_is_efl = self.api_is_efl_file(self.exec_bin_file)
+        if not self.elf_current_exe_bin_is_efl:
+            error(f"{self.exec_bin_file} is not an ELF file")
+            return False
+        self.elf_symbol_dict = self.api_get_elf_symbol_dict(self.exec_bin_file)
+        count = len(self.elf_symbol_dict.get("addr", {}))
+        info(f"Loaded {count} symbols from {self.exec_bin_file}")
+        return True
+
     def api_echo_pc_symbol_block_change(self, current_pc, last_block_addr, last_pc):
         block_addr = last_block_addr
         if current_pc < 0:
@@ -123,6 +158,30 @@ class CmdEfl:
                 f"-> {symbol_name}({hex(symbol_addr)})+{hex(delta_curr)}")
         return symbol_addr
 
+    def api_turn_on_pc_symbol_block_change(self, value = True):
+        """Enable or disable tracing PC symbol block change
+        Args:
+            value (bool): True to enable, False to disable
+        """
+        self.flag_trace_pc_symbol_block_change = value
+        if value:
+            self.api_update_local_elf_symbol_dict()
+
+    def do_xtrace_pc_symbol_block_change(self, arg):
+        """Enable or disable tracing PC symbol block change
+
+        Args:
+            arg (string): "on" to enable, "off" to disable
+        """
+        if arg == "on":
+            self.api_turn_on_pc_symbol_block_change(True)
+            message("PC symbol block change tracing enabled")
+        elif arg == "off":
+            self.api_turn_on_pc_symbol_block_change(False)
+            message("PC symbol block change tracing disabled")
+        else:
+            message("Usage: xtrace_pc_symbol_block_change [on|off]")
+
     def complete_xtrace_pc_symbol_block_change(self, text, line, begidx, endidx):
         """Complete the command for tracing PC symbol block change
 
@@ -133,3 +192,44 @@ class CmdEfl:
             endidx (int): Ending index
         """
         return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
+
+    def api_address_to_symbol(self, addr):
+        """Convert address to symbol name
+
+        Args:
+            addr (int): Address to convert
+        """
+        if self.elf_current_exe_bin_is_efl is False:
+            return None
+        if self.elf_symbol_dict is None:
+            self.api_update_local_elf_symbol_dict()
+        if self.elf_symbol_dict is None:
+            return None
+        symbol_index = bisect.bisect_left(self.elf_symbol_dict["sorted_addr"], addr) - 1
+        if symbol_index < 0:
+            return None
+        if symbol_index >= len(self.elf_symbol_dict["sorted_addr"]):
+            return None
+        symbol_addr = self.elf_symbol_dict["sorted_addr"][symbol_index]
+        symbol = self.elf_symbol_dict.get("addr", {}).get(symbol_addr)
+        if symbol:
+            return f"({','.join([s['name'] for s in symbol])}: {hex(symbol_addr)}) + {hex(addr - symbol_addr)}"
+        return None
+
+    def api_symbol_to_address(self, symbol):
+        """Convert symbol name to address
+
+        Args:
+            symbol (string): Symbol name to convert
+        """
+        if self.elf_current_exe_bin_is_efl is False:
+            return None
+        if self.elf_symbol_dict is None:
+            self.api_update_local_elf_symbol_dict()
+        if self.elf_symbol_dict is None:
+            return None
+        addr = self.elf_symbol_dict.get("name", {}).get(symbol)
+        if addr:
+            return addr["addr"]
+        return None
+
