@@ -55,7 +55,7 @@ trait HasScParameters extends HasBpuParameters {
   def GlobalTableSize:     Int              = GlobalTableInfos.length
   def BiasTableSize:       Int              = scParameters.biasTableSize
   def BiasUseTageBitWidth: Int              = scParameters.biasUseTageBitWidth
-  def BiasTableNumWays:    Int              = NumWays * BiasUseTageBitWidth // add tage_taken bits as wayIdx
+  def BiasTableNumWays:    Int              = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
   def WriteBufferSize:     Int              = scParameters.WriteBufferSize
   def TagWidth:            Int              = scParameters.TagWidth
 }

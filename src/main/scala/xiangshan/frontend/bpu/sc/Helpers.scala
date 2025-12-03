@@ -52,9 +52,10 @@ trait Helpers extends HasScParameters with PhrHelper {
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
+  // def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
+  //   (scSum > threshold.zext) && pos(scSum) || (scSum < -threshold.zext) && neg(scSum)
   def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
-    (scSum > threshold.zext) && pos(scSum) || (scSum < -threshold.zext) && neg(scSum)
-
+    scSum.abs.asUInt > threshold
   // Accumulate update information for multiple branches using update methods
   def updateEntry(
       oldEntries:    Vec[ScEntry],
@@ -72,7 +73,7 @@ trait Helpers extends HasScParameters with PhrHelper {
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
       val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).foldLeft(oldEntry.ctr) {
         case (prevCtr, ((writeValid, writeTaken), writeWayIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(wayIdx) &&
+          val needUpdate = writeValid && writeWayIdx === wayIdx.U &&
             (metaData.scPred(wayIdx) =/= writeTaken || !metaData.sumAboveThres(wayIdx))
           val nextValue = prevCtr.getUpdate(writeTaken)
           val nextCtr   = WireInit(prevCtr)

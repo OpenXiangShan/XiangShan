@@ -243,7 +243,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.mbtbResult                := mbtb.io.result
   sc.io.tageInfo.condTakenMask    := tage.io.condTakenMask
   sc.io.tageInfo.providerTakenCtr := tage.io.providerTakenCtrVec
-  sc.io.foldedPathHist            := phr.io.s1_foldedPhr
+  sc.io.foldedPathHist            := phr.io.s0_foldedPhr
   sc.io.trainFoldedPathHist       := phr.io.trainFoldedPhr
   sc.io.s3_override               := s3_override
   sc.io.ghr                       := ghr.io.s0_ghist
