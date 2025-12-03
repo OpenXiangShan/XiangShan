@@ -103,7 +103,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     DataHoldBypass(VecInit(tables.map(_.io.predictReadResp.usefulCtrs)), RegNext(s0_fire))
 
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
-  private val s1_tempTag    = VecInit(s1_foldedHist.map(hist => getTag(s1_startVAddr, hist.forTag)))
+  private val s1_rawTag = VecInit(s1_foldedHist.zip(TableInfos).map { case (hist, tableInfo) =>
+    getRawTag(s1_startVAddr, hist.forTag, tableInfo.NumSets)
+  })
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -118,8 +120,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
   dontTouch(s2_startVAddr)
 
-  private val s2_setIdx  = RegEnable(s1_setIdx, s1_fire)
-  private val s2_tempTag = RegEnable(s1_tempTag, s1_fire)
+  private val s2_setIdx = RegEnable(s1_setIdx, s1_fire)
+  private val s2_rawTag = RegEnable(s1_rawTag, s1_fire)
 
   private val s2_branches  = io.branchesFromMainBtb
   private val s2_positions = VecInit(s2_branches.map(_.bits.cfiPosition))
@@ -138,7 +140,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       // compare tags of each branch with all tables
       val allTableTagMatchResults = s2_allTableEntries.zip(s2_allTableUsefulCtrs).zipWithIndex.map {
         case ((entriesPerTable, usefulCtrsPerTable), tableIdx) =>
-          val tag          = s2_tempTag(tableIdx) ^ position
+          val tag          = s2_rawTag(tableIdx) ^ position
           val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
           val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
@@ -183,7 +185,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   io.meta.baseTableCtrs := s2_baseTableCtrs
   io.meta.debug_setIdx  := s2_setIdx
-  io.meta.debug_tempTag := s2_tempTag
+  io.meta.debug_tempTag := s2_rawTag
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -251,11 +253,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t1_baseTableCtrs = RegEnable(t0_baseTableCtrs, t0_valid)
 
   private val t1_foldedHist = RegEnable(t0_foldedHist, t0_valid)
-  private val t1_tempTag    = VecInit(t1_foldedHist.map(hist => getTag(t1_startVAddr, hist.forTag)))
+  private val t1_rawTag = VecInit(t1_foldedHist.zip(TableInfos).map { case (hist, tableInfo) =>
+    getRawTag(t1_startVAddr, hist.forTag, tableInfo.NumSets)
+  })
 
   private val t1_debugTempTag = RegEnable(io.train.bits.meta.tage.debug_tempTag, t0_valid)
 //  when(t1_valid) {
-//    assert(t1_tempTag === t1_debugTempTag, "predict tag != train tag")
+//    assert(t1_rawTag === t1_debugTempTag, "predict tag != train tag")
 //  }
 
   private val t1_branchesVAddr =
@@ -281,7 +285,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_allTableEntries    = RegEnable(t1_allTableEntries, t1_valid)
   private val t2_allTableUsefulCtrs = RegEnable(t1_allTableUsefulCtrs, t1_valid)
 
-  private val t2_tempTag = RegEnable(t1_tempTag, t1_valid)
+  private val t2_rawTag = RegEnable(t1_rawTag, t1_valid)
 
   private val t2_baseTableCtrs = RegEnable(t1_baseTableCtrs, t1_valid)
 
@@ -293,7 +297,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val isCond = t2_condMask(brIdx)
     val allTableTagMatchResults = t2_allTableEntries.zip(t2_allTableUsefulCtrs).zipWithIndex.map {
       case ((entriesPerTable, usefulCtrsPerTable), tableIdx) =>
-        val tag          = t2_tempTag(tableIdx) ^ branch.bits.cfiPosition
+        val tag          = t2_rawTag(tableIdx) ^ branch.bits.cfiPosition
         val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
         val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
         dontTouch(tag.suggestName(s"branch_${brIdx}_table_${tableIdx}_tag"))
@@ -435,7 +439,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t2_allocateEntry = Wire(new TageEntry)
   t2_allocateEntry.valid := true.B
-  t2_allocateEntry.tag   := Mux1H(t2_allocateTableMaskOH, t2_tempTag) ^ t2_allocateBranch.bits.cfiPosition
+  t2_allocateEntry.tag   := Mux1H(t2_allocateTableMaskOH, t2_rawTag) ^ t2_allocateBranch.bits.cfiPosition
   t2_allocateEntry.takenCtr.value := Mux(
     t2_allocateBranch.bits.taken,
     (1 << (TakenCtrWidth - 1)).U,      // weak taken
