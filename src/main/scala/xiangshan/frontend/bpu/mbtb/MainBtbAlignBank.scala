@@ -177,17 +177,21 @@ class MainBtbAlignBank(
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
 
-  // Decide wayMask:
-  // If not hit, use mbtb replacer's victim way
-  // If hit, use hit wayMask, but do write only if:
-  //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
-  //   No other cases for now
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
   private val t1_hitMask = PriorityEncoderOH(VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
-  private val t1_needWrite = !t1_hit || t1_branchInfo.attribute.isOtherIndirect
-  private val t1_wayMask   = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
+  // Decide whether to write and which wayMask to write:
+  private val t1_needWrite =
+    // If not hit, always write a new entry, use mbtb replacer's victim way
+    !t1_hit ||
+      // If hit, but do write only if:
+      //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
+      t1_branchInfo.attribute.isOtherIndirect ||
+      //   2. attribute changed, probably indicating a software self-modification
+      !(t1_branchInfo.attribute === Mux1H(t1_hitMask, io.write.req.bits.meta.map(_.attribute)))
+  // Use hit wayMask if hit, else use replacer's victim way
+  private val t1_wayMask = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B

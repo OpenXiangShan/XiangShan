@@ -56,10 +56,7 @@ class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
 
-  def hit(branch: BranchInfo): Bool =
-    rawHit &&
-      position === branch.cfiPosition &&
-      attribute === branch.attribute
+  def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
