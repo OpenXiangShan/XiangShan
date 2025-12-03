@@ -553,25 +553,23 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
   io.writeBack.valid := req_valid && bufferState === s_wb &&
     (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) &&
     !req.isvec
-  io.writeBack.bits := 0.U.asTypeOf(io.writeBack.bits)
   io.writeBack.bits.data := VecInit(Seq.fill(param.wbPathNum)(newRdataHelper(data_select, combinedData)))
   io.writeBack.bits.pdest := req.uop.pdest
   io.writeBack.bits.robIdx := req.uop.robIdx
-  io.writeBack.bits.intWen.foreach(_ := !globalException && !globalUncache && req.uop.rfWen)
-  io.writeBack.bits.fpWen.foreach(_ := req.uop.fpWen)
-  io.writeBack.bits.vecWen.foreach(_ := req.uop.vecWen)
-  io.writeBack.bits.v0Wen.foreach(_ := req.uop.v0Wen)
-  io.writeBack.bits.vlWen.foreach(_ := req.uop.vlWen)
+  io.writeBack.bits.intWen.get := !globalException && !globalUncache && req.uop.rfWen
+  io.writeBack.bits.fpWen.get := req.uop.fpWen
+  // all exception bits are false unless the indices of bits are contained in LduCfg.exceptionOut
+  io.writeBack.bits.exceptionVec.get := 0.U.asTypeOf(io.writeBack.bits.exceptionVec.get)
   io.writeBack.bits.exceptionVec.foreach(excp => {
     LduCfg.exceptionOut.foreach(no => excp(no) := (globalUncache || globalException) && exceptionVec(no))
   })
-  io.writeBack.bits.flushPipe.foreach(_ := false.B)
-  io.writeBack.bits.replay.foreach(_ := false.B)
-  io.writeBack.bits.lqIdx.foreach(_ := req.uop.lqIdx)
-  io.writeBack.bits.sqIdx.foreach(_ := req.uop.sqIdx)
-  io.writeBack.bits.trigger.foreach(_ := req.uop.trigger)
-  io.writeBack.bits.isRVC.foreach(_ := req.uop.isRVC)
-  io.writeBack.bits.vls.foreach(x => {
+
+  io.writeBack.bits.flushPipe.get := false.B
+  io.writeBack.bits.replay.get := false.B
+  io.writeBack.bits.lqIdx.get := req.uop.lqIdx
+  io.writeBack.bits.trigger.get := req.uop.trigger
+  io.writeBack.bits.isRVC.get := req.uop.isRVC
+  io.writeBack.bits.vls.foreach { case x =>
     x.vpu := req.uop.vpu
     x.oldVdPsrc := req.uop.psrc(2)
     x.vdIdx := DontCare
@@ -582,13 +580,16 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
     x.isWhole := VlduType.isWhole(req.uop.fuOpType)
     x.isVecLoad := VlduType.isVecLd(req.uop.fuOpType)
     x.isVlm := VlduType.isMasked(req.uop.fuOpType) && VlduType.isVecLd(req.uop.fuOpType)
-  })
+  }
+  io.writeBack.bits.isFromLoadUnit.get := true.B
+  io.writeBack.bits.debugInfo := req.uop.debugInfo
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
-
+  io.writeBack.bits.debug.vaddr := req.vaddr
+  io.writeBack.bits.debug_seqNum := req.uop.debug_seqNum
   // vector output
   io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && req.isvec
 
