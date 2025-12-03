@@ -46,6 +46,9 @@ object CompressType {
 
   def apply() = UInt(2.W)
 
+  def isNORMAL(compressType: UInt): Bool = compressType === NORMAL
+  def isCC(compressType: UInt): Bool = compressType === CC
+
   def isLoadStore(commitType: UInt): Bool = commitType(1)
   def lsInstIsStore(commitType: UInt): Bool = commitType(0)
   def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)

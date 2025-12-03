@@ -97,6 +97,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val walk_v = Bool()
     val commit_v = Bool()
     val commit_w = Bool()
+    val compressType = CompressType()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
     val wflags = Bool()
@@ -182,6 +183,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
     robCommitEntry.commit_w := robEntry.uopNum === 0.U
+    robCommitEntry.compressType := robEntry.commitType
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe
     robCommitEntry.rfWen := robEntry.rfWen
