@@ -182,11 +182,12 @@ class MainBtbAlignBank(
   // If hit, use hit wayMask, but do write only if:
   //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
   //   No other cases for now
-  private val t1_hitMask = VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo)))
-  private val t1_hit     = t1_hitMask.reduce(_ || _)
+  // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
+  private val t1_hitMask = PriorityEncoderOH(VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo))).asUInt)
+  private val t1_hit     = t1_hitMask.orR
 
   private val t1_needWrite = !t1_hit || t1_branchInfo.attribute.isOtherIndirect
-  private val t1_wayMask   = Mux(t1_hit, t1_hitMask.asUInt, replacer.io.victim.wayMask)
+  private val t1_wayMask   = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
@@ -207,8 +208,9 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.trainTouch.valid       := t1_valid && t1_needWrite
-  replacer.io.trainTouch.bits.setIdx := getReplacerSetIndex(t1_startVAddr)
+  replacer.io.trainTouch.valid        := t1_valid && t1_needWrite
+  replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startVAddr)
+  replacer.io.trainTouch.bits.wayMask := t1_wayMask
 
   /* *** multi-hit detection & flush *** */
   private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))

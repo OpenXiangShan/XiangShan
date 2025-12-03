@@ -23,22 +23,20 @@ import xiangshan.frontend.bpu.ReplacerState
 
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   class MainBtbReplacerIO extends Bundle {
-    class PredictTouch extends Bundle {
+    class Touch extends Bundle {
       val setIdx:  UInt = UInt(SetIdxLen.W)
       val wayMask: UInt = UInt(NumWay.W)
-    }
-
-    class TrainTouch extends Bundle {
-      val setIdx: UInt = UInt(SetIdxLen.W)
     }
 
     class Victim extends Bundle {
       val wayMask: UInt = UInt(NumWay.W)
     }
 
-    val predictTouch: Valid[PredictTouch] = Flipped(Valid(new PredictTouch))
-    val trainTouch:   Valid[TrainTouch]   = Flipped(Valid(new TrainTouch))
-    val victim:       Victim              = Output(new Victim)
+    val victim: Victim            = Output(new Victim)
+    val touch:  Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
+
+    def predictTouch: Valid[Touch] = touch(0)
+    def trainTouch:   Valid[Touch] = touch(1)
   }
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
@@ -78,7 +76,8 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   // compose touch way vec
   private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
   trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := trainStateGen.io.replaceWay
+  trainTouchWay.bits  := OHToUInt(io.victim.wayMask) // MainBtbAlignBank ensures this is one-hot
+  assert(!io.trainTouch.valid || PopCount(io.victim.wayMask) <= 1.U, "victim wayMask should be at-most-one-hot")
 
   // generate next state
   trainStateGen.io.stateIn   := trainState
