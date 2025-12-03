@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BtbInfo
@@ -213,6 +214,35 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     getSetIndex(t0_startVAddr, hist.forIdx, tableInfo.NumSets)
   })
   dontTouch(t0_setIdx)
+
+  // only for perf
+  private val t0_readBankConflictReg     = RegNext(t0_readBankConflict)
+  private val t0_readBankConflictPos     = t0_readBankConflict && (!t0_readBankConflictReg)
+  private val t0_readBankConflictNeg     = !t0_readBankConflict && t0_readBankConflictReg
+  private val t0_readBankConflictdistCnt = RegInit(0.U(4.W))
+  private val perf_s0AlignVaddr          = getAlignedAddr(s0_startVAddr)
+  private val perf_s1AlignVaddr          = getAlignedAddr(s1_startVAddr)
+  private val perf_s1BankIdx             = RegEnable(s0_bankIdx, s0_fire)
+  // pred target within align 64B,and not blocked by s2
+  private val t0_readBankConflictShortLoop = t0_readBankConflictReg && s1_fire &&
+    (perf_s1BankIdx === s0_bankIdx) &&
+    (perf_s0AlignVaddr.toUInt - perf_s1AlignVaddr.toUInt <= FetchBlockSize.U ||
+      perf_s1AlignVaddr.toUInt - perf_s0AlignVaddr.toUInt <= FetchBlockSize.U) && s0_fire
+  private val t0_readBankConflictShortLoopReg     = RegNext(t0_readBankConflictShortLoop)
+  private val t0_readBankConflictShortLoopNeg     = !t0_readBankConflictShortLoop & t0_readBankConflictShortLoopReg
+  private val t0_readBankConflictShortLoopdistCnt = RegInit(0.U(4.W))
+  // dist cnt
+  t0_readBankConflictShortLoopdistCnt := Mux(
+    t0_readBankConflictShortLoopNeg,
+    0.U,
+    Mux(t0_readBankConflictShortLoop, t0_readBankConflictShortLoopdistCnt + 1.U, t0_readBankConflictShortLoopdistCnt)
+  )
+
+  t0_readBankConflictdistCnt := Mux(
+    t0_readBankConflictNeg,
+    0.U,
+    Mux(t0_readBankConflict, t0_readBankConflictdistCnt + 1.U, t0_readBankConflictdistCnt)
+  )
 
 //  when(t0_valid) {
 //    assert(t0_setIdx === io.train.bits.meta.tage.debug_setIdx, "predict setIdx != train setIdx")
@@ -534,7 +564,30 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     )
   }
 
-  XSPerfAccumulate("read_conflict", t0_readBankConflict)
+  /*
+  sum -> total bubbles caused by read bank conflict
+  sampled -> total times of read bank conflict happened
+   */
+  XSPerfHistogram(
+    "read_conflict_bubble_dist",
+    t0_readBankConflictdistCnt,
+    t0_readBankConflictNeg,
+    0,
+    16
+  )
+  /*
+  sum -> total bubbles caused by read bank conflict within aligned 64B loop
+  sampled -> total times of read bank conflict within aligned 64B loop happened
+  Currently, there is an error in the short branch jump dist. It is approximately 1 time.
+  e.g. The value obtained from the 7th loop of statistics may contain part of the 6th loop.
+   */
+  XSPerfHistogram(
+    "read_conflict_loop_dist",
+    t0_readBankConflictShortLoopdistCnt,
+    t0_readBankConflictShortLoopNeg,
+    0,
+    16
+  )
   XSPerfAccumulate("reset_useful", t2_valid && usefulResetCtr.isSaturatePositive)
   XSPerfAccumulate("need_allocate", t2_valid && t2_needAllocate)
   XSPerfAccumulate("allocate_success", t2_valid && t2_needAllocate && t2_canAllocate)
