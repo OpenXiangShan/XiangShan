@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
@@ -46,7 +47,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** submodules *** */
   private val baseTable = Module(new TageBaseTable)
-  private val tables    = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(info.NumTotalSets, i)) }
+  private val tables    = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
   // reset usefulCtr of all entries when usefulResetCtr saturated
   private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
@@ -385,32 +386,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     }
   }
 
-  private val t2_updateMask       = Wire(Vec(NumTables, Vec(NumWays, Bool())))
-  private val t2_updateEntries    = Wire(Vec(NumTables, Vec(NumWays, new TageEntry)))
-  private val t2_updateUsefulCtrs = Wire(Vec(NumTables, Vec(NumWays, new SaturateCounter(UsefulCtrWidth))))
-  dontTouch(t2_updateEntries)
-  dontTouch(t2_updateUsefulCtrs)
-
-  t2_updateMask.zip(t2_updateEntries).zip(t2_updateUsefulCtrs).zipWithIndex.map {
-    case (((updateEnPerTable, entriesPerTable), usefulCtrsPerTable), tableIdx) =>
-      updateEnPerTable.zip(entriesPerTable).zip(usefulCtrsPerTable).zipWithIndex.map {
-        case (((updateEn, entry), usefulCtr), wayIdx) =>
-          val hitBranchProviderMask = t2_allBranchUpdateInfo.map { branch =>
-            branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
-          }
-          val hitBranchAltMask = t2_allBranchUpdateInfo.map { branch =>
-            branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
-          }
-          val hitBranchProvider  = hitBranchProviderMask.reduce(_ || _)
-          val hitBranchAlt       = hitBranchAltMask.reduce(_ || _)
-          val providerUpdateInfo = Mux1H(hitBranchProviderMask, t2_allBranchUpdateInfo)
-          val altUpdateInfo      = Mux1H(hitBranchAltMask, t2_allBranchUpdateInfo)
-          updateEn  := hitBranchProvider || hitBranchAlt
-          entry     := Mux(hitBranchProvider, providerUpdateInfo.providerEntry, altUpdateInfo.altEntry)
-          usefulCtr := Mux(hitBranchProvider, providerUpdateInfo.providerNewUsefulCtr, altUpdateInfo.altOldUsefulCtr)
-      }
-  }
-
   private val t2_needAllocate         = t2_allBranchUpdateInfo.map(_.needAllocate).reduce(_ || _)
   private val t2_needAllocateBranchOH = PriorityEncoderOH(t2_allBranchUpdateInfo.map(_.needAllocate))
   private val t2_allocateBranch       = Mux1H(t2_needAllocateBranchOH, t2_branches)
@@ -450,7 +425,30 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   )
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
-    val thisTableNeedUpdate   = t2_updateMask(tableIdx).reduce(_ || _)
+    implicit val info: TageTableInfo = TableInfos(tableIdx) // used by NumWays
+
+    val updateMask       = Wire(Vec(NumWays, Bool()))
+    val updateEntries    = Wire(Vec(NumWays, new TageEntry))
+    val updateUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+
+    updateMask.zip(updateEntries).zip(updateUsefulCtrs).zipWithIndex.foreach {
+      case (((updateEn, entry), usefulCtr), wayIdx) =>
+        val hitBranchProviderMask = t2_allBranchUpdateInfo.map { branch =>
+          branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
+        }
+        val hitBranchAltMask = t2_allBranchUpdateInfo.map { branch =>
+          branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
+        }
+        val hitBranchProvider  = hitBranchProviderMask.reduce(_ || _)
+        val hitBranchAlt       = hitBranchAltMask.reduce(_ || _)
+        val providerUpdateInfo = Mux1H(hitBranchProviderMask, t2_allBranchUpdateInfo)
+        val altUpdateInfo      = Mux1H(hitBranchAltMask, t2_allBranchUpdateInfo)
+        updateEn  := hitBranchProvider || hitBranchAlt
+        entry     := Mux(hitBranchProvider, providerUpdateInfo.providerEntry, altUpdateInfo.altEntry)
+        usefulCtr := Mux(hitBranchProvider, providerUpdateInfo.providerNewUsefulCtr, altUpdateInfo.altOldUsefulCtr)
+    }
+
+    val thisTableNeedUpdate   = updateMask.reduce(_ || _)
     val thisTableNeedAllocate = t2_allocateTableMaskOH(tableIdx)
     table.io.writeReq.valid         := t2_valid && (thisTableNeedUpdate || thisTableNeedAllocate)
     table.io.writeReq.bits.setIdx   := t2_setIdx(tableIdx)
@@ -461,10 +459,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
 
     writeEntries.zip(writeUsefulCtrs).zipWithIndex.foreach { case ((entry, usefulCtr), wayIdx) =>
-      val thisWayNeedUpdate   = t2_updateMask(tableIdx)(wayIdx)
+      val thisWayNeedUpdate   = updateMask(wayIdx)
       val thisWayNeedAllocate = thisTableNeedAllocate && t2_allocateWayMaskOH(wayIdx)
-      entry           := Mux(thisWayNeedAllocate, t2_allocateEntry, t2_updateEntries(tableIdx)(wayIdx))
-      usefulCtr.value := Mux(thisWayNeedAllocate, UsefulCtrInitValue.U, t2_updateUsefulCtrs(tableIdx)(wayIdx).value)
+      entry                := Mux(thisWayNeedAllocate, t2_allocateEntry, updateEntries(wayIdx))
+      usefulCtr.value      := Mux(thisWayNeedAllocate, UsefulCtrInitValue.U, updateUsefulCtrs(wayIdx).value)
       writeWayMask(wayIdx) := thisWayNeedUpdate || thisWayNeedAllocate
     }
 

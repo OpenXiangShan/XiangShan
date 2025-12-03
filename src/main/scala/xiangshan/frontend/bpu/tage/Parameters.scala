@@ -24,17 +24,16 @@ case class TageParameters(
     BaseTableSize:          Int = 1024 * 8,
     BaseTableTakenCtrWidth: Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
-      // TageTableInfo(NumSets, HistoryLength)
-      new TageTableInfo(2048, 4),
-      new TageTableInfo(2048, 9),
-      new TageTableInfo(2048, 17),
-      new TageTableInfo(2048, 29),
-      new TageTableInfo(2048, 56),
-      new TageTableInfo(2048, 109),
-      new TageTableInfo(2048, 211),
-      new TageTableInfo(2048, 397)
+      // TageTableInfo(Size, NumWays, HistoryLength)
+      new TageTableInfo(4096, 2, 4),
+      new TageTableInfo(4096, 2, 9),
+      new TageTableInfo(4096, 2, 17),
+      new TageTableInfo(4096, 2, 29),
+      new TageTableInfo(4096, 2, 56),
+      new TageTableInfo(4096, 2, 109),
+      new TageTableInfo(4096, 2, 211),
+      new TageTableInfo(4096, 2, 397)
     ),
-    NumWays:             Int = 2,
     NumBanks:            Int = 4, // to alleviate read-write conflicts in single-port SRAM
     TagWidth:            Int = 13,
     TakenCtrWidth:       Int = 3,
@@ -56,7 +55,6 @@ trait HasTageParameters extends HasBpuParameters {
   def BaseTableNumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
   def BaseTableTakenCtrWidth: Int = tageParameters.BaseTableTakenCtrWidth
 
-  def NumWays:            Int = tageParameters.NumWays
   def NumBanks:           Int = tageParameters.NumBanks
   def BankIdxWidth:       Int = log2Ceil(NumBanks)
   def TagWidth:           Int = tageParameters.TagWidth
@@ -70,7 +68,18 @@ trait HasTageParameters extends HasBpuParameters {
   def NumUseAltCtrs:       Int = tageParameters.NumUseAltCtrs
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
-  def NumTables:  Int                = TableInfos.length
+
+  def NumTables:     Int = TableInfos.length
+  def TableIdxWidth: Int = log2Ceil(NumTables)
+
+  def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
+  def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
+
+  // per table parameters
+  def NumSets(implicit info:     TageTableInfo): Int = info.getNumSets(NumBanks)
+  def SetIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumSets)
+  def NumWays(implicit info:     TageTableInfo): Int = info.NumWays
+  def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays)
 
   def EnableTageTrace: Boolean = tageParameters.EnableTageTrace
 }

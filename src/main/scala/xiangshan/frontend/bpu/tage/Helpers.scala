@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait BaseTableHelper extends HasTageParameters {
@@ -44,11 +45,11 @@ trait BaseTableHelper extends HasTageParameters {
 
 trait TopHelper extends HasTageParameters {
   def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { tableInfo =>
+    VecInit(TableInfos.map { implicit tableInfo =>
       val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
-      val foldedHist = Wire(new TageFoldedHist(tableInfo.NumTotalSets / NumBanks))
+      val foldedHist = Wire(new TageFoldedHist)
       foldedHist.forIdx := tageFoldedHist.head
       foldedHist.forTag := tageFoldedHist(1) ^ Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
@@ -65,8 +66,7 @@ trait TopHelper extends HasTageParameters {
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   // varies between different tables
-  def NumSets:     Int
-  def SetIdxWidth: Int = log2Ceil(NumSets)
+  implicit val info: TageTableInfo
 
   val addrFields = AddrField(
     Seq(

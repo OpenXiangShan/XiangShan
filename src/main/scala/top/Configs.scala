@@ -111,10 +111,11 @@ class MinimalConfig(n: Int = 1) extends Config(
             ),
             tageParameters = TageParameters(
               TableInfos = Seq(
-                new TageTableInfo(512, 6),
-                new TageTableInfo(512, 9),
-                new TageTableInfo(512, 17),
-                new TageTableInfo(512, 31)
+                // Size, NumWays, HistoryLength
+                new TageTableInfo(1024, 2, 6),
+                new TageTableInfo(1024, 2, 9),
+                new TageTableInfo(1024, 2, 17),
+                new TageTableInfo(1024, 2, 31)
               ),
             ),
             // FIXME: these are from V2 SC, we don't have equivalent parameters now

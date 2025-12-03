@@ -20,26 +20,28 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.WriteBuffer
 
-class TageTable(numTotalSets: Int, tableIdx: Int)(implicit p: Parameters) extends TageModule with TableHelper {
+class TageTable(
+    tableIdx:          Int,
+    implicit val info: TageTableInfo // declare info as implicit val to pass it to Bundles / methods like TableReadReq
+)(implicit p: Parameters) extends TageModule with TableHelper {
   class TageTableIO extends TageBundle {
-    val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(NumSets)))
-    val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(NumSets)))
+    val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq))
+    val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq))
     val predictReadResp: TableReadResp        = Output(new TableReadResp)
     val trainReadResp:   TableReadResp        = Output(new TableReadResp)
-    val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq(NumSets)))
+    val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq))
     val resetUseful:     Bool                 = Input(Bool())
     val resetDone:       Bool                 = Output(Bool())
   }
 
-  // required by TableHelper
-  def NumSets: Int = numTotalSets / NumBanks
-
   val io: TageTableIO = IO(new TageTableIO)
 
   println(f"TageTable[$tableIdx]:")
-  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${numTotalSets * NumWays}")
+  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
+  println(f"  History length: ${info.HistoryLength}")
   println(f"  Address fields:")
   addrFields.show(indent = 4)
 
@@ -74,7 +76,7 @@ class TageTable(numTotalSets: Int, tableIdx: Int)(implicit p: Parameters) extend
   private val entryWriteBuffers =
     Seq.tabulate(NumBanks) { bankIdx =>
       Module(new WriteBuffer(
-        new EntrySramWriteReq(NumSets),
+        new EntrySramWriteReq,
         WriteBufferSize,
         numPorts = NumWays,
         hasCnt = false, // FIXME: set to true when bug fixed
