@@ -91,7 +91,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val payload               = new IssueQueueInUop(params)
+    val payload               = new IssueQueuePayload(params)
   }
 
   class CommonInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -314,11 +314,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByIntWb = common.vlWakeupByIntWb
       val vlWakeUpByVfWb = common.vlWakeupByVfWb
-      val isDependOldVd = entryReg.payload.vpu.isDependOldVd
-      val isWritePartVd = entryReg.payload.vpu.isWritePartVd
-      val vta = entryReg.payload.vpu.vta
-      val vma = entryReg.payload.vpu.vma
-      val vm = entryReg.payload.vpu.vm
+      val vpu = entryReg.payload.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      val isDependOldVd = vpu.isDependOldVd
+      val isWritePartVd = vpu.isWritePartVd
+      val vta = vpu.vta
+      val vma = vpu.vma
+      val vm = vpu.vm
       val vlFromIntIsZero = commonIn.vlFromIntIsZero
       val vlFromIntIsVlmax = commonIn.vlFromIntIsVlmax
       val vlFromVfIsZero = commonIn.vlFromVfIsZero
@@ -497,7 +498,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
     val isFirstLoad = entryReg.status.vecMem.get.lqIdx === fromLsq.lqDeqPtr
 
-    val isVleff                                        = entryReg.payload.vpu.isVleff
+    val isVleff                                        = entryReg.payload.vpu.get.isVleff
     // update blocked
     entryUpdate.status.blocked                        := !isFirstLoad && isVleff
   }

@@ -313,20 +313,20 @@ object Bundles {
   class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     // from frontend
-    val isRVC = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Bool()
-    val predTaken = Bool()
-    val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val isRVC      = Option.when(params.needIsRVC)(Bool())
+    val fixedTaken = Option.when(params.needTaken)(Bool())
+    val predTaken  = Option.when(params.needTaken)(Bool())
+    val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
+    val ftqOffset  = Option.when(params.needFtqPtr)(UInt(FetchBlockInstOffsetWidth.W))
     // from decode
     val srcType = Vec(numSrc, SrcType())
     val fuType = FuType()
     val fuOpType = FuOpType()
-    val rfWen  = Option.when(params.needWriteIntRegFile)(Bool())
-    val fpWen  = Option.when(params.needWriteFpRegFile )(Bool())
-    val vecWen = Option.when(params.needWriteVecRegFile)(Bool())
-    val v0Wen  = Option.when(params.needWriteV0RegFile )(Bool())
-    val vlWen  = Option.when(params.needWriteVlRegFile )(Bool())
+    val rfWen  = Option.when(params.needIntWen)(Bool())
+    val fpWen  = Option.when(params.needFpWen )(Bool())
+    val vecWen = Option.when(params.needVecWen)(Bool())
+    val v0Wen  = Option.when(params.needV0Wen )(Bool())
+    val vlWen  = Option.when(params.needVlWen )(Bool())
     val selImm = Option.when(params.needImm)(SelImm())
     val imm    = Option.when(params.needImm)(UInt(32.W))
     val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
@@ -357,31 +357,30 @@ object Bundles {
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
-  class IssueQueueInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
+  class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
-
     // from frontend
-    val isRVC = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Bool()
-    val predTaken = Bool()
-    val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val isRVC      = Option.when(params.needIsRVC)(Bool())
+    val fixedTaken = Option.when(params.needTaken)(Bool())
+    val predTaken  = Option.when(params.needTaken)(Bool())
+    val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
+    val ftqOffset  = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     // from decode
     val srcType = Vec(numSrc, SrcType())
     val fuType = FuType()
     val fuOpType = FuOpType()
-    val rfWen = Bool()
-    val fpWen = Bool()
-    val vecWen = Bool()
-    val v0Wen = Bool()
-    val vlWen = Bool()
-    val selImm = SelImm()
-    val imm = UInt(32.W)
-    val fpu = new FPUCtrlSignals
-    val vpu = new VPUCtrlSignals
+    val rfWen  = Option.when(params.needIntWen)(Bool())
+    val fpWen  = Option.when(params.needFpWen )(Bool())
+    val vecWen = Option.when(params.needVecWen)(Bool())
+    val v0Wen  = Option.when(params.needV0Wen )(Bool())
+    val vlWen  = Option.when(params.needVlWen )(Bool())
+    val selImm = Option.when(params.needImm)(SelImm())
+    val imm    = Option.when(params.needImm)(UInt(32.W))
+    val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val vpu = Option.when(params.inVfSchd)(new VPUCtrlSignals)
     val wfflags = Bool()
     val uopIdx = UopIdx()
-    val lastUop = Bool()
+    val lastUop = Option.when(params.inVfSchd)(Bool())
     // from rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
@@ -897,10 +896,8 @@ object Bundles {
     val rasAction     = if (params.hasRasAction)  Some(BranchAttribute.RasAction())   else None
     val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val isRVC         = if (params.hasIsRVC || params.aluNeedPc)      Some(Bool())                        else None
-    val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
-                                                  Some(new FtqPtr)                    else None
-    val ftqOffset     = if (params.needPc || params.aluNeedPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
-                                                  Some(UInt(FetchBlockInstOffsetWidth.W))  else None
+    val ftqIdx        = if (params.needFtqPtr)    Some(new FtqPtr)                    else None
+    val ftqOffset     = if (params.needFtqPtrOffset) Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val fixedTaken = Bool()
