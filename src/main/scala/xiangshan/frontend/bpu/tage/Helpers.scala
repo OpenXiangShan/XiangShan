@@ -17,12 +17,10 @@ package xiangshan.frontend.bpu.tage
 
 import chisel3._
 import chisel3.util._
-import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper {
+trait BaseTableHelper extends HasTageParameters {
   def getBaseTableSetIndex(pc: PrunedAddr): UInt =
     pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
 
@@ -31,7 +29,9 @@ trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper
 
   def getBaseTableAlignBankIndex(pc: PrunedAddr): UInt =
     pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+}
 
+trait TopHelper extends HasTageParameters {
   def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
     VecInit(TableInfos.map { tableInfo =>
       val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
@@ -43,26 +43,30 @@ trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper
       foldedHist
     })
 
-  def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + instOffsetBits, instOffsetBits)
-
-  def getSetIndex(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
-    val setIdxWidth = log2Ceil(numSets / NumBanks)
-    val offset      = BankIdxWidth + instOffsetBits
-    pc(setIdxWidth - 1 + offset, offset) ^ hist
-  }
-
-  def getRawTag(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
-    val setIdxWidth = log2Ceil(numSets / NumBanks)
-    val offset      = setIdxWidth + BankIdxWidth + instOffsetBits
-    pc(TagWidth - 1 + offset, offset) ^ hist
-  }
-
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
 
   def getUseAltIndex(pc: PrunedAddr): UInt = {
     val useAltIdxWidth = log2Ceil(NumUseAltCtrs)
     pc(useAltIdxWidth - 1 + instOffsetBits, instOffsetBits)
+  }
+}
+
+trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
+  // varies between different tables
+  def NumSets:     Int
+  def SetIdxWidth: Int = log2Ceil(NumSets / NumBanks)
+
+  def getBankIndex(pc: PrunedAddr): UInt =
+    pc(BankIdxWidth - 1 + instOffsetBits, instOffsetBits)
+
+  def getSetIndex(pc: PrunedAddr, hist: UInt): UInt = {
+    val offset = BankIdxWidth + instOffsetBits
+    pc(SetIdxWidth - 1 + offset, offset) ^ hist
+  }
+
+  def getRawTag(pc: PrunedAddr, hist: UInt): UInt = {
+    val offset = SetIdxWidth + BankIdxWidth + instOffsetBits
+    pc(TagWidth - 1 + offset, offset) ^ hist
   }
 }

@@ -22,7 +22,7 @@ import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
-class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends TageModule with Helpers {
+class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends TageModule with TableHelper {
   class TageTableIO extends TageBundle {
     val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
     val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
@@ -32,6 +32,10 @@ class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends Tag
     val resetUseful:     Bool                 = Input(Bool())
     val resetDone:       Bool                 = Output(Bool())
   }
+
+  // required by TableHelper
+  def NumSets: Int = numSets
+
   val io: TageTableIO = IO(new TageTableIO)
 
   private val entrySram =

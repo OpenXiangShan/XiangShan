@@ -25,13 +25,14 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BtbInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
  * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
  */
-class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with Helpers {
+class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
     val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
@@ -69,11 +70,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_startVAddr = io.startVAddr
 
   private val s0_foldedHist = getFoldedHist(io.foldedPathHist)
-  private val s0_setIdx = VecInit(TableInfos.zip(s0_foldedHist).map { case (tableInfo, hist) =>
-    getSetIndex(s0_startVAddr, hist.forIdx, tableInfo.NumSets)
+  private val s0_setIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>
+    table.getSetIndex(s0_startVAddr, hist.forIdx)
   })
 
-  private val s0_bankIdx  = getBankIndex(s0_startVAddr)
+  // currently all tables share the same bank index
+  private val s0_bankIdx  = tables.head.getBankIndex(s0_startVAddr)
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   baseTable.io.readReqValid := s0_fire
@@ -103,8 +105,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     DataHoldBypass(VecInit(tables.map(_.io.predictReadResp.usefulCtrs)), RegNext(s0_fire))
 
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
-  private val s1_rawTag = VecInit(s1_foldedHist.zip(TableInfos).map { case (hist, tableInfo) =>
-    getRawTag(s1_startVAddr, hist.forTag, tableInfo.NumSets)
+  private val s1_rawTag = VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
+    table.getRawTag(s1_startVAddr, hist.forTag)
   })
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -196,7 +198,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_startVAddr = io.train.bits.startVAddr
   private val t0_branches   = io.train.bits.branches
 
-  private val t0_bankIdx  = getBankIndex(t0_startVAddr)
+  // currently all tables share the same bank index
+  private val t0_bankIdx  = tables.head.getBankIndex(t0_startVAddr)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
@@ -211,8 +214,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_baseTableCtrs = io.train.bits.meta.tage.baseTableCtrs
 
   private val t0_foldedHist = getFoldedHist(io.foldedPathHistForTrain)
-  private val t0_setIdx = VecInit(TableInfos.zip(t0_foldedHist).map { case (tableInfo, hist) =>
-    getSetIndex(t0_startVAddr, hist.forIdx, tableInfo.NumSets)
+  private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
+    table.getSetIndex(t0_startVAddr, hist.forIdx)
   })
   dontTouch(t0_setIdx)
 
@@ -253,8 +256,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t1_baseTableCtrs = RegEnable(t0_baseTableCtrs, t0_valid)
 
   private val t1_foldedHist = RegEnable(t0_foldedHist, t0_valid)
-  private val t1_rawTag = VecInit(t1_foldedHist.zip(TableInfos).map { case (hist, tableInfo) =>
-    getRawTag(t1_startVAddr, hist.forTag, tableInfo.NumSets)
+  private val t1_rawTag = VecInit((tables zip t1_foldedHist).map { case (table, hist) =>
+    table.getRawTag(t1_startVAddr, hist.forTag)
   })
 
   private val t1_debugTempTag = RegEnable(io.train.bits.meta.tage.debug_tempTag, t0_valid)

@@ -21,9 +21,10 @@ import org.chipsalliance.cde.config.Parameters
 import utils.VecRotate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
 
-class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
+class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHelper with HalfAlignHelper {
   class TageBaseTableIO extends TageBundle {
     val readReqValid: Bool                 = Input(Bool())
     val startVAddr:   PrunedAddr           = Input(PrunedAddr(VAddrBits))
