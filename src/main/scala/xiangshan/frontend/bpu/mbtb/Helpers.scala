@@ -64,7 +64,7 @@ trait Helpers extends HasMainBtbParameters
       val bothHit      = hitMask(i) && hitMask(j)
       val samePosition = position(i) === position(j)
       when(bothHit && samePosition) {
-        multiHitMask(i) := true.B
+        multiHitMask(j) := true.B
       }
     }
     PriorityEncoderOH(multiHitMask.asUInt)
