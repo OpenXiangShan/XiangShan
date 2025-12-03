@@ -310,15 +310,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
   val s0_src_valid_vec = WireInit(VecInit(Seq(
-    io.misalign_ldin.valid,
     io.replay.valid && io.replay.bits.forward_tlDchannel,
     io.fast_rep_in.valid,
-    io.lsq.uncache.valid,
-    io.lsq.nc_ldin.valid,
     io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
+    io.misalign_ldin.valid,
+    io.lsq.uncache.valid,
+    io.lsq.nc_ldin.valid,
     io.l2l_fwd_in.valid,
     io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U,
   )))
