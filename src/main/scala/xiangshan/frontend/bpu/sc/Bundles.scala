@@ -84,7 +84,7 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   private def ScEntryWidth = (new ScEntry).getWidth
   val scPathResp:      Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scGlobalResp:    Vec[Vec[UInt]] = Vec(GlobalTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(log2Ceil(BiasUseTageBitWidth).W))
+  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
   val scBiasResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
   val scGhr:           UInt           = UInt(GhrHistoryLength.W)
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
@@ -92,4 +92,9 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
   val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
+  val predPathIdx: Vec[UInt] =
+    Vec(PathTableSize, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
+  val predGlobalIdx: Vec[UInt] =
+    Vec(GlobalTableSize, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
+  val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
 }
