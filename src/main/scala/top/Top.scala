@@ -382,6 +382,7 @@ object TopMain extends App {
     DifftestModule.finish("XiangShan", false)
   }
   TraceRTLParameters.generateCppHeader(config)
+  TraceRTLParameters.generateVerilogHeader(config)
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

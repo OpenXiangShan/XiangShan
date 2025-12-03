@@ -164,5 +164,6 @@ object SimTop extends App {
   ChiselMap.addToFileRegisters
   Constantin.addToFileRegisters
   TraceRTLParameters.generateCppHeader(config)
+  TraceRTLParameters.generateVerilogHeader(config)
   FileRegisters.write(fileDir = "./build")
 }
