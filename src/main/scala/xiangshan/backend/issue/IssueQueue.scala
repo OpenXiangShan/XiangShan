@@ -26,7 +26,7 @@ class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) e
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
   val flush = Flipped(ValidIO(new Redirect))
-  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueueInUop(params))))
+  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueuePayload(params))))
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
@@ -332,7 +332,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.status.firstIssue                                := false.B
       enq.bits.status.issueTimer                                := "b11".U
       enq.bits.status.deqPortIdx                                := 0.U
-      enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm)
+      enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm.get)
       enq.bits.payload                                          := s0_enqBits(enqIdx)
     }
     entriesIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
@@ -868,11 +868,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.common.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     deq.bits.common.fuOpType := deqEntryVec(i).bits.payload.fuOpType
-    deq.bits.common.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen)
-    deq.bits.common.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen)
-    deq.bits.common.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen)
-    deq.bits.common.v0Wen.foreach(_ := deqEntryVec(i).bits.payload.v0Wen)
-    deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen)
+    deq.bits.common.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
+    deq.bits.common.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
+    deq.bits.common.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
+    deq.bits.common.v0Wen.foreach(_ := deqEntryVec(i).bits.payload.v0Wen.get)
+    deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen.get)
     deq.bits.common.flushPipe.foreach(_ := false.B)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
@@ -906,7 +906,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>
       sink := source
     }
-    deq.bits.immType := deqEntryVec(i).bits.payload.selImm
+    deq.bits.immType := deqEntryVec(i).bits.payload.selImm.getOrElse(0.U.asTypeOf(deq.bits.immType))
     deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
     deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
@@ -1171,37 +1171,37 @@ class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extend
     deq.bits.common.pc.foreach(_ := DontCare)
     deq.bits.common.isRVC.foreach(_ := deqEntryVec(i).bits.payload.isRVC.getOrElse(false.B))
     deq.bits.common.rasAction.foreach(_ := deqEntryVec(i).bits.payload.rasAction.getOrElse(0.U))
-    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
-    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
+    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
+    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
     deq.bits.common.predictInfo.foreach(x => {
       x.target := DontCare
-      x.fixedTaken := deqEntryVec(i).bits.payload.fixedTaken
-      x.predTaken  := deqEntryVec(i).bits.payload.predTaken
+      x.fixedTaken := deqEntryVec(i).bits.payload.fixedTaken.getOrElse(false.B)
+      x.predTaken  := deqEntryVec(i).bits.payload.predTaken.getOrElse(false.B)
     })
     // for std
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx)
     // for i2f
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
   }}
 }
 
 class IssueQueueVfImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
 {
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
-    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
-    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }}
 }
 
 class IssueQueueFpImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
 {
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
-    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
-    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }}
 }
 
@@ -1294,8 +1294,8 @@ class IssueQueueMemAddrImp(implicit p: Parameters, params: IssueBlockParams)
     deq.bits.common.ssid.foreach(_ := deqEntryVec(i).bits.payload.ssid)
     deq.bits.common.sqIdx.get := deqEntryVec(i).bits.payload.sqIdx
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
-    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
-    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
+    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
+    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
   }
 }
 
@@ -1319,7 +1319,7 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
       enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem.get
 
       val isFirstLoad           = s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get
-      val isVleff               = s0_enqBits(i).vpu.isVleff
+      val isVleff               = s0_enqBits(i).vpu.get.isVleff
       enqData.blocked          := !isFirstLoad && isVleff
     }
   }
@@ -1352,13 +1352,13 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
     deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
     if (params.isVecLduIQ) {
-      deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
-      deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset
+      deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr.get
+      deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset.get
     }
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
-    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
-    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }
 
   io.vecLoadIssueResp.foreach(dontTouch(_))

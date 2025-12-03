@@ -387,7 +387,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
         io.deqEntry(i)     := deqEntry
         io.cancelDeqVec(i) := cancelDeqVec
         if (params.aluDeqNeedPickJump) {
-          val aluDeqSelectJump = io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
+          val aluDeqSelectJump = io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
           io.aluDeqSelectJump.get := aluDeqSelectJump
           if (params.deqFuCfgs(i).contains(AluCfg)) {
             assert(i == 0, "IQ needPickRfWen ALU must in deq 0")
@@ -448,7 +448,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
-    rfWenVec(entryIdx)          := out.entry.bits.payload.rfWen
+    rfWenVec(entryIdx)          := out.entry.bits.payload.rfWen.getOrElse(false.B)
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
