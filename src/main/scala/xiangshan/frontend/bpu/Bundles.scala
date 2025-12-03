@@ -255,23 +255,22 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:   MainBtbMeta  = new MainBtbMeta
-  val tage:   TageMeta     = new TageMeta
-  val ras:    RasMeta      = new RasMeta
-  val phr:    PhrMeta      = new PhrMeta
-  val sc:     ScMeta       = new ScMeta
-  val ittage: IttageMeta   = new IttageMeta
-  val debug:  BpuDebugMeta = new BpuDebugMeta
+  val mbtb:   MainBtbMeta = new MainBtbMeta
+  val tage:   TageMeta    = new TageMeta
+  val ras:    RasMeta     = new RasMeta
+  val phr:    PhrMeta     = new PhrMeta
+  val sc:     ScMeta      = new ScMeta
+  val ittage: IttageMeta  = new IttageMeta
 }
 
-class BpuDebugMeta(implicit p: Parameters) extends BpuBundle {
-  // used for BpTrace
+class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val bpId:         UInt                = UInt(XLEN.W)
   val startVAddr:   PrunedAddr          = new PrunedAddr(VAddrBits)
   val s1Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction
   val bpSource:     BpuPredictionSource = new BpuPredictionSource
-  def bpPred:       Prediction          = Mux(bpSource.s3Override, s3Prediction, s1Prediction)
+
+  def bpPred: Prediction = Mux(bpSource.s3Override, s3Prediction, s1Prediction)
 }
 
 /* *** internal const & type *** */

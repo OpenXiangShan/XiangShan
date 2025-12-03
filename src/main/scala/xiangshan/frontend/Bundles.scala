@@ -30,8 +30,8 @@ import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.bpu.BpuCommit
-import xiangshan.frontend.bpu.BpuDebugMeta
 import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
@@ -55,7 +55,9 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val speculationMeta: DecoupledIO[BpuSpeculationMeta] = Decoupled(new BpuSpeculationMeta)
   val meta:            DecoupledIO[BpuMeta]            = Decoupled(new BpuMeta)
   val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
-  // TODO: topdown, etc.
+
+  // perfMeta uses the same valid signal as meta
+  val perfMeta: BpuPerfMeta = Output(new BpuPerfMeta)
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
