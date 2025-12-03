@@ -33,7 +33,10 @@ class LoadPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 
 class MainPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val bad_prefetch = Bool() // from mainpipe replace, prefetch block but not accessed
-  val pf_source = UInt(L1PfSourceBits.W)
+  val bad_source = UInt(L1PfSourceBits.W)
+
+  val good_prefetch = Bool() // from mainpipe, refill accessed pf block | store req hit pf block
+  val good_source = UInt(L1PfSourceBits.W)
 }
 
 class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
@@ -87,7 +90,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val nack_prefetch = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _)
   val late_miss_prefetch = io.missinfo.late_miss_prefetch
   // demand accesses from different ldu may hit different prefetch blocks
-  val good_prefetch = PopCount(prefetch_info.loadinfo.map(t => t.prefetch_hit))
+  val good_prefetch = PopCount(prefetch_info.loadinfo.map(t => t.prefetch_hit) ++ Seq(prefetch_info.maininfo.good_prefetch))
   val bad_prefetch = io.maininfo.bad_prefetch
   val prefetch_miss = io.missinfo.prefetch_miss
   val load_miss = io.missinfo.load_miss
@@ -185,8 +188,8 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val late_hit_prefetch = io.prefetch_info.loadinfo.map(t => t.late_hit_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val nack_prefetch = io.prefetch_info.loadinfo.map(t => t.nack_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val late_miss_prefetch = io.prefetch_info.missinfo.late_miss_prefetch && param.isMyType(io.prefetch_info.missinfo.pf_source)
-  val good_prefetch = PopCount(io.prefetch_info.loadinfo.map(t => t.prefetch_hit && param.isMyType(t.hit_source)))
-  val bad_prefetch = io.prefetch_info.maininfo.bad_prefetch && param.isMyType(io.prefetch_info.maininfo.pf_source)
+  val good_prefetch = PopCount(io.prefetch_info.loadinfo.map(t => t.prefetch_hit && param.isMyType(t.hit_source)) ++ Seq(io.prefetch_info.maininfo.good_prefetch && param.isMyType(io.prefetch_info.maininfo.good_source)))
+  val bad_prefetch = io.prefetch_info.maininfo.bad_prefetch && param.isMyType(io.prefetch_info.maininfo.bad_source)
   val prefetch_miss = io.prefetch_info.missinfo.prefetch_miss && param.isMyType(io.prefetch_info.missinfo.pf_source)
 
   total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
