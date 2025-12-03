@@ -35,21 +35,21 @@ abstract class NamedTuple[T <: Product] {
 }
 
 class TageTableInfo(
-    val NumSets:       Int,
+    val NumTotalSets:  Int,
     val HistoryLength: Int
 ) extends NamedTuple[(Int, Int)] {
-  require(NumSets > 0, "NumSets must be > 0")
+  require(NumTotalSets > 0, "NumTotalSets must be > 0")
   require(HistoryLength >= 0, "HistoryLength must be >= 0")
 
   def asTuple: (Int, Int) =
-    (NumSets, HistoryLength)
+    (NumTotalSets, HistoryLength)
 
   def getFoldedHistoryInfoSet(numBanks: Int, tagWidth: Int): Set[FoldedHistoryInfo] = {
     require(numBanks > 0, "numBanks must be > 0")
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       Set( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumSets / numBanks))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumTotalSets / numBanks))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
@@ -62,7 +62,7 @@ class TageTableInfo(
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       List( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumSets / numBanks))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumTotalSets / numBanks))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )

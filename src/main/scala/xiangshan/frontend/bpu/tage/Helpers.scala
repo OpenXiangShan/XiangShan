@@ -17,18 +17,29 @@ package xiangshan.frontend.bpu.tage
 
 import chisel3._
 import chisel3.util._
+import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait BaseTableHelper extends HasTageParameters {
-  def getBaseTableSetIndex(pc: PrunedAddr): UInt =
-    pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
+  val addrFields = AddrField(
+    Seq(
+      ("alignOffset", FetchBlockAlignWidth),
+      ("alignBankIdx", FetchBlockSizeWidth - FetchBlockAlignWidth),
+      ("bankIdx", BankIdxWidth),
+      ("setIdx", BaseTableSetIdxWidth)
+    ),
+    maxWidth = Option(VAddrBits)
+  )
 
-  def getBaseTableBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
+  def getSetIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("setIdx", pc)
 
-  def getBaseTableAlignBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc)
+
+  def getAlignBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("alignBankIdx", pc)
 }
 
 trait TopHelper extends HasTageParameters {
@@ -37,7 +48,7 @@ trait TopHelper extends HasTageParameters {
       val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
-      val foldedHist = Wire(new TageFoldedHist(tableInfo.NumSets))
+      val foldedHist = Wire(new TageFoldedHist(tableInfo.NumTotalSets / NumBanks))
       foldedHist.forIdx := tageFoldedHist.head
       foldedHist.forTag := tageFoldedHist(1) ^ Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
@@ -55,18 +66,24 @@ trait TopHelper extends HasTageParameters {
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   // varies between different tables
   def NumSets:     Int
-  def SetIdxWidth: Int = log2Ceil(NumSets / NumBanks)
+  def SetIdxWidth: Int = log2Ceil(NumSets)
+
+  val addrFields = AddrField(
+    Seq(
+      ("instOffset", instOffsetBits),
+      ("bankIdx", BankIdxWidth),
+      ("setIdx", SetIdxWidth),
+      ("tag", TagWidth)
+    ),
+    maxWidth = Option(VAddrBits)
+  )
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + instOffsetBits, instOffsetBits)
+    addrFields.extract("bankIdx", pc)
 
-  def getSetIndex(pc: PrunedAddr, hist: UInt): UInt = {
-    val offset = BankIdxWidth + instOffsetBits
-    pc(SetIdxWidth - 1 + offset, offset) ^ hist
-  }
+  def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
+    addrFields.extract("setIdx", pc) ^ hist
 
-  def getRawTag(pc: PrunedAddr, hist: UInt): UInt = {
-    val offset = SetIdxWidth + BankIdxWidth + instOffsetBits
-    pc(TagWidth - 1 + offset, offset) ^ hist
-  }
+  def getRawTag(pc: PrunedAddr, hist: UInt): UInt =
+    addrFields.extract("tag", pc) ^ hist
 }

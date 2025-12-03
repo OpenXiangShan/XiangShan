@@ -35,7 +35,7 @@ class BaseTableSramWriteReq(implicit p: Parameters) extends TageBundle {
 }
 
 class TableReadReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val setIdx:   UInt = UInt(log2Ceil(numSets / NumBanks).W)
+  val setIdx:   UInt = UInt(log2Ceil(numSets).W)
   val bankMask: UInt = UInt(NumBanks.W)
 }
 
@@ -46,7 +46,7 @@ class TableReadResp(implicit p: Parameters) extends TageBundle {
 
 class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasTageParameters {
-  val setIdx:         UInt                    = UInt(log2Ceil(numSets / NumBanks).W)
+  val setIdx:         UInt                    = UInt(log2Ceil(numSets).W)
   val entry:          TageEntry               = new TageEntry
   val usefulCtr:      SaturateCounter         = new SaturateCounter(UsefulCtrWidth)
   override def tag:   Option[UInt]            = Some(entry.tag)
@@ -55,7 +55,7 @@ class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBu
 }
 
 class TableWriteReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val setIdx:     UInt                 = UInt(log2Ceil(numSets / NumBanks).W)
+  val setIdx:     UInt                 = UInt(log2Ceil(numSets).W)
   val bankMask:   UInt                 = UInt(NumBanks.W)
   val wayMask:    UInt                 = UInt(NumWays.W)
   val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
@@ -69,7 +69,7 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
 }
 
 class TageFoldedHist(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val forIdx: UInt = UInt(log2Ceil(numSets / NumBanks).W)
+  val forIdx: UInt = UInt(log2Ceil(numSets).W)
   val forTag: UInt = UInt(TagWidth.W)
 }
 

@@ -50,7 +50,8 @@ case class TageParameters(
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
-  def BaseTableNumSets:       Int = tageParameters.BaseTableSize / NumBanks / FetchBlockInstNum
+  def BaseTableSize:          Int = tageParameters.BaseTableSize
+  def BaseTableNumSets:       Int = BaseTableSize / NumBanks / FetchBlockInstNum
   def BaseTableSetIdxWidth:   Int = log2Ceil(BaseTableNumSets)
   def BaseTableNumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
   def BaseTableTakenCtrWidth: Int = tageParameters.BaseTableTakenCtrWidth
