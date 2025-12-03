@@ -19,14 +19,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.frontend.ftq.{FtqPtr}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{CMOReq, CMOResp, DCacheWordReqWithVaddrAndPfFlag, UncacheWordIO}
-import xiangshan.mem.Bundles.{LsPipelineBundle, PipeLoadForwardQueryIO, StoreMaBufToSqControlIO, StoreMaskBundle}
-import xiangshan.mem.{DiffStoreIO, FeedbackToLsqIO}
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.mem.Bundles.StoreMaskBundle
 
 
 class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
@@ -278,7 +277,7 @@ class StoreQueueIO(implicit p: Parameters) extends MemBlockBundle {
   // write store request to uncacheBuffer.
   val toUncacheBuffer    = new UncacheWordIO
   // to backend , used to writeback uop when request is mmio, cmo.
-  val writeBack          = DecoupledIO(new MemExuOutput)
+  val writeBack          = DecoupledIO(new ExuOutput(staParams.head))
   // from misalignBuffer, will be remove in the feature
 //  val maControl          = Flipped(new StoreMaBufToSqControlIO)
   val wfi                = Flipped(new WfiReqBundle)
