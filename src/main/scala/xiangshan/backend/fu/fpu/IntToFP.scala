@@ -28,10 +28,6 @@ import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.scalar
 
 class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  //inst    fcvt_h_w    fcvt_h_wu    fcvt_h_l    fcvt_h_lu    fcvt_s_w    fcvt_s_wu    fcvt_s_l    fcvt_s_lu    fcvt_d_w    fcvt_d_wu    fcvt_d_l    fcvt_d_lu
-  //typ     00          01           10          11           00          01           10          11           00          01           10          11
-  //out     10          10           10          10           00          00           00          00           01          01           01          01
-  //opcode  0_0_10_1    0_0_10_0     0_1_10_1    0_1_10_0     0_0_00_1    0_0_00_0     0_1_00_1    0_1_00_0     0_0_01_1    0_0_01_0     0_1_01_1    0_1_01_0
   val ctrl = inCtrl.fpu.get
   val src0 = inData.src(0)
   val ctrlReg = RegEnable(ctrl, regEnable(1))
@@ -40,7 +36,7 @@ class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg
   val typ = Cat(fuOpType(3), ~fuOpType(0))
   val tag = fuOpType(2, 1)
 
-  val intValue = RegEnable(Mux(ctrl.wflags,
+  val intValue = RegEnable(Mux(ctrl.wfflags,
     Mux(typ(1),
       Mux(typ(0), ZeroExt(src0, XLEN), SignExt(src0, XLEN)),
       Mux(typ(0), ZeroExt(src0(31, 0), XLEN), SignExt(src0(31, 0), XLEN))
@@ -51,7 +47,7 @@ class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg
   //stage 2
   val s2_tag = RegEnable(tag, regEnable(1))
   val s2_typ = RegEnable(typ, regEnable(1))
-  val s2_wflags = ctrlReg.wflags
+  val s2_wfflags = ctrlReg.wfflags
 
   val mux = Wire(new Bundle() {
     val data = UInt(XLEN.W)
@@ -61,7 +57,7 @@ class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg
   mux.data := intValue
   mux.exc := 0.U
 
-  when(s2_wflags){
+  when(s2_wfflags){
     val i2fResults = for(t <- FPU.ftypes.take(3)) yield {
       val i2f = Module(new scalar.IntToFP(t.expWidth, t.precision))
       i2f.io.sign := ~s2_typ(0)

@@ -120,7 +120,6 @@ object Bundles {
     val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
     val vlsInstr = Bool()
-    val wfflags = Bool()
     val isMove = Bool()
     val uopIdx = UopIdx()
     val uopSplitType = UopSplitType()
@@ -207,7 +206,6 @@ object Bundles {
     val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
     val vlsInstr = Bool()
-    val wfflags = Bool()
     val isMove = Bool()
     val uopIdx = UopIdx()
     val isVset = Bool()
@@ -274,7 +272,6 @@ object Bundles {
     val imm = UInt(32.W)
     val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
-    val wfflags = Bool()
     val uopIdx = UopIdx()
     val lastUop = Bool()
     // from rename
@@ -332,7 +329,6 @@ object Bundles {
     val imm    = Option.when(params.needImm)(UInt(32.W))
     val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
     val vpu = Option.when(params.inVfSchd)(new VPUCtrlSignals)
-    val wfflags = Bool()
     val uopIdx = UopIdx()
     val lastUop = Option.when(params.inVfSchd)(Bool())
     // from rename
@@ -380,7 +376,6 @@ object Bundles {
     val imm = UInt(32.W)
     val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
-    val wfflags = Bool()
     val uopIdx = UopIdx()
     val lastUop = Bool()
     // from rename
@@ -405,7 +400,7 @@ object Bundles {
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
-    val wflags = OptionWrapper(params.writeFflags, Bool())
+    val wfflags = OptionWrapper(params.writeFflags, Bool())
     val fflags = OptionWrapper(params.writeFflags, UInt(5.W))
     val vxsat = OptionWrapper(params.writeVxsat, Bool())
     val exceptionVec = OptionWrapper(params.exceptionOut.nonEmpty, ExceptionVec())
@@ -459,7 +454,6 @@ object Bundles {
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val vlsInstr        = Bool()
-    val wfflags         = Bool()
     val isMove          = Bool()
     val isDropAmocasSta = Bool()
     val uopIdx          = UopIdx()
@@ -1029,7 +1023,7 @@ object Bundles {
     val vlWen        = if (params.needVlWen)    Some(Bool())                  else None
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
-    val wflags       = if (params.writeFflags)  Some(Bool())                  else None
+    val wfflags      = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
     val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None

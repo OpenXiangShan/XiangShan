@@ -73,7 +73,10 @@ package object xiangshan {
   }
 
   object I2fType {
-    // move/cvt ## i64/i32(input) ## f64/f32/f16(output) ## hassign
+
+    // in_typ  op(3) ## ~op(0)
+    // out_typ op(2,1)
+
     def fcvt_h_wu = BitPat("b0_0_10_0")
     def fcvt_h_w  = BitPat("b0_0_10_1")
     def fcvt_h_lu = BitPat("b0_1_10_0")

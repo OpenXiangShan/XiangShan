@@ -119,7 +119,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
 
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-  val wflags = Bool()
+  val wfflags = Bool()
   val fmt = UInt(2.W)
   val rm = UInt(3.W)
 }
