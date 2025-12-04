@@ -303,16 +303,16 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
    * load prefetch to l1 Dcache
    * stride
    */
-  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, pipe = false, name = Some("pf_to_ldu_reg"))
+  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
 
   /** load/store prefetch to l2 cache
    *  stride, sms
    */
-  l2_pf_req <> Pipeline(in = l2_pf_arb.io.out, depth = L2_PF_REG_CNT, pipe = false, name = Some("pf_to_l2cache_reg"))
+  l2_pf_req <> Pipeline(in = l2_pf_arb.io.out, depth = L2_PF_REG_CNT, name = Some("pf_to_l2cache_reg"))
   l2_pf_req.ready := true.B
 
   // load/store prefetch to l3 cache
-  l3_pf_req <> Pipeline(in = l3_pf_arb.io.out, depth = L3_PF_REG_CNT, pipe = false, name = Some("pf_to_l3cache_reg"))
+  l3_pf_req <> Pipeline(in = l3_pf_arb.io.out, depth = L3_PF_REG_CNT, name = Some("pf_to_l3cache_reg"))
   l3_pf_req.ready := true.B
 
   io.fromDCache.sms_agt_evict_req.ready := false.B
