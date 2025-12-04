@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx}
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
@@ -252,7 +253,7 @@ class SbufferWriteIO(implicit p : Parameters) extends XSBundle {
   val req                = Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddrAndPfFlag))
 }
 
-class StoreQueueIO(implicit p: Parameters) extends MemBlockBundle {
+class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends MemBlockBundle {
   // for mulit Core Difftest
   val hartId             = Input(UInt(hartIdLen.W))
   val redirect           = Flipped(ValidIO(new Redirect))
@@ -277,7 +278,7 @@ class StoreQueueIO(implicit p: Parameters) extends MemBlockBundle {
   // write store request to uncacheBuffer.
   val toUncacheBuffer    = new UncacheWordIO
   // to backend , used to writeback uop when request is mmio, cmo.
-  val writeBack          = DecoupledIO(new ExuOutput(staParams.head))
+  val writeBack          = DecoupledIO(new ExuOutput(param))
   // from misalignBuffer, will be remove in the feature
 //  val maControl          = Flipped(new StoreMaBufToSqControlIO)
   val wfi                = Flipped(new WfiReqBundle)
