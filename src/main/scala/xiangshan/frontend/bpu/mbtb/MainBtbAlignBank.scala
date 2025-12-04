@@ -187,7 +187,7 @@ class MainBtbAlignBank(
     !t1_hit ||
       // If hit, but do write only if:
       //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
-      t1_branchInfo.attribute.isOtherIndirect ||
+      t1_branchInfo.attribute.needIttage ||
       //   2. attribute changed, probably indicating a software self-modification
       !(t1_branchInfo.attribute === Mux1H(t1_hitMask, io.write.req.bits.meta.map(_.attribute)))
   // Use hit wayMask if hit, else use replacer's victim way

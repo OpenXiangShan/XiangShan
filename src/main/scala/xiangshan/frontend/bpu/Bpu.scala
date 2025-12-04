@@ -300,7 +300,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_firstTakenBranchOH         = RegEnable(s2_firstTakenBranchOH, s2_fire)
   private val s3_firstTakenBranch           = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
   private val s3_firstTakenBranchIsReturn   = s3_firstTakenBranch.bits.attribute.isReturn
-  private val s3_firstTakenBranchIsIndirect = s3_firstTakenBranch.bits.attribute.isOtherIndirect
+  private val s3_firstTakenBranchNeedIttage = s3_firstTakenBranch.bits.attribute.needIttage
 
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
@@ -313,7 +313,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_fallThroughPrediction.target,
       Seq(
 //        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
-        (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
+        (s3_taken && s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit) -> ittage.io.prediction.target,
         s3_taken                                                                -> s3_firstTakenBranch.bits.target
       )
     )
@@ -464,7 +464,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ))
   private val s3_predictionSource = PriorityEncoder(Seq(
     false.B, // s3_taken && s3_firstTakenBranchIsReturn                    // RAS
-    s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit, // ITTage
+    s3_taken && s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit, // ITTage
     s3_taken && s3_firstTakenBranch.bits.attribute.isConditional,          // MbtbTage
     s3_taken,                                                              // Mbtb
     (s3_mbtbResult zip s3_condTakenMask).map { case (info, taken) =>
@@ -569,7 +569,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate(
     "s3_use_ittage",
     s3_fire && s3_taken &&
-      s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit &&
+      s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit &&
       !s3_firstTakenBranchIsReturn
   )
   XSPerfAccumulate(
@@ -728,7 +728,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional
   private val perf_directMispredict =
     train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isDirect
-  private val perf_indirectMispredict =
+  private val perf_otherIndirectMispredict =
     train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isOtherIndirect
   private val perf_callMispredict =
     train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isCall
@@ -746,7 +746,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect)), 0.U)
   )
   XSPerfAccumulate(
-    "train_total_indirect",
+    "train_total_otherIndirect",
     Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect)), 0.U)
   )
   XSPerfAccumulate(
@@ -759,7 +759,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   XSPerfAccumulate("train_conditional_mispredict", perf_conditionalMispredict)
   XSPerfAccumulate("train_direct_mispredict", perf_directMispredict)
-  XSPerfAccumulate("train_indirect_mispredict", perf_indirectMispredict)
+  XSPerfAccumulate("train_indirect_mispredict", perf_otherIndirectMispredict)
   XSPerfAccumulate("train_call_mispredict", perf_callMispredict)
   XSPerfAccumulate("train_return_mispredict", perf_returnMispredict)
   XSPerfAccumulate("train_conditional_mispredict_because_mbtb_miss", perf_conditionalMispredict && !t0_mbtbHit)
