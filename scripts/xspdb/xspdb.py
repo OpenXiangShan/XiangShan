@@ -84,7 +84,7 @@ class XSPdb(pdb.Pdb):
         self.df.InitFlash("")
         self.xspdb_init_bin = "xspdb_flash_init.bin"
         self.flash_bin_file = None
-        self.df.difftest_init(True, self.mem_size)
+        self.df.difftest_init(False, self.mem_size)
         self.difftest_stat =  df.GetDifftest(0).dut
         self.difftest_flash = df.GetFlash()
         self.register_map = OrderedDict()
