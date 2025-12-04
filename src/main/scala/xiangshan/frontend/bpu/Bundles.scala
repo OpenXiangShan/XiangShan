@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
+import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -232,9 +233,11 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
 // use s3 prediction to train s1 predictors
 class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
-  val startVAddr:      PrunedAddr   = PrunedAddr(VAddrBits)
-  val finalPrediction: Prediction   = new Prediction
-  val abtbMeta:        AheadBtbMeta = new AheadBtbMeta
+  val startVAddr:      PrunedAddr    = PrunedAddr(VAddrBits)
+  val finalPrediction: Prediction    = new Prediction
+  val hasOverride:     Bool          = Bool()
+  val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
+  val utageMeta:       MicroTageMeta = new MicroTageMeta
 }
 
 class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
@@ -255,13 +258,14 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:   MainBtbMeta  = new MainBtbMeta
-  val tage:   TageMeta     = new TageMeta
-  val ras:    RasMeta      = new RasMeta
-  val phr:    PhrMeta      = new PhrMeta
-  val sc:     ScMeta       = new ScMeta
-  val ittage: IttageMeta   = new IttageMeta
-  val debug:  BpuDebugMeta = new BpuDebugMeta
+  val utage:  MicroTageMeta = new MicroTageMeta
+  val mbtb:   MainBtbMeta   = new MainBtbMeta
+  val tage:   TageMeta      = new TageMeta
+  val ras:    RasMeta       = new RasMeta
+  val phr:    PhrMeta       = new PhrMeta
+  val sc:     ScMeta        = new ScMeta
+  val ittage: IttageMeta    = new IttageMeta
+  val debug:  BpuDebugMeta  = new BpuDebugMeta
 }
 
 class BpuDebugMeta(implicit p: Parameters) extends BpuBundle {
