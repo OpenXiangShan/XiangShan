@@ -153,6 +153,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   val trainBranchIdxVec: Vec[Bool] = VecInit(t1_train.branches.map(b =>
     b.valid && b.bits.attribute.needIttage && b.bits.taken
   ))
+  assert(
+    PopCount(trainBranchIdxVec) <= 1.U,
+    "At most one branch in branches should be valid and isOtherIndirect for ITTAGE update"
+  )
   val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
   val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
 
