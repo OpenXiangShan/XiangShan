@@ -147,8 +147,6 @@ class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
   val vaddr        = UInt(VAddrBits.W)
   val data         = UInt(VLEN.W)
   val mask         = UInt((VLEN/8).W)
-  // debug signal
-  val debug_robIdx = Option.when(debugEn)(new RobPtr)
 }
 
 abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
@@ -493,6 +491,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     private val deqSameCycle   = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
 
+    // if Sbuffer counsume i request, within the same cycle, i entries may enter new request.
     (0 until EnsbufferWidth).map {i =>
       deqSameCycle(i) := deqPtrVec.zipWithIndex.map{case (ptr, j) =>
         ptr.value === i.U && io.toSbuffer.req(j).fire
@@ -514,17 +513,25 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
     }
 
-    enqPtrVec.map(ptr => ptr.value + PopCount(canEnq))
+    enqPtrVec.map(ptr => ptr + PopCount(canEnq))
 
     // deq
     private val doDeq = io.toSbuffer.req.map(_.fire)
-    deqPtrVec.map(ptr => ptr.value + PopCount(doDeq))
+    deqPtrVec.map(ptr => ptr + PopCount(doDeq))
 
     XSError(enqPtrVec.head < deqPtrVec.head, s"Something wrong in DataBufferQueue!\n")
 
     // connection
     for (i <- 0 until EnsbufferWidth) {
-      io.fromDeqModule(i).ready := !allocated(enqPtrVec(i).value) || deqSameCycle(enqPtrVec(i).value)
+      // if port 0, it can be enter queue whenever possible. However, for other ports, enter queue requires that
+      //  the port with the smaller sequencer number be ready.
+      if(i == 0) {
+        io.fromDeqModule(i).ready := !allocated(enqPtrVec(i).value) || deqSameCycle(enqPtrVec(i).value)
+      }
+      else {
+        io.fromDeqModule(i).ready := (!allocated(enqPtrVec(i).value) || deqSameCycle(enqPtrVec(i).value)) && io.fromDeqModule(i - 1).ready
+      }
+
     }
 
     for (i <- 0 until EnsbufferWidth) {
@@ -536,7 +543,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     io.freeCount := PopCount((~allocated.asUInt).asUInt)
+    io.empty     := empty
+    io.full      := full
 
+    if(debugEn) {
+      dontTouch(deqSameCycle)
+      dontTouch(enqPtrVec)
+      dontTouch(deqPtrVec)
+    }
   }
 
   private class DeqModule(implicit p: Parameters) extends LSQModule {
@@ -661,7 +675,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         }
       }
       is(CboState.flushSb) {
-        when(io.sbufferCtrl.resp.empty) {
+        when(io.sbufferCtrl.resp.empty && dataQueue.io.empty) { // Ensure there are no in-flight request.
           cboStateNext := Mux(isCboZero(headCtrlEntry.cboType), CboState.writeback, CboState.sendReq)
         }
       }
