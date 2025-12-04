@@ -72,6 +72,7 @@ class TLBFA(
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     val reqVpn   = RegNext(vpn)
+    val s1_level = entries.map(_.s1_level)
     val pbmt     = entries.map(_.pbmt)
     val gpbmt    = entries.map(_.g_pbmt)
     val perm     = entries.map(_.perm)
@@ -80,7 +81,8 @@ class TLBFA(
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
-        resp.bits.pbmt(d) := pbmt(0)
+        resp.bits.gvpns(d).gvpn := entries(0).genGVPN(saveLevel, resp.valid)(reqVpn)
+        resp.bits.gvpns(d).s1_level := s1_level(0)
         resp.bits.g_pbmt(d) := gpbmt(0)
         resp.bits.perm(d) := perm(0)
         resp.bits.g_perm(d) := gPerm(0)
@@ -89,6 +91,8 @@ class TLBFA(
     } else {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := Mux1H(hitVecReg zip entries.map(_.genPPN(saveLevel, resp.valid)(reqVpn)))
+        resp.bits.gvpns(d).gvpn := Mux1H(hitVecReg zip entries.map(_.genGVPN(saveLevel, resp.valid)(reqVpn)))
+        resp.bits.gvpns(d).s1_level := Mux1H(hitVecReg zip s1_level)
         resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmt)
         resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmt)
         resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
@@ -354,6 +358,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     rp.bits.hit := p.bits.hit
     for (d <- 0 until nDups) {
       rp.bits.ppn(d) := p.bits.ppn(d)
+      rp.bits.gvpns(d) := p.bits.gvpns(d)
       rp.bits.perm(d).pf := p.bits.perm(d).pf
       rp.bits.perm(d).af := p.bits.perm(d).af
       rp.bits.perm(d).v := p.bits.perm(d).v

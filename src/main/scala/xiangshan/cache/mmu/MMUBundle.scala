@@ -149,6 +149,11 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
   }
 }
 
+class TlbGvpnBundle(implicit p: Parameters) extends TlbBundle {
+  val gvpn = UInt(gvpnLen.W)
+  val s1_level = UInt(2.W)
+}
+
 // multi-read && single-write
 // input is data, output is hot-code(not one-hot)
 class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
@@ -199,6 +204,11 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val pteidx = Vec(tlbcontiguous, Bool())
   val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
+  val s1_level = UInt(2.W)
+  val s2_level = UInt(2.W)
+  val s1_n = UInt(pteNLen.W)
+
+  val gvpn = UInt(gvpnLen.W)
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
@@ -329,6 +339,9 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
         Mux(s2_exception && !s1_valid, 3.U, merge_level))
     val inner_level = Mux(item.s2xlate =/= allStage, merge_level, allStage_level)
     this.level.map(_ := inner_level)
+    this.s1_level := item.s1.entry.level.getOrElse(0.U)
+    this.s2_level := item.s2.entry.level.getOrElse(0.U)
+    this.s1_n := item.s1.entry.n.getOrElse(0.U)
     this.perm.apply(item.s1)
     this.pbmt := item.s1.entry.pbmt
 
@@ -353,6 +366,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s2ppn_low = VecInit(Seq.fill(tlbcontiguous)(s2ppn_tmp(sectortlbwidth - 1, 0)))
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.ppn_low := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn_low, s2ppn_low)
+    this.gvpn := Mux(item.s2xlate === onlyStage2, item.s2.entry.tag, Cat(item.s1.entry.ppn, item.s1.ppn_low(OHToUInt(item.s1.pteidx))))
     // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
     // n is valid (represents a 64KB page) when:
     // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
@@ -400,6 +414,23 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       RegEnable(ppn_res, valid)
     else
       ppn_res
+  }
+
+  def genGVPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
+    val inner_s1_level = s1_level
+    val inner_gvpn = MuxLookup(inner_s1_level, 0.U(gvpnLen.W))(Seq(
+      3.U -> Cat(gvpn(gvpnLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
+      2.U -> Cat(gvpn(gvpnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(gvpn(gvpnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+      0.U -> Mux(s1_n === 0.U, gvpn, Cat(gvpn(gvpnLen - 1, pteNapotBits), vpn(pteNapotBits - 1, 0))))
+    )
+    val isNonLeaf = !(perm.r || perm.x || perm.w) && perm.v && !perm.pf && !perm.af
+    val gvpn_res = Mux(isNonLeaf, gvpn, inner_gvpn)
+
+    if (saveLevel)
+      RegEnable(gvpn_res, valid)
+    else
+      gvpn_res
   }
 
   def hasS2xlate(): Bool = {
@@ -453,6 +484,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val gvpns = Vec(nDups, Output(new TlbGvpnBundle()))
       val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
@@ -474,7 +506,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.gvpns, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
@@ -494,6 +526,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val gvpns = Vec(nDups, Output(new TlbGvpnBundle()))
       val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
@@ -513,7 +546,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.gvpns, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
@@ -705,7 +738,6 @@ class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
   val resp = Flipped(DecoupledIO(new Bundle {
     val data = new PtwRespS2withMemIdx
     val vector = Output(Vec(Width, Bool()))
-    val getGpa = Output(Vec(Width, Bool()))
   }))
 
   def connect(normal: TlbPtwIOwithMemIdx): Unit = {
@@ -1129,7 +1161,6 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 
 class PtwReqwithMemIdx(implicit p: Parameters) extends PtwReq {
   val memidx = new MemBlockidxBundle
-  val getGpa = Bool() // this req is to get gpa when having guest page fault
 }
 
 class PtwResp(implicit p: Parameters) extends PtwBundle {
@@ -1408,7 +1439,6 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
 
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {
   val memidx = new MemBlockidxBundle()
-  val getGpa = Bool() // this req is to get gpa when having guest page fault
 }
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
