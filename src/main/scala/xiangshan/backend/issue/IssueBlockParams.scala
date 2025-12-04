@@ -56,6 +56,8 @@ case class IssueBlockParams(
 
   def isStAddrIQ: Boolean = StaCnt > 0
 
+  def isStdIQ: Boolean = StdCnt > 0
+
   def isHyAddrIQ: Boolean = HyuCnt > 0
 
   def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0

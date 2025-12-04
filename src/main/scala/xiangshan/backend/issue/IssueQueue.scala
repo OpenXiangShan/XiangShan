@@ -26,7 +26,7 @@ class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) e
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
   val flush = Flipped(ValidIO(new Redirect))
-  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new IssueQueuePayload(params))))
+  val enq = Vec(params.numEnq, Flipped(DecoupledIO(new RegionInUop(params))))
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
@@ -1179,7 +1179,7 @@ class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extend
       x.predTaken  := deqEntryVec(i).bits.payload.predTaken.getOrElse(false.B)
     })
     // for std
-    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx)
+    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx.get)
     // for i2f
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
   }}
@@ -1190,7 +1190,7 @@ class IssueQueueVfImp(implicit p: Parameters, params: IssueBlockParams) extends 
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
-    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }}
 }
@@ -1200,7 +1200,7 @@ class IssueQueueFpImp(implicit p: Parameters, params: IssueBlockParams) extends 
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
-    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }}
 }
@@ -1287,13 +1287,13 @@ class IssueQueueMemAddrImp(implicit p: Parameters, params: IssueBlockParams)
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.pc.foreach(_ := 0.U)
-    deq.bits.common.loadWaitBit.foreach(_ := deqEntryVec(i).bits.payload.loadWaitBit)
-    deq.bits.common.waitForRobIdx.foreach(_ := deqEntryVec(i).bits.payload.waitForRobIdx)
-    deq.bits.common.storeSetHit.foreach(_ := deqEntryVec(i).bits.payload.storeSetHit)
-    deq.bits.common.loadWaitStrict.foreach(_ := deqEntryVec(i).bits.payload.loadWaitStrict)
-    deq.bits.common.ssid.foreach(_ := deqEntryVec(i).bits.payload.ssid)
-    deq.bits.common.sqIdx.get := deqEntryVec(i).bits.payload.sqIdx
-    deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
+    deq.bits.common.loadWaitBit.foreach(_ := deqEntryVec(i).bits.payload.loadWaitBit.get)
+    deq.bits.common.waitForRobIdx.foreach(_ := deqEntryVec(i).bits.payload.waitForRobIdx.get)
+    deq.bits.common.storeSetHit.foreach(_ := deqEntryVec(i).bits.payload.storeSetHit.get)
+    deq.bits.common.loadWaitStrict.foreach(_ := deqEntryVec(i).bits.payload.loadWaitStrict.get)
+    deq.bits.common.ssid.foreach(_ := deqEntryVec(i).bits.payload.ssid.get)
+    deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.payload.lqIdx.get)
+    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx.get)
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
   }
@@ -1313,12 +1313,12 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
 
   for (i <- entries.io.enq.indices) {
     entries.io.enq(i).bits.status match { case enqData =>
-      enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
-      enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
+      enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx.get
+      enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx.get
       // MemAddrIQ also handle vector insts
       enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem.get
 
-      val isFirstLoad           = s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get
+      val isFirstLoad           = s0_enqBits(i).lqIdx.get <= memIO.lqDeqPtr.get
       val isVleff               = s0_enqBits(i).vpu.get.isVleff
       enqData.blocked          := !isFirstLoad && isVleff
     }
@@ -1357,7 +1357,7 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
     }
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
-    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
   }
 

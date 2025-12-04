@@ -290,7 +290,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     stdIQEnq.bits.srcLoadDependency(0) := staIQEnq.bits.srcLoadDependency(stdIdx)
     stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
     stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(stdIdx)
-    stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
+    stdIQEnq.bits.sqIdx.get := staIQEnq.bits.sqIdx.get
     stdIQEnq.bits.useRegCache(0) := staIQEnq.bits.useRegCache(stdIdx)
     stdIQEnq.bits.regCacheIdx(0) := staIQEnq.bits.regCacheIdx(stdIdx)
   }

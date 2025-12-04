@@ -486,7 +486,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
     // vecMem
     if (params.isVecMemIQ) {
-      commonOut.uopIdx.get                            := entryReg.payload.uopIdx
+      commonOut.uopIdx.get                            := entryReg.payload.uopIdx.get
     }
   }
 
