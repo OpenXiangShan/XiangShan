@@ -325,9 +325,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val finalPred      = Mux(useAlt, altPred, Mux(hasProvider, pred, basePred))
     val actualTaken    = branch.bits.taken
 
-    val providerNewTakenCtr = providerInfo.entry.takenCtr.getUpdate(actualTaken)
+    val providerNewTakenCtr       = providerInfo.entry.takenCtr.getUpdate(actualTaken)
+    val increaseProviderUsefulCtr = hasProvider && pred === actualTaken && pred =/= Mux(hasAlt, altPred, basePred)
     val providerNewUsefulCtr = Mux(
-      hasProvider && pred === actualTaken && pred =/= Mux(hasAlt, altPred, basePred),
+      increaseProviderUsefulCtr,
       providerInfo.usefulCtr.getIncrease,
       providerInfo.usefulCtr.value
     )
@@ -356,6 +357,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     updateInfo.finalPred := finalPred
 
     updateInfo.needAllocate := isCond && finalPred =/= actualTaken && !(hasProvider && providerTableOH(NumTables - 1))
+    updateInfo.canUpdate := !(
+      providerInfo.entry.takenCtr.shouldHold(actualTaken) &&
+        providerInfo.usefulCtr.isSaturatePositive && increaseProviderUsefulCtr &&
+        altInfo.entry.takenCtr.shouldHold(actualTaken)
+    )
 
     updateInfo.increaseUseAlt := increaseUseAlt
     updateInfo.decreaseUseAlt := decreaseUseAlt
@@ -389,10 +395,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       updateEnPerTable.zip(entriesPerTable).zip(usefulCtrsPerTable).zipWithIndex.map {
         case (((updateEn, entry), usefulCtr), wayIdx) =>
           val hitBranchProviderMask = t2_allBranchUpdateInfo.map { branch =>
-            branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
+            branch.canUpdate && branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
           }
           val hitBranchAltMask = t2_allBranchUpdateInfo.map { branch =>
-            branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
+            branch.canUpdate && branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
           }
           val hitBranchProvider  = hitBranchProviderMask.reduce(_ || _)
           val hitBranchAlt       = hitBranchAltMask.reduce(_ || _)
@@ -542,5 +548,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   for (i <- 0 until NumTables) {
     XSPerfAccumulate(s"table_${i}_allocate", t2_valid && t2_allocateTableMaskOH(i))
   }
+  XSPerfAccumulate("total_write", t2_valid && (t2_allocateTableMaskOH.orR || t2_updateMask.flatten.reduce(_ || _)))
+  XSPerfAccumulate("allocate_write", t2_valid && t2_allocateTableMaskOH.orR)
+  XSPerfAccumulate("update_write", t2_valid && t2_updateMask.flatten.reduce(_ || _))
   // TODO: add more
 }
