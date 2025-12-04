@@ -61,8 +61,9 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
     val brOffset    = Cat(cfiPosition, 0.U(instOffsetBits.W))
     PrunedAddrInit(alignedAddr + brOffset)
   }
+
   def pathHash(pc: PrunedAddr, target: PrunedAddr): UInt = {
-    val hash = (((pc >> 1) & (Fill(9, true.B))) << 4) ^ ((target >> 2) & Fill(15, true.B))
+    val hash = Cat(pc(9, 1), 0.U(4.W)) ^ target(16, 2) // magic numbers
     hash(PathHashWidth - 1, 0)
   }
 
@@ -74,12 +75,12 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
     } else 0.U
 
   def computeFoldedHash(hashBits: UInt, compLen: Int)(histLen: Int): UInt =
-    if (histLen > 0 & PathHashWidth >= histLen) {
+    if (histLen > 0 && PathHashWidth >= histLen) {
       val effectiveBit = hashBits(histLen - 1, 0)
       val nChunks      = (histLen + compLen - 1) / compLen
       val histChunks   = (0 until nChunks) map { i => effectiveBit(min((i + 1) * compLen, histLen) - 1, i * compLen) }
       ParallelXOR(histChunks)
-    } else if (histLen > 0 & PathHashWidth < histLen) {
+    } else if (histLen > 0 && PathHashWidth < histLen) {
       val nChunks    = (PathHashWidth + compLen - 1) / compLen
       val histChunks = (0 until nChunks) map { i => hashBits(min((i + 1) * compLen, PathHashWidth) - 1, i * compLen) }
       ParallelXOR(histChunks)
