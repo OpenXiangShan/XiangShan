@@ -22,6 +22,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
     SignExt(io.in.bits.data.pc.get, cfg.destDataBits),
     ZeroExt(io.in.bits.data.pc.get, cfg.destDataBits)
   )
+  private val thisPc = pc + (io.in.bits.ctrl.ftqOffset.get << 1).asUInt - Mux(io.in.bits.ctrl.isRVC.get, 0.U, 2.U)
   private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
   private val isRVC = io.in.bits.ctrl.isRVC.get
@@ -54,7 +55,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.fullTarget := jumpDataModule.io.target
   redirect.taken := true.B
   redirect.target := jumpDataModule.io.target
-  redirect.pc := io.in.bits.data.pc.get
+  redirect.pc := thisPc
   redirect.isMisPred := needRedirect
   redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
@@ -68,7 +69,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpOpisAuipc(func)
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pc)
+  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(thisPc)
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(jumpDataModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := true.B
   io.toFrontendBJUResolve.get.bits.mispredict := needTrain

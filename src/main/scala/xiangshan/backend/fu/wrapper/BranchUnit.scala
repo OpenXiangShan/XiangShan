@@ -41,6 +41,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
     SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
     ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)
   )
+  val thisPc = pcExtend + (io.in.bits.ctrl.ftqOffset.get << 1).asUInt - Mux(io.in.bits.ctrl.isRVC.get, 0.U, 2.U)
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
@@ -67,7 +68,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.isMisPred := isMisPred
       redirect.bits.taken := dataModule.io.taken
       redirect.bits.target := addModule.io.target
-      redirect.bits.pc := io.in.bits.data.pc.get
+      redirect.bits.pc := thisPc
       redirect.bits.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
       redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
       redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
@@ -76,7 +77,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend)
+  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(thisPc)
   io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
