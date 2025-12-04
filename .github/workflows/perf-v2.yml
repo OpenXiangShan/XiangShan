@@ -15,8 +15,8 @@ on:
         type: string
         description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
   #only for test push
-  push:
-    branches: [ ci-perf-yml ]
+  # push:
+  #   branches: [ ci-perf-yml ]
 
 jobs:
   check-run:
