@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
 import chisel3.util._
+import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CrossPageHelper
@@ -25,32 +26,47 @@ import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMainBtbParameters
     with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
+
+  val addrFields = AddrField(
+    Seq(
+      ("alignOffset", FetchBlockAlignWidth),
+      ("alignBankIdx", AlignBankIdxLen),
+      ("internalBankIdx", InternalBankIdxLen),
+      ("setIdx", SetIdxLen),
+      ("tag", TagWidth)
+    ),
+    maxWidth = Option(VAddrBits),
+    extraFields = Seq(
+      ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
+      ("targetLower", instOffsetBits, TargetWidth),
+      ("position", instOffsetBits, FetchBlockAlignWidth),
+      ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
+    )
+  )
+
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxLen + InternalBankIdxLen + FetchBlockSizeWidth - 1, InternalBankIdxLen + FetchBlockSizeWidth)
+    addrFields.extract("setIdx", pc)
 
   def getReplacerSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxLen + FetchBlockSizeWidth - 1, FetchBlockSizeWidth)
+    addrFields.extract("replacerSetIdx", pc)
 
   def getAlignBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+    addrFields.extract("alignBankIdx", pc)
 
   def getAlignBankIndexFromPosition(cfiPosition: UInt): UInt =
-    cfiPosition(CfiPositionWidth - 1, CfiPositionWidth - AlignBankIdxLen)
+    addrFields.extractFrom("cfiPosition", "alignBankIdx", cfiPosition)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
-    pc(VAddrBits - 1, TargetWidth + instOffsetBits)
+    pc(pc.length - 1, addrFields.getEnd("targetLower") + 1)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
-    target(TargetWidth + instOffsetBits - 1, instOffsetBits)
+    addrFields.extract("targetLower", target)
 
   def getInternalBankIndex(pc: PrunedAddr): UInt =
-    pc(InternalBankIdxLen + FetchBlockSizeWidth - 1, FetchBlockSizeWidth)
+    addrFields.extract("internalBankIdx", pc)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(
-      TagWidth + InternalBankIdxLen + SetIdxLen + FetchBlockSizeWidth - 1,
-      InternalBankIdxLen + SetIdxLen + FetchBlockSizeWidth
-    )
+    addrFields.extract("tag", pc)
 
   // detect multi-hit, return a mask indicating which way has multi-hit
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): UInt = {
