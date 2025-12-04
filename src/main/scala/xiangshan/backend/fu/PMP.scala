@@ -27,7 +27,7 @@ import xiangshan._
 import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 import utility._
-import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
+import xiangshan.cache.mmu.TlbCmd
 import freechips.rocketchip.rocket.CSRs
 
 trait PMPConst extends HasPMParameters {
