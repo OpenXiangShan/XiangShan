@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.ras.RasInternalMeta
 import xiangshan.frontend.bpu.ras.RasMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
+import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -141,22 +142,26 @@ class BpuPredictionSource extends Bundle {
   val s3Source:   UInt = BpuPredictionSource.Stage3()
   val s3Override: Bool = Bool()
 
-  def s1Ubtb:            Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
-  def s1Abtb:            Bool = s1Source === BpuPredictionSource.Stage1.Abtb
-  def s1Fallthrough:     Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
-  def s3Ras:             Bool = s3Source === BpuPredictionSource.Stage3.Ras
-  def s3ITTage:          Bool = s3Source === BpuPredictionSource.Stage3.ITTage
-  def s3MbtbTage:        Bool = s3Source === BpuPredictionSource.Stage3.MbtbTage
-  def s3Mbtb:            Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
-  def s3FallthroughTage: Bool = s3Source === BpuPredictionSource.Stage3.FallthroughTage
-  def s3Fallthrough:     Bool = s3Source === BpuPredictionSource.Stage3.Fallthrough
+  def s1Ubtb:             Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
+  def s1Abtb:             Bool = s1Source === BpuPredictionSource.Stage1.Abtb
+  def s1AbtbUtage:        Bool = s1Source === BpuPredictionSource.Stage1.AbtbUtage
+  def s1FallthroughUtage: Bool = s1Source === BpuPredictionSource.Stage1.FallthroughUtage
+  def s1Fallthrough:      Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
+  def s3Ras:              Bool = s3Source === BpuPredictionSource.Stage3.Ras
+  def s3ITTage:           Bool = s3Source === BpuPredictionSource.Stage3.ITTage
+  def s3MbtbTage:         Bool = s3Source === BpuPredictionSource.Stage3.MbtbTage
+  def s3Mbtb:             Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
+  def s3FallthroughTage:  Bool = s3Source === BpuPredictionSource.Stage3.FallthroughTage
+  def s3Fallthrough:      Bool = s3Source === BpuPredictionSource.Stage3.Fallthrough
 }
 
 object BpuPredictionSource {
-  object Stage1 extends EnumUInt(3) {
-    def Ubtb:        UInt = 0.U(width.W)
-    def Abtb:        UInt = 1.U(width.W)
-    def Fallthrough: UInt = 2.U(width.W)
+  object Stage1 extends EnumUInt(5) {
+    def AbtbUtage:        UInt = 0.U(width.W)
+    def FallthroughUtage: UInt = 1.U(width.W)
+    def Ubtb:             UInt = 2.U(width.W)
+    def Abtb:             UInt = 3.U(width.W)
+    def Fallthrough:      UInt = 4.U(width.W)
   }
   object Stage3 extends EnumUInt(6) {
     def Ras:             UInt = 0.U(width.W)
@@ -174,6 +179,7 @@ class BpuCtrl extends Bundle {
   // s1 predictor enable
   val ubtbEnable: Bool = Bool()
   val abtbEnable: Bool = Bool()
+  // val utageEnable: Bool = Bool()
   // s3 predictor enable
   val mbtbEnable:   Bool = Bool()
   val tageEnable:   Bool = Bool()
@@ -232,9 +238,11 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
 // use s3 prediction to train s1 predictors
 class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
-  val startVAddr:      PrunedAddr   = PrunedAddr(VAddrBits)
-  val finalPrediction: Prediction   = new Prediction
-  val abtbMeta:        AheadBtbMeta = new AheadBtbMeta
+  val startVAddr:      PrunedAddr    = PrunedAddr(VAddrBits)
+  val finalPrediction: Prediction    = new Prediction
+  val hasOverride:     Bool          = Bool()
+  val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
+  val utageMeta:       MicroTageMeta = new MicroTageMeta
 }
 
 class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
@@ -255,13 +263,14 @@ class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for training (e.g. aheadBtb, mainBtb-specific)
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:   MainBtbMeta  = new MainBtbMeta
-  val tage:   TageMeta     = new TageMeta
-  val ras:    RasMeta      = new RasMeta
-  val phr:    PhrMeta      = new PhrMeta
-  val sc:     ScMeta       = new ScMeta
-  val ittage: IttageMeta   = new IttageMeta
-  val debug:  BpuDebugMeta = new BpuDebugMeta
+  val utage:  MicroTageMeta = new MicroTageMeta
+  val mbtb:   MainBtbMeta   = new MainBtbMeta
+  val tage:   TageMeta      = new TageMeta
+  val ras:    RasMeta       = new RasMeta
+  val phr:    PhrMeta       = new PhrMeta
+  val sc:     ScMeta        = new ScMeta
+  val ittage: IttageMeta    = new IttageMeta
+  val debug:  BpuDebugMeta  = new BpuDebugMeta
 }
 
 class BpuDebugMeta(implicit p: Parameters) extends BpuBundle {

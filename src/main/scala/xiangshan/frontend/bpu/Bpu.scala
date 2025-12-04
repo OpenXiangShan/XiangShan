@@ -40,6 +40,8 @@ import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
+import xiangshan.frontend.bpu.utage.MicroTage
+import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
@@ -55,6 +57,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
   private val abtb        = Module(new AheadBtb)
+  private val utage       = Module(new MicroTage)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
   private val ittage      = Module(new Ittage)
@@ -67,6 +70,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     fallThrough,
     ubtb,
     abtb,
+    utage,
     mbtb,
     tage,
     sc,
@@ -83,6 +87,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val constCtrl = Constantin.createRecord("constCtrl")
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
+  utage.io.enable       := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
@@ -91,6 +96,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
     ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
+    // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
   } else {
     ubtb.io.enable   := ctrl.ubtbEnable
     abtb.io.enable   := ctrl.abtbEnable
@@ -99,6 +105,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := false.B
+    // utage.io.enable  := ctrl.utageEnable
   }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -148,6 +155,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
+  // utage meta
+  // private val s1_utageMeta = utage.io.prediction.meta.bits
+  private val s1_utageMeta = Wire(new MicroTageMeta)
+  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
+  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -177,6 +190,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.startVAddr      := s3_pc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
+  fastTrain.bits.utageMeta       := s3_utageMeta
+  fastTrain.bits.hasOverride     := s3_override
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -196,6 +211,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.overrideValid       := s3_override
   abtb.io.previousVAddr.valid := s4_valid
   abtb.io.previousVAddr.bits  := s4_pc
+  abtb.io.microTagePred       := utage.io.prediction
+
+  // utage
+  utage.io.foldedPathHist         := phr.io.s0_foldedPhr
+  utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -270,14 +290,40 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // if ubtb or abtb find a taken branch, use the corresponding prediction
   // otherwise, use fall-through prediction
   // TODO: maybe need compare position？
+
+  // When microTAGE participates in prediction, it has the highest priority in stage S1.
+  private val s1_realUbtbTaken = ubtb.io.prediction.taken && !abtb.io.useMicroTage
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        ubtb.io.prediction.taken -> ubtb.io.prediction,
+        s1_realUbtbTaken         -> ubtb.io.prediction,
         abtb.io.prediction.taken -> abtb.io.prediction
       )
     )
+
+  // ---------- Base Table Info for microTAGE Meta ----------
+  // private val baseBrTaken = Mux(
+  //   ubtb.io.prediction.taken,
+  //   ubtb.io.prediction.attribute.isConditional,
+  //   Mux(abtb.io.basePrediction.taken, abtb.io.basePrediction.attribute.isConditional, false.B)
+  // )
+  // private val baseBrCfiPosition = Mux(
+  //   ubtb.io.prediction.taken,
+  //   ubtb.io.prediction.cfiPosition,
+  //   Mux(abtb.io.basePrediction.taken, abtb.io.basePrediction.cfiPosition, 0.U)
+  // )
+  private val baseBrTaken = abtb.io.basePrediction.taken && abtb.io.basePrediction.attribute.isConditional
+  private val baseBrCfiPosition = Mux(
+    abtb.io.basePrediction.taken && abtb.io.basePrediction.attribute.isConditional,
+    abtb.io.basePrediction.cfiPosition,
+    0.U
+  )
+
+  s1_utageMeta                  := utage.io.meta.bits
+  s1_utageMeta.testUseMicroTage := abtb.io.useMicroTage
+  s1_utageMeta.baseTaken        := baseBrTaken
+  s1_utageMeta.baseCfiPosition  := baseBrCfiPosition
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
@@ -361,6 +407,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
+  s3_meta.utage  := s3_utageMeta
   s3_meta.mbtb   := s3_mbtbMeta
   s3_meta.tage   := s3_tageMeta
   s3_meta.ras    := s3_rasMeta
@@ -452,9 +499,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_condTakenMask = RegEnable(s2_condTakenMask, s2_fire)
   // see class BpuPredictionSource in bpu/Bundles.scala:137
   private val s1_predictionSource = PriorityEncoder(Seq(
-    ubtb.io.prediction.taken, // Ubtb
-    abtb.io.prediction.taken, // Abtb
-    true.B                    // Fallthrough
+    abtb.io.useMicroTage && abtb.io.prediction.taken,
+    abtb.io.useMicroTage && !abtb.io.prediction.taken,
+    ubtb.io.prediction.taken && !abtb.io.useMicroTage,     // Ubtb
+    abtb.io.basePrediction.taken && !abtb.io.useMicroTage, // Abtb
+    true.B                                                 // Fallthrough
   ))
   private val s3_predictionSource = PriorityEncoder(Seq(
     false.B, // s3_taken && s3_firstTakenBranchIsReturn                    // RAS
@@ -532,8 +581,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     0,
     FetchBlockInstNum + 1
   )
-  XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && ubtb.io.prediction.taken)
-  XSPerfAccumulate("s1_use_abtb", io.toFtq.prediction.fire && !ubtb.io.prediction.taken && abtb.io.prediction.taken)
+  XSPerfAccumulate("s1_use_microTage", io.toFtq.prediction.fire && abtb.io.useMicroTage)
+  XSPerfAccumulate("s1_use_ubtb", io.toFtq.prediction.fire && !abtb.io.useMicroTage && ubtb.io.prediction.taken)
+  XSPerfAccumulate(
+    "s1_use_abtb",
+    io.toFtq.prediction.fire && !abtb.io.useMicroTage && !ubtb.io.prediction.taken && abtb.io.basePrediction.taken
+  )
   XSPerfAccumulate(
     "s1_use_fallThrough",
     io.toFtq.prediction.fire && !ubtb.io.prediction.taken && !abtb.io.prediction.taken
@@ -552,6 +605,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   XSPerfAccumulate("finalPred_s1_ubtb", s3_fire && !s3_override && s3_debugMeta.bpSource.s1Ubtb)
   XSPerfAccumulate("finalPred_s1_abtb", s3_fire && !s3_override && s3_debugMeta.bpSource.s1Abtb)
+  XSPerfAccumulate("finalPred_s1_abtb_utage", s3_fire && !s3_override && s3_debugMeta.bpSource.s1AbtbUtage)
+  XSPerfAccumulate("finalPred_s1_fall_utage", s3_fire && !s3_override && s3_debugMeta.bpSource.s1FallthroughUtage)
   XSPerfAccumulate("finalPred_s1_fall", s3_fire && !s3_override && s3_debugMeta.bpSource.s1Fallthrough)
 
   XSPerfAccumulate("finalPred_s3_ras", s3_fire && s3_override && s3_debugMeta.bpSource.s3Ras)
@@ -591,6 +646,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_debugMeta.bpSource.s1Abtb
   )
   XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fallTage_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_debugMeta.bpSource.s3FallthroughTage &&
+      s3_debugMeta.bpSource.s1AbtbUtage
+  )
+  XSPerfAccumulate(
     "s3Override_takenMismatch_s3fall_s1uBTB",
     io.toFtq.prediction.fire && s3_override &&
       s3_debugMeta.bpSource.s3Fallthrough &&
@@ -601,6 +662,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     io.toFtq.prediction.fire && s3_override &&
       s3_debugMeta.bpSource.s3Fallthrough &&
       s3_debugMeta.bpSource.s1Abtb
+  )
+  XSPerfAccumulate(
+    "s3Override_takenMismatch_s3fall_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_debugMeta.bpSource.s3Fallthrough &&
+      s3_debugMeta.bpSource.s1AbtbUtage
   )
   // position mismatch
   XSPerfAccumulate(
@@ -616,6 +683,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.taken && s3_s1Prediction.taken &&
       s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
       s3_debugMeta.bpSource.s1Abtb
+  )
+  XSPerfAccumulate(
+    "s3Override_positionMismatch_s3mBTB_s1aBTBUTage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
+      s3_debugMeta.bpSource.s1AbtbUtage
   )
   // attribute mismatch
   XSPerfAccumulate(
@@ -633,6 +707,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 //      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
       !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
       s3_debugMeta.bpSource.s1Abtb
+  )
+  XSPerfAccumulate(
+    "s3Override_attributeMismatch_s3mBTB_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken === s3_s1Prediction.taken &&
+//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
+      s3_debugMeta.bpSource.s1AbtbUtage
   )
   // target mismatch
   XSPerfAccumulate(
@@ -688,6 +770,33 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.attribute === s3_s1Prediction.attribute &&
       !(s3_prediction.target === s3_s1Prediction.target) &&
       s3_debugMeta.bpSource.s1Abtb && s3_debugMeta.bpSource.s3Ras
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3mBTB_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_debugMeta.bpSource.s1AbtbUtage && (s3_debugMeta.bpSource.s3MbtbTage || s3_debugMeta.bpSource.s3Mbtb)
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3ITTage_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_debugMeta.bpSource.s1AbtbUtage && s3_debugMeta.bpSource.s3ITTage
+  )
+  XSPerfAccumulate(
+    "s3Override_targetMismatch_s3RAS_s1aBTBUtage",
+    io.toFtq.prediction.fire && s3_override &&
+      s3_prediction.taken && s3_s1Prediction.taken &&
+      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+      s3_prediction.attribute === s3_s1Prediction.attribute &&
+      !(s3_prediction.target === s3_s1Prediction.target) &&
+      s3_debugMeta.bpSource.s1AbtbUtage && s3_debugMeta.bpSource.s3Ras
   )
 
   /* *** perf train *** */
