@@ -478,8 +478,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
   io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.robIdx, io.in.valid)
-  io.feedbackSlow.bits.sqIdx   := RegEnable(io.in.bits.sqIdx.get, io.in.valid)
-  io.feedbackSlow.bits.lqIdx   := RegEnable(io.in.bits.lqIdx.get, io.in.valid)
+  io.feedbackSlow.bits.sqIdx   := RegEnable(io.in.bits.sqIdx.getOrElse(0.U.asTypeOf(io.feedbackSlow.bits.sqIdx)), io.in.valid)
+  io.feedbackSlow.bits.lqIdx   := RegEnable(io.in.bits.lqIdx.getOrElse(0.U.asTypeOf(io.feedbackSlow.bits.lqIdx)), io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
   io.feedbackSlow.bits.sourceType := DontCare
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
