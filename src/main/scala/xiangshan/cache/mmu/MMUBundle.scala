@@ -586,9 +586,17 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
-  val ld = Output(Bool())
-  val st = Output(Bool())
-  val instr = Output(Bool())
+  val ld = Bool()
+  val st = Bool()
+  val instr = Bool()
+}
+
+class TlbRespExcp(implicit p: Parameters) extends TlbBundle {
+  val vaNeedExt = Bool()
+  val isHyper = Bool()
+  val gpf = new TlbExceptionBundle
+  val pf = new TlbExceptionBundle
+  val af = new TlbExceptionBundle
 }
 
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
@@ -599,13 +607,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val miss = Output(Bool())
   val fastMiss = Output(Bool())
   val isForVSnonLeafPTE = Output(Bool())
-  val excp = Vec(nDups, new Bundle {
-    val vaNeedExt = Output(Bool())
-    val isHyper = Output(Bool())
-    val gpf = new TlbExceptionBundle()
-    val pf = new TlbExceptionBundle()
-    val af = new TlbExceptionBundle()
-  })
+  val excp = Output(Vec(nDups, new TlbRespExcp))
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
   val memidx = Output(new MemBlockidxBundle)
 
