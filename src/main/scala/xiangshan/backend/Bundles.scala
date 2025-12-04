@@ -319,39 +319,40 @@ object Bundles {
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtr)(UInt(FetchBlockInstOffsetWidth.W))
     // from decode
-    val srcType = Vec(numSrc, SrcType())
-    val fuType = FuType()
+    val srcType  = Vec(numSrc, SrcType())
+    val fuType   = FuType()
     val fuOpType = FuOpType()
-    val rfWen  = Option.when(params.needIntWen)(Bool())
-    val fpWen  = Option.when(params.needFpWen )(Bool())
-    val vecWen = Option.when(params.needVecWen)(Bool())
-    val v0Wen  = Option.when(params.needV0Wen )(Bool())
-    val vlWen  = Option.when(params.needVlWen )(Bool())
-    val selImm = Option.when(params.needImm)(SelImm())
-    val imm    = Option.when(params.needImm)(UInt(32.W))
-    val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
-    val vpu = Option.when(params.inVfSchd)(new VPUCtrlSignals)
-    val wfflags = Bool()
-    val uopIdx = UopIdx()
-    val lastUop = Option.when(params.inVfSchd)(Bool())
+    val rfWen    = Option.when(params.needIntWen)(Bool())
+    val fpWen    = Option.when(params.needFpWen )(Bool())
+    val vecWen   = Option.when(params.needVecWen)(Bool())
+    val v0Wen    = Option.when(params.needV0Wen )(Bool())
+    val vlWen    = Option.when(params.needVlWen )(Bool())
+    val selImm   = Option.when(params.needImm)(SelImm())
+    val imm      = Option.when(params.needImm)(UInt(32.W))
+    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
+    val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
-    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
-    val pdest = UInt(PhyRegIdxWidth.W)
-    val robIdx = new RobPtr
+    val robIdx    = new RobPtr
+    val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest     = UInt(PhyRegIdxWidth.W)
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
-    val storeSetHit = Bool()
-    val waitForRobIdx = new RobPtr
-    val loadWaitBit = Bool()
-    val loadWaitStrict = Bool()
-    val ssid = UInt(SSIDWidth.W)
-    val srcState = Vec(numSrc, SrcState())
+    val storeSetHit       = Option.when(params.isLdAddrIQ)(Bool())
+    val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
+    val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
+    val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
+    val ssid              = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
+    // from dispatch
+    val srcState          = Vec(numSrc, SrcState())
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
-    val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
-    val lqIdx = new LqPtr
-    val sqIdx = new SqPtr
+    val useRegCache       = Vec(backendParams.numIntRegSrc, Bool())
+    val regCacheIdx       = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val lqIdx             = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
+    val sqIdx             = Option.when(params.isLdAddrIQ || params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ)(new SqPtr) // load unit need sqIdx
     // cas ctrl
     val isDropAmocasSta = Bool()
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
@@ -366,40 +367,40 @@ object Bundles {
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     // from decode
-    val srcType = Vec(numSrc, SrcType())
-    val fuType = FuType()
+    val srcType  = Vec(numSrc, SrcType())
+    val fuType   = FuType()
     val fuOpType = FuOpType()
-    val rfWen  = Option.when(params.needIntWen)(Bool())
-    val fpWen  = Option.when(params.needFpWen )(Bool())
-    val vecWen = Option.when(params.needVecWen)(Bool())
-    val v0Wen  = Option.when(params.needV0Wen )(Bool())
-    val vlWen  = Option.when(params.needVlWen )(Bool())
-    val selImm = Option.when(params.needImm)(SelImm())
-    val imm    = Option.when(params.needImm)(UInt(32.W))
-    val fpu = Option.when(params.writeFflags)(new FPUCtrlSignals)
-    val vpu = Option.when(params.inVfSchd)(new VPUCtrlSignals)
-    val wfflags = Bool()
-    val uopIdx = UopIdx()
-    val lastUop = Option.when(params.inVfSchd)(Bool())
+    val rfWen    = Option.when(params.needIntWen)(Bool())
+    val fpWen    = Option.when(params.needFpWen )(Bool())
+    val vecWen   = Option.when(params.needVecWen)(Bool())
+    val v0Wen    = Option.when(params.needV0Wen )(Bool())
+    val vlWen    = Option.when(params.needVlWen )(Bool())
+    val selImm   = Option.when(params.needImm)(SelImm())
+    val imm      = Option.when(params.needImm)(UInt(32.W))
+    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
+    val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
-    val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
-    val pdest = UInt(PhyRegIdxWidth.W)
-    val robIdx = new RobPtr
+    val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val pdest     = UInt(PhyRegIdxWidth.W)
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
-    val storeSetHit = Bool()
-    val waitForRobIdx = new RobPtr
-    val loadWaitBit = Bool()
-    val loadWaitStrict = Bool()
-    val ssid = UInt(SSIDWidth.W)
-    val srcState = Vec(numSrc, SrcState())
+    val storeSetHit       = Option.when(params.isLdAddrIQ)(Bool())
+    val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
+    val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
+    val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
+    val ssid              = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
+    // from dispatch
+    val srcState          = Vec(numSrc, SrcState())
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
-    val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
-    val lqIdx = new LqPtr
-    val sqIdx = new SqPtr
-    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+    val useRegCache       = Vec(backendParams.numIntRegSrc, Bool())
+    val regCacheIdx       = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val lqIdx             = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
+    val sqIdx             = Option.when(params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ || params.isLdAddrIQ)(new SqPtr) // load unit need sqIdx
+    val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
@@ -910,9 +911,8 @@ object Bundles {
     val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
     // only vector load store need
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
-
-    val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
-    val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
+    val lqIdx = OptionWrapper(params.hasLoadFu || params.hasVecLsFu, new LqPtr)
+    val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu, new SqPtr)
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
