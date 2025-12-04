@@ -43,3 +43,4 @@ jobs:
       test_branch: kunminghu-v3
       test_commit: ${{ github.event.inputs.test_commit }}
       benchmark_type: ${{ github.event.inputs.benchmark_type || 'spec06-1.0c' }}
+      all_spec_dir: /nfs/home/cirunner/perf-report-kmhv3
