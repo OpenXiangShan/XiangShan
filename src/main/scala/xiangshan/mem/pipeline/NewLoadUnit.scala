@@ -36,15 +36,17 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
+import xiangshan.mem.LoadStage._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 
-class LoadUnitS0(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
-  with HasL1PrefetchSourceParameter {
+class LoadUnitS0(param: ExeUnitParams)(
+  implicit p: Parameters,
+  override implicit val s: LoadStage = LoadS0()
+) extends LoadUnitStage(param) with HasL1PrefetchSourceParameter {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val out = DecoupledIO(new FlowSource)
     /**
       * Request sources in order of priority:
       * 0. unalign tail inject from s1
@@ -56,7 +58,7 @@ class LoadUnitS0(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
       * 6. loads issued from IQ
       * 7. low-confidence prefetch
       */
-    val unalignTail = Flipped(DecoupledIO(new FlowSource))
+    val unalignTail = Flipped(DecoupledIO(new LoadPipelineBundle))
     val replay = Flipped(DecoupledIO(new LsPipelineBundle))
     val fastReplay = Flipped(DecoupledIO(new LqWriteBundle))
     // TODO: canAcceptHigh/LowConfPrefetch
@@ -100,11 +102,12 @@ class LoadUnitS0(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io <> DontCare
 }
 
-class LoadUnitS1(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
+class LoadUnitS1(param: ExeUnitParams)(
+  implicit p: Parameters,
+  override implicit val s: LoadStage = LoadS1()
+) extends LoadUnitStage(param) {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val in = Flipped(DecoupledIO(new FlowSource))
-    val out = DecoupledIO(new FlowSource)
 
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp(2))) // TODO: parameterize 2
@@ -126,7 +129,7 @@ class LoadUnitS1(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
     val dcacheForwardKill = Output(Bool())
 
     // Unalign tail inject to s0
-    val unalignTail = DecoupledIO(new FlowSource)
+    val unalignTail = DecoupledIO(new LoadPipelineBundle)
 
     // Nuke check with StoreUnit
     val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
@@ -151,11 +154,12 @@ class LoadUnitS1(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io <> DontCare
 }
 
-class LoadUnitS2(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
+class LoadUnitS2(param: ExeUnitParams)(
+  implicit p: Parameters,
+  override implicit val s: LoadStage = LoadS2()
+) extends LoadUnitStage(param) {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val in = Flipped(DecoupledIO(new FlowSource))
-    val out = DecoupledIO(new FlowSource)
 
     // PMP result
     val pmp = Flipped(new PMPRespBundle)
@@ -204,10 +208,12 @@ class LoadUnitS2(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io <> DontCare
 }
 
-class LoadUnitS3(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
+class LoadUnitS3(param: ExeUnitParams)(
+  implicit p: Parameters,
+  override implicit val s: LoadStage = LoadS3()
+) extends LoadUnitStage(param) {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val in = Flipped(DecoupledIO(new FlowSource))
 
     // DCache response
     val dcacheError = Input(Bool())
@@ -313,9 +319,9 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val s3 = Module(new LoadUnitS3(param))
 
   // Internal wiring
-  s1.io.in <> s0.io.out
-  s2.io.in <> s1.io.out
-  s3.io.in <> s2.io.out
+  s1 <> s0
+  s2 <> s1
+  s3 <> s2
   s0.io.unalignTail <> s1.io.unalignTail
   s0.io.fastReplay <> s3.io.fastReplay
 
@@ -410,44 +416,83 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.s2_pc := s2.io.debugInfo.pc
 }
 
-class FlowSource(implicit p: Parameters) extends XSBundle
+abstract class LoadUnitStage(val param: ExeUnitParams)(
+  implicit p: Parameters,
+  implicit val s: LoadStage
+) extends XSModule with OnLoadStage {
+  val pipeIn = if (afterS1) {
+    Some(IO(Flipped(DecoupledIO(new LoadPipelineBundle()(p, prevStage(s))))))
+  } else None
+  val pipeOut = if (!lastStage) {
+    Some(IO(DecoupledIO(new LoadPipelineBundle)))
+  } else None
+
+  def <>(that: LoadUnitStage): Unit = {
+    this.pipeIn.foreach(_ <> that.pipeOut.get)
+  }
+
+  // TODO: remove this
+  for (in <- pipeIn) {
+    dontTouch(in)
+    in <> DontCare
+  }
+  for (out <- pipeOut) {
+    dontTouch(out)
+    out <> DontCare
+  }
+}
+
+class LoadPipelineBundle(
+  implicit p: Parameters,
+  implicit val s: LoadStage
+) extends XSBundle
+  with OnLoadStage
   with HasDCacheParameters
   with HasVLSUParameters {
-  val vaddr         = UInt(VAddrBits.W)
-  val mask          = UInt((VLEN/8).W)
-  val uop           = new DynInst
-  val has_rob_entry = Bool()
-  val rep_carry     = new ReplayCarry(nWays)
-  val mshrid        = UInt(log2Up(cfg.nMissEntries).W)
-  val isFirstIssue  = Bool()
-  val fast_rep      = Bool()
-  val ld_rep        = Bool()
-  val prf           = Bool()
-  val prf_rd        = Bool()
-  val prf_wr        = Bool()
-  val prf_i         = Bool()
-  val sched_idx     = UInt(log2Up(LoadQueueReplaySize+1).W)
-  // Record the issue port idx of load issue queue. This signal is used by load cancel.
-  val deqPortIdx    = UInt(log2Ceil(LoadPipelineWidth).W)
-  val frm_mabuf     = Bool()
-  // vec only
-  val isvec         = Bool()
-  val is128bit      = Bool()
-  val uop_unit_stride_fof = Bool()
-  val reg_offset    = UInt(vOffsetBits.W)
-  val vecActive     = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
-  val is_first_ele  = Bool()
-  // val flowPtr       = new VlflowPtr
-  val usSecondInv   = Bool()
-  val mbIndex       = UInt(vlmBindexBits.W)
-  val elemIdx       = UInt(elemIdxBits.W)
+  // basic info
+  val entrance = LoadEntrance()
+  val accessType = LoadAccessType()
+  val uop = new DynInst
+  val vaddr = UInt(VAddrBits.W)
+  val paddr = UInt(PAddrBits.W)
+  val fullva = UInt(XLEN.W)
+  val size = UInt(3.W)
+  val mask = UInt((VLEN/8).W)
+
+  // unalign
+  val unalignHead = Bool()
+
+  // MMU & exception handling
+  val tlbAccessResult = TlbAccessResult()
+  val tlbException = new TlbRespExcp
+  val pbmt = Pbmt()
+  val pmp = new PMPRespBundle
+  val isForVSnonLeafPTE = Bool()
+
+  // replay requests
+  val handledByMSHR = Bool()
+  val mshrId = UInt(log2Up(cfg.nMissEntries).W) // valid when `handledByMSHR` is HIGH
+  val replayQueueIdx = UInt(log2Up(LoadQueueReplaySize+1).W)
+  val forwardDChannel = Bool()
+
+  // vector
+  val elemIdx = UInt(elemIdxBits.W)
+  val mbIndex = UInt(vlmBindexBits.W)
+  val regOffset = UInt(vOffsetBits.W)
   val elemIdxInsideVd = UInt(elemIdxBits.W)
-  val alignedType   = UInt(alignTypeBits.W)
-  val vecBaseVaddr  = UInt(VAddrBits.W)
-  //for Svpbmt NC
-  val isnc          = Bool()
-  val paddr         = UInt(PAddrBits.W)
-  val data          = UInt((VLEN+1).W)
+  val vecBaseVaddr = UInt(VAddrBits.W)
+  val vecVaddrOffset = UInt(VAddrBits.W) // only used in s1 & s2, to generate vstart
+  val vecTriggerMask = UInt((VLEN/8).W)
+
+  // data
+  val data = UInt((VLEN+1).W)
+
+  // virtualLoadQueue
+  val writebacked = Bool() // `updateAddrValid` in the original version
+
+  // debug info and top-down
+  val hasROBEntry = Bool()
+  val missDbUpdated = Bool()
 }
 
 /**
