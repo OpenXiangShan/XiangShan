@@ -25,9 +25,11 @@ import xiangshan.ExceptionNO.hardwareError
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{DCacheWordReqWithVaddrAndPfFlag, MemoryOpConstants, UncacheWordIO}
+import xiangshan.mem.NewStoreQueueMain.config
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -199,7 +201,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     else Cat(in(step - 1, 0), in(maxLen - 1, step))
   }
 
-  private class ForwardModule(implicit p: Parameters) extends LSQModule {
+  val param = staParams.head
+  param.bindBackendParam(backendParams)
+
+  private class ForwardModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val query           = Vec(LoadPipelineWidth, new ForwardQueryIO)
       val dataEntriesIn   = Vec(StoreQueueSize, Input(new SQEntryBundle())) // from storeQueue data
@@ -447,7 +452,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   *     |   head 0   |----------------------> |      Entry 0      | ------------> |                   |
   *     +------------+                        +-------------------+               +-------------------+
   * */
-  private class EnterSbufferQueue(implicit  p: Parameters) extends LSQModule {
+  private class EnterSbufferQueue(val param: ExeUnitParams)(implicit  p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val fromDeqModule = Vec(EnsbufferWidth, Flipped(DecoupledIO(new WriteToSbufferReqEntry)))
       val toSbuffer     = new SbufferWriteIO
@@ -553,7 +558,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
   }
 
-  private class DeqModule(implicit p: Parameters) extends LSQModule {
+  private class DeqModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val headDataEntries = Vec(EnsbufferWidth, Input(new SQEntryBundle))
       val headCtrlEntries = Vec(EnsbufferWidth, Input(new SQCtrlEntryBundle))
@@ -562,7 +567,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val toDCache        = new ToCacheIO
       val fromRob         = Input(new FromRobIO)
       val writeToSbuffer  = new SbufferWriteIO
-      val writeBack       = DecoupledIO(new ExuOutput(staParams.head))
+      val writeBack       = DecoupledIO(new ExuOutput(param))
       val exceptionInfo   = ValidIO(new MemExceptionInfo)
       val sbufferCtrl     = new SbufferCtrlIO
 
@@ -598,7 +603,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val writeback = Value
     }
 
-    private val dataQueue        = Module(new EnterSbufferQueue)
+    private val dataQueue        = Module(new EnterSbufferQueue(param))
 
     private val dataEntries      = io.headDataEntries
     private val ctrlEntries      = io.headCtrlEntries
@@ -1017,7 +1022,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   }
   /*==================================================================================================================*/
   /* UnalignQueue will save the second physical address of the oldest SQUnalignQueueSize crossPage unaligned requests.*/
-  private class UnalignQueue(implicit p: Parameters) extends LSQModule {
+  private class UnalignQueue(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val redirect       = Flipped(ValidIO(new Redirect))
       val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
@@ -1095,7 +1100,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
   }
 
-  val io = IO(new StoreQueueIO)
+
+
+  val io = IO(new StoreQueueIO(param))
   println("StoreQueue: size:" + StoreQueueSize)
 
   // entries define
@@ -1137,9 +1144,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   /*========================================== Module define & connection ============================================*/
   // use `private` to limit module connection within this module.
 
-  private val forwardModule         = Module(new ForwardModule)
-  private val deqModule             = Module(new DeqModule)
-  private val unalignQueue          = Module(new UnalignQueue)
+  private val forwardModule         = Module(new ForwardModule(param))
+  private val deqModule             = Module(new DeqModule(param))
+  private val unalignQueue          = Module(new UnalignQueue(param))
 
   // forward connection
   forwardModule.io.query           <> io.forward

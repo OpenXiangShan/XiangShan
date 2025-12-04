@@ -26,6 +26,7 @@ abstract class LSQModule(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasVLSUParameters
+  with HasMemBlockParameters
 
 
 object MemoryType {
