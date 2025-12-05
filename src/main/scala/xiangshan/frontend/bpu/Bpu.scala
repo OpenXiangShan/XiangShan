@@ -95,7 +95,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
     sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
-    ras.io.enable    := Mux(constCtrl(0), constCtrl(7), false.B)
+    ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
   } else {
     ubtb.io.enable   := ctrl.ubtbEnable
     abtb.io.enable   := ctrl.abtbEnable
@@ -103,7 +103,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     tage.io.enable   := ctrl.tageEnable
     sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
-    ras.io.enable    := false.B
+    ras.io.enable    := ctrl.rasEnable
   }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -354,7 +354,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       s3_fallThroughPrediction.target,
       Seq(
-//        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
+        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
         (s3_taken && s3_firstTakenBranchIsIndirect && ittage.io.prediction.hit) -> ittage.io.prediction.target,
         s3_taken                                                                -> s3_firstTakenBranch.bits.target
       )

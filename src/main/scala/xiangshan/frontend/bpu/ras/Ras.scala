@@ -64,7 +64,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   private val specIn       = io.specIn.bits
   private val specAlignPc  = specIn.startPc & alignMask
-  private val specPushAddr = specAlignPc + specIn.cfiPosition + 2.U
+  private val specPushAddr = specAlignPc + (specIn.cfiPosition << 1.U) + 2.U
   stack.spec.pushValid := specPush && !stackNearOverflow
   stack.spec.popValid  := specPop && !stackNearOverflow
 
