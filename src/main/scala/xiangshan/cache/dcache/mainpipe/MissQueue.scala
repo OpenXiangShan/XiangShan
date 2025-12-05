@@ -1311,7 +1311,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
     difftest.addr := io.refill_to_ldq.bits.addr
     difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
-    difftest.idtfr := DontCare
+    difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }
 
   // Perf count

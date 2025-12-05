@@ -70,11 +70,10 @@ class CmdDiffTest:
             self.df.finish_device()
             self.df.GoldenMemFinish()
             self.df.difftest_finish()
-            self.df.difftest_init()
+            self.api_init_mem()
+            self.df.difftest_init(True, self.exec_bin_file)
             self.difftest_stat = self.df.GetDifftest(0).dut
         self.df.init_device()
-        self.df.GoldenMemInit()
-        self.df.init_nemuproxy(0)
         self.difftest_ref_is_inited = True
         return True
 
@@ -325,6 +324,19 @@ class CmdDiffTest:
             instance (number): difftest instance to get, default is 0
         """
         return self.df.GetDifftest(instance)
+
+    def do_xdifftest_turn_on(self, arg):
+        """Turn on the difftest diff
+
+        Args:
+            arg (string): Turn on or off
+        """
+        if arg.strip() == "on":
+            self.api_set_difftest_diff(True)
+        elif arg.strip() == "off":
+            self.api_set_difftest_diff(False)
+        else:
+            error("usage: xdifftest_turn_on <on|off>")
 
     def complete_xdifftest_turn_on(self, text, line, begidx, endidx):
         return [x for x in ["on", "off"] if x.startswith(text)] if text else ["on", "off"]
