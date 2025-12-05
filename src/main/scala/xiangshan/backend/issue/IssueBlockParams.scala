@@ -56,6 +56,8 @@ case class IssueBlockParams(
 
   def isStAddrIQ: Boolean = StaCnt > 0
 
+  def isStdIQ: Boolean = StdCnt > 0
+
   def isHyAddrIQ: Boolean = HyuCnt > 0
 
   def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0
@@ -129,6 +131,12 @@ case class IssueBlockParams(
   def needRasAction: Boolean = JmpCnt > 0
 
   def needIsRVC: Boolean = JmpCnt + BrhCnt + CsrCnt + LduCnt > 0
+
+  def needTaken: Boolean = JmpCnt + BrhCnt > 0
+
+  def needFtqPtr: Boolean = exuBlockParams.map(_.needFtqPtr).reduce(_ || _)
+
+  def needFtqPtrOffset: Boolean = exuBlockParams.map(_.needFtqPtrOffset).reduce(_ || _)
 
   def needSrcFrm: Boolean = exuBlockParams.map(_.needSrcFrm).reduce(_ || _)
 
@@ -218,15 +226,15 @@ case class IssueBlockParams(
 
   def needReadFpRegFile: Boolean = exuBlockParams.map(_.readFpRf).reduce(_ || _)
 
-  def needWriteIntRegFile: Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
+  def needIntWen: Boolean = exuBlockParams.map(_.needIntWen).reduce(_ || _)
 
-  def needWriteFpRegFile: Boolean = exuBlockParams.map(_.writeFpRf).reduce(_ || _)
+  def needFpWen: Boolean = exuBlockParams.map(_.needFpWen).reduce(_ || _)
 
-  def needWriteVecRegFile: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
+  def needVecWen: Boolean = exuBlockParams.map(_.needVecWen).reduce(_ || _)
 
-  def needWriteV0RegFile: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
+  def needV0Wen: Boolean = exuBlockParams.map(_.needV0Wen).reduce(_ || _)
 
-  def needWriteVlRegFile: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
+  def needVlWen: Boolean = exuBlockParams.map(_.needVlWen).reduce(_ || _)
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
