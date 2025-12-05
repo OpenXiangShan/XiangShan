@@ -1047,18 +1047,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val memSetPattenDetected = Output(Bool())
     val lqEmpty = Input(Bool())
 
-    val prefetch_info = new Bundle {
-      val naive = new Bundle {
-        val late_miss_prefetch = Output(Bool())
-        val pf_source = Output(UInt(L1PfSourceBits.W))
-      }
-
-      val fdp = new Bundle {
-        val late_miss_prefetch = Output(Bool())
-        val prefetch_monitor_cnt = Output(Bool())
-        val total_prefetch = Output(Bool())
-      }
-    }
+    val prefetch_stat = Output(new MissPrefetchStatBundle)
 
     val wfi = Flipped(new WfiReqBundle)
 
@@ -1298,12 +1287,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   // prefetch related
-  io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
-  io.prefetch_info.naive.pf_source := io.req.bits.pf_source
-
-  io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
-  io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
-  io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  io.prefetch_stat.late_miss_prefetch := io.req.valid && io.req.bits.isFromPrefetch && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+  io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
+  io.prefetch_stat.pf_source := io.req.bits.pf_source
+  io.prefetch_stat.demand_match_pfmshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
+  io.prefetch_stat.load_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromLoad
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)
