@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
@@ -226,4 +227,10 @@ class MainBtbAlignBank(
   }
 
   XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)
+  XSPerfAccumulate("allocate", t1_valid && !t1_hit)
+  XSPerfAccumulate("fixTarget", t1_valid && t1_hit && t1_branchInfo.attribute.isOtherIndirect)
+  XSPerfAccumulate(
+    "fixAttribute",
+    t1_valid && t1_hit && !(t1_branchInfo.attribute === Mux1H(t1_hitMask, io.write.req.bits.meta.map(_.attribute)))
+  )
 }
