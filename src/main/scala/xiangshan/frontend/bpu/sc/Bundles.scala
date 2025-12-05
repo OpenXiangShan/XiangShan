@@ -24,24 +24,18 @@ import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class ScEntry(implicit p: Parameters) extends ScBundle {
-  val ctr: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
+  val ctr: SignedSaturateCounter = new SignedSaturateCounter(CtrWidth)
 }
 class ScTageInfo(implicit p: Parameters) extends ScBundle {
   val condTakenMask: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
   val providerTakenCtr: Vec[Valid[SaturateCounter]] =
-    Vec(NumBtbResultEntries, Valid(new SaturateCounter(tageTakenCtrWidth)))
-}
-class TableCtrl extends Bundle {
-  val pathEnable:   Bool = Bool()
-  val globalEnable: Bool = Bool()
-  val biasEnable:   Bool = Bool()
-  // TODO: other ctrl signals
+    Vec(NumBtbResultEntries, Valid(new SaturateCounter(TageTakenCtrWidth)))
 }
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
-  val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
+  val thres: SaturateCounter = new SaturateCounter(ThresholdWidth)
 
-  def initVal: UInt = 520.U
+  def initVal: UInt = 128.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())
@@ -82,8 +76,8 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
   // FIXME: is there a better way to do this?
   private def ScEntryWidth = (new ScEntry).getWidth
-  val scPathResp:      Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scGlobalResp:    Vec[Vec[UInt]] = Vec(GlobalTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scPathResp:      Vec[Vec[UInt]] = Vec(NumPathTables, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scGlobalResp:    Vec[Vec[UInt]] = Vec(NumGlobalTables, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
   val scBiasResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
   val scGhr:           UInt           = UInt(GhrHistoryLength.W)
@@ -93,8 +87,8 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
   val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
   val predPathIdx: Vec[UInt] =
-    Vec(PathTableSize, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
+    Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
   val predGlobalIdx: Vec[UInt] =
-    Vec(GlobalTableSize, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
+    Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
   val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
 }
