@@ -243,7 +243,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_biasIdxLowBits = VecInit(s2_condTakenMask.zip(s2_providerValid).zip(s2_providerCtr).map {
     case ((taken, valid), ctr) => Cat(valid && ctr.isWeak, taken)
   })
-  private val s2_totalPercsum = WireInit(VecInit.fill(NumWays)(0.S(ctrWidth.W)))
+  private val s2_totalPercsum = WireInit(VecInit.fill(NumWays)(0.S(TotalSumWidth.W)))
   private val s2_hitMask      = WireInit(VecInit.fill(NumWays)(false.B))
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
 

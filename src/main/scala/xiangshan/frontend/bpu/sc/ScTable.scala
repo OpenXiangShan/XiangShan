@@ -91,7 +91,7 @@ class ScTable(
     case (buffer, bankEnable) =>
       val writeValid = updateValid && bankEnable
       buffer.io.write.head.valid       := writeValid
-      buffer.io.write.head.bits.setIdx := updateIdx >> log2Ceil(NumBanks)
+      buffer.io.write.head.bits.setIdx := updateIdx
       buffer.io.write.head.bits.wayMask := Mux(
         writeValid,
         updateWayMask,
