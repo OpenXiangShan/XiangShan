@@ -35,15 +35,15 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
       val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
-      ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
+      ((pc >> FetchBlockSizeWidth) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
     } else {
-      (pc >> (BankWidth + FetchBlockSizeWidth))(log2Ceil(numSets) - 1, 0)
+      (pc >> FetchBlockSizeWidth)(log2Ceil(numSets) - 1, 0)
     }
 
   // get pc ^ ghr for index
   def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int, ghrLen: Int): UInt = {
     val foldedGhr = computeFoldedHist(ghr, log2Ceil(numSets))(ghrLen)
-    ((pc >> (BankWidth + FetchBlockSizeWidth)) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
+    ((pc >> FetchBlockSizeWidth) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
   }
 
   // get pc ^ ghr for index
