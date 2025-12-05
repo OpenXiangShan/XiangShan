@@ -45,7 +45,7 @@ object PhrPtr {
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val valid:     Bool                  = Bool()
   val taken:     Bool                  = Bool()
-  val pc:        PrunedAddr            = PrunedAddr(VAddrBits)
+  val cfiPc:     PrunedAddr            = PrunedAddr(VAddrBits)
   val target:    PrunedAddr            = PrunedAddr(VAddrBits)
   val phrMeta:   PhrMeta               = new PhrMeta()
   val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
@@ -60,12 +60,12 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
 
   val s1_valid:      Bool       = Bool()
   val s1_prediction: Prediction = new Prediction()
-  val s1_pc:         PrunedAddr = PrunedAddr(VAddrBits)
+  val s1_startPc:    PrunedAddr = PrunedAddr(VAddrBits)
 
   val s3_override:   Bool       = Bool()
   val s3_phrMeta:    PhrMeta    = new PhrMeta()
   val s3_prediction: Prediction = new Prediction()
-  val s3_pc:         PrunedAddr = PrunedAddr(VAddrBits)
+  val s3_startPc:    PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 class PhrMeta(implicit p: Parameters) extends PhrBundle {

@@ -104,9 +104,9 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   resolve.zipWithIndex.foreach { case (branch, i) =>
     when(branch.valid && !full) {
-      mem(enqIndex(i)).valid           := true.B
-      mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
-      mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
+      mem(enqIndex(i)).valid        := true.B
+      mem(enqIndex(i)).bits.ftqIdx  := branch.bits.ftqIdx
+      mem(enqIndex(i)).bits.startPc := branch.bits.pc
 
       val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
       val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))

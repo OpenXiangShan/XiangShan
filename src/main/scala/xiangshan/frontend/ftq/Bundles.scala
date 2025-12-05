@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
 }
 
@@ -35,9 +35,9 @@ class MetaEntry(implicit p: Parameters) extends FtqBundle {
 }
 
 class ResolveEntry(implicit p: Parameters) extends FtqBundle {
-  val ftqIdx:     FtqPtr     = new FtqPtr
-  val flushed:    Bool       = Bool()
-  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val ftqIdx:  FtqPtr     = new FtqPtr
+  val flushed: Bool       = Bool()
+  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
   // TODO: Reconsider branch number
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 }
@@ -73,7 +73,7 @@ class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQue
 
 class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   // write to backend pc mem
-  val wen:        Bool       = Output(Bool())
-  val ftqIdx:     UInt       = Output(UInt(FtqPtr.width.W))
-  val startVAddr: PrunedAddr = Output(PrunedAddr(VAddrBits))
+  val wen:     Bool       = Output(Bool())
+  val ftqIdx:  UInt       = Output(UInt(FtqPtr.width.W))
+  val startPc: PrunedAddr = Output(PrunedAddr(VAddrBits))
 }

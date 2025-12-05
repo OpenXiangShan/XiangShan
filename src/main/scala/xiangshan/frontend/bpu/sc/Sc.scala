@@ -129,10 +129,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  predict pipeline stage 0
    */
-  private val s0_startVAddr = io.startVAddr
+  private val s0_startPc = io.startPc
   private val s0_pathIdx: Seq[UInt] = PathTableInfos.map(info =>
     getPathTableIdx(
-      s0_startVAddr,
+      s0_startPc,
       new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays))),
       io.foldedPathHist,
       info.Size / NumWays
@@ -141,7 +141,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val s0_globalIdx: Seq[UInt] = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
-      s0_startVAddr,
+      s0_startPc,
       s0_ghr.value.asUInt,
       info.Size / NumWays
     )
@@ -161,7 +161,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 1
    *  calculate each ctr's percsum
    */
-  private val s1_startVAddr = RegEnable(io.startVAddr, s0_fire)
+  private val s1_startPc = RegEnable(io.startPc, s0_fire)
   private val s1_pathResp: Vec[Vec[ScEntry]] = VecInit(pathTable.map(_.io.resp))
   // if s0_ghr invalid, global table resp is also invalid
   private val s1_globalResp: Vec[Vec[ScEntry]] =
@@ -191,7 +191,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
    */
-  private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
+  private val s2_startPc    = RegEnable(s1_startPc, s1_fire)
   private val s2_pathResp   = s1_pathResp.map(entries => VecInit(entries.map(RegEnable(_, s1_fire))))
   private val s2_globalResp = s1_globalResp.map(entries => VecInit(entries.map(RegEnable(_, s1_fire))))
   private val s2_sumPercsum: Vec[SInt] = VecInit(s1_sumPercsum.map(RegEnable(_, s1_fire)))
@@ -249,7 +249,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val t1_pathSetIdx = PathTableInfos.map(info =>
     getPathTableIdx(
-      t1_train.startVAddr,
+      t1_train.startPc,
       new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays))),
       io.trainFoldedPathHist,
       info.Size / NumWays
@@ -258,7 +258,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val t1_globalSetIdx = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
-      t1_train.startVAddr,
+      t1_train.startPc,
       t1_meta.scGhr,
       info.Size / NumWays
     )

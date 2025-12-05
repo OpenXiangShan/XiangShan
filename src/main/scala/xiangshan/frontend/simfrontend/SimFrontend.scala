@@ -265,9 +265,9 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
     )
   }
 
-  io.backend.fromFtq.wen        := fetchHelper.io.out_ftqPackData(6)
-  io.backend.fromFtq.ftqIdx     := fetchHelper.io.out_ftqPackData(5, 0)
-  io.backend.fromFtq.startVAddr := PrunedAddrInit(fetchHelper.io.out_ftqPc)
+  io.backend.fromFtq.wen     := fetchHelper.io.out_ftqPackData(6)
+  io.backend.fromFtq.ftqIdx  := fetchHelper.io.out_ftqPackData(5, 0)
+  io.backend.fromFtq.startPc := PrunedAddrInit(fetchHelper.io.out_ftqPc)
 
   XSPerfAccumulate("all_redirect", io.backend.toFtq.redirect.valid)
   XSPerfAccumulate("mispred_redirect", io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.isMisPred)
