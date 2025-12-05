@@ -572,6 +572,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.hartId := io.fromTop.hartId
   csrin.msiInfo.valid := RegNext(io.fromTop.msiInfo.valid)
   csrin.msiInfo.bits := RegEnable(io.fromTop.msiInfo.bits, io.fromTop.msiInfo.valid)
+  csrin.teemsiInfo.valid := RegNext(io.fromTop.teemsiInfo.valid)
+  csrin.teemsiInfo.bits := RegEnable(io.fromTop.teemsiInfo.bits, io.fromTop.teemsiInfo.valid)
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
@@ -963,6 +965,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.toTop.cpuCriticalError := csrio.criticalErrorState
   io.toTop.msiAck := csrio.msiAck
+  io.toTop.teemsiAck := csrio.teemsiAck
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -1063,6 +1066,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle with HasSoCPar
   val hartId            = Output(UInt(hartIdLen.W))
   val externalInterrupt = Output(new ExternalInterruptIO)
   val msiInfo           = Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+  val teemsiInfo        = Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
   val clintTime         = Output(ValidIO(UInt(64.W)))
   val l2FlushDone       = Output(Bool())
 }
@@ -1071,6 +1075,7 @@ class BackendToTopBundle extends Bundle {
   val cpuHalted = Output(Bool())
   val cpuCriticalError = Output(Bool())
   val msiAck = Output(Bool())
+  val teemsiAck = Output(Bool())
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {

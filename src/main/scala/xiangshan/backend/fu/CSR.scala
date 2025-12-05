@@ -120,6 +120,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val instrAddrTransType = Output(new AddrTransType)
   // ack for axireg from imsic. which indicates imsic can work actively
   val msiAck = Output(Bool())
+  val teemsiAck = Output(Bool())
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {

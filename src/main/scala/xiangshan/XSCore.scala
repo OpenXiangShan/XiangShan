@@ -86,6 +86,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val hartId = Input(UInt(hartIdLen.W))
     val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
     val msiAck = Output(Bool())
+    val teemsiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+    val teemsiAck = Output(Bool())
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
@@ -198,6 +200,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // top -> memBlock
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
   memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
+  memBlock.io.fromTopToBackend.teemsiInfo := io.teemsiInfo
   memBlock.io.hartId := io.hartId
   memBlock.io.l2_flush_done := io.l2_flush_done
   memBlock.io.outer_reset_vector := io.reset_vector
@@ -263,6 +266,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.power_down_en := memBlock.io.outer_power_down_en
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
   io.msiAck := memBlock.io.outer_msi_ack
+  io.teemsiAck := memBlock.io.outer_teemsi_ack
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.dcacheError
   io.beu_errors.uncache <> memBlock.io.uncacheError

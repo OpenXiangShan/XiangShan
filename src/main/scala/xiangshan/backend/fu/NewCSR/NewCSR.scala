@@ -391,6 +391,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.platform.seip := platformIRP.SEIP
   intrMod.io.in.fromAIA.meip := fromAIA.meip
   intrMod.io.in.fromAIA.seip := fromAIA.seip
+  intrMod.io.in.fromAIA.notice_pending := fromAIA.notice_pending
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
@@ -676,6 +677,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.aiaToCSR.mtopei  := fromAIA.mtopei
         m.aiaToCSR.stopei  := fromAIA.stopei
         m.aiaToCSR.vstopei := fromAIA.vstopei
+        m.aiaToCSR.notice_pending := fromAIA.notice_pending
       case _ =>
     }
     mod match {

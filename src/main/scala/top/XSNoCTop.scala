@@ -404,6 +404,11 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
   core_with_l2.module.io.msiInfo.valid := u_imsic_bus_top.module.msiio.vld_req
   core_with_l2.module.io.msiInfo.bits := u_imsic_bus_top.module.msiio.data
   u_imsic_bus_top.module.msiio.vld_ack := core_with_l2.module.io.msiAck
+  u_imsic_bus_top.module.teemsiio.foreach { teemsiio =>
+    core_with_l2.module.io.teemsiInfo.valid := teemsiio.vld_req
+    core_with_l2.module.io.teemsiInfo.bits := teemsiio.data
+    teemsiio.vld_ack := core_with_l2.module.io.teemsiAck
+  }
 }
 
 trait HasTraceIO { this: BaseXSSoc with HasXSTile =>

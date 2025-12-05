@@ -110,7 +110,7 @@ trait MachineLevel { self: NewCSR =>
     }
 
     // 14~63 read only 0
-    regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).foreach(_ := 0.U)
+    regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).filterNot(_.lsb == InterruptNO.ASNI).foreach(_ := 0.U)
   }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
@@ -296,6 +296,9 @@ trait MachineLevel { self: NewCSR =>
     }.otherwise {
       reg.LCOFIP := reg.LCOFIP
     }
+
+    // bit 48 LCOFIP
+    reg.LC48IP := aiaToCSR.notice_pending
   }).setAddr(CSRs.mip)
 
   val mtinst = Module(new CSRModule("Mtinst", new XtinstBundle) with TrapEntryMEventSinkBundle)
@@ -638,6 +641,8 @@ class MidelegBundle extends InterruptBundle {
 class MieBundle extends InterruptEnableBundle {
   this.getNonLocal.foreach(_.setRW().withReset(0.U))
   this.LCOFIE.setRW().withReset(0.U)
+  // add MIE.LC48IE for AIA
+  this.LC48IE.setRW().withReset(0.U)
 }
 
 class MipBundle extends InterruptPendingBundle {

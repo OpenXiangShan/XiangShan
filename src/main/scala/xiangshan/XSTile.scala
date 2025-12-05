@@ -103,6 +103,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
+      val teemsiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+      val teemsiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -124,6 +126,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    dontTouch(io.teemsiInfo)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -133,6 +136,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
     core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
     l2top.module.io.msiInfo.fromTile := io.msiInfo
+    core.module.io.teemsiInfo := l2top.module.io.teemsiInfo.toCore
+    l2top.module.io.teemsiInfo.fromTile := io.teemsiInfo
     core.module.io.clintTime := l2top.module.io.clintTime.toCore
     l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
@@ -142,6 +147,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
     l2top.module.io.msiAck.fromCore := core.module.io.msiAck
     io.msiAck := l2top.module.io.msiAck.toTile
+    l2top.module.io.teemsiAck.fromCore := core.module.io.teemsiAck
+    io.teemsiAck := l2top.module.io.teemsiAck.toTile
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
