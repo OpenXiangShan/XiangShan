@@ -162,7 +162,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqSuccess            = Bool()
     val srcWakeupByWB         = Vec(params.numRegSrc, Bool())
     val vlWakeupByIntWb       = Bool()
-    val vlWakeupByVfWb        = Bool()
     val srcCancelVec          = Vec(params.numRegSrc, Bool())
     val srcLoadCancelVec      = Vec(params.numRegSrc, Bool())
     val srcLoadTransCancelVec = Vec(params.numRegSrc, Bool())
@@ -206,17 +205,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
         bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
       })
-      var numVecWb = params.backendParam.getVfWBExeGroup.size
-      var numV0Wb = params.backendParam.getV0WBExeGroup.size
+      var numVecWb = params.needWakeupFromVfWBPort.size
+      var numV0Wb = params.needWakeupFromV0WBPort.size
       var intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
-      var vfSchdVlWbPort = p(XSCoreParamsKey).vfSchdVlWbPort
       // int wb is first bit of vlwb, which is after vfwb and v0wb
       common.vlWakeupByIntWb  := wakeUpFromVl(numVecWb + numV0Wb + intSchdVlWbPort)
-      // vf wb is second bit of wb
-      common.vlWakeupByVfWb   := wakeUpFromVl(numVecWb + numV0Wb + vfSchdVlWbPort)
     } else {
       common.vlWakeupByIntWb  := false.B
-      common.vlWakeupByVfWb   := false.B
     }
   }
 
@@ -313,7 +308,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByIntWb = common.vlWakeupByIntWb
-      val vlWakeUpByVfWb = common.vlWakeupByVfWb
       val isDependOldVd = entryReg.payload.vpu.isDependOldVd
       val isWritePartVd = entryReg.payload.vpu.isWritePartVd
       val vta = entryReg.payload.vpu.vta
@@ -323,8 +317,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val vlFromIntIsVlmax = commonIn.vlFromIntIsVlmax
       val vlFromVfIsZero = commonIn.vlFromVfIsZero
       val vlFromVfIsVlmax = commonIn.vlFromVfIsVlmax
-      val vlIsVlmax = (vlFromIntIsVlmax && vlWakeUpByIntWb) || (vlFromVfIsVlmax && vlWakeUpByVfWb)
-      val vlIsNonZero = (!vlFromIntIsZero && vlWakeUpByIntWb) || (!vlFromVfIsZero && vlWakeUpByVfWb)
+      val vlIsVlmax = vlFromIntIsVlmax && vlWakeUpByIntWb
+      val vlIsNonZero = !vlFromIntIsZero && vlWakeUpByIntWb
       val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
       val ignoreWhole = (vm =/= 0.U || vma) && vta
       val srcIsVec = SrcType.isVp(srcStatus.srcType)

@@ -321,6 +321,7 @@ case class XSCoreParameters
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(1, 0)), Seq(IntRD(10, 0))), true, 2),
         ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(10, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+        // i2fCfg and I2vCfg must be in the same ExuUnit because they both need to write to the fp register file.
       IssueBlockParams(Seq(
         ExeUnitParams("ALU2", Seq(AluCfg, I2fCfg, VSetRiWiCfg, VSetRiWvfCfg, I2vCfg), Seq(IntWB(port = 2, 0), VfWB(4, 0), V0WB(port = 2, 0), VlWB(port = intSchdVlWbPort, 0), FpWB(port = 0, 1)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(11, 0))), true, 2),
         ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(11, 1))))
@@ -394,7 +395,7 @@ case class XSCoreParameters
         ExeUnitParams("VFEX0", Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg), Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), VlWB(port = vfSchdVlWbPort, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0)), Seq(VlRD(0, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX1", Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg), Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0)), Seq(VlRD(1, 0)))),
+        ExeUnitParams("VFEX1", Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg), Seq(VfWB(port = 1, 0), V0WB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0)), Seq(VlRD(1, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg), Seq(VfWB(2, 0), V0WB(2, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
@@ -431,6 +432,10 @@ case class XSCoreParameters
       WakeUpConfig(
         Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
         Seq("STD0", "STD1")
+      ),
+      WakeUpConfig(
+        Seq("VFEX0", "VFEX1") ->
+        Seq("VFEX0", "VFEX1")
       ),
     ).flatten
   }
