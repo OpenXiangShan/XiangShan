@@ -21,9 +21,10 @@ import org.chipsalliance.cde.config.Parameters
 import utils.VecRotate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
 
-class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
+class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHelper with HalfAlignHelper {
   class TageBaseTableIO extends TageBundle {
     val readReqValid: Bool                 = Input(Bool())
     val startVAddr:   PrunedAddr           = Input(PrunedAddr(VAddrBits))
@@ -32,6 +33,12 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
     val resetDone:    Bool                 = Output(Bool())
   }
   val io: TageBaseTableIO = IO(new TageBaseTableIO)
+
+  // print params
+  println(f"TageBaseTable:")
+  println(f"  Size(set, bank, cnt): $BaseTableNumSets * $NumBanks * $FetchBlockInstNum = $BaseTableSize")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
 
   private val alignBanks = Seq.tabulate(BaseTableNumAlignBanks) { alignIdx =>
     Module(new TageBaseTableAlignBank(alignIdx))
@@ -52,7 +59,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   // i.e. we have VecInit.tabulate(...)'s alignBankIdx = (1, 2, 3, 0),
   // they always needs to goes to physical alignBank (0, 1, 2, 3),
   // so we need to rotate it right by 1.
-  private val s0_rotator = VecRotate(getBaseTableAlignBankIndex(s0_startVAddr))
+  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startVAddr))
   private val s0_startVAddrVec = s0_rotator.rotate(
     VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedAddr(s0_startVAddr + (i << FetchBlockAlignWidth).U))
   )
@@ -97,7 +104,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with Helpers {
   private val t1_startVAddr = t1_train.startVAddr
   private val t1_branches   = t1_train.branches
   private val t1_oldCtrs    = t1_train.meta.tage.baseTableCtrs
-  private val t1_rotator    = VecRotate(getBaseTableAlignBankIndex(t1_startVAddr))
+  private val t1_rotator    = VecRotate(getAlignBankIndex(t1_startVAddr))
   private val t1_startVAddrVec = t1_rotator.rotate(
     VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U))
   )

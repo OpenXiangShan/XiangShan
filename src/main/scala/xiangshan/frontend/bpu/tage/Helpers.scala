@@ -17,46 +17,43 @@ package xiangshan.frontend.bpu.tage
 
 import chisel3._
 import chisel3.util._
-import xiangshan.HasXSParameter
+import utils.AddrField
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper {
-  def getBaseTableSetIndex(pc: PrunedAddr): UInt =
-    pc(BaseTableSetIdxWidth - 1 + BankIdxWidth + FetchBlockSizeWidth, BankIdxWidth + FetchBlockSizeWidth)
+trait BaseTableHelper extends HasTageParameters {
+  val addrFields = AddrField(
+    Seq(
+      ("alignOffset", FetchBlockAlignWidth),
+      ("alignBankIdx", FetchBlockSizeWidth - FetchBlockAlignWidth),
+      ("bankIdx", BankIdxWidth),
+      ("setIdx", BaseTableSetIdxWidth)
+    ),
+    maxWidth = Option(VAddrBits)
+  )
 
-  def getBaseTableBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + FetchBlockSizeWidth, FetchBlockSizeWidth)
+  def getSetIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("setIdx", pc)
 
-  def getBaseTableAlignBankIndex(pc: PrunedAddr): UInt =
-    pc(FetchBlockSizeWidth - 1, FetchBlockAlignWidth)
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc)
 
+  def getAlignBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("alignBankIdx", pc)
+}
+
+trait TopHelper extends HasTageParameters {
   def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { tableInfo =>
+    VecInit(TableInfos.map { implicit tableInfo =>
       val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
-      val foldedHist = Wire(new TageFoldedHist(tableInfo.NumSets))
+      val foldedHist = Wire(new TageFoldedHist)
       foldedHist.forIdx := tageFoldedHist.head
       foldedHist.forTag := tageFoldedHist(1) ^ Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
     })
-
-  def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth - 1 + instOffsetBits, instOffsetBits)
-
-  def getSetIndex(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
-    val setIdxWidth = log2Ceil(numSets / NumBanks)
-    val offset      = BankIdxWidth + instOffsetBits
-    pc(setIdxWidth - 1 + offset, offset) ^ hist
-  }
-
-  def getRawTag(pc: PrunedAddr, hist: UInt, numSets: Int): UInt = {
-    val setIdxWidth = log2Ceil(numSets / NumBanks)
-    val offset      = setIdxWidth + BankIdxWidth + instOffsetBits
-    pc(TagWidth - 1 + offset, offset) ^ hist
-  }
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
@@ -65,4 +62,28 @@ trait Helpers extends HasTageParameters with HasXSParameter with HalfAlignHelper
     val useAltIdxWidth = log2Ceil(NumUseAltCtrs)
     pc(useAltIdxWidth - 1 + instOffsetBits, instOffsetBits)
   }
+}
+
+trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
+  // varies between different tables
+  implicit val info: TageTableInfo
+
+  val addrFields = AddrField(
+    Seq(
+      ("instOffset", instOffsetBits),
+      ("bankIdx", BankIdxWidth),
+      ("setIdx", SetIdxWidth),
+      ("tag", TagWidth)
+    ),
+    maxWidth = Option(VAddrBits)
+  )
+
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc)
+
+  def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
+    addrFields.extract("setIdx", pc) ^ hist
+
+  def getRawTag(pc: PrunedAddr, hist: UInt): UInt =
+    addrFields.extract("tag", pc) ^ hist
 }

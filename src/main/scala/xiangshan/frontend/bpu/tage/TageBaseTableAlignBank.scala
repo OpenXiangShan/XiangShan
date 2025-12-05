@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.SaturateCounter
 
 class TageBaseTableAlignBank(
     alignIdx: Int
-)(implicit p: Parameters) extends TageModule with Helpers {
+)(implicit p: Parameters) extends TageModule with BaseTableHelper {
   class TageBaseTableAlignBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
@@ -95,9 +95,9 @@ class TageBaseTableAlignBank(
   /* *** read *** */
   private val s0_fire       = r.req.valid
   private val s0_startVAddr = r.req.bits.startVAddr
-  private val s0_bankIdx    = getBaseTableBankIndex(s0_startVAddr)
+  private val s0_bankIdx    = getBankIndex(s0_startVAddr)
   private val s0_bankMask   = UIntToOH(s0_bankIdx, NumBanks)
-  private val s0_setIdx     = getBaseTableSetIndex(s0_startVAddr)
+  private val s0_setIdx     = getSetIndex(s0_startVAddr)
 
   sramBanks.zipWithIndex.foreach { case (bank, i) =>
     bank.io.r.req.valid       := s0_fire && s0_bankMask(i)
@@ -114,7 +114,7 @@ class TageBaseTableAlignBank(
   private val t1_takenCtrs  = w.req.bits.takenCtrs
   private val t1_wayMask    = w.req.bits.wayMask
 
-  private val t1_setIdx   = getBaseTableSetIndex(t1_startVAddr)
+  private val t1_setIdx   = getSetIndex(t1_startVAddr)
   private val t1_bankIdx  = getBankIndex(t1_startVAddr)
   private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)
 

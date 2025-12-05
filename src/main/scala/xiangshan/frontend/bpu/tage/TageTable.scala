@@ -20,25 +20,36 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.WriteBuffer
 
-class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends TageModule with Helpers {
+class TageTable(
+    tableIdx:          Int,
+    implicit val info: TageTableInfo // declare info as implicit val to pass it to Bundles / methods like TableReadReq
+)(implicit p: Parameters) extends TageModule with TableHelper {
   class TageTableIO extends TageBundle {
-    val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
-    val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq(numSets)))
+    val predictReadReq:  Valid[TableReadReq]  = Flipped(Valid(new TableReadReq))
+    val trainReadReq:    Valid[TableReadReq]  = Flipped(Valid(new TableReadReq))
     val predictReadResp: TableReadResp        = Output(new TableReadResp)
     val trainReadResp:   TableReadResp        = Output(new TableReadResp)
-    val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq(numSets)))
+    val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq))
     val resetUseful:     Bool                 = Input(Bool())
     val resetDone:       Bool                 = Output(Bool())
   }
+
   val io: TageTableIO = IO(new TageTableIO)
+
+  println(f"TageTable[$tableIdx]:")
+  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
+  println(f"  History length: ${info.HistoryLength}")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
 
   private val entrySram =
     Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
       Module(new SRAMTemplate(
         new TageEntry,
-        set = numSets / NumBanks,
+        set = NumSets,
         way = 1,
         singlePort = true,
         shouldReset = true,
@@ -53,7 +64,7 @@ class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends Tag
   private val usefulCtrs = RegInit(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumWays)(
-        VecInit.fill(numSets / NumBanks)(
+        VecInit.fill(NumSets)(
           0.U.asTypeOf(new SaturateCounter(UsefulCtrWidth))
         )
       )
@@ -65,7 +76,7 @@ class TageTable(numSets: Int, tableIdx: Int)(implicit p: Parameters) extends Tag
   private val entryWriteBuffers =
     Seq.tabulate(NumBanks) { bankIdx =>
       Module(new WriteBuffer(
-        new EntrySramWriteReq(numSets),
+        new EntrySramWriteReq,
         WriteBufferSize,
         numPorts = NumWays,
         hasCnt = false, // FIXME: set to true when bug fixed

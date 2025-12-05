@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class TageEntry(implicit p: Parameters) extends TageBundle {
@@ -34,19 +35,19 @@ class BaseTableSramWriteReq(implicit p: Parameters) extends TageBundle {
   val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
 }
 
-class TableReadReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val setIdx:   UInt = UInt(log2Ceil(numSets / NumBanks).W)
+class TableReadReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:   UInt = UInt(SetIdxWidth.W)
   val bankMask: UInt = UInt(NumBanks.W)
 }
 
-class TableReadResp(implicit p: Parameters) extends TageBundle {
+class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
   val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, new SaturateCounter(UsefulCtrWidth))
 }
 
-class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBundle
+class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle
     with HasTageParameters {
-  val setIdx:         UInt                    = UInt(log2Ceil(numSets / NumBanks).W)
+  val setIdx:         UInt                    = UInt(SetIdxWidth.W)
   val entry:          TageEntry               = new TageEntry
   val usefulCtr:      SaturateCounter         = new SaturateCounter(UsefulCtrWidth)
   override def tag:   Option[UInt]            = Some(entry.tag)
@@ -54,8 +55,8 @@ class EntrySramWriteReq(numSets: Int)(implicit p: Parameters) extends WriteReqBu
   override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive) // FIXME: use actualTaken
 }
 
-class TableWriteReq(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val setIdx:     UInt                 = UInt(log2Ceil(numSets / NumBanks).W)
+class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:     UInt                 = UInt(SetIdxWidth.W)
   val bankMask:   UInt                 = UInt(NumBanks.W)
   val wayMask:    UInt                 = UInt(NumWays.W)
   val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
@@ -68,27 +69,27 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
   val debug_tempTag: Vec[UInt]            = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
 }
 
-class TageFoldedHist(numSets: Int)(implicit p: Parameters) extends TageBundle {
-  val forIdx: UInt = UInt(log2Ceil(numSets / NumBanks).W)
+class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val forIdx: UInt = UInt(NumSets.W)
   val forTag: UInt = UInt(TagWidth.W)
 }
 
 class TagMatchResult(implicit p: Parameters) extends TageBundle {
   val hit:          Bool            = Bool()
-  val hitWayMaskOH: UInt            = UInt(NumWays.W)
+  val hitWayMaskOH: UInt            = UInt(MaxNumWays.W)
   val entry:        TageEntry       = new TageEntry
   val usefulCtr:    SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 }
 
 class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val providerTableOH:      UInt            = UInt(NumTables.W)
-  val providerWayOH:        UInt            = UInt(NumWays.W)
+  val providerWayOH:        UInt            = UInt(MaxNumWays.W)
   val providerEntry:        TageEntry       = new TageEntry
   val providerOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
   val providerNewUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
   val altTableOH:      UInt            = UInt(NumTables.W)
-  val altWayOH:        UInt            = UInt(NumWays.W)
+  val altWayOH:        UInt            = UInt(MaxNumWays.W)
   val altEntry:        TageEntry       = new TageEntry
   val altOldUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
@@ -106,16 +107,16 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val branchVAddr: PrunedAddr = PrunedAddr(VAddrBits)
 
   val hasProvider:       Bool            = Bool()
-  val providerTableIdx:  UInt            = UInt(log2Ceil(NumTables).W)
+  val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val providerSetIdx:    UInt            = UInt(16.W)
-  val providerWayIdx:    UInt            = UInt(log2Ceil(NumWays).W)
+  val providerWayIdx:    UInt            = UInt(MaxWayIdxWidth.W)
   val providerTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val providerUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
   val hasAlt:       Bool            = Bool()
-  val altTableIdx:  UInt            = UInt(log2Ceil(NumTables).W)
+  val altTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val altSetIdx:    UInt            = UInt(16.W)
-  val altWayIdx:    UInt            = UInt(log2Ceil(NumWays).W)
+  val altWayIdx:    UInt            = UInt(MaxWayIdxWidth.W)
   val altTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val altUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
 
@@ -125,7 +126,7 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val finalPred:      Bool = Bool()
   val actualTaken:    Bool = Bool()
   val allocSuccess:   Bool = Bool()
-  val allocTableIdx:  UInt = UInt(log2Ceil(NumTables).W)
+  val allocTableIdx:  UInt = UInt(TableIdxWidth.W)
   val allocateSetIdx: UInt = UInt(16.W)
-  val allocWayIdx:    UInt = UInt(log2Ceil(NumWays).W)
+  val allocWayIdx:    UInt = UInt(MaxWayIdxWidth.W)
 }
