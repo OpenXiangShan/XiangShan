@@ -105,12 +105,6 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     s2_enqueue(w) := s2_valid(w)
   }
 
-  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
-    req_valid := s2_enqueue.asUInt.orR
-  }.elsewhen (s2_enqueue.asUInt.orR) {
-    req_valid := true.B
-  }
-
   def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     if (valid.length == 0 || valid.length == 1) {
@@ -133,16 +127,11 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  val reqSel = selectOldest(s2_enqueue, s2_req)
+  val reqValid = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val reqSel = selectOldest(s2_enqueue :+ reqValid, s2_req :+ req)
 
-  when (req_valid) {
-    req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
-      reqSel._2(0),
-      req)
-  } .elsewhen (s2_enqueue.asUInt.orR) {
-    req := reqSel._2(0)
-  }
+  req_valid := reqSel._1(0)
+  req := reqSel._2(0)
 
   io.exceptionAddr.vaddr     := req.fullva
   io.exceptionAddr.vaNeedExt := req.vaNeedExt
