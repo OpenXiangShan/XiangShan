@@ -35,7 +35,7 @@ class ScTageInfo(implicit p: Parameters) extends ScBundle {
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val thres: SaturateCounter = new SaturateCounter(ThresholdWidth)
 
-  def initVal: UInt = 128.U
+  def initVal: UInt = 640.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())

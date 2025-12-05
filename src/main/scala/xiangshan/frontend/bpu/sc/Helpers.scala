@@ -52,10 +52,10 @@ trait Helpers extends HasScParameters with PhrHelper {
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
-  // def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
-  //   (scSum > threshold.zext) && pos(scSum) || (scSum < -threshold.zext) && neg(scSum)
   def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
-    scSum.abs.asUInt > threshold
+    (scSum > threshold.zext) && pos(scSum) || (scSum < -threshold.zext) && neg(scSum)
+  // def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
+  //   scSum.abs.asUInt > threshold
   // Accumulate update information for multiple branches using update methods
   def updateEntry(
       oldEntries:    Vec[ScEntry],
