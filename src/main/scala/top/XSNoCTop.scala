@@ -327,17 +327,12 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
   tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
   tl.foreach(_ := tlXbar.get)
-  // seperate TL io
-  val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 
-  // AXI part
+  // AXI part (optional)
   // If AXI is selected as SeperatedBus, directly convert from TL to AXI
-  val axiSinkOpt = Option.when(isAXI) {
-    AXI4IdentityNode() := AXI4UserYanker() := TLToAXI4() := tlXbar.get
-  }
 
-  val axi = Option.when(isAXI)(AXI4SlaveNode(Seq(
-    AXI4SlavePortParameters(
+  val axiSlaveNodeOpt = Option.when(isAXI) {
+    val axiSlaveNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = SeperateBusRanges.filter(address => !address.overlaps(soc.TIMERRange)) map { address =>
         AXI4SlaveParameters(
           address = List(address),
@@ -349,24 +344,38 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
         )
       },
       beatBytes = 8
-    )
-  )))
-  val axiXbar = Option.when(isAXI)(AXI4Xbar())
-  axiSinkOpt.foreach(sink => axiXbar.get := sink)
-  axi.foreach(_ := axiXbar.get)
-  // seperate AXI io
-  val io_axi = axi.map(x => InModuleBody(x.makeIOs()))
+    )))
+
+    val axiXbar = AXI4Xbar()
+    axiXbar :=
+      AXI4IdentityNode() :=
+      AXI4UserYanker() :=
+      TLToAXI4() :=
+      tlXbar.get
+    axiSlaveNode := axiXbar
+
+    axiSlaveNode
+  }
 }
 
 trait HasSeperatedBusImpOpt[+L <: HasSeperatedBusOpt] {
   this: BaseXSSocImp with HasAsyncClockImp =>
 
-  def tlAsyncSinkOpt = wrapper.asInstanceOf[L].tlAsyncSinkOpt
+  def sepbus = wrapper.asInstanceOf[L]
+
+  // sepbus I/O, prefer AXI than TL
+  val io_sepbus = sepbus.axiSlaveNodeOpt.map { x =>
+      val _io = IO(new VerilogAXI4Record(x.in.head._1.params))
+      _io.viewAs[AXI4Bundle] <> x.in.head._1
+      _io.suggestName("io_sepbus")
+    }
+    .orElse(sepbus.tl.map(x => x.makeIOs()))
+    .getOrElse(None)
 
   // both AXI and TL will use tlAsyncSinkOpt as async queue
   if (socParams.SeperateBus != SeperatedBusType.NONE && socParams.EnableSeperateBusAsync) {
-    tlAsyncSinkOpt.get.module.clock := soc_clock
-    tlAsyncSinkOpt.get.module.reset := soc_reset_sync
+    sepbus.tlAsyncSinkOpt.get.module.clock := soc_clock
+    sepbus.tlAsyncSinkOpt.get.module.reset := soc_reset_sync
   }
 }
 
