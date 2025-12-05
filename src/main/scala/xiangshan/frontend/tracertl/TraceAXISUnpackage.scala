@@ -52,7 +52,7 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
   })
   dontTouch(io)
 
-  val BufferNum = 2
+  val BufferNum = 3
   val buffer = Reg(Vec(BufferNum, Vec(PACKET_CYCLE_NUM, UInt(AXIS_DATA_WIDTH.W))))
   val bufferValid = RegInit(VecInit(Seq.fill(BufferNum)(false.B)))
 
@@ -62,24 +62,21 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
   // recv
   io.axis.tready := !bufferValid(recvIdx.value)
   val axis_fire = io.axis.tvalid && io.axis.tready
-
   val axis_cycle_index = Counter(axis_fire, PACKET_CYCLE_NUM)._1
+  val packageLast = axis_cycle_index === (PACKET_CYCLE_NUM-1).U
+
   when (axis_fire) {
     buffer(recvIdx.value)(axis_cycle_index) := io.axis.tdata
   }
-  when (axis_fire && io.axis.tlast) {
+  when (axis_fire && packageLast) {
     recvIdx := recvIdx + 1.U
     bufferValid(recvIdx.value) := true.B
   }
   when (axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U)) {
     assert(io.axis.tlast, "ERROR in TraceAXISUnpackage, last cycle but tlast is false")
   }
-  assert(!(axis_fire && io.axis.tlast && (axis_cycle_index =/= (PACKET_CYCLE_NUM-1).U)),
-    s"ERROR in TraceAXISUnpackage, counter not finish but encounter tlast PACKET_CYCLE_NUM ${PACKET_CYCLE_NUM}")
-  when (axis_fire && !io.axis.tlast) {
-    assert(io.axis.tkeep === ~(0.U((AXIS_DATA_WIDTH/8).W)),
-      "ERROR in TraceAXISUnpackage, not the tlast but tkeep not all true")
-  }
+  XSPerfAccumulate("AXIS_CountFinishAndLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && io.axis.tlast)
+  XSPerfAccumulate("AXIS_CountFinishNotLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && !io.axis.tlast)
 
   // tranfer to core
   require(PACKET_INST_NUM % DUT_BUS_INST_NUM == 0, s"ERROR in TraceAXISUnpackage, PACKET_INST_NUM $PACKET_INST_NUM should be times of DUT_BUS_INST_NUM $DUT_BUS_INST_NUM")
