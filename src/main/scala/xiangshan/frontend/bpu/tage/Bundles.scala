@@ -99,6 +99,7 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val decreaseUseAlt: Bool = Bool()
 
   val needAllocate: Bool = Bool()
+  val canUpdate:    Bool = Bool()
 }
 
 class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
