@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
+import utility.OneHot.UIntToOHSeq
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.{RabToVecExcpMod, RegWriteFromRab}
 import xiangshan.backend.decode.VectorConstants
@@ -83,8 +84,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   XSError(deqPtr.toOH =/= deqPtrOH, p"wrong one-hot reg between $deqPtr and $deqPtrOH")
 
   private val walkPtr = Reg(new RenameBufferPtr)
-  private val walkPtrOH = walkPtr.toOH
-  private val walkPtrOHVec = VecInit.tabulate(RabCommitWidth + 1)(CircularShift(walkPtrOH).left)
+  private val walkPtrOH = UIntToOHSeq(walkPtr.value, walkPtr.entries)
+  private val walkPtrOHSeq = Seq.tabulate(RabCommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
@@ -92,7 +93,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val vcfgPtrOH = RegInit(1.U(size.W))
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
   // may shift [0, 2) steps
-  val vcfgPtrOHVec = VecInit.tabulate(2)(vcfgPtrOHShift.left)
+  val vcfgPtrOHSeq = Seq.tabulate(2)(vcfgPtrOHShift.left)
 
   val diffPtr = RegInit(0.U.asTypeOf(new RenameBufferPtr))
   val diffPtrNext = Wire(new RenameBufferPtr)
@@ -160,9 +161,9 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   walkPtr := walkPtrNext
 
-  val walkCandidates   = VecInit(walkPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+  val walkCandidates   = VecInit(walkPtrOHSeq.map(sel => Mux1H(sel, renameBufferEntries)))
   val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
-  val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+  val vcfgCandidates   = VecInit(vcfgPtrOHSeq.map(sel => Mux1H(sel, renameBufferEntries)))
 
   // update diff pointer
   diffPtrNext := diffPtr + newCommitSize
