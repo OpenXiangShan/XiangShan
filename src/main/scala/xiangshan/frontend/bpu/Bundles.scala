@@ -41,8 +41,7 @@ class BranchAttribute extends Bundle {
   def isDirect:      Bool = branchType === BranchAttribute.BranchType.Direct
   def isIndirect:    Bool = branchType === BranchAttribute.BranchType.Indirect
 
-  def isOtherIndirect: Bool =
-    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.None
+  def isOtherIndirect: Bool = isIndirect && rasAction === BranchAttribute.RasAction.None
 
   // NOTE: maybe we should check branchType === BranchAttribute.BranchType.Direct/Indirect,
   //       but as BranchAttribute.BranchType is declared as private,
@@ -55,6 +54,8 @@ class BranchAttribute extends Bundle {
   // hasPop = isPop || isPushAndPop, hasPush = isPush || isPushAndPop
   def hasPop:  Bool = rasAction(BranchAttribute.RasAction.popBit)
   def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
+
+  def needIttage: Bool = isIndirect && !hasPop
 }
 
 object BranchAttribute {
