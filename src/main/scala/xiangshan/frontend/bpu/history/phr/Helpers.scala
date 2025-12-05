@@ -23,8 +23,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.PhrHelper
 
-trait Helpers extends HasPhrParameters with HalfAlignHelper {
+trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
   // folded History
   def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
@@ -62,24 +63,17 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
     PrunedAddrInit(alignedAddr + brOffset)
   }
   def pathHash(pc: PrunedAddr, target: PrunedAddr): UInt = {
-    val hash = (((pc >> 1) & (Fill(9, true.B))) << 4) ^ ((target >> 2) & Fill(15, true.B))
+    val hash = Cat(pc(9, 1), 0.U(4.W)) ^ target(16, 2)
     hash(PathHashWidth - 1, 0)
   }
 
-  def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt =
-    if (histLen > 0) {
-      val nChunks    = (histLen + compLen - 1) / compLen
-      val histChunks = (0 until nChunks) map { i => hist(min((i + 1) * compLen, histLen) - 1, i * compLen) }
-      ParallelXOR(histChunks)
-    } else 0.U
-
   def computeFoldedHash(hashBits: UInt, compLen: Int)(histLen: Int): UInt =
-    if (histLen > 0 & PathHashWidth >= histLen) {
+    if (histLen > 0 && PathHashWidth >= histLen) {
       val effectiveBit = hashBits(histLen - 1, 0)
       val nChunks      = (histLen + compLen - 1) / compLen
       val histChunks   = (0 until nChunks) map { i => effectiveBit(min((i + 1) * compLen, histLen) - 1, i * compLen) }
       ParallelXOR(histChunks)
-    } else if (histLen > 0 & PathHashWidth < histLen) {
+    } else if (histLen > 0 && PathHashWidth < histLen) {
       val nChunks    = (PathHashWidth + compLen - 1) / compLen
       val histChunks = (0 until nChunks) map { i => hashBits(min((i + 1) * compLen, PathHashWidth) - 1, i * compLen) }
       ParallelXOR(histChunks)
