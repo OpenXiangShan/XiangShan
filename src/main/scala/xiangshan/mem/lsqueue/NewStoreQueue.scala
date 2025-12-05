@@ -488,7 +488,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val canEnq    = io.fromDeqModule.map(_.fire)
     private val enqReq    = io.fromDeqModule.map(_.bits)
 
-    deqPtrVec.zip(canEnq).zipWithIndex.map{case ((ptr, v), i) =>
+    enqPtrVec.zip(canEnq).zipWithIndex.map{case ((ptr, v), i) =>
       when(v) {
         entries(ptr.value) := enqReq(i)
       }
@@ -518,13 +518,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
     }
 
-    enqPtrVec.map(ptr => ptr + PopCount(canEnq))
+    //update enq pointer
+    private val enqNum = PopCount(canEnq)
+    enqPtrVec := VecInit(enqPtrVec.map(_ + enqNum))
 
     // deq
-    private val doDeq = io.toSbuffer.req.map(_.fire)
-    deqPtrVec.map(ptr => ptr + PopCount(doDeq))
-
-    XSError(enqPtrVec.head < deqPtrVec.head, s"Something wrong in DataBufferQueue!\n")
+    private val doDeqNum = PopCount(io.toSbuffer.req.map(_.fire))
+    deqPtrVec := VecInit(deqPtrVec.map(_ + doDeqNum))
+    // When enqPtr.flag = 1, enqPtr.value = 0, deqPtr.flag=0, deqPtr.value = 0, the API '<'  fails to function correctly.
+    XSError(enqPtrVec.head < deqPtrVec.head && !full, s"Something wrong in DataBufferQueue!\n")
 
     // connection
     for (i <- 0 until EnsbufferWidth) {
@@ -1087,8 +1089,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     when(io.toDeqModule.fire) {
       deqPtr := deqPtr + 1.U
     }
-
-    XSError(enqPtr < deqPtr, s"Something wrong in UnalignQueue!")
+    // When enqPtr.flag = 1, enqPtr.value = 0, deqPtr.flag=0, deqPtr.value = 0, the API '<'  fails to function correctly.
+    XSError(enqPtr < deqPtr && !full, s"Something wrong in UnalignQueue!")
     // connection
     io.toDeqModule.bits.paddr := headEntry.paddr
     io.toDeqModule.bits.sqIdx := headEntry.sqIdx
