@@ -117,3 +117,5 @@ class CmdBatch:
     def complete_xload_script(self, text, line, begidx, endidx):
         return self.api_complite_localfile(text)
 
+    def is_working_in_batch_mode(self):
+        return self.batch_depth > 0

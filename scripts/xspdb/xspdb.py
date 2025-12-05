@@ -14,6 +14,7 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+
 import os
 import sys
 import inspect
@@ -29,6 +30,7 @@ from collections import OrderedDict
 from logging import DEBUG, INFO, WARNING, ERROR
 from xspdb.xscmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level, set_xspdb_debug_level, logging_level_map
 from xspdb.xscmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
+from xspdb.ui import enter_simple_tui
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, default_file=None,
@@ -84,7 +86,7 @@ class XSPdb(pdb.Pdb):
         self.df.InitFlash("")
         self.xspdb_init_bin = "xspdb_flash_init.bin"
         self.flash_bin_file = None
-        self.df.difftest_init()
+        self.df.difftest_init(False, self.mem_size)
         self.difftest_stat =  df.GetDifftest(0).dut
         self.difftest_flash = df.GetFlash()
         self.register_map = OrderedDict()
@@ -99,17 +101,17 @@ class XSPdb(pdb.Pdb):
     def check_is_need_trace(self):
         if getattr(self, "__xspdb_need_fast_trace__", False) is True:
             setattr(self, "__xspdb_need_fast_trace__" ,False)
-            info("Force set trace") 
+            info("Force set trace")
             self.set_trace()
         if self.interrupt is True:
             if getattr(self, "__xspdb_set_traced__", None) is None:
-                self.setattr(self, "__xspdb_set_traced__", True) 
+                self.setattr(self, "__xspdb_set_traced__", True)
                 info("Find interrupt, set trace")
                 self.set_trace()
         return False
 
     def __init_pdb(self, args):
-        if args.log: 
+        if args.log:
             self.api_log_enable_log(True)
         if args.log_file:
             self.api_log_set_log_file(args.log_file)
@@ -273,6 +275,57 @@ class XSPdb(pdb.Pdb):
     def parseline(self, line):
         cmd, arg, line = super().parseline(line)
         return cmd or "", arg, line
+
+    def do_xui(self, arg):
+        """Enter the Text UI interface
+
+        Args:
+            arg (None): No arguments
+        """
+        if self.in_tui:
+            error("Already in TUI")
+            return
+        try:
+            self.tui_ret = None
+            self.in_tui = True
+            enter_simple_tui(self)
+            self.in_tui = False
+            self.on_update_tstep = None
+            self.interrupt = False
+            info("XUI Exited.")
+            return self.tui_ret
+        except Exception as e:
+            import traceback
+            self.in_tui = False
+            error(f"XUI Error: {e}")
+            traceback.print_exc()
+            return False
+
+    def do_xcmds(self, arg):
+        """Print all xcmds
+
+        Args:
+            arg (None): No arguments
+        """
+        cmd_count = 0
+        max_cmd_len = 0
+        cmds = []
+        for cmd in dir(self):
+            if not cmd.startswith("do_x"):
+                continue
+            cmd_name = cmd[3:]
+            max_cmd_len = max(max_cmd_len, len(cmd_name))
+            cmd_desc = f"{YELLOW}Description not found{RESET}"
+            try:
+                cmd_desc = getattr(self, cmd).__doc__.split("\n")[0]
+            except Exception as e:
+                pass
+            cmds.append((cmd, cmd_name, cmd_desc))
+            cmd_count += 1
+        cmds.sort(key=lambda x: x[0])
+        for c in cmds:
+            message(("%-"+str(max_cmd_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
+        info(f"Total {cmd_count} xcommands")
 
     def do_xcmds(self, arg):
         """Print all xcmds
