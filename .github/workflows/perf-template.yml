@@ -17,6 +17,10 @@ on:
         required: true
         type: string
         description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
+      all_spec_dir:
+        required: true
+        type: string
+        description: "Directory for all spec reports"
 
 jobs:
   run:
@@ -72,7 +76,7 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
-          echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "SPEC_DIR=${{ inputs.all_spec_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
 
       - name: Initialize submodules
