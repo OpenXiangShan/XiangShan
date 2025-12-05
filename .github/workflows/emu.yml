@@ -370,6 +370,9 @@ jobs:
     name: EMU - SimFrontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
