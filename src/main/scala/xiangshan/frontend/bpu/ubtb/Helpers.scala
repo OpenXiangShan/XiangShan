@@ -21,11 +21,11 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMicroBtbParameters with TargetFixHelper {
-  def getTag(vAddr: PrunedAddr): UInt =
-    vAddr(TagWidth + instOffsetBits - 1, instOffsetBits)
+  def getTag(pc: PrunedAddr): UInt =
+    pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
-  def getTargetUpper(vAddr: PrunedAddr): UInt =
-    vAddr(VAddrBits - 1, TargetWidth + instOffsetBits)
+  def getTargetUpper(pc: PrunedAddr): UInt =
+    pc(pc.length - 1, TargetWidth + instOffsetBits)
 
   def getEntryTarget(fullTarget: PrunedAddr): UInt =
     fullTarget(TargetWidth + instOffsetBits - 1, instOffsetBits)

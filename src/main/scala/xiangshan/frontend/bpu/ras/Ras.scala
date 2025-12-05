@@ -64,7 +64,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   private val specIn       = io.specIn.bits
   private val specAlignPc  = specIn.startPc & alignMask
-  private val specPushAddr = specAlignPc + specIn.cfiPosition + Mux(specIn.isRvc, 2.U, 4.U)
+  private val specPushAddr = specAlignPc + specIn.cfiPosition + 2.U
   stack.spec.pushValid := specPush && !stackNearOverflow
   stack.spec.popValid  := specPop && !stackNearOverflow
 
@@ -92,7 +92,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.redirect.isRet  := redirect.bits.attribute.isReturn && (redirect.bits.level === 0.U)
   stack.redirect.meta   := redirect.bits.meta
   // Redirected branch PC points to end of instruction.
-  stack.redirect.callAddr := redirect.bits.brPc + 2.U
+  stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
 
   private val commitValid    = RegNext(io.commit.valid, init = false.B)
   private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)

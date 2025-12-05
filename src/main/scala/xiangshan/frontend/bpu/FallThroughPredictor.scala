@@ -34,12 +34,12 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   io.train.ready := true.B
 
   /* *** predict stage 0 *** */
-  private val s0_fire       = io.stageCtrl.s0_fire
-  private val s0_startVAddr = io.startVAddr
+  private val s0_fire    = io.stageCtrl.s0_fire
+  private val s0_startPc = io.startPc
 
   /* *** predict stage 1 *** */
-  private val s1_fire       = io.stageCtrl.s1_fire
-  private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
+  private val s1_fire    = io.stageCtrl.s1_fire
+  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
   // e.g. FetchBlockSize = 64B, FetchBlockAlignSize = 32B, we have CfiPositionWidth = 5
   // start | nextBlock | crossPage | nextPage | cfiPc | cfiPosition
@@ -61,12 +61,12 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   // 0xfe0 |   0x1020  |    true   |  0x1000  | 0xffe | 0x0f // (0xffe-0xfe0) >> 1
   // 0xff0 |   0x1030  |    true   |  0x1000  | 0xffe | 0x07 // (0xffe-0xff0) >> 1
 
-  // fall-through address = startVAddr + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
-  private val s1_nextBlockAlignedAddr = getAlignedAddr(s1_startVAddr + FetchBlockSize.U)
+  // fall-through pc = startPc + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
+  private val s1_nextBlockAlignedPc = getAlignedPc(s1_startPc + FetchBlockSize.U)
 
-  // if cross page, we need to align fallThroughAddr to the next page
-  private val s1_crossPage           = isCrossPage(s1_startVAddr, s1_nextBlockAlignedAddr) // compare LSB of Vpn
-  private val s1_nextPageAlignedAddr = getPageAlignedAddr(s1_nextBlockAlignedAddr)         // clear page offset
+  // if cross page, we need to align fallThroughPc to the next page
+  private val s1_crossPage         = isCrossPage(s1_startPc, s1_nextBlockAlignedPc) // compare LSB of Vpn
+  private val s1_nextPageAlignedPc = getPageAlignedAddr(s1_nextBlockAlignedPc)      // clear page offset
 
   // cfiPosition is the offset between alignedStart and last 2B before nextStart (nextBlock or nextPage), in instr
   // i.e. if not crossPage:
@@ -81,21 +81,21 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   //                = (~(nextBlock - nextPage)) >> instOffsetBits
   private val s1_cfiPosition = Mux(
     s1_crossPage,
-    ~(s1_nextBlockAlignedAddr - s1_nextPageAlignedAddr)(CfiPositionWidth + instOffsetBits - 1, instOffsetBits),
+    ~(s1_nextBlockAlignedPc - s1_nextPageAlignedPc)(CfiPositionWidth + instOffsetBits - 1, instOffsetBits),
     (FetchBlockInstNum - 1).U
   )
 
-  private val s1_fallThroughAddr = Mux(
+  private val s1_fallThroughPc = Mux(
     s1_crossPage,
-    s1_nextPageAlignedAddr,
-    s1_nextBlockAlignedAddr
+    s1_nextPageAlignedPc,
+    s1_nextBlockAlignedPc
   )
 
   io.prediction.taken       := false.B
   io.prediction.cfiPosition := s1_cfiPosition
-  io.prediction.target      := s1_fallThroughAddr
+  io.prediction.target      := s1_fallThroughPc
   io.prediction.attribute   := BranchAttribute.None
 
   XSPerfAccumulate("crossPage", s1_fire && s1_crossPage)
-  XSPerfAccumulate("crossPageFixed", s1_fire && s1_crossPage && s1_nextBlockAlignedAddr =/= s1_nextPageAlignedAddr)
+  XSPerfAccumulate("crossPageFixed", s1_fire && s1_crossPage && s1_nextBlockAlignedPc =/= s1_nextPageAlignedPc)
 }

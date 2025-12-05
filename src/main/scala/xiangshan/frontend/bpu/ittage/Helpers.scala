@@ -20,6 +20,9 @@ import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 
 trait Helpers extends HasIttageParameters {
-  def targetGetRegion(target: PrunedAddr): UInt = target(VAddrBits - 1, TargetOffsetWidth)
-  def targetGetOffset(target: PrunedAddr): UInt = target(TargetOffsetWidth - 1, 0)
+  def targetGetRegion(target: PrunedAddr): UInt =
+    target(target.length - 1, TargetOffsetWidth)
+
+  def targetGetOffset(target: PrunedAddr): UInt =
+    target(TargetOffsetWidth - 1, 0)
 }

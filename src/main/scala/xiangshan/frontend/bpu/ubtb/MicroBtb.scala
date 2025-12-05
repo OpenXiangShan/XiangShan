@@ -46,11 +46,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   replacer.io.usefulCnt := VecInit(entries.map(_.usefulCnt))
 
   /* *** predict stage 0 ***
-   * - io.startVAddr timing might be bad, simply cache it
+   * - io.startPc timing might be bad, simply cache it
    */
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
 
-  private val s0_startVAddr = io.startVAddr
+  private val s0_startPc = io.startPc
 
   /* *** predict stage 1 ***
    * - read entries
@@ -60,8 +60,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    */
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
 
-  private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
-  private val s1_tag        = getTag(s1_startVAddr)
+  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
+  private val s1_tag     = getTag(s1_startPc)
 
   private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
   assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
@@ -72,7 +72,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // we do always-taken prediction in ubtb
   io.prediction.taken       := s1_hit
   io.prediction.cfiPosition := s1_hitEntry.slot1.position
-  io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
+  io.prediction.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
@@ -86,7 +86,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - calculate hit flags
    */
   private val t0_valid       = Wire(Bool())
-  private val t0_startVAddr  = Wire(PrunedAddr(VAddrBits))
+  private val t0_startPc     = Wire(PrunedAddr(VAddrBits))
   private val t0_actualTaken = Wire(Bool())
   private val t0_position    = Wire(UInt(CfiPositionWidth.W))
   private val t0_fullTarget  = Wire(PrunedAddr(VAddrBits))
@@ -94,7 +94,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   if (UseFastTrain) {
     t0_valid       := io.fastTrain.get.valid && io.enable
-    t0_startVAddr  := io.fastTrain.get.bits.startVAddr
+    t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
     t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target
@@ -102,16 +102,16 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?
     t0_valid       := io.train.fire && io.train.bits.mispredictBranch.valid && io.enable
-    t0_startVAddr  := io.train.bits.startVAddr
+    t0_startPc     := io.train.bits.startPc
     t0_actualTaken := io.train.bits.mispredictBranch.bits.taken
     t0_position    := io.train.bits.mispredictBranch.bits.cfiPosition
     t0_fullTarget  := io.train.bits.mispredictBranch.bits.target
     t0_attribute   := io.train.bits.mispredictBranch.bits.attribute
   }
 
-  private val t0_tag         = getTag(t0_startVAddr)
+  private val t0_tag         = getTag(t0_startPc)
   private val t0_target      = getEntryTarget(t0_fullTarget)
-  private val t0_targetCarry = if (EnableTargetFix) Option(getTargetCarry(t0_startVAddr, t0_fullTarget)) else None
+  private val t0_targetCarry = if (EnableTargetFix) Option(getTargetCarry(t0_startPc, t0_fullTarget)) else None
 
   private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
   // t0 may hit t1, so we add a "real" prefix for entries hit
