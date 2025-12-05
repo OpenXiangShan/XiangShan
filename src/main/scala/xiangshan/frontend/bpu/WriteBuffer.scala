@@ -57,6 +57,8 @@ class WriteBuffer[T <: WriteReqBundle](
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
+  private val namePrefix = s"WriteBuffer_${nameSuffix}"
+
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
 
@@ -180,10 +182,10 @@ class WriteBuffer[T <: WriteReqBundle](
         }
       }
     }
-    XSPerfAccumulate(f"port${portIdx}_hit_not_written", writeValid && hitNotWritten)
-    XSPerfAccumulate(f"port${portIdx}_hit_written", writeValid && hitWritten)
-    XSPerfAccumulate(f"port${portIdx}_hit", writeValid && hit)
-    XSPerfAccumulate(f"port${portIdx}_not_hit", writeValid && !hit)
+    XSPerfAccumulate(f"${namePrefix}_port${portIdx}_hit_not_written", writeValid && hitNotWritten)
+    XSPerfAccumulate(f"${namePrefix}_port${portIdx}_hit_written", writeValid && hitWritten)
+    XSPerfAccumulate(f"${namePrefix}_port${portIdx}_hit", writeValid && hit)
+    XSPerfAccumulate(f"${namePrefix}_port${portIdx}_not_hit", writeValid && !hit)
 
   }
 
@@ -213,7 +215,13 @@ class WriteBuffer[T <: WriteReqBundle](
         needWrite(nRows)(i) := false.B
       }
     }
-    XSPerfAccumulate(f"port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
-    XSPerfHistogram(f"port${nRows}_useful", PopCount(readValidVec(nRows)), readReadyVec(nRows), 0, numEntries)
+    XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
+    XSPerfHistogram(
+      f"${namePrefix}_port${nRows}_useful",
+      PopCount(readValidVec(nRows)),
+      readReadyVec(nRows),
+      0,
+      numEntries
+    )
   }
 }
