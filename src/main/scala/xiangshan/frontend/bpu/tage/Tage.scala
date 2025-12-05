@@ -107,6 +107,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     DataHoldBypass(VecInit(tables.map(_.io.predictReadResp.usefulCtrs)), RegNext(s0_fire))
 
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
+  // A tag without branch position, position will be hashed into after BTB result
   private val s1_rawTag = VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
     table.getRawTag(s1_startVAddr, hist.forTag)
   })
@@ -117,6 +118,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - get prediction for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
+  private val s2_valid              = RegNext(s1_fire) && io.enable
   private val s2_baseTableCtrs      = RegEnable(s1_baseTableCtrs, s1_fire)
   private val s2_allTableEntries    = RegEnable(s1_allTableEntries, s1_fire)
   private val s2_allTableUsefulCtrs = RegEnable(s1_allTableUsefulCtrs, s1_fire)
@@ -148,11 +150,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
           val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
           val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
-          val result = Wire(new TagMatchResult).suggestName(s"branch_${brIdx}_table_${tableIdx}_result")
+          val result = Wire(new TagMatchResult).suggestName(s"s2_branch_${brIdx}_table_${tableIdx}_result")
           result.hit          := isCond && hitWayMask.reduce(_ || _)
           result.entry        := Mux1H(hitWayMaskOH, entriesPerTable)
           result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
-          result.hitWayMaskOH := DontCare
+          result.hitWayMaskOH := hitWayMaskOH.asUInt
+          result.hitWayMask   := hitWayMask.asUInt
           result
       }
       // find the provider, the table with the longest history among the hit tables
@@ -175,6 +178,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val altPred        = altTakenCtr.isPositive
       val basePred       = s2_baseTableCtrs(position).isPositive
       val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(s2_branchesUseAltIdx(brIdx)).isPositive
+
+      XSPerfAccumulate(
+        s"s2_branch_${brIdx}_multihit_on_same_way",
+        allTableTagMatchResults.map(e => (s2_valid && PopCount(e.hitWayMask) > 1.U).asUInt).reduce(_ +& _)
+      )
 
       // get prediction for each branch
       isCond && Mux(
@@ -336,24 +344,25 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
         dontTouch(tag.suggestName(s"branch_${brIdx}_table_${tableIdx}_tag"))
 
-        val result = Wire(new TagMatchResult).suggestName(s"branch_${brIdx}_table_${tableIdx}_result")
+        val result = Wire(new TagMatchResult).suggestName(s"t2_branch_${brIdx}_table_${tableIdx}_result")
         result.hit          := isCond && hitWayMask.reduce(_ || _)
         result.entry        := Mux1H(hitWayMaskOH, entriesPerTable)
         result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
         result.hitWayMaskOH := hitWayMaskOH.asUInt
+        result.hitWayMask   := hitWayMask.asUInt
         result
     }
     val hitTableMask    = allTableTagMatchResults.map(_.hit)
     val hasProvider     = hitTableMask.reduce(_ || _)
     val providerTableOH = getLongestHistTableOH(hitTableMask)
     val providerInfo    = Mux1H(providerTableOH, allTableTagMatchResults)
-    dontTouch(hitTableMask.asUInt.suggestName(s"branch_${brIdx}_hitTableMask"))
+    dontTouch(hitTableMask.asUInt.suggestName(s"t2_branch_${brIdx}_hitTableMask"))
 
     val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
     val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
     val altInfo                = Mux1H(altTableOH, allTableTagMatchResults)
-    dontTouch(hitTableMaskNoProvider.asUInt.suggestName(s"branch_${brIdx}_hitTableMaskNoProvider"))
+    dontTouch(hitTableMaskNoProvider.asUInt.suggestName(s"t2_branch_${brIdx}_hitTableMaskNoProvider"))
 
     val pred           = providerInfo.entry.takenCtr.isPositive
     val providerIsWeak = providerInfo.entry.takenCtr.isWeak
@@ -375,6 +384,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val decreaseUseAlt = hasProvider && providerIsWeak && Mux(hasAlt, altPred, basePred) =/= actualTaken
 
     val updateInfo = Wire(new UpdateInfo).suggestName(s"branch_${brIdx}_updateInfo")
+    updateInfo.valid                        := isCond // Only consider update if conditional branch
     updateInfo.providerTableOH              := providerTableOH.asUInt & Fill(NumTables, hasProvider)
     updateInfo.providerWayOH                := providerInfo.hitWayMaskOH
     updateInfo.providerEntry.valid          := true.B
@@ -397,6 +407,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     updateInfo.increaseUseAlt := increaseUseAlt
     updateInfo.decreaseUseAlt := decreaseUseAlt
+    updateInfo.hitTableMask   := hitTableMask.asUInt
+    updateInfo.mispredicted   := finalPred =/= actualTaken
     updateInfo
   }
 
@@ -417,8 +429,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
 
   private val t2_needAllocate         = t2_allBranchUpdateInfo.map(_.needAllocate).reduce(_ || _)
+  private val t2_mispredictBranchOH   = PriorityEncoderOH(t2_allBranchUpdateInfo.map(b => b.valid && b.mispredicted))
   private val t2_needAllocateBranchOH = PriorityEncoderOH(t2_allBranchUpdateInfo.map(_.needAllocate))
   private val t2_allocateBranch       = Mux1H(t2_needAllocateBranchOH, t2_branches)
+  private val t2_mispredictBranchUpdateInfo = Mux1H(t2_mispredictBranchOH, t2_allBranchUpdateInfo)
   private val t2_allocateBranchProviderTableOH =
     Mux1H(t2_needAllocateBranchOH, t2_allBranchUpdateInfo.map(_.providerTableOH))
 
@@ -439,6 +453,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_canAllocateTableMask = t2_longerHistoryTableMask & t2_allTableCanAllocateWayMask.map(_.orR).asUInt
   private val t2_canAllocate          = t2_canAllocateTableMask.orR
   private val t2_allocate             = t2_needAllocate && t2_canAllocate
+  private val t2_usefulReset          = t2_valid && usefulResetCtr.isSaturatePositive
 
   private val t2_allocateTableMaskOH = PriorityEncoderOH(t2_canAllocateTableMask) & Fill(NumTables, t2_allocate)
   private val t2_allocateWayMaskOH   = PriorityEncoderOH(Mux1H(t2_allocateTableMaskOH, t2_allTableCanAllocateWayMask))
@@ -500,10 +515,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.entries    := writeEntries
     table.io.writeReq.bits.usefulCtrs := writeUsefulCtrs
 
-    table.io.resetUseful := t2_valid && usefulResetCtr.isSaturatePositive
+    table.io.resetUseful := t2_usefulReset
   }
 
-  when(t2_valid && usefulResetCtr.isSaturatePositive) {
+  when(t2_usefulReset) {
     usefulResetCtr.resetZero()
   }.elsewhen(t2_valid && t2_needAllocate && !t2_canAllocate) {
     usefulResetCtr.increase()
@@ -561,11 +576,68 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.train.fire)
   XSPerfAccumulate("train_has_cond", t0_valid)
 
-  XSPerfAccumulate("mispredict_branch_has_provider", t2_valid && t2_allocateBranchProviderTableOH.orR)
+  XSPerfAccumulate(
+    "total_condbr_mispredicted",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && e.mispredicted).asUInt
+    ).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "total_first_condbr_mispredicted",
+    t2_allBranchUpdateInfo.map(e =>
+      t2_valid && e.valid && e.mispredicted
+    ).reduce(_ || _)
+  )
+  XSPerfAccumulate(
+    "total_allbr_mispredicted",
+    io.train.bits.branches.map(b => (io.train.valid && b.valid && b.bits.mispredict).asUInt).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "mispredict_branch_use_basetable",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && e.mispredicted && !e.providerTableOH.orR).asUInt
+    ).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "mispredict_branch_has_provider",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && e.mispredicted && e.providerTableOH.orR).asUInt
+    ).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "resolve_branch_use_basetable",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && !e.providerTableOH.orR).asUInt
+    ).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "resolve_branch_has_provider",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && e.providerTableOH.orR).asUInt
+    ).reduce(_ +& _)
+  )
+  XSPerfAccumulate(
+    "resolve_total_use_alt",
+    t2_allBranchUpdateInfo.map(e =>
+      (t2_valid && e.valid && e.useAlt).asUInt
+    ).reduce(_ +& _)
+  )
   for (i <- 0 until NumTables) {
     XSPerfAccumulate(
-      s"mispredict_branch_provider_is_table_${i}",
+      s"allocate_branch_provider_is_table_${i}",
       t2_valid && t2_allocateBranchProviderTableOH.orR && t2_allocateBranchProviderTableOH(i)
+    )
+    XSPerfAccumulate(
+      s"resolve_branch_hit_table_${i}",
+      t2_allBranchUpdateInfo.map(e =>
+        (t2_valid && e.valid && e.hitTableMask(i)).asUInt
+      ).reduce(_ +& _)
+    )
+    XSPerfAccumulate(
+      s"resolve_branch_provider_is_table_${i}",
+      t2_allBranchUpdateInfo.map(e =>
+        (t2_valid && e.valid && e.providerTableOH(i)).asUInt
+      ).reduce(_ +& _)
     )
   }
 
@@ -593,12 +665,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     0,
     16
   )
-  XSPerfAccumulate("reset_useful", t2_valid && usefulResetCtr.isSaturatePositive)
-  XSPerfAccumulate("need_allocate", t2_valid && t2_needAllocate)
+  XSPerfAccumulate("read_conflict", t0_readBankConflict)
+  XSPerfAccumulate("reset_useful", t2_usefulReset)
+  XSPerfAccumulate(
+    "allocate_not_needed_due_to_already_on_highest_table",
+    t2_mispredictBranchUpdateInfo.valid && t2_mispredictBranchUpdateInfo.mispredicted &&
+      !t2_mispredictBranchUpdateInfo.needAllocate
+  )
+  XSPerfAccumulate("allocate_needed", t2_valid && t2_needAllocate)
   XSPerfAccumulate("allocate_success", t2_valid && t2_needAllocate && t2_canAllocate)
   XSPerfAccumulate("allocate_failure", t2_valid && t2_needAllocate && !t2_canAllocate)
   for (i <- 0 until NumTables) {
     XSPerfAccumulate(s"table_${i}_allocate", t2_valid && t2_allocateTableMaskOH(i))
   }
-  // TODO: add more
 }
