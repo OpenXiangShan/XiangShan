@@ -200,8 +200,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // ras
   ras.io.redirect.valid          := redirect.valid
   ras.io.redirect.bits.attribute := redirect.bits.attribute
-  ras.io.redirect.bits.brPc      := redirect.bits.startVAddr
-  ras.io.redirect.bits.isRvc     := redirect.bits.isRvc
+  ras.io.redirect.bits.brPc      := redirect.bits.cfiPc
   ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
   ras.io.commit.valid            := commitUpdate.valid
@@ -209,7 +208,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
   ras.io.specIn.valid            := s3_fire
   ras.io.specIn.bits.startPc     := s3_pc.toUInt
-  ras.io.specIn.bits.isRvc       := false.B
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
@@ -425,7 +423,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ghr.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   ghr.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
   ghr.io.redirect.valid      := redirect.valid
-  ghr.io.redirect.startVAddr := redirect.bits.startVAddr
+  ghr.io.redirect.startVAddr := redirect.bits.cfiPc
   ghr.io.redirect.taken      := redirect.bits.taken
   ghr.io.redirect.meta       := redirect.bits.speculationMeta.ghrMeta
   private val s0_ghist = ghr.io.s0_ghist
