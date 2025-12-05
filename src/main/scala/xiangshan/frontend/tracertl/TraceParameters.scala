@@ -177,10 +177,10 @@ object TraceRTLParameters {
          |
          |struct __attribute__((packed)) TraceFpgaCollectStruct {
          |  uint64_t pcVA:${tCollectBundle.pcVA.getWidth};
-         |  uint64_t instNum:${tCollectBundle.instNum.getWidth};
+         |  uint32_t instNum:${tCollectBundle.instNum.getWidth};
          |
          |  void dump() {
-         |    printf("pcVA: %lx, instNum: %ld\\n", pcVA, instNum);
+         |    printf("pcVA: %lx, instNum: %d\\n", pcVA, instNum);
          |  }
          |};
          |

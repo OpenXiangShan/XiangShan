@@ -203,9 +203,9 @@ class TraceRTLAXISIO(DATA_WIDTH: Int) extends Bundle {
 
 // size must be multiple of 8bit(byte)
 class TraceFPGACollectBundle(implicit p: Parameters) extends Bundle {
+  val padding = UInt(6.W)
   val instNum = UInt(8.W)
   val pcVA = UInt(p(TraceRTLParamKey).TraceVAddrWidth.W)
-  val padding = UInt(6.W)
 }
 
 object TraceFPGACollectBundle {
