@@ -52,7 +52,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val interrupt_safe = Bool()
     val fpWen = Bool()
     val rfWen = Bool()
-    val wflags = Bool()
+    val wfflags = Bool()
     val dirtyVs = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
@@ -95,7 +95,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
-    val wflags = Bool()
+    val wfflags = Bool()
     val fflags = UInt(5.W)
     val vxsat = Bool()
     val isRVC = Bool()
@@ -127,7 +127,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: DynInst): Unit = {
-    robEntry.wflags := robEnq.wfflags
+    robEntry.wfflags := robEnq.fpu.wfflags
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -159,7 +159,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.rfWen := robEntry.rfWen
     robCommitEntry.fpWen := robEntry.fpWen
     robCommitEntry.fflags := robEntry.fflags
-    robCommitEntry.wflags := robEntry.wflags
+    robCommitEntry.wfflags := robEntry.wfflags
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.isVset := robEntry.isVset
@@ -170,7 +170,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
-    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
+    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wfflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.crossFtqCommit := robEntry.crossFtqCommit
