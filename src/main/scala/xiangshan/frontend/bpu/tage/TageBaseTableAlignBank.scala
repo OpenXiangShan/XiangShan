@@ -29,9 +29,9 @@ class TageBaseTableAlignBank(
   class TageBaseTableAlignBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
-        // NOTE: this startVAddr is not from Bpu top, it's calculated in TageBaseTable top
-        // i.e. vecRotateRight(VecInit.tabulate(NumAlignBanks)(startVAddr + _ * alignSize), startAlignIdx)(alignIdx)
-        val startVAddr: PrunedAddr = new PrunedAddr(VAddrBits)
+        // NOTE: this startPc is not from Bpu top, it's calculated in TageBaseTable top
+        // i.e. vecRotateRight(VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize), startAlignIdx)(alignIdx)
+        val startPc: PrunedAddr = new PrunedAddr(VAddrBits)
       }
 
       class Resp extends Bundle {
@@ -44,11 +44,11 @@ class TageBaseTableAlignBank(
 
     class Write extends Bundle {
       class Req extends Bundle {
-        // NOTE: this startVAddr is not from Bpu top, it's calculated in TageBaseTable top
-        // i.e. vecRotateRight(VecInit.tabulate(NumAlignBanks)(startVAddr + _ * alignSize), startAlignIdx)(alignIdx)
-        val startVAddr: PrunedAddr           = new PrunedAddr(VAddrBits)
-        val takenCtrs:  Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
-        val wayMask:    UInt                 = UInt(FetchBlockAlignInstNum.W)
+        // NOTE: this startPc is not from Bpu top, it's calculated in TageBaseTable top
+        // i.e. vecRotateRight(VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize), startAlignIdx)(alignIdx)
+        val startPc:   PrunedAddr           = new PrunedAddr(VAddrBits)
+        val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
+        val wayMask:   UInt                 = UInt(FetchBlockAlignInstNum.W)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -93,11 +93,11 @@ class TageBaseTableAlignBank(
   io.resetDone := sramBanks.map(_.io.r.req.ready).reduce(_ && _)
 
   /* *** read *** */
-  private val s0_fire       = r.req.valid
-  private val s0_startVAddr = r.req.bits.startVAddr
-  private val s0_bankIdx    = getBankIndex(s0_startVAddr)
-  private val s0_bankMask   = UIntToOH(s0_bankIdx, NumBanks)
-  private val s0_setIdx     = getSetIndex(s0_startVAddr)
+  private val s0_fire     = r.req.valid
+  private val s0_startPc  = r.req.bits.startPc
+  private val s0_bankIdx  = getBankIndex(s0_startPc)
+  private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
+  private val s0_setIdx   = getSetIndex(s0_startPc)
 
   sramBanks.zipWithIndex.foreach { case (bank, i) =>
     bank.io.r.req.valid       := s0_fire && s0_bankMask(i)
@@ -109,13 +109,13 @@ class TageBaseTableAlignBank(
   io.read.resp.takenCtrs := Mux1H(s1_bankMask, sramBanks.map(_.io.r.resp.data))
 
   /* *** write *** */
-  private val t1_valid      = w.req.valid
-  private val t1_startVAddr = w.req.bits.startVAddr
-  private val t1_takenCtrs  = w.req.bits.takenCtrs
-  private val t1_wayMask    = w.req.bits.wayMask
+  private val t1_valid     = w.req.valid
+  private val t1_startPc   = w.req.bits.startPc
+  private val t1_takenCtrs = w.req.bits.takenCtrs
+  private val t1_wayMask   = w.req.bits.wayMask
 
-  private val t1_setIdx   = getSetIndex(t1_startVAddr)
-  private val t1_bankIdx  = getBankIndex(t1_startVAddr)
+  private val t1_setIdx   = getSetIndex(t1_startPc)
+  private val t1_bankIdx  = getBankIndex(t1_startPc)
   private val t1_bankMask = UIntToOH(t1_bankIdx, NumBanks)
 
   writeBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>

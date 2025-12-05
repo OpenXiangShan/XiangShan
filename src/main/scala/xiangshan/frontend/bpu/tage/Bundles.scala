@@ -103,8 +103,8 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
 }
 
 class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
-  val startVAddr:  PrunedAddr = PrunedAddr(VAddrBits)
-  val branchVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
+  val cfiPc:   PrunedAddr = PrunedAddr(VAddrBits)
 
   val hasProvider:       Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)

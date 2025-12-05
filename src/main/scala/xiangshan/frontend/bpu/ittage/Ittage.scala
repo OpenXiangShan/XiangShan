@@ -57,14 +57,14 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   io.train.ready := true.B
 
-  private val s0_pc   = io.startVAddr
-  private val s0_fire = io.stageCtrl.s0_fire && io.enable
-  private val s1_fire = io.stageCtrl.s1_fire && io.enable
-  private val s2_fire = io.stageCtrl.s2_fire && io.enable
-  private val s3_fire = io.stageCtrl.s3_fire && io.enable
+  private val s0_startPc = io.startPc
+  private val s0_fire    = io.stageCtrl.s0_fire && io.enable
+  private val s1_fire    = io.stageCtrl.s1_fire && io.enable
+  private val s2_fire    = io.stageCtrl.s2_fire && io.enable
+  private val s3_fire    = io.stageCtrl.s3_fire && io.enable
 
-  private val s1_pc = RegEnable(s0_pc, s0_fire)
-  private val s2_pc = RegEnable(s1_pc, s1_fire)
+  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
+  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
 
   private val tables = TableInfos.zipWithIndex.map {
     case (info, i) =>
@@ -120,7 +120,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, io.train.fire)
 
-  private val updatePc        = t1_train.startVAddr
+  private val updateStartPc   = t1_train.startPc
   private val updateFoldedPhr = t1_trainFoldedPhr
 
   // To improve Clock Gating Efficiency
@@ -182,7 +182,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // Predict
   tables.foreach { t =>
     t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
-    t.io.req.bits.pc         := s1_pc
+    t.io.req.bits.startPc    := s1_startPc
     t.io.req.bits.foldedHist := io.s1_foldedPhr
   }
 
@@ -227,7 +227,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     regionTargets(i) := PrunedAddrInit(Mux(
       rTable.io.respHit(i) && !regionReadTargetOffset(i).usePcRegion,
       Cat(rTable.io.respRegion(i), regionReadTargetOffset(i).offset.toUInt),
-      Cat(targetGetRegion(s2_pc), regionReadTargetOffset(i).offset.toUInt)
+      Cat(targetGetRegion(s2_startPc), regionReadTargetOffset(i).offset.toUInt)
     ))
   }
 
@@ -297,7 +297,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // Update in loop
   private val updateRealTarget       = t1_train.branches(trainBranchIdx).bits.target
-  private val updatePCRegion         = targetGetRegion(t1_train.startVAddr)
+  private val updatePCRegion         = targetGetRegion(t1_train.startPc)
   private val updateRealTargetRegion = targetGetRegion(updateRealTarget)
   private val metaProviderTargetOffset, metaAltProviderTargetOffset, updateRealTargetOffset =
     WireInit(0.U.asTypeOf(new IttageOffset))
@@ -401,7 +401,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
     tables(i).io.update.usefulCntValid := RegEnable(updateUsefulCntMask(i), false.B, updateMask(i))
     tables(i).io.update.usefulCnt      := RegEnable(updateUsefulCnt(i), updateMask(i))
-    tables(i).io.update.pc             := RegEnable(updatePc, updateMask(i))
+    tables(i).io.update.startPc        := RegEnable(updateStartPc, updateMask(i))
     tables(i).io.update.foldedHist     := RegEnable(updateFoldedPhr, updateMask(i))
   }
 
@@ -474,11 +474,11 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   if (debug) {
     val s2_respsRegs = RegEnable(s2_resps, s2_fire)
-    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_pc.toUInt)
-    XSDebug("s1_fire:%d, resp: pc=%x\n", s1_fire, s1_pc.toUInt)
+    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_startPc.toUInt)
+    XSDebug("s1_fire:%d, resp: pc=%x\n", s1_fire, s1_startPc.toUInt)
     XSDebug(
       "s2_fireOnLastCycle: resp: pc=%x, hit=%b\n",
-      s2_pc.toUInt,
+      s2_startPc.toUInt,
       s2_provided
     )
     for (i <- 0 until NumTables) {
@@ -494,7 +494,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
   XSDebug(
     updateValid,
-    p"pc: ${Hexadecimal(updatePc.toUInt)}, target: ${Hexadecimal(t1_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
+    p"pc: ${Hexadecimal(updateStartPc.toUInt)}, target: ${Hexadecimal(t1_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
   )
   XSDebug(updateValid, t1_meta.toPrintable + p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")

@@ -59,7 +59,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val tickCounter = RegInit(0.U((TickWidth + 1).W))
   // Predict
   tables.foreach { t =>
-    t.req.startPc        := io.startVAddr
+    t.req.startPc        := io.startPc
     t.req.foldedPathHist := io.foldedPathHist
     t.usefulReset        := tickCounter(TickWidth)
   }
@@ -186,7 +186,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     t.update.bits.usefulValid := (t0_providerMask(i) && t0_histTableNeedUpdate) &&
       (t0_histHitMisPred || (baseNotMatchHistPred && fastTrainHasPredBr))
 
-    t.update.bits.startPc                := io.fastTrain.get.bits.startVAddr
+    t.update.bits.startPc                := io.fastTrain.get.bits.startPc
     t.update.bits.allocTaken             := t0_allocTaken
     t.update.bits.allocCfiPosition       := t0_allocCfiPosition
     t.update.bits.updateTaken            := t0_updateTaken
@@ -234,20 +234,20 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     (idx, tag)
   }
 
-  private val (s0_idxTable0, s0_tagTable0) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 0)
-  private val (s0_idxTable1, s0_tagTable1) = computeHash(io.startVAddr.toUInt, io.foldedPathHist, 1)
+  private val (s0_idxTable0, s0_tagTable0) = computeHash(io.startPc.toUInt, io.foldedPathHist, 0)
+  private val (s0_idxTable1, s0_tagTable1) = computeHash(io.startPc.toUInt, io.foldedPathHist, 1)
 
   predMeta.bits.testUseMicroTage  := false.B // no use, only for placeholder.
   predMeta.bits.testPredIdx0      := s0_idxTable0
   predMeta.bits.testPredTag0      := s0_tagTable0
   predMeta.bits.testPredIdx1      := s0_idxTable1
   predMeta.bits.testPredTag1      := s0_tagTable1
-  predMeta.bits.testPredStartAddr := io.startVAddr.toUInt
+  predMeta.bits.testPredStartAddr := io.startPc.toUInt
 
   private val (trainIdx0, trainTag0) =
-    computeHash(io.fastTrain.get.bits.startVAddr.toUInt, io.foldedPathHistForTrain, 0)
+    computeHash(io.fastTrain.get.bits.startPc.toUInt, io.foldedPathHistForTrain, 0)
   private val (trainIdx1, trainTag1) =
-    computeHash(io.fastTrain.get.bits.startVAddr.toUInt, io.foldedPathHistForTrain, 1)
+    computeHash(io.fastTrain.get.bits.startPc.toUInt, io.foldedPathHistForTrain, 1)
 
   XSPerfAccumulate(
     "train_useMicroTage_and_override_fromFastTrain",

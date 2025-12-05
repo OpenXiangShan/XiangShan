@@ -30,7 +30,7 @@ trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
     pc(TagWidth + instOffsetBits - 1, instOffsetBits)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
-    pc(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)
+    pc(pc.length - 1, TargetLowerBitsWidth + instOffsetBits)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
     target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)

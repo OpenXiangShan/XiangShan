@@ -27,7 +27,7 @@ import xiangshan.frontend.bpu.SaturateCounter
 class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHelper with HalfAlignHelper {
   class TageBaseTableIO extends TageBundle {
     val readReqValid: Bool                 = Input(Bool())
-    val startVAddr:   PrunedAddr           = Input(PrunedAddr(VAddrBits))
+    val startPc:      PrunedAddr           = Input(PrunedAddr(VAddrBits))
     val takenCtrs:    Vec[SaturateCounter] = Output(Vec(FetchBlockInstNum, new SaturateCounter(BaseTableTakenCtrWidth)))
     val train:        Valid[BpuTrain]      = Input(Valid(new BpuTrain))
     val resetDone:    Bool                 = Output(Bool())
@@ -51,22 +51,22 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHel
      - send read request to SRAM
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s0_fire       = io.readReqValid
-  private val s0_startVAddr = io.startVAddr
+  private val s0_fire    = io.readReqValid
+  private val s0_startPc = io.startPc
   // rotate read addresses according to the first align bank index
-  // e.g. if NumAlignBanks = 4, startVAddr locates in alignBank 1,
-  // startVAddr + (i << FetchBlockAlignWidth) will be located in alignBank (1 + i) % 4,
+  // e.g. if NumAlignBanks = 4, startPc locates in alignBank 1,
+  // startPc + (i << FetchBlockAlignWidth) will be located in alignBank (1 + i) % 4,
   // i.e. we have VecInit.tabulate(...)'s alignBankIdx = (1, 2, 3, 0),
   // they always needs to goes to physical alignBank (0, 1, 2, 3),
   // so we need to rotate it right by 1.
-  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startVAddr))
-  private val s0_startVAddrVec = s0_rotator.rotate(
-    VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedAddr(s0_startVAddr + (i << FetchBlockAlignWidth).U))
+  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startPc))
+  private val s0_startPcVec = s0_rotator.rotate(
+    VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedPc(s0_startPc + (i << FetchBlockAlignWidth).U))
   )
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid           := s0_fire
-    b.io.read.req.bits.startVAddr := s0_startVAddrVec(i)
+    b.io.read.req.valid        := s0_fire
+    b.io.read.req.bits.startPc := s0_startPcVec(i)
   }
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHel
   private val s1_rawCtrs = VecInit(alignBanks.map(_.io.read.resp.takenCtrs))
 
   // after read out from SRAM, we need to revert the rotation to restore the original order
-  // again e.g. if NumAlignBanks = 4, startVAddr locates in alignBank 1,
+  // again e.g. if NumAlignBanks = 4, startPc locates in alignBank 1,
   // we have counters from physical alignBank (0, 1, 2, 3),
   // they actually corresponds to requested address (1, 2, 3, 0),
   // so we need to rotate it left by 1
@@ -101,12 +101,12 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHel
   private val t1_valid = RegNext(t0_valid)
   private val t1_train = RegEnable(t0_train, t0_valid)
 
-  private val t1_startVAddr = t1_train.startVAddr
-  private val t1_branches   = t1_train.branches
-  private val t1_oldCtrs    = t1_train.meta.tage.baseTableCtrs
-  private val t1_rotator    = VecRotate(getAlignBankIndex(t1_startVAddr))
-  private val t1_startVAddrVec = t1_rotator.rotate(
-    VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U))
+  private val t1_startPc  = t1_train.startPc
+  private val t1_branches = t1_train.branches
+  private val t1_oldCtrs  = t1_train.meta.tage.baseTableCtrs
+  private val t1_rotator  = VecRotate(getAlignBankIndex(t1_startPc))
+  private val t1_startPcVec = t1_rotator.rotate(
+    VecInit.tabulate(BaseTableNumAlignBanks)(i => getAlignedPc(t1_startPc + (i << FetchBlockAlignWidth).U))
   )
 
   private val t1_updateMaskVec = Wire(Vec(BaseTableNumAlignBanks, Vec(FetchBlockAlignInstNum, Bool())))
@@ -126,9 +126,9 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHel
   private val t1_rotatedUpdateMaskVec = t1_rotator.rotate(t1_updateMaskVec)
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid           := t1_valid
-    b.io.write.req.bits.startVAddr := t1_startVAddrVec(i)
-    b.io.write.req.bits.wayMask    := t1_rotatedUpdateMaskVec(i).asUInt
-    b.io.write.req.bits.takenCtrs  := t1_rotatedNewCtrsVec(i)
+    b.io.write.req.valid          := t1_valid
+    b.io.write.req.bits.startPc   := t1_startPcVec(i)
+    b.io.write.req.bits.wayMask   := t1_rotatedUpdateMaskVec(i).asUInt
+    b.io.write.req.bits.takenCtrs := t1_rotatedNewCtrsVec(i)
   }
 }

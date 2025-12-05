@@ -44,14 +44,14 @@ import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
-  class DummyBpuIO extends Bundle {
+  class BpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
   }
 
-  val io: DummyBpuIO = IO(new DummyBpuIO)
+  val io: BpuIO = IO(new BpuIO)
 
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
@@ -137,17 +137,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val debug_bpId = RegInit(0.U(XLEN.W))
 
-  private val s0_pc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val s0_pcReg = RegEnable(s0_pc, !s0_stall)
+  private val s0_startPc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val s0_startPcReg = RegEnable(s0_startPc, !s0_stall)
 
   when(RegNext(RegNext(reset.asBool)) && !reset.asBool) {
-    s0_pcReg := io.resetVector
+    s0_startPcReg := io.resetVector
   }
 
-  private val s1_pc = RegEnable(s0_pc, s0_fire)
-  private val s2_pc = RegEnable(s1_pc, s1_fire)
-  private val s3_pc = RegEnable(s2_pc, s2_fire)
-  private val s4_pc = RegEnable(s3_pc, s3_fire) // only used for abtb fast train
+  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
+  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
+  private val s3_startPc = RegEnable(s2_startPc, s2_fire)
+  private val s4_startPc = RegEnable(s3_startPc, s3_fire) // only used for abtb fast train
 
   // abtb meta won't be sent to ftq, used for abtb fast train
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
@@ -185,7 +185,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val fastTrain = Wire(Valid(new BpuFastTrain))
   fastTrain.valid                := s3_valid
-  fastTrain.bits.startVAddr      := s3_pc
+  fastTrain.bits.startPc         := s3_startPc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
   fastTrain.bits.utageMeta       := s3_utageMeta
@@ -193,7 +193,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
-    p.io.startVAddr  := s0_pc
+    p.io.startPc     := s0_startPc
     p.io.stageCtrl   := stageCtrl
     p.io.train.valid := train.valid
     p.io.train.bits  := train.bits
@@ -205,11 +205,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // FIXME: should use s3_prediction to train ubtb
 
   // abtb
-  abtb.io.redirectValid       := redirect.valid
-  abtb.io.overrideValid       := s3_override
-  abtb.io.previousVAddr.valid := s4_valid
-  abtb.io.previousVAddr.bits  := s4_pc
-  abtb.io.microTagePred       := utage.io.prediction
+  abtb.io.redirectValid         := redirect.valid
+  abtb.io.overrideValid         := s3_override
+  abtb.io.previousStartPc.valid := s4_valid
+  abtb.io.previousStartPc.bits  := s4_startPc
+  abtb.io.microTagePred         := utage.io.prediction
 
   // utage
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
@@ -218,14 +218,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // ras
   ras.io.redirect.valid          := redirect.valid
   ras.io.redirect.bits.attribute := redirect.bits.attribute
-  ras.io.redirect.bits.brPc      := redirect.bits.cfiPc
+  ras.io.redirect.bits.cfiPc     := redirect.bits.cfiPc
   ras.io.redirect.bits.meta      := redirect.bits.speculationMeta.rasMeta
   ras.io.redirect.bits.level     := 0.U(1.W)
   ras.io.commit.valid            := commitUpdate.valid
   ras.io.commit.bits.attribute   := commitUpdate.bits.attribute
   ras.io.commit.bits.meta        := commitUpdate.bits.rasMeta
   ras.io.specIn.valid            := s3_fire
-  ras.io.specIn.bits.startPc     := s3_pc.toUInt
+  ras.io.specIn.bits.startPc     := s3_startPc.toUInt
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
@@ -368,9 +368,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // to Ftq
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_override
   when(s3_override) {
-    io.toFtq.prediction.bits.fromStage(s3_pc, s3_prediction)
+    io.toFtq.prediction.bits.fromStage(s3_startPc, s3_prediction)
   }.otherwise {
-    io.toFtq.prediction.bits.fromStage(s1_pc, s1_prediction)
+    io.toFtq.prediction.bits.fromStage(s1_startPc, s1_prediction)
   }
   io.toFtq.prediction.bits.s3Override := s3_override
 
@@ -422,8 +422,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.toFtq.speculationMeta.valid := s3_valid
   io.toFtq.speculationMeta.bits  := s3_speculationMeta
 
-  s0_pc := MuxCase(
-    s0_pcReg,
+  s0_startPc := MuxCase(
+    s0_startPcReg,
     Seq(
       redirect.valid -> redirect.bits.target,
       s3_override    -> s3_prediction.target,
@@ -444,10 +444,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s3_override   := s3_override
   phr.io.train.s3_phrMeta    := s3_phrMeta
   phr.io.train.s3_prediction := s3_prediction
-  phr.io.train.s3_pc         := s3_pc
+  phr.io.train.s3_startPc    := s3_startPc
   phr.io.train.s1_valid      := s1_fire
   phr.io.train.s1_prediction := s1_prediction
-  phr.io.train.s1_pc         := s1_pc
+  phr.io.train.s1_startPc    := s1_startPc
 
   phr.io.commit.valid := train.fire
   phr.io.commit.bits  := train.bits
@@ -468,7 +468,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ghr.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   ghr.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
   ghr.io.redirect.valid      := redirect.valid
-  ghr.io.redirect.startVAddr := redirect.bits.cfiPc
+  ghr.io.redirect.cfiPc      := redirect.bits.cfiPc
   ghr.io.redirect.taken      := redirect.bits.taken
   ghr.io.redirect.meta       := redirect.bits.speculationMeta.ghrMeta
   private val s0_ghist = ghr.io.s0_ghist
@@ -483,16 +483,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     powerOnResetState := false.B
   }
   XSError(
-    !powerOnResetState && s0_stall && s0_pc =/= s0_pcReg,
-    "s0_stall but s0_pc is different from s0_pc_reg"
+    !powerOnResetState && s0_stall && s0_startPc =/= s0_startPcReg,
+    "s0_stall but s0_startPc is different from s0_startPcReg"
   )
 
   /* *** check abtb output *** */
   when(io.toFtq.prediction.fire && abtb.io.prediction.taken) {
-    assert(abtb.io.debug_startVAddr === s1_pc)
+    assert(abtb.io.debug_startPc === s1_startPc)
     assert(
-      (abtb.io.debug_previousVAddr === s2_pc) || (abtb.io.debug_previousVAddr === s4_pc),
-      "abtb previousVAddr doesn't match"
+      (abtb.io.debug_previousStartPc === s2_startPc) || (abtb.io.debug_previousStartPc === s4_startPc),
+      "abtb previousStartPc doesn't match"
     )
   }
 
@@ -520,7 +520,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s2_fire)
 
   private val s3_perfMeta = Wire(new BpuPerfMeta)
-  s3_perfMeta.startVAddr          := s3_pc
+  s3_perfMeta.startPc             := s3_startPc
   s3_perfMeta.bpId                := debug_bpId
   s3_perfMeta.s1Prediction        := s3_s1Prediction
   s3_perfMeta.s3Prediction        := s3_prediction

@@ -73,7 +73,7 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   private val r0_oldPositions  = io.redirect.meta.position
   private val r0_oldHits       = io.redirect.meta.hitMask
   private val r0_taken         = io.redirect.taken
-  private val r0_takenPosition = getAlignedInstOffset(io.redirect.startVAddr) // FIXME: position calculate maybe wrong
+  private val r0_takenPosition = getAlignedInstOffset(io.redirect.cfiPc) // FIXME: position calculate maybe wrong
   private val r0_lessThanPc = r0_oldPositions.zip(r0_oldHits).map {
     case (pos, hit) => hit && (pos < r0_takenPosition)
   } // positions less than redirect branch pc

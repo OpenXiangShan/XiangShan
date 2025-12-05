@@ -56,32 +56,32 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
 
   /* *** s0 ***
-   * calculate per-bank startVAddr and posHigherBits
+   * calculate per-bank startPc and posHigherBits
    * send read request to alignBanks
    */
   s0_fire := io.stageCtrl.s0_fire && io.enable
-  private val s0_startVAddr = io.startVAddr
+  private val s0_startPc = io.startPc
   // rotate read addresses according to the first align bank index
-  // e.g. if NumAlignBanks = 4, startVAddr locates in alignBank 1,
-  // startVAddr + (i << FetchBlockAlignWidth) will be located in alignBank (1 + i) % 4,
+  // e.g. if NumAlignBanks = 4, startPc locates in alignBank 1,
+  // startPc + (i << FetchBlockAlignWidth) will be located in alignBank (1 + i) % 4,
   // i.e. we have VecInit.tabulate(...)'s alignBankIdx = (1, 2, 3, 0),
   // they always needs to goes to physical alignBank (0, 1, 2, 3),
   // so we need to rotate it right by 1.
-  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startVAddr))
-  private val s0_startVAddrVec = s0_rotator.rotate(
+  private val s0_rotator = VecRotate(getAlignBankIndex(s0_startPc))
+  private val s0_startPcVec = s0_rotator.rotate(
     VecInit.tabulate(NumAlignBanks) { i =>
       if (i == 0)
-        s0_startVAddr // keep lower bits for the first one
+        s0_startPc // keep lower bits for the first one
       else
-        getAlignedAddr(s0_startVAddr + (i << FetchBlockAlignWidth).U) // use aligned for others
+        getAlignedPc(s0_startPc + (i << FetchBlockAlignWidth).U) // use aligned for others
     }
   )
   private val s0_posHigherBitsVec = s0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.startVAddr    := s0_startVAddrVec(i)
+    b.io.read.req.startPc       := s0_startPcVec(i)
     b.io.read.req.posHigherBits := s0_posHigherBitsVec(i)
-    b.io.read.req.crossPage     := isCrossPage(s0_startVAddrVec(i), s0_startVAddr)
+    b.io.read.req.crossPage     := isCrossPage(s0_startPcVec(i), s0_startPc)
   }
 
   /* *** s1 ***
@@ -114,10 +114,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_valid = RegNext(t0_valid) && io.enable
   private val t1_train = RegEnable(t0_train, t0_valid)
 
-  private val t1_startVAddr = t1_train.startVAddr
-  private val t1_rotator    = VecRotate(getAlignBankIndex(t1_startVAddr))
-  private val t1_startVAddrVec = t1_rotator.rotate(
-    VecInit.tabulate(NumAlignBanks)(i => getAlignedAddr(t1_startVAddr + (i << FetchBlockAlignWidth).U))
+  private val t1_startPc = t1_train.startPc
+  private val t1_rotator = VecRotate(getAlignBankIndex(t1_startPc))
+  private val t1_startPcVec = t1_rotator.rotate(
+    VecInit.tabulate(NumAlignBanks)(i => getAlignedPc(t1_startPc + (i << FetchBlockAlignWidth).U))
   )
   private val t1_meta             = t1_train.meta.mbtb
   private val t1_mispredictBranch = t1_train.mispredictBranch
@@ -129,7 +129,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)
-    b.io.write.req.bits.startVAddr := t1_startVAddrVec(i)
+    b.io.write.req.bits.startPc    := t1_startPcVec(i)
     b.io.write.req.bits.branchInfo := t1_mispredictBranch.bits
     b.io.write.req.bits.meta       := t1_meta.entries(i)
   }
