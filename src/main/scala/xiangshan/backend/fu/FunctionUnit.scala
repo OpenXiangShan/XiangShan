@@ -16,13 +16,6 @@
 
 package xiangshan.backend.fu
 
-import org.chipsalliance.cde.config.Parameters
-import chisel3._
-import chisel3.util._
-import utility.XSPerfAccumulate
-import xiangshan._
-import xiangshan.backend.fu.fpu._
-
 trait HasFuLatency {
   val latencyVal: Option[Int]
   val extraLatencyVal: Option[Int]
@@ -52,6 +45,7 @@ object UncertainLatency {
   def apply(value: Int): UncertainLatency = UncertainLatency(Some(value))
 }
 
+/*
 class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
   val data = UInt(len.W)
   val uop = new MicroOp
@@ -80,3 +74,4 @@ abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSMod
   XSPerfAccumulate("out_fire", io.out.fire)
 
 }
+*/
