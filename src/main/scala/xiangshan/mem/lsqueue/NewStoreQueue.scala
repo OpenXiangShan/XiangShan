@@ -373,7 +373,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       /*================================================== Stage 2 ===================================================*/
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB)) === s2LoadPaddr) && s2Valid
+      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB)) =/= s2LoadPaddr) && s2Valid
 
       val selectData         = (0 until VLEN/8).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
