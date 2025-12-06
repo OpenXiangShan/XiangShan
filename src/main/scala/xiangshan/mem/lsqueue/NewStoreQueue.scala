@@ -30,6 +30,7 @@ import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{DCacheWordReqWithVaddrAndPfFlag, MemoryOpConstants, UncacheWordIO}
 import xiangshan.mem.NewStoreQueueMain.config
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -323,9 +324,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         vaddrMatchVec
 
       // find youngest entry, which is one-hot
-      val (maskLowOH, multiMatchLow)   = findYoungest(canForwardLow)
-      val (maskHighOH, multiMatchHigh) = findYoungest(canForwardHigh)
-      val selectOH                     = maskLowOH | maskHighOH
+      val (maskLowOH, multiMatchLow)   = findYoungest(Reverse(canForwardLow))
+      val (maskHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
+      val selectOH                     = Reverse(maskLowOH | maskHighOH) // index higher, mean it younger
       val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
       val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
       val multiMatch                   = multiMatchLow | multiMatchHigh
@@ -340,9 +341,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val addrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt &
         VecInit(Seq.fill(StoreQueueSize)(!addrInvalidLow.orR)).asUInt
 
-      val (addrInvLowOH, _)   = findYoungest(addrInvalidLow)
-      val (addrInvHighOH, _)  = findYoungest(addrInvalidHigh)
-      val addrInvSelectOH     = addrInvLowOH | addrInvHighOH
+      val (addrInvLowOH, _)   = findYoungest(Reverse(addrInvalidLow))
+      val (addrInvHighOH, _)  = findYoungest(Reverse(addrInvalidHigh))
+      val addrInvSelectOH     = Reverse(addrInvLowOH | addrInvHighOH)
 
       val dataInvalidSqIdx   = Wire(new SqPtr)
       val addrInvalidSqIdx   = Wire(new SqPtr)
