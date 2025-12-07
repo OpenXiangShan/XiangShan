@@ -21,12 +21,10 @@
 
 package xiangshan.backend.fu
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.SignExt
-import xiangshan.backend.fu.util.CSA3_2
 
+/*
 /** A Radix-4 SRT Integer Divider
   *
   * 2 ~ (5 + (len+3)/2) cycles are needed for each division.
@@ -299,6 +297,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   io.in_ready := state(s_idle)
   io.out_valid := state(s_finish) // state === s_finish
 }
+*/
 
 class RightShifter(len: Int, lzc_width: Int) extends Module {
   val io = IO(new Bundle() {
@@ -324,6 +323,7 @@ class RightShifter(len: Int, lzc_width: Int) extends Module {
   io.out := s5
 }
 
+/*
 object mLookUpTable {
   // Usage :
   // result := decoder(QMCMinimizer, index, mLookupTable.xxx)
@@ -456,3 +456,4 @@ class SRT4Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len)
   io.out.bits.data := divDataModule.io.out_data
   io.out.bits.uop := uopReg
 }
+*/

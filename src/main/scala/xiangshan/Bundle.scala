@@ -206,6 +206,7 @@ class LSIdx(implicit p: Parameters) extends XSBundle {
   val sqIdx = new SqPtr
 }
 
+/*
 // CfCtrl -> MicroOp at Rename Stage
 class MicroOp(implicit p: Parameters) extends CfCtrl {
   val srcState = Vec(4, SrcState())
@@ -241,6 +242,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     this
   }
 }
+*/
 
 class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new DynInst
