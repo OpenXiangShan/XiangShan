@@ -187,6 +187,7 @@ trait HasSoCParameter {
     soc.SeperateBusAsyncBridge else None
 
   val UsePrivateClint = soc.UsePrivateClint
+  val TIMERRange = soc.TIMERRange
   // seperate TL bus
   val EnableSeperateBusAsync = SeperateBusAsyncBridge.isDefined
 
