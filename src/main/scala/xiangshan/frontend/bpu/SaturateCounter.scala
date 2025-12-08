@@ -28,8 +28,11 @@ class SaturateCounter(width: Int) extends Bundle {
 
   def isSaturateNegative: Bool = !value.orR // value === 0.U
 
+  def shouldHold(positive: Bool): Bool =
+    isSaturatePositive && positive || isSaturateNegative && !positive
+
   def getUpdate(positive: Bool): UInt = Mux(
-    isSaturatePositive && positive || isSaturateNegative && !positive,
+    shouldHold(positive),
     value,
     Mux(positive, value + 1.U, value - 1.U)
   )
