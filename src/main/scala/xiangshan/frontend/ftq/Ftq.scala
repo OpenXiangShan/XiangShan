@@ -302,11 +302,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
 
-  io.toBpu.redirect.valid := redirect.valid
-  // FIXME: Modify BPU
-  io.toBpu.redirect.bits.startVAddr      := redirect.bits.pc
+  io.toBpu.redirect.valid                := redirect.valid
+  io.toBpu.redirect.bits.cfiPc           := redirect.bits.pc + (redirect.bits.ftqOffset << 1).asUInt
   io.toBpu.redirect.bits.target          := redirect.bits.target
-  io.toBpu.redirect.bits.isRvc           := redirect.bits.isRVC
   io.toBpu.redirect.bits.taken           := redirect.bits.taken
   io.toBpu.redirect.bits.attribute       := redirect.bits.attribute
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)

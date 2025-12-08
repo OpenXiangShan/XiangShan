@@ -202,9 +202,8 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
 
 // Backend & Ftq -> Bpu
 class BpuRedirect(implicit p: Parameters) extends BpuBundle {
-  val startVAddr:      PrunedAddr         = PrunedAddr(VAddrBits)
+  val cfiPc:           PrunedAddr         = PrunedAddr(VAddrBits)
   val target:          PrunedAddr         = PrunedAddr(VAddrBits)
-  val isRvc:           Bool               = Bool()
   val taken:           Bool               = Bool()
   val speculationMeta: BpuSpeculationMeta = new BpuSpeculationMeta
   val attribute:       BranchAttribute    = new BranchAttribute
