@@ -381,7 +381,6 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
 
   // imsic axi4 io
   val imsic_axi4 = u_imsic_bus_top.axi4.map(x => IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
-  val imsic_axi4_t = u_imsic_bus_top.axi4_t.map(x => IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
   // imsic tl io
   val imsic_m_tl = u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
   val imsic_s_tl = u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
@@ -391,7 +390,6 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
 
   // imsic axi4 io connection
   imsic_axi4.foreach(_.viewAs[AXI4Bundle] <> u_imsic_bus_top.axi4.get.elements.head._2)
-  imsic_axi4_t.foreach(_.viewAs[AXI4Bundle] <> u_imsic_bus_top.axi4_t.get.elements.head._2)
   // imsic tl io connection
   u_imsic_bus_top.tl_m.foreach(_ <> imsic_m_tl.get)
   u_imsic_bus_top.tl_s.foreach(_ <> imsic_s_tl.get)
