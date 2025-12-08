@@ -104,6 +104,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     // TODO: implement vector store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true)) // vec writeback uncached store
     val sqEmpty = Output(Bool())
+    val lqRepThreshold = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
@@ -235,6 +236,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
+  loadQueue.io.lqRepThreshold      <> io.lqRepThreshold
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint

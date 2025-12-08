@@ -190,6 +190,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // queue-based replay
     val replay       = Flipped(Decoupled(new LsPipelineBundle))
     val lq_rep_full  = Input(Bool())
+    // backpressure IQ when LRQ threshold is reached
+    val lqRepThreshold = Flipped(ValidIO(new LqPtr))
 
     // misc
     val s2_ptr_chasing = Output(Bool()) // provide right pc for hw prefetch
@@ -215,7 +217,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   PerfCCT.updateInstPos(io.ldin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
-
+  val lqNack = io.lqRepThreshold.valid && io.lqRepThreshold.bits =/= io.ldin.bits.uop.lqIdx
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
@@ -227,7 +229,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_misalign_select= Wire(Bool())
   val s0_kill          = Wire(Bool())
   val s0_can_go        = s1_ready
-  val s0_fire          = s0_valid && s0_can_go
+  val s0_fire          = Wire(Bool())
   val s0_mmio_fire     = s0_mmio_select && s0_can_go
   val s0_nc_fire       = s0_nc_select && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
@@ -372,6 +374,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_ptr_chasing_vaddr    = io.l2l_fwd_in.data(5, 0) +& io.ld_fast_imm(5, 0)
   val s0_ptr_chasing_canceled = WireInit(false.B)
   s0_kill := s0_ptr_chasing_canceled
+  s0_fire := s0_valid && s0_can_go && !(s0_src_select_vec(int_iss_idx) && lqNack)
 
   // prefetch related ctrl signal
   io.canAcceptLowConfPrefetch  := s0_src_ready_vec(low_pf_idx) && io.dcache.req.ready
@@ -400,7 +403,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
 
   // query DCache
-  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
+  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data && !(s0_src_select_vec(int_iss_idx) && lqNack)
   io.dcache.req.bits.cmd          := Mux(s0_sel_src.prf_rd,
                                       MemoryOpConstants.M_PFR,
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
@@ -841,7 +844,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // 2) there is no fast replayed load
   // 3) there is no high confidence prefetch request
   io.vecldin.ready := s0_can_go && io.dcache.req.ready && s0_src_ready_vec(vec_iss_idx)
-  io.ldin.ready := s0_can_go && io.dcache.req.ready && s0_src_ready_vec(int_iss_idx)
+  io.ldin.ready := s0_can_go && io.dcache.req.ready && s0_src_ready_vec(int_iss_idx) && !lqNack
   io.misalign_ldin.ready := s0_can_go && io.dcache.req.ready && s0_src_ready_vec(mab_idx)
 
   // for hw prefetch load flow feedback, to be added later

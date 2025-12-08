@@ -950,6 +950,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       loadUnits(i).io.stld_nuke_query(s) := stld_nuke_query(s)
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
+    loadUnits(i).io.lqRepThreshold.valid := lsq.io.lqRepThreshold
+    loadUnits(i).io.lqRepThreshold.bits := lsq.io.lqDeqPtr
     // load prefetch train
     prefetcherOpt.foreach(pf => {
       // sms will train on all miss load sources
@@ -1616,7 +1618,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
                               vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.threshold.get.valid := vlMergeBuffer.io.toSplit.get.threshold
+    vlSplit(i).io.threshold.get.valid := vlMergeBuffer.io.toSplit.get.threshold || lsq.io.lqRepThreshold
     vlSplit(i).io.threshold.get.bits  := lsq.io.lqDeqPtr
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
