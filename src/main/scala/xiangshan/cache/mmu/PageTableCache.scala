@@ -512,15 +512,17 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.pbmts(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError)
   }
-  val te = ClockGate.genTeSink
-  val l0_masked_clock = if (HasBitmapCheck) {
-    ClockGate(te.cgen, io.bitmap_wakeup.get.fire | stageReq.fire | (!flush_dup(0) && refill.levelOH.l0) | mbistPlL0.map(_.mbist.req).getOrElse(false.B), clock) 
-  } else {
-    ClockGate(te.cgen, stageReq.fire | (!flush_dup(0) && refill.levelOH.l0) | mbistPlL0.map(_.mbist.req).getOrElse(false.B), clock)
-  }
-  val l1_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush_dup(1) && refill.levelOH.l1) | mbistPlL1.map(_.mbist.req).getOrElse(false.B), clock)
-  l0.clock := l0_masked_clock
-  l1.clock := l1_masked_clock
+  if (EnableClockGate) {
+    val te = ClockGate.genTeSink
+    val l0_masked_clock = if (HasBitmapCheck) {
+      ClockGate(te.cgen, io.bitmap_wakeup.get.fire | stageReq.fire | (!flush_dup(0) && refill.levelOH.l0) | mbistPlL0.map(_.mbist.req).getOrElse(false.B), clock)
+    } else {
+      ClockGate(te.cgen, stageReq.fire | (!flush_dup(0) && refill.levelOH.l0) | mbistPlL0.map(_.mbist.req).getOrElse(false.B), clock)
+    }
+    val l1_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush_dup(1) && refill.levelOH.l1) | mbistPlL1.map(_.mbist.req).getOrElse(false.B), clock)
+    l0.clock := l0_masked_clock
+    l1.clock := l1_masked_clock
+  } // Use clock if EnableClockGate = false
   // l0
   val ptwl0replace = ReplacementPolicy.fromString(l2tlbParams.l0Replacer,l2tlbParams.l0nWays,l2tlbParams.l0nSets)
   val (l0Hit, l0HitData, l0Pre, l0eccError, l0HitWay, l0BitmapCheckResult, l0JmpBitmapCheck) = {

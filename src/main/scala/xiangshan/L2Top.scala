@@ -25,7 +25,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
-import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
+import coupledL2.{EnableCHI, EnableL2ClockGate, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey}
 import huancun.BankBitsKey
@@ -117,6 +117,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None
       )
       case EnableCHI => p(EnableCHI)
+      case EnableL2ClockGate => EnableClockGate
       case CHIIssue => p(CHIIssue)
       case CHIAddrWidthKey => p(CHIAddrWidthKey)
       case NonSecureKey => p(NonSecureKey)
