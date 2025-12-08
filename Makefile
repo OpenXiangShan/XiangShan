@@ -265,6 +265,9 @@ pldm-debug:
 trtl-axis-gen:
 	mill -i xiangshan.test.runMain tracertl.TraceRTLAXISModGen
 
+trtl-xdma-test-gen:
+	mill -i xiangshan.test.runMain tracertl.XDmaTestModGen
+
 include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
