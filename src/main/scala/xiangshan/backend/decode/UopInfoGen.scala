@@ -24,7 +24,6 @@ import freechips.rocketchip.rocket.Instructions
 import freechips.rocketchip.util.uintToBitPat
 import utils._
 import utility._
-import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
