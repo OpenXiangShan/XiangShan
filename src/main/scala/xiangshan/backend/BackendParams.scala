@@ -370,6 +370,29 @@ case class BackendParams(
     foundExu.get.exuIdx
   }
 
+  def getExuIdxI2V: Int = {
+    val exuParams = allRealExuParams
+    val foundExu = exuParams.find(_.fuConfigs.contains(I2vCfg))
+    require(foundExu.nonEmpty, s"exu contains I2V not find")
+    foundExu.get.exuIdx
+  }
+
+  def getExuIdxF2V: Int = {
+    val exuParams = allRealExuParams
+    val foundExu = exuParams.find(_.fuConfigs.contains(F2vCfg))
+    require(foundExu.nonEmpty, s"exu contains F2V not find")
+    foundExu.get.exuIdx
+  }
+
+  def getExuIdxV2I: Int = {
+    val exuParams = allRealExuParams
+    val foundExu = exuParams.find(_.fuConfigs.contains(VmoveCfg))
+    require(foundExu.nonEmpty, s"exu contains Vmove not find")
+    foundExu.get.exuIdx
+  }
+
+  def getExuIdxV2F: Int = getExuIdxV2I
+
   def getExuName(idx: Int): String = {
     val exuParams = allRealExuParams
     exuParams(idx).name

@@ -246,6 +246,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromF2I.foreach(_ := io.wakeupFromF2I.get)
+      iq.io.wakeupFromV2I.foreach(_ := io.wakeupFromV2I.get)
       println(s"[Region_int] wakeupFromWB.size = ${wakeupFromWB.size}")
       println(s"[Region_int] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
       println(s"[Region_int] ${iq.param.getIQName}: iq.param.needWakeupFromIntWBPort = ${iq.param.needWakeupFromIntWBPort.map(x => (x._1, x._2.map(_.name)))}")
@@ -266,19 +267,43 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromI2F.foreach(_ := io.wakeupFromI2F.get)
+      iq.io.wakeupFromV2F.foreach(_ := io.wakeupFromV2F.get)
+      println(s"[Region_fp] wakeupFromWB.size = ${wakeupFromWB.size}")
+      println(s"[Region_fp] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
+      println(s"[Region_fp] ${iq.param.getIQName}: iq.param.needWakeupFromFpWBPort = ${iq.param.needWakeupFromFpWBPort.map(x => (x._1, x._2.map(_.name)))}")
     }
   }
   else if (params.isVecSchd) {
-    val wakeupFromWB = io.fromVfWb ++ io.fromV0Wb ++ io.fromVlWb
-    val wakeupFromWBDelayedVf = RegNext(io.fromVfWb)
-    val wakeupFromWBDelayedV0 = RegNext(io.fromV0Wb)
-    val wakeupFromWBDelayedVl = RegNext(io.fromVlWb)
+    val vfIdxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[VfWB]).head.port)
+    val v0Idxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[V0WB]).head.port)
+    println(s"[Region] vec write vf port = ${vfIdxes}")
+    println(s"[Region] vec write v0 port = ${v0Idxes}")
+    val wakeupFromVfWb = MixedVecInit(vfIdxes.map(x => io.fromVfWb(x)))
+    val wakeupFromV0Wb = MixedVecInit(v0Idxes.map(x => io.fromV0Wb(x)))
+    val wakeupFromVlWb = io.fromVlWb
+    val wakeupFromWB = wakeupFromVfWb ++ wakeupFromV0Wb ++ wakeupFromVlWb
+    val wakeupFromWBDelayedVf = RegNext(wakeupFromVfWb)
+    val wakeupFromWBDelayedV0 = RegNext(wakeupFromV0Wb)
+    val wakeupFromWBDelayedVl = RegNext(wakeupFromVlWb)
+    val wakeupFromWBDelayed = wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl
     issueQueues.map { case iq =>
+      val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
+      println(s"[Region_vec] vecExuIndices ${vecExuIndices}")
+      val vecWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
+      println(s"[Region_vec] vecWBIndices ${vecWBIndices}")
+      vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
+        connectWakeupWB(iq.io.wakeupFromWB(i), source1)
+        connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)  
+      }
+      iq.io.wakeupFromI2V.foreach(_ := io.wakeupFromI2V.get)
+      iq.io.wakeupFromI2V0.foreach(_ := io.wakeupFromI2V0.get)
+      iq.io.wakeupFromF2V.foreach(_ := io.wakeupFromF2V.get)
+      iq.io.wakeupFromF2V0.foreach(_ := io.wakeupFromF2V0.get)
       println(s"[Region_vec] wakeupFromWB.size = ${wakeupFromWB.size}")
       println(s"[Region_vec] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
       println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromVfWBPort = ${iq.param.needWakeupFromVfWBPort.map(x => (x._1, x._2.map(_.name)))}")
-      iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
-      iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl).map(x => connectWakeupWB(x._1, x._2))
+      println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromV0WBPort = ${iq.param.needWakeupFromV0WBPort.map(x => (x._1, x._2.map(_.name)))}")
+      println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromVlWBPort = ${iq.param.needWakeupFromVlWBPort.map(x => (x._1, x._2.map(_.name)))}")
     }
   }
   // std dispatch
@@ -418,9 +443,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
     io.vlWriteBackInfoOut.vlFromIntIsZero := exuBlock.io.vlIsZero.get
     io.vlWriteBackInfoOut.vlFromIntIsVlmax := exuBlock.io.vlIsVlmax.get
-    io.I2FWakeupOut.get := exuBlock.io.I2FWakeupOut.get
-    io.I2FDataOut.get := exuBlock.io.I2FDataOut.get
+    io.I2FWakeupOut.get  := exuBlock.io.I2FWakeupOut.get
+    io.I2FDataOut.get    := exuBlock.io.I2FDataOut.get
+    io.I2VWakeupOut.get  := exuBlock.io.I2VWakeupOut.get
+    io.I2VDataOut.get    := exuBlock.io.I2VDataOut.get
+    io.I2V0WakeupOut.get := exuBlock.io.I2V0WakeupOut.get
+    io.I2V0DataOut.get   := exuBlock.io.I2V0DataOut.get
     exuBlock.io.F2IDataIn.get := io.F2IDataIn.get
+    exuBlock.io.V2IDataIn.get := io.V2IDataIn.get
     exuBlock.io.csrio.get <> io.csrio.get
     exuBlock.io.csrin.get := io.csrin.get
     println(s"[Region_int] wbDataPath.io.fromIntExu.size = ${wbDataPath.io.fromIntExu.size}")
@@ -543,9 +573,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     issueQueues.zipWithIndex.foreach { case (iq, i) =>
       iq.io.wbBusyTableRead := wbFuBusyTable.io.out.fpRespRead(i)
     }
-    io.F2IWakeupOut.get := exuBlock.io.F2IWakeupOut.get
-    io.F2IDataOut.get := exuBlock.io.F2IDataOut.get
+    io.F2IWakeupOut.get  := exuBlock.io.F2IWakeupOut.get
+    io.F2IDataOut.get    := exuBlock.io.F2IDataOut.get
+    io.F2VWakeupOut.get  := exuBlock.io.F2VWakeupOut.get
+    io.F2VDataOut.get    := exuBlock.io.F2VDataOut.get
+    io.F2V0WakeupOut.get := exuBlock.io.F2V0WakeupOut.get
+    io.F2V0DataOut.get   := exuBlock.io.F2V0DataOut.get
     exuBlock.io.I2FDataIn.get := io.I2FDataIn.get
+    exuBlock.io.V2FDataIn.get := io.V2FDataIn.get
     wbDataPath.io.fromFpExu.flatten.zip(exuBlock.io.out.flatten).map{ case (sink, source) =>
       sink.valid := source.valid
       sink.bits := source.bits
@@ -625,6 +660,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       iq.io.vlFromVfIsZero := io.vlWriteBackInfoIn.vlFromVfIsZero
       iq.io.vlFromVfIsVlmax := io.vlWriteBackInfoIn.vlFromVfIsVlmax
     }
+    io.V2IWakeupOut.get := exuBlock.io.V2IWakeupOut.get
+    io.V2IDataOut.get   := exuBlock.io.V2IDataOut.get
+    io.V2FWakeupOut.get := exuBlock.io.V2FWakeupOut.get
+    io.V2FDataOut.get   := exuBlock.io.V2FDataOut.get
+    exuBlock.io.I2VDataIn.get  := io.I2VDataIn.get
+    exuBlock.io.I2V0DataIn.get := io.I2V0DataIn.get
+    exuBlock.io.F2VDataIn.get  := io.F2VDataIn.get
+    exuBlock.io.F2V0DataIn.get := io.F2V0DataIn.get
     val og2Resp = issueQueues.map(_.io.og2Resp.get).flatten
     og2Resp.zip(og2ForVector.get.io.toVfIQOg2Resp.flatten).map{ case (sink, source) =>
       sink := source
@@ -831,12 +874,36 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeUpFromInt = Option.when(params.isFpSchd)(Flipped(intSchdParam.genIQWakeUpOutValidBundle))
   val wakeupFromI2F = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
+  val wakeupFromI2V = Option.when(params.isVecSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam))))
+  val wakeupFromI2V0 = Option.when(params.isVecSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam))))
+  val wakeupFromF2V  = Option.when(params.isVecSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam))))
+  val wakeupFromF2V0 = Option.when(params.isVecSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam))))
+  val wakeupFromV2I  = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam))))
+  val wakeupFromV2F  = Option.when(params.isFpSchd)( Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam))))
   val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
-  val I2FDataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
-  val I2FDataIn = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
   val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
+  val I2VWakeupOut  = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+  val I2V0WakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+  val F2VWakeupOut  = Option.when(params.isFpSchd)( ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+  val F2V0WakeupOut = Option.when(params.isFpSchd)( ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+  val V2IWakeupOut  = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam)))
+  val V2FWakeupOut  = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam)))
+  val I2FDataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
   val F2IDataOut = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
+  val I2VDataOut  = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
+  val I2V0DataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
+  val F2VDataOut  = Option.when(params.isFpSchd)( ValidIO(UInt(XLEN.W)))
+  val F2V0DataOut = Option.when(params.isFpSchd)( ValidIO(UInt(XLEN.W)))
+  val V2IDataOut  = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+  val V2FDataOut  = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+  val I2FDataIn = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
   val F2IDataIn = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val I2VDataIn  = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val I2V0DataIn = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2VDataIn  = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2V0DataIn = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val V2IDataIn  = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val V2FDataIn  = Option.when(params.isFpSchd)( Flipped(ValidIO(UInt(XLEN.W))))
   val toMemExu = Option.when(!params.isFpSchd)(params.genExuInputCopySrcBundleMemBlock)
   // fromMem
   val wakeupFromLDU = Option.when(params.isIntSchd)(Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle))))
@@ -870,8 +937,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val fromVfWb = Input(backendParams.genVfWriteBackBundle)
   val fromV0Wb = Input(backendParams.genV0WriteBackBundle)
   val fromVlWb = Input(backendParams.genVlWriteBackBundle)
-  val I2FWakeupIn = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
-  val F2IWakeupIn = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val og0Cancel = Output(ExuVec())
   val fenceio = Option.when(params.isIntSchd)(new FenceIO)
   val frm = Input(UInt(3.W))
