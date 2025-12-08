@@ -277,7 +277,7 @@ class ITTageTable(
     holdRead = true,
     singlePort = true,
     useBitmask = true,
-    withClockGate = true,
+    withClockGate = EnableClockGate,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl
   ))

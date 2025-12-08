@@ -501,7 +501,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       shouldReset = true,
       holdRead = false,
       singlePort = true,
-      withClockGate = true,
+      withClockGate = EnableClockGate,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
     ))

@@ -19,7 +19,7 @@ package top
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, DFTOptionsKey, XSTileKey}
+import xiangshan.{DFTOptionsKey, DebugOptionsKey, XSCoreParamsKey, XSTileKey}
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -48,6 +48,7 @@ object ArgParser {
       |--with-rollingdb
       |--disable-perf
       |--disable-alwaysdb
+      |--disable-clockgate
       |--enable-dfx
       |""".stripMargin
 
@@ -140,6 +141,10 @@ object ArgParser {
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+          }), tail)
+        case "--disable-clockgate" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(EnableClockGate = false))
           }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {

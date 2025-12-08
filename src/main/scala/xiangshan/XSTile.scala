@@ -36,6 +36,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
+  println("XSTile clockgate: " + p(XSCoreParamsKey).EnableClockGate +" " + EnableClockGate)
   override def shouldBeInlined: Boolean = false
   val core = LazyModule(new XSCore())
   val l2top = LazyModule(new L2Top())

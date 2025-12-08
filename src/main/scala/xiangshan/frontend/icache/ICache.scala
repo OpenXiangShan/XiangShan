@@ -278,7 +278,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true,
+      withClockGate = EnableClockGate,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
     ))
@@ -802,7 +802,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 //      shouldReset = true,
 //      holdRead = true,
 //      singlePort = true,
-//      withClockGate = true
+//      withClockGate = EnableClockGate
 //    ))
 //
 //    sramBank.io.r.req.valid := io.read.req(bank).valid

@@ -69,6 +69,7 @@ class ExeUnitImp(
   })
 
   if (EnableClockGate) {
+    println("!!!!!!!!! Exeunit clockgate not disable")
     fuCfgs.zip(funcUnits).foreach { case (cfg, fu) =>
       val clk_en = WireInit(false.B)
       val fuVld_en = WireInit(false.B)

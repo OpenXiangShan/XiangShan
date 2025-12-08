@@ -175,7 +175,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       shouldReset = false,
       singlePort = true,
       holdRead = true,
-      withClockGate = true,
+      withClockGate = EnableClockGate,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
     )
@@ -351,7 +351,7 @@ class TageTable(
     extraReset = true,
     holdRead = true,
     singlePort = true,
-    withClockGate = true,
+    withClockGate = EnableClockGate,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl
   ))
@@ -366,7 +366,7 @@ class TageTable(
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true,
+      withClockGate = EnableClockGate,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl
     ))
