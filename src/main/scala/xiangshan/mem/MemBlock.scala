@@ -2001,7 +2001,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
     x.externalInterrupt.nmi.nmi_31 := outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0)
     x.externalInterrupt.nmi.nmi_43 := outer.nmi_int_sink.in.head._1(1)
-    x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
+    x.msiInfo           := io.fromTopToBackend.msiInfo
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
   }
 
