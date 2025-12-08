@@ -110,7 +110,9 @@ trait MachineLevel { self: NewCSR =>
     }
 
     // 14~63 read only 0
-    regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).filterNot(_.lsb == InterruptNO.ASNI).foreach(_ := 0.U)
+    regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).foreach(_ := 0.U)
+    reg.LC48IE := Mux(wen, wdata.LC48IE, reg.LC48IE)
+    regOut.LC48IE := reg.LC48IE
   }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))

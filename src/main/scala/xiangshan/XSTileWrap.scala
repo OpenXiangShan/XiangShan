@@ -78,8 +78,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
-      val teemsiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
-      val teemsiAck = Output(Bool())
+      val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+      val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -124,14 +124,18 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
 
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := io.msiInfo
-    tile.module.io.teemsiInfo := io.teemsiInfo
+    tile.module.io.teemsiInfo zip io.teemsiInfo foreach { case (tile_teemsiInfo, io_teemsiInfo) =>
+      tile_teemsiInfo := io_teemsiInfo
+    }
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.msiAck := tile.module.io.msiAck
-    io.teemsiAck := tile.module.io.teemsiAck
+    io.teemsiAck zip tile.module.io.teemsiAck foreach { case (io_teemsiAck, tile_teemsiAck) =>
+      io_teemsiAck := tile_teemsiAck
+    }
     io.hartIsInReset := tile.module.io.hartIsInReset
     io.traceCoreInterface <> tile.module.io.traceCoreInterface
     io.debugTopDown <> tile.module.io.debugTopDown
@@ -183,7 +187,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
-    dontTouch(io.teemsiInfo)
+    io.teemsiInfo.foreach(dontTouch(_))
     io.pwrdown_req_n.foreach(dontTouch(_))
     io.pwrdown_ack_n.foreach(dontTouch(_))
     io.iso_en.foreach(dontTouch(_))

@@ -35,6 +35,7 @@ import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 import xiangshan.backend.trace._
 import freechips.rocketchip.rocket.CSRs
+import system.HasSoCParameter
 
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
@@ -83,7 +84,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class CSRFileIO(implicit p: Parameters) extends XSBundle {
+class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
@@ -120,7 +121,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val instrAddrTransType = Output(new AddrTransType)
   // ack for axireg from imsic. which indicates imsic can work actively
   val msiAck = Output(Bool())
-  val teemsiAck = Output(Bool())
+  val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {

@@ -231,10 +231,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.csrio.get.msiAck := imsic.msiio.vld_ack
 
   imsic.teemsiio.foreach { teemsiio =>
-    teemsiio.vld_req := io.csrin.get.teemsiInfo.valid
-    teemsiio.data := io.csrin.get.teemsiInfo.bits
-    io.csrio.get.teemsiAck := teemsiio.vld_ack
+    teemsiio.vld_req := io.csrin.get.teemsiInfo.get.valid
+    teemsiio.data := io.csrin.get.teemsiInfo.get.bits
+    io.csrio.get.teemsiAck.get := teemsiio.vld_ack
   }
+  csrMod.fromAIA.notice_pending := false.B
   imsic.sec.foreach { imsicsec =>
     imsicsec.cmode := csrMod.io.tlb.mbmc.CMODE.asBool
     csrMod.fromAIA.notice_pending := imsicsec.notice_pending
@@ -389,7 +390,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
-  val teemsiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+  val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val l2FlushDone = Input(Bool())

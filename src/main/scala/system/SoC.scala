@@ -107,8 +107,8 @@ case class SoCParameters
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
-    mAddr = 0x30800000,
-    sgAddr = 0x40000000,
+    mAddr = 0x40000000,
+    sgAddr = 0x30000000,
     geilen = 5,
     vgeinWidth = 6,
     iselectWidth = 12,

@@ -186,14 +186,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
-      val teemsiInfo = new Bundle() {
+      val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(new Bundle() {
         val fromTile = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
         val toCore = Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
-      }
-      val teemsiAck = new Bundle {
+      })
+      val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(new Bundle {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
-      }
+      })
       val cpu_halt = new Bundle() {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
@@ -254,11 +254,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
     io.msiInfo.toCore := io.msiInfo.fromTile
-    io.teemsiInfo.toCore := io.teemsiInfo.fromTile
+    io.teemsiInfo.foreach( teemsiInfo => teemsiInfo.toCore := teemsiInfo.fromTile)
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     io.msiAck.toTile := io.msiAck.fromCore
-    io.teemsiAck.toTile := io.teemsiAck.fromCore
+    io.teemsiAck.foreach( teemsiAck => teemsiAck.toTile := teemsiAck.fromCore)
     io.l3Miss.toCore := io.l3Miss.fromTile
     io.clintTime.toCore := io.clintTime.fromTile
     // trace interface
