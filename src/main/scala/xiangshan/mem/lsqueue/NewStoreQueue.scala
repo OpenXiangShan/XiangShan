@@ -216,6 +216,20 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
     })
 
+    /**
+     * @param in The select vector
+     * @return (result, multiHit)
+     *
+     *         result: The one-hot vec of first true.
+     *
+     *         multiHit: select vector is not one-hot.
+     * @example
+     *         in: b00010100
+     *         -> lowHasOne: b11111000 => (result, multiHit): (b00000100, true.B)
+     *
+     *         in: b00000010
+     *         -> lowHasOne: b11111100 => (result, multiHit): (b00000010, false.B)
+     * */
     def findYoungest(in: UInt): (UInt, Bool) = {
       val lowHasOne = VecInit(Seq.fill(in.getWidth)(false.B))
       for (i <- 1 until in.getWidth) {
@@ -226,23 +240,33 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     /**
-     * load forward query
+     * [Load Forward Query]
      *
-     * Check store queue for instructions that is older than the load.
-     * The response will be valid at the next 2 cycle after req.
+     * Checks Store Queue for older stores that can forward data to the load.
+     * Response becomes valid 2 cycles after request.
+     *
+     * Pipeline Overview:
+     *   Stage 0: Prepare masks and address ranges
+     *   Stage 1: Match stores and select youngest valid candidate
+     *   Stage 2: Generate forwarded data and mask
+     *
+     * +----------+     +----------+     +----------+
+     * | Stage 0  | --> | Stage 1  | --> | Stage 2  |
+     * | (Cycle 0)|     | (Cycle 1)|     | (Cycle 2)|
+     * +----------+     +----------+     +----------+
      */
     for (i <- 0 until LoadPipelineWidth) {
-      /**
-       * Stage 0:
-       *        1. generate load sqIdx mask
-       *        2. generate load byte start and byte end
-       *        3. compare byte start and byte end to judge whether have address overlap
-       * Stage 1:
-       *        1. match paddr and vaddr
-       *        2. select youngest entry to forward
-       * Stage 2:
-       *        select data byte
-       * */
+      // Stage breakdown:
+      //   Stage 0:
+      //     1. Generate load sqIdx mask
+      //     2. Calculate byte start/end for load
+      //   Stage 1:
+      //     1. Match physical/virtual addresses
+      //     2. Check byte range overlap
+      //     3. Select youngest matching store
+      //   Stage 2:
+      //     1. Extract correct bytes from store data
+      //     2. Generate final forwarded data and mask
 
       // vector store will consider all inactive || secondInvalid flows as valid
       val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
@@ -253,12 +277,38 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         io.ctrlEntriesIn(j).allValid)))
 
       /*================================================== Stage 0 ===================================================*/
-      // Compare deqPtr (deqPtr) and forward.sqIdx, we have two cases:
-      // (1) if they have the same flag, we need to check range(tail, sqIdx)
-      // (2) if they have different flags, we need to check range(tail, VirtualLoadQueueSize) and range(0, sqIdx)
-      // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, VirtualLoadQueueSize))
-      // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
-      // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
+      // Circular Queue Handling:
+      //   Store Queue is circular (like a ring buffer). When deqPtr and sqIdx wrap around,
+      //   we need to check two segments:
+      //
+      //   Case 1: same flag (no wrap)
+      //              sqIdx            deqPtr
+      //               |                |
+      //               v                v
+      //     +-----+-----+-----+-----+-----+-----+-----+-----+
+      //     |  7  |  6  |  5  |  4  |  3  |  2  |  1  |  0  |
+      //     +-----+-----+-----+-----+-----+-----+-----+-----+
+      //               ^^^^^^^^^^^^^^^^
+      //               deqPtr -> sqIdx (one segment)
+      //
+      //   Case 2: different flags (wrap around)
+      //             deqPtr           sqIdx
+      //               |                |
+      //               v                v
+      //     +-----+-----+-----+-----+-----+-----+-----+-----+
+      //     |  7  |  6  |  5  |  4  |  3  |  2  |  1  |  0  |
+      //     +-----+-----+-----+-----+-----+-----+-----+-----+
+      //     ^^^^^^^^^                   ^^^^^^^^^^^^^^^^^^^
+      //     end <- deqPtr        +      sqIdx <- 0
+      //
+      //   Implementation:
+      //     ageMaskLow  = deqMask & forwardMask & differentFlag
+      //     ageMaskHigh = ~deqMask & (differentFlag | forwardMask)
+      //
+      // Example: SQ size=8, deqPtr=6 (flag=0), sqIdx=3 (flag=1)
+      //   differentFlag = true
+      //   ageMaskLow  = 0b00001111 (bits 0-3)
+      //   ageMaskHigh = 0b11000000 (bits 6-7)
 
       val s0Valid          = io.query(i).req.lduStage0ToSq.valid
       val deqMask          = UIntToMask(io.ctrlInfo.deqPtr.value, StoreQueueSize)
@@ -279,12 +329,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
           io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === io.query(i).req.lduStage0ToSq.bits.uop.ssid)))
       )
 
-      /**
-       *  ageMaskLow:
-       *
-       *  ageMaskHigh:
-       *
-       * */
       val ageMaskLow     = deqMask & forwardMask & VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt
       val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
 
@@ -301,29 +345,51 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
 
       /*================================================== Stage 1 ===================================================*/
+      // Matching Process:
+      //
+      //   Step 1: Virtual Address Match (high bits only)
+      //     +-------+-----------------+--------+
+      //     | Store | vaddr (high)    |  size  |
+      //     +-------+-----------------+--------+
+      //     |   0   | 0x100 (0x1000)  |   4B   |
+      //     |   1   | 0x100 (0x1004)  |   2B   |
+      //     |   2   | 0x200 (0x2000)  |   4B   |
+      //     |   3   | 0x100 (0x1002)  |   4B   |
+      //     +-------+-----------------+--------+
+      //     Load vaddr = 0x1003 -> high=0x100 -> matches stores 0 and 3
+      //
+      //   Step 2: Byte Overlap Check
+      //     Store 0: [0,3] vs Load [3,3] -> overlap (0<=3<=3)
+      //     Store 3: [2,5] vs Load [3,3] -> overlap (2<=3<=5)
+      //
+      //   Step 3: Select Youngest Valid Store
+      //     canForward = ageMask & overlap & vaddrMatch
+      //     Example: canForward = 0b1001 (stores 0 and 3 match)
+      //     findYoungest(Reverse(0b1001)) -> selects store 3 (index 3)
 
       val s1QueryPaddr = io.query(i).req.lduStage1ToSq.paddr(PAddrBits - 1, log2Ceil(VLENB))
       // prevent X-state
+      // Virtual address match (high bits only, ignore byte offset)
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB)) === s1LoadVaddr) && ctrlEntry.addrValid
       }).asUInt
 
+      // Byte overlap check: store covers any part of load's range
+      //   Example: store [2,5] and load [3,3] -> overlap (2<=3 && 5>=3)
       val s1OverlapMask  = VecInit((0 until StoreQueueSize).map(j =>
         io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart
       )).asUInt
 
       XSError(loadEnd < loadStart, "ByteStart > ByteEnd!\n")
 
-      // new select
-      /**
-       * if canFoewardLow not zero, means High is not youngest
-       * */
-
+      // Two-step selection to handle circular queue segments
       val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
       val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
         vaddrMatchVec
 
       // find youngest entry, which is one-hot
+      // Find youngest store (highest index = most recent)
+      //   Reverse vector so we can find leftmost 1 (highest index)
       val (maskLowOH, multiMatchLow)   = findYoungest(Reverse(canForwardLow))
       val (maskHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
       val selectOH                     = Reverse(maskLowOH | maskHighOH) // index higher, mean it younger
@@ -372,6 +438,23 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
       XSError(selectOH.orR && !selectCtrlEntry.allocated, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
+
+      // Data Generation Process:
+      //     Original Store Data (byteStart=1, size=4B):
+      //     +--------+--------+--------+--------+
+      //     | 0x88   | 0x77   | 0x66   | 0x55   |  <- Memory (LE)
+      //     +--------+--------+--------+--------+
+      //       0x1004   0x1003   0x1002   0x1001
+      //                                  ^^^^^^
+      //                                    Store starts here
+      //
+      //
+      //   Load at s2ByteSelectOffset=2 (loadStart=3, loadSize=1B):
+      //     +--------+--------+--------+--------+
+      //     | 0x66   | 0x55   | 0x88   | 0x77   |  <- MerotateByteRight && ParallelLookUp
+      //     +--------+--------+--------+--------+
+      //                                  ^^^^
+      //                                  Load needs this byte (0x77)
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
       val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB)) =/= s2LoadPaddr) && s2Valid
@@ -504,6 +587,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }.reduce(_ || _)
     }
 
+    /**
+     * Update allocation status for each queue slot:
+     *   - Enqueue sets allocated = true (higher priority)
+     *   - Dequeue sets allocated = false (lower priority)
+     *
+     * Priority: Enqueue > Dequeue (allows same-cycle reuse)
+     */
     (0 until queueSize).map{i =>
       val deqCancel = deqPtrVec.zipWithIndex.map{case (ptr, j) =>
         ptr.value === i.U && io.toSbuffer.req(j).fire
@@ -811,7 +901,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.exceptionInfo.bits.isHyper      := false.B
 
     /*============================================ cacheable handle ==================================================*/
-    /*
+    /**
     * This section has three functions:
     * [1]. All aligned requestor will write to Sbuffer
     * [2]. All unaligned requestor will be splited, then write to Sbuffer
