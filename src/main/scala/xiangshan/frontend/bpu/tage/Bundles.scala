@@ -70,7 +70,7 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val forIdx: UInt = UInt(NumSets.W)
+  val forIdx: UInt = UInt(SetIdxWidth.W)
   val forTag: UInt = UInt(TagWidth.W)
 }
 
