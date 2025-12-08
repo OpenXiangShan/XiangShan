@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-
+import xiangshan.DebugOptionsKey
 
 class TraceUnpackageBufferPtr(entries: Int) extends CircularQueuePtr[TraceUnpackageBufferPtr](entries) with HasCircularQueuePtrHelper
 
@@ -75,8 +75,10 @@ class TraceAXISUnpackage(PACKET_INST_NUM: Int, AXIS_DATA_WIDTH: Int, DUT_BUS_INS
   when (axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U)) {
     assert(io.axis.tlast, "ERROR in TraceAXISUnpackage, last cycle but tlast is false")
   }
-  XSPerfAccumulate("AXIS_CountFinishAndLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && io.axis.tlast)
-  XSPerfAccumulate("AXIS_CountFinishNotLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && !io.axis.tlast)
+  if (!p(DebugOptionsKey).FPGAPlatform) {
+    XSPerfAccumulate("AXIS_CountFinishAndLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && io.axis.tlast)
+    XSPerfAccumulate("AXIS_CountFinishNotLast", axis_fire && (axis_cycle_index === (PACKET_CYCLE_NUM-1).U) && !io.axis.tlast)
+  }
 
   // tranfer to core
   require(PACKET_INST_NUM % DUT_BUS_INST_NUM == 0, s"ERROR in TraceAXISUnpackage, PACKET_INST_NUM $PACKET_INST_NUM should be times of DUT_BUS_INST_NUM $DUT_BUS_INST_NUM")

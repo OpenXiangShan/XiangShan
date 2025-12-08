@@ -21,6 +21,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import circt.stage.ChiselStage
 import xiangshan.frontend.tracertl.{TraceAXISPackage, TraceAXISUnpackage}
 import xiangshan.frontend.tracertl.TraceRTLParamKey
+import xiangshan.DebugOptionsKey
 import top.ArgParser
 
 // used to generated TraceAXISUnpackage.sv and *Package.sv without SimTop
@@ -38,7 +39,10 @@ object TraceRTLAXISModGen extends App {
     ),
     Seq(ChiselGeneratorAnnotation(() => new TraceAXISPackage(
       trtlOpts.TraceFpgaCollectWidth,
-      trtlOpts.TraceFpgaAxisWidth)(config)))
+      trtlOpts.TraceFpgaAxisWidth
+    )(config.alter((site, here, up) => {
+      case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+    }))))
   )
 
   println(s"Successfully generated TraceAXISPackage.sv in $targetDir")
@@ -52,7 +56,9 @@ object TraceRTLAXISModGen extends App {
       trtlOpts.TraceFpgaUnpackInstNum,
       trtlOpts.TraceFpgaAxisWidth,
       trtlOpts.TraceFpgaRecvWidth
-    )(config)))
+    )(config.alter((site, here, up) => {
+      case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+    }))))
   )
 
   println(s"Successfully generated TraceAXISUpackage.sv in $targetDir")

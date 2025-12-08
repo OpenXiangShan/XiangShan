@@ -20,6 +20,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import xiangshan.DebugOptionsKey
 
 class TraceCollectQueuePtr(entries: Int) extends CircularQueuePtr[TraceCollectQueuePtr](entries)
   with HasCircularQueuePtrHelper
@@ -54,7 +55,9 @@ class TraceFPGACollectQueue(CommitCheckWidth: Int = 128)(implicit p: Parameters)
     }
     writePtr := writePtr + PopCount(io.in.bits.map(_.valid))
   }
-  XSError(io.in.valid && !io.in.ready, s"TraceFPGACollectQueue: Queue Full")
+  if (!p(DebugOptionsKey).FPGAPlatform) {
+    XSError(io.in.valid && !io.in.ready, s"TraceFPGACollectQueue: Queue Full")
+  }
   // XSError(io.in.fire && io.in.bits(i).valid && io.in.bits.map(_.valid).take(i).foldLeft(false.B)(!_ || !_), s"Error in TraceFPGACollectBundle: port ${i} valid but older invalid ports")
 
   // output to XSTop by BoringUtil.addSink and addSource
