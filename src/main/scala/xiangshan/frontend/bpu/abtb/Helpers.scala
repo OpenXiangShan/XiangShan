@@ -16,24 +16,38 @@
 package xiangshan.frontend.bpu.abtb
 
 import chisel3._
+import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
+  val addrFields = AddrField(
+    Seq(
+      ("instOffset", instOffsetBits),
+      ("bankIdx", BankIdxWidth),
+      ("setIdx", SetIdxWidth)
+    ),
+    maxWidth = Option(VAddrBits),
+    extraFields = Seq(
+      ("tag", instOffsetBits, TagWidth),
+      ("targetLower", instOffsetBits, TargetLowerBitsWidth)
+    )
+  )
+
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIdxWidth + BankIdxWidth + instOffsetBits - 1, BankIdxWidth + instOffsetBits)
+    addrFields.extract("setIdx", pc)
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    pc(BankIdxWidth + instOffsetBits - 1, instOffsetBits)
+    addrFields.extract("bankIdx", pc)
 
   def getTag(pc: PrunedAddr): UInt =
-    pc(TagWidth + instOffsetBits - 1, instOffsetBits)
+    addrFields.extract("tag", pc)
 
   def getTargetUpper(pc: PrunedAddr): UInt =
-    pc(pc.length - 1, TargetLowerBitsWidth + instOffsetBits)
+    pc(pc.length - 1, addrFields.getEnd("targetLower") + 1)
 
   def getTargetLowerBits(target: PrunedAddr): UInt =
-    target(TargetLowerBitsWidth + instOffsetBits - 1, instOffsetBits)
+    addrFields.extract("targetLower", target)
 
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): (Bool, UInt) = {
     require(hitMask.length == position.length)

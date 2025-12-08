@@ -35,6 +35,13 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
 
+  println(f"MicroBtb:")
+  println(f"  Size(full-assoc): $NumEntries")
+  println(f"  Use fast-train: $UseFastTrain")
+  println(f"  Replacer: $Replacer")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
+
   io.resetDone := true.B
 
   io.train.ready := true.B

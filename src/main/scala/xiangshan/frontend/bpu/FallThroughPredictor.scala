@@ -62,7 +62,7 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   // 0xff0 |   0x1030  |    true   |  0x1000  | 0xffe | 0x07 // (0xffe-0xff0) >> 1
 
   // fall-through pc = startPc + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
-  private val s1_nextBlockAlignedPc = getAlignedPc(s1_startPc + FetchBlockSize.U)
+  private val s1_nextBlockAlignedPc = getAlignedPc(s1_startPc, next = 1)
 
   // if cross page, we need to align fallThroughPc to the next page
   private val s1_crossPage         = isCrossPage(s1_startPc, s1_nextBlockAlignedPc) // compare LSB of Vpn
