@@ -997,7 +997,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
   val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
-  // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
+  // logger.info(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
   // NOTE: vs is used for different usage:
   // for l0, which store the leaf(leaves), vs is page fault or not.
   // for l1, which shoule not store leaf, vs is valid or not, that will anticipate in hit check

@@ -204,7 +204,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   with HasUncacheBufferParameters
   with HasPerfEvents
 {
-  println(s"Uncahe Buffer Size: $UncacheBufferSize entries")
+  logger.info(s"Uncahe Buffer Size: $UncacheBufferSize entries")
   val io = IO(new UncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
