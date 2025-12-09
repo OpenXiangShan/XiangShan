@@ -75,7 +75,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.inner.l2cache match {
     case Some(l2) =>
       l2.pf_recv_node.foreach(recv => {
-        println("Connecting L1 prefetcher to L2!")
+        logger.info("Connecting L1 prefetcher to L2!")
         recv := memBlock.l2_pf_sender_opt.get
       })
     case None =>

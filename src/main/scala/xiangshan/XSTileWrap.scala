@@ -57,8 +57,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   beuIntNode := IntBuffer() := tile.beu_int_source
 
   // seperate TL bus
-  println(s"SeperateBus = $SeperateBus")
-  println(s"EnableSeperateBusAsync = $EnableSeperateBusAsync")
+  logger.info(s"SeperateBus = $SeperateBus")
+  logger.info(s"EnableSeperateBusAsync = $EnableSeperateBusAsync")
   val tlXbar = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLXbar())
   tlXbar.map(_ := tile.sep_tl_opt.get) // TLXbar node in connect with tile master
   timer.map(_.node := tlXbar.get) // TLXbar node out connnect with timer mmio

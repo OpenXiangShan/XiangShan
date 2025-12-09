@@ -107,7 +107,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
   val beu_local_int_source_buffer = IntBuffer()
 
-  println(s"enableCHI: ${enableCHI}")
+  logger.info(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
@@ -321,7 +321,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val allPerfEvents = l2.getPerfEvents
       if (printEventCoding) {
         for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-          println("L2 Cache perfEvents Set", name, inc, i)
+          logger.info(s"L2 Cache perfEvents Set ${name} ${inc} ${i}")
         }
       }
 

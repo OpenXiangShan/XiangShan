@@ -23,6 +23,7 @@ import chisel3.util._
 import coupledL2.PrefetchCtrlFromCore
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import com.typesafe.scalalogging.LazyLogging
 import system.HasSoCParameter
 import utils._
 import utility._
@@ -43,10 +44,10 @@ abstract class XSModule(implicit val p: Parameters) extends Module
   with HasFPUParameters
 
 //remove this trait after impl module logic
-trait NeedImpl {
+trait NeedImpl extends LazyLogging {
   this: RawModule =>
   protected def IO[T <: Data](iodef: T): T = {
-    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
+    logger.warn(s"(${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.IO(iodef)
     io <> DontCare
     io
@@ -121,7 +122,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   dontTouch(io.l2_flush_en)
   dontTouch(io.power_down_en)
 
-  println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  logger.info(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
   val frontend = outer.frontend.module
   val backend = outer.backend.module
