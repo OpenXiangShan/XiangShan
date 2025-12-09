@@ -576,16 +576,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
   val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx)
-  println(f"TLB Size:")
-  println(f"  size = $DTlbSize = ${TlbSubSizeVec}")
-  println(f"TLB Index Vec:")
-  println(f"  TlbStartVec = ${TlbStartVec}")
-  println(f"  TlbEndVec = ${TlbEndVec}")
-  println(f"TLB for Prefetcher:")
+  logger.info(f"TLB Size:")
+  logger.info(f"  size = $DTlbSize = ${TlbSubSizeVec}")
+  logger.info(f"TLB Index Vec:")
+  logger.info(f"  TlbStartVec = ${TlbStartVec}")
+  logger.info(f"  TlbEndVec = ${TlbEndVec}")
+  logger.info(f"TLB for Prefetcher:")
   prefetcherSeq zip pf2tlbIndexMap foreach { case (pf, idx) =>
-    println(f"  TLB #$idx%-2d => ${pf.name}")
+    logger.info(f"  TLB #$idx%-2d => ${pf.name}")
   }
-  println(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
+  logger.info(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
 
   // dtlb instantiation
   val dtlb_ld_tlb_ld = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_ld_idx), 2, ldtlbParams))
@@ -1824,7 +1824,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("MemBlock perfEvents Set", name, inc, i)
+      logger.info(s"MemBlock perfEvents Set $name $inc $i")
     }
   }
 

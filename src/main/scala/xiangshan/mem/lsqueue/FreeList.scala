@@ -38,7 +38,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     val empty = Output(Bool())
   })
 
-  println(s"FreeList: $moduleName, size " + size)
+  logger.info(s"$moduleName size: $size")
 
   val freeList = RegInit(VecInit(
     // originally {0, 1, ..., size - 1} are free.

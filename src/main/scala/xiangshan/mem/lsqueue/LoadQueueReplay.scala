@@ -215,7 +215,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val debugTopDown = new LoadQueueTopDownIO
   })
 
-  println("LoadQueueReplay size: " + LoadQueueReplaySize)
+  logger.info(s"Size: $LoadQueueReplaySize")
   //  LoadQueueReplay field:
   //  +-----------+---------+-------+-------------+--------+
   //  | Allocated | MicroOp | VAddr |    Cause    |  Flags |
