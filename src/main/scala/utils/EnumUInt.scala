@@ -2,6 +2,7 @@ package utils
 
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 
 /**
  * Used to define enum values (e.g. finite state machine states)
@@ -98,7 +99,7 @@ abstract class EnumUInt(
       } else {
         log2Up(n)
       }
-    ) {
+    ) with LazyLogging {
 
   private var names     = Seq[String]()
   private var values    = Seq[UInt]()
@@ -147,8 +148,8 @@ abstract class EnumUInt(
       // warn if there are methods seems to be constants but not UpperCamelCase before throw AssertionError
       val methodsNotUpperCamelCase = methodsAll.diff(methods)
       methodsNotUpperCamelCase.foreach { method =>
-        println(
-          s"[Warn]: EnumUInt ${this.getClass.getName} seems has constants definition '${method.getName}' " +
+        logger.warn(
+          s"${this.getClass.getName} seems has constants definition '${method.getName}' " +
             s"that is not UpperCamelCase, Do you mean '${method.getName.capitalize}'?"
         )
       }
@@ -160,7 +161,7 @@ abstract class EnumUInt(
     }
 
     // pass!
-    println(s"EnumUInt ${this.getClass.getName} validated: ${this.getValuesString}")
+    logger.debug(s"EnumUInt ${this.getClass.getName} validated: ${this.getValuesString}")
   }
 
   /** Check or generate assertion for unsafe inputs

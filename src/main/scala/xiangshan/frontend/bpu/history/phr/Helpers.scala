@@ -36,20 +36,20 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
   // do xors for several bitsets at specified bits
   def bitsetsXor(info: FoldedHistoryInfo, bitsets: Seq[Seq[(Int, Bool)]]): UInt = {
     val res = Wire(Vec(info.FoldedLength, Bool()))
-    // println(f"num bitsets: ${bitsets.length}")
-    // println(f"bitsets $bitsets")
+    // logger.debug(f"num bitsets: ${bitsets.length}")
+    // logger.debug(f"bitsets $bitsets")
     val resArr = Array.fill(info.FoldedLength)(List[Bool]())
     for (bs <- bitsets) {
       for ((n, b) <- bs) {
         resArr(n) = b :: resArr(n)
       }
     }
-    // println(f"${resArr.mkString}")
-    // println(f"histLen: ${this.len}, foldedLen: $folded_len")
+    // logger.debug(f"${resArr.mkString}")
+    // logger.debug(f"histLen: ${this.len}, foldedLen: $folded_len")
     for (i <- 0 until info.FoldedLength) {
-      // println(f"bit[$i], ${resArr(i).mkString}")
+      // logger.debug(f"bit[$i], ${resArr(i).mkString}")
       if (resArr(i).isEmpty) {
-        println(f"[error] bits $i is not assigned in folded hist update logic! $info")
+        logger.error(f"bits $i is not assigned in folded hist update logic! $info")
       }
       res(i) := resArr(i).foldLeft(false.B)(_ ^ _)
     }

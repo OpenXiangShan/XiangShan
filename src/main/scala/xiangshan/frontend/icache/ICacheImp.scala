@@ -38,7 +38,9 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToICacheIO
 
-class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
+class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
+    with HasICacheParameters
+    with HasPerfEvents {
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
     // FTQ
@@ -67,20 +69,21 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val io: ICacheIO = IO(new ICacheIO)
 
-  println("ICache:")
-  println(s"  Size(set * way * block): $nSets * $nWays * $blockBytes = ${nSets * nWays * blockBytes} bytes")
-  println(s"  Replacer: $Replacer")
-  println(s"  Mshr(fetch, prefetch): $NumFetchMshr, $NumPrefetchMshr entries")
-  println(s"  WayLookupSize: $WayLookupSize entries")
-  println(s"  DataBanks: $DataBanks banks")
-  println(s"  DataEccUnit: $DataEccUnit bits")
-  println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
-  println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
-  println(s"  AliasTagBits: $AliasTagBits")
-  println(s"  CtrlUnit:")
-  println(s"    Enabled: $EnableCtrlUnit")
-  println(s"    Address: ${icacheParameters.ctrlUnitParameters.Address}")
-  println(s"  Address fields:")
+  logger.info(s"Size(set * way * block): $nSets * $nWays * $blockBytes = ${nSets * nWays * blockBytes} bytes")
+  logger.info(s"Replacer: $Replacer")
+  logger.info(s"Mshr(fetch, prefetch): $NumFetchMshr, $NumPrefetchMshr entries")
+  logger.info(s"WayLookupSize: $WayLookupSize entries")
+  logger.info(s"DataBanks: $DataBanks banks")
+  logger.info(s"DataEccUnit: $DataEccUnit bits")
+  logger.info(
+    s"DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth"
+  )
+  logger.info(s"Ecc(meta, data): $MetaEcc, $DataEcc")
+  logger.info(s"AliasTagBits: $AliasTagBits")
+  logger.info(s"CtrlUnit:")
+  logger.info(s"  Enabled: $EnableCtrlUnit")
+  logger.info(s"  Address: ${icacheParameters.ctrlUnitParameters.Address}")
+  logger.info(s"Address fields:")
   AddrField(
     Seq(
       ("bankOffset", rowOffBits),
@@ -94,7 +97,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
       ("blockOffset", 0, blockOffBits),
       ("blockPAddr", blockOffBits, PAddrBits - blockOffBits)
     ) ++ AliasTagBits.map(w => ("aliasTag", pgIdxBits, w))
-  ).show(indent = 4)
+  ).format(indent = 2).foreach(logger.info(_)) // cannot remove this "(_)" due to macro expansion
 
   val (bus, edge) = outer.clientNode.out.head
 

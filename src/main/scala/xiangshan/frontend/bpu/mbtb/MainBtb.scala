@@ -35,10 +35,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   val io: MainBtbIO = IO(new MainBtbIO)
 
   // print params
-  println(f"MainBtb:")
-  println(f"  Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = $NumEntries")
-  println(f"  Address fields:")
-  addrFields.show(indent = 4)
+  logger.info(f"Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = $NumEntries")
+  logger.info(f"Address fields:")
+  addrFields.format(indent = 2).foreach(logger.info(_)) // cannot remove this "(_)" due to macro expansion
 
   /* *** submodules *** */
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))

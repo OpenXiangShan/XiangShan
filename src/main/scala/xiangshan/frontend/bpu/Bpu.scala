@@ -133,7 +133,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_prediction = Wire(new Prediction)
 
   private val s3_meta = Wire(new BpuMeta)
-  println("bpu meta width: " + s3_meta.getWidth)
+  logger.debug("bpu meta width: " + s3_meta.getWidth)
 
   private val debug_bpId = RegInit(0.U(XLEN.W))
 
