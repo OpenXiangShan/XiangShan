@@ -114,7 +114,7 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
         (oldestBitPosInFolded(i), oldestBitsMasked(i))
       )
 
-      // println(f"old bits pos ${oldestBitsSet.map(_._1)}")
+      // logger.debug(f"old bits pos ${oldestBitsSet.map(_._1)}")
 
       // only the last bit could be 1, as we have at most one taken branch at a time
       val newestBitsMasked = shiftBits
@@ -122,7 +122,7 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
       // if a bit does not wrap around, newest bits should not be xored onto it either
       val newestBitsSet = (0 until maxUpdateNum).map(i => (info.FoldedLength - 1 - i, newestBitsMasked(num - i - 1)))
 
-      // println(f"new bits set ${newestBitsSet.map(_._1)}")
+      // logger.debug(f"new bits set ${newestBitsSet.map(_._1)}")
       //
       val originalBitsMasked = VecInit(foldedHist.asBools.zipWithIndex.map {
         case (fb, i) => fb && !(num >= (info.HistoryLength - i)).B
