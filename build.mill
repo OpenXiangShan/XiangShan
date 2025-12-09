@@ -50,6 +50,14 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
   }
 }
 
+trait HasLogging extends SbtModule {
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"com.typesafe.scala-logging::scala-logging:3.9.5",
+    ivy"ch.qos.logback:logback-classic:1.5.21",
+    ivy"org.fusesource.jansi:jansi:1.18",
+  )
+}
+
 object `rocket-chip` extends ChiselModule {
   object macros extends ScalaModule {
     def scalaVersion: T[String] = defaultScalaVersion
@@ -125,7 +133,7 @@ object macros extends ScalaModule {
   def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
 }
 
-object xiangshan extends ChiselModule {
+object xiangshan extends ChiselModule with HasLogging {
   def millSourcePath = pwd
 
   def moduleDeps = Seq(
@@ -148,7 +156,8 @@ object xiangshan extends ChiselModule {
 
   def forkArgs = Seq(
     s"-Xmx${sys.props.getOrElse("jvm-xmx", "40G")}",
-    s"-Xss${sys.props.getOrElse("jvm-xss", "256m")}"
+    s"-Xss${sys.props.getOrElse("jvm-xss", "256m")}",
+    s"-Dlogback.configurationFile=${resourcesPath}/logback.xml"
   )
 
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
