@@ -241,11 +241,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       else
         bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
     }.toSeq.transpose
-    println(params.exuBlockParams.map(_.name))
     val wakeupUncertainVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map { (bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       dontTouch(bundle.bits.is0Lat)
       val hasUncertain = params.backendParam.allExuParams(bundle.bits.exuIdx).needUncertainWakeup
-      println(s"${params.backendParam.allExuParams(bundle.bits.exuIdx).name}: hasUncertain: $hasUncertain")
       val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
       (VecInit(
         if (params.numRegSrc == 5) {
