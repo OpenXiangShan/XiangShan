@@ -752,10 +752,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // print perfEvents
   val allPerfEvents = hpmEvents.map(x => (s"Hc", x.value))
-  if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      logger.info(s"CSR perfEvents Set ${name} ${inc} ${i}")
-    }
+  for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+    logger.debug(s"CSR perfEvents[${i}] ${name}: ${inc}")
   }
 
   val csrevents = perfEvents.slice(24, 29)

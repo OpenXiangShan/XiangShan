@@ -151,7 +151,7 @@ case class ExeUnitParams(
         }
       }
     }
-    logger.info(s"exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
+    logger.debug(s"exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
     1 + setIQ.size / copyDistance
   }
   def rdPregIdxWidth: Int = {
@@ -195,7 +195,7 @@ case class ExeUnitParams(
       addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
       val latencyCertainFuConfigsAddJump = if (addJump) latencyCertainFuConfigs :+ JmpCfg else latencyCertainFuConfigs
-      logger.info(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
+      logger.debug(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
       latencyCertainFuConfigsAddJump.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
@@ -372,7 +372,7 @@ case class ExeUnitParams(
     val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
     val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet
     this.needLoadDependency = !(wakeUpByLoadNames & thisWakeUpByNames).isEmpty
-    logger.info(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
+    logger.debug(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
   }
 
   def updateExuIdx(idx: Int): Unit = {

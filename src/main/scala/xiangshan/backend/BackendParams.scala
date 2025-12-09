@@ -55,13 +55,13 @@ case class BackendParams(
     copyPdestInfo.contains(exuIdx)
   }
   def connectWakeup(exuIdx: Int): Unit = {
-    logger.info(s"copyPdestInfo ${copyPdestInfo}")
+    logger.trace(s"copyPdestInfo ${copyPdestInfo}")
     if (copyPdestInfo.contains(exuIdx)) {
-      logger.info(s"exuIdx ${exuIdx} be connected, old info ${copyPdestInfo(exuIdx)}")
+      logger.trace(s"exuIdx ${exuIdx} be connected, old info ${copyPdestInfo(exuIdx)}")
       val newInfo = exuIdx -> (copyPdestInfo(exuIdx)._1, copyPdestInfo(exuIdx)._2 + 1)
       copyPdestInfo.remove(exuIdx)
       copyPdestInfo += newInfo
-      logger.info(s"exuIdx ${exuIdx} be connected, new info ${copyPdestInfo(exuIdx)}")
+      logger.trace(s"exuIdx ${exuIdx} be connected, new info ${copyPdestInfo(exuIdx)}")
     }
   }
   def getCopyPdestIndex(exuIdx: Int): Int = {
@@ -449,7 +449,7 @@ case class BackendParams(
     val rdTypes = Seq(IntRD(), FpRD(), VfRD())
     for(wbType <- wbTypes){
       for(rdType <- rdTypes){
-        logger.info(s"wbType: ${wbType}, rdType: ${rdType}")
+        logger.debug(s"wbType: ${wbType}, rdType: ${rdType}")
         allRealExuParams.map {
           case exuParam =>
             val wbPortConfigs = exuParam.wbPortConfigs
@@ -471,9 +471,9 @@ case class BackendParams(
           .sortBy(_._1.get.priority)
           .groupBy(_._1.get.port).map { case (wbPort, intWbRdPairs) =>
             val rdCfgs = intWbRdPairs.map(_._2).flatten
-            logger.info(s"wb port ${wbPort} rdcfgs: ${rdCfgs}")
+            logger.debug(s"wb port ${wbPort} rdcfgs: ${rdCfgs}")
             rdCfgs.groupBy(_.port).foreach { case (p, rdCfg) =>
-              //logger.info(s"rdport: ${p}, cfgs: ${rdCfg}")
+              //logger.debug(s"rdport: ${p}, cfgs: ${rdCfg}")
               rdCfg.zip(rdCfg.drop(1)).foreach { case (cfg0, cfg1) => assert(cfg0.priority <= cfg1.priority, s"an exu has high priority at ${wbType} wb port ${wbPort}, but has low priority at ${rdType} rd port ${p}") }
             }
         }

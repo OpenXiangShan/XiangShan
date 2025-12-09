@@ -1822,10 +1822,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromTLB ++ perfFromPTW ++ perfBlock
 
-  if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      logger.info(s"MemBlock perfEvents Set $name $inc $i")
-    }
+  for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+    logger.debug(s"MemBlock perfEvents[${i}] ${name}: ${inc}")
   }
 
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))

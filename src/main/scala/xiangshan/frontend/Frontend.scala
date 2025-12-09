@@ -279,10 +279,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock ++ perfFromITLB
 
-  if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      logger.info(s"Frontend perfEvents Set ${name} ${inc} ${i}")
-    }
+  for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+    logger.debug(s"Frontend perfEvents[${i}] ${name}: ${inc}")
   }
 
   val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))

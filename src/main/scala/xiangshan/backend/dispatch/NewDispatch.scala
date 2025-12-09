@@ -53,19 +53,18 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
   val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
   val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
-  logger.info(s"${allExuParams.map(_.name)}")
-  logger.info(s"${allFuConfigs.map(_.name)}")
-  logger.info(s"${allFuConfigs.map(_.fuType.id)}")
-  logger.info(s"${sortedFuConfigs.map(_.name)}")
-  logger.info(s"${sortedFuConfigs.map(_.fuType.id)}")
+  logger.info(s"EXU: ${allExuParams.map(_.name).mkString(", ")}")
+  logger.info(s"All FU: ${allFuConfigs.map(c => s"${c.name}(${c.fuType.id})").mkString(", ")}")
+  logger.info(s"Sorted FU: ${sortedFuConfigs.map(c => s"${c.name}(${c.fuType.id})").mkString(", ")}")
   val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
   val fuMapIQIdx = sortedFuConfigs.map( fu => {
     val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
     (fu -> fuInIQIdx)
    }
   )
-  fuMapIQIdx.map { case (fu, iqidx) =>
-    logger.info(s"${fu.name} $iqidx")
+  logger.info("IqIdx:")
+  fuMapIQIdx.foreach { case (fu, iqidx) =>
+    logger.info(s"  ${fu.name}: ${iqidx.mkString(", ")}")
   }
   val sameIQIdxFus = fuMapIQIdx.map{ case (fu, iqidx) =>
     fuMapIQIdx.filter(_._2 == iqidx).map(_._1) -> iqidx
@@ -73,10 +72,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val needMultiIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size > 1)
   val needSingleIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size == 1)
   needMultiIQ.map { case (fus, iqidx) =>
-    logger.info(s"needMultiIQ: ${fus.map(_.name)} $iqidx")
+    logger.info(s"needMultiIQ: ${fus.map(_.name).mkString(", ")}(${iqidx.mkString(", ")})")
   }
   needSingleIQ.map { case (fus, iqidx) =>
-    logger.info(s"needSingleIQ: ${fus.map(_.name)} $iqidx")
+    logger.info(s"needSingleIQ: ${fus.map(_.name).mkString(", ")}(${iqidx.mkString(", ")})")
   }
   val fuConfigsInExuParams = allExuParams.map(_.fuConfigs)
   val fuMapExuIdx = sortedFuConfigs.map { case fu => {
@@ -211,11 +210,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       xx.zipWithIndex.filter(y => VlRegSrcDataSet.contains(y._1)).map(_._2)
     }).flatten
   }).flatten.toSet.toSeq.sorted
-  logger.info(s"idxRegTypeInt: $idxRegTypeInt")
-  logger.info(s"idxRegTypeFp: $idxRegTypeFp")
-  logger.info(s"idxRegTypeVec: $idxRegTypeVec")
-  logger.info(s"idxRegTypeV0: $idxRegTypeV0")
-  logger.info(s"idxRegTypeVl: $idxRegTypeVl")
+  logger.info(s"idxRegTypeInt: ${idxRegTypeInt.mkString(", ")}")
+  logger.info(s"idxRegTypeFp: ${idxRegTypeFp.mkString(", ")}")
+  logger.info(s"idxRegTypeVec: ${idxRegTypeVec.mkString(", ")}")
+  logger.info(s"idxRegTypeV0: ${idxRegTypeV0.mkString(", ")}")
+  logger.info(s"idxRegTypeVl: ${idxRegTypeVl.mkString(", ")}")
   val numRegSrc: Int = issueBlockParams.map(_.exuBlockParams.map(
     x => if (x.hasStdFu) x.numRegSrc + 1 else x.numRegSrc
   ).max).max
@@ -294,7 +293,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       // for int is 2 src, fp is 3 src
       srcLoadDependencyUpdate.zip(srcType).zipWithIndex.map{ case ((sinks, srctypes), idx) =>
         sinks.zip(srctypes).zipWithIndex.map{ case ((sink, srctype), srcidx) =>
-          logger.info(s"srcidx = ${srcidx}")
+          logger.trace(s"srcidx = ${srcidx}")
           val fpRead = busyTables(1).io.read(idx * 3 + srcidx).loadDependency
           if (srcidx < 2) {
             val intRead = busyTables(0).io.read(idx * 2 + srcidx).loadDependency
@@ -393,7 +392,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val suffix = fus.map(_.name).mkString("_")
     val iqNum = exuidx.size
     val iqidx = allIssueParams.map(_.exuBlockParams.map(_.fuConfigs).flatten.toSet.toSeq).zipWithIndex.filter{x => fus.toSet.subsetOf(x._1.toSet)}.map(_._2)
-    logger.info(s"${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
+    logger.debug(s"${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
     val compareMatrix = Wire(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"compareMatrix_$suffix")
     for (i <- 0 until iqNum) {
       for (j <- 0 until iqNum) {
@@ -410,12 +409,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val minIQSel = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool()))).suggestName(s"minIQSel_$suffix")
     for (i <- 0 until renameWidth){
       val minIQSel_ith = IQSort(i % iqNum)
-      logger.info(s"minIQSel_${i}th_$suffix = IQSort(${i % iqNum})")
+      logger.debug(s"minIQSel_${i}th_$suffix = IQSort(${i % iqNum})")
       for (j <- 0 until issueQueueNum){
         minIQSel(i)(j) := false.B
         if (iqidx.contains(j)){
           minIQSel(i)(j) := minIQSel_ith(iqidx.indexOf(j))
-          logger.info(s"minIQSel_${suffix}_${i}_${j} = minIQSel_ith(iqidx.indexOf(${j}))")
+          logger.trace(s"minIQSel_${suffix}_${i}_${j} = minIQSel_ith(iqidx.indexOf(${j}))")
         }
       }
     }

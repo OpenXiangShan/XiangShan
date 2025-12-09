@@ -16,7 +16,7 @@ class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle with L
   private val maxVLMUL = 8
   private val maxVLMAX = 8 * 16 // TODO: parameterize this
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
-  logger.info(s"elemIdxWidth: $elemIdxWidth")
+  logger.trace(s"elemIdxWidth: $elemIdxWidth")
 
   val in = Input(new Bundle {
     val begin = UInt(elemIdxWidth.W)
@@ -53,7 +53,7 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module with Laz
   private val maxVLMAX = 8 * 16 // TODO: parameterize this
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
 
-  logger.info(s"numBytes: ${numBytes}, byteWidth: ${byteWidth}")
+  logger.trace(s"numBytes: ${numBytes}, byteWidth: ${byteWidth}")
 
   val io = IO(new ByteMaskTailGenIO(vlen))
 

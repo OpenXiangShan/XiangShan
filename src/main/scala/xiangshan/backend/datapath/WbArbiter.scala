@@ -128,7 +128,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
       mgu.io.writeback.bits.vls.get.vpu.vstart := io.fromCSR.vstart
     }
     val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
-    logger.info("vldIdx: " + vldIdx)
+    logger.debug("vldIdx: " + vldIdx)
     vldIdx.zip(vldMgu).foreach { case (id, wb) =>
       wbReplaceVld.update(id, wb.io.writebackAfterMerge)
     }
@@ -154,8 +154,8 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   fpArbiterInputsWire.map(_.ready := true.B)
   val fpArbiterInputsWireY = fpArbiterInputsWire.filter(x => x.bits.params.writeFpRf)
 
-  fpArbiterInputsWire.map(x => logger.info(s"fpArbiterInputsWire: ${x.bits.params.name}"))
-  fpArbiterInputsWireY.map(x => logger.info(s"fpArbiterInputsWireY: ${x.bits.params.name}"))
+  fpArbiterInputsWire.map(x => logger.debug(s"fpArbiterInputsWire: ${x.bits.params.name}"))
+  fpArbiterInputsWireY.map(x => logger.debug(s"fpArbiterInputsWireY: ${x.bits.params.name}"))
   val fpArbiterInputsWireN = fpArbiterInputsWire.filterNot(_.bits.params.writeFpRf)
 
   val vfArbiterInputsWire = Wire(chiselTypeOf(fromExu))
@@ -179,21 +179,21 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
     (Seq(intWen, fpwen, vecWen, v0Wen, vlWen), !intWen && !fpwen && !vecWen && !v0Wen && !vlWen)
   }
 
-  logger.info(s"${schdParams.schdType}: io.fromFpExu.flatten.size = ${io.fromFpExu.flatten.size}")
-  logger.info(s"${schdParams.schdType}: intArbiterInputsWire.size = ${intArbiterInputsWire.size}")
-  logger.info(s"${schdParams.schdType}: fpArbiterInputsWire.size = ${fpArbiterInputsWire.size}")
-  logger.info(s"${schdParams.schdType}: vfArbiterInputsWire.size = ${vfArbiterInputsWire.size}")
-  logger.info(s"${schdParams.schdType}: v0ArbiterInputsWire.size = ${v0ArbiterInputsWire.size}")
-  logger.info(s"${schdParams.schdType}: vlArbiterInputsWire.size = ${vlArbiterInputsWire.size}")
+  logger.debug(s"${schdParams.schdType}: io.fromFpExu.flatten.size = ${io.fromFpExu.flatten.size}")
+  logger.debug(s"${schdParams.schdType}: intArbiterInputsWire.size = ${intArbiterInputsWire.size}")
+  logger.debug(s"${schdParams.schdType}: fpArbiterInputsWire.size = ${fpArbiterInputsWire.size}")
+  logger.debug(s"${schdParams.schdType}: vfArbiterInputsWire.size = ${vfArbiterInputsWire.size}")
+  logger.debug(s"${schdParams.schdType}: v0ArbiterInputsWire.size = ${v0ArbiterInputsWire.size}")
+  logger.debug(s"${schdParams.schdType}: vlArbiterInputsWire.size = ${vlArbiterInputsWire.size}")
   intArbiterInputsWire.zip(fpArbiterInputsWire).zip(vfArbiterInputsWire).zip(v0ArbiterInputsWire).zip(vlArbiterInputsWire).zip(fromExu).foreach {
     case (((((intArbiterInput, fpArbiterInput), vfArbiterInput), v0ArbiterInput), vlArbiterInput), exuOut) =>
-      logger.info(s"${schdParams.schdType}: intArbiterInput.bits.params.name = ${intArbiterInput.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: fpArbiterInput.bits.params.name = ${fpArbiterInput.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: vfArbiterInput.bits.params.name = ${vfArbiterInput.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: v0ArbiterInput.bits.params.name = ${v0ArbiterInput.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: vlArbiterInput.bits.params.name = ${vlArbiterInput.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: exuOut.bits.params.name = ${exuOut.bits.params.name}")
-      logger.info(s"${schdParams.schdType}: exuOut.bits.params.needFpWen = ${exuOut.bits.params.needFpWen}")
+      logger.debug(s"${schdParams.schdType}: intArbiterInput.bits.params.name = ${intArbiterInput.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: fpArbiterInput.bits.params.name = ${fpArbiterInput.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: vfArbiterInput.bits.params.name = ${vfArbiterInput.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: v0ArbiterInput.bits.params.name = ${v0ArbiterInput.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: vlArbiterInput.bits.params.name = ${vlArbiterInput.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: exuOut.bits.params.name = ${exuOut.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: exuOut.bits.params.needFpWen = ${exuOut.bits.params.needFpWen}")
       val writeCond = acceptCond(exuOut.bits)
       val intWrite = Wire(Bool())
       val fpWrite = Wire(Bool())
@@ -202,7 +202,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
       val vlWrite = Wire(Bool())
       val notWrite = Wire(Bool())
 
-      logger.info(s"${schdParams.schdType}: exuOut name = ${exuOut.bits.params.name}")
+      logger.debug(s"${schdParams.schdType}: exuOut name = ${exuOut.bits.params.name}")
       intWrite := exuOut.valid && writeCond._1(0)
       fpWrite := exuOut.valid && writeCond._1(1)
       vfWrite := exuOut.valid && writeCond._1(2)
@@ -226,7 +226,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
         intArbiterInput.bits := RegEnable(exuOut.bits, exuOut.valid)
       }
 
-      logger.info(s"exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
+      logger.debug(s"exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
 
       // only EXUs with uncertain latency need result of arbiter
       // the result data can be maintained until getting success in arbiter
@@ -264,27 +264,27 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   v0ArbiterInputsWireN.foreach(_.ready := false.B)
   vlArbiterInputsWireN.foreach(_.ready := false.B)
 
-  logger.info(s"write int preg: " +
+  logger.debug(s"write int preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeIntRf)}) "
   )
-  logger.info(s"write fp preg: " +
+  logger.debug(s"write fp preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeFpRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeFpRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeFpRf)}) "
   )
-  logger.info(s"write vf preg: " +
+  logger.debug(s"write vf preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeVfRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeVfRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeVfRf)}) "
   )
-  logger.info(s"write v0 preg: " +
+  logger.debug(s"write v0 preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeV0Rf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeV0Rf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeV0Rf)}) "
   )
-  logger.info(s"write vl preg: " +
+  logger.debug(s"write vl preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeVlRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeVlRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeVlRf)}) "
@@ -296,11 +296,11 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   private val vfWbArbiter = Module(new RealWBCollideChecker(params.getVfWbArbiterParams))
   private val v0WbArbiter = Module(new RealWBCollideChecker(params.getV0WbArbiterParams))
   private val vlWbArbiter = Module(new RealWBCollideChecker(params.getVlWbArbiterParams))
-  logger.info(s"int preg write back port num: ${intWbArbiter.io.out.size}, active port: ${intWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  logger.info(s"fp preg write back port num: ${fpWbArbiter.io.out.size}, active port: ${fpWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  logger.info(s"vf preg write back port num: ${vfWbArbiter.io.out.size}, active port: ${vfWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  logger.info(s"v0 preg write back port num: ${v0WbArbiter.io.out.size}, active port: ${v0WbArbiter.io.inGroup.keys.toSeq.sorted}")
-  logger.info(s"vl preg write back port num: ${vlWbArbiter.io.out.size}, active port: ${vlWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"int preg write back port num: ${intWbArbiter.io.out.size}, active port: ${intWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"fp preg write back port num: ${fpWbArbiter.io.out.size}, active port: ${fpWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"vf preg write back port num: ${vfWbArbiter.io.out.size}, active port: ${vfWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"v0 preg write back port num: ${v0WbArbiter.io.out.size}, active port: ${v0WbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"vl preg write back port num: ${vlWbArbiter.io.out.size}, active port: ${vlWbArbiter.io.inGroup.keys.toSeq.sorted}")
 
   // module assign
   intWbArbiter.io.flush <> io.flush
@@ -313,12 +313,12 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   private val intWbArbiterOut = intWbArbiter.io.out
 
   fpWbArbiter.io.flush <> io.flush
-  logger.info(s"fpWbArbiter.io.in.size = ${fpWbArbiter.io.in.size}, fpArbiterInputsWireY.size = ${fpArbiterInputsWireY.size}")
+  logger.debug(s"fpWbArbiter.io.in.size = ${fpWbArbiter.io.in.size}, fpArbiterInputsWireY.size = ${fpArbiterInputsWireY.size}")
   require(fpWbArbiter.io.in.size == fpArbiterInputsWireY.size, s"fpWbArbiter input size: ${fpWbArbiter.io.in.size}, all fp wb size: ${fpArbiterInputsWireY.size}")
   fpWbArbiter.io.in.zip(fpArbiterInputsWireY).foreach { case (arbiterIn, in) =>
-    logger.info(s"fpWbArbiter: fpArbiterInputsWireY.name = ${in.bits.params.name}")
-    logger.info(s"fpWbArbiter: fpArbiterInputsWireY.data.size = ${in.bits.data.size}")
-    logger.info(s"fpWbArbiter: arbiterIn.bits.params.port,priority = ${arbiterIn.bits.params.port},${arbiterIn.bits.params.priority}")
+    logger.debug(s"fpWbArbiter: fpArbiterInputsWireY.name = ${in.bits.params.name}")
+    logger.debug(s"fpWbArbiter: fpArbiterInputsWireY.data.size = ${in.bits.data.size}")
+    logger.debug(s"fpWbArbiter: arbiterIn.bits.params.port,priority = ${arbiterIn.bits.params.port},${arbiterIn.bits.params.priority}")
     arbiterIn.valid := in.valid && (in.bits.fpWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "fp")

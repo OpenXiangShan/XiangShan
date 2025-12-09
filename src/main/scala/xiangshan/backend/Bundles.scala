@@ -1098,7 +1098,7 @@ object Bundles {
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
-      logger.info(s"${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
+      logger.trace(s"${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)

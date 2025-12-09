@@ -761,7 +761,6 @@ trait HasXSParameter extends LazyLogging {
   def numCSRPCntCtrl     = 8
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
-  def printEventCoding   = true
   def maxCommitStuck = pow(2, 21).toInt
 
   // Vector load exception

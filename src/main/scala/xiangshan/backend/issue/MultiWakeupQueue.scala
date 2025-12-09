@@ -35,8 +35,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   modificationFunc: ExuInput => ExuInput = { x: ExuInput => x },
   lastConnectFunc: (ExuInput, ExuInput) => ExuInput,
 ) extends Module with LazyLogging {
-  logger.info(s"$exuParam")
-  logger.info(s"$latencySet")
+  logger.debug(s"$exuParam")
+  logger.debug(s"$latencySet")
   require(latencySet.min >= 0)
 
   val io = IO(new MultiWakeupQueueIO(gen, lastGen, flushGen, log2Up(latencySet.max) + 1))

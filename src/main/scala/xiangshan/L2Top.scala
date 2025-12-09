@@ -319,10 +319,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.perfEvents := l2.io_perf
 
       val allPerfEvents = l2.getPerfEvents
-      if (printEventCoding) {
-        for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-          logger.info(s"L2 Cache perfEvents Set ${name} ${inc} ${i}")
-        }
+      for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+        logger.debug(s"L2 Cache perfEvents[${i}] ${name}: ${inc}")
       }
 
       l2.io.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid

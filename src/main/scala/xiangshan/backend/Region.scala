@@ -44,14 +44,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     else Module(new IssueQueueVecMemImp()(p,iqParam))).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
     }
   }
+  logger.debug(s"${params.schdType}")
   issueQueues.map(x =>{
-    logger.info(s"iqParam.getIQName = ${x.param.getIQName}")
-    logger.info(s"Class name: ${x.getClass.getSimpleName}")
-    logger.info(s"iqParam.inIntSchd: ${x.param.inIntSchd}")
-    logger.info(s"iqParam.isMemAddrIQ: ${x.param.isMemAddrIQ}")
+    logger.debug(s"  Class name: ${x.getClass.getSimpleName}")
+    logger.debug(s"    iqParam.getIQName = ${x.param.getIQName}")
+    logger.debug(s"    iqParam.inIntSchd: ${x.param.inIntSchd}")
+    logger.debug(s"    iqParam.isMemAddrIQ: ${x.param.isMemAddrIQ}")
   }
   )
-  logger.info(s"${params.schdType}")
   val prefix = if (params.isIntSchd) "int" else if (params.isFpSchd) "fp" else "vec"
   val dataPath = Module(new DataPath()(p, backendParams, params)).suggestName(prefix + "DataPath")
   val bypassNetwork = Module(new BypassNetwork()(p, backendParams)).suggestName(prefix + "BypassNetwork")
@@ -79,20 +79,20 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }.toMap
   // Connect bundles having the same wakeup source
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
-    logger.info(s"${params.schdType}: iq.param.getIQName = ${iq.param.getIQName}")
-    logger.info(s"${params.schdType}: iq.io.wakeupFromIQ.size = ${iq.io.wakeupFromIQ.size}")
-    if (params.isIntSchd) logger.info(s"${params.schdType}: io.wakeUpFromFp.size = ${io.wakeUpFromFp.get.size}")
-    if (params.isFpSchd) logger.info(s"${params.schdType}: io.wakeUpFromInt.filter(_.bits.params.hasLoadExu).size = ${io.wakeUpFromInt.get.filter(_.bits.params.hasLoadExu).size}")
-    logger.info(s"${params.schdType}: iqWakeUpBundle = ${iqWakeUpBundle.keys.toList.sorted}")
+    logger.trace(s"${params.schdType}: iq.param.getIQName = ${iq.param.getIQName}")
+    logger.trace(s"${params.schdType}: iq.io.wakeupFromIQ.size = ${iq.io.wakeupFromIQ.size}")
+    if (params.isIntSchd) logger.trace(s"${params.schdType}: io.wakeUpFromFp.size = ${io.wakeUpFromFp.get.size}")
+    if (params.isFpSchd) logger.trace(s"${params.schdType}: io.wakeUpFromInt.filter(_.bits.params.hasLoadExu).size = ${io.wakeUpFromInt.get.filter(_.bits.params.hasLoadExu).size}")
+    logger.trace(s"${params.schdType}: iqWakeUpBundle = ${iqWakeUpBundle.keys.toList.sorted}")
     iq.io.wakeupFromIQ.foreach { wakeUp =>
       val exuIdx = wakeUp.bits.exuIdx
-      logger.info(s"${params.schdType}: Connect wakeup exuName = ${backendParams.allExuParams(exuIdx).name}, exuIdx = ${exuIdx}")
+      logger.trace(s"${params.schdType}: Connect wakeup exuName = ${backendParams.allExuParams(exuIdx).name}, exuIdx = ${exuIdx}")
       val wakeUpIn = iqWakeUpBundle(wakeUp.bits.exuIdx)
       wakeUp.valid := wakeUpIn.valid
       connectSamePort(wakeUp.bits, wakeUpIn.bits)
       backendParams.connectWakeup(exuIdx)
       if (backendParams.isCopyPdest(exuIdx)) {
-        logger.info(s"${params.schdType}: exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
+        logger.trace(s"${params.schdType}: exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
         wakeUp.bits.pdest := wakeUpIn.bits.pdestCopy.get(backendParams.getCopyPdestIndex(exuIdx))
         if (wakeUpIn.bits.rfWenCopy.nonEmpty) wakeUp.bits.rfWen := wakeUpIn.bits.rfWenCopy.get(backendParams.getCopyPdestIndex(exuIdx))
         if (wakeUpIn.bits.fpWenCopy.nonEmpty) wakeUp.bits.fpWen := wakeUpIn.bits.fpWenCopy.get(backendParams.getCopyPdestIndex(exuIdx))
@@ -233,34 +233,34 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   if (params.isIntSchd) {
     // exu can write to only one register file port
     val idxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeIntRf).map(_.wbPortConfigs.filter(_.isInstanceOf[IntWB]).head.port)
-    logger.info(s"vec write int port = ${idxes}")
+    logger.debug(s"vec write int port = ${idxes}")
     val wakeupFromWB = MixedVecInit(idxes.map(x => io.fromIntWb(x)))
     val wakeupFromWBDelayed = RegNext(wakeupFromWB)
     issueQueues.map { case iq =>
       val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
-      logger.info(s"int: vecExuIndices = ${vecExuIndices}")
+      logger.trace(s"int: vecExuIndices = ${vecExuIndices}")
       val vecWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
-      logger.info(s"int: vecWBIndices = ${vecWBIndices}")
+      logger.trace(s"int: vecWBIndices = ${vecWBIndices}")
       vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
         connectWakeupWB(iq.io.wakeupFromWB(i), source1)
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromF2I.foreach(_ := io.wakeupFromF2I.get)
-      logger.info(s"int: wakeupFromWB.size = ${wakeupFromWB.size}")
-      logger.info(s"int: iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
-      logger.info(s"int: ${iq.param.getIQName}: iq.param.needWakeupFromIntWBPort = ${iq.param.needWakeupFromIntWBPort.map(x => (x._1, x._2.map(_.name)))}")
+      logger.trace(s"int: wakeupFromWB.size = ${wakeupFromWB.size}")
+      logger.trace(s"int: iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
+      logger.trace(s"int: ${iq.param.getIQName}: iq.param.needWakeupFromIntWBPort = ${iq.param.needWakeupFromIntWBPort.map(x => (x._1, x._2.map(_.name)))}")
     }
   }
   else if (params.isFpSchd) {
     val idxes = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeFpRf).map(_.wbPortConfigs.filter(_.isInstanceOf[FpWB]).head.port)
-    logger.info(s"vec write fp port = ${idxes}")
+    logger.debug(s"vec write fp port = ${idxes}")
     val wakeupFromWB = MixedVecInit(idxes.map(x => io.fromFpWb(x)))
     val wakeupFromWBDelayed = RegNext(wakeupFromWB)
     issueQueues.map { case iq =>
       val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
-      logger.info(s"fp: vecExuIndices = ${vecExuIndices}")
+      logger.trace(s"fp: vecExuIndices = ${vecExuIndices}")
       val vecWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
-      logger.info(s"fp: vecWBIndices = ${vecWBIndices}")
+      logger.trace(s"fp: vecWBIndices = ${vecWBIndices}")
       vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
         connectWakeupWB(iq.io.wakeupFromWB(i), source1)
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
@@ -274,9 +274,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val wakeupFromWBDelayedV0 = RegNext(io.fromV0Wb)
     val wakeupFromWBDelayedVl = RegNext(io.fromVlWb)
     issueQueues.map { case iq =>
-      logger.info(s"vec: wakeupFromWB.size = ${wakeupFromWB.size}")
-      logger.info(s"vec: iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
-      logger.info(s"vec: ${iq.param.getIQName}: iq.param.needWakeupFromVfWBPort = ${iq.param.needWakeupFromVfWBPort.map(x => (x._1, x._2.map(_.name)))}")
+      logger.trace(s"vec: wakeupFromWB.size = ${wakeupFromWB.size}")
+      logger.trace(s"vec: iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
+      logger.trace(s"vec: ${iq.param.getIQName}: iq.param.needWakeupFromVfWBPort = ${iq.param.needWakeupFromVfWBPort.map(x => (x._1, x._2.map(_.name)))}")
       iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
       iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl).map(x => connectWakeupWB(x._1, x._2))
     }
@@ -323,8 +323,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     iqReplaceRCIdxVec.zip(dataPath.io.toWakeupQueueRCIdx).foreach { case (iq, in) =>
       iq := in
     }
-    logger.info(s"numWriteRegCache: ${params.numWriteRegCache}")
-    logger.info(s"iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
+    logger.debug(s"numWriteRegCache: ${params.numWriteRegCache}")
+    logger.debug(s"iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
   }
   dataPath.io.hartId := io.hartId
   dataPath.io.flush := io.flush
@@ -423,9 +423,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     exuBlock.io.F2IDataIn.get := io.F2IDataIn.get
     exuBlock.io.csrio.get <> io.csrio.get
     exuBlock.io.csrin.get := io.csrin.get
-    logger.info(s"int: wbDataPath.io.fromIntExu.size = ${wbDataPath.io.fromIntExu.size}")
-    logger.info(s"int: exuBlock.io.out.size = ${exuBlock.io.out.size}")
-    logger.info(s"int: io.memWriteback.size = ${io.memWriteback.flatten.size}")
+    logger.debug(s"int: wbDataPath.io.fromIntExu.size = ${wbDataPath.io.fromIntExu.size}")
+    logger.debug(s"int: exuBlock.io.out.size = ${exuBlock.io.out.size}")
+    logger.debug(s"int: io.memWriteback.size = ${io.memWriteback.flatten.size}")
     wbDataPath.io.fromIntExu.flatten.zip((exuBlock.io.out ++ io.memWriteback).flatten).map{ case (sink, source) =>
       sink <> source
     }
@@ -493,7 +493,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val toMem = Wire(io.toMemExu.get.cloneType)
     io.toMemExu.get <> toMem
     val firstMemExu = bypassNetwork.io.toExus.int.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
-    logger.info(s"int: firstMemExu = $firstMemExu")
+    logger.debug(s"int: firstMemExu = $firstMemExu")
     for (i <- toMem.indices) {
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.int(firstMemExu + i)(j)
@@ -695,7 +695,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val toMem = Wire(io.toMemExu.get.cloneType)
     io.toMemExu.get <> toMem
     val firstMemExu = bypassNetwork.io.toExus.vf.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
-    logger.info(s"int: firstMemExu = $firstMemExu")
+    logger.debug(s"int: firstMemExu = $firstMemExu")
     for (i <- toMem.indices) {
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.vf(firstMemExu + i)(j)
