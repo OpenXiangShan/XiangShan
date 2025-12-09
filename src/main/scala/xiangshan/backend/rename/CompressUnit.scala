@@ -86,6 +86,8 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       else Seq.fill(RenameWidth)(0).patch(idx - (cntL(i) + 1)/2, Seq.fill(size)(1), size)
     }
 
+    // for debug, don't delete
+    /*
     println("[Rename.Compress]" +
       " index: "    + index +
       " i: "        + keyCandidate +
@@ -94,6 +96,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       " uopSizes: " + uopSizes +
       " masks: "    + masks.map(_.map(_.toBinaryString).reduce(_ + _))
     )
+    */
 
     val keyBitPat = BitPat(keyCandidate.U)
     val needRobBitPats = needRobs.map(x => BitPat(x.U))

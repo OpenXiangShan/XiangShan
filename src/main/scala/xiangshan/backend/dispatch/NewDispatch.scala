@@ -410,12 +410,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val minIQSel = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool()))).suggestName(s"minIQSel_$suffix")
     for (i <- 0 until renameWidth){
       val minIQSel_ith = IQSort(i % iqNum)
-      println(s"minIQSel_${i}th_$suffix = IQSort(${i % iqNum})")
       for (j <- 0 until issueQueueNum){
         minIQSel(i)(j) := false.B
         if (iqidx.contains(j)){
           minIQSel(i)(j) := minIQSel_ith(iqidx.indexOf(j))
-          println(s"minIQSel_${suffix}_${i}_${j} = minIQSel_ith(iqidx.indexOf(${j}))")
         }
       }
     }
