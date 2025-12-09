@@ -57,7 +57,8 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
-  val perfMeta: BpuPerfMeta = Output(new BpuPerfMeta)
+  val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
+  val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {

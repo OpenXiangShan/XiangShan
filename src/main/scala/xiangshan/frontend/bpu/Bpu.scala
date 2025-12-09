@@ -26,6 +26,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utils.EnumUInt
 import xiangshan.frontend.BpuToFtqIO
+import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuPredictionSource
@@ -529,6 +530,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.bpSource.s3Override := s3_override
 
   io.toFtq.perfMeta := s3_perfMeta
+  // TODO: override reason and redirect reason
+  io.toFtq.topdownReasons := 0.U.asTypeOf(new FrontendTopDownBundle())
 
   /* *** BpTrace *** */
   when(io.toFtq.meta.fire) {
