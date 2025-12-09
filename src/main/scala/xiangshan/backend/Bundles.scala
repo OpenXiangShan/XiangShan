@@ -403,7 +403,6 @@ object Bundles {
     val sqIdx = new SqPtr
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
-  /*
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
     val wflags = OptionWrapper(params.writeFflags, Bool())
@@ -418,7 +417,6 @@ object Bundles {
     val debugInfo = new PerfDebugInfo
     val debug_seqNum = InstSeqNum()
   }
-  */
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
