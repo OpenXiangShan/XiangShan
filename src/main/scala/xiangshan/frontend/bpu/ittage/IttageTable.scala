@@ -38,7 +38,7 @@ class IttageTable(
 )(implicit p: Parameters) extends IttageModule {
   class IttageTableIO extends IttageBundle {
     class Req extends Bundle {
-      val pc:         PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
     }
 
@@ -49,7 +49,7 @@ class IttageTable(
     }
 
     class Update extends Bundle {
-      val pc:         PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
       // update tag and ctr
       val valid:   Bool            = Bool()
@@ -108,8 +108,8 @@ class IttageTable(
   def getUnhashedIdx(pc: PrunedAddr): UInt = (pc >> instOffsetBits).asUInt
 
   private val s0_valid       = io.req.valid
-  private val s0_pc          = io.req.bits.pc
-  private val s0_unhashedIdx = getUnhashedIdx(io.req.bits.pc)
+  private val s0_startPc     = io.req.bits.startPc
+  private val s0_unhashedIdx = getUnhashedIdx(io.req.bits.startPc)
 
   private val (s0_idx, s0_tag) = computeTagAndHash(s0_unhashedIdx, io.req.bits.foldedHist)
   private val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
@@ -149,7 +149,7 @@ class IttageTable(
 
   // Use fetchpc to compute hash
   private val updateFoldedHist       = io.update.foldedHist
-  private val (updateIdx, updateTag) = computeTagAndHash(getUnhashedIdx(io.update.pc), updateFoldedHist)
+  private val (updateIdx, updateTag) = computeTagAndHash(getUnhashedIdx(io.update.startPc), updateFoldedHist)
   private val updateWdata            = Wire(new IttageEntry(tagLen))
 
   private val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
@@ -247,7 +247,7 @@ class IttageTable(
     val tag = s0_tag
     XSDebug(
       io.req.fire,
-      p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.pc.toUInt)}, " +
+      p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.startPc.toUInt)}, " +
         p"idx=$idx, tag=$tag\n"
     )
     XSDebug(
@@ -257,7 +257,7 @@ class IttageTable(
     )
     XSDebug(
       io.update.valid,
-      p"update ITTAGE Table: pc:${Hexadecimal(u.pc.toUInt)}}, " +
+      p"update ITTAGE Table: pc:${Hexadecimal(u.startPc.toUInt)}}, " +
         p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCnt}, " +
         p"target:${Hexadecimal(u.targetOffset.offset.toUInt)}, old_target:${Hexadecimal(u.oldTargetOffset.offset.toUInt)}\n"
     )

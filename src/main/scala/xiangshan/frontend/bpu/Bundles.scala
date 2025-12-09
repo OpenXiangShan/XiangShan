@@ -185,16 +185,16 @@ class BpuCtrl extends Bundle {
 
 // Bpu -> Ftq
 class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
   val target:         PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   // override valid
   val s3Override: Bool = Bool()
 
-  def fromStage(pc: PrunedAddr, prediction: Prediction): Unit = {
-    this.startVAddr           := pc
+  def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
+    this.startPc              := startPc
     this.takenCfiOffset.valid := prediction.taken
-    this.takenCfiOffset.bits  := getFtqOffset(pc, prediction.cfiPosition)
+    this.takenCfiOffset.bits  := getFtqOffset(startPc, prediction.cfiPosition)
     this.target               := prediction.target
   }
   // TODO: what else do we need?
@@ -202,6 +202,7 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelp
 
 // Backend & Ftq -> Bpu
 class BpuRedirect(implicit p: Parameters) extends BpuBundle {
+  // BpuRedirect need the virtual address of the control flow instruction (cfiPc) instead of startPc in other bundles
   val cfiPc:           PrunedAddr         = PrunedAddr(VAddrBits)
   val target:          PrunedAddr         = PrunedAddr(VAddrBits)
   val taken:           Bool               = Bool()
@@ -219,9 +220,9 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
 
 // Backend & Ftq -> Bpu
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val meta:       BpuMeta                = new BpuMeta
-  val startVAddr: PrunedAddr             = PrunedAddr(VAddrBits)
-  val branches:   Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+  val meta:     BpuMeta                = new BpuMeta
+  val startPc:  PrunedAddr             = PrunedAddr(VAddrBits)
+  val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
 
   // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
   // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
@@ -232,7 +233,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
 // use s3 prediction to train s1 predictors
 class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
-  val startVAddr:      PrunedAddr    = PrunedAddr(VAddrBits)
+  val startPc:         PrunedAddr    = PrunedAddr(VAddrBits)
   val finalPrediction: Prediction    = new Prediction
   val hasOverride:     Bool          = Bool()
   val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
@@ -268,7 +269,7 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val bpId:         UInt                = UInt(XLEN.W)
-  val startVAddr:   PrunedAddr          = new PrunedAddr(VAddrBits)
+  val startPc:      PrunedAddr          = new PrunedAddr(VAddrBits)
   val s1Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction
   val bpSource:     BpuPredictionSource = new BpuPredictionSource

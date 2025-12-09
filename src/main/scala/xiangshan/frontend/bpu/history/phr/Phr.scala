@@ -87,27 +87,27 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
 
   private val updateData   = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val updatePc     = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  private val updateCfiPc  = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val updateTarget = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   private val redirectPhr  = WireInit(0.U(PhrHistoryLength.W))
 
   redirectData.valid   := io.train.redirect.valid
   redirectData.taken   := io.train.redirect.bits.taken
-  redirectData.pc      := io.train.redirect.bits.cfiPc
+  redirectData.cfiPc   := io.train.redirect.bits.cfiPc
   redirectData.target  := io.train.redirect.bits.target
   redirectData.phrMeta := io.train.redirect.bits.speculationMeta.phrMeta
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
   s3_overrideData.taken     := io.train.s3_prediction.taken
-  s3_overrideData.pc        := getBranchAddr(io.train.s3_pc, io.train.s3_prediction.cfiPosition)
+  s3_overrideData.cfiPc     := getCfiPcFromPosition(io.train.s3_startPc, io.train.s3_prediction.cfiPosition)
   s3_overrideData.target    := io.train.s3_prediction.target
   s3_overrideData.phrMeta   := io.train.s3_phrMeta
   s3_overrideData.foldedPhr := s3_foldedPhrReg
 
   s1_overrideData.valid              := s1_valid
   s1_overrideData.taken              := io.train.s1_prediction.taken
-  s1_overrideData.pc                 := getBranchAddr(io.train.s1_pc, io.train.s1_prediction.cfiPosition)
+  s1_overrideData.cfiPc              := getCfiPcFromPosition(io.train.s1_startPc, io.train.s1_prediction.cfiPosition)
   s1_overrideData.target             := io.train.s1_prediction.target
   s1_overrideData.foldedPhr          := s1_foldedPhrReg
   s1_overrideData.phrMeta.phrPtr     := s1_phrPtr
@@ -122,13 +122,13 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     )
   )
 
-  updatePc     := updateData.pc
+  updateCfiPc  := updateData.cfiPc
   updateTarget := updateData.target
 
   /*
    * phr := (phr<<Shamt) ^ hash
    */
-  private val hash      = pathHash(updatePc, updateTarget)
+  private val hash      = pathHash(updateCfiPc, updateTarget)
   private val shiftBits = hash(Shamt - 1, 0)
   private val hashHigh  = hash(PathHashWidth - 1, Shamt)
 
@@ -247,8 +247,8 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val commitTaken = commit.branches(0).bits.taken
     val commitTakenPc = Mux(
       commitValid && commit.branches(0).bits.mispredict.asBools.reduce(_ || _),
-      commit.startVAddr,
-      getBranchAddr(commit.startVAddr, commit.branches(0).bits.cfiPosition)
+      commit.startPc,
+      getCfiPcFromPosition(commit.startPc, commit.branches(0).bits.cfiPosition)
     )
     val commitShiftBits = shiftCommitBits(commitTakenPc)
 

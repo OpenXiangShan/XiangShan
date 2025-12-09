@@ -39,8 +39,8 @@ class GhrMeta(implicit p: Parameters) extends GhrBundle {
 }
 
 class GhrRedirect(implicit p: Parameters) extends GhrBundle {
-  val valid:      Bool       = Bool()
-  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val taken:      Bool       = Bool()
-  val meta:       GhrMeta    = new GhrMeta
+  val valid: Bool       = Bool()
+  val cfiPc: PrunedAddr = PrunedAddr(VAddrBits)
+  val taken: Bool       = Bool()
+  val meta:  GhrMeta    = new GhrMeta
 }

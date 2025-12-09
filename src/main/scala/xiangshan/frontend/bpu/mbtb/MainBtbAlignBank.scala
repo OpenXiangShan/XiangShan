@@ -30,9 +30,9 @@ class MainBtbAlignBank(
   class MainBtbAlignBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
-        // NOTE: this startVAddr is not from Bpu top, it's calculated in MainBtb top
-        // i.e. (VecInit.tabulate(NumAlignBanks)(startVAddr + _ * alignSize))(alignIdx) rotated right by startAlignIdx
-        val startVAddr:    PrunedAddr = new PrunedAddr(VAddrBits)
+        // NOTE: this startPc is not from Bpu top, it's calculated in MainBtb top
+        // i.e. (VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize))(alignIdx) rotated right by startAlignIdx
+        val startPc:       PrunedAddr = new PrunedAddr(VAddrBits)
         val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
         val crossPage:     Bool       = Bool()
       }
@@ -50,8 +50,8 @@ class MainBtbAlignBank(
 
     class Write extends Bundle {
       class Req extends Bundle {
-        // similar to Read.Req.startVAddr, calculated in MainBtb top
-        val startVAddr: PrunedAddr            = new PrunedAddr(VAddrBits)
+        // similar to Read.Req.startPc, calculated in MainBtb top
+        val startPc:    PrunedAddr            = new PrunedAddr(VAddrBits)
         val branchInfo: BranchInfo            = new BranchInfo
         val meta:       Vec[MainBtbMetaEntry] = Vec(NumWay, new MainBtbMetaEntry)
       }
@@ -84,16 +84,16 @@ class MainBtbAlignBank(
    * send read req to internal banks (srams)
    */
   private val s0_fire             = io.stageCtrl.s0_fire
-  private val s0_startVAddr       = r.req.startVAddr
+  private val s0_startPc          = r.req.startPc
   private val s0_posHigherBits    = r.req.posHigherBits
   private val s0_crossPage        = r.req.crossPage
-  private val s0_setIdx           = getSetIndex(s0_startVAddr)
-  private val s0_internalBankIdx  = getInternalBankIndex(s0_startVAddr)
+  private val s0_setIdx           = getSetIndex(s0_startPc)
+  private val s0_internalBankIdx  = getInternalBankIndex(s0_startPc)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx, NumInternalBanks)
-  private val s0_alignBankIdx     = getAlignBankIndex(s0_startVAddr)
+  private val s0_alignBankIdx     = getAlignBankIndex(s0_startPc)
 
-  // mainBtb top is responsible for sending the correct startVAddr to alignBanks,
-  // so here we should always see getAlignBankIndex(s0_startVAddr) == physical alignIdx.
+  // mainBtb top is responsible for sending the correct startPc to alignBanks,
+  // so here we should always see getAlignBankIndex(s0_startPc) == physical alignIdx.
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
@@ -109,7 +109,7 @@ class MainBtbAlignBank(
    * select 1 internal bank's resp
    */
   private val s1_fire             = io.stageCtrl.s1_fire
-  private val s1_startVAddr       = RegEnable(s0_startVAddr, s0_fire)
+  private val s1_startPc          = RegEnable(s0_startPc, s0_fire)
   private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
   private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
   private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
@@ -125,20 +125,20 @@ class MainBtbAlignBank(
    * send resp to top
    */
   private val s2_fire             = io.stageCtrl.s2_fire
-  private val s2_startVAddr       = RegEnable(s1_startVAddr, s1_fire)
+  private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
   private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
 
-  private val s2_setIdx = getSetIndex(s2_startVAddr)
-  private val s2_tag    = getTag(s2_startVAddr)
+  private val s2_setIdx = getSetIndex(s2_startPc)
+  private val s2_tag    = getTag(s2_startPc)
 
-  // NOTE: when we calculate startVAddr in MainBtb top, we have selected whether lower bits should be masked
-  //       (see s0_startVAddrVec)
+  // NOTE: when we calculate startPc in MainBtb top, we have selected whether lower bits should be masked
+  //       (see s0_startPcVec)
   //       so here, if this alignBank is not the first alignBank of the fetch block, we'll get s2_alignedInstOffset = 0
   //       and, we'll do a (e.position >= 0) check later, which is always true
-  private val s2_alignedInstOffset = getAlignedInstOffset(s2_startVAddr)
+  private val s2_alignedInstOffset = getAlignedInstOffset(s2_startPc)
 
   // send resp
   (r.resp zip s2_rawEntries).foreach { case (resp, e) =>
@@ -149,7 +149,7 @@ class MainBtbAlignBank(
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
     resp.info.valid            := hit
     resp.info.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
-    resp.info.bits.target      := getFullTarget(s2_startVAddr, e.targetLowerBits, Some(e.targetCarry))
+    resp.info.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, Some(e.targetCarry))
     resp.info.bits.attribute   := e.attribute
 
     resp.meta.rawHit    := rawHit
@@ -163,19 +163,19 @@ class MainBtbAlignBank(
 
   // update replacer
   replacer.io.predictTouch.valid        := s2_fire && s2_hitMask.reduce(_ || _)
-  replacer.io.predictTouch.bits.setIdx  := getReplacerSetIndex(s2_startVAddr)
+  replacer.io.predictTouch.bits.setIdx  := getReplacerSetIndex(s2_startPc)
   replacer.io.predictTouch.bits.wayMask := s2_hitMask.asUInt
 
   /* *** t1 ***
    * send write req to internal banks (srams)
    */
   private val t1_valid            = w.req.valid
-  private val t1_startVAddr       = w.req.bits.startVAddr
+  private val t1_startPc          = w.req.bits.startPc
   private val t1_branchInfo       = w.req.bits.branchInfo
-  private val t1_setIdx           = getSetIndex(t1_startVAddr)
-  private val t1_internalBankIdx  = getInternalBankIndex(t1_startVAddr)
+  private val t1_setIdx           = getSetIndex(t1_startPc)
+  private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
-  private val t1_alignBankIdx     = getAlignBankIndex(t1_startVAddr)
+  private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
 
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
   private val t1_hitMask = PriorityEncoderOH(VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo))).asUInt)
@@ -195,10 +195,10 @@ class MainBtbAlignBank(
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
-  t1_entry.tag             := getTag(t1_startVAddr)
+  t1_entry.tag             := getTag(t1_startPc)
   t1_entry.position        := t1_branchInfo.cfiPosition
   t1_entry.targetLowerBits := getTargetLowerBits(t1_branchInfo.target)
-  t1_entry.targetCarry     := getTargetCarry(t1_startVAddr, t1_branchInfo.target)
+  t1_entry.targetCarry     := getTargetCarry(t1_startPc, t1_branchInfo.target)
   t1_entry.attribute       := t1_branchInfo.attribute
 
   // similar to s0 case
@@ -213,7 +213,7 @@ class MainBtbAlignBank(
 
   // update replacer
   replacer.io.trainTouch.valid        := t1_valid && t1_needWrite
-  replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startVAddr)
+  replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.trainTouch.bits.wayMask := t1_wayMask
 
   /* *** multi-hit detection & flush *** */

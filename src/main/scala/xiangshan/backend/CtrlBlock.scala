@@ -780,7 +780,7 @@ class CtrlBlockImp(
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.wen)
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.ftqIdx, io.frontend.fromFtq.wen)
-  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.startVAddr, io.frontend.fromFtq.wen)
+  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.startPc, io.frontend.fromFtq.wen)
 
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect

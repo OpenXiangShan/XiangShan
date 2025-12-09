@@ -113,7 +113,7 @@ class RasCommitInfo(implicit p: Parameters) extends RasBundle {
 
 class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
   val attribute: BranchAttribute = new BranchAttribute
-  val brPc:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val cfiPc:     PrunedAddr      = PrunedAddr(VAddrBits)
   val meta:      RasInternalMeta = new RasInternalMeta
   val level:     UInt            = RedirectLevel()
 }

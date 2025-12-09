@@ -179,7 +179,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(predictionPtr.value).startVAddr     := prediction.bits.startVAddr
+    entryQueue(predictionPtr.value).startPc        := prediction.bits.startPc
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
   }
 
@@ -231,7 +231,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.prefetchReq.bits.startVAddr := Mux(
     redirectNext.valid,
     PrunedAddrInit(redirectNext.bits.target),
-    entryQueue(pfPtr(0).value).startVAddr
+    entryQueue(pfPtr(0).value).startPc
   )
   io.toICache.prefetchReq.bits.nextCachelineVAddr :=
     io.toICache.prefetchReq.bits.startVAddr + (CacheLineSize / 8).U
@@ -253,20 +253,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // TODO: consider BPU bypass
   io.toICache.fetchReq.valid                   := ifuReqValid
-  io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
-  io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
+  io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startPc
+  io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startPc + (CacheLineSize / 8).U
   io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
   io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid                    := ifuReqValid
   io.toIfu.req.bits.fetch(0).valid      := ifuReqValid
-  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startVAddr
+  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startPc
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
-    entryQueue(ifuPtr(1).value).startVAddr,
+    entryQueue(ifuPtr(1).value).startPc,
     Seq(
       (bpuPtr(0) === ifuPtr(0)) -> prediction.bits.target,
-      (bpuPtr(0) === ifuPtr(1)) -> prediction.bits.startVAddr
+      (bpuPtr(0) === ifuPtr(1)) -> prediction.bits.startPc
     )
   )
   io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
@@ -278,9 +278,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.wen        := (prediction.fire || bpuS3Redirect) && !redirect.valid
-  io.toBackend.ftqIdx     := predictionPtr.value
-  io.toBackend.startVAddr := prediction.bits.startVAddr
+  io.toBackend.wen     := (prediction.fire || bpuS3Redirect) && !redirect.valid
+  io.toBackend.ftqIdx  := predictionPtr.value
+  io.toBackend.startPc := prediction.bits.startPc
 
   // --------------------------------------------------------------------------------
   // Redirect from backend and IFU
@@ -301,11 +301,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
 
-  io.toBpu.redirect.valid                := redirect.valid
-  io.toBpu.redirect.bits.cfiPc           := redirect.bits.pc + (redirect.bits.ftqOffset << 1).asUInt
-  io.toBpu.redirect.bits.target          := redirect.bits.target
-  io.toBpu.redirect.bits.taken           := redirect.bits.taken
-  io.toBpu.redirect.bits.attribute       := redirect.bits.attribute
+  io.toBpu.redirect.valid          := redirect.valid
+  io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
+  io.toBpu.redirect.bits.target    := redirect.bits.target
+  io.toBpu.redirect.bits.taken     := redirect.bits.taken
+  io.toBpu.redirect.bits.attribute := redirect.bits.attribute
   io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
@@ -321,7 +321,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.train.valid           := resolveQueue.io.bpuTrain.valid
   resolveQueue.io.bpuTrain.ready := io.toBpu.train.ready
   io.toBpu.train.bits.meta       := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
-  io.toBpu.train.bits.startVAddr := resolveQueue.io.bpuTrain.bits.startVAddr
+  io.toBpu.train.bits.startPc    := resolveQueue.io.bpuTrain.bits.startPc
   io.toBpu.train.bits.branches   := resolveQueue.io.bpuTrain.bits.branches
 
   // --------------------------------------------------------------------------------

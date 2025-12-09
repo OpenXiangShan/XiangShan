@@ -56,12 +56,6 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper {
     res.asUInt
   }
 
-  def getBranchAddr(addr: PrunedAddr, cfiPosition: UInt): PrunedAddr = {
-    val alignedAddr = Cat(getAlignedAddrUpper(addr), 0.U(FetchBlockAlignWidth.W))
-    val brOffset    = Cat(cfiPosition, 0.U(instOffsetBits.W))
-    PrunedAddrInit(alignedAddr + brOffset)
-  }
-
   def pathHash(pc: PrunedAddr, target: PrunedAddr): UInt = {
     val hash = Cat(pc(9, 1), 0.U(4.W)) ^ target(16, 2) // magic numbers
     hash(PathHashWidth - 1, 0)

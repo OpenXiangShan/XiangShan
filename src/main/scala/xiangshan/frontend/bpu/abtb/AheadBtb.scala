@@ -33,16 +33,16 @@ import xiangshan.frontend.bpu.utage.MicroTagePrediction
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid:       Bool                       = Input(Bool())
-    val overrideValid:       Bool                       = Input(Bool())
-    val previousVAddr:       Valid[PrunedAddr]          = Flipped(Valid(PrunedAddr(VAddrBits)))
-    val microTagePred:       Valid[MicroTagePrediction] = Input(Valid(new MicroTagePrediction))
-    val prediction:          Prediction                 = Output(new Prediction)
-    val basePrediction:      Prediction                 = Output(new Prediction)
-    val useMicroTage:        Bool                       = Output(Bool())
-    val meta:                AheadBtbMeta               = Output(new AheadBtbMeta)
-    val debug_startVAddr:    PrunedAddr                 = Output(PrunedAddr(VAddrBits))
-    val debug_previousVAddr: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val redirectValid:         Bool                       = Input(Bool())
+    val overrideValid:         Bool                       = Input(Bool())
+    val previousStartPc:       Valid[PrunedAddr]          = Flipped(Valid(PrunedAddr(VAddrBits)))
+    val microTagePred:         Valid[MicroTagePrediction] = Input(Valid(new MicroTagePrediction))
+    val prediction:            Prediction                 = Output(new Prediction)
+    val basePrediction:        Prediction                 = Output(new Prediction)
+    val useMicroTage:          Bool                       = Output(Bool())
+    val meta:                  AheadBtbMeta               = Output(new AheadBtbMeta)
+    val debug_startPc:         PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val debug_previousStartPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -109,10 +109,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - send read request to selected bank
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s0_previousVAddr = io.startVAddr
+  private val s0_previousStartPc = io.startPc
 
-  private val s0_setIdx   = getSetIndex(s0_previousVAddr)
-  private val s0_bankIdx  = getBankIndex(s0_previousVAddr)
+  private val s0_setIdx   = getSetIndex(s0_previousStartPc)
+  private val s0_bankIdx  = getBankIndex(s0_previousStartPc)
   private val s0_bankMask = UIntToOH(s0_bankIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
@@ -126,7 +126,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - get entries from bank
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s1_startVAddr = io.startVAddr
+  private val s1_startPc = io.startPc
 
   private val s1_setIdx   = RegEnable(s0_setIdx, s0_fire)
   private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
@@ -144,31 +144,31 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - stage 3 is only for fast prediction when override is valid
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s3_setIdx     = RegInit(0.U.asTypeOf(s1_setIdx))
-  private val s3_bankIdx    = RegInit(0.U.asTypeOf(s1_bankIdx))
-  private val s3_bankMask   = RegInit(0.U.asTypeOf(s1_bankMask))
-  private val s3_entries    = RegInit(0.U.asTypeOf(s1_entries))
-  private val s3_startVAddr = RegInit(0.U.asTypeOf(s1_startVAddr))
+  private val s3_setIdx   = RegInit(0.U.asTypeOf(s1_setIdx))
+  private val s3_bankIdx  = RegInit(0.U.asTypeOf(s1_bankIdx))
+  private val s3_bankMask = RegInit(0.U.asTypeOf(s1_bankMask))
+  private val s3_entries  = RegInit(0.U.asTypeOf(s1_entries))
+  private val s3_startPc  = RegInit(0.U.asTypeOf(s1_startPc))
 
-  private val s2_setIdx     = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
-  private val s2_bankIdx    = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
-  private val s2_bankMask   = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
-  private val s2_entries    = RegEnable(Mux(overrideValid, s3_entries, s1_entries), s1_fire)
-  private val s2_startVAddr = RegEnable(s1_startVAddr, s1_fire)
+  private val s2_setIdx   = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
+  private val s2_bankIdx  = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
+  private val s2_bankMask = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
+  private val s2_entries  = RegEnable(Mux(overrideValid, s3_entries, s1_entries), s1_fire)
+  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
 
   when(s2_fire) {
-    s3_setIdx     := s2_setIdx
-    s3_bankIdx    := s2_bankIdx
-    s3_bankMask   := s2_bankMask
-    s3_entries    := s2_entries
-    s3_startVAddr := s2_startVAddr
+    s3_setIdx   := s2_setIdx
+    s3_bankIdx  := s2_bankIdx
+    s3_bankMask := s2_bankMask
+    s3_entries  := s2_entries
+    s3_startPc  := s2_startPc
   }
 
   //  private val s2_entriesDelay1 = RegNext(s2_entries)
 
   private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
 
-  private val s2_tag = getTag(s2_startVAddr)
+  private val s2_tag = getTag(s2_startPc)
   dontTouch(s2_tag)
 //  private val s2_realEntries = Mux(RegNext(io.overrideValid), s2_entriesDelay1, s2_entries)
   private val s2_realEntries = s2_entries // TODO
@@ -186,7 +186,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
 
   private val s2_firstTakenTarget =
-    getFullTarget(s2_startVAddr, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
+    getFullTarget(s2_startPc, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
 
   private val microTagePred = io.microTagePred
   private val s2_jumpMask = s2_realEntries.zip(s2_hitMask).map {
@@ -203,7 +203,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val microTageTakenOH = s2_compareMatrix.getLeastElementOH(s2_microTageTakenMask)
   private val microTageEntry   = Mux1H(microTageTakenOH, s2_realEntries)
   private val microTageTarget =
-    getFullTarget(s2_startVAddr, microTageEntry.targetLowerBits, microTageEntry.targetCarry)
+    getFullTarget(s2_startPc, microTageEntry.targetLowerBits, microTageEntry.targetCarry)
 
   // Only use the microTage result when microTage is valid and a hit occurs.
   io.useMicroTage           := useMicroTage
@@ -226,8 +226,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.meta.targetLowerBits := s2_firstTakenEntry.targetLowerBits
 
   // used for check abtb output
-  io.debug_startVAddr    := s2_startVAddr
-  io.debug_previousVAddr := s3_startVAddr
+  io.debug_startPc         := s2_startPc
+  io.debug_previousStartPc := s3_startPc
 
   replacers.zipWithIndex.foreach { case (r, i) =>
     r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
@@ -242,8 +242,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_valid = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousVAddr.valid
-  private val t0_previousVAddr = io.previousVAddr.bits
+  private val t0_valid = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousStartPc.valid
+  private val t0_previousStartPc = io.previousStartPc.bits
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -251,14 +251,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_valid         = RegNext(t0_valid) & io.enable
-  private val t1_train         = RegEnable(t0_train, t0_valid)
-  private val t1_previousVAddr = RegEnable(t0_previousVAddr, t0_valid)
+  private val t1_valid           = RegNext(t0_valid) & io.enable
+  private val t1_train           = RegEnable(t0_train, t0_valid)
+  private val t1_previousStartPc = RegEnable(t0_previousStartPc, t0_valid)
 
-  private val t1_setIdx  = getSetIndex(t1_previousVAddr)
+  private val t1_setIdx  = getSetIndex(t1_previousStartPc)
   private val t1_setMask = UIntToOH(t1_setIdx)
 
-  private val t1_bankIdx  = getBankIndex(t1_previousVAddr)
+  private val t1_bankIdx  = getBankIndex(t1_previousStartPc)
   private val t1_bankMask = UIntToOH(t1_bankIdx)
 
   private val t1_meta = t1_train.abtbMeta
@@ -317,11 +317,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t1_writeEntry = Wire(new AheadBtbEntry)
   t1_writeEntry.valid           := true.B
-  t1_writeEntry.tag             := getTag(t1_train.startVAddr)
+  t1_writeEntry.tag             := getTag(t1_train.startPc)
   t1_writeEntry.position        := t1_trainPosition
   t1_writeEntry.attribute       := t1_trainAttribute
   t1_writeEntry.targetLowerBits := t1_trainTargetLowerBits
-  t1_writeEntry.targetCarry.foreach(_ := getTargetCarry(t1_train.startVAddr, t1_trainTarget)) // if (EnableTargetFix)
+  t1_writeEntry.targetCarry.foreach(_ := getTargetCarry(t1_train.startPc, t1_trainTarget)) // if (EnableTargetFix)
 
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
