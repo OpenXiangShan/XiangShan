@@ -79,9 +79,8 @@ class TrainSourceIO(implicit p: Parameters) extends PrefetchBundle {
 }
 
 class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
-  println(s"PrefetcherWrapper:")
   prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
-    println(f"  Prefetcher #$idx%-2d => ${pf.name}")
+    logger.info(f"Prefetcher #$idx%-2d => ${pf.name}")
   }
   val io = IO(new Bundle() {
     // prefetch control

@@ -57,7 +57,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val noUopsIssued = Input(Bool())
   })
 
-  println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
+  logger.info(s"Size: $VirtualLoadQueueSize")
   //  VirtualLoadQueue field
   //  +-----------+---------+-------+
   //  | Allocated | MicroOp | Flags |

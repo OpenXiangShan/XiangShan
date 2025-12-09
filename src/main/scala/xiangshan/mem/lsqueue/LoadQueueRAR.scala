@@ -83,7 +83,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     Cat(ppaddr_high.asUInt, ppaddr_low.asUInt)
   }
 
-  println("LoadQueueRAR: size: " + LoadQueueRARSize)
+  logger.info(s"Size: $LoadQueueRARSize")
   //  LoadQueueRAR field
   //  +-------+-------+-------+----------+
   //  | Valid |  Uop  | PAddr | Released |

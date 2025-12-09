@@ -1034,7 +1034,7 @@ class Sbuffer(implicit p: Parameters)
         }
       }
     }
-    println("PMA Store: diffStoreEventCount = " + diffStoreEventCount)
+    logger.info("PMA Store: diffStoreEventCount = " + diffStoreEventCount)
 
     // the event that nc store to main memory
     val ncmmStoreEvent = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
