@@ -99,7 +99,7 @@ jobs:
           else
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-              --with-dramsim3 --threads 16                                  \
+              --with-dramsim3 --threads 8                                   \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst
             mkdir -p $SPEC_DIR
@@ -111,7 +111,7 @@ jobs:
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
+            --xs $NOOP_HOME --threads 8 --dir $SPEC_DIR --resume \
             -L "$NODE_SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
