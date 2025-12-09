@@ -17,6 +17,11 @@ on:
         required: true
         type: string
         description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
+      benchmarks:
+        description: "Specific benchmarks to run (comma-separated), leave empty to run all"
+        required: false
+        type: string
+        default: ''
 
 jobs:
   run:
@@ -101,6 +106,7 @@ jobs:
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --benchmarks "${{ inputs.benchmarks }}"\
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
             -L "$NODE_SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
@@ -111,9 +117,11 @@ jobs:
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --benchmarks "${{ inputs.benchmarks }}"\
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
             --check --dump-json-path $SPEC_DIR/err_ckps.json
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --benchmarks "${{ inputs.benchmarks }}"\
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
           # mkdir $GITHUB_WORKSPACE/result
