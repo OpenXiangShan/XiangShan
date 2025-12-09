@@ -146,6 +146,11 @@ ifneq ($(YAML_CONFIG),)
 COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
 endif
 
+# compile-time logging
+ifneq ($(LOGGING_LEVEL),)
+COMMON_EXTRA_ARGS += --logging-level $(LOGGING_LEVEL)
+endif
+
 # public args sumup
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
@@ -193,7 +198,6 @@ endif
 ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend
 endif
-
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"

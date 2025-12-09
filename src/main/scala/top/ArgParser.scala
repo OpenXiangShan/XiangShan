@@ -229,6 +229,9 @@ object ArgParser {
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
+        case "--logging-level" :: level :: tail =>
+          System.setProperty("LOGGING_LEVEL", level)
+          nextOption(config, tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
