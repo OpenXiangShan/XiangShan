@@ -292,7 +292,7 @@ class TLBFA(
   )
   generatePerfEvent()
 
-  println(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
+  logger.info(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
 class TLBFakeFA(

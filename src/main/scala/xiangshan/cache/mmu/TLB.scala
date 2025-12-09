@@ -690,7 +690,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: page: ${q.NWays} ${q.Associative} ${q.Replacer.get}")
+  logger.info(s"${q.name}: page: ${q.NWays} ${q.Associative} ${q.Replacer.get}")
 
   if (env.EnableDifftest) {
     for (i <- 0 until Width) {
