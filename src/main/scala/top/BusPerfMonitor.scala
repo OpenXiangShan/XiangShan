@@ -19,6 +19,7 @@ package top
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink._
@@ -30,7 +31,7 @@ class BusPerfMonitor(name: String, stat_latency: Boolean)(implicit p: Parameters
 }
 
 class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boolean)
-  extends LazyModuleImp(outer)
+  extends LazyModuleImp(outer) with LazyLogging
 {
 
   outer.node.in.zip(outer.node.out).foreach{
@@ -102,7 +103,7 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
   if (stat_latency) {
     val nrEdge = outer.node.in.length.toInt
     if (outer.node.in.isEmpty) {
-      println(s"name = $name")
+      logger.info(s"name = $name")
     }
     val edgeIn = outer.node.in.head._2
 
