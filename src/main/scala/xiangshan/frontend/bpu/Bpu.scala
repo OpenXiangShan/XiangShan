@@ -621,144 +621,85 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       s3_prediction.attribute.isConditional
   )
 
-  XSPerfAccumulate("finalPred_s1_ubtb", s3_fire && !s3_override && s3_perfMeta.bpSource.s1Ubtb)
-  XSPerfAccumulate("finalPred_s1_abtb", s3_fire && !s3_override && s3_perfMeta.bpSource.s1Abtb)
-  XSPerfAccumulate("finalPred_s1_fall", s3_fire && !s3_override && s3_perfMeta.bpSource.s1Fallthrough)
+  XSPerfAccumulate(
+    "finalPred_s1",
+    s3_fire && !s3_override,
+    BpuPredictionSource.Stage1.getValidSeq(s3_perfMeta.bpSource.s1Source)
+  )
 
-  XSPerfAccumulate("finalPred_s3_ras", s3_fire && s3_override && s3_perfMeta.bpSource.s3Ras)
-  XSPerfAccumulate("finalPred_s3_ittage", s3_fire && s3_override && s3_perfMeta.bpSource.s3ITTage)
-  XSPerfAccumulate("finalPred_s3_mbtb_tage", s3_fire && s3_override && s3_perfMeta.bpSource.s3MbtbTage)
-  XSPerfAccumulate("finalPred_s3_mbtb", s3_fire && s3_override && s3_perfMeta.bpSource.s3Mbtb)
-  XSPerfAccumulate("finalPred_s3_fall_tage", s3_fire && s3_override && s3_perfMeta.bpSource.s3FallthroughTage)
-  XSPerfAccumulate("finalPred_s3_fall", s3_fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough)
+  XSPerfAccumulate(
+    "finalPred_s3",
+    s3_fire && s3_override,
+    BpuPredictionSource.Stage3.getValidSeq(s3_perfMeta.bpSource.s3Source)
+  )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
   // taken mismatch
-  XSPerfAccumulate(
-    "s3Override_takenMismatch_s3Tage_s1fall",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_perfMeta.bpSource.s3MbtbTage &&
-      s3_perfMeta.bpSource.s1Fallthrough
+  private val perf_s1TakenSourceVec = BpuPredictionSource.Stage1.getValidSeq(
+    s3_perfMeta.bpSource.s1Source,
+    exclude = Set("Fallthrough"),
+    thisPrefix = "s1"
   )
-  XSPerfAccumulate(
-    "s3Override_takenMismatch_s3nonCond_s1fall",
-    io.toFtq.prediction.fire && s3_override &&
-      (s3_perfMeta.bpSource.s3Ras ||
-        s3_perfMeta.bpSource.s3ITTage ||
-        s3_perfMeta.bpSource.s3Mbtb) &&
-      s3_perfMeta.bpSource.s1Fallthrough
+  private val perf_s3TakenSourceVec = BpuPredictionSource.Stage3.getValidSeq(
+    s3_perfMeta.bpSource.s3Source,
+    exclude = Set("Fallthrough", "FallthroughTage"),
+    thisPrefix = "s3"
   )
+
   XSPerfAccumulate(
-    "s3Override_takenMismatch_s3fallTage_s1uBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_perfMeta.bpSource.s3FallthroughTage &&
-      s3_perfMeta.bpSource.s1Ubtb
+    s"s3Override_takenMismatch_s1fall",
+    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s1Fallthrough,
+    perf_s1TakenSourceVec
   )
+
   XSPerfAccumulate(
-    "s3Override_takenMismatch_s3fallTage_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_perfMeta.bpSource.s3FallthroughTage &&
-      s3_perfMeta.bpSource.s1Abtb
+    s"s3Override_takenMismatch_s3fall",
+    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough,
+    perf_s3TakenSourceVec
   )
+
   XSPerfAccumulate(
-    "s3Override_takenMismatch_s3fall_s1uBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_perfMeta.bpSource.s3Fallthrough &&
-      s3_perfMeta.bpSource.s1Ubtb
+    s"s3Override_takenMismatch_s3fallTage",
+    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3FallthroughTage,
+    perf_s3TakenSourceVec
   )
-  XSPerfAccumulate(
-    "s3Override_takenMismatch_s3fall_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_perfMeta.bpSource.s3Fallthrough &&
-      s3_perfMeta.bpSource.s1Abtb
-  )
+
   // position mismatch
   XSPerfAccumulate(
-    "s3Override_positionMismatch_s3mBTB_s1uBTB",
+    s"s3Override_positionMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
-      s3_perfMeta.bpSource.s1Ubtb
+      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition,
+    perf_s1TakenSourceVec
   )
-  XSPerfAccumulate(
-    "s3Override_positionMismatch_s3mBTB_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition &&
-      s3_perfMeta.bpSource.s1Abtb
-  )
+
   // attribute mismatch
   XSPerfAccumulate(
-    "s3Override_attributeMismatch_s3mBTB_s1uBTB",
+    s"s3Override_attributeMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
 //      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
-      s3_perfMeta.bpSource.s1Ubtb
+      !(s3_prediction.attribute === s3_s1Prediction.attribute),
+    perf_s1TakenSourceVec
   )
-  XSPerfAccumulate(
-    "s3Override_attributeMismatch_s3mBTB_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken === s3_s1Prediction.taken &&
-//      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      !(s3_prediction.attribute === s3_s1Prediction.attribute) &&
-      s3_perfMeta.bpSource.s1Abtb
-  )
+
   // target mismatch
-  XSPerfAccumulate(
-    "s3Override_targetMismatch_s3mBTB_s1uBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Ubtb && (s3_perfMeta.bpSource.s3MbtbTage || s3_perfMeta.bpSource.s3Mbtb)
+  // get a cartesian product of s1 source and s3 source
+  private val perf_fullTakenSourceVec = BpuPredictionSource.Stage3.getValidSeq(
+    s3_perfMeta.bpSource.s3Source,
+    thatSeq = perf_s1TakenSourceVec,
+    exclude = Set("Fallthrough", "FallthroughTage"),
+    thisPrefix = "s3"
   )
+
   XSPerfAccumulate(
-    "s3Override_targetMismatch_s3ITTage_s1uBTB",
+    s"s3Override_targetMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
       s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Ubtb && s3_perfMeta.bpSource.s3ITTage
-  )
-  XSPerfAccumulate(
-    "s3Override_targetMismatch_s3RAS_s1uBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Ubtb && s3_perfMeta.bpSource.s3Ras
-  )
-  XSPerfAccumulate(
-    "s3Override_targetMismatch_s3mBTB_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Abtb && (s3_perfMeta.bpSource.s3MbtbTage || s3_perfMeta.bpSource.s3Mbtb)
-  )
-  XSPerfAccumulate(
-    "s3Override_targetMismatch_s3ITTage_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Abtb && s3_perfMeta.bpSource.s3ITTage
-  )
-  XSPerfAccumulate(
-    "s3Override_targetMismatch_s3RAS_s1aBTB",
-    io.toFtq.prediction.fire && s3_override &&
-      s3_prediction.taken && s3_s1Prediction.taken &&
-      s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
-      s3_prediction.attribute === s3_s1Prediction.attribute &&
-      !(s3_prediction.target === s3_s1Prediction.target) &&
-      s3_perfMeta.bpSource.s1Abtb && s3_perfMeta.bpSource.s3Ras
+      !(s3_prediction.target === s3_s1Prediction.target),
+    perf_fullTakenSourceVec
   )
 
   /* *** perf train *** */
@@ -767,43 +708,30 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val t0_branches         = train.bits.branches
   private val t0_mbtbHit          = t0_mbtbMeta.entries.flatten.map(_.hit(t0_mispredictBranch.bits)).reduce(_ || _)
 
-  private val perf_conditionalMispredict =
-    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isConditional
-  private val perf_directMispredict =
-    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isDirect
-  private val perf_indirectMispredict =
-    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isOtherIndirect
-  private val perf_callMispredict =
-    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isCall
-  private val perf_returnMispredict =
-    train.fire && t0_mispredictBranch.valid && t0_mispredictBranch.bits.attribute.isReturn
-
   XSPerfAccumulate("train", train.fire)
-  XSPerfAccumulate("train_total_branch", Mux(train.fire, PopCount(t0_branches.map(_.valid)), 0.U))
   XSPerfAccumulate(
-    "train_total_conditional",
-    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)), 0.U)
+    "train_branch",
+    train.fire,
+    Seq(
+      ("total", true.B, PopCount(t0_branches.map(_.valid))),
+      ("direct", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect))),
+      ("indirect", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect))),
+      ("call", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isCall))),
+      ("return", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isReturn))),
+      ("conditional", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)))
+    )
   )
   XSPerfAccumulate(
-    "train_total_direct",
-    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect)), 0.U)
+    "train_mispredict",
+    train.fire && t0_mispredictBranch.valid,
+    Seq(
+      ("total", true.B),
+      ("direct", t0_mispredictBranch.bits.attribute.isDirect),
+      ("indirect", t0_mispredictBranch.bits.attribute.isOtherIndirect),
+      ("call", t0_mispredictBranch.bits.attribute.isCall),
+      ("return", t0_mispredictBranch.bits.attribute.isReturn),
+      ("conditional", t0_mispredictBranch.bits.attribute.isConditional),
+      ("conditional_because_mbtb_miss", t0_mispredictBranch.bits.attribute.isConditional && !t0_mbtbHit)
+    )
   )
-  XSPerfAccumulate(
-    "train_total_indirect",
-    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect)), 0.U)
-  )
-  XSPerfAccumulate(
-    "train_total_call",
-    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isCall)), 0.U)
-  )
-  XSPerfAccumulate(
-    "train_total_return",
-    Mux(train.fire, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isReturn)), 0.U)
-  )
-  XSPerfAccumulate("train_conditional_mispredict", perf_conditionalMispredict)
-  XSPerfAccumulate("train_direct_mispredict", perf_directMispredict)
-  XSPerfAccumulate("train_indirect_mispredict", perf_indirectMispredict)
-  XSPerfAccumulate("train_call_mispredict", perf_callMispredict)
-  XSPerfAccumulate("train_return_mispredict", perf_returnMispredict)
-  XSPerfAccumulate("train_conditional_mispredict_because_mbtb_miss", perf_conditionalMispredict && !t0_mbtbHit)
 }
