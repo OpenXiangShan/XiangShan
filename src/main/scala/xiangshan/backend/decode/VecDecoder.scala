@@ -530,7 +530,7 @@ object VecDecoder extends DecodeConstants {
     FMV_X_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     FMV_X_W -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     FMV_X_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
-    // donot wflags
+    // donot wfflags
     FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),
     FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),
     FCLASS_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),

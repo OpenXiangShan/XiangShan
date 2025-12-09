@@ -23,30 +23,31 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{SignExt, ZeroExt}
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.{FuConfig, PipedFuncUnit}
+import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.scalar
 
-class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
-  val regEnables = IO(Input(Vec(latency, Bool())))
+class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
+  val ctrl = inCtrl.fpu.get
+  val src0 = inData.src(0)
+  val ctrlReg = RegEnable(ctrl, regEnable(1))
+  val rmReg = RegEnable(rm, regEnable(1))
 
-  //  stage1
-  val ctrl = io.in.fpCtrl
-  val in = io.in.src(0)
-  val typ = ctrl.typ
-  val intValue = RegEnable(Mux(ctrl.wflags,
+  val typ = Cat(fuOpType(3), ~fuOpType(0))
+  val tag = fuOpType(2, 1)
+
+  val intValue = RegEnable(Mux(ctrl.wfflags,
     Mux(typ(1),
-      Mux(typ(0), ZeroExt(in, XLEN), SignExt(in, XLEN)),
-      Mux(typ(0), ZeroExt(in(31, 0), XLEN), SignExt(in(31, 0), XLEN))
+      Mux(typ(0), ZeroExt(src0, XLEN), SignExt(src0, XLEN)),
+      Mux(typ(0), ZeroExt(src0(31, 0), XLEN), SignExt(src0(31, 0), XLEN))
     ),
-    in
-  ), regEnables(0))
-  val ctrlReg = RegEnable(ctrl, regEnables(0))
-  val rmReg = RegEnable(rm, regEnables(0))
+    src0
+  ), regEnable(1))
 
-  // stage2
-  val s2_tag = ctrlReg.typeTagOut
-  val s2_wflags = ctrlReg.wflags
-  val s2_typ = ctrlReg.typ
+  //stage 2
+  val s2_tag = RegEnable(tag, regEnable(1))
+  val s2_typ = RegEnable(typ, regEnable(1))
+  val s2_wfflags = ctrlReg.wfflags
 
   val mux = Wire(new Bundle() {
     val data = UInt(XLEN.W)
@@ -56,7 +57,7 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   mux.data := intValue
   mux.exc := 0.U
 
-  when(s2_wflags){
+  when(s2_wfflags){
     val i2fResults = for(t <- FPU.ftypes.take(3)) yield {
       val i2f = Module(new scalar.IntToFP(t.expWidth, t.precision))
       i2f.io.sign := ~s2_typ(0)
@@ -70,17 +71,11 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
     mux.exc := VecInit(exc)(s2_tag)
   }
 
-  // stage3
-  val s3_out = RegEnable(mux, regEnables(1))
-  val s3_tag = RegEnable(s2_tag, regEnables(1))
+  //stage 3
+  val s3_out = RegEnable(mux, regEnable(2))
+  val s3_tag = RegEnable(s2_tag, regEnable(2))
 
-  io.out.fflags := s3_out.exc
-  io.out.data := FPU.box(s3_out.data, s3_tag)
-}
+  io.out.bits.res.fflags.get := s3_out.exc
+  io.out.bits.res.data       := FPU.box(s3_out.data, s3_tag)
 
-class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
-  override def latency: Int = cfg.latency.latencyVal.get
-  override val dataModule = Module(new IntToFPDataModule(latency))
-  connectDataModule
-  dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
 }
