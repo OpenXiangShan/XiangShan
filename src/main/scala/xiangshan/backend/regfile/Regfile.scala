@@ -19,6 +19,7 @@ package xiangshan.backend.regfile
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
@@ -69,14 +70,14 @@ class Regfile
   width: Int,
   bankNum: Int = 1,
   isVlRegfile: Boolean = false,
-) extends Module {
+) extends Module with LazyLogging {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
     val debug_rports = Vec(65, new RfReadPort(len, width))
   })
   override def desiredName = name
-  println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
+  logger.info(s"$name: size: $numPregs read: $numReadPorts write: $numWritePorts")
 
   val mem_0 = if (isVlRegfile) RegInit(0.U(len.W)) else Reg(UInt(len.W))
   val mem = Reg(Vec(numPregs, UInt(len.W)))

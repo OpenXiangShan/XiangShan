@@ -69,7 +69,7 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
   // check read & write port config
   params.configChecks
 
-  println(params.iqWakeUpParams)
+  logger.info(s"${params.iqWakeUpParams}")
 
   for ((schdCfg, i) <- params.allSchdParams.zipWithIndex) {
     schdCfg.bindBackendParam(params)
@@ -86,15 +86,15 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     exuCfg.updateExuIdx(i)
   }
 
-  println(s"[Backend] debugEn:${backendParams.debugEn}")
-  println(s"[Backend] basicDebugEn:${backendParams.basicDebugEn}")
-  println("[Backend] ExuConfigs:")
+  logger.info(s"debugEn:${backendParams.debugEn}")
+  logger.info(s"basicDebugEn:${backendParams.basicDebugEn}")
+  logger.info("ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs
     val wbPortConfigs = exuCfg.wbPortConfigs
     val immType = exuCfg.immType
 
-    println("[Backend]   " +
+    logger.info(
       s"${exuCfg.name}: " +
       (if (exuCfg.fakeUnit) "fake, " else "") +
       (if (exuCfg.hasLoadFu || exuCfg.hasHyldaFu) s"LdExuIdx(${backendParams.getLdExuIdx(exuCfg)})" else "") +
@@ -121,47 +121,47 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     )
   }
 
-  println(s"[Backend] all fu configs")
+  logger.info(s"all fu configs")
   for (cfg <- FuConfig.allConfigs) {
-    println(s"[Backend]   $cfg")
+    logger.info(s"  $cfg")
   }
 
-  println(s"[Backend] Int RdConfigs: ExuName(Priority)")
+  logger.info(s"Int RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(IntData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Int WbConfigs: ExuName(Priority)")
+  logger.info(s"Int WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(IntData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Fp RdConfigs: ExuName(Priority)")
+  logger.info(s"Fp RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(FpData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Fp WbConfigs: ExuName(Priority)")
+  logger.info(s"Fp WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(FpData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Vf RdConfigs: ExuName(Priority)")
+  logger.info(s"Vf RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(VecData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Vf WbConfigs: ExuName(Priority)")
+  logger.info(s"Vf WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(VecData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.info(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Dispatch Configs:")
-  println(s"[Backend] Load IQ enq width(${params.numLoadDp}), Store IQ enq width(${params.numStoreDp})")
-  println(s"[Backend] Load DP width(${LSQLdEnqWidth}), Store DP width(${LSQStEnqWidth})")
+  logger.info(s"Dispatch Configs:")
+  logger.info(s"Load IQ enq width(${params.numLoadDp}), Store IQ enq width(${params.numStoreDp})")
+  logger.info(s"Load DP width(${LSQLdEnqWidth}), Store DP width(${LSQStEnqWidth})")
 
   params.updateCopyPdestInfo
-  println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
+  logger.info(s"copyPdestInfo ${params.copyPdestInfo}")
   params.allExuParams.map(_.copyNum)
   val ctrlBlock = LazyModule(new CtrlBlock(params))
 
@@ -199,10 +199,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val wbDataPathToCtrlBlock = intRegion.io.wbDataPathToCtrlBlock.writeback ++
     fpRegion.io.wbDataPathToCtrlBlock.writeback ++
     vecRegion.io.wbDataPathToCtrlBlock.writeback
-  println(s"[Backend] intRegion.io.wbDataPathToCtrlBlock.writeback.size = ${intRegion.io.wbDataPathToCtrlBlock.writeback.size}")
-  println(s"[Backend] fpRegion.io.wbDataPathToCtrlBlock.writeback.size = ${fpRegion.io.wbDataPathToCtrlBlock.writeback.size}")
-  println(s"[Backend] vecRegion.io.wbDataPathToCtrlBlock.writeback.size = ${vecRegion.io.wbDataPathToCtrlBlock.writeback.size}")
-  println(s"[Backend] ctrlBlock.io.fromWB.wbData.size = ${ctrlBlock.io.fromWB.wbData.size}, wbDataPathToCtrlBlock.size = ${wbDataPathToCtrlBlock.size}")
+  logger.info(s"intRegion.io.wbDataPathToCtrlBlock.writeback.size = ${intRegion.io.wbDataPathToCtrlBlock.writeback.size}")
+  logger.info(s"fpRegion.io.wbDataPathToCtrlBlock.writeback.size = ${fpRegion.io.wbDataPathToCtrlBlock.writeback.size}")
+  logger.info(s"vecRegion.io.wbDataPathToCtrlBlock.writeback.size = ${vecRegion.io.wbDataPathToCtrlBlock.writeback.size}")
+  logger.info(s"ctrlBlock.io.fromWB.wbData.size = ${ctrlBlock.io.fromWB.wbData.size}, wbDataPathToCtrlBlock.size = ${wbDataPathToCtrlBlock.size}")
   assert(ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size, "ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size")
   ctrlBlock.io.fromWB.wbData.zip(wbDataPathToCtrlBlock).map(x => x._1 := x._2)
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
@@ -285,7 +285,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.v0Wen.foreach(_ := source.bits.v0Wen)
     sink.bits.vlWen.foreach(_ := source.bits.vlWen)
   }}
-  println(s"[Backend] intRegion.io.memWriteback.size = ${intRegion.io.memWriteback.size}")
+  logger.info(s"intRegion.io.memWriteback.size = ${intRegion.io.memWriteback.size}")
 
   intRegion.io.memWriteback <> io.mem.intWriteback
   val lduWriteback = io.mem.intWriteback.flatten.filter(_.bits.params.hasLoadFu)
@@ -564,7 +564,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("backend perfEvents Set", name, inc, i)
+      logger.info(s"backend perfEvents Set ${name} ${inc} ${i}")
     }
   }
 
@@ -577,7 +577,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val criticalErrors = ctrlBlockError ++ intExuBlockError
 
   for (((name, error), _) <- criticalErrors.zipWithIndex) {
-    println(s"[Backend] critical error: $name \n")
+    logger.info(s"critical error: $name")
   }
 
   // expand to collect frontend/memblock/L2 critical errors

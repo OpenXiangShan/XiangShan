@@ -166,7 +166,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.debug_seqNum := io.in.bits.debug_seqNum
   }
   io.outValidAhead3Cycle.foreach{x =>
-    println(s"${cfg.name}: has outValidAhead3Cycle")
+    logger.info(s"${cfg.name}: has outValidAhead3Cycle")
     x := false.B
   }
 }

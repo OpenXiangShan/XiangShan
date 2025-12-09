@@ -330,7 +330,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   if (HasVPU) { extList = extList :+ 'v' }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0L)((sum, i) => sum | getMisaExt(i)) //"h8000000000141185".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal.U)
-  println(s"[CSR] supported isa ext: $extList")
+  logger.info(s"supported isa ext: $extList")
 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
@@ -449,9 +449,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     BigIntGenMask(1)
   ).U(XLEN.W)
 
-  println(s"sstatusWNmask: 0x${sstatusWNmask.toString(16)}")
-  println(s"sstatusWmask: 0x${sstatusWmask.litValue.toString(16)}")
-  println(s"sstatusRmask: 0x${sstatusRmask.litValue.toString(16)}")
+  logger.info(s"sstatusWNmask: 0x${sstatusWNmask.toString(16)}")
+  logger.info(s"sstatusWmask: 0x${sstatusWmask.litValue.toString(16)}")
+  logger.info(s"sstatusRmask: 0x${sstatusRmask.litValue.toString(16)}")
 
   // stvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
   val stvecMask = ~(0x2.U(XLEN.W))
@@ -568,14 +568,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.hd_misalign_st_enable := smblockctl(8)
   csrio.customCtrl.hd_misalign_ld_enable := smblockctl(9)
 
-  println("CSR smblockctl init value:")
-  println("  Store buffer replace threshold: " + StoreBufferThreshold)
-  println("  Enable ld-ld vio check after reset: " + EnableLdVioCheckAfterReset)
-  println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
-  println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
-  println("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
-  println("  Enable unaligned store: " + EnableHardwareStoreMisalign)
-  println("  Enable unaligned load: " + EnableHardwareLoadMisalign)
+  logger.info("CSR smblockctl init value:")
+  logger.info("  Store buffer replace threshold: " + StoreBufferThreshold)
+  logger.info("  Enable ld-ld vio check after reset: " + EnableLdVioCheckAfterReset)
+  logger.info("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
+  logger.info("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
+  logger.info("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
+  logger.info("  Enable unaligned store: " + EnableHardwareStoreMisalign)
+  logger.info("  Enable unaligned load: " + EnableHardwareLoadMisalign)
 
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
@@ -754,7 +754,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val allPerfEvents = hpmEvents.map(x => (s"Hc", x.value))
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("CSR perfEvents Set", name, inc, i)
+      logger.info(s"CSR perfEvents Set ${name} ${inc} ${i}")
     }
   }
 
@@ -940,10 +940,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
                 (if (HasHExtension) hcsrMapping else Nil)
 
 
-  println("XiangShan CSR Lists")
+  logger.info("XiangShan CSR Lists")
 
   for (addr <- mapping.keys.toSeq.sorted) {
-    println(f"$addr%#03x ${mapping(addr)._1}")
+    logger.info(f"$addr%#03x ${mapping(addr)._1}")
   }
 
   val vs_s_csr_map = List(

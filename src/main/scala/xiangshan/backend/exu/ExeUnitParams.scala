@@ -3,6 +3,7 @@ package xiangshan.backend.exu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
@@ -26,7 +27,7 @@ case class ExeUnitParams(
 )(
   implicit
   val schdType: SchedulerType,
-) {
+) extends LazyLogging {
   // calculated configs
   var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
   var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
@@ -150,7 +151,7 @@ case class ExeUnitParams(
         }
       }
     }
-    println(s"[Backend] exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
+    logger.info(s"exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
     1 + setIQ.size / copyDistance
   }
   def rdPregIdxWidth: Int = {
@@ -194,7 +195,7 @@ case class ExeUnitParams(
       addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
       val latencyCertainFuConfigsAddJump = if (addJump) latencyCertainFuConfigs :+ JmpCfg else latencyCertainFuConfigs
-      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
+      logger.info(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
       latencyCertainFuConfigsAddJump.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
@@ -371,7 +372,7 @@ case class ExeUnitParams(
     val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
     val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet
     this.needLoadDependency = !(wakeUpByLoadNames & thisWakeUpByNames).isEmpty
-    println(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
+    logger.info(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
   }
 
   def updateExuIdx(idx: Int): Unit = {

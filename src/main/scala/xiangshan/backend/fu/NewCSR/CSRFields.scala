@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util.Fill
+import com.typesafe.scalalogging.LazyLogging
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.collection.mutable
 
@@ -126,7 +127,7 @@ class CSREnumType(
   var init: Data = null
 )(
   override val factory: ChiselEnum
-) extends EnumType(factory) {
+) extends EnumType(factory) with LazyLogging {
 
   var otherUpdateSeq: mutable.Seq[Tuple2[Bool, Data]] = mutable.Seq()
 
@@ -143,8 +144,8 @@ class CSREnumType(
   }
 
   if (msb - lsb + 1 > this.getWidth)
-    println(
-      s"[CSRInfo] $this: " +
+    logger.info(
+      s"$this: " +
       s"the setting range($msb, $lsb) of bitfield is widen than EnumType's width(${this.getWidth}), " +
       s"the higher bits will be optimized"
     )
@@ -231,7 +232,7 @@ class CSREnumType(
     resetCheckRWType
     if (!this.factory.all.exists(_.litValue == init.litValue)) {
       this.factory.asInstanceOf[CSREnum].addNewValue(init)
-      println(s"[CSR-info] add reset value ${init.litValue} into $this")
+      logger.info(s"add reset value ${init.litValue} into $this")
     }
     if (!factory.all.exists(_.litValue == ((BigInt(1) << (msb - lsb + 1)) - 1))) {
       factory.asInstanceOf[CSREnum].addMaxValue

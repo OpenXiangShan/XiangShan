@@ -78,12 +78,12 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
   private val immInfo = io.fromDataPath.immInfo
 
-  println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
+  logger.info(s"RCData num: ${fromDPsRCData.size}")
 
   // (exuIdx, srcIdx, bypassExuIdx)
   private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
     fromDPs.map { (x: DecoupledIO[ExuInput]) =>
-      println(s"[BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
+      logger.info(s"${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
       VecInit(x.bits.exuSources.map(_.map(_.toExuOH(x.bits.params))).getOrElse(
         // TODO: remove tmp max 1 for fake HYU1
         VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(params.numExu.W).asBools)))
@@ -113,7 +113,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fpExuNum  = params.fpSchdParams.get.numExu
   private val vfExuNum  = params.vecSchdParams.get.numExu
 
-  println(s"[BypassNetwork] allExuNum: ${toExus.size} intExuNum: ${intExuNum} fpExuNum: ${fpExuNum} vfExuNum: ${vfExuNum}")
+  logger.info(s"allExuNum: ${toExus.size} intExuNum: ${intExuNum} fpExuNum: ${fpExuNum} vfExuNum: ${vfExuNum}")
 
   private val fromDPsHasBypass2Source = fromDPs.filter(x => x.bits.params.isIQWakeUpSource && x.bits.params.writeVfRf && (x.bits.params.isVfExeUnit || x.bits.params.hasLoadExu)).map(_.bits.params.exuIdx)
   private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && (x.bits.params.isVfExeUnit || x.bits.params.isMemExeUnit)).map(_.bits.params.exuIdx)
@@ -133,9 +133,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     fromDPsHasBypass2Source.map(x => RegEnable(bypassDataVec(x), bypass2DateEn(x).asBool))
   )
 
-  println(s"[BypassNetwork] HasBypass2SourceExuNum: ${fromDPsHasBypass2Source.size} HasBypass2SinkExuNum: ${fromDPsHasBypass2Sink.size} bypass2DataVecSize: ${bypass2DataVec.length}")
-  println(s"[BypassNetwork] HasBypass2SourceExu: ${fromDPsHasBypass2Source}")
-  println(s"[BypassNetwork] HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
+  logger.info(s"HasBypass2SourceExuNum: ${fromDPsHasBypass2Source.size} HasBypass2SinkExuNum: ${fromDPsHasBypass2Sink.size} bypass2DataVecSize: ${bypass2DataVec.length}")
+  logger.info(s"HasBypass2SourceExu: ${fromDPsHasBypass2Source}")
+  logger.info(s"HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
 
   toExus.zip(fromDPs).foreach { case (sink, source) =>
     connectSamePort(sink.bits, source.bits)
@@ -169,11 +169,11 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readRegCache = if (exuParm.needReadRegCache) exuInput.bits.dataSources(srcIdx).readRegCache else false.B
       val readImm = if (exuParm.immType.nonEmpty && srcIdx == 1 || exuParm.hasLoadExu && srcIdx == 0) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
-      println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
+      logger.debug(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
       val readBypass2 = if (bypass2ExuIdx >= 0) dataSource.readBypass2 else false.B
-      println(s"[BypassNetWork] ${exuParm.name}")
-      println(s"[BypassNetWork] exuIdx = ${exuIdx}")
-      println(s"[BypassNetWork] srcIdx = ${srcIdx}")
+      logger.debug(s"${exuParm.name}:")
+      logger.debug(s"  exuIdx = ${exuIdx}")
+      logger.debug(s"  srcIdx = ${srcIdx}")
       val immALU = Wire(UInt(XLEN.W))
       immALU := imm
       if (exuParm.aluNeedPc && srcIdx == 1) {
@@ -295,7 +295,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     fromExus.zip(bypassDataVec).filter(_._1.bits.params.needWriteRegCache).map(_._2)
   )
 
-  println(s"[BypassNetwork] WriteRegCacheExuNum: ${forwardIntWenVec.size}")
+  logger.info(s"WriteRegCacheExuNum: ${forwardIntWenVec.size}")
 
   io.toDataPath.zipWithIndex.foreach{ case (x, i) => 
     x.wen := bypassIntWenVec(i)

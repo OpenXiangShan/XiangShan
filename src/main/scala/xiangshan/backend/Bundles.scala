@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import utils.BundleUtils.makeValid
 import utils.OptionWrapper
 import xiangshan._
@@ -31,6 +32,11 @@ import utility._
 
 
 object Bundles {
+  object Logger extends LazyLogging { // workaround: we cannot extends LazyLogging directly in object Bundles
+    def info(msg: String): Unit = logger.info(msg)
+    def warn(msg: String): Unit = logger.warn(msg)
+  }
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -47,7 +53,7 @@ object Bundles {
         if (sinkWidth == sourceWidth) {
           sinkData := sourceData
         } else {
-          println(s"[connectSamePort] [Warning]" +
+          Logger.warn(s"[connectSamePort]" +
                   s" sinkBundle: ${sinkBundle.className} ${name}'s width is = ${sinkWidth}," +
                   s" sourceBundle: ${sourceBundle.className} ${name}'s width is = ${sourceWidth}")
         }
@@ -1091,7 +1097,7 @@ object Bundles {
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
-      println(s"[fromExuOutput]: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
+      Logger.info(s"fromExuOutput: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)

@@ -86,7 +86,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       else Seq.fill(RenameWidth)(0).patch(idx - (cntL(i) + 1)/2, Seq.fill(size)(1), size)
     }
 
-    println("[Rename.Compress]" +
+    logger.debug(
       " index: "    + index +
       " i: "        + keyCandidate +
       " key: "      + key.tail.dropRight(1) +

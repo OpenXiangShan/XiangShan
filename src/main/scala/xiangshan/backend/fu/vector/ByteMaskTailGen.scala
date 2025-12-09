@@ -3,6 +3,7 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.utils.{MaskExtractor, UIntToContLow0s, UIntToContLow1s}
 import utility.XSDebug
@@ -10,12 +11,12 @@ import yunsuan.vector.SewOH
 import yunsuan.util.LookupTree
 
 
-class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
+class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle with LazyLogging {
   private val numBytes = vlen / 8
   private val maxVLMUL = 8
   private val maxVLMAX = 8 * 16 // TODO: parameterize this
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
-  println(s"elemIdxWidth: $elemIdxWidth")
+  logger.info(s"elemIdxWidth: $elemIdxWidth")
 
   val in = Input(new Bundle {
     val begin = UInt(elemIdxWidth.W)
@@ -43,7 +44,7 @@ class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   })
 }
 
-class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
+class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module with LazyLogging {
   require(isPow2(vlen))
 
   private val numBytes = vlen / 8
@@ -52,7 +53,7 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   private val maxVLMAX = 8 * 16 // TODO: parameterize this
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
 
-  println(s"numBytes: ${numBytes}, byteWidth: ${byteWidth}")
+  logger.info(s"numBytes: ${numBytes}, byteWidth: ${byteWidth}")
 
   val io = IO(new ByteMaskTailGenIO(vlen))
 

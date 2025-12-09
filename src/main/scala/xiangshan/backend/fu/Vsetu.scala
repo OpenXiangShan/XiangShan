@@ -72,8 +72,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   // vlen =  128
   private val log2Vlen = log2Up(VLEN)
-  println(s"[VsetModule] log2Vlen: $log2Vlen")
-  println(s"[VsetModule] vlWidth: $vlWidth")
+  logger.info(s"log2Vlen: $log2Vlen")
+  logger.info(s"vlWidth: $vlWidth")
 
   private val log2Vlmul = vlmul
   // use 2 bits vsew to store vsew

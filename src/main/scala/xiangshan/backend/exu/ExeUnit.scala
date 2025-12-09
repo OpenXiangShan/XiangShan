@@ -61,7 +61,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
     if (exuParams.aluNeedPc && cfg.isAlu) {
       AluCfg.aluNeedPc = true
-      println(s"[ExeUnit] ${exuParams.name}'s alu need pc")
+      logger.info(s"${exuParams.name}'s alu need pc")
     }
     val module = cfg.fuGen(p, cfg)
     AluCfg.aluNeedPc = false
@@ -202,7 +202,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
     val latency = fu.cfg.latency.latencyVal.getOrElse(0)
     if (fu.cfg == I2fCfg){
-      println(s"I2fCfg latency = $latency")
+      logger.info(s"I2fCfg latency = $latency")
     }
     for (i <- 0 until (latency+1)) {
       val sink = fu.io.in.bits.ctrlPipe.get(i)
@@ -256,7 +256,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   private val fuOutValidOH = Wire(Vec(funcUnits.length, Bool()))
   fuOutValidOH := funcUnits.map{ case fu => {
     if (needUncertainWakeupFuConfigs.contains(fu.cfg)){
-      println(p"${exuParams.name}: ${fu.cfg.name} is needUncertainWakeupFuConfig")
+      logger.info(s"${exuParams.name}: ${fu.cfg.name} is needUncertainWakeupFuConfig")
       !funcUnits.filterNot(x => needUncertainWakeupFuConfigs.contains(x.cfg)).map(y => y.io.out.valid).fold(false.B)(_ || _) && fu.io.out.valid
     }
     else {

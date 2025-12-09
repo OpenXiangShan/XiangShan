@@ -88,7 +88,7 @@ class CtrlBlockImp(
   private val numPcMemRead = pcMemRdIndexes.maxIdx
 
   // now pcMem read for exu is moved to PcTargetMem (OG0)
-  println(s"pcMem read num: $numPcMemRead")
+  logger.info(s"pcMem read num: $numPcMemRead")
 
   val io = IO(new CtrlBlockIO())
 
@@ -766,11 +766,11 @@ class CtrlBlockImp(
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
 
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
-  println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
-  println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
-  println(s"[CtrlBlock] io.toIssueBlock.fpUops.size = ${io.toIssueBlock.fpUops.size}")
-  println(s"[CtrlBlock] io.toIssueBlock.vfUops.size = ${io.toIssueBlock.vfUops.size}")
-  println(s"[CtrlBlock] dispatch.io.toIssueQueues.size = ${dispatch.io.toIssueQueues.size}")
+  logger.info(s"toIssueBlockUops.size = ${toIssueBlockUops.size}")
+  logger.info(s"io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
+  logger.info(s"io.toIssueBlock.fpUops.size = ${io.toIssueBlock.fpUops.size}")
+  logger.info(s"io.toIssueBlock.vfUops.size = ${io.toIssueBlock.vfUops.size}")
+  logger.info(s"dispatch.io.toIssueQueues.size = ${dispatch.io.toIssueQueues.size}")
   toIssueBlockUops.zip(dispatch.io.toIssueQueues).map{ case (iq, dispatch) => {
     iq.valid := dispatch.valid
     iq.bits := dispatch.bits

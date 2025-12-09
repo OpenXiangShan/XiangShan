@@ -45,7 +45,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
 
-  println(s"[Rename] numRegSrc: $numRegSrc")
+  logger.info(s"numRegSrc: $numRegSrc")
 
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
@@ -565,7 +565,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
-  println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
+  logger.info(s"idx of pdest in bypassCond $pdestLoc")
   for (i <- 1 until RenameWidth) {
     val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)

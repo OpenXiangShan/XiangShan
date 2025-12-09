@@ -81,7 +81,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     case VlWB(_, _) => vlBusyTableNeedLoadCancel
     case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
   }
-  if (!needLoadCancel) println(s"[BusyTable]: WbConfig ${pregWB} busyTable don't need loadCancel")
+  if (!needLoadCancel) logger.info(s"WbConfig ${pregWB} busyTable don't need loadCancel")
   val loadCancel = if (needLoadCancel) io.ldCancel else 0.U.asTypeOf(io.ldCancel)
   val allWakeUp = io.wakeUpInt ++ io.wakeUpFp ++ io.wakeUpVec
   val wakeUpIn = pregWB match {

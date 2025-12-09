@@ -71,7 +71,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   override def desiredName: String = s"${params.getIQName}"
 
-  println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
+  logger.info(s"${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
     s"wakeup exu in(${params.wakeUpInExuSources.size}): ${params.wakeUpInExuSources.map(_.name).mkString("{",",","}")}, " +
     s"wakeup exu out(${params.wakeUpOutExuSources.size}): ${params.wakeUpOutExuSources.map(_.name).mkString("{",",","}")}, " +
     s"numEntries: ${params.numEntries}, numRegSrc: ${params.numRegSrc}, " +
@@ -89,11 +89,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
   val wakeupFuLatencySeqs : Seq[Seq[(FuType.OHType, Int)]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap.toSeq.sortBy(_._2))
 
-  println(s"[IssueQueueImp] ${params.getIQName} fuLatencySeqs: ${wakeupFuLatencySeqs}")
-  println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
+  logger.info(s"${params.getIQName} fuLatencySeqs: ${wakeupFuLatencySeqs}")
+  logger.info(s"${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   if (params.hasIQWakeUp) {
     val exuSourcesEncodeString = params.wakeUpSourceExuIdx.map(x => 1 << x).reduce(_ + _).toBinaryString
-    println(s"[IssueQueueImp] ${params.getIQName} exuSourcesWidth: ${ExuSource().value.getWidth}, " +
+    logger.info(s"${params.getIQName} exuSourcesWidth: ${ExuSource().value.getWidth}, " +
       s"exuSourcesEncodeMask: ${"0" * (p(XSCoreParamsKey).backendParams.numExu - exuSourcesEncodeString.length) + exuSourcesEncodeString}")
   }
 
@@ -380,13 +380,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.wakeUpFromWB                                      := 0.U.asTypeOf(io.wakeupFromWB)
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
     entriesIO.wakeUpFromWBDelayed                               := 0.U.asTypeOf(io.wakeupFromWBDelayed)
-    println(s"[issueQueue] name = ${params.getIQName}")
+    logger.info(s"name = ${params.getIQName}")
     val wakeupFromWBExuName = io.wakeupFromWB.map(x => x.bits.exuIndices).map(i => i.map(backendParams.allExuParams(_).name))
-    println(s"[issueQueue] wakeupFromWBExuName = ${wakeupFromWBExuName}")
+    logger.info(s"wakeupFromWBExuName = ${wakeupFromWBExuName}")
     val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
-    println(s"[issueQueue] vecExuIndices = ${vecExuIndices}")
+    logger.info(s"vecExuIndices = ${vecExuIndices}")
     val vecWBIndices = io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
-    println(s"[issueQueue] vecWBIndices = ${vecWBIndices}")
+    logger.info(s"vecWBIndices = ${vecWBIndices}")
     vecWBIndices.map{ case i =>
       entriesIO.wakeUpFromWB(i) := io.wakeupFromWB(i)
       entriesIO.wakeUpFromWBDelayed(i) := io.wakeupFromWBDelayed(i)
@@ -431,7 +431,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     // alu and jmp are not same deq port, alu select intWen uop (include auipc and jalr)
     val aluDeqNeedPickJump = param.aluDeqNeedPickJump && fuCfgs.contains(AluCfg)
     val bjuDeqPickCond = param.aluDeqNeedPickJump && fuCfgs.contains(JmpCfg)
-    if (aluDeqNeedPickJump) println(s"${param.getIQName} need select intWen uop")
+    if (aluDeqNeedPickJump) logger.info(s"${param.getIQName} need select intWen uop")
     fuTypeVec.zip(rfWenVec).map { case (fuType, rfWen) =>
       val bjuDeqCanAccept = FuType.isBrh(fuType) || FuType.isJump(fuType) && !rfWen
       // alu and csr in same exeunit, but csr's rfwen may be false.B
@@ -1231,7 +1231,7 @@ class IssueQueueMemAddrImp(implicit p: Parameters, params: IssueBlockParams)
 
   require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
     s"IQName: ${params.getIQName}, StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
-  println(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
+  logger.info(s"StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
@@ -1303,7 +1303,7 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
   extends IssueQueueImp with HasCircularQueuePtrHelper {
 
   require((params.VlduCnt + params.VstuCnt) > 0, "IssueQueueVecMemImp can only be instance of VecMem IQ")
-  println(s"[IssueQueueVecMemImp] VlduCnt: ${params.VlduCnt}, VstuCnt: ${params.VstuCnt}")
+  logger.info(s"VlduCnt: ${params.VlduCnt}, VstuCnt: ${params.VstuCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")

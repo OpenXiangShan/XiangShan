@@ -28,10 +28,10 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
 
   val io = IO(new RegCacheIO())
 
-  println(s"[RegCache] readPorts: ${params.getIntExuRCReadSize} + ${params.getMemExuRCReadSize}, " +
+  logger.info(s"readPorts: ${params.getIntExuRCReadSize} + ${params.getMemExuRCReadSize}, " +
     s"writePorts: ${params.getIntExuRCWriteSize} + ${params.getMemExuRCWriteSize}")
 
-  println(s"[RegCache] dataWidth: ${params.intSchdParams.get.rfDataWidth}, addrWidth: ${RegCacheIdxWidth}, tagWidth: ${params.intSchdParams.get.pregIdxWidth}")
+  logger.info(s"dataWidth: ${params.intSchdParams.get.rfDataWidth}, addrWidth: ${RegCacheIdxWidth}, tagWidth: ${params.intSchdParams.get.pregIdxWidth}")
 
   require(RegCacheIdxWidth == (log2Up(IntRegCacheSize) + 1), "IntRegCache should be half of the whole RegCache")
   require(RegCacheIdxWidth == (log2Up(MemRegCacheSize) + 1), "MemRegCache should be half of the whole RegCache")

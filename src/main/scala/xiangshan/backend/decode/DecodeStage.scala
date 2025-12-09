@@ -87,8 +87,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val io = IO(new DecodeStageIO)
 
   val debugWidth = if(backendParams.debugEn) io.in.head.bits.debug.get.asUInt.getWidth else 0
-  println(s"[DecodeStage]: decodeInUop real width is ${io.in.head.asUInt.getWidth - debugWidth}")
-  println(s"[DecodeStage]: decodeInUop debug width is ${debugWidth}")
+  logger.info(s"decodeInUop real width is ${io.in.head.asUInt.getWidth - debugWidth}")
+  logger.info(s"decodeInUop debug width is ${debugWidth}")
 
   if (backendParams.debugEn){
     io.in.zipWithIndex.foreach { case (d, i) =>

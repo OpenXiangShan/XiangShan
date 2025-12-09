@@ -53,11 +53,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
   val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
   val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
-  println(s"[NewDispatch] ${allExuParams.map(_.name)}")
-  println(s"[NewDispatch] ${allFuConfigs.map(_.name)}")
-  println(s"[NewDispatch] ${allFuConfigs.map(_.fuType.id)}")
-  println(s"[NewDispatch] ${sortedFuConfigs.map(_.name)}")
-  println(s"[NewDispatch] ${sortedFuConfigs.map(_.fuType.id)}")
+  logger.info(s"${allExuParams.map(_.name)}")
+  logger.info(s"${allFuConfigs.map(_.name)}")
+  logger.info(s"${allFuConfigs.map(_.fuType.id)}")
+  logger.info(s"${sortedFuConfigs.map(_.name)}")
+  logger.info(s"${sortedFuConfigs.map(_.fuType.id)}")
   val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
   val fuMapIQIdx = sortedFuConfigs.map( fu => {
     val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
@@ -65,7 +65,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
    }
   )
   fuMapIQIdx.map { case (fu, iqidx) =>
-    println(s"[NewDispatch] ${fu.name} $iqidx")
+    logger.info(s"${fu.name} $iqidx")
   }
   val sameIQIdxFus = fuMapIQIdx.map{ case (fu, iqidx) =>
     fuMapIQIdx.filter(_._2 == iqidx).map(_._1) -> iqidx
@@ -73,10 +73,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val needMultiIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size > 1)
   val needSingleIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size == 1)
   needMultiIQ.map { case (fus, iqidx) =>
-    println(s"[NewDispatch] needMultiIQ: ${fus.map(_.name)} $iqidx")
+    logger.info(s"needMultiIQ: ${fus.map(_.name)} $iqidx")
   }
   needSingleIQ.map { case (fus, iqidx) =>
-    println(s"[NewDispatch] needSingleIQ: ${fus.map(_.name)} $iqidx")
+    logger.info(s"needSingleIQ: ${fus.map(_.name)} $iqidx")
   }
   val fuConfigsInExuParams = allExuParams.map(_.fuConfigs)
   val fuMapExuIdx = sortedFuConfigs.map { case fu => {
@@ -211,11 +211,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       xx.zipWithIndex.filter(y => VlRegSrcDataSet.contains(y._1)).map(_._2)
     }).flatten
   }).flatten.toSet.toSeq.sorted
-  println(s"[NewDispatch] idxRegTypeInt: $idxRegTypeInt")
-  println(s"[NewDispatch] idxRegTypeFp: $idxRegTypeFp")
-  println(s"[NewDispatch] idxRegTypeVec: $idxRegTypeVec")
-  println(s"[NewDispatch] idxRegTypeV0: $idxRegTypeV0")
-  println(s"[NewDispatch] idxRegTypeVl: $idxRegTypeVl")
+  logger.info(s"idxRegTypeInt: $idxRegTypeInt")
+  logger.info(s"idxRegTypeFp: $idxRegTypeFp")
+  logger.info(s"idxRegTypeVec: $idxRegTypeVec")
+  logger.info(s"idxRegTypeV0: $idxRegTypeV0")
+  logger.info(s"idxRegTypeVl: $idxRegTypeVl")
   val numRegSrc: Int = issueBlockParams.map(_.exuBlockParams.map(
     x => if (x.hasStdFu) x.numRegSrc + 1 else x.numRegSrc
   ).max).max
@@ -236,7 +236,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     x => x.numVlSrc
   ).max).max
 
-  println(s"[Dispatch2Iq] numRegSrc: ${numRegSrc}, numRegSrcInt: ${numRegSrcInt}, numRegSrcFp: ${numRegSrcFp}, " +
+  logger.info(s"numRegSrc: ${numRegSrc}, numRegSrcInt: ${numRegSrcInt}, numRegSrcFp: ${numRegSrcFp}, " +
     s"numRegSrcVf: ${numRegSrcVf}, numRegSrcV0: ${numRegSrcV0}, numRegSrcVl: ${numRegSrcVl}")
 
   // RegCacheTagTable Module
@@ -275,10 +275,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.allocPregs := a
   }}
   rcTagTable.io.allocPregs.zip(allocPregs(0)).map(x => x._1 := x._2)
-  println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.length}")
-  println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.length}")
-  println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.size}")
-  println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.size}")
+  logger.info(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.length}")
+  logger.info(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.length}")
+  logger.info(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.size}")
+  logger.info(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.size}")
   rcTagTable.io.wakeupFromIQ := io.wakeUpAll.wakeUpInt
   rcTagTable.io.og0Cancel := io.og0Cancel
   rcTagTable.io.ldCancel := io.ldCancel
@@ -294,7 +294,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       // for int is 2 src, fp is 3 src
       srcLoadDependencyUpdate.zip(srcType).zipWithIndex.map{ case ((sinks, srctypes), idx) =>
         sinks.zip(srctypes).zipWithIndex.map{ case ((sink, srctype), srcidx) =>
-          println(s"srcidx = ${srcidx}")
+          logger.info(s"srcidx = ${srcidx}")
           val fpRead = busyTables(1).io.read(idx * 3 + srcidx).loadDependency
           if (srcidx < 2) {
             val intRead = busyTables(0).io.read(idx * 2 + srcidx).loadDependency
@@ -393,7 +393,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val suffix = fus.map(_.name).mkString("_")
     val iqNum = exuidx.size
     val iqidx = allIssueParams.map(_.exuBlockParams.map(_.fuConfigs).flatten.toSet.toSeq).zipWithIndex.filter{x => fus.toSet.subsetOf(x._1.toSet)}.map(_._2)
-    println(s"[NewDispatch] ${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
+    logger.info(s"${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
     val compareMatrix = Wire(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"compareMatrix_$suffix")
     for (i <- 0 until iqNum) {
       for (j <- 0 until iqNum) {
@@ -410,12 +410,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val minIQSel = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool()))).suggestName(s"minIQSel_$suffix")
     for (i <- 0 until renameWidth){
       val minIQSel_ith = IQSort(i % iqNum)
-      println(s"minIQSel_${i}th_$suffix = IQSort(${i % iqNum})")
+      logger.info(s"minIQSel_${i}th_$suffix = IQSort(${i % iqNum})")
       for (j <- 0 until issueQueueNum){
         minIQSel(i)(j) := false.B
         if (iqidx.contains(j)){
           minIQSel(i)(j) := minIQSel_ith(iqidx.indexOf(j))
-          println(s"minIQSel_${suffix}_${i}_${j} = minIQSel_ith(iqidx.indexOf(${j}))")
+          logger.info(s"minIQSel_${suffix}_${i}_${j} = minIQSel_ith(iqidx.indexOf(${j}))")
         }
       }
     }

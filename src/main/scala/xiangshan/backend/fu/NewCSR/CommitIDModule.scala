@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util.HasBlackBoxInline
+import com.typesafe.scalalogging.LazyLogging
 
 import java.util.Properties
 
@@ -31,7 +32,7 @@ class PrintCommitIDModule(shaWidth: Int, hartIdlen: Int) extends BlackBox with H
   )
 }
 
-class CommitIDModule(shaWidth: Int, hartIdlen: Int) extends Module {
+class CommitIDModule(shaWidth: Int, hartIdlen: Int) extends Module with LazyLogging {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdlen.W))
     val commitID = Output(UInt(shaWidth.W))
@@ -44,8 +45,8 @@ class CommitIDModule(shaWidth: Int, hartIdlen: Int) extends Module {
   val sha = props.get("SHA").asInstanceOf[String].take(shaWidth / 4)
   val dirty = props.get("dirty").asInstanceOf[String].toInt
 
-  println(s"[CommitIDModule] SHA=$sha")
-  println(s"[CommitIDModule] dirty=$dirty")
+  logger.info(s"SHA=$sha")
+  logger.info(s"dirty=$dirty")
 
   io.commitID := BigInt(sha, 16).U(shaWidth.W)
   io.dirty := dirty.U

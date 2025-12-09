@@ -43,7 +43,7 @@ trait MachineLevel { self: NewCSR =>
   val misa = Module(new CSRModule("Misa", new MisaBundle))
     .setAddr(CSRs.misa)
 
-  println(s"[CSR] supported isa ext: ${misa.bundle.getISAString}")
+  logger.info(s"supported isa ext: ${misa.bundle.getISAString}")
 
   val medeleg = Module(new CSRModule("Medeleg", new MedelegBundle))
     .setAddr(CSRs.medeleg)

@@ -31,10 +31,10 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters) extends XSModu
 
   val io = IO(new RegCacheTagTableIO(numReadPorts))
 
-  println(s"[RegCacheTagTable] readPorts: ${numReadPorts}, " +
+  logger.info(s"readPorts: ${numReadPorts}, " +
     s"writePorts: ${backendParams.getIntExuRCWriteSize} + ${backendParams.getMemExuRCWriteSize}")
 
-  println(s"[RegCacheTagTable] addrWidth: ${RegCacheIdxWidth}, tagWidth: ${IntPhyRegIdxWidth}")
+  logger.info(s"addrWidth: ${RegCacheIdxWidth}, tagWidth: ${IntPhyRegIdxWidth}")
 
   private val IntRegCacheReadSize = numReadPorts
   private val IntRegCacheWriteSize = backendParams.getIntExuRCWriteSize

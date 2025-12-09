@@ -52,7 +52,7 @@ class RegCacheDataModule
     val validInfo = Vec(numEntries, Output(Bool()))
   })
 
-  println(s"[RegCache] $name: size: $numEntries, read: $numReadPorts, write: $numWritePorts")
+  logger.info(s"$name: size: $numEntries, read: $numReadPorts, write: $numWritePorts")
 
   val v   = RegInit(VecInit(Seq.fill(numEntries)(false.B)))
   val mem = Reg(Vec(numEntries, UInt(dataWidth.W)))

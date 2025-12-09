@@ -18,6 +18,7 @@ package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
 import utility.{ParallelPriorityMux, ValidHold, ZeroExt}
 import xiangshan.cache.mmu.TlbCmd
@@ -76,7 +77,7 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
     val blankCfg = PMXLEN == 32
     val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % pmaCfgPerCSR == 0)))
     val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
-//      println(s"tlbpma i:$i notempty:$notempty")
+//      logger.info(s"tlbpma i:$i notempty:$notempty")
       RegField.apply(n = PMXLEN, r = RegReadFn{(ivalid, oready) =>
         val r_ready = Wire(Bool())
         val o_valid = Wire(Bool())
@@ -110,7 +111,7 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
 
 }
 
-trait PMAMethod extends PMAConst {
+trait PMAMethod extends PMAConst with LazyLogging {
   /**
   def SimpleMemMapList = List(
       //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
@@ -186,10 +187,10 @@ trait PMAMethod extends PMAConst {
   def get_napot(base: BigInt, range: BigInt): BigInt = {
     val PlatformGrainBytes = (1 << PlatformGrain)
     if ((base % PlatformGrainBytes) != 0) {
-      println("base:%x", base)
+      logger.info("base:%x", base)
     }
     if ((range % PlatformGrainBytes) != 0) {
-      println("range: %x", range)
+      logger.info("range: %x", range)
     }
     require((base % PlatformGrainBytes) == 0)
     require((range % PlatformGrainBytes) == 0)

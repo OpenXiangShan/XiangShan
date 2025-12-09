@@ -156,7 +156,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val numExuWbPorts = exuWBs.length
   val bankAddrWidth = log2Up(CommitWidth)
 
-  println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
+  logger.info(s"size: $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
 
   val rab = Module(new RenameBuffer(RabSize))
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
@@ -1198,8 +1198,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.vlmul := 0.U
   }
 
-  println(s"ExceptionGen:")
-  println(s"num of exceptions: ${params.numException}")
+  logger.info(s"ExceptionGen:")
+  logger.info(s"num of exceptions: ${params.numException}")
   require(exceptionWBs.length == exceptionGen.io.wb.length,
     f"exceptionWBs.length: ${exceptionWBs.length}, " +
       f"exceptionGen.io.wb.length: ${exceptionGen.io.wb.length}")

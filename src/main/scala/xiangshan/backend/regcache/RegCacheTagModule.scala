@@ -58,7 +58,7 @@ class RegCacheTagModule
     val loadDependencyVec = Vec(numEntries, Vec(LoadPipelineWidth, Output(UInt(LoadDependencyWidth.W))))
   })
 
-  println(s"[RegCacheTagModule] $name: size: $numEntries, read: $numReadPorts, write: $numWritePorts")
+  logger.info(s"$name: size: $numEntries, read: $numReadPorts, write: $numWritePorts")
 
   val v   = RegInit(VecInit(Seq.fill(numEntries)(false.B)))
   val tag = Reg(Vec(numEntries, UInt(tagWidth.W)))

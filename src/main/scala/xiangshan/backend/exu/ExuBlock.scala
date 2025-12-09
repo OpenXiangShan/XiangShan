@@ -21,12 +21,12 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
   private val exus = params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx =>
     Module(xx.genExuModule).suggestName("exu" + xx.name + "_" + xx.fuConfigs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _))
   ))
-  params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx => println(s"[ExuBlock] ${xx.name}")))
+  params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx => logger.info(s"${xx.name}")))
   private val ins: collection.IndexedSeq[DecoupledIO[ExuInput]] = io.in.flatten
   private val outs: collection.IndexedSeq[DecoupledIO[ExuOutput]] = io.out.flatten
-  println(s"[ExuBlock] ins.size = ${ins.size}")
-  println(s"[ExuBlock] exus.size = ${exus.size}")
-  println(s"[ExuBlock] outs.size = ${outs.size}")
+  logger.info(s"ins.size = ${ins.size}")
+  logger.info(s"exus.size = ${exus.size}")
+  logger.info(s"outs.size = ${outs.size}")
   (ins zip exus zip outs).foreach { case ((input, exu), output) =>
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)

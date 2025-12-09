@@ -3,6 +3,7 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import utils.MathUtils
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
@@ -13,7 +14,7 @@ import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 
-object EntryBundles extends HasCircularQueuePtrHelper {
+object EntryBundles extends HasCircularQueuePtrHelper with LazyLogging {
 
   class Status(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //basic status
@@ -241,11 +242,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       else
         bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
     }.toSeq.transpose
-    println(params.exuBlockParams.map(_.name))
+    logger.debug(s"${params.exuBlockParams.map(_.name)}")
     val wakeupUncertainVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map { (bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       dontTouch(bundle.bits.is0Lat)
       val hasUncertain = params.backendParam.allExuParams(bundle.bits.exuIdx).needUncertainWakeup
-      println(s"${params.backendParam.allExuParams(bundle.bits.exuIdx).name}: hasUncertain: $hasUncertain")
+      logger.debug(s"${params.backendParam.allExuParams(bundle.bits.exuIdx).name}: hasUncertain: $hasUncertain")
       val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
       (VecInit(
         if (params.numRegSrc == 5) {

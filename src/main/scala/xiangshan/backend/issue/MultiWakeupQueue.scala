@@ -2,6 +2,7 @@ package xiangshan.backend.issue
 
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import utils.PipeWithFlush
 import xiangshan.backend.Bundles.{ExuInput, connectSamePort}
 import xiangshan.backend.exu.ExeUnitParams
@@ -33,10 +34,9 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   flushFunc : (ExuInput, TFlush, Int) => Bool,
   modificationFunc: ExuInput => ExuInput = { x: ExuInput => x },
   lastConnectFunc: (ExuInput, ExuInput) => ExuInput,
-) extends Module {
-  println("[MultiWakeupQueue]:")
-  println(exuParam)
-  println(latencySet)
+) extends Module with LazyLogging {
+  logger.info(s"$exuParam")
+  logger.info(s"$latencySet")
   require(latencySet.min >= 0)
 
   val io = IO(new MultiWakeupQueueIO(gen, lastGen, flushGen, log2Up(latencySet.max) + 1))

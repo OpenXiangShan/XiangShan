@@ -8,6 +8,7 @@ import xiangshan.backend.fu.PMAConfigEntry
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.{HasPMParameters, PMParameKey}
 import CSRConfig._
+import com.typesafe.scalalogging.LazyLogging
 
 trait PMAConst extends PMPConst
 
@@ -112,7 +113,7 @@ class PMAEntryHandleIOBundle(implicit p: Parameters) extends PMABundle {
   })
 }
 
-trait PMAReadWrite extends PMAConst with PMPReadWrite {
+trait PMAReadWrite extends PMAConst with PMPReadWrite with LazyLogging {
   def shift_addr(addr: BigInt): BigInt = {
     addr >> 2
   }
@@ -120,10 +121,10 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
   def get_napot(base: BigInt, range: BigInt): BigInt = {
     val PlatformGrainBytes = 1 << PlatformGrain
     if ((base % PlatformGrainBytes) != 0) {
-      println("base: %x", base)
+      logger.info("base: %x", base)
     }
     if ((range % PlatformGrainBytes) != 0) {
-      println("range: %x", range)
+      logger.info("range: %x", range)
     }
     require((base % PlatformGrainBytes) == 0)
     require((range % PlatformGrainBytes) == 0)
