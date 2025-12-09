@@ -42,7 +42,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
         Seq(io.vecLdIn.get.resp, io.fromMem.get.slowResp, io.vecLdIn.get.finalIssueResp)
       else Seq()
     if (params.isMemAddrIQ) {
-      logger.info(s"[${this.desiredName}] resp: {" +
+      logger.info(s"${this.desiredName} resp: {" +
         s"og0Resp: ${resps.contains(io.og0Resp)}, " +
         s"og1Resp: ${resps.contains(io.og1Resp)}, " +
         s"finalResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.finalIssueResp)}, " +

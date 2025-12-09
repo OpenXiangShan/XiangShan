@@ -74,8 +74,8 @@ class CSRModule[T <: CSRBundle](
     this.wfn(this.reg)
   }
 
-  def dumpFields: String = {
-    this.reg.getFields.map(_.dumpName).mkString("\n")
+  def dumpFields: Seq[String] = {
+    this.reg.getFields.map(_.dumpName)
   }
 
   var addr = 0

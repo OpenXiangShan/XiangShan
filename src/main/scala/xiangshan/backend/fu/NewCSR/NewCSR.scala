@@ -792,7 +792,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   csrMods.foreach { mod =>
     logger.info(s"${mod.modName}: ")
-    logger.info(mod.dumpFields)
+    mod.dumpFields.foreach(f => logger.info(s"  $f"))
   }
 
   trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE

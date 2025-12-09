@@ -32,8 +32,8 @@ import utility._
 
 
 object Bundles {
-  object Logger extends LazyLogging { // workaround: we cannot extends LazyLogging directly in object Bundles
-    def info(msg: String): Unit = logger.info(msg)
+  // workaround: we cannot extends LazyLogging directly in object Bundles
+  private object ConnectSamePortLogger extends LazyLogging {
     def warn(msg: String): Unit = logger.warn(msg)
   }
 
@@ -53,9 +53,10 @@ object Bundles {
         if (sinkWidth == sourceWidth) {
           sinkData := sourceData
         } else {
-          Logger.warn(s"[connectSamePort]" +
-                  s" sinkBundle: ${sinkBundle.className} ${name}'s width is = ${sinkWidth}," +
-                  s" sourceBundle: ${sourceBundle.className} ${name}'s width is = ${sourceWidth}")
+          ConnectSamePortLogger.warn(
+            s"sinkBundle: ${sinkBundle.className} ${name}'s width is = ${sinkWidth}, " +
+            s"sourceBundle: ${sourceBundle.className} ${name}'s width is = ${sourceWidth}"
+          )
         }
       }
     }
@@ -1068,7 +1069,7 @@ object Bundles {
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
-  class WriteBackBundle(val params: PregWB, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
+  class WriteBackBundle(val params: PregWB, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource with LazyLogging {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
@@ -1097,7 +1098,7 @@ object Bundles {
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
-      Logger.info(s"fromExuOutput: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
+      logger.info(s"${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)
