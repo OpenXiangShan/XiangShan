@@ -37,6 +37,7 @@ import top.BusPerfMonitor
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import device.SYSCNTConsts.timeWidth
+import com.typesafe.scalalogging.LazyLogging
 
 case object SoCParamsKey extends Field[SoCParameters]
 case object CVMParamsKey extends Field[CVMParameters]
@@ -131,7 +132,7 @@ case class SoCParameters
   val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
 }
 
-trait HasSoCParameter {
+trait HasSoCParameter extends LazyLogging {
   implicit val p: Parameters
 
   val soc = p(SoCParamsKey)
