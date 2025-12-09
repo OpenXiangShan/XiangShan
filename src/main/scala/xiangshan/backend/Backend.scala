@@ -571,7 +571,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val csrin = intExuBlock.io.csrin.get
   csrin.hartId := io.fromTop.hartId
   csrin.msiInfo.valid := io.fromTop.msiInfo.valid
-  csrin.msiInfo.bits := io.fromTop.msiInfo.valid
+  csrin.msiInfo.bits := io.fromTop.msiInfo.bits
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
