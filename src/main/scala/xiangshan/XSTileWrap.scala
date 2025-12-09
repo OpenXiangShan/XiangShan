@@ -23,7 +23,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, _}
+import freechips.rocketchip.util._
 import system.HasSoCParameter
 import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
 import utility.sram.SramBroadcastBundle
@@ -125,7 +125,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     withClockAndReset(clock, reset_sync) {
       val msi_vld_sync = AsyncResetSynchronizerShiftReg(io.msiInfo.valid, 3, 0)
       msi_vld_cpu := RegNext(msi_vld_sync)
-      msi_data_cpu := RegEnable(io.msiInfo.bits,msi_vld_sync)
+      msi_data_cpu := RegEnable(io.msiInfo.bits, msi_vld_sync)
     }
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo.valid := msi_vld_cpu
