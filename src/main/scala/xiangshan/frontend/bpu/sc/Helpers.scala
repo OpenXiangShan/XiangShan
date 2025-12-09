@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.sc
 
 import chisel3._
 import chisel3.util._
+import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
@@ -24,6 +25,22 @@ import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait Helpers extends HasScParameters with PhrHelper {
+
+  // val addrFields = AddrField(
+  //   Seq(
+  //     ("fetchBlockSize", FetchBlockSizeWidth),
+  //     ("bankIdx", BankWidth),
+  //     ("tag", TagWidth)
+  //   ),
+  //   maxWidth = Option(VAddrBits),
+  //   extraFields = Seq(
+  //     ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
+  //     ("targetLower", instOffsetBits, TargetWidth),
+  //     ("position", instOffsetBits, FetchBlockAlignWidth),
+  //     ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
+  //   )
+  // )
+
   def sign(x: SInt): Bool = x(x.getWidth - 1)
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
