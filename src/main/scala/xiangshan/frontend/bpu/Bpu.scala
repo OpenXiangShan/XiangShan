@@ -416,6 +416,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_meta.ittage := s3_ittageMeta
   s3_meta.sc     := s3_scMeta
 
+  s3_meta.debug_startPc := s3_pc
+
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
 
@@ -494,6 +496,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       (abtb.io.debug_previousVAddr === s2_pc) || (abtb.io.debug_previousVAddr === s4_pc),
       "abtb previousVAddr doesn't match"
     )
+  }
+
+  /* *** check meta *** */
+  when(train.fire) {
+    assert(train.bits.startVAddr === train.bits.meta.debug_startPc, "train startPc != predict startPc")
   }
 
   /* *** Debug Meta *** */

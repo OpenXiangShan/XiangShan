@@ -65,7 +65,7 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
   val baseTableCtrs: Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
-  val debug_setIdx:  Vec[UInt]            = Vec(NumTables, UInt(8.W))        // TODO: remove it
+  val debug_setIdx:  Vec[UInt]            = Vec(NumTables, UInt(16.W))       // TODO: remove it
   val debug_tempTag: Vec[UInt]            = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
 }
 

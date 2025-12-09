@@ -264,6 +264,8 @@ class BpuMeta(implicit p: Parameters) extends BpuBundle {
   val phr:    PhrMeta       = new PhrMeta
   val sc:     ScMeta        = new ScMeta
   val ittage: IttageMeta    = new IttageMeta
+
+  val debug_startPc: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {

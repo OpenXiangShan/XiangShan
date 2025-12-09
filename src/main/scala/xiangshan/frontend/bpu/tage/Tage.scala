@@ -258,9 +258,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     Mux(t0_readBankConflict, t0_readBankConflictdistCnt + 1.U, t0_readBankConflictdistCnt)
   )
 
-//  when(t0_valid) {
-//    assert(t0_setIdx === io.train.bits.meta.tage.debug_setIdx, "predict setIdx != train setIdx")
-//  }
+  when(t0_valid) {
+    assert(t0_setIdx === io.train.bits.meta.tage.debug_setIdx, "predict setIdx != train setIdx")
+  }
 
   baseTable.io.train.valid := t0_valid
   baseTable.io.train.bits  := io.train.bits
@@ -300,9 +300,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   })
 
   private val t1_debugTempTag = RegEnable(io.train.bits.meta.tage.debug_tempTag, t0_valid)
-//  when(t1_valid) {
-//    assert(t1_rawTag === t1_debugTempTag, "predict tag != train tag")
-//  }
+  when(t1_valid) {
+    assert(t1_rawTag === t1_debugTempTag, "predict tag != train tag")
+  }
 
   private val t1_branchesVAddr =
     VecInit(t1_branches.map(branch => getBranchVAddr(s2_startVAddr, branch.bits.cfiPosition)))
