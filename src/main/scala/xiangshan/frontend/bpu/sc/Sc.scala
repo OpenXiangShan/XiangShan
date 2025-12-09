@@ -340,7 +340,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     )
   )
 
-  private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, BiasTableSize)
+  private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, BiasTableSize / BiasTableNumWays / NumBanks)
 
   private val t1_oldPathCtrs    = VecInit(t1_meta.scPathResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
   private val t1_oldGlobalCtrs  = VecInit(t1_meta.scGlobalResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
@@ -496,23 +496,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(scWrongVec)
   dontTouch(useTageVec)
 
+  private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.predPathIdx.zip(t1_pathSetIdx).map {
+    case (predIdx, trainIdx) => predIdx =/= trainIdx
+  }.reduce(_ || _))
+  private val sc_global_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.predGlobalIdx.zip(t1_globalSetIdx).map {
+    case (predIdx, trainIdx) => predIdx =/= trainIdx
+  }.reduce(_ || _))
+  private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.predBiasIdx =/= t1_biasSetIdx)
+
+  dontTouch(sc_path_predIdx_diff_trainIdx)
+  dontTouch(sc_global_predIdx_diff_trainIdx)
+  dontTouch(sc_bias_predIdx_diff_trainIdx)
+
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_ghr.valid)
   XSPerfAccumulate("sc_global_table_valid", s0_fire && s0_ghr.valid)
-  XSPerfAccumulate(
-    "sc_path_predIdx_diff_trainIdx",
-    t1_writeValid && (t1_meta.predPathIdx.zip(t1_pathSetIdx).map {
-      case (predIdx, trainIdx) => predIdx =/= trainIdx
-    }.reduce(_ || _))
-  )
-  XSPerfAccumulate(
-    "sc_global_predIdx_diff_trainIdx",
-    t1_writeValid && (t1_meta.predGlobalIdx.zip(t1_globalSetIdx).map {
-      case (predIdx, trainIdx) => predIdx =/= trainIdx
-    }.reduce(_ || _))
-  )
-  XSPerfAccumulate(
-    "sc_bias_predIdx_diff_trainIdx",
-    t1_writeValid && (t1_meta.predBiasIdx =/= t1_biasSetIdx)
-  )
+  XSPerfAccumulate("sc_path_predIdx_diff_trainIdx", sc_path_predIdx_diff_trainIdx)
+  XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", sc_global_predIdx_diff_trainIdx)
+  XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
 }
