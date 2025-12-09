@@ -24,7 +24,7 @@ import xiangshan.backend.fu.FuType.isUncertain
 import xiangshan.mem.{LqPtr, SqPtr}
 
 class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockParams)
-  extends XSModule with HasXSParameter with HasPerfEvents {
+  extends XSModule with HasXSParameter {
 
   val io = IO(new DataPathIO())
 
@@ -805,50 +805,17 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   })
 
   // Top-Down
-  def FewUops = 4
-
-  val lqEmpty = io.topDownInfo.lqEmpty
-  val sqEmpty = io.topDownInfo.sqEmpty
-  val l1Miss = io.topDownInfo.l1Miss
-  val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
-  val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
-
-  val uopsIssued = fromIQ.flatten.map(_.fire).reduce(_ || _)
-  val uopsIssuedCnt = PopCount(fromIQ.flatten.map(_.fire))
-  val fewUopsIssued = (0 until FewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
-
-  val stallLoad = !uopsIssued
+  val IQsFire = fromFlattenIQ.map(_.fire)
+  val uopsIssued = IQsFire.reduce(_ || _)  
+  val uopsIssuedCnt = PopCount(IQsFire)
 
   val noStoreIssued = !fromIntIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
                                                          memIq.bits.exuParams.fuConfigs.contains(FuConfig.StdCfg)
   ).map(_.fire).reduce(_ || _)
-  val stallStore = uopsIssued && noStoreIssued
 
-  val stallLoadReg = DelayN(stallLoad, 2)
-  val stallStoreReg = DelayN(stallStore, 2)
-
-  val memStallAnyLoad = stallLoadReg && !lqEmpty
-  val memStallStore = stallStoreReg && !sqEmpty
-  val memStallL1Miss = memStallAnyLoad && l1Miss
-  val memStallL2Miss = memStallL1Miss && l2Miss
-  val memStallL3Miss = memStallL2Miss && l3Miss
-
-  io.topDownInfo.noUopsIssued := stallLoad
-
-  XSPerfAccumulate("exec_stall_cycle",   fewUopsIssued)
-  XSPerfAccumulate("mem_stall_store",    memStallStore)
-  XSPerfAccumulate("mem_stall_l1miss",   memStallL1Miss)
-  XSPerfAccumulate("mem_stall_l2miss",   memStallL2Miss)
-  XSPerfAccumulate("mem_stall_l3miss",   memStallL3Miss)
-
-  val perfEvents = Seq(
-    ("EXEC_STALL_CYCLE",  fewUopsIssued),
-    ("MEMSTALL_STORE",    memStallStore),
-    ("MEMSTALL_L1MISS",   memStallL1Miss),
-    ("MEMSTALL_L2MISS",   memStallL2Miss),
-    ("MEMSTALL_L3MISS",   memStallL3Miss),
-  )
-  generatePerfEvent()
+  io.uopTopDown.uopsIssued := uopsIssued
+  io.uopTopDown.uopsIssuedCnt := uopsIssuedCnt
+  io.uopTopDown.noStoreIssued := noStoreIssued
 }
 
 class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlockParams) extends XSBundle {
@@ -932,5 +899,5 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val diffVlRat  = if (params.basicDebugEn && param.isVecSchd) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
   val diffVl     = if (params.basicDebugEn && param.isVecSchd) Some(Output(UInt(VlData().dataWidth.W))) else None
 
-  val topDownInfo = new TopDownInfo
+  val uopTopDown = new UopTopDown
 }

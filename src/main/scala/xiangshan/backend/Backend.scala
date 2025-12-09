@@ -181,6 +181,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val fpRegion = Module(new Region(params.fpSchdParams.get))
   private val vecRegion = Module(new Region(params.vecSchdParams.get))
   private val vecExcpMod = Module(new VecExcpDataMergeModule)
+  private val topDownMod = Module(new TopDownGen)
 
 
   private val vlFromIntIsZero = intRegion.io.vlWriteBackInfoOut.vlFromIntIsZero
@@ -507,7 +508,22 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.debugRolling := ctrlBlock.io.debugRolling
 
-  io.topDownInfo.noUopsIssued := false.B
+  // Top-Down
+  topDownMod.io.intTopDown.uopsIssued    := intRegion.io.uopTopDown.uopsIssued
+  topDownMod.io.intTopDown.uopsIssuedCnt := intRegion.io.uopTopDown.uopsIssuedCnt
+  topDownMod.io.intTopDown.noStoreIssued := intRegion.io.uopTopDown.noStoreIssued
+  topDownMod.io.fpTopDown.uopsIssued     := fpRegion.io.uopTopDown.uopsIssued
+  topDownMod.io.fpTopDown.uopsIssuedCnt  := fpRegion.io.uopTopDown.uopsIssuedCnt
+  topDownMod.io.fpTopDown.noStoreIssued  := fpRegion.io.uopTopDown.noStoreIssued
+  topDownMod.io.vecTopDown.uopsIssued    := vecRegion.io.uopTopDown.uopsIssued
+  topDownMod.io.vecTopDown.uopsIssuedCnt := vecRegion.io.uopTopDown.uopsIssuedCnt
+  topDownMod.io.vecTopDown.noStoreIssued := vecRegion.io.uopTopDown.noStoreIssued
+  topDownMod.io.topDownInfo.lqEmpty := DelayN(io.topDownInfo.lqEmpty, 2)
+  topDownMod.io.topDownInfo.sqEmpty := DelayN(io.topDownInfo.sqEmpty, 2)
+  topDownMod.io.topDownInfo.l1Miss  := RegNext(io.topDownInfo.l1Miss)
+  topDownMod.io.topDownInfo.l2TopMiss.l2Miss := io.topDownInfo.l2TopMiss.l2Miss
+  topDownMod.io.topDownInfo.l2TopMiss.l3Miss := io.topDownInfo.l2TopMiss.l3Miss
+  io.topDownInfo.noUopsIssued := RegNext(topDownMod.io.topDownInfo.noUopsIssued)
 
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
@@ -521,6 +537,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     val rightResetTree = ResetGenNode(Seq(
       ModuleNode(intRegion),
       ModuleNode(fpRegion),
+      ModuleNode(topDownMod)
     ))
     val leftResetTree = ResetGenNode(Seq(
       ModuleNode(vecRegion),
@@ -544,10 +561,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val csrevents = pfevent.io.hpmevent.slice(8,16)
 
   val ctrlBlockPerf    = ctrlBlock.getPerfEvents
+  
+  val topDownPerf = topDownMod.getPerfEvents
 
   val perfBackend  = Seq()
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ perfBackend
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ topDownPerf ++ perfBackend
 
 
   if (printEventCoding) {

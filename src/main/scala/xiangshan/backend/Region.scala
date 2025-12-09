@@ -328,11 +328,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   dataPath.io.fromBypassNetwork := 0.U.asTypeOf(dataPath.io.fromBypassNetwork)
   dataPath.io.fromPcTargetMem.toDataPathTargetPC := 0.U.asTypeOf(dataPath.io.fromPcTargetMem.toDataPathTargetPC)
   dataPath.io.fromPcTargetMem.toDataPathPC := 0.U.asTypeOf(dataPath.io.fromPcTargetMem.toDataPathPC)
-  dataPath.io.topDownInfo.lqEmpty := false.B
-  dataPath.io.topDownInfo.sqEmpty := false.B
-  dataPath.io.topDownInfo.l1Miss := false.B
-  dataPath.io.topDownInfo.l2TopMiss.l2Miss := false.B
-  dataPath.io.topDownInfo.l2TopMiss.l3Miss := false.B
 
   bypassNetwork.io.fromDataPath.int.foreach(x => x.foreach{ xx =>
       xx.valid := false.B
@@ -731,6 +726,10 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   io.fpRfRdataOut.foreach(_ := dataPath.io.fpRfRdataOut.get)
   dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
 
+  io.uopTopDown.uopsIssued := dataPath.io.uopTopDown.uopsIssued
+  io.uopTopDown.uopsIssuedCnt := dataPath.io.uopTopDown.uopsIssuedCnt
+  io.uopTopDown.noStoreIssued := dataPath.io.uopTopDown.noStoreIssued
+
   // perf counter
   if (params.isIntSchd) {
     val iqNum = issueQueues.size
@@ -879,5 +878,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val fpIQOut = Option.when(params.isFpSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromFpIQ = Option.when(params.isIntSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
   val intToFpIQResp = Option.when(params.isIntSchd)(MixedVec(fpSchdParam.issueBlockParams.map(_.genOGRespBundle)))
+  // TopDown
+  val uopTopDown = new UopTopDown
 }
 
