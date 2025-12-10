@@ -56,11 +56,13 @@ import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
+import xiangshan.backend.fu.PMPCheckerv2
 import xiangshan.cache.mmu.PTWFilter
 import xiangshan.cache.mmu.PTWRepeaterNB
 import xiangshan.cache.mmu.TLB
 import xiangshan.cache.mmu.TlbPtwIO
 import xiangshan.cache.mmu.VectorTlbPtwIO
+import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.ftq.Ftq
 import xiangshan.frontend.ibuffer.IBuffer
@@ -130,7 +132,7 @@ class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasFront
     if (env.EnableSimFrontend) new SimFrontendInlinedImp(this) else new FrontendInlinedImp(this)
 }
 
-class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) {
+class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) with HasTlbConst {
   private val instrUncache = outer.instrUncache.module
   private val icache       = outer.icache.module
   private val bpu          = Module(new Bpu)
@@ -205,6 +207,26 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     PTWFilter(itlbParams.fenceDelay, ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
   private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
+
+  val ptw_levels = Seq(0, 1, 2, 3)
+  val ptw_ppn = ptw.resp.bits.data.genPPN()
+  val ptw_paddrs = VecInit(ptw_levels.map { level =>
+    Cat(ptw_ppn(ptw_ppn.getWidth - 1, level * vpnnLen), 0.U((level * vpnnLen + PageOffsetWidth).W))
+  })
+
+  val lgSizes = Seq(12, 21, 30, 39) // 4K / 2M / 1G / 512G
+  val pmp_checkers_ptw = lgSizes.map(lg =>
+    Module(new PMPCheckerv2(lgMaxSize = lg, leaveHitMux = true))
+  )
+
+  pmp_checkers_ptw.zip(ptw_paddrs).foreach {
+    case (checker, addr) =>
+    checker.io.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, ptw.resp.valid, addr)
+  }
+
+  val ptw_pmp_results = VecInit(pmp_checkers_ptw.map(_.io.resp))
+
+  itlb.io.ptw_replenish := ptw_pmp_results
 
   // ICache-Memblock
   icache.io.softPrefetchReq <> io.softPrefetch

@@ -108,6 +108,7 @@ trait HasTlbConst extends HasXSParameter {
     |N | PBMT |Reserved|        PPNs          | RSW |  FALG  |
     +--+------+--------+----------------------+-----+--------+
   */
+  val pteMaxLevel = 4 // Sv48
   val pteFlagLen = 8
   val pteRswLen = 2
   val ptePPNLen = 44
