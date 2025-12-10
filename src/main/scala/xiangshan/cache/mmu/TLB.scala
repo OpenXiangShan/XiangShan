@@ -226,7 +226,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
-    entries.io.w_apply(refill, ptw.resp.bits)
+    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
@@ -241,6 +241,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val g_perm = readResult.map(_._5)
   val pbmt = readResult.map(_._6)
   val g_pbmt = readResult.map(_._7)
+  val pm_check = readResult.map(_._8)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
@@ -265,8 +266,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val (e_hit, e_ppn, e_gvpns, e_perm, e_g_perm, e_s2xlate, e_pbmt, e_g_pbmt) = entries.io.r_resp_apply(i)
-    val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
+    val (e_hit, e_ppn, e_gvpns, e_perm, e_g_perm, e_s2xlate, e_pbmt, e_g_pbmt, e_pm) = entries.io.r_resp_apply(i)
+    val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast, p_pm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
 
@@ -292,6 +293,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val g_pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
     val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
     val r_s2xlate = WireInit(VecInit(Seq.fill(nRespDups)(0.U(2.W))))
+    val pm = Mux(p_hit, p_pm, e_pm)
 
     for (d <- 0 until nRespDups) {
       val e_s1_isLeaf = (e_perm(d).r || e_perm(d).w || e_perm(d).x) && e_perm(d).v
@@ -333,7 +335,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val pmp_paddr = resp(i).bits.paddr(0)
 
-    (hit, miss, pmp_paddr, perm, g_perm, pbmt, g_pbmt)
+    (hit, miss, pmp_paddr, perm, g_perm, pbmt, g_pbmt, pm)
   }
 
   def getVpnn(vpn: UInt, idx: UInt): UInt = {
@@ -430,6 +432,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.instr := false.B
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
+
+      // when pre-fault happens, should not use pma check results
+      resp(idx).bits.pma(nDups).cacheable := false.B
+      resp(idx).bits.pma(nDups).atomic := false.B
+
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
       resp(idx).bits.gpaddr(nDups) := req_out(idx).fullva
@@ -450,11 +457,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
       resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
 
-      resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
-      resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
-      resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
+      val pf_gpf_ld = resp(idx).bits.excp(nDups).pf.ld || resp(idx).bits.excp(nDups).gpf.ld
+      val pf_gpf_st = resp(idx).bits.excp(nDups).pf.st || resp(idx).bits.excp(nDups).gpf.st
+      val pf_gpf_instr = resp(idx).bits.excp(nDups).pf.instr || resp(idx).bits.excp(nDups).gpf.instr
+
+      val pm_valid = portTranslateEnable(idx)
+
+      resp(idx).bits.excp(nDups).af.ld    := (af || pm_valid && !pm_check(idx).r && !pf_gpf_ld) && TlbCmd.isRead(cmd) && fault_valid
+      resp(idx).bits.excp(nDups).af.st    := (af || pm_valid && !pm_check(idx).w && !pf_gpf_st) && TlbCmd.isWrite(cmd) && fault_valid
+      resp(idx).bits.excp(nDups).af.instr := (af || pm_valid && !pm_check(idx).x && !pf_gpf_instr) && TlbCmd.isExec(cmd) && fault_valid
 
       resp(idx).bits.excp(nDups).vaNeedExt := true.B
+
+      resp(idx).bits.pma(nDups).cacheable := pm_check(idx).c
+      resp(idx).bits.pma(nDups).atomic := pm_check(idx).atomic
     }
 
     resp(idx).bits.excp(nDups).isHyper := isHyperInst(idx)
@@ -524,7 +540,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val p_s1_level = RegEnable(ptw.resp.bits.s1.entry.level.get, io.ptw.resp.fire)
     val p_s1_isLeaf = RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     val p_s1_isFakePte = RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
-    (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast)
+
+    // do static pmp & pma check
+    val hitVec_pm = io.ptw_replenish.map(_.hit)
+    val selected_pm = ParallelPriorityMux(hitVec_pm, io.ptw_replenish.map(_.cfg))
+    val assigned_pm = Wire(new TlbPMBundle)
+    assigned_pm.assign_ap(selected_pm)
+
+    val p_pm = RegEnable(assigned_pm, io.ptw.resp.fire)
+
+    (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast, p_pm)
   }
 
   // perf event
