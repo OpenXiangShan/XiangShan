@@ -22,6 +22,8 @@ import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import utility._
+import utility.mbist.MbistPipeline
+import coupledL2.utils.SplittedSRAM
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
@@ -388,17 +390,17 @@ class bitmapCacheIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwC
     val data = UInt(XLEN.W)
   }))
 }
-class bitmapCacheEntry(implicit p: Parameters) extends PtwBundle{
-  val tag = UInt((ppnLen-log2Ceil(XLEN)).W)
+class bitmapCacheEntry(ReservedBits: Int)(implicit p: Parameters) extends PtwBundle{
+  val tag = UInt((ppnLen-log2Ceil(l2tlbParams.bcnSets)-log2Ceil(XLEN)).W)
   val data = UInt(XLEN.W) // store 64bits in one entry
-  val valid = Bool()
-  def hit(tag : UInt) = {
-    (this.tag === tag(ppnLen-1,log2Ceil(XLEN))) && this.valid === 1.B
+  val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
+  def hit(ppn : UInt) = {
+    (this.tag === ppn(ppnLen-1,log2Ceil(l2tlbParams.bcnSets)+log2Ceil(XLEN)))
   }
-  def refill(tag : UInt,data : UInt,valid : Bool) = {
-    this.tag := tag(ppnLen-1,log2Ceil(XLEN))
+  def refill(ppn : UInt,data : UInt) = {
+    this.tag := ppn(ppnLen-1,log2Ceil(l2tlbParams.bcnSets)+log2Ceil(XLEN))
     this.data := data
-    this.valid := valid
+    this.reservedBits.map(_ := true.B)
   }
 }
 
@@ -410,78 +412,112 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed
   val bitmap_cache_clear = csr.mbmc.BCLEAR
 
-  val bitmapCachesize = 128
-  val init_entry = Wire(new bitmapCacheEntry)
-  init_entry.valid := false.B
-  init_entry.tag := DontCare
-  init_entry.data := DontCare
-  val bitmapcache = RegInit(VecInit.fill(bitmapCachesize) { init_entry })
-  val bitmapReplace = ReplacementPolicy.fromString(l2tlbParams.l3Replacer, bitmapCachesize)
+  val bitmapCacheEntryType = new bitmapCacheEntry(ReservedBits = l2tlbParams.bcReservedBits)
+  val bitmapcache = Module(new SplittedSRAM(
+    bitmapCacheEntryType,
+    set = l2tlbParams.bcnSets,
+    way = l2tlbParams.bcnWays,
+    waySplit = 2,
+    dataSplit = 2,
+    singlePort = sramSinglePort,
+    readMCP2 = false,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
+  ))
+  val mbistBC = MbistPipeline.PlaceMbistPipeline(1, s"MbistBitmapCache", hasMbist)
 
-  // -----
-  // -S0--
-  // -----
-  val addr_search = io.req.bits.tag
-  val hitVecT = bitmapcache.map(_.hit(addr_search))
-  val hitIdxT = PriorityEncoder(hitVecT)
+  val bitmapReplace = ReplacementPolicy.fromString(l2tlbParams.bcReplacer,l2tlbParams.bcnWays,l2tlbParams.bcnSets)
 
-  // -----
-  // -S1--
-  // -----
-  val refillindex = bitmapReplace.way
-  dontTouch(refillindex)
-  val replacedata = RegEnable(bitmapcache(refillindex).data, io.refill.valid)
-  val replaceVec = RegNext(UIntToOH(refillindex))
-  val replaceval = RegNext(io.refill.valid)
+  val bcv = RegInit(0.U((l2tlbParams.bcnSets * l2tlbParams.bcnWays).W))
+  def genPtwBCSetIdx(ppn: UInt) = {
+    ppn(log2Ceil(l2tlbParams.bcnSets)+log2Ceil(XLEN)-1,log2Ceil(XLEN))
+  }
+  def getbcvSet(ppn: UInt) = {
+    require(log2Up(l2tlbParams.bcnWays) == log2Down(l2tlbParams.bcnWays))
+    val set = genPtwBCSetIdx(ppn)
+    val bcvVec = bcv.asTypeOf(Vec(l2tlbParams.bcnSets, UInt(l2tlbParams.bcnWays.W)))
+    bcvVec(set)
+  }
 
-  val index = RegEnable(addr_search(log2Up(XLEN)-1,0), io.req.fire)
-  val order = RegEnable(io.req.bits.order, io.req.fire)
-  val hitVec = RegEnable(VecInit(hitVecT), io.req.fire)
-  val hitIdx = RegEnable(hitIdxT, io.req.fire)
-  val CacheDatas = VecInit((0 until bitmapCachesize).map(i => {Mux(replaceVec(i).asBool && replaceval, replacedata, bitmapcache(i).data)}))
-  val CacheData = CacheDatas(hitIdx)
+  // when refill, refuce to accept new req
+  val rwHarzad = io.refill.valid
+
+  val stageReq   = Wire(Decoupled(new bitmapCacheReqBundle())) // enq stage & read cache valid
+  val stageDelay = Wire(Decoupled(new bitmapCacheReqBundle())) // cache resp
+  val stageResp  = Wire(Decoupled(new bitmapCacheReqBundle())) // check hit & deq stage
+
+  val stageDelay_valid_1cycle = OneCycleValid(stageReq.fire, flush)
+  val stageResp_valid_1cycle = OneCycleValid(stageResp.fire, flush)
+
+  stageReq <> io.req
+  PipelineConnect(stageReq, stageDelay, stageDelay.ready, flush, rwHarzad)
+  PipelineConnect(stageDelay, stageResp, stageResp.ready, flush)
+  stageResp.ready := !stageResp.valid || io.resp.ready
+
+  val te = ClockGate.genTeSink
+  val bc_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush && io.refill.valid) | mbistBC.map(_.mbist.req).getOrElse(false.B), clock)
+  bitmapcache.clock := bc_masked_clock
+
+  val ppn_search = stageReq.bits.tag
+  val ridx = genPtwBCSetIdx(ppn_search)
+  bitmapcache.io.r.req.valid := stageReq.fire
+  bitmapcache.io.r.req.bits.apply(setIdx = ridx)
+  val vVec_req = getbcvSet(ppn_search)
+
+  // delay one cycle after sram read
+  val delay_ppn = stageDelay.bits.tag
+  val data_resp = DataHoldBypass(bitmapcache.io.r.resp.data, stageDelay_valid_1cycle)
+  val vVec_delay = RegEnable(vVec_req, stageReq.fire)
+  val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) => wayData.hit(delay_ppn) && v})
+
+  // check hit and deq stage
+  val resp_ppn = stageResp.bits.tag
+  val ramDatas = RegEnable(data_resp, stageDelay.fire)
+  val hitVec = RegEnable(hitVec_delay, stageDelay.fire)
+  val hit = ParallelOR(hitVec)
+
+  val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
+  val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.bcnWays).map(_.U(log2Up(l2tlbParams.bcnWays).W)))
+
+  when (hit && stageResp_valid_1cycle) { bitmapReplace.access(genPtwBCSetIdx(resp_ppn), hitWay) }
+
   val cfs = Wire(Vec(tlbcontiguous, Bool()))
 
-  val cfsdata = CacheData.asTypeOf(Vec(XLEN/8, UInt(8.W)))(index(log2Up(XLEN)-1, log2Up(8)))
+  val cfsdata = hitWayEntry.data.asTypeOf(Vec(XLEN/8, UInt(8.W)))(resp_ppn(log2Up(XLEN)-1, log2Up(8)))
   for (i <- 0 until tlbcontiguous) {
     cfs(i) := cfsdata(i)
   }
-  val hit = ParallelOR(hitVec)
 
   val resp_res = Wire(new bitmapCacheRespBundle())
-  resp_res.apply(hit,cfs,order)
+  resp_res.apply(hit, cfs, stageResp.bits.order)
 
-  val resp_valid_reg = RegInit(false.B)
-  when (flush) {
-    resp_valid_reg := false.B
-  } .elsewhen(io.req.fire) {
-    resp_valid_reg := true.B
-  } .elsewhen(io.resp.fire) {
-    resp_valid_reg := false.B
-  } .otherwise {
-    resp_valid_reg := resp_valid_reg
-  }
-
-  io.req.ready := !resp_valid_reg || io.resp.fire
-  io.resp.valid := resp_valid_reg
+  io.resp.valid := stageResp.valid
   io.resp.bits := resp_res
 
-  when (!flush && hit && io.resp.fire) {
-    bitmapReplace.access(OHToUInt(hitVec))
-  }
-
-  // -----
   // refill
-  // -----
-  val rf_addr = io.refill.bits.tag
-  val rf_data = io.refill.bits.data
-  val rf_vd = io.refill.valid
-  when (!flush && rf_vd) {
-    bitmapcache(refillindex).refill(rf_addr,rf_data,true.B)
-    bitmapReplace.access(refillindex)
+  bitmapcache.io.w.req <> DontCare
+  bitmapcache.io.w.req.valid := false.B
+
+  val bcRefillIdx = genPtwBCSetIdx(io.refill.bits.tag)
+  val bcWdata = Wire(bitmapCacheEntryType)
+  bcWdata.refill(io.refill.bits.tag, io.refill.bits.data)
+
+  val bcVictimWay = replaceWrapper(getbcvSet(io.refill.bits.tag), bitmapReplace.way(bcRefillIdx)).suggestName(s"bc_victimWay")
+  val bcVictimWayOH = UIntToOH(bcVictimWay).asUInt.suggestName(s"bc_victimWayOH")
+  val bcRfvOH = UIntToOH(Cat(bcRefillIdx, bcVictimWay)).suggestName(s"bc_rfvOH")
+
+  when (io.refill.valid) {
+    bitmapcache.io.w.apply(
+      valid = true.B,
+      setIdx = bcRefillIdx,
+      data = bcWdata,
+      waymask = bcVictimWayOH
+    )
+    bitmapReplace.access(bcRefillIdx, bcVictimWay)
+    bcv := bcv | bcRfvOH
   }
   when (bitmap_cache_clear === 1.U) {
-    bitmapcache.foreach(_.valid := false.B)
+    bcv := 0.U
   }
 
   XSPerfAccumulate("bitmap_cache_resp", io.resp.fire)

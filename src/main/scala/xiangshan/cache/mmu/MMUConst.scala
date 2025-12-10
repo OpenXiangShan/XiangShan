@@ -66,6 +66,11 @@ case class L2TLBParameters
   l0nWays: Int = 4,
   l0ReservedBits: Int = 4,
   l0Replacer: Option[String] = Some("setplru"),
+  // bc (bitmapcache)
+  bcnSets: Int = 32,
+  bcnWays: Int = 4,
+  bcReservedBits: Int = 1,
+  bcReplacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
