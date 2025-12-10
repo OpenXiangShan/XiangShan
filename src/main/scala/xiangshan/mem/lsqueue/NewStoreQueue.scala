@@ -93,14 +93,17 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
 
   }
   val uop                = new UopInfo
-  val byteStart          = UInt(log2Ceil(VLEN/8 + 1).W)
-  val byteEnd            = UInt(log2Ceil(VLEN/8 + 1).W)
+  val size               = UInt(MemorySize.Size.width.W)
   // data storage
   val vaddr                    = UInt(VAddrBits.W)
   val paddrHigh                = UInt((PAddrBits - pageOffset).W) //don't need to storage low 12 bit, which is same as vaddr(11, 0)
+  val byteMask                 = UInt((VLEN/8).W)
   def paddr :UInt              = Cat(paddrHigh, vaddr(pageOffset - 1, 0))
   val data                     = UInt(VLEN.W)
   val wline                    = Bool() // write whole cacheline
+
+  def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
+  def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
 
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
@@ -426,7 +429,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2SelectDataEntry  = RegEnable(selectDataEntry, s1Valid)
       val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(HasAddrInvalid, s1Valid)
-      val s2SelectByteMask   = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(selectDataEntry.byteStart, selectDataEntry.byteEnd), VLEN/8), s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLEN/8), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(dataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
@@ -466,7 +468,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val outData            = ParallelLookUp(s2ByteSelectOffset, selectData)
 
       val selectMask         = (0 until VLEN/8).map(j =>
-        j.U -> rotateByteRight(s2SelectByteMask, j)
+        j.U -> rotateByteRight(s2SelectDataEntry.byteMask, j)
       )
       val outMask            = ParallelLookUp(s2ByteSelectOffset, selectMask) & s2LoadMaskEnd
 
@@ -739,7 +741,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
-      val byteMask           = UIntToMask(MemorySize.CaculateSelectMask(dataEntries(i).byteStart, dataEntries(i).byteEnd), VLEN/8)
+      val byteMask           = dataEntries(i).byteMask
       val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
@@ -1718,12 +1720,16 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
     val byteStart     = storeAddrIn.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
+
     when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage)){
       // the second paddr of cross4KPage request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
       dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
-      dataEntries(stWbIdx).byteStart := byteStart
-      dataEntries(stWbIdx).byteEnd   := byteStart + byteOffset
+      // only unit-stride use it, because unit-stride mask is not continue true.
+      dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
+        storeAddrIn.bits.mask,
+        UIntToMask(MemorySize.CaculateSelectMask(byteStart, byteStart + byteOffset), VLEN/8))
+      dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal
       if(debugEn) {
@@ -1849,7 +1855,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
-      val byteMask           = UIntToMask(MemorySize.CaculateSelectMask(dataEntries(i).byteStart, dataEntries(i).byteEnd), VLEN/8)
+      val byteMask           = dataEntries(i).byteMask
       val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
