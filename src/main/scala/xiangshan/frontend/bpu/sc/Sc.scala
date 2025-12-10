@@ -22,8 +22,8 @@ import scala.math.min
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbInfo
 import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.history.ghr.GhrEntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -33,13 +33,13 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with Helpers {
 
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
-    val mbtbResult:          Vec[Valid[BtbInfo]]   = Input(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
-    val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s3_override:         Bool                  = Input(Bool())
-    val ghr:                 GhrEntry              = Input(new GhrEntry())
-    val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val takenMask:           Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
-    val meta:                ScMeta                = Output(new ScMeta())
+    val mbtbResult:          Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
+    val foldedPathHist:      PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s3_override:         Bool                   = Input(Bool())
+    val ghr:                 GhrEntry               = Input(new GhrEntry())
+    val trainFoldedPathHist: PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val takenMask:           Vec[Bool]              = Output(Vec(NumBtbResultEntries, Bool()))
+    val meta:                ScMeta                 = Output(new ScMeta())
   }
   val io: ScIO = IO(new ScIO)
 

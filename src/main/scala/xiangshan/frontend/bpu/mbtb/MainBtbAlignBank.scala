@@ -22,7 +22,8 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
-import xiangshan.frontend.bpu.BtbInfo
+import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.StageCtrl
 
 class MainBtbAlignBank(
@@ -39,22 +40,26 @@ class MainBtbAlignBank(
       }
 
       class Resp extends Bundle {
-        val info: Valid[BtbInfo]   = Valid(new BtbInfo)
-        val meta: MainBtbMetaEntry = new MainBtbMetaEntry
+        val predictions: Vec[Valid[Prediction]] = Vec(NumWay, Valid(new Prediction))
+        val metas:       Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
       }
 
       // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
       val req: Req = Input(new Req)
 
-      val resp: Vec[Resp] = Output(Vec(NumWay, new Resp))
+      val resp: Resp = Output(new Resp)
     }
 
     class Write extends Bundle {
       class Req extends Bundle {
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc:    PrunedAddr            = new PrunedAddr(VAddrBits)
-        val branchInfo: BranchInfo            = new BranchInfo
-        val meta:       Vec[MainBtbMetaEntry] = Vec(NumWay, new MainBtbMetaEntry)
+        val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
+        val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+        val meta:     Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
+        // but we still pass it through a port anyway,
+        // perhaps in the future we can move this Mux1H to prior stages for better timing.
+        val mispredictInfo: Valid[BranchInfo] = Valid(new BranchInfo)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -119,6 +124,10 @@ class MainBtbAlignBank(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.entries)
   )
+  private val s1_rawCounters = Mux1H(
+    s1_internalBankMask,
+    internalBanks.map(_.io.read.resp.counters)
+  )
 
   /* *** s2 ***
    * check entries hit
@@ -131,6 +140,7 @@ class MainBtbAlignBank(
   private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
+  private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startPc)
   private val s2_tag    = getTag(s2_startPc)
@@ -142,24 +152,26 @@ class MainBtbAlignBank(
   private val s2_alignedInstOffset = getAlignedInstOffset(s2_startPc)
 
   // send resp
-  (r.resp zip s2_rawEntries).foreach { case (resp, e) =>
+  (r.resp.predictions zip r.resp.metas zip s2_rawEntries zip s2_rawCounters).foreach { case (((pred, meta), e), c) =>
     // send rawHit for training
     val rawHit = e.valid && e.tag === s2_tag
     // filter out branches before alignedInstOffset
     // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
-    resp.info.valid            := hit
-    resp.info.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
-    resp.info.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, Some(e.targetCarry))
-    resp.info.bits.attribute   := e.attribute
+    pred.valid            := hit
+    pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
+    pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, Some(e.targetCarry))
+    pred.bits.attribute   := e.attribute
+    pred.bits.taken       := c.isPositive
 
-    resp.meta.rawHit    := rawHit
-    resp.meta.attribute := e.attribute
-    resp.meta.position  := Cat(s2_posHigherBits, e.position)
+    meta.rawHit    := rawHit
+    meta.attribute := e.attribute
+    meta.position  := Cat(s2_posHigherBits, e.position)
+    meta.counter   := c
   }
 
   // add an alias for hitMask for later use & debug purpose
-  private val s2_hitMask = VecInit(r.resp.map(_.info.valid))
+  private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
   dontTouch(s2_hitMask)
 
   // update replacer
@@ -172,50 +184,77 @@ class MainBtbAlignBank(
    */
   private val t1_valid            = w.req.valid
   private val t1_startPc          = w.req.bits.startPc
-  private val t1_branchInfo       = w.req.bits.branchInfo
+  private val t1_branches         = w.req.bits.branches
+  private val t1_meta             = w.req.bits.meta
+  private val t1_mispredictInfo   = w.req.bits.mispredictInfo
   private val t1_setIdx           = getSetIndex(t1_startPc)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
 
+  /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
-  private val t1_hitMask = PriorityEncoderOH(VecInit(io.write.req.bits.meta.map(_.hit(t1_branchInfo))).asUInt)
+  private val t1_hitMask = PriorityEncoderOH(VecInit(t1_meta.map(_.hit(t1_mispredictInfo.bits))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
-  // Decide whether to write and which wayMask to write:
-  private val t1_needWrite =
-    // If not hit, always write a new entry, use mbtb replacer's victim way
+  // Write entry only when there's a mispredict, and if:
+  private val t1_entryNeedWrite = t1_mispredictInfo.valid && (
+    // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
-      // If hit, but do write only if:
-      //   1. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table)
-      t1_branchInfo.attribute.needIttage ||
-      //   2. attribute changed, probably indicating a software self-modification
-      !(t1_branchInfo.attribute === Mux1H(t1_hitMask, io.write.req.bits.meta.map(_.attribute)))
+      // 2. hit, do write only if:
+      //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
+      t1_mispredictInfo.bits.attribute.needIttage ||
+      //   b. attribute changed, probably indicating a software self-modification.
+      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute)))
+  )
   // Use hit wayMask if hit, else use replacer's victim way
-  private val t1_wayMask = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
+  private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
   t1_entry.tag             := getTag(t1_startPc)
-  t1_entry.position        := t1_branchInfo.cfiPosition
-  t1_entry.targetLowerBits := getTargetLowerBits(t1_branchInfo.target)
-  t1_entry.targetCarry     := getTargetCarry(t1_startPc, t1_branchInfo.target)
-  t1_entry.attribute       := t1_branchInfo.attribute
+  t1_entry.position        := t1_mispredictInfo.bits.cfiPosition
+  t1_entry.targetLowerBits := getTargetLowerBits(t1_mispredictInfo.bits.target)
+  t1_entry.targetCarry     := getTargetCarry(t1_startPc, t1_mispredictInfo.bits.target)
+  t1_entry.attribute       := t1_mispredictInfo.bits.attribute
 
   // similar to s0 case
   assert(!t1_valid || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid        := t1_valid && t1_needWrite && t1_internalBankMask(i)
-    b.io.write.req.bits.setIdx  := t1_setIdx
-    b.io.write.req.bits.wayMask := t1_wayMask
-    b.io.write.req.bits.entry   := t1_entry
+    b.io.writeEntry.req.valid        := t1_valid && t1_entryNeedWrite && t1_internalBankMask(i)
+    b.io.writeEntry.req.bits.setIdx  := t1_setIdx
+    b.io.writeEntry.req.bits.wayMask := t1_entryWayMask
+    b.io.writeEntry.req.bits.entry   := t1_entry
   }
 
   // update replacer
-  replacer.io.trainTouch.valid        := t1_valid && t1_needWrite
+  replacer.io.trainTouch.valid        := t1_valid && t1_entryNeedWrite
   replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
-  replacer.io.trainTouch.bits.wayMask := t1_wayMask
+  replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
+
+  /* *** update counter *** */
+  private val t1_newCounters    = Wire(Vec(NumWay, new SaturateCounter(TakenCntWidth)))
+  private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
+
+  (t1_newCounters zip t1_counterWayMask zip t1_meta).foreach { case ((newCounter, wen), meta) =>
+    val hitMask = t1_branches.map { branch =>
+      branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
+    }
+    val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    wen              := hitMask.reduce(_ || _)
+    newCounter.value := meta.counter.getUpdate(actualTaken)
+  }
+
+  // write counter anytime when needed
+  private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)
+
+  internalBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.writeCounter.req.valid         := t1_valid && t1_counterNeedWrite && t1_internalBankMask(i)
+    b.io.writeCounter.req.bits.setIdx   := t1_setIdx
+    b.io.writeCounter.req.bits.wayMask  := t1_counterWayMask.asUInt
+    b.io.writeCounter.req.bits.counters := t1_newCounters
+  }
 
   /* *** multi-hit detection & flush *** */
   private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
@@ -227,10 +266,16 @@ class MainBtbAlignBank(
   }
 
   XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)
-  XSPerfAccumulate("allocate", t1_valid && !t1_hit)
-  XSPerfAccumulate("fixTarget", t1_valid && t1_hit && t1_branchInfo.attribute.isOtherIndirect)
+
   XSPerfAccumulate(
-    "fixAttribute",
-    t1_valid && t1_hit && !(t1_branchInfo.attribute === Mux1H(t1_hitMask, io.write.req.bits.meta.map(_.attribute)))
+    "", // no common prefix is needed
+    t1_valid && t1_mispredictInfo.valid,
+    Seq(
+      ("allocate", !t1_hit),
+      ("fixTarget", t1_hit && t1_mispredictInfo.bits.attribute.needIttage),
+      ("fixAttribute", t1_hit && !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute))))
+    )
   )
+
+  XSPerfAccumulate("updateCounter", Mux(t1_valid, PopCount(t1_counterWayMask), 0.U))
 }

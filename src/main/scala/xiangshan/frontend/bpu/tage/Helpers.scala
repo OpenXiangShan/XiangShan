@@ -22,27 +22,6 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-trait BaseTableHelper extends HasTageParameters {
-  val addrFields = AddrField(
-    Seq(
-      ("alignOffset", FetchBlockAlignWidth),
-      ("alignBankIdx", FetchBlockSizeWidth - FetchBlockAlignWidth),
-      ("bankIdx", BankIdxWidth),
-      ("setIdx", BaseTableSetIdxWidth)
-    ),
-    maxWidth = Option(VAddrBits)
-  )
-
-  def getSetIndex(pc: PrunedAddr): UInt =
-    addrFields.extract("setIdx", pc)
-
-  def getBankIndex(pc: PrunedAddr): UInt =
-    addrFields.extract("bankIdx", pc)
-
-  def getAlignBankIndex(pc: PrunedAddr): UInt =
-    addrFields.extract("alignBankIdx", pc)
-}
-
 trait TopHelper extends HasTageParameters {
   def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
     VecInit(TableInfos.map { implicit tableInfo =>
