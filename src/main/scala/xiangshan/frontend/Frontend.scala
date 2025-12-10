@@ -44,6 +44,7 @@ import xiangshan._
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
+import xiangshan.backend.fu.PMPCheckerv2
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.bpu.Bpu
@@ -108,7 +109,7 @@ class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSPar
     if (env.EnableSimFrontend) new SimFrontendInlinedImp(this) else new FrontendInlinedImp(this)
 }
 
-class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) {
+class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(outer) with HasTlbConst {
 
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
@@ -180,6 +181,26 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     PTWFilter(itlbParams.fenceDelay, ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
   private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
+
+  val ptw_levels = Seq(3, 2, 1, 0)
+  val ptw_ppn = ptw.resp.bits.data.genPPN()
+  val ptw_paddrs = VecInit(ptw_levels.map { level =>
+    Cat(ptw_ppn(ptw_ppn.getWidth - 1, level * vpnnLen), 0.U((level * vpnnLen + PageOffsetWidth).W))
+  })
+
+  val lgSizes = Seq(39, 30, 21, 12) // 512G / 1G / 2M / 4K
+  val pmp_checkers_ptw = lgSizes.map(lg =>
+    Module(new PMPCheckerv2(lgMaxSize = lg, leaveHitMux = true))
+  )
+
+  pmp_checkers_ptw.zip(ptw_paddrs).foreach {
+    case (checker, addr) =>
+    checker.io.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, ptw.resp.valid, addr)
+  }
+
+  val ptw_pmp_results = VecInit(pmp_checkers_ptw.map(_.io.resp))
+
+  itlb.io.ptw_replenish := ptw_pmp_results
 
   // ICache-Memblock
   icache.io.softPrefetchReq <> io.softPrefetch

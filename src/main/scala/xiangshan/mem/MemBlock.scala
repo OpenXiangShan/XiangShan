@@ -690,6 +690,29 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
 
+  val ptw_levels = Seq(3, 2, 1, 0)
+  val ptw_ppn = ptwio.resp.bits.data.genPPN()
+  val ptw_paddrs = VecInit(ptw_levels.map { level =>
+    Cat(ptw_ppn(ptw_ppn.getWidth - 1, level * vpnnLen), 0.U((level * vpnnLen + PageOffsetWidth).W))
+  })
+
+  //dontTouch(ptw_paddrs)
+
+  val lgSizes = Seq(39, 30, 21, 12) // 512G / 1G / 2M / 4K
+  val pmp_checkers_ptw = lgSizes.map(lg =>
+    Module(new PMPCheckerv2(lgMaxSize = lg, leaveHitMux = true))
+  )
+
+  pmp_checkers_ptw.zip(ptw_paddrs).foreach {
+    case (checker, addr) =>
+    checker.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, ptwio.resp.valid, addr)
+  }
+
+  //pmp_checkers_ptw.foreach { checker => dontTouch(checker.io) }
+
+  val ptw_pmp_results = VecInit(pmp_checkers_ptw.map(_.io.resp))
+
+  dtlb.foreach(_.ptw_replenish := ptw_pmp_results)
 
   /******************************************************************
    * Prefetcher
