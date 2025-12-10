@@ -226,6 +226,15 @@ object macros extends ScalaModule {
   def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
 }
 
+object chiselIOPMP extends HasChisel {
+  override def millSourcePath = pwd / "ChiselIOPMP"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    utility
+  )
+}
+
 // extends this trait to use XiangShan in other projects
 trait XiangShanModule extends ScalaModule {
 
@@ -249,6 +258,8 @@ trait XiangShanModule extends ScalaModule {
 
   def macrosModule: ScalaModule
 
+  def chiselIOPMPModule: ScalaModule
+
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
@@ -260,6 +271,7 @@ trait XiangShanModule extends ScalaModule {
     utilityModule,
     chiselAIAModule,
     macrosModule,
+    chiselIOPMPModule,
   )
 
   val resourcesPATH = pwd.toString() + "/src/main/resources"
@@ -291,6 +303,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
   def chiselAIAModule = chiselAIA
 
   def macrosModule = macros
+
+  def chiselIOPMPModule = chiselIOPMP
 
   // properties may be changed by user. Use `Task.Input` here.
   def forkArgsTask = Task.Input {
