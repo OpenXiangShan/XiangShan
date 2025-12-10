@@ -654,11 +654,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
   private class DeqModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
+      val redirect         = Flipped(ValidIO(new Redirect))
       //The head request of StoreQueue that will write to sbuffer. The rdataPtr point entries.
       val rdataDataEntries = Vec(EnsbufferWidth, Input(new SQDataEntryBundle))
       val rdataCtrlEntries = Vec(EnsbufferWidth, Input(new SQCtrlEntryBundle))
       //The head request of StoreQueue that will dequeue, The deqPtr point entries.
       val deqCtrlEntries  = Vec(EnsbufferWidth, Input(new SQCtrlEntryBundle))
+      val deqDataEntries  = Vec(EnsbufferWidth, Input(new SQDataEntryBundle))
 
       val toUncacheBuffer = new UncacheWordIO
       val toDCache        = new ToCacheIO
@@ -705,6 +707,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val dataEntries      = io.rdataDataEntries //The head request of StoreQueue that will write to sbuffer. The rdataPtr point entries.
     private val ctrlEntries      = io.rdataCtrlEntries
     private val deqCtrlEntries   = io.deqCtrlEntries //The deqPtr point entries
+    private val deqDataEntries   = io.deqDataEntries
     private val headDataEntry    = dataEntries.head
     private val headCtrlEntry    = ctrlEntries.head
     private val headDeqPtr       = io.deqPtrExt.head
@@ -999,6 +1002,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /*
     * NOTE: [1] only two port of dataQueue is ready, the request of cross16B can write to dataQueue.
     *       [2] dataQueue.io.empty means dataQueue can enter two request at same time.
+    *       [3] entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
     */
 
     // toSbufferValid(0) use dataQueue.io.empty to judge unalign split valid, need to modify if  EnsbufferWifth > 2,
@@ -1008,10 +1012,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     for(i <- 0 until EnsbufferWidth) {
       val ctrlEntry = ctrlEntries(i)
       if(i == 0) {
-        toSbufferValid(i) := (ctrlEntry.allValid || ctrlEntry.vecInactive) &&
-          !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          (!headCross16B || dataQueue.io.empty) && !unalignStall(i) && ctrlEntry.committed
-        // [NOTE]: here I use dataQueue.io.empty because EnsbufferWifth == 2, if EnsbufferWifth > 2, need to modify.
+        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && (!headCross16B || dataQueue.io.empty) &&
+          !unalignStall(i) && ctrlEntry.committed
+        // [NOTE1]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
+        // [NOTE2]: here I use dataQueue.io.empty because EnsbufferWifth == 2, if EnsbufferWifth > 2, need to modify.
 
         unalignStall(i) := false.B // if first port is unalign, make it can write to sbuffer.
       }
@@ -1019,16 +1023,16 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         // Regarding writing to port 1's Sbuffer, only the following two scenarios permit writing:
         //  1. Port 0 write a unaligned request cross 16 bytes, preempting port 1's write port.
         //  2. Port 0 is ready, and the Sbuffer can process two write requests simultaneously.
-        toSbufferValid(i) := ctrlEntry.allValid &&
-          !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated && ctrlEntry.committed &&
+        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && ctrlEntry.committed &&
           toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0)) && !unalignStall(i)
+        // [NOTE]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
 
         unalignStall(i) := ctrlEntry.cross16Byte && !headCross16B
       }
       else {
-        toSbufferValid(i) := ctrlEntry.allValid &&
-          !ctrlEntry.hasException && !uncacheStall(i) && !cboStall(i) && ctrlEntry.allocated &&
-          !unalignStall(i) && ctrlEntry.committed && toSbufferValid(i - 1)
+        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && !unalignStall(i) && ctrlEntry.committed &&
+          toSbufferValid(i - 1)
+        // [NOTE]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
 
         unalignStall(i) := ctrlEntry.cross16Byte || headCross16B
       }
@@ -1063,16 +1067,25 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /*
     * NOTE: Only when port 0 and port 1 are ready can write cross16B request, so only use io.writeToSbuffer.req.head.fire
     *       to caculate sbufferFireNum.
-    * deqPtr will move when request write to sbuffer.
-    * rdataPtr will move when nc request fire / write to SQ2SBPipelineConnect_i
+    * deqPtr will move when [write to sbuffer / writeback / vector inactive element]
+    * rdataPtr will move when [nc request fire / write to SQ2SBPipelineConnect_i / vector inactive element]
     * NOTE: when deq mmio/cbo, rdataPtr === deqPtr, because mmio/cbo need to execute at head of StoreQueue.
     * */
     private val sbufferFireNum = Mux(cross16BDeqReg,
       Cat(RegNext(io.writeToSbuffer.req.head.fire), 0.U),
       Cat(io.writeToSbuffer.req.map{case p => RegNext(p.fire)}))
 
-    private val deqPtrVectorInactiveMove = Cat(deqCtrlEntries.map{case entry =>
-      entry.allocated && (entry.vecMbCommit && !entry.allValid || entry.vecInactive) //TODO: vecMbCommit will be remove in the future
+    // [NOTE]: when point a inactive entry, move pointer.
+    private val deqPtrVectorInactiveValid = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+
+    deqCtrlEntries.zip(deqDataEntries).zipWithIndex.map{case ((ctrl, data), i) =>
+      deqPtrVectorInactiveValid(i) := ctrl.allocated && !data.uop.robIdx.needFlush(io.redirect) &&
+        (ctrl.vecMbCommit && !ctrl.allValid || ctrl.vecInactive) //TODO: vecMbCommit will be remove in the future
+    }
+
+    private val deqPtrVectorInactiveMove = Cat(deqPtrVectorInactiveValid.zipWithIndex.map{case (v, i) =>
+      if(i == 0) v
+      else v && (deqPtrVectorInactiveValid(i - 1) || sbufferFireNum(i - 1).asBool)
     })
 
     // sbufferFireNum need to RegNext, because write to sbuffer need 2 cycle, storeQueue need to forward 1 more cycle
@@ -1088,9 +1101,19 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val otherMove        = uncacheState === UncacheState.sendReq && io.toUncacheBuffer.req.fire && isNC ||
       io.writeBack.fire
 
-    private val rdataPtrVectorInactiveMove = Cat(ctrlEntries.map{case entry =>
-      entry.allocated && (entry.vecMbCommit && !entry.allValid || entry.vecInactive) //TODO: vecMbCommit will be remove in the future
+    // [NOTE]: when point a inactive entry, move pointer.
+    private val rdataPtrVectorInactiveValid = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
+
+    ctrlEntries.zip(dataEntries).zipWithIndex.map{case ((ctrl, data), i) =>
+      rdataPtrVectorInactiveValid(i) := ctrl.allocated && !data.uop.robIdx.needFlush(io.redirect) &&
+      (ctrl.vecMbCommit && !ctrl.allValid || ctrl.vecInactive) //TODO: vecMbCommit will be remove in the future
+    }
+
+    private val rdataPtrVectorInactiveMove = Cat(rdataPtrVectorInactiveValid.zipWithIndex.map{case (v, i) =>
+      if(i == 0) v
+      else v && (rdataPtrVectorInactiveValid(i - 1) || pipelineConnectFireNum(i - 1).asBool)
     })
+
     private val rdataMoveCnt = Cat(pipelineConnectFireNum, rdataPtrVectorInactiveMove, otherMove)
 
     io.rdataPtrMoveCnt        := PopCount(rdataMoveCnt)
@@ -1123,6 +1146,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       dontTouch(outMask)
       dontTouch(outData)
       dontTouch(writeSbufferWire)
+      dontTouch(deqPtrVectorInactiveValid)
+      dontTouch(deqPtrVectorInactiveMove)
+      dontTouch(rdataPtrVectorInactiveValid)
+      dontTouch(rdataPtrVectorInactiveMove)
     }
   }
   /*==================================================================================================================*/
@@ -1271,6 +1298,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   }
 
   // deqModule connection
+  deqModule.io.redirect         := io.redirect
   deqModule.io.rdataCtrlEntries.zip(rdataCtrlEntries).foreach{ case (sink, source) =>
     sink := source
   }
@@ -1278,6 +1306,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     sink := source
   }
   deqModule.io.deqCtrlEntries.zip(deqCtrlEntries).foreach{ case (sink, source) =>
+    sink := source
+  }
+  deqModule.io.deqDataEntries.zip(deqDataEntries).foreach{ case (sink, source) =>
     sink := source
   }
   deqModule.io.toUncacheBuffer  <> io.toUncacheBuffer
@@ -1548,7 +1579,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         dataEntries(i).uop.robIdx === fbk(j).bits.robidx && dataEntries(i).uop.uopIdx === fbk(j).bits.uopidx &&
         ctrlEntries(i).allocated
     }
-    vecCommit(i) := vecCommittmp(i).reduce(_ || _)
+    // vector feedback may occur with deqCancel/needCancel at the same time
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel
 
     when (vecCommit(i)) {
       ctrlEntries(i).vecMbCommit := true.B
@@ -1732,9 +1764,16 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val ptr = cmtPtrExt(i).value
     val ctrlEntry = ctrlEntries(ptr)
     val dataEntry = dataEntries(ptr)
-    when(isNotAfter(dataEntries(ptr).uop.robIdx, GatedRegNext(io.fromRob.pendingPtr)) && ctrlEntries(ptr).allocated &&
-      !needCancel(ptr) && !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 &&
-      (ctrlEntries(ptr).allValid || ctrlEntries(ptr).vecMbCommit && ctrlEntries(ptr).isVec)) {
+    /*
+    * three commit situation:
+    * [1]. normal Scalar Store Commit:      allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [2]. activate Vector Store Commit:    allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [3]. inactivate Vector Store Commit:  allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
+    * */
+    when(ctrlEntries(ptr).allocated && !needCancel(ptr) &&
+      (isNotAfter(dataEntries(ptr).uop.robIdx, GatedRegNext(io.fromRob.pendingPtr)) &&
+      !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 &&
+      ctrlEntries(ptr).allValid || (ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).allValid || ctrlEntries(ptr).vecInactive))) { //TODO: vecMbCommit will be remove in the future
       if(i == 0) {
         commitVec(i)               := true.B
       }
@@ -1742,8 +1781,11 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         commitVec(i)               := commitVec(i - 1)
       }
     } // commitVec default is false.B
-    ctrlEntries(ptr).committed   := commitVec(i)
+    //TODO: vecMbCommit will be remove in the future
+    ctrlEntries(ptr).committed   := commitVec(i) && !ctrlEntries(ptr).vecInactive && !(ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).allValid)
     XSError(!ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed, "commit not allocated entry!\n")
+    XSError(ctrlEntries(ptr).allocated && ctrlEntries(ptr).vecInactive && !ctrlEntries(ptr).isVec, "inactive entry must be vector!\n")
+    XSError(ctrlEntries(ptr).allocated && ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).isVec, "vecMbCommit entry must be vector!\n")
   }
 
   val commitCount = PopCount(commitVec)
@@ -1756,6 +1798,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
   }
 
+  XSError(cmtPtrExt.head < deqPtrExt.head || cmtPtrExt.head < rdataPtrExt.head, "pointer update error!\n")
   /************************************************* IO Assign ********************************************************/
 
   io.toLoadQueue.stAddrReadySqPtr := addrReadyPtrExt
