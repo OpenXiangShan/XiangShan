@@ -109,7 +109,7 @@ jobs:
       - name: Run SPEC CPU2006 checkpoints
         run: |
           cd $PERF_HOME
-          python3 xs_autoxs_autoxs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}"\
             --xs $NOOP_HOME --threads 8 --dir $SPEC_DIR --resume \
             -L "$NODE_SERVER_LIST"
