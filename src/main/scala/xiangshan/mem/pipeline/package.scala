@@ -58,7 +58,6 @@ trait OnLoadStage {
   }
 }
 
-
 object LoadEntrance extends ChiselOHEnum {
   type OHType = super.OHType
 
