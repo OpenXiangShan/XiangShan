@@ -58,12 +58,12 @@ class LoadUnitS0(param: ExeUnitParams)(
       * 6. loads issued from IQ
       * 7. low-confidence prefetch
       */
-    val unalignTail = Flipped(DecoupledIO(new LoadPipelineBundle))
-    val replay = Flipped(DecoupledIO(new LsPipelineBundle))
-    val fastReplay = Flipped(DecoupledIO(new LqWriteBundle))
+    val unalignTail = Flipped(DecoupledIO(new LoadStageIO))
+    val replay = Flipped(DecoupledIO(new LoadReplayIO))
+    val fastReplay = Flipped(DecoupledIO(new LoadReplayIO))
     // TODO: canAcceptHigh/LowConfPrefetch
     val prefetchReq = Flipped(ValidIO(new L1PrefetchReq))
-    val vecldin = Flipped(DecoupledIO(new VecPipeBundle))
+    val vecldin = Flipped(DecoupledIO(new VectorLoadIn))
     val ldin = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
 
     // Tlb request
@@ -100,6 +100,15 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   dontTouch(io)
   io <> DontCare
+
+  /**
+    * Request sources arbitration
+    */
+  val unalignTail = io.unalignTail
+  // val replayHiPrio = Wire(DecoupledIO(new LoadStageIO))
+
+  // connectSamePort()
+
 }
 
 class LoadUnitS1(param: ExeUnitParams)(
@@ -129,7 +138,7 @@ class LoadUnitS1(param: ExeUnitParams)(
     val dcacheForwardKill = Output(Bool())
 
     // Unalign tail inject to s0
-    val unalignTail = DecoupledIO(new LoadPipelineBundle)
+    val unalignTail = DecoupledIO(new LoadStageIO()(p, prevStage(s)))
 
     // Nuke check with StoreUnit
     val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
@@ -224,7 +233,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
 
     // Fast replay
-    val fastReplay = DecoupledIO(new LqWriteBundle)
+    val fastReplay = DecoupledIO(new LoadReplayIO)
 
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
@@ -270,8 +279,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val redirect = Flipped(ValidIO(new Redirect))
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
-  val vecldin = Flipped(DecoupledIO(new VecPipeBundle))
-  val replay = Flipped(DecoupledIO(new LsPipelineBundle))
+  val vecldin = Flipped(DecoupledIO(new VectorLoadIn))
+  val replay = Flipped(DecoupledIO(new LoadReplayIO))
   val prefetchReq = Flipped(ValidIO(new L1PrefetchReq))
   // Writeback to Backend / LQ / VLMergeBuffer
   val ldout = DecoupledIO(new ExuOutput(param))
@@ -421,10 +430,10 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
   implicit val s: LoadStage
 ) extends XSModule with OnLoadStage {
   val pipeIn = if (afterS1) {
-    Some(IO(Flipped(DecoupledIO(new LoadPipelineBundle()(p, prevStage(s))))))
+    Some(IO(Flipped(DecoupledIO(new LoadStageIO()(p, prevStage(s))))))
   } else None
   val pipeOut = if (!lastStage) {
-    Some(IO(DecoupledIO(new LoadPipelineBundle)))
+    Some(IO(DecoupledIO(new LoadStageIO)))
   } else None
 
   def <>(that: LoadUnitStage): Unit = {
@@ -440,59 +449,6 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
     dontTouch(out)
     out <> DontCare
   }
-}
-
-class LoadPipelineBundle(
-  implicit p: Parameters,
-  implicit val s: LoadStage
-) extends XSBundle
-  with OnLoadStage
-  with HasDCacheParameters
-  with HasVLSUParameters {
-  // basic info
-  val entrance = LoadEntrance()
-  val accessType = LoadAccessType()
-  val uop = new DynInst
-  val vaddr = UInt(VAddrBits.W)
-  val paddr = UInt(PAddrBits.W)
-  val fullva = UInt(XLEN.W)
-  val size = UInt(3.W)
-  val mask = UInt((VLEN/8).W)
-
-  // unalign
-  val unalignHead = Bool()
-
-  // MMU & exception handling
-  val tlbAccessResult = TlbAccessResult()
-  val tlbException = new TlbRespExcp
-  val pbmt = Pbmt()
-  val pmp = new PMPRespBundle
-  val isForVSnonLeafPTE = Bool()
-
-  // replay requests
-  val handledByMSHR = Bool()
-  val mshrId = UInt(log2Up(cfg.nMissEntries).W) // valid when `handledByMSHR` is HIGH
-  val replayQueueIdx = UInt(log2Up(LoadQueueReplaySize+1).W)
-  val forwardDChannel = Bool()
-
-  // vector
-  val elemIdx = UInt(elemIdxBits.W)
-  val mbIndex = UInt(vlmBindexBits.W)
-  val regOffset = UInt(vOffsetBits.W)
-  val elemIdxInsideVd = UInt(elemIdxBits.W)
-  val vecBaseVaddr = UInt(VAddrBits.W)
-  val vecVaddrOffset = UInt(VAddrBits.W) // only used in s1 & s2, to generate vstart
-  val vecTriggerMask = UInt((VLEN/8).W)
-
-  // data
-  val data = UInt((VLEN+1).W)
-
-  // virtualLoadQueue
-  val writebacked = Bool() // `updateAddrValid` in the original version
-
-  // debug info and top-down
-  val hasROBEntry = Bool()
-  val missDbUpdated = Bool()
 }
 
 /**
