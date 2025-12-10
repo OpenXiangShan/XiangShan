@@ -305,7 +305,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 //  }
 
   private val t1_cfiPcVec =
-    VecInit(t1_branches.map(branch => getCfiPcFromPosition(s2_startPc, branch.bits.cfiPosition)))
+    VecInit(t1_branches.map(branch => getCfiPcFromPosition(t1_startPc, branch.bits.cfiPosition)))
   private val t1_cfiUseAltIdxVec = VecInit(t1_cfiPcVec.map(getUseAltIndex))
 
   /* --------------------------------------------------------------------------------------------------------------
