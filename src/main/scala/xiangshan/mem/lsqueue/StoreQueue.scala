@@ -726,12 +726,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
+    val cboWithoutZeroVec = VecInit(uop.map(x => LSUOpType.isCbo(x.fuOpType)))
+    val dataInValidVec = (~dataValidVec.asUInt).asUInt | cboWithoutZeroVec.asUInt
     //TODO If the previous store appears out of alignment, then simply FF, this is a very unreasonable way to do it.
     //TODO But for the time being, this is the way to ensure correctness. Such a suitable opportunity to support unaligned forward.
     // If addr match, data not ready, mark it as dataInvalid
     // load_s1: generate dataInvalid in load_s1 to set fastUop
-    val dataInvalidMask1 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask1.asUInt
-    val dataInvalidMask2 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask2.asUInt
+    val dataInvalidMask1 = ((addrValidVec.asUInt & dataInValidVec & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask1.asUInt
+    val dataInvalidMask2 = ((addrValidVec.asUInt & dataInValidVec & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask2.asUInt
     val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2
     io.forward(i).dataInvalidFast := dataInvalidMask.orR
 
@@ -1058,7 +1060,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.uop := uncacheUop
   io.mmioStout.bits.uop.exceptionVec := ExceptionNO.selectByFu(uncacheUop.exceptionVec, StaCfg)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.flushPipe := deqCanDoCbo // flush Pipeline to keep order in CMO
+  io.mmioStout.bits.uop.flushPipe := false.B
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.isFromLoadUnit := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
