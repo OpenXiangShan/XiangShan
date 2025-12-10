@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuMeta
-import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchInfo
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
@@ -76,4 +76,10 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   val wen:     Bool       = Output(Bool())
   val ftqIdx:  UInt       = Output(UInt(FtqPtr.width.W))
   val startPc: PrunedAddr = Output(PrunedAddr(VAddrBits))
+}
+
+class PerfMeta(implicit p: Parameters) extends FtqBundle {
+  val bpuPerf:    BpuPerfMeta = new BpuPerfMeta
+  val isCfi:      Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
+  val mispredict: Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
 }
