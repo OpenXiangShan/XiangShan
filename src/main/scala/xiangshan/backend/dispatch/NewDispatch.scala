@@ -827,13 +827,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRename(i).fire && fromRename(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && !isStore(i) && isLs(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_strict_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && isStore(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && isStore(i)
   )))
 
   val allResourceReady = io.enqRob.canAccept
