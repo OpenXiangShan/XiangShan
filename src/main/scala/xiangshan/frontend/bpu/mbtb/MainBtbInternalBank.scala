@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtbInternalBank(
@@ -32,18 +33,29 @@ class MainBtbInternalBank(
         val setIdx: UInt = UInt(SetIdxLen.W)
       }
       class Resp extends Bundle {
-        val entries: Vec[MainBtbEntry] = Vec(NumWay, new MainBtbEntry)
+        val entries:  Vec[MainBtbEntry]    = Vec(NumWay, new MainBtbEntry)
+        val counters: Vec[SaturateCounter] = Vec(NumWay, new SaturateCounter(TakenCntWidth))
       }
 
       val req:  Valid[Req] = Flipped(Valid(new Req))
       val resp: Resp       = Output(new Resp)
     }
 
-    class Write extends Bundle {
+    class WriteEntry extends Bundle {
       class Req extends Bundle {
         val setIdx:  UInt         = UInt(SetIdxLen.W)
         val wayMask: UInt         = UInt(NumWay.W)
         val entry:   MainBtbEntry = new MainBtbEntry
+      }
+
+      val req: Valid[Req] = Flipped(Valid(new Req))
+    }
+
+    class WriteCounter extends Bundle {
+      class Req extends Bundle {
+        val setIdx:   UInt                 = UInt(SetIdxLen.W)
+        val wayMask:  UInt                 = UInt(NumWay.W)
+        val counters: Vec[SaturateCounter] = Vec(NumWay, new SaturateCounter(TakenCntWidth))
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -61,19 +73,21 @@ class MainBtbInternalBank(
 
     val resetDone: Bool = Output(Bool())
 
-    val read:  Read  = new Read
-    val write: Write = new Write
-    val flush: Flush = new Flush
+    val read:         Read         = new Read
+    val writeEntry:   WriteEntry   = new WriteEntry
+    val writeCounter: WriteCounter = new WriteCounter
+    val flush:        Flush        = new Flush
   }
 
   val io: MainBtbInternalBankIO = IO(new MainBtbInternalBankIO)
 
   // alias
   private val r     = io.read
-  private val w     = io.write
+  private val we    = io.writeEntry
+  private val wc    = io.writeCounter
   private val flush = io.flush
 
-  private val ways = Seq.tabulate(NumWay) { wayIdx =>
+  private val entrySrams = Seq.tabulate(NumWay) { wayIdx =>
     Module(
       new SRAMTemplate(
         new MainBtbEntry,
@@ -85,61 +99,102 @@ class MainBtbInternalBank(
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl,
-        suffix = Option("bpu_mbtb")
+        suffix = Option("bpu_mbtb_entry")
       )
-    ).suggestName(s"mbtb_sram_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
+    ).suggestName(s"mbtb_sram_entry_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
   }
 
-  private val writeBuffer = Module(new WriteBuffer(
-    new MainBtbSramWriteReq,
+  // we often need to update counter, but not the whole entry, so store counters in separate SRAMs for better power
+  private val counterSram = Module(new SRAMTemplate(
+    new SaturateCounter(TakenCntWidth),
+    set = NumSets,
+    way = NumWay,
+    singlePort = true,
+    shouldReset = true,
+    holdRead = true,
+    withClockGate = true,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl,
+    suffix = Option("bpu_mbtb_counter")
+  )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
+
+  private val entryWriteBuffer = Module(new WriteBuffer(
+    new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
     numPorts = NumWay,
-    nameSuffix = s"mbtbAlign${alignIdx}_Bank${bankIdx}"
+    nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
+  ))
+
+  private val counterWriteBuffer = Module(new Queue(
+    new MainBtbCounterSramWriteReq,
+    WriteBufferSize,
+    pipe = true,
+    flow = true
   ))
 
   private val resetDone = RegInit(false.B)
-  when(ways.map(_.io.r.req.ready).reduce(_ && _)) {
+  when(entrySrams.map(_.io.r.req.ready).reduce(_ && _) && counterSram.io.r.req.ready) {
     resetDone := true.B
   }
   io.resetDone := resetDone
 
-  // sram -> io
-  ways.foreach { way =>
-    way.io.r.req.valid       := r.req.valid
-    way.io.r.req.bits.setIdx := r.req.bits.setIdx
+  /* *** sram -> io *** */
+  // handle entry & counter together
+  (entrySrams :+ counterSram).foreach { sram =>
+    sram.io.r.req.valid       := r.req.valid
+    sram.io.r.req.bits.setIdx := r.req.bits.setIdx
   }
-  // magic (0): each sram template has 1 way, so we only read data(0)
-  r.resp.entries := VecInit(ways.map(_.io.r.resp.data(0)))
+  // each entry sram template has 1 way, so here we only read data.head
+  r.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
+  r.resp.counters := counterSram.io.r.resp.data
 
-  // writeBuffer -> sram
-  (ways zip writeBuffer.io.read).foreach { case (way, bufRead) =>
+  /* *** writeBuffer -> sram *** */
+  // entry
+  (entrySrams zip entryWriteBuffer.io.read).foreach { case (way, bufRead) =>
     way.io.w.req.valid        := bufRead.valid && !way.io.r.req.valid
     way.io.w.req.bits.data(0) := bufRead.bits.entry
     way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
+  // counter
+  counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
+  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
+  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
+  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
+  counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
 
-  // io -> writeBuffer
-  private val conflict = w.req.valid && w.req.bits.setIdx === flush.req.bits.setIdx && w.req.bits.entry.tag === 0.U
-  writeBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
-    val writeValid = w.req.valid && w.req.bits.wayMask(i)
+  /* *** io -> writeBuffer *** */
+  // entry
+  private val conflict = we.req.valid && we.req.bits.setIdx === flush.req.bits.setIdx && we.req.bits.entry.tag === 0.U
+  entryWriteBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
+    val writeValid = we.req.valid && we.req.bits.wayMask(i)
     val flushValid = flush.req.valid && flush.req.bits.wayMask(i) && !conflict
     bufWrite.valid := writeValid || flushValid
     bufWrite.bits.setIdx := Mux(
       writeValid,
-      w.req.bits.setIdx,
+      we.req.bits.setIdx,
       flush.req.bits.setIdx
     )
     bufWrite.bits.entry := Mux(
       writeValid,
-      w.req.bits.entry,
+      we.req.bits.entry,
       0.U.asTypeOf(new MainBtbEntry)
     )
   }
+  // counter, dont care flush (`hit` is controlled by entry)
+  counterWriteBuffer.io.enq.valid         := wc.req.valid
+  counterWriteBuffer.io.enq.bits.setIdx   := wc.req.bits.setIdx
+  counterWriteBuffer.io.enq.bits.wayMask  := wc.req.bits.wayMask
+  counterWriteBuffer.io.enq.bits.counters := wc.req.bits.counters
 
   XSPerfAccumulate(
     "multihit_write_conflict",
-    w.req.valid && flush.req.valid && w.req.bits.setIdx === flush.req.bits.setIdx &&
-      (w.req.bits.wayMask & flush.req.bits.wayMask).orR
+    we.req.valid && flush.req.valid && we.req.bits.setIdx === flush.req.bits.setIdx &&
+      (we.req.bits.wayMask & flush.req.bits.wayMask).orR
+  )
+
+  XSPerfAccumulate(
+    "counter_writebuffer_drop_write",
+    counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
   )
 }

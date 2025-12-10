@@ -29,12 +29,6 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
   val takenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
 }
 
-class BaseTableSramWriteReq(implicit p: Parameters) extends TageBundle {
-  val setIdx:    UInt                 = UInt(BaseTableSetIdxWidth.W)
-  val wayMask:   UInt                 = UInt(FetchBlockAlignInstNum.W)
-  val takenCtrs: Vec[SaturateCounter] = Vec(FetchBlockAlignInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
-}
-
 class TableReadReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
   val setIdx:   UInt = UInt(SetIdxWidth.W)
   val bankMask: UInt = UInt(NumBanks.W)
@@ -64,9 +58,8 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
-  val baseTableCtrs: Vec[SaturateCounter] = Vec(FetchBlockInstNum, new SaturateCounter(BaseTableTakenCtrWidth))
-  val debug_setIdx:  Vec[UInt]            = Vec(NumTables, UInt(8.W))        // TODO: remove it
-  val debug_tempTag: Vec[UInt]            = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
+  val debug_setIdx:  Vec[UInt] = Vec(NumTables, UInt(8.W))        // TODO: remove it
+  val debug_tempTag: Vec[UInt] = Vec(NumTables, UInt(TagWidth.W)) // TODO: remove it
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
@@ -127,8 +120,6 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val altWayIdx:    UInt            = UInt(MaxWayIdxWidth.W)
   val altTakenCtr:  SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val altUsefulCtr: SaturateCounter = new SaturateCounter(UsefulCtrWidth)
-
-  val baseTableCtr: SaturateCounter = new SaturateCounter(BaseTableTakenCtrWidth)
 
   val useAlt:         Bool = Bool()
   val finalPred:      Bool = Bool()

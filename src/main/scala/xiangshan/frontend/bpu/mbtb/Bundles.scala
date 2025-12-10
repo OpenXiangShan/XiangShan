@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
 
@@ -45,16 +46,23 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
 //  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
 }
 
-class MainBtbSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
+class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
   val setIdx:       UInt         = UInt(SetIdxLen.W)
   val entry:        MainBtbEntry = new MainBtbEntry
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
+}
+
+class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx:   UInt                 = UInt(SetIdxLen.W)
+  val wayMask:  UInt                 = UInt(NumWay.W)
+  val counters: Vec[SaturateCounter] = Vec(NumWay, new SaturateCounter(TakenCntWidth))
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
   val rawHit:    Bool            = Bool()
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
+  val counter:   SaturateCounter = new SaturateCounter(TakenCntWidth)
 
   def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
 }
