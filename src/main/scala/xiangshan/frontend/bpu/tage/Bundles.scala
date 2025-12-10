@@ -132,6 +132,7 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val finalPred:      Bool = Bool()
   val actualTaken:    Bool = Bool()
   val allocSuccess:   Bool = Bool()
+  val mispredict:     Bool = Bool()
   val allocTableIdx:  UInt = UInt(TableIdxWidth.W)
   val allocateSetIdx: UInt = UInt(16.W)
   val allocWayIdx:    UInt = UInt(MaxWayIdxWidth.W)

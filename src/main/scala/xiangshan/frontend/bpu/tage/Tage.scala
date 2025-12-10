@@ -548,6 +548,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trace.bits.baseTableCtr      := t2_baseTableCtrs(t2_branches(i).bits.cfiPosition)
     trace.bits.useAlt            := t2_allBranchUpdateInfo(i).useAlt
     trace.bits.finalPred         := t2_allBranchUpdateInfo(i).finalPred
+    trace.bits.mispredict        := t2_branches(i).bits.mispredict
     trace.bits.actualTaken       := t2_branches(i).bits.taken
     trace.bits.allocSuccess      := t2_allBranchUpdateInfo(i).needAllocate && t2_allocateTableMaskOH.orR
     trace.bits.allocTableIdx     := OHToUInt(t2_allocateTableMaskOH)
