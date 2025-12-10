@@ -412,12 +412,18 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   // scalar store and scalar load nuke check, and also other purposes
   //A 128-bit aligned unaligned memory access requires changing the unaligned flag bit in sq
+  //TODO: FIX this connect!!
   io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch
+  io.toLsq.bits           := DontCare
+  io.toLsq.bits.paddr     := s1_out.paddr
+  io.toLsq.bits.vaddr     := s1_out.vaddr
   io.toLsq.bits.cacheMiss := false.B // will be set in stage 2
-  connectSamePort(io.toLsq.bits, s1_out)
-  io.toLsq.bits.uop.ftqOffset := s1_in.uop.ftqOffset
-  io.toLsq.bits.size          := s1_in.alignedType
+  io.toLsq.bits.tlbMiss   := s1_out.tlbMiss
+  io.toLsq.bits.wlineflag := s1_out.wlineflag
+  io.toLsq.bits.mask      := s1_out.mask
+  io.toLsq.bits.size          := s1_out.alignedType
   connectSamePort(io.toLsq.bits.uop, s1_out.uop)
+
 
   //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
   // if it was unalign splited, first request will be false, second will be true.
