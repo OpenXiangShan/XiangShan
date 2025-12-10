@@ -78,6 +78,7 @@ class TLBFA(
     val perm     = entries.map(_.perm)
     val gPerm    = entries.map(_.g_perm)
     val s2xLate  = entries.map(_.s2xlate)
+    val pm       = entries.map(_.pm)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
@@ -87,6 +88,7 @@ class TLBFA(
         resp.bits.perm(d) := perm(0)
         resp.bits.g_perm(d) := gPerm(0)
         resp.bits.s2xlate(d) := s2xLate(0)
+        resp.bits.pm := pm(0)
       }
     } else {
       for (d <- 0 until nDups) {
@@ -98,6 +100,7 @@ class TLBFA(
         resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
         resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPerm)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
+        resp.bits.pm := Mux1H(hitVecReg zip pm)
       }
     }
 
@@ -115,7 +118,7 @@ class TLBFA(
 
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data)
+    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.w.bits.pmp)
   }
   // write assert, should not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
@@ -373,6 +376,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.g_perm(d) := p.bits.g_perm(d)
       rp.bits.pbmt(d) := p.bits.pbmt(d)
       rp.bits.g_pbmt(d) := p.bits.g_pbmt(d)
+      rp.bits.pm := p.bits.pm
     }
   }
 
@@ -392,7 +396,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
   page.w_apply(
     valid = io.w.valid,
     wayIdx = refill_idx,
-    data = io.w.bits.data
+    data = io.w.bits.data,
+    pmp = io.w.bits.pmp
   )
 
     // replacement

@@ -61,6 +61,11 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
 }
 
+class PMPConfigWithHit(implicit p: Parameters) extends Bundle {
+  val cfg = new PMPConfig
+  val hit = Bool()
+}
+
 object PMPConfigUInt {
   def apply(
     l: Boolean = false,
@@ -528,7 +533,7 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
 class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
-  val resp = Output(new PMPConfig())
+  val resp = Output(new PMPConfigWithHit())
 
   def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
     check_env.apply(cmode, mode, pmp, pma)
@@ -590,7 +595,7 @@ class PMPChecker
   val cmd = if(leaveHitMux) RegEnable(req.cmd, io.req.valid) else req.cmd
   val resp_pmp = pmp_check(cmd, res_pmp.cfg)
   val resp_pma = pma_check(cmd, res_pma.cfg)
-  
+
   def keyid_check(leaveHitMux: Boolean = false, valid: Bool = true.B, addr: UInt) = {
     val resp = Wire(new PMPRespBundle)
     val keyid_nz = if (PMPKeyIDBits > 0) addr(PMPAddrBits-1, PMPAddrBits-PMPKeyIDBits) =/= 0.U else false.B
@@ -618,9 +623,10 @@ class PMPChecker
 }
 
 /* get config with check */
+// TODO: Add keyID check here!
 class PMPCheckerv2
 (
-  lgMaxSize: Int = 3,
+  lgMaxSize: Int = 39, // MaxSize is 512GB
   sameCycle: Boolean = false,
   leaveHitMux: Boolean = false
 )(implicit p: Parameters) extends PMPModule
@@ -638,9 +644,11 @@ class PMPCheckerv2
   val resp = and(res_pmp, res_pma)
 
   if (sameCycle || leaveHitMux) {
-    io.resp := resp
+    io.resp.cfg := resp
+    io.resp.hit := resp.a =/= 0.U
   } else {
-    io.resp := RegEnable(resp, io.req.valid)
+    io.resp.cfg := RegEnable(resp, io.req.valid)
+    io.resp.hit := RegEnable(resp.a =/= 0.U, io.req.valid)
   }
 
   def and(pmp: PMPEntry, pma: PMPEntry): PMPConfig = {
