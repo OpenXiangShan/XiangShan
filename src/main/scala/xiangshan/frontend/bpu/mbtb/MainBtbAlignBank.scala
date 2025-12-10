@@ -237,13 +237,16 @@ class MainBtbAlignBank(
   private val t1_newCounters    = Wire(Vec(NumWay, new SaturateCounter(TakenCntWidth)))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
 
-  (t1_newCounters zip t1_counterWayMask zip t1_meta).foreach { case ((newCounter, wen), meta) =>
+  t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
-    wen              := hitMask.reduce(_ || _)
-    newCounter.value := meta.counter.getUpdate(actualTaken)
+
+    val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
+
+    t1_counterWayMask(i)    := entryOverridden || hitMask.reduce(_ || _)
+    t1_newCounters(i).value := Mux(entryOverridden, meta.counter.getWeakPositive(), meta.counter.getUpdate(actualTaken))
   }
 
   // write counter anytime when needed
