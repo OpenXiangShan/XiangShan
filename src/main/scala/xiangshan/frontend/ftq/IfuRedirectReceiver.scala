@@ -35,9 +35,8 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.isRVC     := wbRedirect.bits.isRVC
     redirect.bits.attribute := wbRedirect.bits.attribute
     redirect.bits.pc        := wbRedirect.bits.pc
-    // redirect.bits.target    := Mux(pdWb.bits.attribute.isReturn, specTopAddr, pdWb.bits.target.toUInt)
-    redirect.bits.target := wbRedirect.bits.target
-    redirect.bits.taken  := wbRedirect.bits.taken
+    redirect.bits.target    := Mux(wbRedirect.bits.attribute.isReturn, specTopAddr, wbRedirect.bits.target)
+    redirect.bits.taken     := wbRedirect.bits.taken
     redirect
   }
 }
