@@ -308,7 +308,13 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
   // The Manager Node is only used to make IO
   val tl = Option.when(isTL)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
-      managers = SeperateBusRanges.filter(address => !address.overlaps(soc.TIMERRange)) map { address =>
+      managers = SeperateBusRanges.filter(address => {
+        if (soc.UsePrivateClint) {
+          !address.overlaps(soc.TIMERRange)
+        } else {
+          true
+        }
+      }) map { address =>
         TLSlaveParameters.v1(
           address = Seq(address),
           regionType = RegionType.UNCACHED,
@@ -333,7 +339,13 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
 
   val axiSlaveNodeOpt = Option.when(isAXI) {
     val axiSlaveNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-      slaves = SeperateBusRanges.filter(address => !address.overlaps(soc.TIMERRange)) map { address =>
+      slaves = SeperateBusRanges.filter(address => {
+        if (soc.UsePrivateClint) {
+          !address.overlaps(soc.TIMERRange)
+        } else {
+          true
+        }
+      }) map { address =>
         AXI4SlaveParameters(
           address = List(address),
           regionType = RegionType.UNCACHED,
