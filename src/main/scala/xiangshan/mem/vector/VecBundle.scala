@@ -205,6 +205,8 @@ class FeedbackToSplitIO(implicit p: Parameters) extends VLSUBundle{
 class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val robidx = new RobPtr
   val uopidx = UopIdx()
+  val sqIdx = new SqPtr
+  val lqIdx = new LqPtr
   val vaddr = UInt(XLEN.W)
   val vaNeedExt = Bool()
   val gpaddr = UInt(GPAddrBits.W)
