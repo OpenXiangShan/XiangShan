@@ -32,9 +32,6 @@ class XiangShanStage extends ChiselStage {
 
   trait XiangShanCli { this: firrtl.options.Shell =>
     parser.note("XiangShan Options")
-    DisablePrintfAnnotation.addOptions(parser)
-    EnablePrintfAnnotation.addOptions(parser)
-    DisableAllPrintAnnotation.addOptions(parser)
   }
 
   override def run(annotations: firrtl.AnnotationSeq): firrtl.AnnotationSeq = {
@@ -46,7 +43,6 @@ class XiangShanStage extends ChiselStage {
         firrtl.options.Dependency[chisel3.stage.phases.AddSerializationAnnotations],
         firrtl.options.Dependency[chisel3.stage.phases.Convert],
         firrtl.options.Dependency[xiangshan.transforms.PrintModuleName],
-        firrtl.options.Dependency[xiangshan.transforms.PrintControl],
         firrtl.options.Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
         firrtl.options.Dependency[circt.stage.phases.AddImplicitOutputFile],
         firrtl.options.Dependency[circt.stage.phases.CIRCT]
