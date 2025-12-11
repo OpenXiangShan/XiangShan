@@ -23,7 +23,6 @@ import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.StageCtrl
 
 class MainBtbAlignBank(
@@ -234,7 +233,7 @@ class MainBtbAlignBank(
   replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
 
   /* *** update counter *** */
-  private val t1_newCounters    = Wire(Vec(NumWay, new SaturateCounter(TakenCntWidth)))
+  private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
 
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
@@ -246,11 +245,7 @@ class MainBtbAlignBank(
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
 
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
-    t1_newCounters(i) := Mux(
-      entryOverridden,
-      SaturateCounter.WeakPositive(TakenCntWidth),
-      meta.counter.update(actualTaken)
-    )
+    t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.update(actualTaken))
   }
 
   // write counter anytime when needed
