@@ -248,7 +248,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.s3_override               := s3_override
   sc.io.ghr                       := ghr.io.s0_ghist
 
-  private val scTakenMask = sc.io.takenMask
+  private val scTakenMask = sc.io.scTakenMask
+  private val scUsed      = sc.io.scUsed
   dontTouch(scTakenMask)
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
