@@ -100,7 +100,6 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val byteMask                 = UInt((VLEN/8).W)
   def paddr :UInt              = Cat(paddrHigh, vaddr(pageOffset - 1, 0))
   val data                     = UInt(VLEN.W)
-  val wline                    = Bool() // write whole cacheline
 
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
   def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
@@ -376,7 +375,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // prevent X-state
       // Virtual address match (high bits only, ignore byte offset)
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
-        (dataEntry.vaddr(VAddrBits - 1, log2Ceil(VLENB)) === s1LoadVaddr) && ctrlEntry.addrValid
+        val storeIsCboZero = ctrlEntry.isCbo && isCboZero(ctrlEntry.cboType)
+        // vaddr two part match:
+        // [1]: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline), The high bits of vaddr, must match.
+        // [2]: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)], The bits within cacheline, if store is cboZero, it can be ignored.
+        //
+        ((dataEntry.vaddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s1LoadVaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || storeIsCboZero) &&
+          dataEntry.vaddr(VAddrBits - 1, log2Ceil(CacheLineSize / 8)) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB))) &&
+          ctrlEntry.addrValid
       }).asUInt
 
       // Byte overlap check: store covers any part of load's range
@@ -461,7 +467,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //                                  Load needs this byte (0x77)
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val paddrNoMatch       = (s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(VLENB)) =/= s2LoadPaddr) && s2Valid
+      val selectIsCboZero     = selectCtrlEntry.isCbo && isCboZero(selectCtrlEntry.cboType)
+      // !Paddrmatch
+      val paddrNoMatch       = !(
+        (s2SelectDataEntry.paddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s2LoadPaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || selectIsCboZero) &&
+        s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(CacheLineSize / 8)) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB))
+        ) && s2Valid
 
       val selectData         = (0 until VLEN/8).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -1050,7 +1061,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := dataEntry.wline
+      port.bits.wline    := ctrlEntry.isCbo && isCboZero(ctrlEntry.cboType)
       port.bits.prefetch := ctrlEntry.prefetch
       port.bits.vecValid := true.B
       port.valid         := toSbufferValid(i)
@@ -1747,7 +1758,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     when(storeDataIn.fire){
       // if it's a cbo.zero, write zero.
       dataEntries(stWbIdx).data  := Mux(storeDataIn.bits.fuOpType === LSUOpType.cbo_zero, 0.U, storeDataIn.bits.data)
-      dataEntries(stWbIdx).wline := storeDataIn.bits.fuOpType === LSUOpType.cbo_zero
 
       // debug signal
       if(debugEn) {
