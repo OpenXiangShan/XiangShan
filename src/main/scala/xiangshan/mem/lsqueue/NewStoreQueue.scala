@@ -275,8 +275,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // vector store will consider all inactive || secondInvalid flows as valid
       val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).addrValid)))
+      // if is cbo zero, it can forward; other cbo type's data is invalid.
       val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-        io.ctrlEntriesIn(j).dataValid)))
+        io.ctrlEntriesIn(j).dataValid && (isCboZero(io.ctrlEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
       val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).allValid)))
 
@@ -886,7 +887,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.writeBack.bits                         := DontCare // init, TODO: fix it!!!!!!
     io.writeBack.bits.robIdx := dataEntries.head.uop.robIdx
     io.writeBack.bits.exceptionVec.foreach(_(hardwareError) := hasHardwareError)// override
-    io.writeBack.bits.flushPipe.foreach(_ := cboState === CboState.writeback && !isCboZero(headCtrlEntry.cboType)) // cbo need to use it
     // for difftest, ref will skip mmio store
     if(debugEn) {
       io.writeBack.bits.debug.isMMIO  := isMmio(ctrlEntries.head.memoryType) || isPbmtIO(ctrlEntries.head.memoryType)
