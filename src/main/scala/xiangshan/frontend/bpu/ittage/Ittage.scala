@@ -74,7 +74,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
-  private val tickCnt    = RegInit(0.U.asTypeOf(new SaturateCounter(TickWidth)))
+  private val tickCnt    = RegInit(TickCounter.Zero)
 
   private val rTable = Module(new RegionWays)
 
@@ -95,9 +95,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val s2_provider          = Wire(UInt(log2Ceil(NumTables).W))
   private val s2_altProvided       = Wire(Bool())
   private val s2_altProvider       = Wire(UInt(log2Ceil(NumTables).W))
-  private val s2_providerUsefulCnt = Wire(new SaturateCounter(UsefulCntWidth))
-  private val s2_providerCnt       = Wire(new SaturateCounter(ConfidenceCntWidth))
-  private val s2_altProviderCnt    = Wire(new SaturateCounter(ConfidenceCntWidth))
+  private val s2_providerUsefulCnt = Wire(UsefulCounter())
+  private val s2_providerCnt       = Wire(ConfidenceCounter())
+  private val s2_altProviderCnt    = Wire(ConfidenceCounter())
 
   private val s3_ittageTarget      = RegEnable(s2_ittageTarget, s2_fire)
   private val s3_providerTarget    = RegEnable(s2_providerTarget, s2_fire)
@@ -171,8 +171,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val updateResetUsefulCnt  = WireInit(false.B)
   private val updateCorrect         = Wire(Vec(NumTables, Bool()))
   private val updateAlloc           = Wire(Vec(NumTables, Bool()))
-  private val updateOldCnt          = Wire(Vec(NumTables, new SaturateCounter(ConfidenceCntWidth)))
-  private val updateUsefulCnt       = Wire(Vec(NumTables, new SaturateCounter(UsefulCntWidth)))
+  private val updateOldCnt          = Wire(Vec(NumTables, ConfidenceCounter()))
+  private val updateUsefulCnt       = Wire(Vec(NumTables, UsefulCounter()))
   private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
   private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
   updateCorrect         := DontCare
@@ -195,8 +195,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // access tag tables and output meta info
   class IttageTableInfo extends Bundle {
-    val cnt:          SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
-    val usefulCnt:    SaturateCounter = new SaturateCounter(UsefulCntWidth)
+    val cnt:          SaturateCounter = ConfidenceCounter()
+    val usefulCnt:    SaturateCounter = UsefulCounter()
     val targetOffset: IttageOffset    = new IttageOffset
     val tableIdx:     UInt            = UInt(log2Ceil(NumTables).W)
     val maskTarget:   Vec[UInt]       = Vec(NumTables, UInt(VAddrBits.W))
@@ -351,7 +351,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       updateUsefulCnt(provider) := Mux(
         !t1_meta.altDiffers,
         t1_meta.providerUsefulCnt,
-        (t1_meta.providerTarget === updateRealTarget).asTypeOf(new SaturateCounter(UsefulCntWidth))
+        (t1_meta.providerTarget === updateRealTarget).asTypeOf(UsefulCounter())
       )
       updateCorrect(provider)         := t1_meta.providerTarget === updateRealTarget
       updateOldCnt(provider)          := t1_meta.providerCnt
@@ -382,7 +382,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       updateCorrect(allocate.bits)       := false.B // useless for alloc
       updateAlloc(allocate.bits)         := true.B
       updateUsefulCntMask(allocate.bits) := true.B
-      updateUsefulCnt(allocate.bits)     := false.B.asTypeOf(new SaturateCounter(UsefulCntWidth))
+      updateUsefulCnt(allocate.bits)     := UsefulCounter.SaturateNegative
       updateTargetOffset(allocate.bits)  := updateRealTargetOffset
     }
   }
@@ -430,16 +430,14 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     commitPerf(s"ittage_${name}", commitCond)
   }
 
-  def ctrNull(ctr: SaturateCounter): Bool = ctr.isSaturateNegative
-
-  private val predUseProvider     = s2_provided && !ctrNull(s2_providerCnt)
-  private val predUseAltPred      = s2_provided && ctrNull(s2_providerCnt)
+  private val predUseProvider     = s2_provided && !s2_providerCnt.isSaturateNegative
+  private val predUseAltPred      = s2_provided && s2_providerCnt.isSaturateNegative
   private val predUseHtAsAltPred  = predUseAltPred && s2_altProvided
   private val predUseBimAsAltPred = predUseAltPred && !s2_altProvided
   private val predUseBimAsPred    = !s2_provided
 
-  private val commitUseProvider     = t1_meta.provider.valid && !ctrNull(t1_meta.providerCnt)
-  private val commitUseAltPred      = t1_meta.provider.valid && ctrNull(t1_meta.providerCnt)
+  private val commitUseProvider     = t1_meta.provider.valid && !t1_meta.providerCnt.isSaturateNegative
+  private val commitUseAltPred      = t1_meta.provider.valid && t1_meta.providerCnt.isSaturateNegative
   private val commitUseHtAsAltPred  = commitUseAltPred && t1_meta.altProvider.valid
   private val commitUseFtbAsAltPred = commitUseAltPred && !t1_meta.altProvider.valid
   private val commitUseFtbAsPred    = !t1_meta.provider.valid

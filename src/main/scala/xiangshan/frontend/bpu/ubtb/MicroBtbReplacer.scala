@@ -26,7 +26,7 @@ class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
     val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
     val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
 
-    val usefulCnt: Vec[SaturateCounter] = Input(Vec(NumEntries, new SaturateCounter(UsefulCntWidth)))
+    val usefulCnt: Vec[SaturateCounter] = Input(Vec(NumEntries, UsefulCounter()))
 
     val victim: UInt = Output(UInt(log2Up(NumEntries).W))
 

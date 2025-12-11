@@ -49,10 +49,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
   // reset usefulCtr of all entries when usefulResetCtr saturated
-  private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
+  private val usefulResetCtr = RegInit(UsefulResetCounter.Zero)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(0.U.asTypeOf(new SaturateCounter(UseAltOnNaWidth))))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
 
   /* *** reset *** */
   private val resetDone = RegInit(false.B)
@@ -490,8 +490,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     entry.tag   := rawTag ^ position
     entry.takenCtr := Mux(
       actualTaken,
-      SaturateCounter.WeakPositive(TakenCtrWidth), // weak taken
-      SaturateCounter.WeakNegative(TakenCtrWidth)  // weak not taken
+      TakenCounter.WeakPositive, // weak taken
+      TakenCounter.WeakNegative  // weak not taken
     )
     entry
   }
@@ -501,7 +501,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
     val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
 
     // used for writeBuffer
     val actualTakenMask = Wire(Vec(NumWays, Bool()))
@@ -533,7 +533,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
       writeWayMask(wayIdx)    := updateEn || allocateEn
       writeEntries(wayIdx)    := Mux(allocateEn, t2_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, initUsefulCtr, updateUsefulCtr)
+      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
       actualTakenMask(wayIdx) := Mux(allocateEn, t2_allocateBranch.bits.taken, updateBranchActualTaken)
     }
 

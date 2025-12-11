@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.ghr.GhrEntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.tage.{TakenCounter => TageTakenCounter}
 
 /**
  * This module is the implementation of the Statistical Corrector.
@@ -39,7 +40,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult: Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
     val providerTakenCtrs: Vec[Valid[SaturateCounter]] =
-      Input(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TageTakenCtrWidth)))) // s2 stage tage info
+      Input(Vec(NumBtbResultEntries, Valid(TageTakenCounter()))) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s3_override:         Bool                  = Input(Bool())
     val ghr:                 GhrEntry              = Input(new GhrEntry())
@@ -71,7 +72,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val biasTable = Module(new ScTable(BiasTableSize, BiasTableNumWays, "biasTable", 0))
 
-  private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ScThreshold(p)))
+  private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init))
 
   private val resetDone = RegInit(false.B)
   when(pathTable.map(_.io.resetDone).reduce(_ && _) &&
@@ -282,7 +283,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
 
   private val s2_scPred        = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds    = VecInit(scThreshold.map(_.thres.value >> 3))
+  private val s2_thresholds    = VecInit(scThreshold.map(_.value >> 3))
   private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
@@ -421,8 +422,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
           val shouldUpdate = writeValid && writeWayIdx === wayIdx.U && t1_meta.tagePredValid(branchIdx) &&
             (t1_meta.tagePred(branchIdx) =/= t1_meta.scPred(branchIdx)) &&
             (scWrong || !t1_meta.sumAboveThres(branchIdx))
-          val nextThres = prevThres.update(scWrong)
-          Mux(shouldUpdate, nextThres, prevThres)
+          prevThres.getUpdate(scWrong, shouldUpdate)
       }
     WireInit(updated)
   })

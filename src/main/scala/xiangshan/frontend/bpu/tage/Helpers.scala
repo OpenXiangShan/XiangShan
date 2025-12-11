@@ -42,12 +42,6 @@ trait TopHelper extends HasTageParameters {
     val useAltOnNaIdxWidth = log2Ceil(NumUseAltOnNa)
     pc(useAltOnNaIdxWidth - 1 + instOffsetBits, instOffsetBits)
   }
-
-  def initUsefulCtr: SaturateCounter = {
-    val ctr = Wire(new SaturateCounter(UsefulCtrWidth))
-    ctr.value := UsefulCtrInitValue.U
-    ctr
-  }
 }
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex

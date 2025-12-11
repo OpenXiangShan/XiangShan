@@ -43,8 +43,8 @@ class IttageTable(
     }
 
     class Resp extends Bundle {
-      val cnt:          SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
-      val usefulCnt:    SaturateCounter = new SaturateCounter(UsefulCntWidth)
+      val cnt:          SaturateCounter = ConfidenceCounter()
+      val usefulCnt:    SaturateCounter = UsefulCounter()
       val targetOffset: IttageOffset    = new IttageOffset()
     }
 
@@ -55,10 +55,10 @@ class IttageTable(
       val valid:   Bool            = Bool()
       val correct: Bool            = Bool()
       val alloc:   Bool            = Bool()
-      val oldCnt:  SaturateCounter = new SaturateCounter(ConfidenceCntWidth)
+      val oldCnt:  SaturateCounter = ConfidenceCounter()
       // update useful
       val usefulCntValid: Bool            = Bool()
-      val usefulCnt:      SaturateCounter = new SaturateCounter(UsefulCntWidth)
+      val usefulCnt:      SaturateCounter = UsefulCounter()
       val resetUsefulCnt: Bool            = Bool()
       // target
       val targetOffset:    IttageOffset = new IttageOffset
@@ -242,19 +242,18 @@ class IttageTable(
   updateWdata.valid := true.B
   updateWdata.confidenceCnt := Mux(
     io.update.alloc,
-    SaturateCounter.WeakPositive(ConfidenceCntWidth), // reset to neutral (weak positive) when allocate
+    ConfidenceCounter.WeakPositive, // reset to neutral (weak positive) when allocate
     oldCtr.getUpdate(io.update.correct)
   )
   updateWdata.tag := updateTag
   updateWdata.usefulCnt := Mux(
     usefulCanReset,
-    SaturateCounter.SaturateNegative(UsefulCntWidth),
+    UsefulCounter.SaturateNegative,
     io.update.usefulCnt
   )
   // only when ctr is null
-  def ctrNull(ctr: SaturateCounter): Bool = ctr.isSaturateNegative
   updateWdata.targetOffset := Mux(
-    io.update.alloc || ctrNull(oldCtr),
+    io.update.alloc || oldCtr.isSaturateNegative,
     io.update.targetOffset,
     io.update.oldTargetOffset
   )

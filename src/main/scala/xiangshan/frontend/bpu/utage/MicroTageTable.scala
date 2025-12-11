@@ -41,8 +41,8 @@ class MicroTageTable(
       val taken:       Bool            = Bool()
       val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
       val useful:      UInt            = UInt(UsefulWidth.W)
-      val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
-      val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
+      val hitTakenCtr: SaturateCounter = TakenCounter()
+      val hitUseful:   SaturateCounter = UsefulCounter()
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
@@ -68,13 +68,13 @@ class MicroTageTable(
   class MicroTageEntry() extends MicroTageBundle {
     val valid:       Bool            = Bool()
     val tag:         UInt            = UInt(tagLen.W)
-    val takenCtr:    SaturateCounter = new SaturateCounter(TakenCtrWidth)
+    val takenCtr:    SaturateCounter = TakenCounter()
     val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-    // val useful:      SaturateCounter = new SaturateCounter(UsefulWidth)
+    // val useful:      SaturateCounter = UsefulCounter()
   }
   val io                    = IO(new MicroTageTableIO)
   private val entries       = RegInit(VecInit(Seq.fill(numSets)(0.U.asTypeOf(new MicroTageEntry))))
-  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(0.U.asTypeOf(new SaturateCounter(UsefulWidth)))))
+  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(UsefulCounter.Zero)))
 
   val idxFhInfo    = new FoldedHistoryInfo(histLen, min(log2Ceil(numSets), histLen))
   val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag))
@@ -127,8 +127,8 @@ class MicroTageTable(
     // oldTakenCtr.getNeutral,
     Mux(
       io.update.bits.allocTaken,
-      SaturateCounter.WeakPositive(TakenCtrWidth),
-      SaturateCounter.WeakNegative(TakenCtrWidth)
+      TakenCounter.WeakPositive,
+      TakenCounter.WeakNegative
     ),
     oldTakenCtr.getUpdate(io.update.bits.updateTaken)
   )
@@ -141,8 +141,8 @@ class MicroTageTable(
 
   private val updateUseful = Mux(
     io.update.bits.allocValid,
-    if (tableId == 0) { SaturateCounter.WeakNegative(UsefulWidth) }
-    else { SaturateCounter.WeakPositive(UsefulWidth) },
+    if (tableId == 0) { UsefulCounter.WeakNegative }
+    else { UsefulCounter.WeakPositive },
     oldUseful.getUpdate(io.update.bits.usefulCorrect)
   )
 
