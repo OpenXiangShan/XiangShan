@@ -16,6 +16,7 @@
 package xiangshan.frontend.bpu
 
 import chisel3._
+import org.chipsalliance.cde.config.Parameters
 
 class SaturateCounter(width: Int) extends Bundle {
   val value: UInt = UInt(width.W)
@@ -144,4 +145,35 @@ object SaturateCounterInit {
     counter.value := init
     counter
   }
+}
+
+/**
+ * trait to generate SaturateCounter objects with width from Parameters
+ *
+ * @example {{{
+ *   object TageTakenCounter extends SaturateCounterFactory {
+ *     def width(implicit p: Parameters): Int =
+ *       p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.TakenCntWidth
+ *   }
+ *
+ *   class Tage(implicit p: Parameters) {
+ *     val cnt: SaturateCounter = Reg(TageTakenCounter())
+ *     val cntWithReset: SaturateCounter = RegInit(TageTakenCounter.WeakPositive)
+ *
+ *     // ...
+ *   }
+ * }}}
+ */
+trait SaturateCounterFactory {
+  def width(implicit p: Parameters): Int
+
+  def SaturatePositive(implicit p: Parameters): SaturateCounter = SaturateCounter.SaturatePositive(width)
+  def SaturateNegative(implicit p: Parameters): SaturateCounter = SaturateCounter.SaturateNegative(width)
+
+  def WeakPositive(implicit p: Parameters): SaturateCounter = SaturateCounter.WeakPositive(width)
+  def WeakNegative(implicit p: Parameters): SaturateCounter = SaturateCounter.WeakNegative(width)
+
+  def Zero(implicit p: Parameters): SaturateCounter = SaturateCounter.Zero(width)
+
+  def apply()(implicit p: Parameters): SaturateCounter = new SaturateCounter(width)
 }

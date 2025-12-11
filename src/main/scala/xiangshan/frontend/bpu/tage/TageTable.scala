@@ -66,7 +66,7 @@ class TageTable(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumWays)(
         VecInit.fill(NumSets)(
-          0.U.asTypeOf(new SaturateCounter(UsefulCtrWidth))
+          UsefulCounter.Zero
         )
       )
     )

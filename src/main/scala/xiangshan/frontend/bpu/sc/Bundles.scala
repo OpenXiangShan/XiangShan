@@ -18,33 +18,30 @@ package xiangshan.frontend.bpu.sc
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterFactory
+import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.SignedSaturateCounter
+import xiangshan.frontend.bpu.SignedSaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
 
+object Counter extends SignedSaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.CtrWidth
+}
+
+object ThresholdCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.ThresholdWidth
+
+  def Init(implicit p: Parameters): SaturateCounter =
+    SaturateCounterInit(width, 520) // FIXME: magic number
+}
+
 class ScEntry(implicit p: Parameters) extends ScBundle {
-  val ctr: SignedSaturateCounter = new SignedSaturateCounter(CtrWidth)
-}
-
-class ScThreshold(implicit p: Parameters) extends ScBundle {
-  val thres: SaturateCounter = new SaturateCounter(ThresholdWidth)
-
-  def initVal: UInt = 520.U
-
-  def update(cause: Bool): ScThreshold = {
-    val res = Wire(new ScThreshold())
-    res.thres := this.thres.getUpdate(cause)
-    res
-  }
-}
-
-object ScThreshold {
-  def apply(implicit p: Parameters): ScThreshold = {
-    val t = Wire(new ScThreshold())
-    t.thres.value := t.initVal
-    t
-  }
+  val ctr: SignedSaturateCounter = Counter()
 }
 
 class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends WriteReqBundle

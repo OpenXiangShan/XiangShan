@@ -18,9 +18,16 @@ package xiangshan.frontend.bpu.ubtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
+
+object UsefulCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.ubtbParameters.UsefulCntWidth
+}
 
 class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   class SlotBase extends Bundle {
@@ -52,7 +59,7 @@ class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   // partial vTag = fetchBlockVAddr(TagWidth, 1)
   val tag: UInt = UInt(TagWidth.W)
   // saturate counter indicating how useful is this entry
-  val usefulCnt: SaturateCounter = new SaturateCounter(UsefulCntWidth)
+  val usefulCnt: SaturateCounter = UsefulCounter()
 
   val slot1: Slot1 = new Slot1
   val slot2: Slot2 = new Slot2

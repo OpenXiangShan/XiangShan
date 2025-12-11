@@ -65,7 +65,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val takenCounter = RegInit(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumSets)(
-        VecInit.fill(NumWays)(0.U.asTypeOf(new SaturateCounter(TakenCounterWidth)))
+        VecInit.fill(NumWays)(TakenCounter.Zero)
       )
     )
   )

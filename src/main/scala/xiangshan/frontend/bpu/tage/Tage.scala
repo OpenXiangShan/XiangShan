@@ -52,10 +52,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
   // reset usefulCtr of all entries when usefulResetCtr saturated
-  private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
+  private val usefulResetCtr = RegInit(UsefulResetCounter.Zero)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(0.U.asTypeOf(new SaturateCounter(UseAltOnNaWidth))))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
 
   /* *** reset *** */
   private val resetDone = RegInit(false.B)
@@ -131,7 +131,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_prediction = Wire(Vec(NumBtbResultEntries, new TagePrediction))
 
   // to sc
-  private val s2_providerTakenCtrVec = Wire(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TakenCtrWidth))))
+  private val s2_providerTakenCtrVec = Wire(Vec(NumBtbResultEntries, Valid(TakenCounter())))
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val position      = branch.bits.cfiPosition
@@ -483,8 +483,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   t2_allocateEntry.tag   := Mux1H(t2_allocateTableMaskOH, t2_rawTag) ^ t2_allocateBranch.bits.cfiPosition
   t2_allocateEntry.takenCtr := Mux(
     t2_allocateBranch.bits.taken,
-    SaturateCounter.WeakPositive(TakenCtrWidth), // weak taken
-    SaturateCounter.WeakNegative(TakenCtrWidth)  // weak not taken
+    TakenCounter.WeakPositive, // weak taken
+    TakenCounter.WeakNegative  // weak not taken
   )
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
@@ -492,7 +492,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val updateMask       = Wire(Vec(NumWays, Bool()))
     val updateEntries    = Wire(Vec(NumWays, new TageEntry))
-    val updateUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+    val updateUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
 
     updateMask.zip(updateEntries).zip(updateUsefulCtrs).zipWithIndex.foreach {
       case (((updateEn, entry), usefulCtr), wayIdx) =>
@@ -518,7 +518,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.bankMask := t2_bankMask
 
     val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
 
     writeEntries.zip(writeUsefulCtrs).zipWithIndex.foreach { case ((entry, usefulCtr), wayIdx) =>
@@ -527,7 +527,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       entry := Mux(thisWayNeedAllocate, t2_allocateEntry, updateEntries(wayIdx))
       usefulCtr := Mux(
         thisWayNeedAllocate,
-        SaturateCounterInit(UsefulCtrWidth, UsefulCtrInitValue),
+        UsefulCounter.Init,
         updateUsefulCtrs(wayIdx)
       )
       writeWayMask(wayIdx) := thisWayNeedUpdate || thisWayNeedAllocate

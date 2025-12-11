@@ -16,6 +16,7 @@
 package xiangshan.frontend.bpu
 
 import chisel3._
+import org.chipsalliance.cde.config.Parameters
 
 class SignedSaturateCounter(width: Int) extends Bundle {
   val value: SInt = SInt(width.W)
@@ -145,4 +146,35 @@ object SignedSaturateCounterInit {
     counter.value := init
     counter
   }
+}
+
+/**
+ * trait to generate SignedSaturateCounter objects with width from Parameters
+ *
+ * @example {{{
+ *   object ScThreshold extends SignedSaturateCounterFactory {
+ *     def width(implicit p: Parameters): Int =
+ *       p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.ThresholdWidth
+ *   }
+ *
+ *   class Sc(implicit p: Parameters) {
+ *     val cnt: SignedSaturateCounter = Reg(ScThreshold())
+ *     val cntWithReset: SignedSaturateCounter = RegInit(ScThreshold.SaturatePositive)
+ *
+ *     // ...
+ *   }
+ * }}}
+ */
+trait SignedSaturateCounterFactory {
+  def width(implicit p: Parameters): Int
+
+  def SaturatePositive(implicit p: Parameters): SignedSaturateCounter = SignedSaturateCounter.SaturatePositive(width)
+  def SaturateNegative(implicit p: Parameters): SignedSaturateCounter = SignedSaturateCounter.SaturateNegative(width)
+
+  def WeakPositive(implicit p: Parameters): SignedSaturateCounter = SignedSaturateCounter.WeakPositive(width)
+  def WeakNegative(implicit p: Parameters): SignedSaturateCounter = SignedSaturateCounter.WeakNegative(width)
+
+  def Zero(implicit p: Parameters): SignedSaturateCounter = SignedSaturateCounter.Zero(width)
+
+  def apply()(implicit p: Parameters): SignedSaturateCounter = new SignedSaturateCounter(width)
 }
