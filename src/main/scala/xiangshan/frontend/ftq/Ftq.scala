@@ -22,6 +22,7 @@ package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.SeqBoolBitwiseOps
 import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
 import utility.HasCircularQueuePtrHelper
@@ -45,6 +46,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.ras.RasMeta
 
@@ -193,6 +195,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
     perfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     perfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
+    perfQueue(s3BpuPtr).attribute.foreach(_ := BranchAttribute.None)
     perfQueue(s3BpuPtr).mispredict.foreach(_ := false.B)
   }
 
@@ -348,6 +351,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       val ftqIdx      = branch.bits.ftqIdx.value
       val cfiPosition = getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
       perfQueue(ftqIdx).isCfi(cfiPosition)      := true.B
+      perfQueue(ftqIdx).attribute(cfiPosition)  := branch.bits.attribute
       perfQueue(ftqIdx).mispredict(cfiPosition) := branch.bits.mispredict
     }
   }
@@ -446,12 +450,26 @@ class Ftq(implicit p: Parameters) extends FtqModule
     perf_mispredS3SourceVec
   )
 
+  private val perf_isCfiMask      = perfQueue(commitPtr(0).value).isCfi
+  private val perf_attributeVec   = perfQueue(commitPtr(0).value).attribute
+  private val perf_mispredictMask = perfQueue(commitPtr(0).value).mispredict
+
   XSPerfAccumulate(
     "commit",
     io.toBpu.commit.valid,
     Seq(
-      ("branch_number", true.B, PopCount(perfQueue(commitPtr(0).value).isCfi)),
-      ("mispredict_number", true.B, PopCount(perfQueue(commitPtr(0).value).mispredict))
+      ("branch_number", true.B, PopCount(perf_isCfiMask)),
+      ("cond_number", true.B, PopCount(perf_isCfiMask & perf_attributeVec.map(_.isConditional))),
+      ("direct_number", true.B, PopCount(perf_isCfiMask & perf_attributeVec.map(_.isDirect))),
+      ("indirect_number", true.B, PopCount(perf_isCfiMask & perf_attributeVec.map(_.isOtherIndirect))),
+      ("call_number", true.B, PopCount(perf_isCfiMask & perf_attributeVec.map(_.isCall))),
+      ("return_number", true.B, PopCount(perf_isCfiMask & perf_attributeVec.map(_.isReturn))),
+      ("mispredict_number", true.B, PopCount(perf_mispredictMask)),
+      ("cond_mispredict_number", true.B, PopCount(perf_mispredictMask & perf_attributeVec.map(_.isConditional))),
+      ("direct_mispredict_number", true.B, PopCount(perf_mispredictMask & perf_attributeVec.map(_.isDirect))),
+      ("indirect_mispredict_number", true.B, PopCount(perf_mispredictMask & perf_attributeVec.map(_.isOtherIndirect))),
+      ("call_mispredict_number", true.B, PopCount(perf_mispredictMask & perf_attributeVec.map(_.isCall))),
+      ("return_mispredict_number", true.B, PopCount(perf_mispredictMask & perf_attributeVec.map(_.isReturn)))
     )
   )
 
