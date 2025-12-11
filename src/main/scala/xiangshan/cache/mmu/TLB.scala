@@ -133,7 +133,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
     (mode(i) < ModeM)
   )
-  val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
+
+  val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
+  val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
+  val portTranslateEnable = (0 until Width).map(i => privNeedTranslate(i) && !useReqS1Paddr(i))
 
   // pre fault: check fault before real do translate
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -315,6 +318,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
+    val notTranslatePaddr = Mux(useReqS1Paddr(i), req_in(i).bits.pmp_addr, SignExt(req_out(i).vaddr, PAddrBits))
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
@@ -359,7 +363,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val crossPageVaddr = Mux(isitlb || req_out(i).fullva(12) =/= vaddr(12), req_out(i).vaddr, req_out(i).fullva)
       val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
-      resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
+      resp(i).bits.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
       resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
     }
 
