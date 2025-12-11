@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TageTableInfo
@@ -148,4 +149,8 @@ class TageTable(
   )
 
   io.resetDone := entrySram.flatten.map(_.io.r.req.ready).reduce(_ && _)
+
+  XSPerfAccumulate("predict_read", io.predictReadReq.valid)
+  XSPerfAccumulate("train_read", io.trainReadReq.valid)
+  XSPerfAccumulate("write", io.writeReq.valid)
 }

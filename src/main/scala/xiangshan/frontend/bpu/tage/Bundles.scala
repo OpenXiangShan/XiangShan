@@ -102,7 +102,9 @@ class UpdateInfo(implicit p: Parameters) extends TageBundle {
   val increaseUseAlt: Bool = Bool()
   val decreaseUseAlt: Bool = Bool()
 
-  val needAllocate: Bool = Bool()
+  val needAllocate:  Bool = Bool()
+  val notNeedUpdate: Bool = Bool()
+
   // perf analysis only
   val hitTableMask: UInt = UInt(NumTables.W) // all the hit tables
   val mispredicted: Bool = Bool()
@@ -131,6 +133,7 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val useAlt:         Bool = Bool()
   val finalPred:      Bool = Bool()
   val actualTaken:    Bool = Bool()
+  val mispredict:     Bool = Bool()
   val allocSuccess:   Bool = Bool()
   val allocTableIdx:  UInt = UInt(TableIdxWidth.W)
   val allocateSetIdx: UInt = UInt(16.W)

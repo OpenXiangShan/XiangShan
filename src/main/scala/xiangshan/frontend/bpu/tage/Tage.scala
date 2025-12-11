@@ -134,8 +134,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_condMask  = VecInit(s2_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   dontTouch(s2_condMask)
 
-  private val s2_cfiPcVec     = VecInit(s2_positions.map(getCfiPcFromPosition(s2_startPc, _)))
-  private val s2_cfiUseAltIdx = VecInit(s2_cfiPcVec.map(getUseAltIndex))
+  private val s2_cfiPcVec        = VecInit(s2_positions.map(getCfiPcFromPosition(s2_startPc, _)))
+  private val s2_cfiUseAltIdxVec = VecInit(s2_cfiPcVec.map(getUseAltIndex))
   dontTouch(s2_cfiPcVec)
 
   // to sc
@@ -177,7 +177,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val pred           = providerTakenCtr.isPositive
       val altPred        = altTakenCtr.isPositive
       val basePred       = s2_baseTableCtrs(position).isPositive
-      val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(s2_cfiUseAltIdx(brIdx)).isPositive
+      val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(s2_cfiUseAltIdxVec(brIdx)).isPositive
+      val finalPred      = Mux(useAlt, altPred, Mux(hasProvider, pred, basePred))
 
       XSPerfAccumulate(
         s"s2_branch_${brIdx}_multihit_on_same_way",
@@ -185,11 +186,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       )
 
       // get prediction for each branch
-      isCond && Mux(
-        useAlt,
-        altPred,
-        Mux(hasProvider, pred, basePred)
-      )
+      isCond && finalPred
   }
 
   io.condTakenMask       := s2_condTakenMask
@@ -233,7 +230,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_readBankConflictReg     = RegNext(t0_readBankConflict)
   private val t0_readBankConflictPos     = t0_readBankConflict && (!t0_readBankConflictReg)
   private val t0_readBankConflictNeg     = !t0_readBankConflict && t0_readBankConflictReg
-  private val t0_readBankConflictdistCnt = RegInit(0.U(4.W))
+  private val t0_readBankConflictDistCnt = RegInit(0.U(4.W))
   private val perf_s0AlignedPc           = getAlignedPc(s0_startPc)
   private val perf_s1AlignedPc           = getAlignedPc(s1_startPc)
   private val perf_s1BankIdx             = RegEnable(s0_bankIdx, s0_fire)
@@ -252,10 +249,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     Mux(t0_readBankConflictShortLoop, t0_readBankConflictShortLoopdistCnt + 1.U, t0_readBankConflictShortLoopdistCnt)
   )
 
-  t0_readBankConflictdistCnt := Mux(
+  t0_readBankConflictDistCnt := Mux(
     t0_readBankConflictNeg,
     0.U,
-    Mux(t0_readBankConflict, t0_readBankConflictdistCnt + 1.U, t0_readBankConflictdistCnt)
+    Mux(t0_readBankConflict, t0_readBankConflictDistCnt + 1.U, t0_readBankConflictDistCnt)
   )
 
 //  when(t0_valid) {
@@ -372,9 +369,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val finalPred      = Mux(useAlt, altPred, Mux(hasProvider, pred, basePred))
     val actualTaken    = branch.bits.taken
 
-    val providerNewTakenCtr = providerInfo.entry.takenCtr.getUpdate(actualTaken)
+    XSPerfAccumulate(
+      s"t2_branch_${brIdx}_mispredict_diff",
+      t2_valid && branch.valid && isCond && ((finalPred =/= actualTaken) =/= branch.bits.mispredict)
+    )
+
+    val providerNewTakenCtr       = providerInfo.entry.takenCtr.getUpdate(actualTaken)
+    val increaseProviderUsefulCtr = hasProvider && pred === actualTaken && pred =/= Mux(hasAlt, altPred, basePred)
     val providerNewUsefulCtr = Mux(
-      hasProvider && pred === actualTaken && pred =/= Mux(hasAlt, altPred, basePred),
+      increaseProviderUsefulCtr,
       providerInfo.usefulCtr.getIncrease,
       providerInfo.usefulCtr.value
     )
@@ -404,6 +407,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     updateInfo.finalPred := finalPred
 
     updateInfo.needAllocate := isCond && finalPred =/= actualTaken && !(hasProvider && providerTableOH(NumTables - 1))
+    updateInfo.notNeedUpdate := providerInfo.entry.takenCtr.shouldHold(actualTaken) &&
+      providerInfo.usefulCtr.isSaturatePositive && increaseProviderUsefulCtr &&
+      (!useAlt || altInfo.entry.takenCtr.shouldHold(actualTaken))
 
     updateInfo.increaseUseAlt := increaseUseAlt
     updateInfo.decreaseUseAlt := decreaseUseAlt
@@ -479,10 +485,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     updateMask.zip(updateEntries).zip(updateUsefulCtrs).zipWithIndex.foreach {
       case (((updateEn, entry), usefulCtr), wayIdx) =>
         val hitBranchProviderMask = t2_allBranchUpdateInfo.map { branch =>
-          branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
+          !branch.notNeedUpdate && branch.providerTableOH(tableIdx) && branch.providerWayOH(wayIdx)
         }
         val hitBranchAltMask = t2_allBranchUpdateInfo.map { branch =>
-          branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
+          !branch.notNeedUpdate && branch.altTableOH(tableIdx) && branch.altWayOH(wayIdx)
         }
         val hitBranchProvider  = hitBranchProviderMask.reduce(_ || _)
         val hitBranchAlt       = hitBranchAltMask.reduce(_ || _)
@@ -549,6 +555,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trace.bits.useAlt            := t2_allBranchUpdateInfo(i).useAlt
     trace.bits.finalPred         := t2_allBranchUpdateInfo(i).finalPred
     trace.bits.actualTaken       := t2_branches(i).bits.taken
+    trace.bits.mispredict        := t2_branches(i).bits.mispredict
     trace.bits.allocSuccess      := t2_allBranchUpdateInfo(i).needAllocate && t2_allocateTableMaskOH.orR
     trace.bits.allocTableIdx     := OHToUInt(t2_allocateTableMaskOH)
     trace.bits.allocateSetIdx    := t2_setIdx(trace.bits.allocTableIdx)
@@ -647,7 +654,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
    */
   XSPerfHistogram(
     "read_conflict_bubble_dist",
-    t0_readBankConflictdistCnt,
+    t0_readBankConflictDistCnt,
     t0_readBankConflictNeg,
     0,
     16
