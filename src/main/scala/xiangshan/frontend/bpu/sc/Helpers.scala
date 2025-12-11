@@ -48,6 +48,8 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getBankMask(pc: PrunedAddr): UInt =
     UIntToOH((pc >> FetchBlockSizeWidth)(BankWidth - 1, 0))
 
+  def getWayIdx(cfiPosition: UInt): UInt = cfiPosition(log2Ceil(NumWays) - 1, 0)
+
   // get pc ^ foldedHist for index
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
