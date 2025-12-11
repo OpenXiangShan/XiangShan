@@ -117,7 +117,7 @@ class TageTable(
       when(io.resetUseful) {
         ctrsPerWay.foreach(_.resetZero())
       }.elsewhen(readPort.fire) {
-        ctrsPerWay(setIdx).value := readPort.bits.usefulCtr.value
+        ctrsPerWay(setIdx) := readPort.bits.usefulCtr
       }
     }
   }

@@ -257,8 +257,12 @@ class MainBtbAlignBank(
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
 
-    t1_counterWayMask(i)    := entryOverridden || hitMask.reduce(_ || _)
-    t1_newCounters(i).value := Mux(entryOverridden, meta.counter.getWeakPositive(), meta.counter.getUpdate(actualTaken))
+    t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
+    t1_newCounters(i) := Mux(
+      entryOverridden,
+      SaturateCounter.WeakPositive(TakenCntWidth),
+      meta.counter.getUpdate(actualTaken)
+    )
   }
 
   // write counter anytime when needed

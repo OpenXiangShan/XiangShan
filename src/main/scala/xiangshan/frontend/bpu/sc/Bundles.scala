@@ -34,7 +34,7 @@ class ScThreshold(implicit p: Parameters) extends ScBundle {
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())
-    res.thres.value := this.thres.getUpdate(cause)
+    res.thres := this.thres.getUpdate(cause)
     res
   }
 }

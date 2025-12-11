@@ -424,7 +424,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   t1_branchesWayIdxVec.zip(t1_writeValidVec).zip(t1_branchesScIdxVec).foreach {
     case ((wayIdx, writeValid), branchIdx) =>
       val biasWayIdx = Cat(wayIdx, t1_oldBiasLowBits(branchIdx))
-      when(writeValid && t1_oldBiasCtrs(biasWayIdx).ctr.value =/= t1_writeBiasEntryVec(biasWayIdx).ctr.value) {
+      when(writeValid && t1_oldBiasCtrs(biasWayIdx).ctr =/= t1_writeBiasEntryVec(biasWayIdx).ctr) {
         t1_writeBiasWayMask(biasWayIdx) := true.B
       }
   }
@@ -435,12 +435,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     ).foldLeft(oldEntry.ctr) {
       case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
         val biasWayIdx = Cat(writeWayIdx, t1_oldBiasLowBits(branchIdx))
-        val needUpdate = writeValid && biasWayIdx === wayIdx.U &&
-          (t1_meta.scPred(branchIdx) =/= writeTaken || !t1_meta.sumAboveThres(branchIdx))
-        val nextValue = prevCtr.getUpdate(writeTaken)
-        val nextCtr   = WireInit(prevCtr)
-        nextCtr.value := nextValue
-        Mux(needUpdate, nextCtr, prevCtr)
+        val needUpdate = writeValid && biasWayIdx === wayIdx.U && (
+          t1_meta.scPred(branchIdx) =/= writeTaken ||
+            !t1_meta.sumAboveThres(branchIdx)
+        )
+        prevCtr.getUpdate(
+          writeTaken,
+          needUpdate
+        )
     }
     newEntry.ctr := WireInit(newCtr)
   }
@@ -499,11 +501,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   for (i <- 0 until NumWays) {
     val pChange = t1_oldPathCtrs.zip(t1_writePathEntryVec).map {
       case (oldEntries, writeEntries) =>
-        (oldEntries(i).ctr.value =/= writeEntries(i).ctr.value) && t1_writeWayMask(i)
+        (oldEntries(i).ctr =/= writeEntries(i).ctr) && t1_writeWayMask(i)
     }.reduce(_ || _) && PathEnable.B
     val gChange = t1_oldGlobalCtrs.zip(t1_writeGlobalEntryVec).map {
       case (oldEntries, writeEntries) =>
-        (oldEntries(i).ctr.value =/= writeEntries(i).ctr.value) && t1_writeWayMask(i)
+        (oldEntries(i).ctr =/= writeEntries(i).ctr) && t1_writeWayMask(i)
     }.reduce(_ || _) && GlobalEnable.B
     // val bChange =
     //   (t1_oldBiasCtrs(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B
