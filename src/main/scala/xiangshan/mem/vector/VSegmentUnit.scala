@@ -787,7 +787,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     sink.bits.mask                 := io.sbuffer.bits.mask
     sink.bits.wline                := io.sbuffer.bits.wline
     sink.bits.vecValid             := io.sbuffer.bits.vecValid
-    sink.bits.diffIsHighPart       := false.B  // only for scalar store event!
+    sink.bits.diffIsHighPart       := io.sbuffer.bits.addr(3)  // segment store event is treat as scalar store!
   }
 
   /**
