@@ -376,7 +376,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val allocate        = t1_meta.allocate
 
   when(updateValid && updateMisPred && !(providerCorrect && providerUnconf)) {
-    tickCnt.update(!allocate.valid)
+    tickCnt.selfUpdate(!allocate.valid)
     when(allocate.valid) {
       updateMask(allocate.bits)          := true.B
       updateCorrect(allocate.bits)       := false.B // useless for alloc

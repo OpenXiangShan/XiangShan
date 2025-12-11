@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
 
 /**
@@ -153,8 +154,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.prediction(i).hasAlt       := hasAlt
     io.prediction(i).altPred      := alt.takenCtr.isPositive
 
-    io.toSc.providerTakenCtrVec(i).valid      := hasProvider
-    io.toSc.providerTakenCtrVec(i).bits.value := provider.takenCtr.value
+    io.toSc.providerTakenCtrVec(i).valid := hasProvider
+    io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
     io.meta.entries(i).useProvider       := useProvider
     io.meta.entries(i).providerTableIdx  := OHToUInt(providerTableOH)
@@ -389,7 +390,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altNewTakenCtr      = alt.takenCtr.getUpdate(actualTaken)
 
     val incProviderUsefulCtr = hasProvider && providerPred === actualTaken && providerPred =/= altOrBasePred
-    val providerNewUsefulCtr = Mux(incProviderUsefulCtr, provider.usefulCtr.getIncrease, provider.usefulCtr.value)
+    val providerNewUsefulCtr = provider.usefulCtr.getIncrease(incProviderUsefulCtr)
 
     // allocate when mispredict, but except when:
     // 1. already on the highest table
@@ -410,24 +411,24 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
 
-    trainInfo.hasProvider                  := hasProvider
-    trainInfo.useProvider                  := useProvider
-    trainInfo.providerTableOH              := providerTableOH.asUInt
-    trainInfo.providerWayOH                := provider.hitWayMaskOH
-    trainInfo.providerEntry.valid          := true.B
-    trainInfo.providerEntry.tag            := provider.tag
-    trainInfo.providerEntry.takenCtr.value := providerNewTakenCtr
-    trainInfo.providerOldUsefulCtr         := provider.usefulCtr
-    trainInfo.providerNewUsefulCtr.value   := providerNewUsefulCtr
+    trainInfo.hasProvider            := hasProvider
+    trainInfo.useProvider            := useProvider
+    trainInfo.providerTableOH        := providerTableOH.asUInt
+    trainInfo.providerWayOH          := provider.hitWayMaskOH
+    trainInfo.providerEntry.valid    := true.B
+    trainInfo.providerEntry.tag      := provider.tag
+    trainInfo.providerEntry.takenCtr := providerNewTakenCtr
+    trainInfo.providerOldUsefulCtr   := provider.usefulCtr
+    trainInfo.providerNewUsefulCtr   := providerNewUsefulCtr
 
-    trainInfo.hasAlt                  := hasAlt
-    trainInfo.useAlt                  := useAlt
-    trainInfo.altTableOH              := altTableOH.asUInt
-    trainInfo.altWayOH                := alt.hitWayMaskOH
-    trainInfo.altEntry.valid          := true.B
-    trainInfo.altEntry.tag            := alt.tag
-    trainInfo.altEntry.takenCtr.value := altNewTakenCtr
-    trainInfo.altOldUsefulCtr         := alt.usefulCtr
+    trainInfo.hasAlt            := hasAlt
+    trainInfo.useAlt            := useAlt
+    trainInfo.altTableOH        := altTableOH.asUInt
+    trainInfo.altWayOH          := alt.hitWayMaskOH
+    trainInfo.altEntry.valid    := true.B
+    trainInfo.altEntry.tag      := alt.tag
+    trainInfo.altEntry.takenCtr := altNewTakenCtr
+    trainInfo.altOldUsefulCtr   := alt.usefulCtr
 
     trainInfo.needAllocate       := needAllocate
     trainInfo.needUpdateProvider := needUpdateProvider
@@ -467,7 +468,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t2_allTableCanAllocateWayMask = t2_readResp.map { tableReadResp =>
     tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
-      !entry.valid || entry.valid && entry.takenCtr.isWeak && usefulCtr.value === 0.U
+      !entry.valid || entry.valid && entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
     }.asUInt
   }
   private val t2_canAllocateTableMask = t2_longerHistoryTableMask & t2_allTableCanAllocateWayMask.map(_.orR).asUInt
@@ -487,10 +488,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val entry       = Wire(new TageEntry)
     entry.valid := true.B
     entry.tag   := rawTag ^ position
-    entry.takenCtr.value := Mux(
+    entry.takenCtr := Mux(
       actualTaken,
-      (1 << (TakenCtrWidth - 1)).U,      // weak taken
-      ((1 << (TakenCtrWidth - 1)) - 1).U // weak not taken
+      SaturateCounter.WeakPositive(TakenCtrWidth), // weak taken
+      SaturateCounter.WeakNegative(TakenCtrWidth)  // weak not taken
     )
     entry
   }
@@ -551,7 +552,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     when(usefulResetCtr.isSaturatePositive) {
       usefulResetCtr.resetZero()
     }.elsewhen(t2_needAllocate && !t2_canAllocate) {
-      usefulResetCtr.increase()
+      usefulResetCtr.selfIncrease()
     }
   }
 
@@ -572,9 +573,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       assert(!(increase && decrease))
 
       when(increase) {
-        ctr.increase()
+        ctr.selfIncrease()
       }.elsewhen(decrease) {
-        ctr.decrease()
+        ctr.selfDecrease()
       }
     }
   }

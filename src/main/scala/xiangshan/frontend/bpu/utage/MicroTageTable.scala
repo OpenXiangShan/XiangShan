@@ -122,10 +122,14 @@ class MicroTageTable(
   private val updateEntry = Wire(new MicroTageEntry)
   updateEntry.valid := true.B
   updateEntry.tag   := trainTag
-  updateEntry.takenCtr.value := Mux(
+  updateEntry.takenCtr := Mux(
     io.update.bits.allocValid,
     // oldTakenCtr.getNeutral,
-    Mux(io.update.bits.allocTaken, oldTakenCtr.getWeakPositive, oldTakenCtr.getWeakNegative),
+    Mux(
+      io.update.bits.allocTaken,
+      SaturateCounter.WeakPositive(TakenCtrWidth),
+      SaturateCounter.WeakNegative(TakenCtrWidth)
+    ),
     oldTakenCtr.getUpdate(io.update.bits.updateTaken)
   )
 
@@ -137,8 +141,8 @@ class MicroTageTable(
 
   private val updateUseful = Mux(
     io.update.bits.allocValid,
-    if (tableId == 0) { oldUseful.getWeakNegative }
-    else { oldUseful.getWeakPositive },
+    if (tableId == 0) { SaturateCounter.WeakNegative(UsefulWidth) }
+    else { SaturateCounter.WeakPositive(UsefulWidth) },
     oldUseful.getUpdate(io.update.bits.usefulCorrect)
   )
 
@@ -148,13 +152,13 @@ class MicroTageTable(
   }
 
   when(io.update.valid && (io.update.bits.usefulValid || io.update.bits.allocValid)) {
-    usefulEntries(trainIdx).value := updateUseful // updateEntry.useful
+    usefulEntries(trainIdx) := updateUseful // updateEntry.useful
   }
 
   when(io.usefulReset) {
     usefulEntries.zipWithIndex.foreach { case (entry, i) =>
       if (tableId == 0) {
-        usefulEntries(i).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
+        usefulEntries(i).selfDecrease()
       } else {
         usefulEntries(i).value := entry.value >> 1.U
       }
