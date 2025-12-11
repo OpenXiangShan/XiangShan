@@ -40,6 +40,11 @@ trait HalfAlignHelper extends HasBpuParameters {
     PrunedAddrInit(Cat(cfiPcUpperBits, position(CfiPositionWidth - 2, 0), 0.U(instOffsetBits.W)))
   }
 
+  def getOriginalCfiPcFromPosition(startPc: PrunedAddr, position: UInt, isRVC: Bool): PrunedAddr = {
+    val cfiPc = getCfiPcFromPosition(startPc, position).toUInt
+    PrunedAddrInit(Mux(isRVC, cfiPc, cfiPc - 2.U))
+  }
+
   def getCfiPcFromOffset(startPc: PrunedAddr, ftqOffset: UInt): PrunedAddr =
     startPc + (ftqOffset << instOffsetBits.U).asUInt
 

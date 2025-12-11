@@ -306,6 +306,7 @@ class Resolve(implicit p: Parameters) extends XSBundle {
   val taken: Bool = Bool()
   val mispredict: Bool = Bool()
   val attribute: BranchAttribute = new BranchAttribute
+  val debug_isRVC: Bool = Bool()
 }
 
 class CallRetCommit(implicit p: Parameters) extends XSBundle {

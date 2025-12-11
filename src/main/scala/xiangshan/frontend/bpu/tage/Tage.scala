@@ -534,11 +534,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      TAGE Trace
      -------------------------------------------------------------------------------------------------------------- */
 
+  private val t2_originalCfiPcVec = t2_branches.map { branch =>
+    getOriginalCfiPcFromPosition(t2_startPc, branch.bits.cfiPosition, branch.bits.debug_isRVC)
+  }
+
   private val condTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ConditionalBranchTrace)))
   condTraceVec.zipWithIndex.foreach { case (trace, i) =>
     trace.valid                  := t2_condMask(i)
-    trace.bits.startPc           := t2_startPc
-    trace.bits.cfiPc             := t2_cfiPcVec(i)
+    trace.bits.startPc           := t2_startPc.toUInt
+    trace.bits.cfiPc             := t2_originalCfiPcVec(i).toUInt
     trace.bits.hasProvider       := t2_allBranchUpdateInfo(i).providerTableOH.orR
     trace.bits.providerTableIdx  := OHToUInt(t2_allBranchUpdateInfo(i).providerTableOH)
     trace.bits.providerSetIdx    := t2_setIdx(trace.bits.providerTableIdx)
