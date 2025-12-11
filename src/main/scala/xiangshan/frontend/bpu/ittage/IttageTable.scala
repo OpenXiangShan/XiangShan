@@ -216,15 +216,15 @@ class IttageTable(
 
   private val oldCtr = io.update.oldCnt
   updateWdata.valid := true.B
-  updateWdata.confidenceCnt.value := Mux(
+  updateWdata.confidenceCnt := Mux(
     io.update.alloc,
-    oldCtr.getNeutral, // reset to neutral when allocate
-    oldCtr.getUpdate(io.update.correct)
+    SaturateCounter.WeakPositive(ConfidenceCntWidth), // reset to neutral (weak positive) when allocate
+    oldCtr.update(io.update.correct)
   )
   updateWdata.tag := updateTag
   updateWdata.usefulCnt := Mux(
     usefulCanReset,
-    false.B.asTypeOf(new SaturateCounter(UsefulCntWidth)),
+    SaturateCounter.SaturateNegative(UsefulCntWidth),
     io.update.usefulCnt
   )
   // only when ctr is null

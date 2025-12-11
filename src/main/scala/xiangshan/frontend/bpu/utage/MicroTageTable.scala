@@ -115,10 +115,10 @@ class MicroTageTable(
   private val updateEntry = Wire(new MicroTageEntry)
   updateEntry.valid := true.B
   updateEntry.tag   := trainTag
-  updateEntry.takenCtr.value := Mux(
+  updateEntry.takenCtr := Mux(
     io.update.bits.allocValid,
-    oldTakenCtr.getNeutral,
-    oldTakenCtr.getUpdate(io.update.bits.updateTaken)
+    SaturateCounter.WeakPositive(TakenCtrWidth),
+    oldTakenCtr.update(io.update.bits.updateTaken)
   )
 
   updateEntry.cfiPosition := Mux(
@@ -129,8 +129,8 @@ class MicroTageTable(
 
   private val updateUseful = Mux(
     io.update.bits.allocValid,
-    oldUseful.getNeutral,
-    oldUseful.getUpdate(io.update.bits.usefulCorrect)
+    SaturateCounter.WeakPositive(UsefulWidth),
+    oldUseful.update(io.update.bits.usefulCorrect)
   )
 
   // Write back updated entry on valid update
@@ -139,7 +139,7 @@ class MicroTageTable(
   }
 
   when(io.update.valid && (io.update.bits.usefulValid || io.update.bits.allocValid)) {
-    usefulEntries(trainIdx).value := updateUseful // updateEntry.useful
+    usefulEntries(trainIdx) := updateUseful // updateEntry.useful
   }
 
   when(io.usefulReset) {

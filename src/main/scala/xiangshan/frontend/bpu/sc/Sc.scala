@@ -307,11 +307,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       oldEntries.zip(writeEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
         val newCtr = t1_branchesTakenMask.zip(t1_branchesWayIdxVec).zip(t1_writeValidVec).foldLeft(oldEntry.ctr) {
           case (prevCtr, ((writeTaken, writeWayIdx), writeValid)) =>
-            val needUpdate = writeValid && writeWayIdx === wayIdx.U
-            val nextValue  = prevCtr.getUpdate(writeTaken)
-            val nextCtr    = WireInit(prevCtr)
-            nextCtr.value := nextValue
-            Mux(needUpdate, nextCtr, prevCtr)
+            prevCtr.update(writeTaken, writeValid && writeWayIdx === wayIdx.U)
         }
         newEntry.ctr := WireInit(newCtr)
       }
@@ -334,11 +330,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       oldEntries.zip(writeEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
         val newCtr = t1_branchesTakenMask.zip(t1_branchesWayIdxVec).zip(t1_writeValidVec).foldLeft(oldEntry.ctr) {
           case (prevCtr, ((writeTaken, writeWayIdx), writeValid)) =>
-            val needUpdate = writeValid && writeWayIdx === wayIdx.U
-            val nextValue  = prevCtr.getUpdate(writeTaken)
-            val nextCtr    = WireInit(prevCtr)
-            nextCtr.value := nextValue
-            Mux(needUpdate, nextCtr, prevCtr)
+            prevCtr.update(writeTaken, writeValid && writeWayIdx === wayIdx.U)
         }
         newEntry.ctr := WireInit(newCtr)
       }

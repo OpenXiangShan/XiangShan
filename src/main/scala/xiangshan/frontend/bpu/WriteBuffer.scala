@@ -173,7 +173,7 @@ class WriteBuffer[T <: WriteReqBundle](
           // If a write request hits an entry, update its counter using 'taken'
           // and write other entry information
           val writePortTaken = io.write(portIdx).bits.taken.getOrElse(false.B)
-          val updateCnt      = entries(rowIdx)(hitIdx).cnt.get.getUpdate(writePortTaken)
+          val updateCnt      = entries(rowIdx)(hitIdx).cnt.get.update(writePortTaken)
           temporarily.cnt.get     := updateCnt.asTypeOf(temporarily.cnt.get)
           entries(rowIdx)(hitIdx) := temporarily
           valids(rowIdx)(hitIdx)  := true.B
