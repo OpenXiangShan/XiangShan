@@ -245,7 +245,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
-    io.msiInfo.toCore := io.msiInfo.fromTile
+    // add buffer to satisfy PE
+    io.msiInfo.toCore.valid := RegNext(io.msiInfo.fromTile.valid)
+    io.msiInfo.toCore.bits := RegEnable(io.msiInfo.fromTile.bits, io.msiInfo.fromTile.valid)
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     io.msiAck.toTile := io.msiAck.fromCore
