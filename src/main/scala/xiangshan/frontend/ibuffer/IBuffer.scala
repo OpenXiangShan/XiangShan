@@ -416,6 +416,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   when(io.stallReason.backReason.valid) {
+    // Backend always overrides frontend reasons
     io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
   }
 

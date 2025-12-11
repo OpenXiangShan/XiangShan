@@ -31,10 +31,12 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfPriorityAccumulate
 import xiangshan.RedirectLevel
+import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
+import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
@@ -274,6 +276,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.req.bits.fetch(0).takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset
 
   io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
+
+  // toIFU topdown counters
+  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle()))
+  // only driven by clock, not valid-ready
+  topdown_stage                 := io.fromBpu.topdownReasons
+  io.toIfu.req.bits.topdownInfo := topdown_stage
+  when(backendRedirect.valid) {
+    // TODO: reasoning back to each BP component
+    when(backendRedirect.bits.debugIsMemVio) {
+      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id)                 := true.B
+      io.toIfu.req.bits.topdownInfo.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    }
+  }
+
   // --------------------------------------------------------------------------------
   // Interaction with backend
   // --------------------------------------------------------------------------------
@@ -357,14 +373,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
-  io.bpuInfo                    := DontCare
-  io.toIfu.req.bits.topdownInfo := DontCare
-  io.toIfu.topdownRedirect      := DontCare
-  io.ControlBTBMissBubble       := DontCare
-  io.TAGEMissBubble             := DontCare
-  io.SCMissBubble               := DontCare
-  io.ITTAGEMissBubble           := DontCare
-  io.RASMissBubble              := DontCare
+  io.bpuInfo := DontCare
+  // io.toIfu.req.bits.topdownInfo is assigned above
+  io.toIfu.topdownRedirect := backendRedirect
+
+  io.ControlBTBMissBubble := false.B // TODO: add more info to distinguish
+  io.TAGEMissBubble       := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isConditional)
+  io.SCMissBubble         := false.B // TODO: add SC info
+  io.ITTAGEMissBubble     := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isOtherIndirect)
+  io.RASMissBubble        := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isReturn)
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
