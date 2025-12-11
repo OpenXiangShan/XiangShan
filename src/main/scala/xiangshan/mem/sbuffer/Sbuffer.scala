@@ -410,7 +410,12 @@ class Sbuffer(implicit p: Parameters)
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
       prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
     } else {
-      io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
+      if (EnableStorePrefetchSPB) {
+        io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
+      } else {
+        io.store_prefetch(i) <> DontCare
+        prefetcher.io.prefetch_req(i) <> DontCare
+      }
     }
     io.store_prefetch zip prefetcher.io.prefetch_req drop 2 foreach (x => x._1 <> x._2)
   }
