@@ -119,9 +119,17 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       timerInst.module.io.hartId := io.hartId
       timerInst.module.io.time := tile.module.io.clintTime
     }
-
+    // sync about msiinfo
+    val msi_vld_cpu = WireInit(false.B)
+    val msi_data_cpu = WireInit(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W),0.U)
+    withClockAndReset(clock, reset_sync) {
+      val msi_vld_sync = AsyncResetSynchronizerShiftReg(io.msiInfo.valid, 3, 0)
+      msi_vld_cpu := RegNext(msi_vld_sync)
+      msi_data_cpu := RegEnable(io.msiInfo.bits, msi_vld_sync)
+    }
     tile.module.io.hartId := io.hartId
-    tile.module.io.msiInfo := io.msiInfo
+    tile.module.io.msiInfo.valid := msi_vld_cpu
+    tile.module.io.msiInfo.bits := msi_data_cpu
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
