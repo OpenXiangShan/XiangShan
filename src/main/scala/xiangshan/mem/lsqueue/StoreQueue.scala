@@ -116,8 +116,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
         res(i).bits := bits(i)
       }
       val oldest = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
+        Mux(isAfter(bits(0).uop.sqIdx, bits(1).uop.sqIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
@@ -127,7 +126,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  val reqValid = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val reqValid = req_valid && !req.uop.robIdx.needFlush(io.redirect)
   val reqSel = selectOldest(s2_enqueue :+ reqValid, s2_req :+ req)
 
   req_valid := reqSel._1(0)
