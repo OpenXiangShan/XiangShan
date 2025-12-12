@@ -28,3 +28,6 @@
 [submodule "ChiselAIA"]
 	path = ChiselAIA
 	url = https://github.com/OpenXiangShan/ChiselAIA.git
+[submodule "ChiselIOPMP"]
+	path = ChiselIOPMP
+	url = https://github.com/OpenXiangShan/ChiselIOPMP.git
