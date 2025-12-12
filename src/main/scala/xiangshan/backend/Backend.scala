@@ -367,10 +367,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   // for fpIQ write int regfile arbiter
   intRegion.io.fromFpIQ.get <> fpRegion.io.fpIQOut.get
 
-  intRegion.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
-  fpRegion.io.diffFpRat.foreach(_ := ctrlBlock.io.diff_fp_rat.get)
-  vecRegion.io.diffVecRat.foreach(_ := ctrlBlock.io.diff_vec_rat.get)
-  vecRegion.io.diffV0Rat.foreach(_ := ctrlBlock.io.diff_v0_rat.get)
   vecRegion.io.diffVlRat.foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   vecRegion.io.fromVecExcpMod.get.r := vecExcpMod.o.toVPRF.r
   vecRegion.io.fromVecExcpMod.get.w := vecExcpMod.o.toVPRF.w
