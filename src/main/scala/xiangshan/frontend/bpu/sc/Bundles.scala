@@ -26,11 +26,6 @@ import xiangshan.frontend.bpu.WriteReqBundle
 class ScEntry(implicit p: Parameters) extends ScBundle {
   val ctr: SignedSaturateCounter = new SignedSaturateCounter(CtrWidth)
 }
-class ScTageInfo(implicit p: Parameters) extends ScBundle {
-  val condTakenMask: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
-  val providerTakenCtr: Vec[Valid[SaturateCounter]] =
-    Vec(NumBtbResultEntries, Valid(new SaturateCounter(TageTakenCtrWidth)))
-}
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
   val thres: SaturateCounter = new SaturateCounter(ThresholdWidth)

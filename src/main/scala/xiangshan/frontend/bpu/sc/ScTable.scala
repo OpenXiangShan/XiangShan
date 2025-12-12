@@ -24,7 +24,6 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
-import xiangshan.frontend.bpu.tage.BaseTableSramWriteReq
 
 class ScTable(
     numSets:   Int,
@@ -60,21 +59,13 @@ class ScTable(
   )
 
   private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
-    Module(new Queue(
+    Module(new WriteBuffer(
       new ScTableSramWriteReq(numRows, numWays),
       WriteBufferSize,
-      pipe = true,
-      flow = true
+      numPorts = 1,
+      nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
-  // private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
-  //   Module(new WriteBuffer(
-  //     new ScTableSramWriteReq(numRows, numWays),
-  //     WriteBufferSize,
-  //     numPorts = 1,
-  //     nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
-  //   ))
-  // )
 
   // read path table by setIndex
   private val reqSetIdx   = io.req.bits.setIdx
@@ -99,54 +90,27 @@ class ScTable(
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>
       val writeValid = updateValid && bankEnable
-      buffer.io.enq.valid       := writeValid
-      buffer.io.enq.bits.setIdx := updateIdx
-      buffer.io.enq.bits.wayMask := Mux(
+      buffer.io.write.head.valid       := writeValid
+      buffer.io.write.head.bits.setIdx := updateIdx
+      buffer.io.write.head.bits.wayMask := Mux(
         writeValid,
         updateWayMask,
         VecInit.fill(numWays)(false.B)
       )
-      buffer.io.enq.bits.entryVec := Mux(
+      buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
         VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
       )
   }
-  // writeBuffer.zip(updateBankMask.asBools).foreach {
-  //   case (buffer, bankEnable) =>
-  //     val writeValid = updateValid && bankEnable
-  //     buffer.io.write.head.valid       := writeValid
-  //     buffer.io.write.head.bits.setIdx := updateIdx
-  //     buffer.io.write.head.bits.wayMask := Mux(
-  //       writeValid,
-  //       updateWayMask,
-  //       VecInit.fill(numWays)(false.B)
-  //     )
-  //     buffer.io.write.head.bits.entryVec := Mux(
-  //       writeValid,
-  //       io.update.entryVec,
-  //       VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
-  //     )
-  // }
 
   sram.zip(writeBuffer).zipWithIndex.foreach {
     case ((bank, buffer), i) =>
-      bank.io.w.req.valid            := buffer.io.deq.valid && !bank.io.r.req.valid
-      bank.io.w.req.bits.setIdx      := buffer.io.deq.bits.setIdx
-      bank.io.w.req.bits.waymask.get := buffer.io.deq.bits.wayMask.asUInt
-      bank.io.w.req.bits.data        := buffer.io.deq.bits.entryVec
-      buffer.io.deq.ready            := bank.io.w.req.ready && !bank.io.r.req.valid
-  }
-  // sram.zip(writeBuffer).zipWithIndex.foreach {
-  //   case ((bank, buffer), i) =>
-  //     bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
-  //     bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
-  //     bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.asUInt
-  //     bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
-  //     buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
-  // }
-  for (i <- 0 until NumBanks) {
-    XSPerfAccumulate(s"sc_bank${i}_queue_full", updateValid && updateBankMask(i) && !writeBuffer(i).io.enq.ready)
+      bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
+      bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
+      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.asUInt
+      bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
+      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
 
 }
