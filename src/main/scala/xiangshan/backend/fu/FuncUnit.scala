@@ -16,6 +16,35 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchInfo, BranchAttribute}
 
+trait HasFuLatency {
+  val latencyVal: Option[Int]
+  val extraLatencyVal: Option[Int]
+  val uncertainLatencyVal: Option[Int]
+  val uncertainEnable: Option[Int]
+  val orginLatencyVal: Option[Int]
+}
+
+case class CertainLatency(value: Int, extraValue: Int = 0) extends HasFuLatency {
+  override val latencyVal: Option[Int] = Some(value + extraValue)
+  override val extraLatencyVal: Option[Int] = Some(extraValue)
+  override val uncertainLatencyVal: Option[Int] = None
+  override val uncertainEnable: Option[Int] = None
+  override val orginLatencyVal: Option[Int] = Some(value)
+}
+
+case class UncertainLatency(value: Option[Int]) extends HasFuLatency {
+  override val latencyVal: Option[Int] = None
+  override val extraLatencyVal: Option[Int] = None
+  override val uncertainLatencyVal: Option[Int] = value
+  override val uncertainEnable: Option[Int] = Some(0) // for gate uncertain fu
+  override val orginLatencyVal: Option[Int] = None
+}
+
+object UncertainLatency {
+  def apply(): UncertainLatency = UncertainLatency(None)
+  def apply(value: Int): UncertainLatency = UncertainLatency(Some(value))
+}
+
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
   val robIdx      = new RobPtr
