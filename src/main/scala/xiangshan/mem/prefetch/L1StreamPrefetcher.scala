@@ -283,10 +283,10 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
-  val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + 64.U, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - 64.U, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + 640.U, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - 640.U, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
