@@ -169,7 +169,7 @@ case class XSCoreParameters
   LoadQueueRAWSize: Int = 32, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 72,
-  LoadUncacheBufferSize: Int = 4,
+  LoadUncacheBufferSize: Int = 16,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 56,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
@@ -233,7 +233,7 @@ case class XSCoreParameters
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
   // ==============================
-  UncacheBufferSize: Int = 4,
+  UncacheBufferSize: Int = 16,
   EnableLoadToLoadForward: Boolean = false,
   EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
