@@ -109,6 +109,7 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val vaddr       = UInt(VAddrBits.W)
   val paddr       = UInt(PAddrBits.W)
   val pc          = UInt(VAddrBits.W)
+  val access_vec  = UInt(8.W)
   val miss        = Bool()
   val pfHitStream = Bool()
 }
