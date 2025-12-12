@@ -865,7 +865,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   // print configs
-  println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l2:${l2tlbParams.l2Size} fa l1: nSets ${l2tlbParams.l1nSets} nWays ${l2tlbParams.l1nWays} l0: ${l2tlbParams.l0nSets} nWays ${l2tlbParams.l0nWays} blockBytes:${l2tlbParams.blockBytes}")
+  logger.info(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l2:${l2tlbParams.l2Size} fa l1: nSets ${l2tlbParams.l1nSets} nWays ${l2tlbParams.l1nWays} l0: ${l2tlbParams.l0nSets} nWays ${l2tlbParams.l0nWays} blockBytes:${l2tlbParams.blockBytes}")
 
   val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
   generatePerfEvent()

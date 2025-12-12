@@ -69,7 +69,8 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   }
 }
 
-abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModuleImp(outer) with HasXSParameter
+abstract class FrontendInlinedImpBase(outer: FrontendInlined) extends LazyModuleImp(outer)
+    with HasXSParameter
     with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId       = Input(UInt(hartIdLen.W))
@@ -280,7 +281,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("Frontend perfEvents Set", name, inc, i)
+      logger.info(s"Frontend perfEvents Set ${name} ${inc} ${i}")
     }
   }
 

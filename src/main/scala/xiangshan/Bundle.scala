@@ -638,7 +638,7 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
       w.bits.addr := addr
       w.bits.data := data
     }
-    println("Distributed CSR update req registered for " + src_description)
+    logger.info("Distributed CSR update req registered for " + src_description)
   }
 }
 

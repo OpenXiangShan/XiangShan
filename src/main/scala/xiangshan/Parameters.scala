@@ -18,6 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import coupledL2._
 import coupledL2.tl2chi._
 import freechips.rocketchip.diplomacy.AddressSet
@@ -38,6 +39,7 @@ import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.mem.prefetch._
+
 import scala.math.{max, pow}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
@@ -498,7 +500,7 @@ case class DFTOptions
   EnableSramCtl: Boolean = false,
 )
 
-trait HasXSParameter {
+trait HasXSParameter extends LazyLogging {
 
   implicit val p: Parameters
 

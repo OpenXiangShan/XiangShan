@@ -364,7 +364,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
 
 // the smallest access unit is sram
 class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
-  println("  DCacheType: SramedDataArray")
+  logger.info("  DCacheType: SramedDataArray")
   val ReduceReadlineConflict = false
 
   io.write.ready := true.B
@@ -658,7 +658,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
 // the smallest access unit is bank
 class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
-  println("  DCacheType: BankedDataArray")
+  logger.info("  DCacheType: BankedDataArray")
   val ReduceReadlineConflict = false
 
   io.write.ready := true.B

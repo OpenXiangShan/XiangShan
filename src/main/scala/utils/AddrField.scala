@@ -108,7 +108,7 @@ class AddrField(
         " " * (indent + end.toString.length),
         allInstances.map(_.formatName()).mkString("|")
       )
-    ) ++ extraFieldInstances.map { field =>
+    ) ++ extraFieldInstances.flatMap { field =>
       def getOffset(p: Int, f: Field): Int = ((p - f.start).toFloat / (f.width - 1) * f.fieldLength).toInt
 
       val startIdx = allInstances.indexWhere(f => f.end >= field.start && f.start <= field.start)
@@ -123,19 +123,16 @@ class AddrField(
       val leftPadding = leftPosition
       val innerLength = rightPosition - leftPosition
 
-      f"${" " * leftPadding}|${field.formatStart(innerLength)}|\n${" " * leftPadding}|${field.formatName(innerLength)}|"
+      Seq(
+        f"${" " * leftPadding}|${field.formatStart(innerLength)}|",
+        f"${" " * leftPadding}|${field.formatName(innerLength)}|"
+      )
     }
   }
-
-  def show(indent: Int = 0): Unit =
-    println(format(indent).mkString("\n"))
 
   def formatList(indent: Int = 0): Seq[String] = {
     (fieldInstances ++ extraFieldInstances).map(_.formatList(indent))
   }
-
-  def showList(indent: Int = 0): Unit =
-    println(formatList(indent).mkString("\n"))
 
   private def getField(name: String): Field =
     (fieldInstances ++ extraFieldInstances).find(_.name == name).get

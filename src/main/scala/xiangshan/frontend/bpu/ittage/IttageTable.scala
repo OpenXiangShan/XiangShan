@@ -76,7 +76,7 @@ class IttageTable(
   private val dataSplit   = if (nRows <= 2 * TableSramSize) 1 else 2
 
   if (nRows < TableSramSize) {
-    println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
+    logger.warn(f"ittage table $tableIdx has small sram depth of $nRows")
   }
 
   require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)

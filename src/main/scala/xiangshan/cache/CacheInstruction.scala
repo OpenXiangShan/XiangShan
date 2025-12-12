@@ -158,10 +158,10 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   // Translate CSR write to cache op
   val translated_cache_req = Reg(new CacheCtrlReqInfo)
   val translated_cache_req_opCode_dup = Reg(Vec(DCacheDupNum, UInt(XLEN.W)))
-  println("Cache op decoder (" + decoder_name + "):")
-  println("  Id " + id)
+  logger.info("Cache op decoder (" + decoder_name + "):")
+  logger.info("  Id " + id)
   // CacheInsRegisterList.map{case (name, attribute) => {
-  //   println("  Register CSR mirror " + name)
+  //   logger.info("  Register CSR mirror " + name)
   // }}
 
   def cacheop_csr_is_being_write(csr_name: String): Bool = {

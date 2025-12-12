@@ -95,7 +95,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     misc.peripheralXbar.map(_.asInstanceOf[TLNexusNode])
   ).flatten
 
-  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
+  logger.info(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
   val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alter((site, here, up) => {
@@ -171,13 +171,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     }
     core_with_l2(i).memory_port.foreach(port => (misc.core_to_l3_ports.get)(i) :=* port)
     memblock_pf_recv_nodes(i).map(recv => {
-      println(s"Connecting Core_${i}'s L1 pf source to L3!")
+      logger.info(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
     misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateBus can only be connected to DebugModule now in non-XSNoCTop environment
-      println(s"SeparateDM: ${SeperateDM}")
-      println(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
+      logger.info(s"SeparateDM: ${SeperateDM}")
+      logger.info(s"misc.SepTLXbarOpt: ${misc.SepTLXbarOpt}")
       require(core_with_l2(i).sep_tl_opt.isDefined)
       require(SeperateBusRanges.size >= 1)
       require(SeperateBusRanges.head.base <= p(DebugModuleKey).get.address.base)
@@ -204,12 +204,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= misc.l3_banked_xbar.get
       l3.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L3!")
+        logger.info("Connecting L1 prefetcher to L3!")
         recv := l3_pf_sender_opt.get
       })
       l3.tpmeta_recv_node.foreach(recv => {
         for ((core, i) <- core_with_l2.zipWithIndex) {
-          println(s"Connecting core_$i\'s L2 TPmeta request to L3!")
+          logger.info(s"Connecting core_$i\'s L2 TPmeta request to L3!")
           recv := core.core_l3_tpmeta_source_port.get
         }
       })
@@ -217,7 +217,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         val broadcast = LazyModule(new ValidIOBroadcast[TPmetaResp]())
         broadcast.node := send
         for ((core, i) <- core_with_l2.zipWithIndex) {
-          println(s"Connecting core_$i\'s L2 TPmeta response to L3!")
+          logger.info(s"Connecting core_$i\'s L2 TPmeta response to L3!")
           core.core_l3_tpmeta_sink_port.get := broadcast.node
         }
       })

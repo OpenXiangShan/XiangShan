@@ -35,10 +35,9 @@ class TageBaseTable(implicit p: Parameters) extends TageModule with BaseTableHel
   val io: TageBaseTableIO = IO(new TageBaseTableIO)
 
   // print params
-  println(f"TageBaseTable:")
-  println(f"  Size(set, bank, cnt): $BaseTableNumSets * $NumBanks * $FetchBlockInstNum = $BaseTableSize")
-  println(f"  Address fields:")
-  addrFields.show(indent = 4)
+  logger.info(f"Size(set, bank, cnt): $BaseTableNumSets * $NumBanks * $FetchBlockInstNum = $BaseTableSize")
+  logger.info(f"Address fields:")
+  addrFields.format(indent = 2).foreach(logger.info(_)) // cannot remove this "(_)" due to macro expansion
 
   private val alignBanks = Seq.tabulate(BaseTableNumAlignBanks) { alignIdx =>
     Module(new TageBaseTableAlignBank(alignIdx))

@@ -402,7 +402,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
 class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore=false){
   override lazy val uopSize = VlMergeBufferSize
-  println(s"VLMergeBuffer Size: ${VlMergeBufferSize}")
+  logger.info(s"Size: ${VlMergeBufferSize}")
   override lazy val freeList = Module(new FreeList(
     size = uopSize,
     allocWidth = VecLoadPipelineWidth,
@@ -479,7 +479,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
 
 class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore=true){
   override lazy val uopSize = VsMergeBufferSize
-  println(s"VSMergeBuffer Size: ${VsMergeBufferSize}")
+  logger.info(s"VSMergeBuffer Size: ${VsMergeBufferSize}")
   override lazy val freeList = Module(new FreeList(
     size = uopSize,
     allocWidth = VecStorePipelineWidth,

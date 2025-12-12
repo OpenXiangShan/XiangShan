@@ -214,7 +214,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val diffStore = Flipped(new DiffStoreIO)
   })
 
-  println("StoreQueue: size:" + StoreQueueSize)
+  logger.info(s"Size: $StoreQueueSize")
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new DynInst))

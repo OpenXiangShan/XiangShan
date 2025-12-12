@@ -40,11 +40,11 @@ class TageTable(
 
   val io: TageTableIO = IO(new TageTableIO)
 
-  println(f"TageTable[$tableIdx]:")
-  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
-  println(f"  History length: ${info.HistoryLength}")
-  println(f"  Address fields:")
-  addrFields.show(indent = 4)
+  logger.info(f"TageTable[$tableIdx]:")
+  logger.info(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
+  logger.info(f"  History length: ${info.HistoryLength}")
+  logger.info(f"  Address fields:")
+  addrFields.format(indent = 2).foreach(logger.info(_)) // cannot remove this "(_)" due to macro expansion
 
   private val entrySram =
     Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>

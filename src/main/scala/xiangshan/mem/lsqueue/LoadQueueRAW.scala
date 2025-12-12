@@ -60,7 +60,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddr(DCacheVWordOffset + PartialPAddrWidth - 1, paddrOffset)
   }
 
-  println("LoadQueueRAW: size " + LoadQueueRAWSize)
+  logger.info(s"Size: $LoadQueueRAWSize")
   //  LoadQueueRAW field
   //  +-------+--------+-------+-------+-----------+
   //  | Valid |  uop   |PAddr  | Mask  | Datavalid |
