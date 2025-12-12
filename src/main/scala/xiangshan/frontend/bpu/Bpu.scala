@@ -240,12 +240,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
   // sc
-  sc.io.mbtbResult          := mbtb.io.result
-  sc.io.foldedPathHist      := phr.io.s1_foldedPhr
-  sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
-  sc.io.s3_override         := s3_override
-  sc.io.ghr                 := ghr.io.s0_ghist
-  private val scTakenMask = sc.io.takenMask
+  sc.io.mbtbResult                := mbtb.io.result
+  sc.io.tageInfo.condTakenMask    := tage.io.condTakenMask
+  sc.io.tageInfo.providerTakenCtr := tage.io.providerTakenCtrVec
+  sc.io.foldedPathHist            := phr.io.s0_foldedPhr
+  sc.io.trainFoldedPathHist       := phr.io.trainFoldedPhr
+  sc.io.s3_override               := s3_override
+  sc.io.ghr                       := ghr.io.s0_ghist
+
+  private val scTakenMask = sc.io.scTakenMask
+  private val scUsed      = sc.io.scUsed
   dontTouch(scTakenMask)
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
@@ -329,6 +333,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s2_mbtbResult    = mbtb.io.result
   private val s2_condTakenMask = tage.io.condTakenMask
+
+  // private val s2_condTakenMask = VecInit(scUsed.zip(scTakenMask).zip(tage.io.condTakenMask).map {
+  //   case ((useSc, scTaken), tageTaken) => Mux(useSc, scTaken, tageTaken)
+  // })
+
   private val s2_jumpMask = VecInit(s2_mbtbResult.map { e =>
     e.valid && (e.bits.attribute.isDirect || e.bits.attribute.isIndirect)
   })
