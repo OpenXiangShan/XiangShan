@@ -196,7 +196,7 @@ endif
 
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-all --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
+RELEASE_ARGS += --fpga-platform --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
 DEBUG_ARGS   += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
 override PLDM_ARGS += --enable-difftest --firtool-opt "--default-layer-specialization=enable"
 ifeq ($(RELEASE),1)
