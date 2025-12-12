@@ -71,6 +71,7 @@ case class Pbus2Params(
     SYSCNTAddrMap: AddressSet = AddressSet(0x38040000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
     DebugAddrMap: AddressSet = AddressSet(0x00010000L, 0x1000 - 1), // 4KB
     dmsize: Int = 0x1000,
+    DieIDWidth: Int = 3,
     IMSICAddrMap: Seq[AddressSet] = Seq(
       AddressSet(0x3a000000L, 0xffffff),
       AddressSet(0x3b000000L, 0xffffff)
@@ -413,6 +414,24 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dmxbar :*= dm_mNodes(i)
   }
   dm_sNode := dmxbar
+  val dm_mNodes_2 =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-Mnode",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dm_mNodes_3 =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-Mnode",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dmxbar2to1 = AXI4Xbar()
+  dmxbar2to1 := dm_mNodes_2
+  dmxbar2to1 := dm_mNodes_3
+
   // define debugModule sba node
   class Imp(outer: uncoreTop) extends LazyRawModuleImp(outer)  {
     // 在模块实现类中添加前缀注解
@@ -434,10 +453,13 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val peri_s = IO(Flipped(new AXI4Bundle(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
     val msi_m = IO(new AXI4Bundle(imsic_pbus_top.sNode.in.head._2.bundle)) // to imsic master ports
     val cpu_s = IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+    val dm_crs_s = IO(Flipped(new AXI4Bundle(dm_mNodes_3.out.head._2.bundle)))
     // instance debugModule sba port
     val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
     val dmint = IO(Output(Vec(params.NumHarts,Bool())))
+    val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
+    val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
     //instance aplic
     withClockAndReset(clock, reset){
       val aplic_top = Module(new aplic_top(params.aplicParams))
@@ -450,8 +472,21 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     // connect io
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
     (cpu_mNodes.zip(cpu_s)).foreach { case (node, io) => node.out.head._1 <> io }
+
     dm_m.foreach(_ <> dm.axi4masternode.get)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dmxbar2to1.out.head._1)
+//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dm_mNodes_2.out.head._1 <> dm_sNode.in.head._1
+    val isselfid = (req_id === self_id)
+    dm_mNodes_2.out.head._1.aw.valid := isselfid & dm_sNode.in.head._1.aw.valid
+    dm_mNodes_2.out.head._1.w.valid := isselfid & dm_sNode.in.head._1.w.valid
+    dm_mNodes_2.out.head._1.ar.valid := isselfid & dm_sNode.in.head._1.ar.valid
+    dm_mNodes_3.out.head._1 <> dm_sNode.in.head._1
+    dm_mNodes_3.out.head._1.aw.valid := isselfid & dm_sNode.in.head._1.aw.valid
+    dm_mNodes_3.out.head._1.w.valid := isselfid & dm_sNode.in.head._1.w.valid
+    dm_mNodes_3.out.head._1.ar.valid := isselfid & dm_sNode.in.head._1.ar.valid
+
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
     //msi_sNodes -> imsicPbusTop
     imsic_pbus_top.module.s_cpu.zip(msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
