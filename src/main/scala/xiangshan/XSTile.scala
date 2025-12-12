@@ -103,6 +103,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
+      val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+      val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -124,6 +126,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    io.teemsiInfo.foreach(dontTouch(_))
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -133,6 +136,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
     core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
     l2top.module.io.msiInfo.fromTile := io.msiInfo
+    core.module.io.teemsiInfo zip l2top.module.io.teemsiInfo foreach { case (core_teemsiInfo, l2top_teemsiInfo) =>
+      core_teemsiInfo := l2top_teemsiInfo.toCore
+    }
+    l2top.module.io.teemsiInfo zip io.teemsiInfo foreach { case (l2top_teemsiInfo, io_teemsiInfo) =>
+      l2top_teemsiInfo.fromTile := io_teemsiInfo
+    }
     core.module.io.clintTime := l2top.module.io.clintTime.toCore
     l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
@@ -142,6 +151,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
     l2top.module.io.msiAck.fromCore := core.module.io.msiAck
     io.msiAck := l2top.module.io.msiAck.toTile
+    l2top.module.io.teemsiAck zip core.module.io.teemsiAck foreach { case (l2top_teemsiAck, core_teemsiAck) =>
+      l2top_teemsiAck.fromCore := core_teemsiAck
+    }
+    io.teemsiAck zip l2top.module.io.teemsiAck foreach { case (io_teemsiAck, l2top_teemsiAck) =>
+      io_teemsiAck := l2top_teemsiAck.toTile
+    }
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile

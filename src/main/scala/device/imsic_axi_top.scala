@@ -53,16 +53,17 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
 
   // AXI4 Bus
-  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC(soc.IMSICParams, seperateBus = false)))
+  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, seperateBus = false)))
 
   val axi = axi_reg_imsic.map { axi_reg_imsic =>
     val axinode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       Seq(AXI4MasterParameters(
         name = "s_axi_",
-        id = IdRange(0, 65536)
+        id = IdRange(0, 65536),
+        maxFlight = Some(0)
       ))
     )))
-    axi_reg_imsic.axi4tolite.head.node := AXI4Buffer() := axinode
+    axi_reg_imsic.imsic_xbar1to2 := AXI4Buffer() := axinode
     axinode
   }
 
@@ -70,15 +71,26 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
 
   class imsic_bus_top_imp(wrapper: imsic_bus_top) extends LazyModuleImp(wrapper) {
     val msiio = IO(Flipped(new aia.MSITransBundle(soc.IMSICParams)))
+    val teemsiio = Option.when(soc.IMSICParams.HasTEEIMSIC)(IO(Flipped(new aia.MSITransBundle(soc.IMSICParams))))
 
     // No Bus
     val msi = Option.when(soc.IMSICBusType == device.IMSICBusType.NONE)(
+      IO(new aia.MSITransBundle(soc.IMSICParams))
+    )
+    val teemsi = Option.when(soc.IMSICBusType == device.IMSICBusType.NONE & soc.IMSICParams.HasTEEIMSIC)(
       IO(new aia.MSITransBundle(soc.IMSICParams))
     )
 
     tl_reg_imsic.foreach(_.module.msiio <> msiio)
     axi_reg_imsic.foreach(_.module.msiio <> msiio)
     msi.foreach(_ <> msiio)
+
+    axi_reg_imsic zip teemsiio foreach { case (axi_reg_imsic, teemsiio) =>
+      axi_reg_imsic.module.teemsiio.foreach(_ <> teemsiio)
+    }
+    teemsi zip teemsiio foreach { case (teemsi, teemsiio) =>
+      teemsi <> teemsiio
+    }
   }
 
   lazy val module = new imsic_bus_top_imp(this)
