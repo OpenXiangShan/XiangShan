@@ -290,7 +290,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   def detectRollback(i: Int) = {
     paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
-    paddrModule.io.violationCheckLine.get(i) := storeIn(i).bits.wlineflag
+    paddrModule.io.violationCheckLine.get(i) := RegEnable(storeIn(i).bits.wlineflag, storeIn(i).valid)
     maskModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.mask, storeIn(i).valid)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
