@@ -85,5 +85,4 @@ trait Helpers extends HasScParameters with PhrHelper {
     }
     newEntries
   }
-
 }

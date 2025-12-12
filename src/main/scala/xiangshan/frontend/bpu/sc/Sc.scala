@@ -207,19 +207,19 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     biasTable.io.resp,
     VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry()))
   )
-  private val s1_allResp = VecInit(s1_pathResp ++ s1_globalResp)
+  private val s1_mergeResp = VecInit(s1_pathResp ++ s1_globalResp)
 
   private val s1_biasPercsum = VecInit(s1_biasResp.map(entry => getPercsum(entry.ctr.value)))
-  private val s1_allPercsum = VecInit(s1_allResp.map(entries =>
+  private val s1_mergePercsum = VecInit(s1_mergeResp.map(entries =>
     VecInit(entries.map(entry => getPercsum(entry.ctr.value)))
   ))
   require(
-    s1_allPercsum.length == PathTableInfos.length + GlobalTableInfos.length,
-    s"s1_allPercsum length ${s1_allPercsum.length} != " +
+    s1_mergePercsum.length == PathTableInfos.length + GlobalTableInfos.length,
+    s"s1_mergePercsum length ${s1_mergePercsum.length} != " +
       s"PathTableInfos.length + GlobalTableInfos.length ${PathTableInfos.length + GlobalTableInfos.length}"
   )
-  // Calculate sumPercsum in advance
-  private val s1_sumPercsum = VecInit.tabulate(NumWays)(j => s1_allPercsum.map(_(j)).reduce(_ +& _))
+  // Calculate sumPercsum without bias in advance
+  private val s1_sumPercsum = VecInit.tabulate(NumWays)(j => s1_mergePercsum.map(_(j)).reduce(_ +& _))
   require(
     s1_sumPercsum.length == NumWays,
     s"s1_sumPercsum length ${s1_sumPercsum.length} != NumWays $NumWays"
