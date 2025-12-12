@@ -26,6 +26,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
+import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
@@ -191,9 +192,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     metaQueueResolve(s3BpuPtr) := io.fromBpu.meta.bits
     metaQueueCommit(s3BpuPtr)  := io.fromBpu.meta.bits.ras
 
-    perfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
-    perfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
-    perfQueue(s3BpuPtr).mispredict.foreach(_ := false.B)
+    perfQueue(s3BpuPtr).bpuPerf    := io.fromBpu.perfMeta
+    perfQueue(s3BpuPtr).isCfi      := 0.U
+    perfQueue(s3BpuPtr).mispredict := false.B
   }
 
   resolveQueue.io.bpuEnqueue    := bpuEnqueue
@@ -347,8 +348,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
     io.fromBackend.resolve.foreach { branch =>
       val ftqIdx      = branch.bits.ftqIdx.value
       val cfiPosition = getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
-      perfQueue(ftqIdx).isCfi(cfiPosition)      := true.B
-      perfQueue(ftqIdx).mispredict(cfiPosition) := branch.bits.mispredict
+      perfQueue(ftqIdx).isCfi := perfQueue(ftqIdx).isCfi | UIntToOH(cfiPosition)
+      when(branch.bits.mispredict) {
+        // Mark mispredict and flush the cfi after its position
+        perfQueue(ftqIdx).mispredict := true.B
+        val mask = UIntToMask(cfiPosition + 1.U, FetchBlockInstNum)
+        perfQueue(ftqIdx).isCfi := perfQueue(ftqIdx).isCfi & mask
+      }
     }
   }
 
@@ -451,7 +457,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     io.toBpu.commit.valid,
     Seq(
       ("branch_number", true.B, PopCount(perfQueue(commitPtr(0).value).isCfi)),
-      ("mispredict_number", true.B, PopCount(perfQueue(commitPtr(0).value).mispredict))
+      ("mispredict_number", true.B, perfQueue(commitPtr(0).value).mispredict)
     )
   )
 
