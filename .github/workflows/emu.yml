@@ -496,10 +496,10 @@ jobs:
           ssh -tt eda01 "echo test-ok"
       - name: Generate Verilog for VCS
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --no-db --xprop
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --xprop
       - name: Build SIMV on Remote
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --no-db --xprop"
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --xprop"
       - name: V Extension Test - rvv-test
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
