@@ -372,3 +372,4 @@ simulator_err.txt
 simulator_out.txt
 *.log
 *.err
+cr*/
