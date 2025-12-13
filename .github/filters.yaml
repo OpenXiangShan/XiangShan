@@ -6,6 +6,7 @@ core:
   - "!.github/workflows/perf-template.yml"
   - "!.github/workflows/perf-v2.yml"
   - "!.github/workflows/perf-v3.yml"
+  - "!.github/workflows/perf-trigger.yml"
   - "!.github/workflows/format.yml"
   - "!.gitignore"
   - "!**/*.md"
