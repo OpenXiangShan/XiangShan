@@ -1,0 +1,35 @@
+name: Performance Regression Trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_branch:
+        description: Branch or commit to run performance test on
+        required: false
+        type: string
+        default: kunminghu-v3
+      benchmark_type:
+        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
+        required: false
+        type: string
+        default: spec06-1.0c
+      benchmarks:
+        description: Specific benchmarks to run (comma-separated), leave empty to run all
+        required: false
+        type: string
+        default: ''
+      servers:
+        description: Servers to run emulation on
+        required: false
+        type: string
+        default: node029, node033, node034, node036, node037, node038, node039, node040, node041, node042, node003, node004, node005, node006, node007, node008, node009, node020, node021, node022, node023, node024, node025, node026, node027, node028
+
+jobs:
+  performance-test:
+    uses: ./.github/workflows/perf-template.yml
+    with:
+        test_branch: ${{ github.event.inputs.test_branch }}
+        benchmark_type: ${{ github.event.inputs.benchmark_type }}
+        benchmarks: ${{ github.event.inputs.benchmarks }}
+        servers: ${{ github.event.inputs.servers }}
+        spec_dir: /nfs/home/cirunner/perf-report-custom
