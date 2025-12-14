@@ -292,18 +292,24 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // TODO: maybe need compare position？
 
   // When microTAGE participates in prediction, it has the highest priority in stage S1.
-  private val s1_realUbtbTaken = ubtb.io.prediction.taken && !abtb.io.useMicroTage
+  private val s1_realUbtbTaken  = ubtb.io.prediction.taken && !abtb.io.useMicroTage
+  private val s1_realUbtbResult = Wire(new Prediction)
+  private val s1_realAbtbResult = Wire(new Prediction)
+  s1_realUbtbResult        := ubtb.io.prediction
+  s1_realUbtbResult.target := Mux(ubtb.io.prediction.attribute.isReturn, ras.io.topRetAddr, ubtb.io.prediction.target)
+  s1_realAbtbResult        := abtb.io.prediction
+  s1_realAbtbResult.target := Mux(abtb.io.prediction.attribute.isReturn, ras.io.topRetAddr, abtb.io.prediction.target)
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
       Seq(
         (s1_realUbtbTaken && abtb.io.prediction.taken) -> Mux(
           ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
-          ubtb.io.prediction,
-          abtb.io.prediction
+          s1_realUbtbResult,
+          s1_realAbtbResult
         ),
-        s1_realUbtbTaken         -> ubtb.io.prediction,
-        abtb.io.prediction.taken -> abtb.io.prediction
+        s1_realUbtbTaken         -> s1_realUbtbResult,
+        abtb.io.prediction.taken -> s1_realAbtbResult
       )
     )
 
