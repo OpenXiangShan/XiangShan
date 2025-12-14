@@ -22,7 +22,7 @@ on:
         required: false
         type: string
         default: node029, node033, node034, node036, node037, node038, node039, node040, node041, node042, node003, node004, node005, node006, node007, node008, node009, node020, node021, node022, node023, node024, node025, node026, node027, node028
-      spec_dir:
+      perf_report_dir:
         description: Directory for all spec reports
         required: true
         type: string
@@ -75,7 +75,7 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
-          echo "SPEC_DIR=${{ inputs.spec_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
 
       - name: Initialize submodules

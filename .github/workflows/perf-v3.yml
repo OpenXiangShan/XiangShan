@@ -5,11 +5,16 @@ on:
     #run at 4:00 UTC (12:00 UTC+8) on Friday
     - cron: '0 4 * * 5'
   workflow_dispatch:
-    {}
+    inputs:
+      test_branch:
+        description: Only fill this option when retrying with the same branch/commit as previous attempts
+        required: false
+        type: string
+        default: kunminghu-v3
 
 jobs:
   performance-test:
     uses: ./.github/workflows/perf-template.yml
     with:
-      test_branch: kunminghu-v3
-      spec_dir: /nfs/home/cirunner/perf-report-kmhv3
+      test_branch: ${{ github.event.inputs.test_branch }}
+      perf_report_dir: /nfs/home/cirunner/perf-report-kmhv3

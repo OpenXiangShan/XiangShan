@@ -2,11 +2,16 @@ name: Performance Regression V2
 
 on:
   workflow_dispatch:
-    {}
+    inputs:
+      test_branch:
+        description: Only fill this option when retrying with the same branch/commit as previous attempts
+        required: false
+        type: string
+        default: master
 
 jobs:
   performance-test:
     uses: ./.github/workflows/perf-template.yml
     with:
-      test_branch: master
-      spec_dir: /nfs/home/cirunner/perf-report-master
+      test_branch: ${{ github.event.inputs.test_branch }}
+      perf_report_dir: /nfs/home/cirunner/perf-report-master

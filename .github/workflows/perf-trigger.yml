@@ -32,4 +32,4 @@ jobs:
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         servers: ${{ github.event.inputs.servers }}
-        spec_dir: /nfs/home/cirunner/perf-report-custom
+        perf_report_dir: /nfs/home/cirunner/perf-report-custom
