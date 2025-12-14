@@ -41,6 +41,7 @@ object Helpers {
   implicit class StatementHelper(statement: firrtl.ir.Statement) {
     def mapStmt(f: firrtl.ir.Statement => firrtl.ir.Statement): firrtl.ir.Statement = statement match {
       case firrtl.ir.Conditionally(info, pred, conseq, alt) => firrtl.ir.Conditionally(info, pred, f(conseq), f(alt))
+      case firrtl.ir.LayerBlock(info, layer, body) => firrtl.ir.LayerBlock(info, layer, f(body))
       case firrtl.ir.Block(stmts) => 
         val res = new scala.collection.mutable.ArrayBuffer[firrtl.ir.Statement]()
         var its = stmts.iterator :: Nil
