@@ -1,6 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -15,32 +15,39 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.transforms
+package chisel3.stage.phases.xiangshan
 
-import utility.XSLog
+import chisel3._
+import chisel3.stage.ChiselCircuitAnnotation
+import chisel3.stage.phases.Elaborate
+import firrtl.AnnotationSeq
+import firrtl.options.{Dependency, Phase}
 
 @scala.annotation.nowarn("msg=All APIs in package firrtl are deprecated")
-class PrintModuleName extends firrtl.options.Phase {
+class PrintModuleName extends Phase {
 
-  override def invalidates(a: firrtl.options.Phase) = false
+  import chisel3.internal.firrtl.xiangshan.ChiselCircuitHelpers._
+  import chisel3.internal.firrtl.ir._
 
-  override def transform(annotations: firrtl.AnnotationSeq): firrtl.AnnotationSeq = {
+  override def prerequisites = Seq(Dependency[Elaborate])
+  override def invalidates(a: Phase) = false
 
-    import xiangshan.transforms.Helpers._
+  def transform(annotations: AnnotationSeq): AnnotationSeq = {
 
-    val (Seq(circuitAnno: firrtl.stage.FirrtlCircuitAnnotation), otherAnnos) = annotations.partition {
-      case _: firrtl.stage.FirrtlCircuitAnnotation => true
-      case _ => false
-    }
-    val c = circuitAnno.circuit
-
-    def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
-      case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en, name) =>
-        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en, name)
-      case other: firrtl.ir.Statement =>
-        other.mapStmt(onStmt)
+    def onCommand(c: Command): Command = c match {
+      case Printf(id, sourceInfo, filename, clock, pable) =>
+        val (fmt, data) = pable.unpack
+        val newPable = Printable.pack(utility.XSLog.replaceFIRStr(fmt), data:_*)
+        Printf(id, sourceInfo, filename, clock, newPable)
+      case other: Command => other.mapCommand(onCommand)
     }
 
-    firrtl.stage.FirrtlCircuitAnnotation(c.mapModule(m => m.mapStmt(onStmt))) +: otherAnnos
+    annotations.flatMap {
+      case a: ChiselCircuitAnnotation =>
+        Some(ChiselCircuitAnnotation(ElaboratedCircuit(
+          a.elaboratedCircuit._circuit.mapComponent(c => c.mapCommand(onCommand)), Seq()
+        )))
+      case a => Some(a)
+    }
   }
 }

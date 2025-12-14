@@ -11,7 +11,6 @@ import top.ArgParser
 import xiangshan.backend.decode.DecodeUnit
 import xiangshan.backend.regfile.IntPregParams
 import circt.stage.ChiselStage
-import xiangshan.transforms.PrintModuleName
 
 object DecodeMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
