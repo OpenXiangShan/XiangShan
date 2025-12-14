@@ -25,7 +25,6 @@ import svsim.CommonCompilationSettings.VerilogPreprocessorDefine
 import svsim.verilator.Backend.CompilationSettings.{TraceKind, TraceStyle}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import xiangshan.transforms.PrintModuleName
 
 import xiangshan.backend.fu._
 

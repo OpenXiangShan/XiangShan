@@ -18,7 +18,6 @@
 package top
 
 import chisel3.stage._
-import xiangshan.transforms._
 import circt.stage.CLI
 import circt.stage.ChiselStage
 
@@ -41,8 +40,8 @@ class XiangShanStage extends ChiselStage {
         firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputFile],
         firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputAnnotationFile],
         firrtl.options.Dependency[chisel3.stage.phases.AddSerializationAnnotations],
+        firrtl.options.Dependency[chisel3.stage.phases.xiangshan.PrintModuleName],
         firrtl.options.Dependency[chisel3.stage.phases.Convert],
-        firrtl.options.Dependency[xiangshan.transforms.PrintModuleName],
         firrtl.options.Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
         firrtl.options.Dependency[circt.stage.phases.AddImplicitOutputFile],
         firrtl.options.Dependency[circt.stage.phases.CIRCT]
