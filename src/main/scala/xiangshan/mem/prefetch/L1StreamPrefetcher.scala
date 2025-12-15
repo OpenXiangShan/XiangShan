@@ -39,11 +39,12 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   val L3_WIDTH_BYTES = WIDTH_BYTES * 2 * 2
   val L3_WIDTH_CACHE_BLOCKS = L3_WIDTH_BYTES / dcacheParameters.blockBytes
 
-  val DEPTH_LOOKAHEAD = 6
+  val DEPTH_LOOKAHEAD = 8
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
   val ENABLE_DECR_MODE = false
   val ENABLE_STRICT_ACTIVE_DETECTION = true
+  val USE_STREAM_FIXED_DEPTH = true
 
   // constraints
   require((DEPTH_BYTES >= REGION_SIZE) && ((DEPTH_BYTES % REGION_SIZE) == 0) && ((DEPTH_BYTES / REGION_SIZE) > 0))
@@ -261,6 +262,23 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val l3_ratio_const = Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
   val l3_ratio = l3_ratio_const(3, 0)
 
+  val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
+  val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
+  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 640) // l3 is not useful
+
+  val l1_depth = Wire(UInt(DEPTH_BITS.W))
+  val l2_depth = Wire(UInt(DEPTH_BITS.W))
+  val l3_depth = Wire(UInt(DEPTH_BITS.W))
+  if (USE_STREAM_FIXED_DEPTH) {
+    l1_depth := l1_depth_const
+    l2_depth := l2_depth_const
+    l3_depth := l3_depth_const
+  } else {
+    l1_depth := io.dynamic_depth
+    l2_depth := io.dynamic_depth << ratio
+    l3_depth := io.dynamic_depth << l3_ratio
+  }
+
   // s1: alloc or update
   val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
@@ -283,12 +301,12 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
-  val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l1_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l1_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l2_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l2_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l3_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l3_depth, 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
   val strict_trigger_const = Constantin.createRecord(s"StreamStrictTrigger_${p(XSCoreParamsKey).HartId}", initValue = 1)
   // If use strict triggering mode, the stream prefetcher will only trigger prefetching
