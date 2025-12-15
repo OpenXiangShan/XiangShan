@@ -29,6 +29,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.mem.prefetch.{PrefetchReqBundle, TrainReqBundle}
+import xiangshan.backend.exu.ExeUnitParams
 
 import scala.math._
 
@@ -127,6 +128,41 @@ object Bundles {
     val updateAddrValid = Bool()
 
     def isSWPrefetch: Bool = isPrefetch && !isHWPrefetch
+    def toExuOutput(param: ExeUnitParams): ExuOutput = {
+      val output = Wire(new ExuOutput(param))
+      output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
+      output.pdest  := this.uop.pdest
+      output.robIdx := this.uop.robIdx
+      output.intWen.foreach(_ := this.uop.rfWen)
+      output.fpWen.foreach(_ := this.uop.fpWen)
+      output.vecWen.foreach(_ := this.uop.vecWen)
+      output.v0Wen.foreach(_ := this.uop.v0Wen)
+      output.vlWen.foreach(_ := this.uop.vlWen)
+      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.flushPipe.foreach(_ := this.uop.flushPipe)
+      output.replay.foreach(_ := this.uop.replayInst)
+      // output.debug := this.debug
+      output.debugInfo := this.uop.debugInfo
+      output.debug_seqNum := this.uop.debug_seqNum
+      output.lqIdx.foreach(_ := this.uop.lqIdx)
+      output.sqIdx.foreach(_ := this.uop.sqIdx)
+      output.isRVC.foreach(_ := this.uop.isRVC)
+      output.vls.foreach(x => {
+        // x.vdIdx := this.vdIdx.get
+        // x.vdIdxInField := this.vdIdxInField.get
+        x.vpu   := this.uop.vpu
+        x.oldVdPsrc := this.uop.psrc(2)
+        x.isIndexed := VlduType.isIndexed(this.uop.fuOpType)
+        x.isMasked := VlduType.isMasked(this.uop.fuOpType)
+        x.isStrided := VlduType.isStrided(this.uop.fuOpType)
+        x.isWhole := VlduType.isWhole(this.uop.fuOpType)
+        x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
+        x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
+      })
+      // output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
+      output.trigger.foreach(_ := this.uop.trigger)
+      output
+    }
   }
 
   class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -268,8 +304,8 @@ object Bundles {
 
   class UncacheBypassRespS2(implicit p: Parameters) extends XSBundle {
     val data = UInt(VLEN.W)
-    val denied = Bool()
-    val corrupt = Bool()
+    val nderr = Bool()
+    val derr = Bool()
   }
 
   class UncacheBypass(implicit p: Parameters) extends XSBundle {
