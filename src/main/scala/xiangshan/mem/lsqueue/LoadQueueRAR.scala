@@ -236,12 +236,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     query.resp.valid := RegNext(query.req.valid)
     // Generate real violation mask
-    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
+    val ageMask = VecInit(uop.map(_.lqIdx).map(_ > query.req.bits.uop.lqIdx))
     val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
     for(i <- 0 until LoadQueueRARSize) {
       matchMaskReg(i) := (allocated(i) &
                          paddrModule.io.releaseViolationMmask(w)(i) &
-                         robIdxMask(i) &&
+                         ageMask(i) &&
                          released(i))
       }
     val matchMask = GatedValidRegNext(matchMaskReg)
