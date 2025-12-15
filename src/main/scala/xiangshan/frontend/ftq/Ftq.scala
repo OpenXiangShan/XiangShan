@@ -392,7 +392,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.ControlBTBMissBubble := false.B // TODO: add more info to distinguish
   io.TAGEMissBubble       := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isConditional)
   io.SCMissBubble         := false.B // TODO: add SC info
-  io.ITTAGEMissBubble     := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isOtherIndirect)
+  io.ITTAGEMissBubble     := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.needIttage)
   io.RASMissBubble        := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isReturn)
 
   val perfEvents: Seq[(String, UInt)] = Seq()
