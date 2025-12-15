@@ -74,6 +74,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
+      val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+      val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -126,12 +128,28 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo.valid := msi_vld_cpu
     tile.module.io.msiInfo.bits := msi_data_cpu
+
+    tile.module.io.teemsiInfo zip io.teemsiInfo foreach { case (tile_teemsiInfo, io_teemsiInfo) =>
+      // sync about msiinfo
+      val teemsi_vld_cpu = WireInit(false.B)
+      val teemsi_data_cpu = WireInit(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W),0.U)
+      withClockAndReset(clock, reset_sync) {
+        val teemsi_vld_sync = AsyncResetSynchronizerShiftReg(io_teemsiInfo.valid, 3, 0)
+        teemsi_vld_cpu := RegNext(teemsi_vld_sync)
+        teemsi_data_cpu := RegEnable(io_teemsiInfo.bits, teemsi_vld_sync)
+      }
+      tile_teemsiInfo.valid := teemsi_vld_cpu
+      tile_teemsiInfo.bits := teemsi_data_cpu
+    }
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.msiAck := tile.module.io.msiAck
+    io.teemsiAck zip tile.module.io.teemsiAck foreach { case (io_teemsiAck, tile_teemsiAck) =>
+      io_teemsiAck := tile_teemsiAck
+    }
     io.hartIsInReset := tile.module.io.hartIsInReset
     withClockAndReset(clock, reset_sync) {
       tile.module.io.traceCoreInterface.fromEncoder.enable := 
@@ -183,6 +201,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    io.teemsiInfo.foreach(dontTouch(_))
     io.pwrdown_req_n.foreach(dontTouch(_))
     io.pwrdown_ack_n.foreach(dontTouch(_))
     io.iso_en.foreach(dontTouch(_))

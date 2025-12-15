@@ -16,6 +16,7 @@ import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.util.CSRConst._
 import xiangshan.backend.decode.isa.CSRs
+import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap
 
@@ -51,7 +52,7 @@ trait MachineLevel { self: NewCSR =>
   val mideleg = Module(new CSRModule("Mideleg", new MidelegBundle))
     .setAddr(CSRs.mideleg)
 
-  val mie = Module(new CSRModule("Mie", new MieBundle) with HasIpIeBundle {
+  val mie = Module(new CSRModule("Mie", new MieBundle) with HasIpIeBundle with HasSoCParameter {
     val fromHie  = IO(Flipped(new HieToMie))
     val fromSie  = IO(Flipped(new SieToMie))
     val fromVSie = IO(Flipped(new VSieToMie))
@@ -112,6 +113,10 @@ trait MachineLevel { self: NewCSR =>
 
     // 14~63 read only 0
     regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).foreach(_ := 0.U)
+    if (soc.IMSICParams.HasTEEIMSIC) {
+      reg.LC48IE := Mux(wen, wdata.LC48IE, reg.LC48IE)
+      regOut.LC48IE := reg.LC48IE
+    }
   }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
@@ -211,6 +216,7 @@ trait MachineLevel { self: NewCSR =>
     with HasMachineEnvBundle
     with HasLocalInterruptReqBundle
     with HasAIABundle
+    with HasSoCParameter
   {
     // Alias write in
     val fromMvip = IO(Flipped(new MvipToMip))
@@ -297,6 +303,11 @@ trait MachineLevel { self: NewCSR =>
     }.otherwise {
       reg.LCOFIP := reg.LCOFIP
     }
+
+    if (soc.IMSICParams.HasTEEIMSIC) {
+      // bit 48 LCOFIP
+      regOut.LC48IP := aiaToCSR.notice_pending
+    }
   }).setAddr(CSRs.mip)
 
   val mtinst = Module(new CSRModule("Mtinst", new XtinstBundle) with TrapEntryMEventSinkBundle)
@@ -353,7 +364,7 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  // JEDEC JEP106 Manufacturer ID: 
+  // JEDEC JEP106 Manufacturer ID:
   //   Bank 17 (16 continuations), Offset 0x6F (111)
   val mvendorid = Module(new CSRModule("Mvendorid", new MvendoridBundle))
     .setAddr(CSRs.mvendorid)
@@ -640,6 +651,8 @@ class MidelegBundle extends InterruptBundle {
 class MieBundle extends InterruptEnableBundle {
   this.getNonLocal.foreach(_.setRW().withReset(0.U))
   this.LCOFIE.setRW().withReset(0.U)
+  // add MIE.LC48IE for AIA
+  this.LC48IE.setRW().withReset(0.U)
 }
 
 class MipBundle extends InterruptPendingBundle {
