@@ -448,7 +448,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
 
     val prefetch_info = new DCacheBundle {
-      val late_prefetch = Output(Bool())
+      val hit_prefetch = Output(Bool())
+      val hit_pf_source = UInt(L1PfSourceBits.W)
     }
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
@@ -946,9 +947,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.forwardInfo.corrupt := error
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
-  io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.prefetch_info.hit_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.prefetch_info.hit_pf_source := req.pf_source
 
-  when(io.prefetch_info.late_prefetch) {
+  when(io.prefetch_info.hit_prefetch) {
     prefetch := false.B
   }
 
@@ -1287,10 +1289,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   // prefetch related
-  io.prefetch_stat.late_miss_prefetch := io.req.valid && io.req.bits.isFromPrefetch && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+  io.prefetch_stat.pf_late_in_mshr := io.req.valid && io.req.bits.isFromPrefetch && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
   io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
   io.prefetch_stat.pf_source := io.req.bits.pf_source
-  io.prefetch_stat.demand_match_pfmshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
+  io.prefetch_stat.hit_pf_in_mshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.hit_prefetch)).orR)
+  io.prefetch_stat.hit_pf_source_in_mshr := ParallelMux(entries.map(_.io.prefetch_info.hit_prefetch) zip entries.map(_.io.prefetch_info.hit_pf_source))
   io.prefetch_stat.load_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromLoad
 
   // L1MissTrace Chisel DB

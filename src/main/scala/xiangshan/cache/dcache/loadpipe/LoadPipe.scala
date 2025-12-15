@@ -487,18 +487,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val late_hit_prefetch = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   // val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !isFromL1Prefetch(s2_hit_prefetch)
   // val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && isFromL1Prefetch(s2_hit_prefetch)
-  val prefetch_hit = Wire(Bool()) // assigned in s3 for filtering
+  val hit_pf_in_cache = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
   
   io.prefetch_stat.total_prefetch := total_prefetch
-  io.prefetch_stat.late_hit_prefetch := late_hit_prefetch
+  io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
   io.prefetch_stat.nack_prefetch := s2_valid && s2_nack && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   io.prefetch_stat.pf_source := s2_pf_source
 
-  io.prefetch_stat.prefetch_hit := prefetch_hit
+  io.prefetch_stat.hit_pf_in_cache := hit_pf_in_cache
   io.prefetch_stat.hit_source := hit_source
 
   io.prefetch_stat.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
@@ -587,7 +587,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
-  prefetch_hit := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  hit_pf_in_cache := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   hit_source := s3_hit_prefetch
 
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)

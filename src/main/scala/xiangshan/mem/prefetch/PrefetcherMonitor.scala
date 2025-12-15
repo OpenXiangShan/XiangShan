@@ -20,11 +20,11 @@ class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasS
 
 class LoadPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val total_prefetch = Bool() // from loadpipe s2, pf req sent
-  val late_hit_prefetch = Bool() // from loadpipe s2, pf req sent but hit
+  val pf_late_in_cache = Bool() // from loadpipe s2, pf req sent but hit
   val nack_prefetch = Bool() // from loadpipe s2, pf req miss but nack
   val pf_source = UInt(L1PfSourceBits.W)
 
-  val prefetch_hit = Bool() // from loadpipe s3, pf block hit by demand, clear pf flag
+  val hit_pf_in_cache = Bool() // from loadpipe s3, pf block hit by demand, clear pf flag
   val hit_source = UInt(L1PfSourceBits.W)
 
   val demand_miss = Bool() // from loadpipe s2, demand req miss
@@ -32,19 +32,20 @@ class LoadPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 }
 
 class MainPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
-  val bad_prefetch = Bool() // from mainpipe replace, prefetch block but not accessed
-  val bad_source = UInt(L1PfSourceBits.W)
+  val pf_useless = Bool() // from mainpipe replace, prefetch block but not accessed
+  val pf_source_useless = UInt(L1PfSourceBits.W)
 
-  val good_prefetch = Bool() // from mainpipe, refill accessed pf block | store req hit pf block
-  val good_source = UInt(L1PfSourceBits.W)
+  val hit_pf_in_cache = Bool() // from mainpipe, refill accessed pf block | store req hit pf block
+  val hit_pf_source_in_cache = UInt(L1PfSourceBits.W)
 }
 
 class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
-  val late_miss_prefetch = Bool() // from missqueue, pf req match a existing mshr
+  val pf_late_in_mshr = Bool() // from missqueue, pf req match a existing mshr
   val prefetch_miss = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
 
-  val demand_match_pfmshr = Bool() // from missqueue, demand miss match a existing pf mshr, then clear pf flag
+  val hit_pf_in_mshr = Bool() // from missqueue, demand miss match a existing pf mshr, then clear pf flag
+  val hit_pf_source_in_mshr = UInt(L1PfSourceBits.W) // from missqueue, the pf source of demand miss matched
   val load_miss = Bool() // from missqueue, load demand miss allocate a new mshr
 }
 
@@ -70,7 +71,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 
   for (i <- 0 until LoadPipelineWidth) {
     when(io.clear_flag(i)) {
-      prefetch_info.loadinfo(i).prefetch_hit := false.B
+      prefetch_info.loadinfo(i).hit_pf_in_cache := false.B
     }
   }
 
@@ -86,47 +87,51 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 
   // ldu 0, 1, 2 can only have one prefetch request at a time
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _)
-  val late_hit_prefetch = io.loadinfo.map(t => t.late_hit_prefetch).reduce(_ || _)
   val nack_prefetch = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _)
-  val late_miss_prefetch = io.missinfo.late_miss_prefetch
+  val pf_late_in_cache = io.loadinfo.map(t => t.pf_late_in_cache).reduce(_ || _)
+  val pf_late_in_mshr = io.missinfo.pf_late_in_mshr
+  val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
   // demand accesses from different ldu may hit different prefetch blocks
-  val good_prefetch = PopCount(prefetch_info.loadinfo.map(t => t.prefetch_hit) ++ Seq(prefetch_info.maininfo.good_prefetch))
-  val bad_prefetch = io.maininfo.bad_prefetch
+  val hit_pf_in_cache = PopCount(prefetch_info.loadinfo.map(t => t.hit_pf_in_cache) ++ Seq(prefetch_info.maininfo.hit_pf_in_cache))
+  val hit_pf_in_mshr = io.missinfo.hit_pf_in_mshr
+  val hit_pf = hit_pf_in_cache + hit_pf_in_mshr.asUInt
+  val pf_useless = io.maininfo.pf_useless
   val prefetch_miss = io.missinfo.prefetch_miss
-  val load_miss = io.missinfo.load_miss
-  val demand_match_pfmshr = io.missinfo.demand_match_pfmshr
+  val load_miss_to_mshr = io.missinfo.load_miss
   // ldu 0, 1, 2 can have multiple demand accesses at a time
-  val demand_miss = PopCount(io.loadinfo.map(t => t.demand_miss))
+  val demand_miss_in_ldu = PopCount(io.loadinfo.map(t => t.demand_miss))
   val pollution = PopCount(io.loadinfo.map(t => t.pollution))
   
-  XSPerfAccumulate("total_prefetch", total_prefetch)
-  XSPerfAccumulate("late_hit_prefetch", late_hit_prefetch)
-  XSPerfAccumulate("nack_prefetch", nack_prefetch)
-  XSPerfAccumulate("late_miss_prefetch", late_miss_prefetch)
-  XSPerfAccumulate("good_prefetch", good_prefetch)
-  XSPerfAccumulate("bad_prefetch", bad_prefetch)
-  XSPerfAccumulate("prefetch_miss", prefetch_miss)
-  XSPerfAccumulate("load_miss", load_miss)
-  XSPerfAccumulate("demand_match_pfmshr", demand_match_pfmshr)
-  XSPerfAccumulate("demand_miss", demand_miss)
+  XSPerfAccumulate("l1DemandMiss", demand_miss_in_ldu)
+  XSPerfAccumulate("l1prefetchSent", total_prefetch)
+  XSPerfAccumulate("l1prefetchHit", hit_pf)
+  XSPerfAccumulate("l1prefetchHitInCache", hit_pf_in_cache)
+  XSPerfAccumulate("l1prefetchHitInMSHR", hit_pf_in_mshr)
+  XSPerfAccumulate("l1prefetchLate", pf_late)
+  XSPerfAccumulate("l1prefetchLateInCache", pf_late_in_cache)
+  XSPerfAccumulate("l1prefetchLateInMSHR", pf_late_in_mshr)
+  XSPerfAccumulate("l1prefetchUseless", pf_useless)
+  XSPerfAccumulate("l1prefetchDropByNack", nack_prefetch)
+  XSPerfAccumulate("mshr_count_Prefetch", prefetch_miss)
+  XSPerfAccumulate("mshr_count_CPU", load_miss_to_mshr)
   XSPerfAccumulate("cache_pollution", pollution)
 
   // rolling by instr
   XSPerfRolling(
     "L1PrefetchAccuracyIns",
-    good_prefetch, total_prefetch,
+    hit_pf_in_cache, total_prefetch,
     1000, io.debugRolling.robTrueCommit, clock, reset
   )
   
   XSPerfRolling(
     "L1PrefetchLatenessIns",
-    demand_match_pfmshr, prefetch_miss,
+    hit_pf_in_mshr, prefetch_miss,
     1000, io.debugRolling.robTrueCommit, clock, reset
   )
 
   XSPerfRolling(
     "L1PrefetchPollutionIns",
-    pollution, demand_miss,
+    pollution, demand_miss_in_ldu,
     1000, io.debugRolling.robTrueCommit, clock, reset
   )
 
@@ -170,47 +175,50 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
-  val late_hit_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
-  val late_miss_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
+  val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
+  val pf_late_in_mshr_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
 
-  val good_prefetch_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
-  val bad_prefetch_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
+  val hit_pf_in_cache_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
+  val pf_useless_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
 
   val back_off_cnt = RegInit(0.U((log2Up(param.BACK_OFF_INTERVAL) + 1).W))
   val low_conf_cnt = RegInit(0.U((log2Up(param.LOW_CONF_INTERVAL) + 1).W))
 
-  val timely_reset = (total_prefetch_cnt === param.TIMELY_CHECK_INTERVAL.U) || (late_hit_prefetch_cnt >= param.TIMELY_CHECK_INTERVAL.U)
-  val validity_reset = (good_prefetch_cnt + bad_prefetch_cnt) === param.VALIDITY_CHECK_INTERVAL.U
+  val timely_reset = (total_prefetch_cnt === param.TIMELY_CHECK_INTERVAL.U) || (pf_late_in_cache_cnt >= param.TIMELY_CHECK_INTERVAL.U)
+  val validity_reset = (hit_pf_in_cache_cnt + pf_useless_cnt) === param.VALIDITY_CHECK_INTERVAL.U
   val back_off_reset = back_off_cnt === param.BACK_OFF_INTERVAL.U
   val conf_reset = low_conf_cnt === param.LOW_CONF_INTERVAL.U
 
   val total_prefetch = io.prefetch_info.loadinfo.map(t => t.total_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
-  val late_hit_prefetch = io.prefetch_info.loadinfo.map(t => t.late_hit_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
+  val pf_late_in_cache = io.prefetch_info.loadinfo.map(t => t.pf_late_in_cache && param.isMyType(t.pf_source)).reduce(_ || _)
   val nack_prefetch = io.prefetch_info.loadinfo.map(t => t.nack_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
-  val late_miss_prefetch = io.prefetch_info.missinfo.late_miss_prefetch && param.isMyType(io.prefetch_info.missinfo.pf_source)
-  val good_prefetch = PopCount(io.prefetch_info.loadinfo.map(t => t.prefetch_hit && param.isMyType(t.hit_source)) ++ Seq(io.prefetch_info.maininfo.good_prefetch && param.isMyType(io.prefetch_info.maininfo.good_source)))
-  val bad_prefetch = io.prefetch_info.maininfo.bad_prefetch && param.isMyType(io.prefetch_info.maininfo.bad_source)
+  val pf_late_in_mshr = io.prefetch_info.missinfo.pf_late_in_mshr && param.isMyType(io.prefetch_info.missinfo.pf_source)
+  val hit_pf_in_cache = PopCount(io.prefetch_info.loadinfo.map(t => t.hit_pf_in_cache && param.isMyType(t.hit_source)) ++ Seq(io.prefetch_info.maininfo.hit_pf_in_cache && param.isMyType(io.prefetch_info.maininfo.hit_pf_source_in_cache)))
+  val pf_useless = io.prefetch_info.maininfo.pf_useless && param.isMyType(io.prefetch_info.maininfo.pf_source_useless)
   val prefetch_miss = io.prefetch_info.missinfo.prefetch_miss && param.isMyType(io.prefetch_info.missinfo.pf_source)
+  val hit_pf_in_mshr = io.prefetch_info.missinfo.hit_pf_in_mshr && param.isMyType(io.prefetch_info.missinfo.hit_pf_source_in_mshr)
+  val hit_pf = hit_pf_in_cache + hit_pf_in_mshr.asUInt
+  val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
 
   total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
-  late_hit_prefetch_cnt := Mux(timely_reset, 0.U, late_hit_prefetch_cnt + late_hit_prefetch)
-  late_miss_prefetch_cnt := Mux(timely_reset, 0.U, late_miss_prefetch_cnt + late_miss_prefetch)
-  good_prefetch_cnt := Mux(validity_reset, 0.U, good_prefetch_cnt + good_prefetch)
-  bad_prefetch_cnt := Mux(validity_reset, 0.U, bad_prefetch_cnt + bad_prefetch)
+  pf_late_in_cache_cnt := Mux(timely_reset, 0.U, pf_late_in_cache_cnt + pf_late_in_cache)
+  pf_late_in_mshr_cnt := Mux(timely_reset, 0.U, pf_late_in_mshr_cnt + pf_late_in_mshr)
+  hit_pf_in_cache_cnt := Mux(validity_reset, 0.U, hit_pf_in_cache_cnt + hit_pf_in_cache)
+  pf_useless_cnt := Mux(validity_reset, 0.U, pf_useless_cnt + pf_useless)
 
   back_off_cnt := Mux(back_off_reset, 0.U, back_off_cnt + !enable)
   low_conf_cnt := Mux(conf_reset, 0.U, low_conf_cnt + !confidence.asBool)
 
-  val trigger_late_hit = timely_reset && (late_hit_prefetch_cnt >= param.LATE_HIT_THRESHOLD.U)
-  val trigger_late_miss = timely_reset && (late_miss_prefetch_cnt >= param.LATE_MISS_THRESHOLD.U)
-  val trigger_bad_prefetch = validity_reset && (bad_prefetch_cnt >= param.BAD_THRESHOLD.U)
-  val trigger_disable = validity_reset && (bad_prefetch_cnt >= param.DISABLE_THRESHOLD.U)
+  val trigger_late_hit = timely_reset && (pf_late_in_cache_cnt >= param.LATE_HIT_THRESHOLD.U)
+  val trigger_late_miss = timely_reset && (pf_late_in_mshr_cnt >= param.LATE_MISS_THRESHOLD.U)
+  val trigger_pf_useless = validity_reset && (pf_useless_cnt >= param.BAD_THRESHOLD.U)
+  val trigger_disable = validity_reset && (pf_useless_cnt >= param.DISABLE_THRESHOLD.U)
 
   flush := Mux(flush, false.B, flush)
   enable := Mux(back_off_reset, true.B, enable)
   confidence := Mux(conf_reset, 1.U(1.W), confidence)
 
-  when(trigger_bad_prefetch) {
+  when(trigger_pf_useless) {
     depth := Mux(depth === 1.U, depth, depth >> 1)
   }
   when(trigger_disable) {
@@ -245,13 +253,16 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     depth := depth_const
   }
 
-  XSPerfAccumulate(s"${param.name}_total_prefetch", total_prefetch)
-  XSPerfAccumulate(s"${param.name}_late_hit_prefetch", late_hit_prefetch)
-  XSPerfAccumulate(s"${param.name}_nack_prefetch", nack_prefetch)
-  XSPerfAccumulate(s"${param.name}_late_miss_prefetch", late_miss_prefetch)
-  XSPerfAccumulate(s"${param.name}_good_prefetch", good_prefetch)
-  XSPerfAccumulate(s"${param.name}_bad_prefetch", bad_prefetch)
-  XSPerfAccumulate(s"${param.name}_prefetch_miss", prefetch_miss)
+  XSPerfAccumulate(s"l1prefetchSent${param.name}", total_prefetch)
+  XSPerfAccumulate(s"l1prefetchHit${param.name}", hit_pf)
+  XSPerfAccumulate(s"l1prefetchHitInCache${param.name}", hit_pf_in_cache)
+  XSPerfAccumulate(s"l1prefetchHitInMSHR${param.name}", hit_pf_in_mshr)
+  XSPerfAccumulate(s"l1prefetchLate${param.name}", pf_late)
+  XSPerfAccumulate(s"l1prefetchLateInCache${param.name}", pf_late_in_cache)
+  XSPerfAccumulate(s"l1prefetchLateInMSHR${param.name}", pf_late_in_mshr)
+  XSPerfAccumulate(s"l1prefetchUseless${param.name}", pf_useless)
+  XSPerfAccumulate(s"l1prefetchDropByNack${param.name}", nack_prefetch)
+  XSPerfAccumulate(s"mshr_count_Prefetch${param.name}", prefetch_miss)
   for(i <- (0 until DEPTH_BITS)) {
     val t = (1 << i)
     XSPerfAccumulate(s"${param.name}_depth${t}", depth === t.U)
@@ -259,7 +270,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   XSPerfAccumulate(s"${param.name}_trigger_disable", trigger_disable)
   XSPerfAccumulate(s"${param.name}_trigger_late_hit", trigger_late_hit)
   XSPerfAccumulate(s"${param.name}_trigger_late_miss", trigger_late_miss)
-  XSPerfAccumulate(s"${param.name}_trigger_bad_prefetch", trigger_bad_prefetch)
+  XSPerfAccumulate(s"${param.name}_trigger_pf_useless", trigger_pf_useless)
   XSPerfAccumulate(s"${param.name}_disable_time", !enable)
 
   assert(depth =/= 0.U, s"${param.name}_depth should not be zero")

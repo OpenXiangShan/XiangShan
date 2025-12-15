@@ -1144,11 +1144,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.maininfo.bad_prefetch := extra_flag_valid && !extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
-    prefetcherMonitor.io.maininfo.bad_source := extra_flag_prefetch
+    prefetcherMonitor.io.maininfo.pf_useless := extra_flag_valid && !extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
+    prefetcherMonitor.io.maininfo.pf_source_useless := extra_flag_prefetch
 
-    prefetcherMonitor.io.maininfo.good_prefetch := extra_flag_valid && extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
-    prefetcherMonitor.io.maininfo.good_source := extra_flag_prefetch
+    prefetcherMonitor.io.maininfo.hit_pf_in_cache := extra_flag_valid && extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
+    prefetcherMonitor.io.maininfo.hit_pf_source_in_cache := extra_flag_prefetch
   }
 
   // write extra meta
