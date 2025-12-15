@@ -21,8 +21,6 @@ import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
-    BaseTableSize:          Int = 1024 * 8,
-    BaseTableTakenCtrWidth: Int = 2,
     TableInfos: Seq[TageTableInfo] = Seq(
       // TageTableInfo(Size, NumWays, HistoryLength)
       new TageTableInfo(4096, 2, 4),
@@ -48,12 +46,6 @@ case class TageParameters(
 
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
-
-  def BaseTableSize:          Int = tageParameters.BaseTableSize
-  def BaseTableNumSets:       Int = BaseTableSize / NumBanks / FetchBlockInstNum
-  def BaseTableSetIdxWidth:   Int = log2Ceil(BaseTableNumSets)
-  def BaseTableNumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
-  def BaseTableTakenCtrWidth: Int = tageParameters.BaseTableTakenCtrWidth
 
   def NumBanks:           Int = tageParameters.NumBanks
   def BankIdxWidth:       Int = log2Ceil(NumBanks)

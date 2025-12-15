@@ -23,13 +23,13 @@ import utility.XSPerfHistogram
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BtbInfo
+import xiangshan.frontend.bpu.Prediction
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // prediction specific bundle
-    val result: Vec[Valid[BtbInfo]] = Output(Vec(NumBtbResultEntries, Valid(new BtbInfo)))
-    val meta:   MainBtbMeta         = Output(new MainBtbMeta)
+    val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
+    val meta:   MainBtbMeta            = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -99,8 +99,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
-  io.result       := VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info)))
-  io.meta.entries := VecInit(alignBanks.map(b => VecInit(b.io.read.resp.map(_.meta))))
+  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
+  // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
+  io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
   /* *** t0 ***
    * receive training data and latch
@@ -119,30 +120,29 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_startPcVec = t1_rotator.rotate(
     VecInit.tabulate(NumAlignBanks)(i => getAlignedPc(t1_startPc + (i << FetchBlockAlignWidth).U))
   )
-  private val t1_meta             = t1_train.meta.mbtb
-  private val t1_mispredictBranch = t1_train.mispredictBranch
+  private val t1_meta           = t1_train.meta.mbtb
+  private val t1_mispredictInfo = t1_train.mispredictBranch
 
-  private val t1_writeValid = t1_valid && t1_mispredictBranch.valid && t1_mispredictBranch.bits.taken
-
-  private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictBranch.bits.cfiPosition)
+  private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid           := t1_writeValid && t1_writeAlignBankMask(i)
-    b.io.write.req.bits.startPc    := t1_startPcVec(i)
-    b.io.write.req.bits.branchInfo := t1_mispredictBranch.bits
-    b.io.write.req.bits.meta       := t1_meta.entries(i)
+    b.io.write.req.valid         := t1_valid && t1_writeAlignBankMask(i)
+    b.io.write.req.bits.startPc  := t1_startPcVec(i)
+    b.io.write.req.bits.branches := t1_train.branches
+    b.io.write.req.bits.meta     := t1_meta.entries(i)
+    // see comments in MainBtbAlignBank.scala
+    b.io.write.req.bits.mispredictInfo := t1_mispredictInfo
   }
 
   /* *** statistics *** */
-  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.map(_.info.valid)))
-  private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictBranch.bits)).reduce(_ || _)
+  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
+  private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
 
   XSPerfAccumulate("total_train", t1_valid)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
   XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
-  XSPerfAccumulate("train_write_new_entry", t1_writeValid)
-  XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictBranch.valid)
-  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictBranch.valid && perf_t1HitMispredictBranch)
+  XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictInfo.valid)
+  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
   XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
 }

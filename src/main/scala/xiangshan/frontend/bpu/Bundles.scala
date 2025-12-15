@@ -321,14 +321,11 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
 }
 
 // sub predictors -> Bpu top
-class BtbInfo(implicit p: Parameters) extends BpuBundle {
+class Prediction(implicit p: Parameters) extends BpuBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
-}
-
-class Prediction(implicit p: Parameters) extends BtbInfo {
-  val taken: Bool = Bool()
+  val taken:       Bool            = Bool()
 
   def isIdentical(other: Prediction): Bool =
     this.taken === other.taken &&
