@@ -353,9 +353,9 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  val mvendorid = Module(new CSRModule("Mvendorid", new CSRBundle {
-    val ALL = RO(63, 0)
-  }))
+  // JEDEC JEP106 Manufacturer ID: 
+  //   Bank 17 (16 continuations), Offset 0x6F (111)
+  val mvendorid = Module(new CSRModule("Mvendorid", new MvendoridBundle))
     .setAddr(CSRs.mvendorid)
 
   // architecture id for XiangShan is 25
@@ -701,6 +701,19 @@ class MEnvCfg extends EnvCfg {
 
 object MarchidField extends CSREnum with ROApply {
   val XSArchid = Value(25.U)
+}
+
+class MvendoridBundle extends CSRBundle {
+  val Bank   = MvidBankField(31, 7).withReset(MvidBankField.BANK)
+  val Offset = MvidOffsetField(6, 0).withReset(MvidOffsetField.OFFSET)
+}
+
+object MvidBankField extends CSREnum with ROApply {
+  val BANK = Value(16.U)
+}
+
+object MvidOffsetField extends CSREnum with ROApply {
+  val OFFSET = Value(0x6F.U)
 }
 
 class MieToHie extends Bundle {
