@@ -63,7 +63,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   when(enqValid && !enqNeedCancel) {
     when(!valid){
       entries.uop           := enqBits.toDynInst()
-      entries.vl            := enqBits.src(vlIndice).asTypeOf(Vl())
+      entries.vl            := enqBits.vl.get
       entries.hasException  := false.B
     }.elsewhen(valid && enqIsFixVl){
       entries.uop     := enqBits.toDynInst()

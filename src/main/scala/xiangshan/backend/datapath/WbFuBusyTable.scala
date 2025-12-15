@@ -83,7 +83,7 @@ class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSMo
       case FpWB(_, _) => p.wbPortConfigs.collectFirst { case x: FpWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
       case VfWB(_, _) => p.wbPortConfigs.collectFirst { case x: VfWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
       case V0WB(_, _) => p.wbPortConfigs.collectFirst { case x: V0WB => x.port }.getOrElse(-1) == portId && source.nonEmpty
-      case VlWB(_, _) => p.wbPortConfigs.collectFirst { case x: VlWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+      case VlWB(_, _) => p.getVlWBPort.map(_.port).getOrElse(-1) == portId && source.nonEmpty
       case _ => throw new IllegalArgumentException(s"WbConfig ${wbType} is not permitted")
     }
   }

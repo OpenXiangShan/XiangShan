@@ -396,9 +396,9 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     instMicroOp.vstart                := 0.U
     instMicroOp.uopFlowNum            := uopFlowNum
     instMicroOp.uopFlowNumMask        := GenVlMaxMask(uopFlowNum, elemIdxBits) // for merge data
-    instMicroOp.vl                    := io.in.bits.src(vlIndice).asTypeOf(Vl())
+    instMicroOp.vl                    := io.in.bits.vl.get
     instMicroOp.exceptionVl.valid     := false.B
-    instMicroOp.exceptionVl.bits      := io.in.bits.src(vlIndice).asTypeOf(Vl())
+    instMicroOp.exceptionVl.bits      := io.in.bits.vl.get
     segmentOffset                     := 0.U
     instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVSegLoad(io.in.bits.fuType)
     instMicroOp.isVSegLoad            := FuType.isVSegLoad(io.in.bits.fuType)

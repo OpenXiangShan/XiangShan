@@ -33,10 +33,11 @@ import utility.sram.SramBroadcastBundle
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
-import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
+import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
+import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
@@ -66,6 +67,17 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
 
   override def shouldBeInlined: Boolean = true
 
+  /**
+   * updateExuIdx should be executed before the use of {{{
+   *   ExeUnitParams.exuIdx
+   * }}}
+   */
+  for ((exuCfg: ExeUnitParams, i) <- params.allExuParams.zipWithIndex) {
+    exuCfg.bindBackendParam(params)
+    exuCfg.updateIQWakeUpConfigs(params.iqWakeUpParams)
+    exuCfg.updateExuIdx(i)
+  }
+
   // check read & write port config
   params.configChecks
 
@@ -80,11 +92,6 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     iqCfg.exuBlockParams.map(_.bindIssueBlockParam(iqCfg))
   }
 
-  for ((exuCfg, i) <- params.allExuParams.zipWithIndex) {
-    exuCfg.bindBackendParam(params)
-    exuCfg.updateIQWakeUpConfigs(params.iqWakeUpParams)
-    exuCfg.updateExuIdx(i)
-  }
 
   println(s"[Backend] debugEn:${backendParams.debugEn}")
   println(s"[Backend] basicDebugEn:${backendParams.basicDebugEn}")
@@ -277,7 +284,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.srcType.zip(source.bits.srcType).map(x => x._1 := x._2)
     sink.bits.psrc.zip(source.bits.psrc).map(x => x._1 := x._2)
     sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
+    // only the IQ contains VSET uop will use psrcVl and srcStateVl
+    sink.bits.psrcVl.foreach(_ := source.bits.psrcVl)
+    sink.bits.srcStateVl.foreach(_ := source.bits.srcStateVl)
     sink.bits.srcLoadDependency.zip(source.bits.srcLoadDependency).map(x => x._1 := x._2)
+    sink.bits.pdestVl.foreach(_ := source.bits.pdestVl)
   }}
   println(s"[Backend] intRegion.io.memWriteback.size = ${intRegion.io.memWriteback.size}")
 
@@ -313,7 +324,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   fpRegion.io.hartId := io.fromTop.hartId
   fpRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
-  fpRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.fpUops).map{ case (sink, source) => {
+  fpRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.fpUops).map{ case (sink, source) =>
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
     source.ready := sink.ready
@@ -323,17 +334,18 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
     sink.bits.srcLoadDependency.zip(source.bits.srcLoadDependency).map(x => x._1 := x._2)
   }
-  }
   fpRegion.io.ldCancel := io.mem.ldCancel
   fpRegion.io.vlWriteBackInfoIn := 0.U.asTypeOf(intRegion.io.vlWriteBackInfoIn)
 
   vecRegion.io.hartId := io.fromTop.hartId
   vecRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
-  vecRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.vfUops).map { case (sink, source) => {
+  vecRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.vfUops).foreach { case (sink, source) =>
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
     source.ready := sink.ready
-  }
+    sink.bits.srcStateVl.get := source.bits.srcStateVl
+    sink.bits.psrcVl.get := source.bits.psrcVl
+    sink.bits.pdestVl.foreach(_ := source.bits.pdestVl)
   }
   vecRegion.io.memWriteback <> io.mem.vecWriteback
   vecRegion.io.ldCancel := io.mem.ldCancel

@@ -111,7 +111,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val wbPregsFp = Vec(backendParams.numPregWb(FpData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVec = Vec(backendParams.numPregWb(VecData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsV0 = Vec(backendParams.numPregWb(V0Data()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(VlPhyRegIdxWidth.W))))
     val wakeUpAll = new Bundle {
       val wakeUpInt: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
       val wakeUpFp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
@@ -184,8 +184,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val renameWidth = io.fromRename.size
   val issueQueueCount = io.IQValidNumVec
   val issueQueueNum = allIssueParams.size
-  // int fp vec v0 vl
-  val numRegType = 5
+  // int fp vec v0
+  val numRegType = 4
   val idxRegTypeInt = allFuConfigs.map(x => {
     x.srcData.map(xx => {
       xx.zipWithIndex.filter(y => IntRegSrcDataSet.contains(y._1)).map(_._2)
@@ -247,16 +247,15 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val vecBusyTable = Module(new BusyTable(numRegSrcVf * renameWidth, backendParams.numPregWb(VecData()), VfPhyRegs, VfWB()))
   val v0BusyTable = Module(new BusyTable(numRegSrcV0 * renameWidth, backendParams.numPregWb(V0Data()), V0PhyRegs, V0WB()))
   val vlBusyTable = Module(new VlBusyTable(numRegSrcVl * renameWidth, backendParams.numPregWb(VlData()), VlPhyRegs, VlWB()))
-  vlBusyTable.io_vl_Wb.vlWriteBackInfo := io.vlWriteBackInfo
-  val busyTables = Seq(intBusyTable, fpBusyTable, vecBusyTable, v0BusyTable, vlBusyTable)
-  val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0, io.wbPregsVl)
-  val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0, idxRegTypeVl)
+
+  val busyTables = Seq(intBusyTable, fpBusyTable, vecBusyTable, v0BusyTable)
+  val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0)
+  val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0)
   val allocPregsValid = Wire(Vec(busyTables.size, Vec(RenameWidth, Bool())))
   allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.isMove))
   allocPregsValid(1) := VecInit(fromRename.map(x => x.valid && x.bits.fpWen))
   allocPregsValid(2) := VecInit(fromRename.map(x => x.valid && x.bits.vecWen))
   allocPregsValid(3) := VecInit(fromRename.map(x => x.valid && x.bits.v0Wen))
-  allocPregsValid(4) := VecInit(fromRename.map(x => x.valid && x.bits.vlWen))
   val allocPregs = Wire(Vec(busyTables.size, Vec(RenameWidth, ValidIO(UInt(PhyRegIdxWidth.W)))))
   allocPregs.zip(allocPregsValid).map(x =>{
     x._1.zip(x._2).zipWithIndex.map{case ((sink, source), i) => {
@@ -274,6 +273,25 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.wbPregs := w
     b.io.allocPregs := a
   }}
+
+  vlBusyTable.io match {
+    case in =>
+      in.wakeUpInt := 0.U.asTypeOf(in.wakeUpInt)
+      in.wakeUpFp := 0.U.asTypeOf(in.wakeUpFp)
+      in.wakeUpVec := 0.U.asTypeOf(in.wakeUpVec)
+      in.og0Cancel := 0.U.asTypeOf(in.og0Cancel)
+      in.ldCancel := 0.U.asTypeOf(in.ldCancel)
+      for (i <- in.read.indices) {
+        in.read(i).req := fromRename(i).bits.psrcVl
+      }
+      in.wbPregs := io.wbPregsVl
+      for (i <- in.allocPregs.indices) {
+        in.allocPregs(i).valid := fromRename(i).valid && fromRename(i).bits.vlWen
+        in.allocPregs(i).bits := fromRename(i).bits.pdestVl
+      }
+  }
+  vlBusyTable.io_vl_Wb.vlWriteBackInfo := io.vlWriteBackInfo
+
   rcTagTable.io.allocPregs.zip(allocPregs(0)).map(x => x._1 := x._2)
   println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.length}")
   println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.length}")
@@ -318,6 +336,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }
   }}
   val allSrcState = Wire(Vec(renameWidth, Vec(numRegSrc, Vec(numRegType, Bool()))))
+  // only one vl src is needed for one uop
+  val allSrcStateVl = Wire(Vec(renameWidth, Bool()))
   for (i <- 0 until renameWidth){
     for (j <- 0 until numRegSrc){
       for (k <- 0 until numRegType){
@@ -331,12 +351,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
             case 1 => SrcType.isFp(fromRename(i).bits.srcType(j))
             case 2 => SrcType.isVp(fromRename(i).bits.srcType(j))
             case 3 => SrcType.isV0(fromRename(i).bits.srcType(j))
-            case 4 => true.B
           }
           allSrcState(i)(j)(k) := readEn && busyTables(k).io.read(readidx).resp || SrcType.isImm(fromRename(i).bits.srcType(j))
         }
       }
     }
+    allSrcStateVl(i) := vlBusyTable.io.read(i).resp || !fromRename(i).bits.vlRen
   }
 
   // eliminate old vd
@@ -511,10 +531,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
         val thisSrcHasFp  = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) FpRegSrcDataSet.contains(xx(j))  else false}).reduce(_ || _)}).reduce(_ || _)
         val thisSrcHasVec = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) VecRegSrcDataSet.contains(xx(j)) else false}).reduce(_ || _)}).reduce(_ || _)
         val thisSrcHasV0  = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) V0RegSrcDataSet.contains(xx(j))  else false}).reduce(_ || _)}).reduce(_ || _)
-        val thisSrcHasVl  = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) VlRegSrcDataSet.contains(xx(j))  else false}).reduce(_ || _)}).reduce(_ || _)
-        val selSrcState = Seq(thisSrcHasInt || maskForStd, thisSrcHasFp || maskForStd, thisSrcHasVec, thisSrcHasV0, thisSrcHasVl)
+        val selSrcState = Seq(thisSrcHasInt || maskForStd, thisSrcHasFp || maskForStd, thisSrcHasVec, thisSrcHasV0)
         IQSelUop(temp).bits.srcState(j) := PriorityMux(oh, allSrcState)(j).zip(selSrcState).filter(_._2 == true).map(_._1).foldLeft(false.B)(_ || _).asUInt
       }
+      IQSelUop(temp).bits.srcStateVl := PriorityMux(oh, allSrcStateVl)
       temp = temp + 1
       if (backendParams.debugEn){
         dontTouch(oh)
