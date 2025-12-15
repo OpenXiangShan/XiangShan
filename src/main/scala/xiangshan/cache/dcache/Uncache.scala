@@ -64,9 +64,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
   val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
-
-  val resp_denied = Bool()
-  val resp_corrupt = Bool()
+  val resp_derr = Bool()
 
   /* NOTE: if it support the internal forward logic, here can uncomment */
   // val fwd_data = UInt(XLEN.W)
@@ -81,6 +79,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
     resp_nderr := false.B
+    resp_derr := false.B
     // fwd_data := 0.U
     // fwd_mask := 0.U
   }
@@ -101,9 +100,8 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     when(cmd === MemoryOpConstants.M_XRD) {
       data := x.data
     }
-    resp_nderr := x.denied || x.corrupt
-    resp_denied := x.denied
-    resp_corrupt := x.corrupt
+    resp_nderr := x.denied
+    resp_derr := x.corrupt && !x.denied
   }
 
   // def update(forwardData: UInt, forwardMask: UInt): Unit = {
@@ -121,14 +119,12 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     r.data := resp_fwd_data
     r.id := eid
     r.nderr := resp_nderr
-    r.denied := resp_denied
-    r.corrupt := resp_corrupt
     r.nc := nc
     r.is2lq := cmd === MemoryOpConstants.M_XRD
     r.miss := false.B
     r.replay := false.B
     r.tag_error := false.B
-    r.error := false.B
+    r.error := resp_derr
     r
   }
 }
