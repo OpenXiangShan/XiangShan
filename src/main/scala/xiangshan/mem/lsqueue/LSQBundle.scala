@@ -19,7 +19,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx, MemExuOutput}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
@@ -27,7 +27,6 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{CMOReq, CMOResp, DCacheWordReqWithVaddrAndPfFlag, UncacheWordIO}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.Bundles.{SQForward, StoreMaskBundle}
-
 
 class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
   // Bundle define

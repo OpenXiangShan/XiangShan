@@ -856,6 +856,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     io.sbufferForwardResp.valid && io.sbufferForwardResp.bits.matchInvalid ||
     io.uncacheForwardResp.valid && io.uncacheForwardResp.bits.matchInvalid
 
+  val forwardInvalid = io.sqForwardResp.valid && io.sqForwardResp.bits.forwardInvalid
+
   // MSHR / TileLink-D channel
   val mshrForwardDenied = io.mshrForwardResp.valid && io.mshrForwardResp.bits.denied
   val tldForwardDenied = io.tldForwardResp.valid && io.tldForwardResp.bits.denied
@@ -872,10 +874,6 @@ class LoadUnitS2(param: ExeUnitParams)(
   // Uncache bypass
   afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.nderr
   hweBypassCorrupt := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.derr
-
-  // Uncache bypass
-  afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.denied
-  hweBypassCorrupt := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.corrupt && !io.uncacheBypassResp.bits.denied
 
   /**
     * DCache early response
@@ -949,10 +947,18 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.ftqPtr := uop.ftqPtr
   nukeQueryReq.ftqOffset := uop.ftqOffset
 
+  val rarNack = io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
+  val rawNack = io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
+
   /**
     * Load replay
     */
   val shouldReplay = cause.asUInt.orR // including fast replay
+  cause(C_UNCACHE) := troubleMaker && Mux(
+    isUncacheReplay,
+    isNCReplay && (sqDataInvalid || rarNack || rawNack || nuke || forwardInvalid),
+    isUncache
+  )
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
   cause(C_TM) := troubleMaker && tlbMiss
   cause(C_FF) := troubleMaker && sqDataInvalid
@@ -960,10 +966,11 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
   cause(C_WF) := false.B
   cause(C_BC) := troubleMaker && needDCacheAccess && bankConflict
-  cause(C_RAR) := troubleMaker && io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
-  cause(C_RAW) := troubleMaker && io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
+  cause(C_RAR) := troubleMaker && rarNack
+  cause(C_RAW) := troubleMaker && rawNack
   cause(C_NK) := troubleMaker && nuke
   cause(C_MF) := false.B
+  cause(C_SMF) := troubleMaker && forwardInvalid
 
   def hasHigherPriorityCauses(cause: Vec[Bool], index: Int): Bool = {
     if (index == 0) false.B
@@ -1286,7 +1293,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.tlbMiss := TlbAccessResult.isMiss(in.tlbAccessResult.get)// TODO: remove this
   lqWrite.ptwBack := false.B // TODO: remove this
   lqWrite.af := exceptionVec(loadAccessFault) // TODO: remove this
-  lqWrite.nc := in.nc.get
+  lqWrite.nc := in.nc.get || isNCR
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
   lqWrite.hasException := false.B // ?
@@ -1611,8 +1618,6 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val mshrForward = new DCacheForward
   val tldForward = new DCacheForward
   val uncacheBypass = new UncacheBypass
-  // Uncache data
-  val uncacheData = Input(new LoadDataFromLQBundle)
   // Nuke check with StoreUnit
   val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
   // Nuke check with RAR / RAW
@@ -1730,7 +1735,6 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
-  s3.io.uncacheData := RegNextN(io.uncacheData, 3) // TODO
   s3.io.csrCtrl := io.csrCtrl
 
   // Data path
