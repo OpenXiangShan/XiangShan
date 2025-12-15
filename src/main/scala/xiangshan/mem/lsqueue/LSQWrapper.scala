@@ -92,6 +92,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
+    val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = new SbufferWriteIO
     val forward = Flipped(Vec(LoadPipelineWidth, new SQForward))
@@ -247,10 +248,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.sq.stDataReadyVec   <> storeQueue.io.toLoadQueue.stDataReadyVec
   loadQueue.io.sq.stIssuePtr       <> storeQueue.io.toLoadQueue.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
+  loadQueue.io.sq.sqDeqPtr         <> storeQueue.io.sqDeqPtr
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
+  loadQueue.io.bypass              <> io.bypass
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
