@@ -241,6 +241,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.sq.stDataReadyVec   <> storeQueue.io.toLoadQueue.stDataReadyVec
   loadQueue.io.sq.stIssuePtr       <> storeQueue.io.toLoadQueue.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
+  loadQueue.io.sq.sqDeqPtr         <> storeQueue.io.sqDeqPtr
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
