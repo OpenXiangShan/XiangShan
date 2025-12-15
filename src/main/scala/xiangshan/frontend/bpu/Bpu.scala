@@ -518,7 +518,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
   private val s3_predictionSource = PriorityEncoder(Seq(
-    false.B, // s3_taken && s3_firstTakenBranchIsReturn                    // RAS
+    s3_taken && s3_firstTakenBranchIsReturn,                               // RAS
     s3_taken && s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit, // ITTage
     s3_taken && s3_firstTakenBranch.bits.attribute.isConditional,          // MbtbTage
     s3_taken,                                                              // Mbtb
