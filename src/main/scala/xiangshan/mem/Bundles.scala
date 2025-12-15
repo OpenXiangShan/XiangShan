@@ -111,6 +111,7 @@ object Bundles {
     val replacementUpdated  = Bool()
     val missDbUpdated = Bool()
     val forward_tlDchannel = Bool()
+    val isMmioOrNc = Bool()
     val dcacheRequireReplay = Bool()
     val delayedLoadError = Bool()
     val lateKill = Bool()

@@ -309,6 +309,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
+  for(i <- 0 until LoadPipelineWidth) {
+    loadQueueReplay.io.mmioOut(i).valid := uncacheBuffer.io.mmioOut(i).valid
+    loadQueueReplay.io.mmioOut(i).bits := uncacheBuffer.io.mmioOut(i).bits
+    loadQueueReplay.io.ncOut(i).valid := uncacheBuffer.io.ncOut(i).valid
+    loadQueueReplay.io.ncOut(i).bits := uncacheBuffer.io.ncOut(i).bits
+  }
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
