@@ -102,6 +102,7 @@ object Bundles {
     val commitType = CommitType()
     def numSrc = backendParams.numSrc
     val srcType = Vec(numSrc, SrcType())
+    val vlRen = Bool()
     val lsrc = Vec(numSrc, UInt(LogicRegsWidth.W))
     val ldest = UInt(LogicRegsWidth.W)
     val fuType = FuType()
@@ -199,6 +200,7 @@ object Bundles {
     val vecWen = Bool()
     val v0Wen = Bool()
     val vlWen = Bool()
+    val vlRen = Bool()
     val waitForward = Bool() // no speculate execution
     val blockBackward = Bool()
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
@@ -216,7 +218,9 @@ object Bundles {
     val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
+    val pdestVl = UInt(VlPhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val dirtyFs = Bool()
     val dirtyVs = Bool()
@@ -279,7 +283,9 @@ object Bundles {
     val lastUop = Bool()
     // from rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
+    val pdestVl = UInt(VlPhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val numLsElem = NumLsElem()
     val rasAction = BranchAttribute.RasAction()
@@ -290,6 +296,7 @@ object Bundles {
     val loadWaitStrict = Bool()
     val ssid = UInt(SSIDWidth.W)
     val srcState = Vec(numSrc, SrcState())
+    val srcStateVl = SrcState()
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
     val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
@@ -337,7 +344,9 @@ object Bundles {
     // from rename
     val robIdx    = new RobPtr
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
+    val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W)) // Todo: reuse psrc to store it
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
@@ -351,6 +360,7 @@ object Bundles {
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val useRegCache       = Vec(backendParams.numIntRegSrc, Bool())
     val regCacheIdx       = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val srcStateVl        = Option.when(params.readVlRf)(SrcState())
     val lqIdx             = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
     val sqIdx             = Option.when(params.isLdAddrIQ || params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ)(new SqPtr) // load unit need sqIdx
     // cas ctrl
@@ -385,6 +395,7 @@ object Bundles {
     // from rename
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
+    val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
@@ -579,6 +590,7 @@ object Bundles {
     val v0Wen = Bool()
     val vlWen = Bool()
     val pdest = UInt(pregIdxWidth.W)
+    val pdestVl = UInt(VlPhyRegIdxWidth.W)
 
     /**
       * @param successor Seq[(psrc, srcType)]
@@ -603,7 +615,7 @@ object Bundles {
     }
     def wakeUpVl(successor: (UInt, UInt), valid: Bool): Bool = {
       val (thatPsrc, srcType) = successor
-      val pdestMatch = pdest === thatPsrc
+      val pdestMatch = pdestVl === thatPsrc
       pdestMatch && (
         SrcType.isVp(srcType) && this.vlWen
       ) && valid
@@ -647,7 +659,11 @@ object Bundles {
     }
   }
 
-  class IssueQueueWBWakeUpBundle(exuIndices: Seq[Int], backendParams: BackendParams)(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, exuIndices) {
+  class IssueQueueWBWakeUpBundle(
+    exuIndices: Seq[Int],
+    backendParams: BackendParams,
+    val dataConfig: DataConfig,
+  )(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, exuIndices) {
 
   }
 
@@ -676,6 +692,7 @@ object Bundles {
       this.v0Wen := exuInput.v0Wen.getOrElse(false.B)
       this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
+      this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
     }
   }
 
@@ -782,6 +799,8 @@ object Bundles {
       )
     ))
 
+    val rfVl = Option.when(exuParams.readVlRf)(new RfReadPortWithConfig(VlData(), iqParams.backendParam.getPregParams(VlData()).addrWidth))
+
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val immType = SelImm()                         // used to select imm extractor
@@ -796,6 +815,10 @@ object Bundles {
         case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
           makeValid(issueValid, rfRd.head)
       }.toSeq
+    }
+
+    def genVlRdReadValidBundle(issueValid: Bool): Option[ValidIO[RfReadPortWithConfig]] = {
+      rfVl.map(x => makeValid(issueValid, x))
     }
   }
 
@@ -872,6 +895,7 @@ object Bundles {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val vl            = Option.when(params.readVlRf)(Vl())
     val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
     val imm           = UInt(64.W)
     val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((FetchBlockInstOffsetWidth + 2).W))
@@ -886,6 +910,7 @@ object Bundles {
     val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
+    val pdestVl       = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
@@ -1017,6 +1042,7 @@ object Bundles {
   ) extends Bundle with BundleSource with HasXSParameter {
     val data         = Vec(params.wbPathNum, UInt(params.destDataBitsMax.W))
     val pdest        = UInt(params.wbPregIdxWidth.W)
+    val pdestVl      = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val robIdx       = new RobPtr
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
     val fpWen        = if (params.needFpWen)    Some(Bool())                  else None
@@ -1086,7 +1112,7 @@ object Bundles {
       this.vecWen := source.vecWen.getOrElse(false.B)
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
-      this.pdest  := source.pdest
+      this.pdest  := (if (wbType == "vl") source.pdestVl.get else source.pdest)
       println(s"[fromExuOutput]: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx

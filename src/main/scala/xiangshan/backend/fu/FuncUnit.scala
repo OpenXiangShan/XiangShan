@@ -10,11 +10,10 @@ import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.fu.vector.Bundles.Vxsat
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl, Vxsat}
 import xiangshan.ExceptionNO.illegalInstr
-import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.frontend.bpu.{BranchInfo, BranchAttribute}
+import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -49,6 +48,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val fuOpType    = FuOpType()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
+  val pdestVl     = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
   val vecWen      = OptionWrapper(cfg.needVecWen, Bool())
@@ -71,6 +71,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
+  val pdestVl       = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
@@ -86,11 +87,11 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
+  val vl        = Option.when(cfg.readVl)(Vl())
   val imm       = UInt(cfg.destDataBits.W)
   val pc        = OptionWrapper(cfg.needPc || cfg.aluNeedPc, UInt(VAddrData().dataWidth.W))
   val nextPcOffset = OptionWrapper(cfg.needPc, UInt((FetchBlockInstOffsetWidth + 2).W))
 
-  def getSrcVConfig : UInt = src(cfg.vconfigIdx)
   def getSrcMask    : UInt = src(cfg.maskSrcIdx)
 }
 
