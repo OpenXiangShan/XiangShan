@@ -256,6 +256,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     do_uarch_drain := false.B
   }
 
+  val q0_entry = Wire(new UncacheEntry)
+  val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
+  val q0_canSent = Wire(Bool())
 
 
   /******************************************************************
@@ -294,8 +297,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
-    // old entry is not inflight
-    states(eid).canMerge()
+    // old entry is not inflight and senting
+    states(eid).canMerge() && !(q0_canSent && q0_canSentIdx === eid)
   }
 
   /******************************************************************
@@ -359,7 +362,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_fire){
+  when(e0_canMerge && e0_req_valid){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
@@ -381,10 +384,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   /******************************************************************
    * Uncache Req
    *  Version 0 (better timing)
-   *    q0: choose which one is sent and set inflight
-   *        why set inflight in q0 not q1?
-   *        in this way, there is no need to check q0_sent in e0; and q1_sent can get the updated result in e1.
-   *    q1: select the entry and sent to bus
+   *    q0: choose which one is sent
+   *    q0: sent
    *
    *  Version 1 (better performance)
    *    solved in one cycle for achieving the original performance.
@@ -392,58 +393,54 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    *          because there is no guarantee that mem_aquire will be always ready.
    ******************************************************************/
 
-  // q0
   val q0_canSentVec = sizeMap(i =>
     (io.enableOutstanding || uState === s_idle) &&
-    states(i).can2Bus() && !io.wfi.wfiReq
+    states(i).can2Bus()
   )
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
-  val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
-  val q0_canSent = Wire(Bool())
   q0_canSentIdx := q0_res._1
   q0_canSent := q0_res._2
-  when(q0_canSent){
-    states(q0_canSentIdx).setInflight(true.B)
-    noPending(q0_canSentIdx) := false.B
-  }
+  q0_entry := entries(q0_canSentIdx)
 
-  // q1
-  val q1_canSent = RegNext(q0_canSent)
-  val q1_canSentIdx = RegEnable(q0_canSentIdx, q0_canSent)
-  val q1_entry = entries(q1_canSentIdx)
-  val q1_size = PopCount(q1_entry.mask)
-  val (q1_lgSize, q1_legal) = PriorityMuxWithFlag(Seq(
+  val size = PopCount(q0_entry.mask)
+  val (lgSize, legal) = PriorityMuxWithFlag(Seq(
     1.U -> 0.U,
     2.U -> 1.U,
     4.U -> 2.U,
     8.U -> 3.U
-  ).map(m => (q1_size===m._1) -> m._2))
-  assert(!(q1_canSent && !q1_legal))
+  ).map(m => (size===m._1) -> m._2))
+  assert(!(q0_canSent && !legal))
 
-  val q1_load = edge.Get(
-    fromSource      = q1_canSentIdx,
-    toAddress       = q1_entry.addr,
-    lgSize          = q1_lgSize
+  val q0_load = edge.Get(
+    fromSource      = q0_canSentIdx,
+    toAddress       = q0_entry.addr,
+    lgSize          = lgSize
   )._2
 
-  val q1_store = edge.Put(
-    fromSource      = q1_canSentIdx,
-    toAddress       = q1_entry.addr,
-    lgSize          = q1_lgSize,
-    data            = q1_entry.data,
-    mask            = q1_entry.mask
+  val q0_store = edge.Put(
+    fromSource      = q0_canSentIdx,
+    toAddress       = q0_entry.addr,
+    lgSize          = lgSize,
+    data            = q0_entry.data,
+    mask            = q0_entry.mask
   )._2
 
-  val q1_isStore = q1_entry.cmd === MemoryOpConstants.M_XWR
+  val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
 
-  mem_acquire.valid := q1_canSent && !io.wfi.wfiReq
-  mem_acquire.bits := Mux(q1_isStore, q1_store, q1_load)
-  mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q1_entry.memBackTypeMM)
-  mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q1_entry.nc)
-  // q1: restore when mem_acquire is not fire
-  when(mem_acquire.valid && !mem_acquire.ready){
-    states(q1_canSentIdx).setInflight(false.B)
-    noPending(q1_canSentIdx) := true.B
+  mem_acquire.valid := q0_canSent && !io.wfi.wfiReq
+  mem_acquire.bits := Mux(q0_isStore, q0_store, q0_load)
+  mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q0_entry.memBackTypeMM)
+  mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q0_entry.nc)
+  when(mem_acquire.fire){
+    states(q0_canSentIdx).setInflight(true.B)
+    noPending(q0_canSentIdx) := false.B
+
+    // q0 should judge whether wait same block
+    (0 until UncacheBufferSize).map(j =>
+      when(q0_canSentIdx =/= j.U && states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
+        states(j).setWaitSame(true.B)
+      }
+    )
   }
 
   // uncache store but memBackTypeMM should update the golden memory
@@ -451,10 +448,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val difftest = DifftestModule(new DiffUncacheMMStoreEvent, delay = 1)
     difftest.coreid := io.hartId
     difftest.index  := 0.U
-    difftest.valid  := mem_acquire.fire && isStore(entries(q1_canSentIdx)) && entries(q1_canSentIdx).memBackTypeMM
-    difftest.addr   := entries(q1_canSentIdx).addr
-    difftest.data   := entries(q1_canSentIdx).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
-    difftest.mask   := entries(q1_canSentIdx).mask
+    difftest.valid  := mem_acquire.fire && isStore(entries(q0_canSentIdx)) && entries(q0_canSentIdx).memBackTypeMM
+    difftest.addr   := entries(q0_canSentIdx).addr
+    difftest.data   := entries(q0_canSentIdx).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
+    difftest.mask   := entries(q0_canSentIdx).mask
   }
 
   /******************************************************************
@@ -604,10 +601,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("e0_merge", e0_fire && e0_canMerge)
   XSPerfAccumulate("e0_alloc_simple", e0_fire && e0_canAlloc && !e0_allocWaitSame)
   XSPerfAccumulate("e0_alloc_wait_same", e0_fire && e0_canAlloc && e0_allocWaitSame)
-  XSPerfAccumulate("mem_acquire", mem_acquire.fire)
-  XSPerfAccumulate("mem_acquire_store", mem_acquire.fire && q1_isStore)
-  XSPerfAccumulate("mem_acquire_load", mem_acquire.fire && !q1_isStore)
-  XSPerfAccumulate("mem_grant", mem_grant.fire)
+  XSPerfAccumulate("q0_acquire", q0_canSent)
+  XSPerfAccumulate("q0_acquire_store", q0_canSent && q0_isStore)
+  XSPerfAccumulate("q0_acquire_load", q0_canSent && !q0_isStore)
   XSPerfAccumulate("uncache_memBackTypeMM", io.lsq.req.fire && io.lsq.req.bits.memBackTypeMM)
   XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
