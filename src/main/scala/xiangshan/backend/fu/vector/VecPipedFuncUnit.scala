@@ -51,8 +51,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
       vm -> allMaskTrue
     ))
   }
-  protected val srcVConfig: VConfig = if(!cfg.vconfigWakeUp) inCtrl.vpu.get.vconfig else inData.getSrcVConfig.asTypeOf(new VConfig)
-  protected val vl = srcVConfig.vl
+  protected val vl = inData.vl.get
 }
 
 class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -73,8 +72,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
 
   // vadc.vv, vsbc.vv need this
   protected val outNeedClearMask: Bool = if(cfg == VialuCfg) VialuFixType.needClearMask(outCtrl.fuOpType) else false.B
-  protected val outVConfig  = if(!cfg.vconfigWakeUp) outCtrl.vpu.get.vconfig else outData.getSrcVConfig.asTypeOf(new VConfig)
-  protected val outVl       = outVConfig.vl
+  protected val outVl       = outData.vl.get
   protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
   protected val outVlmul    = outCtrl.vpu.get.vlmul

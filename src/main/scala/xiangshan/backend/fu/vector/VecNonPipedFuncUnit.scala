@@ -29,8 +29,7 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   // vadc.vv, vsbc.vv need this
   protected val outNeedClearMask: Bool = VialuFixType.needClearMask(outCtrl.fuOpType)
 
-  protected val outVConfig  = if(!cfg.vconfigWakeUp) outCtrl.vpu.get.vconfig else outData.getSrcVConfig.asTypeOf(new VConfig)
-  protected val outVl       = outVConfig.vl
+  protected val outVl       = outData.vl.get
   protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
   // There is no difference between control-dependency or data-dependency for function unit,

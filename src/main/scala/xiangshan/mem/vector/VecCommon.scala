@@ -95,7 +95,6 @@ trait HasVLSUParameters extends HasMemBlockParameters with VLSUConstants {
   def isSegment(instType: UInt) = instType(2) === "b1".U
   def is128Bit(alignedType: UInt) = alignedType(2) === "b1".U
 
-  def vlIndice(implicit param: ExeUnitParams): Int = param.getRfReadSrcIdx(VlData()).head
   def v0Indice(implicit param: ExeUnitParams): Int = param.getRfReadSrcIdx(V0Data()).head
   def vecDataIndices(implicit param: ExeUnitParams): Seq[Int] = param.getRfReadSrcIdx(VecData())
   def rs1Indice(implicit param: ExeUnitParams): Int = vecDataIndices apply 0

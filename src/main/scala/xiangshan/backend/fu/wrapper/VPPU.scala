@@ -67,7 +67,7 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.info.ma     := vma
       subIO.in.bits.info.ta     := vta
       subIO.in.bits.info.vlmul  := Mux(isVmvnr, emul, vlmul)
-      subIO.in.bits.info.vl     := srcVConfig.vl
+      subIO.in.bits.info.vl     := vl
       subIO.in.bits.info.vstart := vstart
       subIO.in.bits.info.uopIdx := vuopIdx
       subIO.in.bits.info.vxrm   := vxrm

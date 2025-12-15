@@ -300,8 +300,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).srcType(0) := SrcType.no
           csBundle(1).srcType(2) := SrcType.no
           csBundle(1).srcType(3) := SrcType.no
-          csBundle(1).srcType(4) := SrcType.vp
-          csBundle(1).lsrc(4) := Vl_IDX.U
+          csBundle(1).vlRen := true.B
         }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // uop0: mv vtype gpr to vector region
           csBundle(0).srcType(0) := SrcType.xp
@@ -321,8 +320,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).srcType(0) := SrcType.no
           csBundle(1).srcType(2) := SrcType.no
           csBundle(1).srcType(3) := SrcType.no
-          csBundle(1).srcType(4) := SrcType.vp
-          csBundle(1).lsrc(4) := Vl_IDX.U
+          csBundle(1).vlRen := true.B
           // vtype
           csBundle(1).srcType(1) := SrcType.vp
           csBundle(1).lsrc(1) := VECTOR_TMP_REG_LMUL.U
@@ -1788,8 +1786,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(numOfWB - 1.U).srcType(1) := SrcType.no
       csBundle(numOfWB - 1.U).srcType(2) := SrcType.no
       csBundle(numOfWB - 1.U).srcType(3) := SrcType.no
-      csBundle(numOfWB - 1.U).srcType(4) := SrcType.vp
-      csBundle(numOfWB - 1.U).lsrc(4) := Vl_IDX.U
+      csBundle(numOfWB - 1.U).vlRen := true.B
       // vtype
       csBundle(numOfWB - 1.U).vecWen := false.B
       csBundle(numOfWB - 1.U).vlWen := true.B

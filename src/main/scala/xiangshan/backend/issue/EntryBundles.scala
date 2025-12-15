@@ -7,6 +7,7 @@ import utils.MathUtils
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.DataConfig.VlData
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
@@ -21,6 +22,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val fuType                = IQFuType()
     //src status
     val srcStatus             = Vec(params.numRegSrc, new SrcStatus)
+    val srcStatusVl           = Option.when(params.readVlRf)(new VlSrcStatus)
     //issue status
     val blocked               = Bool()
     val issued                = Bool()
@@ -31,7 +33,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
 
     def srcReady: Bool        = {
-      VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
+      VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR &&
+        srcStatusVl.map(_.srcState).map(SrcState.isReady).getOrElse(true.B)
     }
 
     def canIssue: Bool        = {
@@ -55,6 +58,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //reg cache
     val useRegCache           = Option.when(params.needReadRegCache)(Bool())
     val regCacheIdx           = Option.when(params.needReadRegCache)(UInt(RegCacheIdxWidth.W))
+  }
+
+  class VlSrcStatus(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+    val psrc = UInt(backendParams.getPregParams(VlData()).addrWidth.W)
+    val srcState = SrcState()
+    val dataSource = DataSource()
   }
 
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
@@ -176,10 +185,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle =>
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
-                                    if (params.numRegSrc == 5) {
+                                    if (params.numRegSrc == 4) {
                                       bundle.bits.wakeUp(psrcSrcTypeVec.take(3), bundle.valid) :+
-                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid) :+
-                                      bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
+                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid)
                                     }
                                     else
                                       bundle.bits.wakeUp(psrcSrcTypeVec, bundle.valid)
@@ -200,20 +208,17 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     } else {
       common.validRegNext     := Mux(commonIn.enq.valid, true.B, Mux(common.clear, false.B, validReg))
     }
-    if (params.numRegSrc == 5) {
-      // only when numRegSrc == 5 need vl
-      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.map{ bundle =>
-        val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
-        bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
+
+    if (params.readVlRf) {
+      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.filter(_.bits.dataConfig.isInstanceOf[VlData]).map{ bundle =>
+        bundle.bits.wakeUpVl((status.srcStatusVl.get.psrc, SrcType.vp), bundle.valid)
       })
-      var numVecWb = params.backendParam.getVfWBExeGroup.size
-      var numV0Wb = params.backendParam.getV0WBExeGroup.size
       var intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
       var vfSchdVlWbPort = p(XSCoreParamsKey).vfSchdVlWbPort
       // int wb is first bit of vlwb, which is after vfwb and v0wb
-      common.vlWakeupByIntWb  := wakeUpFromVl(numVecWb + numV0Wb + intSchdVlWbPort)
+      common.vlWakeupByIntWb  := wakeUpFromVl(intSchdVlWbPort)
       // vf wb is second bit of wb
-      common.vlWakeupByVfWb   := wakeUpFromVl(numVecWb + numV0Wb + vfSchdVlWbPort)
+      common.vlWakeupByVfWb   := wakeUpFromVl(vfSchdVlWbPort)
     } else {
       common.vlWakeupByIntWb  := false.B
       common.vlWakeupByVfWb   := false.B
@@ -379,6 +384,18 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         srcStatusNext.useRegCache.get                 := srcStatus.useRegCache.get && !(srcLoadCancel || replaceRC) || wakeupRC
         srcStatusNext.regCacheIdx.get                 := Mux(wakeupRC, wakeupRCIdx, srcStatus.regCacheIdx.get)
       }
+    }
+    entryUpdate.status.srcStatusVl.zip(status.srcStatusVl).foreach {
+      case (srcStatusVlNext, srcStatusVl) =>
+        val wakeupVlByWB = common.vlWakeupByVfWb || common.vlWakeupByIntWb
+        srcStatusVlNext.psrc     := srcStatusVl.psrc
+        srcStatusVlNext.srcState := srcStatusVl.srcState | wakeupVlByWB
+        srcStatusVlNext.dataSource.value := MuxCase(
+          srcStatusVl.dataSource.value,
+          // no IQ wakeup here, so make it unchange since enq
+          Seq(
+          ),
+        )
     }
     entryUpdate.status.blocked                        := false.B
     entryUpdate.status.issued                         := MuxCase(status.issued, Seq(

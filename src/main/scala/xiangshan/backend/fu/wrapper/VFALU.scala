@@ -339,8 +339,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     outCtrl_s0.fuOpType === VfaluType.vfredmin ||
     outCtrl_s0.fuOpType === VfaluType.vfredosum ||
     outCtrl_s0.fuOpType === VfaluType.vfwredosum
-  val outVConfig_s0  = if(!cfg.vconfigWakeUp) outVecCtrl_s0.vconfig else dataVec.head.getSrcVConfig.asTypeOf(new VConfig)
-  val outVl_s0       = outVConfig_s0.vl
+  val outVl_s0       = dataVec.head.vl.get
   val outVlFix_s0 = Mux(
     outVecCtrl_s0.fpu.isFpToVecInst || (outCtrl_s0.fuOpType === VfaluType.vfmv_f_s),
     1.U,
