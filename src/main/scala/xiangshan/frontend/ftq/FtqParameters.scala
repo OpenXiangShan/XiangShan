@@ -21,7 +21,7 @@ import xiangshan.frontend.HasFrontendParameters
 
 case class FtqParameters(
     FtqSize:            Int = 64,
-    ResolveQueueSize:   Int = 16,
+    ResolveQueueSize:   Int = 64,
     BpRunAheadDistance: Int = 8,
     BpTrainStallLimit:  Int = 8,
     CommitQueueSize:    Int = 64

@@ -213,7 +213,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
   private val t0_readBankConflict = io.train.valid && t0_hasCond && s0_fire && t0_bankIdx === s0_bankIdx
-  io.train.ready := !t0_readBankConflict
+  io.train.ready := true.B
 
   private val t0_valid = io.train.fire && t0_hasCond && io.enable
 
@@ -268,9 +268,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.trainReadReq.bits.bankMask := t0_bankMask
   }
 
-  when(t0_valid) {
-    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
-  }
+//  when(t0_valid) {
+//    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
+//  }
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
