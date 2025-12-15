@@ -72,8 +72,10 @@ object LoadReplayCauses {
   val C_MF  = 10
   // uop is mmio/nc
   val C_UNCACHE = 11
+  // storeQueue multi forward invalid
+  val C_SMF = 12
   // total causes
-  val allCauses = 12
+  val allCauses = 13
 }
 
 class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
@@ -201,6 +203,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val stAddrReadyVec   = Input(Vec(StoreQueueSize, Bool()))
     val stDataReadySqPtr = Input(new SqPtr)
     val stDataReadyVec   = Input(Vec(StoreQueueSize, Bool()))
+    val sqDeqPtr         = Input(new SqPtr)
 
     // from LoadQueueUncache
     val mmioOut = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new MemExuOutput)))
@@ -387,6 +390,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // case C_UNCACHE
     when (cause(i)(LoadReplayCauses.C_UNCACHE)) {
       blocking(i) := Mux(lqIdxMatchMmio(i) || lqIdxMatchNc(i), false.B, blocking(i))
+    }
+    // casue C_SMF
+    when (cause(i)(LoadReplayCauses.C_SMF)) {
+      blocking(i) := Mux(!isAfter(uop(i).sqIdx, io.sqDeqPtr), false.B, blocking(i))
     }
   })
 
