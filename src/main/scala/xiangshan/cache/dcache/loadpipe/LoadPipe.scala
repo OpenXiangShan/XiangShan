@@ -488,8 +488,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  // val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !isFromL1Prefetch(s2_hit_prefetch)
-  // val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && isFromL1Prefetch(s2_hit_prefetch)
   val hit_pf_in_cache = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
   
