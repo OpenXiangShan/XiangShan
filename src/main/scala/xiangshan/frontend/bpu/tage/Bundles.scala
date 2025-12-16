@@ -29,6 +29,18 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
   val takenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
 }
 
+class TagePrediction(implicit p: Parameters) extends TageBundle {
+  val useProviderPred: Bool = Bool()
+  val providerPred:    Bool = Bool()
+  val hasAlt:          Bool = Bool()
+  val altPred:         Bool = Bool()
+}
+
+class TageToScIO(implicit p: Parameters) extends TageBundle {
+  val providerTakenCtrVec: Vec[Valid[SaturateCounter]] =
+    Output(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TakenCtrWidth))))
+}
+
 class TableReadReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
   val setIdx:   UInt = UInt(SetIdxWidth.W)
   val bankMask: UInt = UInt(NumBanks.W)
@@ -70,7 +82,8 @@ class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBu
 class TagMatchResult(implicit p: Parameters) extends TageBundle {
   val hit:          Bool            = Bool()
   val hitWayMaskOH: UInt            = UInt(MaxNumWays.W)
-  val entry:        TageEntry       = new TageEntry
+  val tag:          UInt            = UInt(TagWidth.W)
+  val takenCtr:     SaturateCounter = new SaturateCounter(TakenCtrWidth)
   val usefulCtr:    SaturateCounter = new SaturateCounter(UsefulCtrWidth)
   // perf analysis only
   val hitWayMask: UInt = UInt(MaxNumWays.W)

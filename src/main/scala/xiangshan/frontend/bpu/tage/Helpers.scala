@@ -38,7 +38,7 @@ trait TopHelper extends HasTageParameters {
     PriorityEncoderOH(hitTableMask.reverse).reverse
 
   def getUseAltIndex(pc: PrunedAddr): UInt = {
-    val useAltIdxWidth = log2Ceil(NumUseAltCtrs)
+    val useAltIdxWidth = log2Ceil(NumUseAltOnNa)
     pc(useAltIdxWidth - 1 + instOffsetBits, instOffsetBits)
   }
 }
