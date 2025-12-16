@@ -1289,12 +1289,17 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   // prefetch related
+  val hit_pf_reg = miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid)
   io.prefetch_stat.pf_late_in_mshr := io.req.valid && io.req.bits.isFromPrefetch && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
   io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
   io.prefetch_stat.pf_source := io.req.bits.pf_source
-  io.prefetch_stat.hit_pf_in_mshr := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.hit_prefetch)).orR)
-  io.prefetch_stat.hit_pf_source_in_mshr := ParallelMux(entries.map(_.io.prefetch_info.hit_prefetch) zip entries.map(_.io.prefetch_info.hit_pf_source))
   io.prefetch_stat.load_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromLoad
+  io.prefetch_stat.hit_pf_in_mshr := hit_pf_reg || Cat(entries.map(_.io.prefetch_info.hit_prefetch)).orR
+  io.prefetch_stat.hit_pf_source_in_mshr := ParallelMux(
+    Seq(hit_pf_reg) ++ entries.map(_.io.prefetch_info.hit_prefetch)
+    zip
+    Seq(miss_req_pipe_reg.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+  )
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)
