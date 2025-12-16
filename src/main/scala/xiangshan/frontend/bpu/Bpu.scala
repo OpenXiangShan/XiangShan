@@ -664,19 +664,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate(
     s"s3Override_takenMismatch_s1fall",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s1Fallthrough,
-    perf_s1TakenSourceVec
+    perf_s3TakenSourceVec
   )
 
   XSPerfAccumulate(
     s"s3Override_takenMismatch_s3fall",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough,
-    perf_s3TakenSourceVec
+    perf_s1TakenSourceVec
   )
 
   XSPerfAccumulate(
     s"s3Override_takenMismatch_s3fallTage",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3FallthroughTage,
-    perf_s3TakenSourceVec
+    perf_s1TakenSourceVec
   )
 
   // position mismatch
@@ -729,7 +729,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Seq(
       ("total", true.B, PopCount(t0_branches.map(_.valid))),
       ("direct", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect))),
-      ("indirect", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect))),
+      ("otherIndirect", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isOtherIndirect))),
       ("call", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isCall))),
       ("return", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isReturn))),
       ("conditional", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)))
@@ -741,7 +741,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Seq(
       ("total", true.B),
       ("direct", t0_mispredictBranch.bits.attribute.isDirect),
-      ("indirect", t0_mispredictBranch.bits.attribute.isOtherIndirect),
+      ("otherIndirect", t0_mispredictBranch.bits.attribute.isOtherIndirect),
       ("call", t0_mispredictBranch.bits.attribute.isCall),
       ("return", t0_mispredictBranch.bits.attribute.isReturn),
       ("conditional", t0_mispredictBranch.bits.attribute.isConditional),
