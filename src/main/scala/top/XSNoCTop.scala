@@ -391,7 +391,7 @@ trait HasSeperatedBusImpOpt[+L <: HasSeperatedBusOpt] {
     sepbus.tlAsyncSinkOpt.get.module.reset := soc_reset_sync
     sepbus.axi4buf.foreach(_.module.clock := soc_clock)
     sepbus.axi4buf.foreach(_.module.reset := soc_reset_sync)
-  }else {
+  } else {
     sepbus.axi4buf.foreach(_.module.clock := clock)
     sepbus.axi4buf.foreach(_.module.reset := cpuReset_sync)
   }
