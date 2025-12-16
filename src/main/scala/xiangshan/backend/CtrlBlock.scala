@@ -344,8 +344,8 @@ class CtrlBlockImp(
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
-  val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
-  val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)
+  val s4_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 3)
+  val s5_flushFromRobValid = GatedValidRegNext(s4_flushFromRobValidAhead)
   val frontendFlushBits = RegEnable(s1_robFlushRedirect.bits, s1_robFlushRedirect.valid) // ??
 
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
@@ -364,19 +364,19 @@ class CtrlBlockImp(
     frontendCommit
   )
 
-  io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s3_redirectGen.valid
-  io.frontend.toFtq.redirect.bits := Mux(s6_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
-  io.frontend.toFtq.ftqIdxSelOH.valid := s6_flushFromRobValid || redirectGen.io.stage2Redirect.valid
-  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s6_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s6_flushFromRobValid))
+  io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
+  io.frontend.toFtq.redirect.bits := Mux(s5_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
+  io.frontend.toFtq.ftqIdxSelOH.valid := s5_flushFromRobValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s5_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s5_flushFromRobValid))
 
   //jmp/brh, sel oldest first, only use one read port
-  io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(0).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
   //loadreplay
-  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
   //exception
-  io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead.last.valid := s4_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
 
   for (i <- 0 until CommitWidth) {
@@ -392,25 +392,24 @@ class CtrlBlockImp(
   // T1: s1_robFlushRedirect, rob.io.exception.valid
   // T2: csr.redirect.valid
   // T3: csr.exception.valid
-  // T4: csr.trapTarget
-  // T5: ctrlBlock.trapTarget
-  // T6: io.frontend.toFtq.stage2Redirect.valid
+  // T4: get csr.trapTarget from csr
+  // T5: io.frontend.toFtq
   val s2_robFlushPc = RegEnable(Mux(s1_robFlushRedirect.bits.flushItself(),
     s1_robFlushPc, // replay inst
     s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
-  private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
-  private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s4_csrIsTrap = DelayN(rob.io.exception.valid, 3)
+  private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.pc, s2_robFlushPc)
-  val s5_trapTargetIAF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIAF, false.B)
-  val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
-  val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
-  when (s6_flushFromRobValid) {
-    io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
+  val flushTarget = Mux(s4_csrIsTrap, s4_trapTargetFromCsr.pc, s2_robFlushPc)
+  val s4_trapTargetIAF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIAF
+  val s4_trapTargetIPF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIPF
+  val s4_trapTargetIGPF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIGPF
+  when (s5_flushFromRobValid) {
+    io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s4_trapTargetIAF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s4_trapTargetIPF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s4_trapTargetIGPF, s4_flushFromRobValidAhead)
   }
 
   for (i <- 0 until DecodeWidth) {
