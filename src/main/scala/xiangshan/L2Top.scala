@@ -114,7 +114,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform,
         hasMbist = hasMbist,
-        EnablePrivateClint = SeperateBus != top.SeperatedBusType.NONE
+        EnablePrivateClint = UsePrivateClint
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
