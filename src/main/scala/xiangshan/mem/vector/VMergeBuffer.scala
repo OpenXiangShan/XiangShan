@@ -328,11 +328,11 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       uopFinish(i) := true.B
     }
   }
-   val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
-   private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
-   for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
+  val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
+  private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+  private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+  private val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
+  for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
     val entryIdx = OHToUInt(selOHVec)
@@ -361,6 +361,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     feedbackOut.dataInvalidSqIdx         := DontCare
     feedbackOut.sqIdx                    := selEntry.uop.sqIdx
     feedbackOut.lqIdx                    := selEntry.uop.lqIdx
+    feedbackOut.uopIdx.get               := selEntry.uop.uopIdx
 
     io.feedback(i).valid                 := RegNext(feedbackValid)
     io.feedback(i).bits                  := RegEnable(feedbackOut, feedbackValid)

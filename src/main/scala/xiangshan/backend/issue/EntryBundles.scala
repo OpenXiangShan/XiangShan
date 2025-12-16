@@ -31,9 +31,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqPortIdx            = UInt(1.W)
     //vector mem status
     val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
+    val lastUopReady          = Option.when(params.isVecMemIQ)(Bool())
 
     def srcReady: Bool        = {
-      VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
+      VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR && lastUopReady.getOrElse(true.B)
     }
 
     def canIssue: Bool        = {
@@ -488,6 +489,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val isVleff                                        = entryReg.payload.vpu.isVleff
     // update blocked
     entryUpdate.status.blocked                        := !isFirstLoad && isVleff
+    entryUpdate.status.lastUopReady.get               := commonIn.issueResp.valid &&
+      (commonIn.issueResp.bits.robIdx === entryReg.status.robIdx) &&
+      ((commonIn.issueResp.bits.uopIdx.get + 1.U) === entryReg.payload.uopIdx)
   }
 
   object IQFuType {

@@ -464,6 +464,7 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val dataInvalidSqIdx = new SqPtr
   val sqIdx = new SqPtr
   val lqIdx = new LqPtr
+  val uopIdx = Option.when(isVector)(UopIdx()) // locate vldoxe uop in issue entries
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
