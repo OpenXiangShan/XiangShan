@@ -217,6 +217,8 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
   val mispredict:  Bool            = Bool()
+
+  val debug_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
 }
 
 // Backend & Ftq -> Bpu

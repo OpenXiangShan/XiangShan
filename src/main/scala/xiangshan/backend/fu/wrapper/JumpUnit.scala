@@ -80,5 +80,8 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
     )
   )
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := rasAction
+  if (io.toFrontendBJUResolve.get.bits.debug_isRVC.isDefined) {
+    io.toFrontendBJUResolve.get.bits.debug_isRVC.get := io.in.bits.ctrl.isRVC.get
+  }
   connect0LatencyCtrlSingal
 }

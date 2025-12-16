@@ -533,7 +533,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   condTraceVec.zipWithIndex.foreach { case (trace, i) =>
     trace.valid                  := t2_condMask(i)
     trace.bits.startPc           := t2_startPc
-    trace.bits.cfiPc             := t2_cfiPcVec(i)
+    trace.bits.cfiPc             := t2_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
     trace.bits.hasProvider       := t2_allBranchUpdateInfo(i).providerTableOH.orR
     trace.bits.providerTableIdx  := OHToUInt(t2_allBranchUpdateInfo(i).providerTableOH)
     trace.bits.providerSetIdx    := t2_setIdx(trace.bits.providerTableIdx)
