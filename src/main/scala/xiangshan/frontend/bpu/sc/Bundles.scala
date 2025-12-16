@@ -24,13 +24,13 @@ import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.WriteReqBundle
 
 class ScEntry(implicit p: Parameters) extends ScBundle {
-  val ctr: SignedSaturateCounter = new SignedSaturateCounter(ctrWidth)
+  val ctr: SignedSaturateCounter = new SignedSaturateCounter(CtrWidth)
 }
 
 class ScThreshold(implicit p: Parameters) extends ScBundle {
-  val thres: SaturateCounter = new SaturateCounter(thresholdThresWidth)
+  val thres: SaturateCounter = new SaturateCounter(ThresholdWidth)
 
-  def initVal: UInt = 6.U
+  def initVal: UInt = 520.U
 
   def update(cause: Bool): ScThreshold = {
     val res = Wire(new ScThreshold())
@@ -47,26 +47,44 @@ object ScThreshold {
   }
 }
 
-class PathTableSramWriteReq(val numSets: Int)(implicit p: Parameters) extends WriteReqBundle with HasScParameters {
+class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends WriteReqBundle
+    with HasScParameters {
   val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
-  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
-  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
+  val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
 }
 
-class PathTableTrain(val numSets: Int)(implicit p: Parameters) extends ScBundle {
+class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
+  val setIdx:   UInt = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val bankMask: UInt = UInt(NumBanks.W)
+}
+
+class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
   val valid:    Bool         = Bool()
-  val setIdx:   UInt         = UInt(log2Ceil(numSets / NumBanks).W)
-  val wayMask:  Vec[Bool]    = Vec(NumWays, Bool())
-  val entryVec: Vec[ScEntry] = Vec(NumWays, new ScEntry())
+  val setIdx:   UInt         = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val bankMask: UInt         = UInt(NumBanks.W)
+  val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
+  val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
   // FIXME: is there a better way to do this?
   private def ScEntryWidth = (new ScEntry).getWidth
-  val scPathResp:   Vec[Vec[UInt]] = Vec(PathTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scGlobleResp: Vec[Vec[UInt]] = Vec(GlobalTableSize, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scGhr:        UInt           = UInt(GhrHistoryLength.W)
-  val scPred:       Vec[Bool]      = Vec(NumWays, Bool())
-  val useScPred:    Vec[Bool]      = Vec(NumWays, Bool())
+  val scPathResp:      Vec[Vec[UInt]] = Vec(NumPathTables, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scGlobalResp:    Vec[Vec[UInt]] = Vec(NumGlobalTables, Vec(NumWays, UInt(ScEntryWidth.W)))
+  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
+  val scBiasResp:      Vec[UInt]      = Vec(BiasTableNumWays, UInt(ScEntryWidth.W))
+  val scGhr:           UInt           = UInt(GhrHistoryLength.W)
+  val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
+  val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
+  val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
+  val tagePredCtr:     Vec[UInt]      = Vec(NumBtbResultEntries, UInt(TageTakenCtrWidth.W))
+  val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
+  val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
+  val predPathIdx: Vec[UInt] =
+    Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
+  val predGlobalIdx: Vec[UInt] =
+    Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
+  val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
 }

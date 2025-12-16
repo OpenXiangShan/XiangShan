@@ -74,7 +74,7 @@ trait HasBpuParameters extends HasFrontendParameters {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth)
       }.reduce(_ ++ _) ++
       bpuParameters.scParameters.PathTableInfos.map {
-        _.getFoldedHistoryInfoSet(NumBtbResultEntries, bpuParameters.scParameters.TagWidth)
+        _.getFoldedHistoryInfoSet(NumBtbResultEntries, bpuParameters.scParameters.NumBanks)
       }.reduce(_ ++ _) ++
       bpuParameters.utageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet()

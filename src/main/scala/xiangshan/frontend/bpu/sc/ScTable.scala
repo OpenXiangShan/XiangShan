@@ -27,26 +27,27 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class ScTable(
     numSets:   Int,
-    histLen:   Int,
+    numWays:   Int,
     tableType: String,
     tableIdx:  Int
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:    DecoupledIO[UInt] = Flipped(Decoupled(UInt(log2Ceil(numSets / NumWays).W)))
-    val resp:   Vec[ScEntry]      = Output(Vec(NumWays, new ScEntry()))
-    val update: PathTableTrain    = Input(new PathTableTrain(numSets))
+    val req:       Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val resp:      Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update:    ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val resetDone: Bool              = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
 
-  def numRows: Int = numSets / NumBanks / NumWays
+  def numRows: Int = numSets / numWays / NumBanks
 
   private val sram = Seq.fill(NumBanks)(
     Module(new SRAMTemplate(
       new ScEntry(),
       set = numRows,
-      way = NumWays,
+      way = numWays,
       singlePort = true,
       shouldReset = true,
       holdRead = true,
@@ -59,7 +60,7 @@ class ScTable(
 
   private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
     Module(new WriteBuffer(
-      new PathTableSramWriteReq(numRows),
+      new ScTableSramWriteReq(numRows, numWays),
       WriteBufferSize,
       numPorts = 1,
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
@@ -67,16 +68,15 @@ class ScTable(
   )
 
   // read path table by setIndex
-  private val reqBankIdx  = io.req.bits(log2Ceil(NumBanks) - 1, 0)
-  private val reqSetIdx   = io.req.bits >> log2Ceil(NumBanks)
-  private val reqBankMask = UIntToOH(reqBankIdx, NumBanks)
+  private val reqSetIdx   = io.req.bits.setIdx
+  private val reqBankMask = io.req.bits.bankMask
   sram.zip(reqBankMask.asBools).foreach {
     case (bank, bankEnable) =>
       bank.io.r.req.valid       := io.req.valid && bankEnable
       bank.io.r.req.bits.setIdx := reqSetIdx
   }
 
-  io.req.ready := sram.map(_.io.r.req.ready).reduce(_ && _)
+  io.resetDone := sram.map(_.io.r.req.ready).reduce(_ && _)
 
   private val respBankMask = RegEnable(reqBankMask, io.req.valid)
   io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
@@ -85,23 +85,22 @@ class ScTable(
   private val updateValid    = io.update.valid
   private val updateIdx      = io.update.setIdx
   private val updateWayMask  = io.update.wayMask
-  private val updateBankIdx  = updateIdx(log2Ceil(NumBanks) - 1, 0)
-  private val updateBankMask = UIntToOH(updateBankIdx, NumBanks)
+  private val updateBankMask = io.update.bankMask
 
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>
       val writeValid = updateValid && bankEnable
       buffer.io.write.head.valid       := writeValid
-      buffer.io.write.head.bits.setIdx := updateIdx >> log2Ceil(NumBanks)
+      buffer.io.write.head.bits.setIdx := updateIdx
       buffer.io.write.head.bits.wayMask := Mux(
         writeValid,
         updateWayMask,
-        VecInit.fill(NumWays)(false.B)
+        VecInit.fill(numWays)(false.B)
       )
       buffer.io.write.head.bits.entryVec := Mux(
         writeValid,
         io.update.entryVec,
-        VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
+        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
       )
   }
 
@@ -113,4 +112,5 @@ class ScTable(
       bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
+
 }

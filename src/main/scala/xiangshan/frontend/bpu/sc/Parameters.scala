@@ -28,29 +28,45 @@ case class ScParameters(
       new ScTableInfo(1024, 8),
       new ScTableInfo(1024, 16)
     ),
-    ctrWidth:            Int = 6,
-    weightCtrWidth:      Int = 6,
-    thresholdThresWidth: Int = 8,
-    NumTables:           Int = 2,
-    NumBanks:            Int = 2,
-    WriteBufferSize:     Int = 4,
-    TagWidth:            Int = 12
+    BiasTableSize:       Int = 1024,
+    BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
+
+    PathEnable:      Boolean = false,
+    GlobalEnable:    Boolean = false,
+    BiasEnable:      Boolean = true,
+    CtrWidth:        Int = 6,
+    ThresholdWidth:  Int = 12,
+    NumTables:       Int = 2,
+    NumBanks:        Int = 2,
+    WriteBufferSize: Int = 4,
+    TagWidth:        Int = 12
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
-  def scParameters:        ScParameters     = bpuParameters.scParameters
-  def ctrWidth:            Int              = scParameters.ctrWidth
-  def weightCtrWidth:      Int              = scParameters.weightCtrWidth
-  def thresholdThresWidth: Int              = scParameters.thresholdThresWidth
-  def PathTableInfos:      Seq[ScTableInfo] = scParameters.PathTableInfos
-  def PathTableSize:       Int              = PathTableInfos.length
-  def NumPathTables:       Int              = PathTableInfos.length
-  def GlobalTableInfos:    Seq[ScTableInfo] = scParameters.GlobalTableInfos
-  def GlobalTableSize:     Int              = GlobalTableInfos.length
-  def NumWays:             Int              = NumBtbResultEntries
-  def NumBanks:            Int              = scParameters.NumBanks
-  def BankWidth:           Int              = log2Ceil(NumBanks)
-  def WriteBufferSize:     Int              = scParameters.WriteBufferSize
-  def TagWidth:            Int              = scParameters.TagWidth
-  // TODO
+  def scParameters: ScParameters = bpuParameters.scParameters
+
+  def PathEnable:   Boolean = scParameters.PathEnable
+  def GlobalEnable: Boolean = scParameters.GlobalEnable
+  def BiasEnable:   Boolean = scParameters.BiasEnable
+
+  def TageTakenCtrWidth: Int = bpuParameters.tageParameters.TakenCtrWidth
+  def CtrWidth:          Int = scParameters.CtrWidth
+  def NumWays:           Int = NumBtbResultEntries
+  def NumBanks:          Int = scParameters.NumBanks
+  def BankWidth:         Int = log2Ceil(NumBanks)
+  def ThresholdWidth:    Int = scParameters.ThresholdWidth
+
+  def PathTableInfos: Seq[ScTableInfo] = scParameters.PathTableInfos
+  def NumPathTables:  Int              = PathTableInfos.length
+
+  def GlobalTableInfos: Seq[ScTableInfo] = scParameters.GlobalTableInfos
+  def NumGlobalTables:  Int              = GlobalTableInfos.length
+
+  def BiasTableSize:       Int = scParameters.BiasTableSize
+  def BiasUseTageBitWidth: Int = scParameters.BiasUseTageBitWidth
+  def BiasTableNumWays:    Int = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
+  def NumBiasTable:        Int = 1
+
+  def WriteBufferSize: Int = scParameters.WriteBufferSize
+  def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2
 }
