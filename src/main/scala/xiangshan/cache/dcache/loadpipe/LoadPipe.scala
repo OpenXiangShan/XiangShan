@@ -87,25 +87,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val pseudo_tag_error_inj_done = Output(Bool())
     val pseudo_data_error_inj_done = Output(Bool())
 
-    val prefetch_info = new Bundle {
-      val naive = new Bundle {
-        val total_prefetch = Output(Bool())
-        val late_hit_prefetch = Output(Bool())
-        val late_prefetch_hit = Output(Bool())
-        val late_load_hit = Output(Bool())
-        val useless_prefetch = Output(Bool())
-        val useful_prefetch = Output(Bool())
-        val pf_source = Output(UInt(L1PfSourceBits.W))
-        val prefetch_hit = Output(Bool())
-        val hit_source = Output(UInt(L1PfSourceBits.W))
-      }
-
-      val fdp = new Bundle {
-        val useful_prefetch = Output(Bool())
-        val demand_miss = Output(Bool())
-        val pollution = Output(Bool())
-      }
-    }
+    val prefetch_stat = Output(new LoadPrefetchStatBundle)
 
     val bloom_filter_query = new Bundle {
       val query = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
@@ -505,27 +487,22 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val late_hit_prefetch = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !isFromL1Prefetch(s2_hit_prefetch)
-  val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && isFromL1Prefetch(s2_hit_prefetch)
-  val useless_prefetch = s2_miss_req_fire && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
-
-  val prefetch_hit = Wire(Bool()) // assigned in s3 for filtering
+  val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  // val late_load_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && !isFromL1Prefetch(s2_hit_prefetch)
+  // val late_prefetch_hit = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && isFromL1Prefetch(s2_hit_prefetch)
+  val hit_pf_in_cache = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
+  
+  io.prefetch_stat.total_prefetch := total_prefetch
+  io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
+  io.prefetch_stat.nack_prefetch := s2_valid && s2_nack && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  io.prefetch_stat.pf_source := s2_pf_source
 
-  io.prefetch_info.naive.total_prefetch := total_prefetch
-  io.prefetch_info.naive.late_hit_prefetch := late_hit_prefetch
-  io.prefetch_info.naive.late_load_hit := late_load_hit
-  io.prefetch_info.naive.late_prefetch_hit := late_prefetch_hit
-  io.prefetch_info.naive.useless_prefetch := useless_prefetch
-  io.prefetch_info.naive.useful_prefetch := useful_prefetch
-  io.prefetch_info.naive.pf_source := s2_pf_source
-  io.prefetch_info.naive.prefetch_hit := prefetch_hit
-  io.prefetch_info.naive.hit_source := hit_source
+  io.prefetch_stat.hit_pf_in_cache := hit_pf_in_cache
+  io.prefetch_stat.hit_source := hit_source
 
-  io.prefetch_info.fdp.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
-  io.prefetch_info.fdp.pollution := io.prefetch_info.fdp.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
+  io.prefetch_stat.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
+  io.prefetch_stat.pollution := io.prefetch_stat.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -610,8 +587,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
-  io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  prefetch_hit := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  hit_pf_in_cache := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   hit_source := s3_hit_prefetch
 
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
