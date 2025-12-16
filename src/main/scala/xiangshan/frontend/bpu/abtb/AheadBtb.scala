@@ -391,13 +391,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     t1_predictTargetLowerBits === t1_trainTargetLowerBits
 
   XSPerfAccumulate("predict_req_num", predictReqValid)
-  XSPerfAccumulate("predict_num", s2_valid)
-  XSPerfAccumulate("predict_hit", s2_valid && s2_hit)
-  XSPerfAccumulate("predict_miss", s2_valid && !s2_hit)
-  XSPerfAccumulate("predict_hit_entry_num", Mux(s2_valid, PopCount(s2_hitMask), 0.U))
-  XSPerfAccumulate("predict_taken", s2_valid && s2_taken)
-  XSPerfAccumulate("predict_not_taken", s2_valid && s2_hit && !s2_taken)
-  XSPerfAccumulate("predict_multi_hit", s2_valid && s2_multiHit)
+  XSPerfAccumulate("predict_num", s2_fire)
+  XSPerfAccumulate("predict_hit", s2_fire && s2_hit)
+  XSPerfAccumulate("predict_miss", s2_fire && !s2_hit)
+  XSPerfAccumulate("predict_hit_entry_num", Mux(s2_fire, PopCount(s2_hitMask), 0.U))
+  XSPerfAccumulate("predict_taken", s2_fire && s2_taken)
+  XSPerfAccumulate("predict_not_taken", s2_fire && s2_hit && !s2_taken)
+  XSPerfAccumulate("predict_multi_hit", s2_fire && s2_multiHit)
 
   XSPerfAccumulate("train_req_num", io.fastTrain.get.valid)
   XSPerfAccumulate("train_num", t1_valid)
