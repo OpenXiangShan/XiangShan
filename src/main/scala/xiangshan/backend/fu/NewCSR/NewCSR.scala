@@ -607,7 +607,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
         m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
-        m.robCommit.vl      := RegNext          (io.fromRob.commit.vl)
+        m.robCommit.vl      := DelayN           (io.fromRob.commit.vl, 2) // not used yet
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
         m.writeFCSR         := writeFpLegal
         m.writeVCSR         := writeVecLegal
@@ -1592,7 +1592,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffVecCSRState.vxsat := vcsr.vxsat.asUInt
     diffVecCSRState.vxrm := vcsr.vxrm.asUInt
     diffVecCSRState.vcsr := vcsr.rdata.asUInt
-    diffVecCSRState.vl := RegNext(io.fromRob.commit.vl)
+    diffVecCSRState.vl := DelayN(io.fromRob.commit.vl, 2)
     diffVecCSRState.vtype := vtype.rdata.asUInt
     diffVecCSRState.vlenb := vlenb.rdata.asUInt
 

@@ -419,11 +419,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
 
-  // csr not store the value of vl, so when using difftest we assign the value of vl to debugVl
-  val debugVl_s0 = WireInit(UInt(VlData().dataWidth.W), 0.U)
-  val debugVl_s1 = WireInit(UInt(VlData().dataWidth.W), 0.U)
-  debugVl_s0 := vecRegion.io.diffVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
-  debugVl_s1 := RegNext(debugVl_s0)
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
@@ -431,7 +426,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   //Todo here need change design
   csrio.vpu.set_vtype.valid := commitVType.valid
   csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
-  csrio.vpu.vl := ZeroExt(debugVl_s1, XLEN)
+  csrio.vpu.vl := vecRegion.io.diffVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
