@@ -77,9 +77,11 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 
   val StreamMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stream")))
   val StrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stride")))
+  val BertiMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("berti")))
 
   StreamMonitor.io.prefetch_info:= prefetch_info
   StrideMonitor.io.prefetch_info := prefetch_info
+  BertiMonitor.io.prefetch_info := prefetch_info
   
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
@@ -298,6 +300,7 @@ object PrefetcherMonitorParam {
   def fromString(s: String): PrefetcherMonitorParam = s.toLowerCase match {
     case "stream" => new StreamMonitorParam()
     case "stride" => new StrideMonitorParam()
+    case "berti" => new BertiMonitorParam()
     case t => throw new IllegalArgumentException(s"unknown Prefetcher type $t")
   }
 }
@@ -313,4 +316,9 @@ class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSource
 
   override val VALIDITY_CHECK_INTERVAL = 800
   override val DISABLE_THRESHOLD = 700
+}
+
+class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "Berti"
+  override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
 }
