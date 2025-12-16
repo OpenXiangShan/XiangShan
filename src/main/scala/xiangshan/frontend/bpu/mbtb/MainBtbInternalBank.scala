@@ -195,6 +195,6 @@ class MainBtbInternalBank(
 
   XSPerfAccumulate(
     "counter_writebuffer_drop_write",
-    counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
+    !counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
   )
 }

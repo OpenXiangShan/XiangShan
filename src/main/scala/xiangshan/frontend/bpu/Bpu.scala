@@ -297,14 +297,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       fallThrough.io.prediction,
       Seq(
-        (s1_realUbtbTaken && abtb.io.prediction.taken) -> Mux(
-          ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
-          ubtb.io.prediction,
-          abtb.io.prediction
-        ),
-        s1_realUbtbTaken         -> ubtb.io.prediction,
-        abtb.io.prediction.taken -> abtb.io.prediction
+        ubtb.io.prediction.taken -> ubtb.io.prediction
       )
+//      Seq(
+//        (s1_realUbtbTaken && abtb.io.prediction.taken) -> Mux(
+//          ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
+//          ubtb.io.prediction,
+//          abtb.io.prediction
+//        ),
+//        s1_realUbtbTaken         -> ubtb.io.prediction,
+//        abtb.io.prediction.taken -> abtb.io.prediction
+//      )
     )
 
   // ---------- Base Table Info for microTAGE Meta ----------
@@ -333,7 +336,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_mbtbResult = mbtb.io.result
   private val s2_condTakenMask = VecInit((s2_mbtbResult zip tage.io.takenMask zip tage.io.hasProvided).map {
     case ((e, tageTaken), tageProvided) =>
-      e.valid && e.bits.attribute.isConditional && Mux(tageProvided, tageTaken, e.bits.taken)
+      e.valid && e.bits.attribute.isConditional && e.bits.taken
   })
 
   // private val s2_condTakenMask = VecInit(scUsed.zip(scTakenMask).zip(tage.io.condTakenMask).map {
@@ -366,9 +369,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       s3_fallThroughPrediction.target,
       Seq(
-        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
-        (s3_taken && s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit) -> ittage.io.prediction.target,
-        s3_taken                                                                -> s3_firstTakenBranch.bits.target
+//        (s3_taken && s3_firstTakenBranchIsReturn)                               -> ras.io.topRetAddr,
+//        (s3_taken && s3_firstTakenBranchNeedIttage && ittage.io.prediction.hit) -> ittage.io.prediction.target,
+        s3_taken -> s3_firstTakenBranch.bits.target
       )
     )
 
