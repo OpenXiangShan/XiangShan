@@ -271,9 +271,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //     1. Extract correct bytes from store data
       //     2. Generate final forwarded data and mask
 
-      // vector store will consider all inactive || secondInvalid flows as valid
+      // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
+      // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
+      val CrossPageVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
+        io.dataEntriesIn(j).byteEnd(log2Ceil(VLEN / 8)) && io.dataEntriesIn(j).vaddr(pageOffset - 1, log2Ceil(VLEN / 8)).andR)))
       val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-        io.ctrlEntriesIn(j).addrValid)))
+        io.ctrlEntriesIn(j).addrValid && !CrossPageVec(j))))
       // if is cbo zero, it can forward; other cbo type's data is invalid.
       val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).dataValid && (isCboZero(io.ctrlEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
