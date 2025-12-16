@@ -114,7 +114,8 @@ abstract class BertiBundle(implicit p: Parameters) extends XSBundle with HasBert
 abstract class BertiModule(implicit p: Parameters) extends XSModule with HasBertiHelper
 
 object DeltaStatus extends ChiselEnum {
-  val NO_PREF, L1_PREF, L2_PREF, L2_PREF_REPL = Value
+  // prefetch priority is from low to high
+  val NO_PREF, L2_PREF_REPL, L2_PREF, L1_PREF = Value
 }
 
 class HTSearchReq(implicit p: Parameters) extends BertiBundle {
@@ -445,6 +446,10 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     def newStatus(next: UInt = 0.U): Unit = {
       status := getStatus(Mux(next === 0.U, coverageCnt, next))
     }
+
+    def isGreaterThan(x: DeltaInfo): Bool = {
+      (status > x.status) || (status === x.status && coverageCnt >= x.coverageCnt)
+    }
   }
 
   class DeltaEntry()(implicit p: Parameters) extends BertiBundle {
@@ -517,7 +522,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       when (matchVec.orR){
         val updateIdx = OHToUInt(matchVec)
         deltaList(updateIdx).update()
-        when(deltaList(updateIdx).coverageCnt >= deltaList(bestDeltaIdx).coverageCnt){
+        when(deltaList(updateIdx).isGreaterThan(deltaList(bestDeltaIdx))){
           bestDeltaIdx := updateIdx
         }
         stat_update_isDeltaHit := true.B
