@@ -384,15 +384,13 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   val stat_update_evictDelta = WireInit(0.S(DeltaWidth.W)) // TODO lyq: have no idea how to output this
   val stat_prefetch_isEntryHit = WireInit(false.B)
   /*** built-in function */
-  // def thresholdOfMax: UInt = (1 << DtCntWidth) - 1
-  // def thresholdOfHalf: UInt = (1 << (DtCntWidth - 1)) - 1
   // def thresholdOfReset: UInt = 16.U 
   // def thresholdOfUpdate: UInt = 10.U 
   // def thresholdOfL1PF: UInt = 8.U 
   // def thresholdOfL2PF: UInt = 5.U 
   // def thresholdOfL2PFR: UInt = 2.U 
-  val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 6)   // thresholdOfMax
-  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 2)  // thresholdOfHalf
+  val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 6)    // (1 << DtCntWidth) - 1
+  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 2)  // (1 << (DtCntWidth - 1))
   val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 4)      // ((1 << DtCntWidth) * 0.65).toInt
   val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 2)      // ((1 << DtCntWidth) * 0.5).toInt
   val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 1)    // ((1 << DtCntWidth) * 0.35).toInt
