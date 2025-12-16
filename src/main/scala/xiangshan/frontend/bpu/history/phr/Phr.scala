@@ -282,7 +282,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     }
 
     XSPerfAccumulate(f"predictFHist_diff_commitTrueFHist", predictFHist_diff_commitTrueFHist)
-    XSPerfAccumulate(f"predictFHist_diff_commitTrueFHist", predictFHist_diff_commitTrueFHist)
     XSPerfAccumulate(f"predictHist_diff_commitHist", predictHist_diff_commitHist)
     dontTouch(commitHistValue)
     dontTouch(commitTrueHist)
