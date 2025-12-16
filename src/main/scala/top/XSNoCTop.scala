@@ -336,7 +336,7 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
 
   // AXI part (optional)
   // If AXI is selected as SeperatedBus, directly convert from TL to AXI
-
+  val axi4buf = Option.when(isAXI){LazyModule(new AXI4Buffer())}
   val axiSlaveNodeOpt = Option.when(isAXI) {
     val axiSlaveNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = SeperateBusRanges.filter(address => {
@@ -359,12 +359,13 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
     )))
 
     val axiXbar = AXI4Xbar()
+
     axiXbar :=
       AXI4IdentityNode() :=
       AXI4UserYanker() :=
       TLToAXI4() :=
       tlXbar.get
-    axiSlaveNode := axiXbar
+    axiSlaveNode := axi4buf.get.node := axiXbar
 
     axiSlaveNode
   }
@@ -388,6 +389,11 @@ trait HasSeperatedBusImpOpt[+L <: HasSeperatedBusOpt] {
   if (socParams.SeperateBus != SeperatedBusType.NONE && socParams.EnableSeperateBusAsync) {
     sepbus.tlAsyncSinkOpt.get.module.clock := soc_clock
     sepbus.tlAsyncSinkOpt.get.module.reset := soc_reset_sync
+    sepbus.axi4buf.foreach(_.module.clock := soc_clock)
+    sepbus.axi4buf.foreach(_.module.reset := soc_reset_sync)
+  }else {
+    sepbus.axi4buf.foreach(_.module.clock := clock)
+    sepbus.axi4buf.foreach(_.module.reset := cpuReset_sync)
   }
 }
 
