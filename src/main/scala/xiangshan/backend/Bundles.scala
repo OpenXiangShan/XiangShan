@@ -639,7 +639,7 @@ object Bundles {
     }
     def wakeUpVlFromIQ(successor: (UInt, UInt)): Bool = {
       val (thatPsrc, srcType) = successor
-      val pdestMatch = pdest === thatPsrc
+      val pdestMatch = pdestVl === thatPsrc
       pdestMatch && (
         SrcType.isVp(srcType) && this.vlWen
       )
@@ -972,6 +972,7 @@ object Bundles {
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
       this.debug_seqNum  := source.common.debug_seqNum
+      this.pdestVl       .foreach(_ := source.common.pdestVl.get)
       this.exuSources    .foreach(_ := source.common.exuSources.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
