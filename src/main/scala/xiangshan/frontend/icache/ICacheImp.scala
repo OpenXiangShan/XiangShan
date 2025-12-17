@@ -37,6 +37,8 @@ import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToICacheIO
+import xiangshan.frontend.icache.array.ICacheDataArray
+import xiangshan.frontend.icache.array.ICacheMetaArray
 
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {

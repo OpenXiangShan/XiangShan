@@ -13,13 +13,20 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.icache
+package xiangshan.frontend.icache.array
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utils.VecRotate
+import xiangshan.frontend.icache.ICacheAddrHelper
+import xiangshan.frontend.icache.ICacheBundle
+import xiangshan.frontend.icache.ICacheMetaEntry
+import xiangshan.frontend.icache.ICacheModule
+import xiangshan.frontend.icache.MetaFlushBundle
+import xiangshan.frontend.icache.MetaReadBundle
+import xiangshan.frontend.icache.MetaWriteBundle
 
 class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {

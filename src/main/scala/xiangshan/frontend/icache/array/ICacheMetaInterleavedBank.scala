@@ -13,13 +13,15 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.icache
+package xiangshan.frontend.icache.array
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
+import xiangshan.frontend.icache.ICacheMetaEntry
+import xiangshan.frontend.icache.ICacheModule
 
 class ICacheMetaInterleavedBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheMetaInterleavedBankIO extends Bundle {

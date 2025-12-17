@@ -13,10 +13,16 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.icache
+package xiangshan.frontend.icache.array
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.icache.DataReadBundle
+import xiangshan.frontend.icache.DataWriteBundle
+import xiangshan.frontend.icache.ICacheBundle
+import xiangshan.frontend.icache.ICacheDataEntry
+import xiangshan.frontend.icache.ICacheDataHelper
+import xiangshan.frontend.icache.ICacheModule
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDataHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
