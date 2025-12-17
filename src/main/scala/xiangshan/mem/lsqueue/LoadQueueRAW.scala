@@ -314,11 +314,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val lqViolation = lqSelect._1(0)
     val lqViolationUop = lqSelect._2(0).uop
 
-    XSDebug(
-      lqViolation,
-      "need rollback (ld wb before store) pc %x robidx %d target %x\n",
-      storeIn(i).bits.uop.pc.get, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
-    )
+    if(debugEn) {
+      XSDebug(
+        lqViolation,
+        "need rollback (ld wb before store) pc %x robidx %d target %x\n",
+        storeIn(i).bits.uop.pc.get, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
+      )
+    }
+
 
     (lqViolation, lqViolationUop)
   }
