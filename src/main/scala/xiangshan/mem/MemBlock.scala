@@ -1257,7 +1257,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // Initialize when unenabled difftest.
   sbuffer.io.diffStore := DontCare
-  lsq.io.diffStore := DontCare
+  lsq.io.diffStore.foreach(_ := DontCare)
   vSegmentUnit.io.vecDifftestInfo := DontCare
   io.mem_to_ooo.storeDebugInfo := DontCare
   // store event difftest information
@@ -1269,14 +1269,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
           sbuffer.io.diffStore.diffInfo(0) := vSegmentUnit.io.vecDifftestInfo.bits
           sbuffer.io.diffStore.pmaStore(0) := vSegmentUnit.io.diffPmaStore.get
         }.otherwise{
-          sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.diffInfo(0)
-          sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.pmaStore(0)
+          sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.get.diffInfo(0)
+          sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.get.pmaStore(0)
         }
       }else{
-        sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.diffInfo(i)
-        sbuffer.io.diffStore.pmaStore(i) := lsq.io.diffStore.pmaStore(i)
+        sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.get.diffInfo(i)
+        sbuffer.io.diffStore.pmaStore(i) := lsq.io.diffStore.get.pmaStore(i)
       }
-      sbuffer.io.diffStore.ncStore := lsq.io.diffStore.ncStore
+      sbuffer.io.diffStore.ncStore := lsq.io.diffStore.get.ncStore
       io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
       sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
