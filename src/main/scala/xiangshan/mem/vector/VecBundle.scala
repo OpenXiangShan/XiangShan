@@ -236,7 +236,8 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
-  val threshold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
+  val threshold           = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
+  val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
 
 class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -252,6 +253,7 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
   val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
+  val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{

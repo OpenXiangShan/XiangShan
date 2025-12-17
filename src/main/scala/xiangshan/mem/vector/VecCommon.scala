@@ -92,6 +92,7 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   def isNotIndexed(instType: UInt) = instType(0) === "b0".U
   def isSegment(instType: UInt) = instType(2) === "b1".U
   def is128Bit(alignedType: UInt) = alignedType(2) === "b1".U
+  def isOrderIndexed(instType: UInt) = instType === "b11".U
 
   def mergeDataWithMask(oldData: UInt, newData: UInt, mask: UInt): Vec[UInt] = {
     require(oldData.getWidth == newData.getWidth)
