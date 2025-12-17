@@ -1620,6 +1620,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.threshold.get.valid := vlMergeBuffer.io.toSplit.get.threshold
     vlSplit(i).io.threshold.get.bits  := lsq.io.lqDeqPtr
+    vlSplit(i).io.fromPipeline.foreach { case port =>
+      port.zipWithIndex.map{case (sink, j) =>
+        if(j == MisalignWBPort) {
+          when(loadUnits(j).io.vecldout.valid) {
+            sink.valid := loadUnits(j).io.vecldout.valid
+            sink.bits  := loadUnits(j).io.vecldout.bits
+          } .otherwise {
+            sink.valid   := loadMisalignBuffer.io.vecWriteBack.valid
+            sink.bits    := loadMisalignBuffer.io.vecWriteBack.bits
+          }
+        }else {
+          sink.valid := loadUnits(j).io.vecldout.valid
+          sink.bits  := loadUnits(j).io.vecldout.bits
+        }
+
+      }
+    }
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
       Mux(vlSplit(i).io.out.fire, vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
