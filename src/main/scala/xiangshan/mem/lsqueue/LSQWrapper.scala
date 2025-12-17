@@ -142,7 +142,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssued = Input(Bool())
 
-    val diffStore = Flipped(new DiffStoreIO)
+    val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -217,7 +217,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
   storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
 //  storeQueue.io.maControl    <> io.maControl
-  storeQueue.io.diffStore.foreach(io.diffStore := _)
+  io.diffStore.foreach{case sink =>
+    storeQueue.io.diffStore.foreach(sink := _)
+  }
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
