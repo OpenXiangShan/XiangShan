@@ -132,10 +132,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val ctrlUnit = outer.ctrlUnitOpt.get.module
     when(ctrlUnit.io.injecting) {
       metaArray.io.write <> ctrlUnit.io.metaWrite
-      metaArray.io.read <> ctrlUnit.io.metaRead
-      missUnit.io.metaWrite.req.ready  := false.B
-      prefetcher.io.metaRead.req.ready := false.B
-      prefetcher.io.metaRead.resp      := DontCare
+      metaArray.io.read.head <> ctrlUnit.io.metaRead
+      metaArray.io.read.tail.foreach(_.req.valid := false.B)
+      metaArray.io.read.tail.foreach(_.req.bits := DontCare)
+      missUnit.io.metaWrite.req.ready := false.B
+      prefetcher.io.metaRead.foreach(_.req.ready := false.B)
+      prefetcher.io.metaRead.foreach(_.resp := DontCare)
     }.otherwise {
       ctrlUnit.io.metaWrite.req.ready := false.B
       ctrlUnit.io.metaRead.req.ready  := false.B

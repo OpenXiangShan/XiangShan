@@ -30,10 +30,10 @@ import xiangshan.frontend.icache.MetaWriteBundle
 
 class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
-    val write:    MetaWriteBundle = Flipped(new MetaWriteBundle)
-    val read:     MetaReadBundle  = Flipped(new MetaReadBundle)
-    val flush:    MetaFlushBundle = Flipped(new MetaFlushBundle)
-    val flushAll: Bool            = Input(Bool())
+    val write:    MetaWriteBundle     = Flipped(new MetaWriteBundle)
+    val read:     Vec[MetaReadBundle] = Vec(FetchPorts, Flipped(new MetaReadBundle))
+    val flush:    MetaFlushBundle     = Flipped(new MetaFlushBundle)
+    val flushAll: Bool                = Input(Bool())
   }
 
   val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
@@ -45,40 +45,58 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAd
 
   /* *** read *** */
   // vSetIdx(1) must be vSetIdx(0) + 1 if isDoubleLine, it's pre-computed in Ftq for better timing (maybe)
-  assert(
-    !(
-      io.read.req.valid && io.read.req.bits.isDoubleLine &&
-        io.read.req.bits.vSetIdx(0) + 1.U =/= io.read.req.bits.vSetIdx(1)
-    ),
-    "2 read setIdx must be adjacent!"
-  )
+  io.read.foreach { port =>
+    assert(
+      !(
+        port.req.valid && port.req.bits.isDoubleLine &&
+          port.req.bits.vSetIdx(0) + 1.U =/= port.req.bits.vSetIdx(1)
+      ),
+      "2 read setIdx must be adjacent!"
+    )
+  }
 
   // rotate setIdxVec to match interleaved banking
   // e.g. 2-interleaved, if vSetIdx(0) is even (getInterleavedBankIdx == 0), we don't need to rotate
   //      i.e. vSetIdx(0) goes to bank0, vSetIdx(1) goes to bank1
   //      if vSetIdx(0) is odd (getInterleavedBankIdx == 1), we need to rotate right once
   //      i.e. vSetIdx(0) goes to bank1, vSetIdx(1) goes to bank0
-  private val r0_rotator = VecRotate(getInterleavedBankIdx(io.read.req.bits.vSetIdx(0)), storeOneHot = true)
-  private val r0_validVec = r0_rotator.rotate(
-    VecInit(Seq(io.read.req.valid, io.read.req.valid && io.read.req.bits.isDoubleLine))
-  )
-  private val r0_setIdxVec = r0_rotator.rotate(
-    VecInit(io.read.req.bits.vSetIdx.map(getInterleavedSetIdx))
-  )
+  private val r0_rotator = VecInit(io.read.map { port =>
+    VecRotate(getInterleavedBankIdx(port.req.bits.vSetIdx(0)), storeOneHot = true)
+  })
+  private val r0_validVec = VecInit((io.read zip r0_rotator).map { case (port, rotator) =>
+    rotator.rotate(
+      VecInit(Seq(port.req.valid, port.req.valid && port.req.bits.isDoubleLine))
+    )
+  })
+  private val r0_setIdxVec = VecInit((io.read zip r0_rotator).map { case (port, rotator) =>
+    rotator.rotate(
+      VecInit(port.req.bits.vSetIdx.map(getInterleavedSetIdx))
+    )
+  })
 
-  io.read.req.ready := banks.map(_.io.read.req.ready).reduce(_ && _)
+  io.read.foreach(_.req.ready := banks.map(_.io.read.req.ready).reduce(_ && _))
+
   banks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := r0_validVec(i)
-    b.io.read.req.bits.setIdx := r0_setIdxVec(i)
+    // select which port is accessing this bank
+    val portValidVec = VecInit(r0_validVec.map(_(i)))
+    assert(
+      PopCount(portValidVec) <= 1.U,
+      s"more than 1 read port accessing bank $i at the same time!"
+    )
+
+    b.io.read.req.valid       := portValidVec.reduce(_ || _)
+    b.io.read.req.bits.setIdx := Mux1H(portValidVec, r0_setIdxVec.map(_(i)))
   }
 
-  private val r1_rotator = RegEnable(r0_rotator, io.read.req.fire)
   // rotate back to original order
-  io.read.resp.entries := r1_rotator.revert(VecInit(banks.map(_.io.read.resp.entries)))
+  (io.read zip r0_rotator).foreach { case (port, rotator) =>
+    val r1_rotator = RegEnable(rotator, port.req.fire)
+    port.resp.entries := r1_rotator.revert(VecInit(banks.map(_.io.read.resp.entries)))
+  }
 
   // TEST: force ECC to fail by setting parity codes to 0
   if (ForceMetaEccFail) {
-    io.read.resp.entries.foreach(_.foreach(_.bits.code := 0.U(MetaEccBits.W)))
+    io.read.foreach(_.resp.entries.foreach(_.foreach(_.bits.code := 0.U(MetaEccBits.W))))
   }
 
   /* *** write *** */

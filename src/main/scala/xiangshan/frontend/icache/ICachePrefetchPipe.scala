@@ -47,7 +47,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val itlb:           TlbRequestIO                      = new TlbRequestIO
     val itlbFlushPipe:  Bool                              = Output(Bool())
     val pmp:            PmpCheckBundle                    = new PmpCheckBundle
-    val metaRead:       MetaReadBundle                    = new MetaReadBundle
+    val metaRead:       Vec[MetaReadBundle]               = Vec(FetchPorts, new MetaReadBundle)
     val missReq:        DecoupledIO[MissReqBundle]        = DecoupledIO(new MissReqBundle)
     val missResp:       Valid[MissRespBundle]             = Flipped(ValidIO(new MissRespBundle))
     val wayLookupWrite: DecoupledIO[WayLookupWriteBundle] = DecoupledIO(new WayLookupWriteBundle)
@@ -59,7 +59,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   private val (toItlb, fromItlb) = (io.itlb.req, io.itlb.resp)
   private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
-  private val (toMeta, fromMeta) = (io.metaRead.req, io.metaRead.resp)
+  private val (toMeta, fromMeta) = (io.metaRead.map(_.req), io.metaRead.map(_.resp))
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
   private val toWayLookup        = io.wayLookupWrite
 
@@ -93,7 +93,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_flush       := io.flush || fromBpuS0Flush || s1_flush
 
-  private val s0_canGo = s1_ready && toItlb.ready && toMeta.ready
+  private val s0_canGo = s1_ready && toItlb.ready && toMeta.map(_.ready).reduce(_ && _)
   io.req.ready := s0_canGo
 
   s0_fire := s0_valid && s0_canGo && !s0_flush
@@ -199,16 +199,16 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   private val s1_needMeta = ((s1_state === S1FsmState.ItlbResend) && tlbFinish) || (s1_state === S1FsmState.MetaResend)
-  toMeta.valid             := s1_needMeta || s0_valid
-  toMeta.bits.isDoubleLine := Mux(s1_needMeta, s1_doubleline, s0_doubleline)
-  toMeta.bits.vSetIdx      := Mux(s1_needMeta, s1_vSetIdx, s0_vSetIdx)
+  toMeta.head.valid             := s1_needMeta || s0_valid
+  toMeta.head.bits.isDoubleLine := Mux(s1_needMeta, s1_doubleline, s0_doubleline)
+  toMeta.head.bits.vSetIdx      := Mux(s1_needMeta, s1_vSetIdx, s0_vSetIdx)
 
   /**
     ******************************************************************************
     * Receive resp from IMeta and check
     ******************************************************************************
     */
-  private val s1_sramMetaInfo = VecInit(fromMeta.entries.map { portEntries =>
+  private val s1_sramMetaInfo = VecInit(fromMeta.head.entries.map { portEntries =>
     val waymask       = getWaymask(s1_pTag, portEntries)
     val selectedEntry = Mux1H(waymask, portEntries)
 
@@ -239,8 +239,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
 
   private val s1_sramValid = VecInit(Seq(
-    s0_fireNext || RegNext(s1_needMeta && toMeta.ready),
-    (s0_fireNext || RegNext(s1_needMeta && toMeta.ready)) && s1_doubleline
+    s0_fireNext || RegNext(s1_needMeta && toMeta.head.ready),
+    (s0_fireNext || RegNext(s1_needMeta && toMeta.head.ready)) && s1_doubleline
   ))
   private val s1_mshrValid = fromMiss.valid && !fromMiss.bits.corrupt
 
@@ -339,7 +339,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     }
     is(S1FsmState.ItlbResend) {
       when(tlbFinish) {
-        when(!toMeta.ready) {
+        when(!toMeta.head.ready) {
           s1_nextState := S1FsmState.MetaResend
         }.otherwise { // toMeta.ready
           s1_nextState := S1FsmState.EnqWay
@@ -347,7 +347,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       } // .otherwise { s1_nextState := S1FsmState.itlbResend }  // !tlbFinish
     }
     is(S1FsmState.MetaResend) {
-      when(toMeta.ready) {
+      when(toMeta.head.ready) {
         s1_nextState := S1FsmState.EnqWay
       } // .otherwise { s1_nextState := S1FsmState.metaResend }  // !toMeta.ready
     }
@@ -480,7 +480,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // itlb miss bubble
   XSPerfAccumulate(
     "stallCycles_fetch_icachePrefetch_metaArray",
-    s0_valid && !toMeta.ready
+    s0_valid && !toMeta.head.ready
   )
   XSPerfAccumulate(
     "stallCycles_fetch_icachePrefetch_itlbNotReady",
@@ -492,7 +492,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   )
   XSPerfAccumulate(
     "stallCycles_fetch_icachePrefetch_metaResend",
-    s1_valid && tlbFinish && !toMeta.ready &&
+    s1_valid && tlbFinish && !toMeta.head.ready &&
       (s1_state === S1FsmState.ItlbResend || s1_state === S1FsmState.MetaResend)
   )
 }
