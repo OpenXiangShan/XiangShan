@@ -40,7 +40,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   //TODO vdIdxReg should no longer be useful, don't delete it for now
   val vdIdxReg = RegInit(0.U(3.W))
 
-  val mergeBufferNack = io.threshold.valid && ({
+  //                                           Ensure the sequence of vec index order uop.
+  val mergeBufferNack = (io.threshold.valid || isOrderIndexed(io.in.bits.uop.fuOpType(6,5)) && !isVStore.B) &&
+   ({
     (isVStore, io.threshold.bits) match {
       case (true,  p: SqPtr) => p =/= io.in.bits.uop.sqIdx
       case (false, p: LqPtr) => p =/= io.in.bits.uop.lqIdx
@@ -418,7 +420,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   /** Issue to scala pipeline**/
 
   lazy val misalignedCanGo = true.B
-  val allowIssue = (addrAligned || misalignedCanGo) && io.out.ready
+  lazy val splitCanGo      = true.B
+  val allowIssue = (addrAligned || misalignedCanGo) && io.out.ready && splitCanGo
   val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(activeIssue))) // for dont need split unit-stride, issue two flow
   val dataIssued = RegInit(false.B)
 
@@ -461,7 +464,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   }
 
   // out connect
-  io.out.valid := issueValid && vecActive && (addrAligned || misalignedCanGo) // TODO: inactive unit-stride uop do not send to pipeline
+  io.out.valid := issueValid && vecActive && (addrAligned || misalignedCanGo) && splitCanGo
 
   XSPerfAccumulate("out_valid",             io.out.valid)
   XSPerfAccumulate("out_fire",              io.out.fire)
@@ -522,6 +525,52 @@ class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = f
   io.out.bits.uop.lqIdx := issueUop.lqIdx + splitIdx
   io.out.bits.uop.exceptionVec(loadAddrMisaligned) := !addrAligned && !issuePreIsSplit && io.out.bits.mask.orR
   io.out.bits.uop.fuType := FuType.vldu.U
+
+  // stop and wait to avoid RAR violation of order index
+  object StopAndWaitState extends ChiselEnum {
+    val idle   = Value
+    val send   = Value
+    val stop   = Value
+  }
+
+  lazy val stopWaitState     = RegInit(StopAndWaitState.idle)
+  lazy val stopWaitStateNext = WireInit(stopWaitState)
+  stopWaitState              := stopWaitStateNext
+
+  val pipelineWbValid = io.fromPipeline.get.map{case port =>
+    port.valid && port.bits.mBIndex === issueMbIndex
+  }.reduce(_ || _)
+
+  // stop and wait state
+  switch(stopWaitState) {
+    is(StopAndWaitState.idle) {
+      when(isOrderIndexed(issueInstType) && io.out.fire && !splitFinish && !needCancel) { // have one active element issue, only order index need it
+        stopWaitStateNext := StopAndWaitState.stop
+      }
+    }
+    is(StopAndWaitState.send) {
+      when(splitFinish || needCancel) {
+        stopWaitStateNext := StopAndWaitState.idle
+      }.elsewhen(io.out.fire) {
+        stopWaitStateNext := StopAndWaitState.stop
+      }
+    }
+    is(StopAndWaitState.stop) {
+      when(splitFinish || needCancel) {
+        stopWaitStateNext := StopAndWaitState.idle
+      }.elsewhen(pipelineWbValid) {
+        stopWaitStateNext := StopAndWaitState.send
+      }
+    }
+  }
+
+  // if it's a normal vector instruction, it will always be idle.
+  // if it's a order index instruction, it will wait element writeback after first active element issue.
+  override lazy val splitCanGo = stopWaitState =/= StopAndWaitState.stop
+
+  XSError((stopWaitState === StopAndWaitState.stop || stopWaitState === StopAndWaitState.send) &&
+    !isOrderIndexed(issueInstType), "normal vector load instruction do not need to wait!\n")
+  XSError(!allocated && stopWaitState =/= StopAndWaitState.idle, "invalid entry do not need to wait!\n")
 }
 
 class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
@@ -556,6 +605,7 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
 
   // Split Buffer
   splitBuffer.io.redirect <> io.redirect
+  splitBuffer.io.fromPipeline.get := io.fromPipeline.get
   io.out <> splitBuffer.io.out
 }
 
