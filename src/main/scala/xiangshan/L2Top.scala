@@ -239,8 +239,12 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val dft_reset_out = Option.when(hasMbist)(Output(new DFTResetSignals()))
       // val reset_core = IO(Output(Reset()))
     })
-    io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
-    io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
+    io.dft_out.zip(io.dft).foreach({ case(a, b) =>
+      a := b
+      a.ram_hold := RegNext(b.ram_hold)
+      a.cgen := RegNext(b.cgen)
+    })
+    io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := RegNext(b) })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 

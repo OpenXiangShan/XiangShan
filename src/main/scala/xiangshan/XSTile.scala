@@ -174,8 +174,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     l2top.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
-    core.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
-    core.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+    core.module.io.dft.zip(l2top.module.io.dft_out).foreach({ case (a, b) => a := b })
+    core.module.io.dft_reset.zip(l2top.module.io.dft_reset_out).foreach({ case (a, b) => a := b })
 
     if (enableL2) {
       // TODO: add ECC interface of L2
