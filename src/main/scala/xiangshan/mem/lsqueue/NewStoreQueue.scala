@@ -124,7 +124,6 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val isVec              = Bool() // TODO: need it ?
   // vecInactive indicate storage a inactive vector element, it will not write to Sbuffer. written when vector split.
   val vecInactive        = Bool()
-  val unaligned          = Bool() // TODO: need it ?
   val cross16Byte        = Bool() // TODO: need it ?
   val hasException       = Bool() // TODO: need it ?
   val committed          = Bool()
@@ -904,7 +903,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     // for difftest, ref will skip mmio store
     if(debugEn) {
       io.writeBack.bits.debug.isMMIO  := isMmio(ctrlEntries.head.memoryType) || isPbmtIO(ctrlEntries.head.memoryType)
-      io.writeBack.bits.debug.isNCIO  := isNC(ctrlEntries.head.memoryType)
+      io.writeBack.bits.debug.isNCIO  := isPbmtNC(ctrlEntries.head.memoryType)
       io.writeBack.bits.debug.vaddr   := dataEntries.head.debugVaddr.get
       io.writeBack.bits.debug.paddr   := dataEntries.head.debugPaddr.get
       io.writeBack.bits.debug_seqNum  := dataEntries.head.debugUop.get.debug_seqNum
@@ -1453,9 +1452,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val addrValidSet   = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
       port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
     }.reduce(_ || _)
-    val unalignSet     = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      port.bits.isUnsalign && staValidSetVec(j)
-    }.reduce(_ || _)
     val cross16ByteSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
       port.bits.isUnsalign && !port.bits.unalignWith16Byte && staValidSetVec(j)
     }.reduce(_ || _)
@@ -1471,7 +1467,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     when(staSetValid) { // no need to clean when deq or cancel, because it will be set when set addrValid
-      ctrlEntries(i).unaligned    := unalignSet
       ctrlEntries(i).cross16Byte  := cross16ByteSet
       ctrlEntries(i).isCbo        := isCboSet
     } // don't need to set false for low power, it will be set every instruction.
@@ -1695,30 +1690,21 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     // enqPtr update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
-      (ctrlEntries(ptr.value).addrValid &&
-        (isMmio(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) || ctrlEntries(ptr.value).vecMbCommit) &&
-      !ctrlEntries(ptr.value).unaligned && ctrlEntries(ptr.value).allocated &&
+      (ctrlEntries(ptr.value).addrValid && // currently, dataValid but addrInvalid also need to replay laod.
+        (isMmio(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) ||
+        ctrlEntries(ptr.value).vecMbCommit) && //TODO: vecMbCommit will be remove in the future, entry maybe inactive, so we nned to or vecMbCommit.
+      ctrlEntries(ptr.value).allocated &&
       ptr =/= enqPtrExt(0)
   )
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
-  // move unalign ptr
-  val deqGroupHasUnalign = deqPtrExt.map { case ptr => ctrlEntries(ptr.value).unaligned }.reduce(_|_)
-  val dataPtrInDeqGroupRangeVec = VecInit(deqPtrExt.zipWithIndex.map { case (ptr, i) =>
-    dataReadyPtrExt === ptr && sqDeqCnt > i.U
-  })
-  val unalignedCanMove = deqGroupHasUnalign && dataPtrInDeqGroupRangeVec.asUInt.orR
-  when (unalignedCanMove) {
-    val step = sqDeqCnt - PriorityEncoder(dataPtrInDeqGroupRangeVec)
-    dataReadyPtrExt := dataReadyPtrExt + step
-  }
-
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
     stDataReadyVecReg(i) := (ctrlEntries(i).addrValid &&
-        (isMmio(ctrlEntries(i).memoryType) || ctrlEntries(i).dataValid) || (ctrlEntries(i).isVec && ctrlEntries(i).vecMbCommit)) &&
-      !ctrlEntries(i).unaligned && ctrlEntries(i).allocated
+        (isMmio(ctrlEntries(i).memoryType) || ctrlEntries(i).dataValid) ||
+      ctrlEntries(i).vecMbCommit) &&
+      ctrlEntries(i).allocated
   })
 
   // deqPtr logic
