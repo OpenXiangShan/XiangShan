@@ -36,10 +36,8 @@ import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.annotate
+import difftest.HasDiffTestInterfaces
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
-
-import difftest.common.DifftestWiring
-import difftest.util.Profile
 
 abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper)
 {
@@ -494,21 +492,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 
 class XSNoCDiffTop(implicit p: Parameters) extends XSNoCTop
 {
-  class XSNoCDiffTopImp(wrapper: XSNoCTop) extends XSNoCTopImp(wrapper) {
-    // TODO:
-    // XSDiffTop is only part of DUT, we can not instantiate difftest here.
-    // Temporarily we collect Performance counters for each DiffTop, need control signals passed from Difftest
-    val timer = IO(Input(UInt(64.W)))
-    val logEnable = IO(Input(Bool()))
-    val clean = IO(Input(Bool()))
-    val dump = IO(Input(Bool()))
-
-    withClockAndReset(clock, cpuReset_sync) {
-      XSLog.collect(timer, logEnable, clean, dump)
-    }
-    DifftestWiring.createAndConnectExtraIOs()
-    Profile.generateJson("XiangShan")
-    XSNoCDiffTopChecker()
+  class XSNoCDiffTopImp(wrapper: XSNoCTop) extends XSNoCTopImp(wrapper) with HasDiffTestInterfaces {
+    override def cpuName: Option[String] = Some("XiangShan")
+    override protected def implicitClock: Clock = clock
+    override protected def implicitReset: Reset = reset
   }
 
   override lazy val module = new XSNoCDiffTopImp(this)
