@@ -93,7 +93,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   val uart = IO(new UARTIO)
   simMMIO.io.uart <> uart
 
-  override def connectTopIOs(difftest: DifftestTopIO): Seq[Data] = {
+  override def connectTopIOs(difftest: DifftestTopIO): Unit = {
     difftest.uart <> uart
 
     val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
@@ -105,7 +105,6 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
     XSLog.collect(timer, logEnable, clean, dump)
-    Seq.empty
   }
 }
 

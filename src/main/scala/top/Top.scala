@@ -20,7 +20,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import difftest.{DifftestModule, DifftestTopIO, HasDiffTestInterfaces}
+import difftest.{DifftestModule, HasDiffTestInterfaces}
 import xiangshan._
 import utils._
 import utility._
@@ -477,18 +477,6 @@ class XSTileDiffTop(implicit p: Parameters) extends XSTop {
     override def cpuName: Option[String] = Some("XiangShan")
     override protected def implicitClock: Clock = io.clock
     override protected def implicitReset: Reset = io.reset
-    override def connectTopIOsWithName(difftest: DifftestTopIO): Seq[(Data, String)] = {
-      val otherIOs = Seq(wrapper.nmi.getWrappedValue) ++
-        dma.toSeq ++
-        Seq(
-          memory,
-          peripheral,
-        )
-      otherIOs.map(d => (d, d.instanceName)) ++
-        io.elements.toSeq.collect { case (name, elem)
-          if !Seq("clock", "reset").contains(name) => (elem, "io_" + name)
-        }
-    }
   }
   override lazy val module = new XSTileDiffTopImp(this)
 }
@@ -505,9 +493,11 @@ object TopMain extends App {
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
   if (config(SoCParamsKey).UseXSNoCDiffTop) {
+    if (enableDifftest) Gateway.setConfig("H") // use XMR to avoid extra topIO
     val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+    Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
+    if (enableDifftest) Gateway.setConfig("H") // use XMR to avoid extra topIO
     val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
     Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else {
