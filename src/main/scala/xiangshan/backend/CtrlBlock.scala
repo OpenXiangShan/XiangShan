@@ -777,7 +777,7 @@ class CtrlBlockImp(
     iq.bits := dispatch.bits
     dispatch.ready := iq.ready
   }}
-  io.toIssueBlock.flush <> s2_s4_redirect
+  io.toIssueBlock.flush := s1_s3_redirect
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.wen)
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.ftqIdx, io.frontend.fromFtq.wen)
