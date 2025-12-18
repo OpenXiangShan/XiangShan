@@ -377,6 +377,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_release = Input(Vec(2, ValidIO(UInt(PAddrBits.W))))
     val l2_pmp_resp = new PMPRespBundle
     val l2_flush_done = Input(Bool())
 
@@ -1222,7 +1223,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   AddPipelineReg(uncache.io.lsq.resp, uncacheResp, false.B)
 
   //lsq.io.refill         := delayedDcacheRefill
-  lsq.io.release        := dcache.io.lsu.release
+  // lsq.io.release        := dcache.io.lsu.release
+  lsq.io.release        := io.l2_release
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
