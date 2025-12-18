@@ -96,9 +96,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
-          arbInSeq(srcIdx).bits.addr := 0.U
+          arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
@@ -110,9 +112,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
-          arbInSeq(srcIdx).bits.addr := 0.U
+          arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
@@ -125,9 +129,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
-          arbInSeq(srcIdx).bits.addr := 0.U
+          arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
@@ -140,9 +146,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
-          arbInSeq(srcIdx).bits.addr := 0.U
+          arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
@@ -155,9 +163,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
-          arbInSeq(srcIdx).bits.addr := 0.U
+          arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
