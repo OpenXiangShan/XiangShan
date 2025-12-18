@@ -25,7 +25,13 @@ import utils._
 import utility._
 
 
-class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType, realNumLogicRegs: Int = 32)(implicit p: Parameters) extends BaseFreeList(freeListSize, realNumLogicRegs) with HasPerfEvents {
+class StdFreeList(
+  freeListSize: Int,
+  numLogicRegs: Int,
+  regType: RegType,
+  commitWidth: Int,
+  realNumLogicRegs: Int = 32,
+)(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, realNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
@@ -36,7 +42,7 @@ class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType, realNu
   // free committed instructions' `old_pdest` reg
   //
   val freeReqReg = io.freeReq
-  for (i <- 0 until RabCommitWidth) {
+  for (i <- 0 until commitWidth) {
     val offset = if (i == 0) 0.U else PopCount(freeReqReg.take(i))
     val enqPtr = lastTailPtr + offset
 
@@ -65,15 +71,8 @@ class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType, realNu
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
     XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
-  val doCommit = io.commit.isCommit
-  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) =>
-    valid && (regType match {
-      case Reg_F => info.fpWen
-      case Reg_V => info.vecWen
-      case Reg_V0 => info.v0Wen
-      case Reg_Vl => info.vlWen
-    })
-  }
+  val doCommit = io.commit.doCommit
+  val archAlloc = io.commit.archAlloc
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew  = archHeadPtr + numArchAllocate
   val archHeadPtrNext = Mux(doCommit, archHeadPtrNew, archHeadPtr)

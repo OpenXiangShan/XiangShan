@@ -24,7 +24,7 @@ import utils._
 import utility._
 
 
-class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
+class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends BaseFreeList(size, commitWidth) with HasPerfEvents {
   val freeList = RegInit(VecInit(
     // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
     Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
@@ -34,7 +34,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val doWalkRename = io.walk && io.doAllocate && !io.redirect
   val doNormalRename = io.canAllocate && io.doAllocate && !io.redirect
   val doRename = doWalkRename || doNormalRename
-  val doCommit = io.commit.isCommit
+  val doCommit = io.commit.doCommit
 
   /**
     * Allocation: from freelist (same as StdFreelist)
@@ -45,9 +45,8 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
   }
   // update arch head pointer
-  val archAlloc = io.commit.commitValid zip io.commit.info map {
-    case (valid, info) => valid && info.rfWen && !info.isMove
-  }
+  val archAlloc = io.commit.archAlloc
+
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew  = archHeadPtr + numArchAllocate
   val archHeadPtrNext = Mux(doCommit, archHeadPtrNew, archHeadPtr)
@@ -65,7 +64,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
-  for (i <- 0 until RabCommitWidth) {
+  for (i <- 0 until commitWidth) {
     when (io.freeReq(i)) {
       val freePtr = tailPtr + PopCount(io.freeReq.take(i))
       freeList(freePtr.value) := io.freePhyReg(i)
