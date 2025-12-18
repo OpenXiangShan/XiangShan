@@ -31,7 +31,7 @@ import xiangshan._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
-import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
+import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
 
 // DCache specific parameters
 case class DCacheParameters
@@ -309,6 +309,10 @@ class DCacheExtraMeta(implicit p: Parameters) extends DCacheBundle
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
+  /**
+    * TODO:
+    * remove data, mask, id, either cmd or instrtype
+    */
   val cmd    = UInt(M_SZ.W)
   val vaddr  = UInt(VAddrBits.W)
   val vaddr_dup = UInt(VAddrBits.W)
@@ -714,7 +718,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheForwardReqS0(implicit p: Parameters) extends DCacheBundle {
   val vaddr = UInt(VAddrBits.W)
-  val size = UInt(3.W)
+  val size = UInt(MemorySize.Size.width.W)
   val mshrId = UInt(log2Up(cfg.nMissEntries).W)
 }
 

@@ -315,18 +315,21 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
     s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
     s0_src_select_vec(nc_idx)
-  s0_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
-    s0_src_valid_vec(mab_idx) ||
-    s0_src_valid_vec(super_rep_idx) ||
-    s0_src_valid_vec(fast_rep_idx) ||
-    s0_src_valid_vec(lsq_rep_idx) ||
-    s0_src_valid_vec(high_pf_idx) ||
-    s0_src_valid_vec(vec_iss_idx) ||
-    s0_src_valid_vec(int_iss_idx) ||
-    s0_src_valid_vec(low_pf_idx)
-  ) && !s0_src_select_vec(mmio_idx) && io.dcache.req.ready &&
-    !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
-  ))
+  s0_valid := !s0_kill && (
+    s0_src_select_vec(nc_idx) || (
+      (
+        s0_src_valid_vec(mab_idx) ||
+        s0_src_valid_vec(super_rep_idx) ||
+        s0_src_valid_vec(fast_rep_idx) ||
+        s0_src_valid_vec(lsq_rep_idx) ||
+        s0_src_valid_vec(high_pf_idx) ||
+        s0_src_valid_vec(vec_iss_idx) ||
+        s0_src_valid_vec(int_iss_idx) ||
+        s0_src_valid_vec(low_pf_idx)
+      ) && !s0_src_select_vec(mmio_idx) && io.dcache.req.ready &&
+        !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
+    )
+  )
 
   s0_mmio_select := s0_src_select_vec(mmio_idx) && !s0_kill
   s0_nc_select := s0_src_select_vec(nc_idx) && !s0_kill

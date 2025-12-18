@@ -192,8 +192,8 @@ object Bundles {
 
   class StoreForwardReqS0(implicit p: Parameters) extends XSBundle {
     val vaddr = UInt(VAddrBits.W)
-    val sqIdx = new SqPtr // TODO: remove this, sqIdx is included in uop
-    val size = UInt(3.W) // TODO: parameterize this @LWD
+    val sqIdx = new SqPtr
+    val size = UInt(MemorySize.Size.width.W)
     val uop = new DynInst // TODO: only MDP involved signals are needed
   }
 
