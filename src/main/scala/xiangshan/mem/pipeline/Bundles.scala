@@ -28,6 +28,7 @@ import xiangshan.cache.mmu._
 import xiangshan.mem.LoadStage._
 
 sealed trait HasLoadPipeBundleParam {
+  def hasPAddr: Boolean = false
   def hasAddrTrans: Boolean = false
   def hasPAddrChecked: Boolean = false
   def replayToLRQ: Boolean = false
@@ -35,6 +36,7 @@ sealed trait HasLoadPipeBundleParam {
   def hasVector: Boolean = false
   def hasData: Boolean = false
   def hasWritebacked: Boolean = false
+  def hasUnalignHandling: Boolean = false
 
   def replayFromToLRQ = replayToLRQ || replayFromLRQ
 }
@@ -48,16 +50,21 @@ class LoadPipeBundle(
   with HasLoadPipeBundleParam
   with HasTlbConst
   with HasDCacheParameters
-  with HasVLSUParameters {
+  with HasVLSUParameters
+  with HasMemBlockParameters {
   // basic info
   val entrance = LoadEntrance()
   val accessType = LoadAccessType()
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
-  val size = UInt(3.W)
+  val fullva = UInt(XLEN.W)
+  val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
-  val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
-  val fullva = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
+  val paddr = Option.when(param.hasAddrTrans || param.hasPAddr)(UInt(PAddrBits.W))
+
+  // unalign handling
+  val align = Option.when(param.hasUnalignHandling)(Bool())
+  val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
   val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
@@ -80,6 +87,10 @@ class LoadPipeBundle(
   val tlbFull = Option.when(param.replayToLRQ)(Bool())
 
   val forwardDChannel = Option.when(param.replayFromLRQ)(Bool())
+  val uncacheReplay = Option.when(param.replayFromLRQ)(Bool())
+  val nc = Option.when(param.replayFromLRQ)(Bool())
+  def ncReplay(): Bool = uncacheReplay.getOrElse(false.B) && nc.getOrElse(false.B)
+  def mmioReplay(): Bool = uncacheReplay.getOrElse(false.B) && !nc.getOrElse(false.B)
 
   // vector
   val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
@@ -100,9 +111,42 @@ class LoadPipeBundle(
   // TODO: use Option
   val hasROBEntry = Bool()
   val missDbUpdated = Bool()
+
+  def offset = vaddr.take(DCacheLineOffset)
+  def DontCarePAddr(): Unit = {
+    paddr.get := DontCare
+  }
+  def DontCareUnalign(): Unit = {
+    align.get := DontCare
+    unalignHead.get := DontCare
+  }
+  def DontCareReplayFromLRQFields(): Unit = {
+    mshrId.get := DontCare
+    replayQueueIdx.get := DontCare
+    cause.get := 0.U.asTypeOf(cause.get)
+    forwardDChannel.get := false.B
+    uncacheReplay.get := false.B
+    nc.get := false.B
+  }
+  def DontCareVectorFields(): Unit = {
+    elemIdx.get := 0.U
+    mbIndex.get := 0.U
+    regOffset.get := 0.U
+    elemIdxInsideVd.get := 0.U
+    vecBaseVaddr.get := 0.U
+    vecVaddrOffset.get := 0.U
+    vecTriggerMask.get := 0.U
+  }
 }
 
 case class LoadReplayIOParam(
+  override val replayFromLRQ: Boolean = true,
+  override val hasVector: Boolean = true
+) extends HasLoadPipeBundleParam
+
+case class FastReplayIOParam(
+  override val hasPAddr: Boolean = true,
+  override val hasAddrTrans: Boolean = true,
   override val replayFromLRQ: Boolean = true,
   override val hasVector: Boolean = true
 ) extends HasLoadPipeBundleParam
@@ -115,12 +159,25 @@ case class LoadStageIOParam()(
   implicit val s: LoadStage
 ) extends HasLoadPipeBundleParam with OnLoadStage {
   // TODO
-  // override val hasData: Boolean = afterS2
+  override val hasPAddr: Boolean = true
+  // override val hasAddrTrans: Boolean =
+  // override val hasPAddrChecked: Boolean =
+  // override val replayToLRQ: Boolean =
+  override val replayFromLRQ: Boolean = true
+  override val hasVector: Boolean = true
+  // override val hasData: Boolean =
+  // override val hasWritebacked: Boolean =
+  override val hasUnalignHandling: Boolean = true
 }
 
-class LoadReplayIO(implicit p: Parameters) extends LoadPipeBundle(LoadReplayIOParam())
-class VectorLoadIn(implicit p: Parameters) extends LoadPipeBundle(VectorLoadInParam())
+class LoadReplayIO(implicit p: Parameters)
+  extends LoadPipeBundle(LoadReplayIOParam())
 
-class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage) extends LoadPipeBundle(LoadStageIOParam()) {
-  val unalignHead = Bool()
-}
+class FastReplayIO(implicit p: Parameters)
+  extends LoadPipeBundle(FastReplayIOParam())
+
+class VectorLoadIn(implicit p: Parameters)
+  extends LoadPipeBundle(VectorLoadInParam())
+
+class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage)
+  extends LoadPipeBundle(LoadStageIOParam())

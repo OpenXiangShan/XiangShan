@@ -90,13 +90,16 @@ object LoadEntrance extends ChiselOHEnum {
 class LoadAccessType extends Bundle {
   val instrType = InstrType()
   val pftType = PrefetchType() // only 
-  val pftCoh = PrefetchType()
+  val pftCoh = PrefetchCoh()
 
   import InstrType._
-  import PrefetchType._
-  def isScalar() = IsOneOf(instrType, scalar)
-  def isVector() = IsOneOf(instrType, vector)
-  def isPrefetch() = IsOneOf(instrType, prefetch) && isDataPrefetch(pftType)
+  def isScalar(): Bool = IsOneOf(instrType, scalar)
+  def isVector(): Bool = IsOneOf(instrType, vector)
+  def isPrefetch(): Bool = IsOneOf(instrType, prefetch)
+  def isHwPrefetch(): Bool = isPrefetch() && PrefetchType.isHwPrefetch(pftType)
+  def isSwPrefetch(): Bool = isPrefetch() && PrefetchType.isSwPrefetch(pftType)
+  def isInstrPrefetch(): Bool = isPrefetch() && PrefetchType.isInstrPrefetch(pftType)
+  def isDataPrefetch(): Bool = isPrefetch() && PrefetchType.isDataPrefetch(pftType)
 }
 
 object LoadAccessType {
@@ -124,11 +127,14 @@ object PrefetchType {
 
   def apply() = UInt(2.W)
   def isDataPrefetch(t: UInt): Bool = t(0) === data
+  def isInstrPrefetch(t: UInt): Bool = t(0) === instr
+  def isSwPrefetch(t: UInt): Bool = t(1) === sw
+  def isHwPrefetch(t: UInt): Bool = t(1) === hw
 }
 
 object PrefetchCoh {
-  def Read = "b0".U
-  def Write = "b1".U
+  def read = "b0".U
+  def write = "b1".U
   def apply() = UInt(1.W)
 }
 
