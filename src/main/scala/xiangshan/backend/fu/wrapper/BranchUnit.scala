@@ -51,7 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
-  val brhRealTarget = addModule.io.target
+  val brhRealTarget = addModule.io.target(VAddrData().dataWidth - 1, 0)
   val targetWrong = dataModule.io.fixedTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
   val isMisPred = dataModule.io.mispredict || targetWrong
   io.out.bits.res.data := 0.U
