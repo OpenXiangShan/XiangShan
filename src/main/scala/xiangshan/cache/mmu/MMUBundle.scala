@@ -559,6 +559,11 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
+  /**
+    * TODO:
+    * 1. remove size, either kill or no_translate
+    * 2. move pmp_addr outside this Bundle
+    */
   val vaddr = Output(UInt(VAddrBits.W))
   val fullva = Output(UInt(XLEN.W))
   val checkfullva = Output(Bool())
@@ -571,7 +576,6 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val isPrefetch = Output(Bool())
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
-  // TODO: remove pmp_addr out of this bundle
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
