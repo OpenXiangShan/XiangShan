@@ -76,6 +76,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   def misalign_nack = cause(LoadReplayCauses.C_MF)
   def nuke          = cause(LoadReplayCauses.C_NK)
   def mmioOrNc      = cause(LoadReplayCauses.C_UNCACHE)
+  def storeMultiFwd = cause(LoadReplayCauses.C_SMF)
   def need_rep      = cause.asUInt.orR
 }
 
@@ -1174,6 +1175,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   val s2_raw_nack      = io.lsq.stld_nuke_query.req.valid &&
                          !io.lsq.stld_nuke_query.req.ready
+
+  val s2_mmioOrNc      = s2_in.nc || s2_mmio
   // st-ld violation query
   //  NeedFastRecovery Valid when
   //  1. Fast recovery query request Valid.
@@ -1335,6 +1338,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
+  s2_out.rep_info.mmioOrNc        := s2_mmioOrNc && s2_troublem
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
