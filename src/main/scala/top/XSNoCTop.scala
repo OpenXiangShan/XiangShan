@@ -383,12 +383,6 @@ trait HasSeperatedBusImpOpt[+L <: HasSeperatedBusOpt] {
     }
     .orElse(sepbus.tl.map(x => x.makeIOs()))
     .getOrElse(None)
-
-  // both AXI and TL will use tlAsyncSinkOpt as async queue
-  if (socParams.SeperateBus != SeperatedBusType.NONE && socParams.EnableSeperateBusAsync) {
-    sepbus.tlAsyncSinkOpt.get.module.clock := soc_clock
-    sepbus.tlAsyncSinkOpt.get.module.reset := soc_reset_sync
-  }
 }
 
 trait HasIMSIC { this: BaseXSSoc with HasXSTile =>
@@ -416,10 +410,6 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
   u_imsic_bus_top.tl_s.foreach(_ <> imsic_s_tl.get)
   // imsic bare io connection
   u_imsic_bus_top.module.msi.foreach(_ <> imsic.get)
-
-  // device clock and reset
-  u_imsic_bus_top.module.clock := soc_clock
-  u_imsic_bus_top.module.reset := soc_reset_sync
 
   // core <> imsic io
   core_with_l2.module.io.msiInfo.valid := u_imsic_bus_top.module.msiio.vld_req
@@ -505,6 +495,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasIMSICImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
+    /* work in SoC clock domain by default in XSTop scope */
+    childClock := soc_clock
+    childReset := soc_reset_sync
+
     /* CPU Low Power State */
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
