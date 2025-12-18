@@ -77,24 +77,8 @@ class XSSim()(implicit p: config.Parameters) extends LazyModule with HasXSParame
 
     override def cpuName: Option[String] = Some("XiangShan")
 
-    override def connectTopIOs(difftest: DifftestTopIO): Seq[Data] = {
+    override def connectTopIOs(difftest: DifftestTopIO): Unit = {
       difftest.uart <> uart
-
-      // if (env.EnableDebug || env.EnablePerfDebug) {
-      //   val timer = GTimer()
-      //   val logEnable = WireInit((timer >= difftest.logCtrl.begin) && (timer < difftest.logCtrl.end))
-      //   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-      //   ExcitingUtils.addSource(timer, "logTimestamp")
-      // }
-
-      // if (env.EnablePerfDebug) {
-      //   val clean = WireInit(difftest.perfCtrl.clean)
-      //   val dump = WireInit(difftest.perfCtrl.dump)
-      //   ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
-      //   ExcitingUtils.addSource(dump, "XSPERF_DUMP")
-      // }
-
-      Seq.empty
     }
   }
 }
