@@ -497,7 +497,6 @@ object TopMain extends App {
     val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
     Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
-    if (enableDifftest) Gateway.setConfig("H") // use XMR to avoid extra topIO
     val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
     Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
   } else {

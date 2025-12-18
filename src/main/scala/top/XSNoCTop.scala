@@ -36,7 +36,7 @@ import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.annotate
-import difftest.HasDiffTestInterfaces
+import difftest.{DifftestTopIO, HasDiffTestInterfaces}
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper)
@@ -496,6 +496,19 @@ class XSNoCDiffTop(implicit p: Parameters) extends XSNoCTop
     override def cpuName: Option[String] = Some("XiangShan")
     override protected def implicitClock: Clock = clock
     override protected def implicitReset: Reset = reset
+
+    override def connectTopIOs(difftest: DifftestTopIO): Unit = {
+      val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+      val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+      val hasPerfLog = hasPerf || hasLog
+      val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
+      val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
+      val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
+      val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
+      // XSLog will also be generated outside XSTop to keep design clean
+      XSLog.collect(timer, logEnable, clean, dump)
+    }
+    XSNoCDiffTopChecker()
   }
 
   override lazy val module = new XSNoCDiffTopImp(this)
@@ -510,24 +523,13 @@ object XSNoCDiffTopChecker {
     val verilog =
       """
         |`define CONFIG_XSCORE_NR 2
-        |`include "gateway_interface.svh"
+        |`define CORE_INST(i) XSDiffTopChecker.u_CPU_TOP[i].u_XSTop
         |module XSDiffTopChecker(
         | input                                 cpu_clk,
         | input                                 cpu_rstn,
         | input                                 sys_clk,
         | input                                 sys_rstn
         |);
-        |wire [63:0] timer;
-        |wire logEnable;
-        |wire clean;
-        |wire dump;
-        |// FIXME: use siganls from Difftest rather than default value
-        |assign timer = 64'b0;
-        |assign logEnable = 1'b0;
-        |assign clean = 1'b0;
-        |assign dump = 1'b0;
-        |gateway_if gateway_if_i();
-        |core_if core_if_o[`CONFIG_XSCORE_NR]();
         |generate
         |    genvar i;
         |    for (i = 0; i < `CONFIG_XSCORE_NR; i = i+1)
@@ -537,23 +539,21 @@ object XSNoCDiffTopChecker {
         |        .clock                   (cpu_clk),
         |        .noc_clock               (sys_clk),
         |        .soc_clock               (sys_clk),
-        |        .io_hartId               (6'h0 + i),
-        |        .timer                   (timer),
-        |        .logEnable               (logEnable),
-        |        .clean                   (clean),
-        |        .dump                    (dump),
-        |        .gateway_out             (core_if_o[i])
+        |        .io_hartId               (6'h0 + i)
         |    );
         |    end
         |endgenerate
-        |    CoreToGateway u_CoreToGateway(
-        |    .gateway_out (gateway_if_i.out),
-        |    .core_in (core_if_o)
+        |
+        |    `include "DifftestMacros.svh"
+        |    wire [`CONFIG_XSCORE_NR * `CONFIG_DIFFTEST_INTERFACE_WIDTH - 1 : 0] gateway_in;
+        |    DifftestInterface #(.NCORES(`CONFIG_XSCORE_NR)) core2diff(
+        |    .gateway_in(gateway_in)
         |    );
+        |
         |    GatewayEndpoint u_GatewayEndpoint(
         |    .clock (sys_clk),
         |    .reset (sys_rstn),
-        |    .gateway_in (gateway_if_i.in),
+        |    .in (gateway_in),
         |    .step ()
         |    );
         |
