@@ -353,6 +353,7 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
 
     // If AXI is selected as SeperatedBus, directly convert from TL to AXI
     axiSlaveNode :=
+      AXI4Buffer() :=
       AXI4IdentityNode() :=
       AXI4UserYanker() :=
       TLToAXI4() :=
