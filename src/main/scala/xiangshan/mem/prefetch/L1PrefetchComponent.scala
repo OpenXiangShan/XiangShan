@@ -220,8 +220,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
       valids(allocPtr.value) := true.B
       entries(allocPtr.value) := req
       entries(allocPtr.value).access_vec := merge_access_vec(i)
-    }
-    .elsewhen(needUpdate(i)) {
+    }.elsewhen(needUpdate(i)) {
       // Update
       entries(entry_match_index).access_vec := entries(entry_match_index).access_vec | merge_access_vec(i)
     }
