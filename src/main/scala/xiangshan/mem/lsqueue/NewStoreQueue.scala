@@ -1420,6 +1420,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     XSError(ctrlEntries(i).allocated && entryCanEnq, s"entry double allocate! index: ${i}\n")
+    XSError(!ctrlEntries(i).allocated && (ctrlEntries(i).addrValid || ctrlEntries(i).dataValid), s"invalid entry have addrValid or dataValid! index: ${i}\n")
 
     for (i <- 0 until io.enq.req.length) {
       val sqIdx = enqPtrExt(0) + validVStoreOffsetRShift.take(i + 1).reduce(_ + _)
@@ -1484,7 +1485,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       }
     }
 
-    XSError(ctrlEntries(i).addrValid && staSetValid, s"[addrValid] double allocate! index: ${i}\n")
+    //TODO: vector element maybe set addrValid twice because of replay uop, which will be remove in the future.
+    XSError(ctrlEntries(i).addrValid && staSetValid && !ctrlEntries(i).isVec, s"[addrValid] double allocate! index: ${i}\n")
 
     /*======================================= staInRe [sta Stage 2] ==================================================*/
 
@@ -1570,7 +1572,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ctrlEntries(i).dataValid := false.B
     }
 
-    XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
+    //TODO: vector element maybe set dataValid twice because of replay uop, which will be remove in the future.
+    XSError(ctrlEntries(i).dataValid && dataValidSet && !ctrlEntries(i).isVec, s"[dataValid] double allocate! index: ${i}\n")
     XSError(!ctrlEntries(i).allocated && deqCancel, s"double deq! index: ${i}\n")
 
     /*================================================================================================================*/
@@ -1587,8 +1590,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val fbk = io.fromVMergeBuffer
     for (j <- 0 until VecStorePipelineWidth) {
       vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
-        dataEntries(i).uop.robIdx === fbk(j).bits.robidx && dataEntries(i).uop.uopIdx === fbk(j).bits.uopidx &&
-        ctrlEntries(i).allocated
+        dataEntries(i).uop.robIdx === fbk(j).bits.robidx && dataEntries(i).uop.uopIdx === fbk(j).bits.uopidx
     }
     // vector feedback may occur with deqCancel/needCancel at the same time
     vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel
@@ -1769,15 +1771,21 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val ptr = cmtPtrExt(i).value
     val ctrlEntry = ctrlEntries(ptr)
     val dataEntry = dataEntries(ptr)
+    //TODO:
     /*
-    * three commit situation:
+    * Currently three commit situation:
+    * [1]. normal Scalar Store Commit:      allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [2]. activate Vector Store Commit:    allocated && noFlush && isRobHead && noException && allValid && [vecMbcommit] --> move cmtPtr, set committed
+    * [3]. inactivate Vector Store Commit:  allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
+    *
+    * Future three commit situation:
     * [1]. normal Scalar Store Commit:      allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
     * [2]. activate Vector Store Commit:    allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
     * [3]. inactivate Vector Store Commit:  allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
     * */
     when(ctrlEntries(ptr).allocated && !needCancel(ptr) &&
       (isNotAfter(dataEntries(ptr).uop.robIdx, GatedRegNext(io.fromRob.pendingPtr)) &&
-      !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 &&
+      !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 && (ctrlEntries(ptr).vecMbCommit || !ctrlEntries(ptr).isVec) &&
       ctrlEntries(ptr).allValid || (ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).allValid || ctrlEntries(ptr).vecInactive))) { //TODO: vecMbCommit will be remove in the future
       if(i == 0) {
         commitVec(i)               := true.B
