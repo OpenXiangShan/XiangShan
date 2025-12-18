@@ -290,17 +290,13 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
   private val isNONE = SeperateBus == SeperatedBusType.NONE
   private val isTL  = SeperateBus == SeperatedBusType.TL
   private val isAXI = SeperateBus == SeperatedBusType.AXI
-  private val busAsync = EnableSeperateBusAsync
 
   // TileLink part
   // asynchronous bridge sink node
-  val tlAsyncSinkOpt = Option.when(!isNONE && busAsync)(
+  val tlAsyncSinkOpt = Option.when(!isNONE)(
     LazyModule(new TLAsyncCrossingSink(SeperateBusAsyncBridge.get))
   )
   tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
-  // synchronous sink node
-  val tlSyncSinkOpt = Option.when(!isNONE && !busAsync)(TLTempNode())
-  tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
 
   // The Manager Node is only used to make IO
   val tl = Option.when(isTL)(TLManagerNode(Seq(
@@ -328,7 +324,6 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
   )))
   val tlXbar = Option.when(!isNONE)(TLXbar())
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
-  tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
   tl.foreach(_ := tlXbar.get)
 
   // AXI part (optional)
