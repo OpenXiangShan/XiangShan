@@ -120,7 +120,9 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     robWalkEndReg := true.B
   }
 
-  val realNeedAlloc = io.req.map(req => req.valid && req.bits.needWriteRf)
+  // only handle int, fp, vec and v0 wen, while vl is handled in VTypeBuffer
+  val mayNeedAlloc = WireInit(VecInit(io.req.map(x => x.bits.needEnqRab)))
+  val realNeedAlloc = io.req.zip(mayNeedAlloc).map { case (req, alloc) => req.valid && alloc }
   val enqCount    = PopCount(realNeedAlloc)
   val commitNum = Wire(UInt(RabCommitWidth.U.getWidth.W))
   val walkNum = Wire(UInt(RabCommitWidth.U.getWidth.W))
