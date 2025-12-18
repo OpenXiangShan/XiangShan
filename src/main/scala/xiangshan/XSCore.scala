@@ -102,6 +102,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_release = Input(Vec(2, ValidIO(UInt(PAddrBits.W))))
     val l2_pmp_resp = new PMPRespBundle
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
@@ -250,6 +251,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
   memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
+  memBlock.io.l2_release := io.l2_release
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
 

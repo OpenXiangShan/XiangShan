@@ -230,6 +230,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
+      val l2_release = Vec(2, ValidIO(UInt(PAddrBits.W)))
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
@@ -357,7 +358,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
           l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
+          require(l2.io_l2_release.getWidth == io.l2_release.getWidth)
+          io.l2_release := l2.io_l2_release
         case l2cache: TL2TLCoupledL2 =>
+          io.l2_release := DontCare
       }
 
       beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid

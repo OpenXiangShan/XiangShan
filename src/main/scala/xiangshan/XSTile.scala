@@ -186,6 +186,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
 
+      core.module.io.l2_release := l2top.module.io.l2_release
+
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2top.module.io.debugTopDown.l2MissMatch
       l2top.module.io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr

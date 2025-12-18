@@ -93,7 +93,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
-    val release = Flipped(Valid(new Release))
+    val release = Input(Vec(2, ValidIO(UInt(PAddrBits.W)))) // from L2 release
    // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val maControl     = Flipped(new StoreMaBufToSqControlIO)
