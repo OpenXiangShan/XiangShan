@@ -393,7 +393,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart
       )).asUInt
 
-      XSError(loadEnd < loadStart, "ByteStart > ByteEnd!\n")
+      XSError((s1LoadEnd < s1LoadStart) && s1Valid, "ByteStart > ByteEnd!\n")
 
       // Two-step selection to handle circular queue segments
       val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
@@ -447,7 +447,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2Valid            = RegNext(forwardValid)
       // debug
       val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
-      XSError(selectOH.orR && !selectCtrlEntry.allocated, "forward select a invalid entry!\n")
+      XSError(selectOH.orR && !selectCtrlEntry.allocated && s1Valid, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
 
       // Data Generation Process:
