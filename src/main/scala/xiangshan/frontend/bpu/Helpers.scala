@@ -45,6 +45,11 @@ trait HalfAlignHelper extends HasBpuParameters {
   def getCfiPcFromOffset(startPc: PrunedAddr, ftqOffset: UInt): PrunedAddr =
     startPc + (ftqOffset << instOffsetBits.U).asUInt
 
+  def getRealCfiPcFromOffset(startPc: PrunedAddr, ftqOffset: UInt, isRVC: Bool): UInt = {
+    val cfiPc = getCfiPcFromOffset(startPc, ftqOffset).toUInt
+    Mux(isRVC, cfiPc, cfiPc - 2.U)
+  }
+
   def getAlignedInstOffset(pc: PrunedAddr): UInt =
     // given an instruction pc, return the offset of the instruction in the fetch block
     // example:
