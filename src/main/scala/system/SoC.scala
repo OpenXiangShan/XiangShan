@@ -189,13 +189,10 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val SeperateBusAsyncBridge = if (SeperateBus != top.SeperatedBusType.NONE && soc.SeperateBusAsyncBridge.isDefined)
-    soc.SeperateBusAsyncBridge else None
+  val SeperateBusAsyncBridge = soc.SeperateBusAsyncBridge
 
   val UsePrivateClint = soc.UsePrivateClint
   val TIMERRange = soc.TIMERRange
-  // seperate TL bus
-  val EnableSeperateBusAsync = SeperateBusAsyncBridge.isDefined
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
