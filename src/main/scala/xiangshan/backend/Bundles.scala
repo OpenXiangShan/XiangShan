@@ -484,6 +484,7 @@ object Bundles {
     val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
+    val pdestVl         = UInt(VlPhyRegIdxWidth.W)
     val rasAction       = BranchAttribute.RasAction()
     // reg cache
     val useRegCache     = Vec(backendParams.numIntRegSrc, Bool())

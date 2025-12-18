@@ -661,7 +661,9 @@ class CtrlBlockImp(
 
   rat.io.redirect := s1_s3_redirect.valid
   rat.io.rabCommits := rob.io.rabCommits
+  rat.io.vlCommits := rob.io.vlCommits
   rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
+  rat.io.diffVlCommits.foreach(_ := rob.io.diffVlCommits.get)
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
@@ -670,6 +672,7 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
+  rename.io.vlCommits := rob.io.vlCommits
   rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)

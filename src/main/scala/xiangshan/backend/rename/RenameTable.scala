@@ -44,7 +44,7 @@ class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val data = UInt(PhyRegIdxWidth.W)
 }
 
-class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
 
   // params alias
   private val numVecRegSrc = backendParams.numVecRegSrc
@@ -80,7 +80,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = if (backendParams.basicDebugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth)))) else None
+    val diffWritePorts = Option.when(backendParams.basicDebugEn)(Input(Vec(numDiffWritePorts, new RatWritePort(renameTableWidth))))
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_rdata = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0 = if (backendParams.debugEn) reg_t match {
@@ -216,7 +216,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
+    val vlCommits = Input(new VlCommitBundle(CommitWidth))
     val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
+    val diffVlCommits = Option.when(backendParams.basicDebugEn)(Input(new DiffVlCommitBundle(CommitWidth)))
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs))))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(IntLogicRegs))))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(log2Ceil(FpLogicRegs))))
@@ -251,11 +253,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val diff_vl_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
   })
 
-  val intRat = Module(new RenameTable(Reg_I))
-  val fpRat  = Module(new RenameTable(Reg_F))
-  val vecRat = Module(new RenameTable(Reg_V))
-  val v0Rat  = Module(new RenameTable(Reg_V0))
-  val vlRat  = Module(new RenameTable(Reg_Vl))
+  val intRat = Module(new RenameTable(Reg_I, RabCommitWidth * MaxUopSize))
+  val fpRat  = Module(new RenameTable(Reg_F, RabCommitWidth * MaxUopSize))
+  val vecRat = Module(new RenameTable(Reg_V, RabCommitWidth * MaxUopSize))
+  val v0Rat  = Module(new RenameTable(Reg_V0, RabCommitWidth * MaxUopSize))
+  val vlRat  = Module(new RenameTable(Reg_Vl, CommitWidth))
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)
   io.diff_int_rat  .foreach(_ := intRat.io.diff_rdata.get)
@@ -410,14 +412,14 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     dontTouch(vlRat.io)
   }
   for ((arch, i) <- vlRat.io.archWritePorts.zipWithIndex) {
-    arch.wen := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && io.rabCommits.info(i).vlWen
-    arch.addr := io.rabCommits.info(i).ldest
-    arch.data := io.rabCommits.info(i).pdest
+    arch.wen := io.vlCommits.isCommit && io.vlCommits.commitValid(i)
+    arch.addr := 0.U // only use one vl register
+    arch.data := io.vlCommits.pdestVl(i)
   }
   for ((spec, i) <- vlRat.io.specWritePorts.zipWithIndex) {
-    spec.wen := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && io.rabCommits.info(i).vlWen
-    spec.addr := io.rabCommits.info(i).ldest
-    spec.data := io.rabCommits.info(i).pdest
+    spec.wen := io.vlCommits.isWalk && io.vlCommits.walkValid(i)
+    spec.addr := 0.U
+    spec.data := io.vlCommits.pdestVl(i)
   }
   for ((spec, rename) <- vlRat.io.specWritePorts.zip(io.vlRenamePorts)) {
     when(rename.wen) {
@@ -428,9 +430,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   }
   if (backendParams.basicDebugEn) {
     for ((diff, i) <- vlRat.io.diffWritePorts.get.zipWithIndex) {
-      diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).vlWen
-      diff.addr := io.diffCommits.get.info(i).ldest
-      diff.data := io.diffCommits.get.info(i).pdest
+      diff.wen := io.diffVlCommits.get.commitValid(i)
+      diff.addr := 0.U
+      diff.data := io.diffVlCommits.get.pdestVl(i)
     }
   }
 }

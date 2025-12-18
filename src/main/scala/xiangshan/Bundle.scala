@@ -362,6 +362,11 @@ class DiffCommitIO(implicit p: Parameters) extends XSBundle {
   val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
 }
 
+class DiffVlCommitBundle(commitWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val commitValid = Vec(commitWidth, Bool())
+  val pdestVl = Vec(commitWidth, UInt(VlPhyRegIdxWidth.W))
+}
+
 class RobCommitInfo(implicit p: Parameters) extends RobCommitEntryBundle
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
@@ -403,6 +408,20 @@ class RabCommitIO(implicit p: Parameters) extends XSBundle {
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+/**
+ * This bundle is used to pass commit and walk vl preg info to RAT
+ */
+class VlCommitBundle(commitWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(commitWidth, Bool())
+
+  val isWalk = Bool()
+  // valid bits optimized for walk
+  val walkValid = Vec(commitWidth, Bool())
+
+  val pdestVl = Vec(commitWidth, UInt(VlPhyRegIdxWidth.W))
 }
 
 class SnapshotPort(implicit p: Parameters) extends XSBundle {
