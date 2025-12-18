@@ -109,7 +109,7 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle with HasDCach
   val vaddr       = UInt(VAddrBits.W)
   val paddr       = UInt(PAddrBits.W)
   val pc          = UInt(VAddrBits.W)
-  val access_vec  = UInt((blockBytes/DCacheWordBytes).W)
+  val accessVec  = UInt((blockBytes/DCacheWordBytes).W)
   val miss        = Bool()
   val pfHitStream = Bool()
 }

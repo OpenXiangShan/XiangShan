@@ -210,7 +210,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     }).orR
 
     merge_access_vec(i) := reqs_l.zip(reqs_vl).map {
-      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr), e.access_vec, 0.U)
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr), e.accessVec, 0.U)
     }.foldLeft(0.U)(_ | _)
     needUpdate(i) := req_v && entry_match && !prev_enq_match && io.enable
 
@@ -220,10 +220,10 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     when(canAlloc(i)) {
       valids(allocPtr.value) := true.B
       entries(allocPtr.value) := req
-      entries(allocPtr.value).access_vec := merge_access_vec(i)
+      entries(allocPtr.value).accessVec := merge_access_vec(i)
     }.elsewhen(needUpdate(i)) {
       // Update
-      entries(entry_match_index).access_vec := entries(entry_match_index).access_vec | merge_access_vec(i)
+      entries(entry_match_index).accessVec := entries(entry_match_index).accessVec | merge_access_vec(i)
     }
   }
   val allocNum = PopCount(canAlloc)
@@ -233,7 +233,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   // deq
 
   val deq_merge_access = reqs_l.zip(reqs_vl).map {
-      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(entries(deqPtr).vaddr), e.access_vec, 0.U)
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(entries(deqPtr).vaddr), e.accessVec, 0.U)
   }.foldLeft(0.U)(_ | _)
   
   io.train_req.valid := false.B
@@ -243,7 +243,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
       when(deqPtr === i.U) {
         io.train_req.valid := valid && io.enable
         io.train_req.bits := entry
-        io.train_req.bits.access_vec := entry.access_vec | deq_merge_access
+        io.train_req.bits.accessVec := entry.accessVec | deq_merge_access
       }
     }
   }
@@ -252,7 +252,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     valids(deqPtr) := false.B
     deqPtrExt := deqPtrExt + 1.U
   }.elsewhen(deq_merge_access.orR && valids(deqPtr)) {
-    entries(deqPtr).access_vec := entries(deqPtr).access_vec | deq_merge_access
+    entries(deqPtr).accessVec := entries(deqPtr).accessVec | deq_merge_access
   }
 
   when(RegNext(io.flush)) {
