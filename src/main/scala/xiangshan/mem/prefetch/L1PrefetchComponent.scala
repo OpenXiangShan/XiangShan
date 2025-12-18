@@ -190,25 +190,40 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val reqs_vl = ld_in_reordered.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
+  val needUpdate = Wire(Vec(enqLen, Bool()))
+  val merge_access_vec = Wire(Vec(enqLen, UInt(8.W)))
 
   for(i <- (0 until enqLen)) {
     val req = reqs_l(i)
     val req_v = reqs_vl(i)
     val index = PopCount(needAlloc.take(i))
     val allocPtr = enqPtrExt(index)
-    val entry_match = Cat(entries.zip(valids).map {
-      case(e, v) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr)
-    }).orR
-    val prev_enq_match = if(i == 0) false.B else Cat(reqs_l.zip(reqs_vl).take(i).map {
-      case(pre, pre_v) => pre_v && block_hash_tag(pre.vaddr) === block_hash_tag(req.vaddr)
+    val entry_match_bits = Cat(valids.zip(entries).zipWithIndex.map {
+      case((v, e), id) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr) && (deqPtr =/= id.U)
+    })
+    val entry_match = entry_match_bits.orR
+    val entry_match_index = OHToUInt(Reverse(entry_match_bits))
+    
+    val isUniqueReq = if(i == enqLen - 1) true.B else !Cat(reqs_l.zip(reqs_vl).drop(i + 1).map {
+      case (back, back_v) => back_v && block_hash_tag(back.vaddr) === block_hash_tag(reqs_l(i).vaddr)
     }).orR
 
-    needAlloc(i) := req_v && !entry_match && !prev_enq_match
+    merge_access_vec(i) := reqs_l.zip(reqs_vl).map {
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(reqs_l(i).vaddr), e.access_vec, 0.U)
+    }.foldLeft(0.U)(_ | _)
+    needUpdate(i) := req_v && entry_match && isUniqueReq && io.enable
+
+    needAlloc(i) := req_v && !entry_match && isUniqueReq
     canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt && io.enable
 
     when(canAlloc(i)) {
       valids(allocPtr.value) := true.B
       entries(allocPtr.value) := req
+      entries(allocPtr.value).access_vec := merge_access_vec(i)
+    }
+    .elsewhen(needUpdate(i)) {
+      // Update
+      entries(entry_match_index).access_vec := entries(entry_match_index).access_vec | merge_access_vec(i)
     }
   }
   val allocNum = PopCount(canAlloc)
@@ -939,7 +954,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new TrainFilter(STREAM_FILTER_SIZE, "stream"))
-  val stream_bit_vec_array = Module(new StreamBitVectorArray)
+  val stream_bit_vec_array = Module(new StreamBitVectorArray(CELL_SIZE = 64))
   val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
