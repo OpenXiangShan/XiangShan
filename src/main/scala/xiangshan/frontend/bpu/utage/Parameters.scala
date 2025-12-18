@@ -44,12 +44,14 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
 
-  def TestPredIdx0Width: Int = log2Ceil(TableInfos(0).NumSets)
-  def TestPredTag0Width: Int = TableInfos(0).TagWidth
-  def TestPredIdx1Width: Int = log2Ceil(TableInfos(1).NumSets)
-  def TestPredTag1Width: Int = TableInfos(1).TagWidth
+  def MaxNumSets:        Int = 512
+  def MaxTagLen:         Int = 16
+  def DebugPredIdxWidth: Int = log2Ceil(TableInfos(0).NumSets)
+  def DebugPredTagWidth: Int = TableInfos(0).TagWidth
+
   // utage can only be fast-trained, we don't have continous predict block on resolve
   def EnableFastTrain: Boolean = true
+  def EnableTrace:     Boolean = true
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
   def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)

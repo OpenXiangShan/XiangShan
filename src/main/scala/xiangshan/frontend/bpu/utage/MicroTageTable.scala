@@ -56,10 +56,13 @@ class MicroTageTable(
       val usefulCorrect:          Bool                  = Bool()
       val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
     }
-    val req:         MicroTageReq           = Input(new MicroTageReq)
-    val resp:        Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
-    val update:      Valid[MicroTageUpdate] = Input(Valid(new MicroTageUpdate))
-    val usefulReset: Bool                   = Input(Bool())
+    val req:           MicroTageReq           = Input(new MicroTageReq)
+    val resp:          Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
+    val update:        Valid[MicroTageUpdate] = Input(Valid(new MicroTageUpdate))
+    val usefulReset:   Bool                   = Input(Bool())
+    val debug_predIdx: UInt                   = UInt(log2Ceil(numSets).W)
+    val debug_predTag: UInt                   = UInt(tagLen.W)
+    val trainDebug:    MicroTageDebug         = Output(new MicroTageDebug)
   }
   class MicroTageEntry() extends MicroTageBundle {
     val valid:       Bool            = Bool()
@@ -76,7 +79,7 @@ class MicroTageTable(
   val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag))
   val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag - 1))
 
-  def computeHash(startPc: UInt, allFh: PhrAllFoldedHistories, tableId: Int): (UInt, UInt) = {
+  def computeHash(startPc: PrunedAddr, allFh: PhrAllFoldedHistories, tableId: Int): (UInt, UInt) = {
     val unhashedIdx = getUnhashedIdx(startPc)
     val unhashedTag = getUnhashedTag(startPc)
     val idxFh       = allFh.getHistWithInfo(idxFhInfo).foldedHist
@@ -94,10 +97,12 @@ class MicroTageTable(
   }
 
   // predict
-  private val (s0_idx, s0_tag) = computeHash(io.req.startPc.toUInt, io.req.foldedPathHist, tableId)
+  private val (s0_idx, s0_tag) = computeHash(io.req.startPc, io.req.foldedPathHist, tableId)
   private val readEntry        = entries(s0_idx)
   private val readHit          = (readEntry.tag === s0_tag) && readEntry.valid
   private val usefulEntry      = usefulEntries(s0_idx)
+  io.debug_predIdx := s0_idx
+  io.debug_predTag := s0_tag
 
   io.resp.valid            := readHit
   io.resp.bits.taken       := readEntry.takenCtr.isPositive
@@ -108,7 +113,7 @@ class MicroTageTable(
 
   // train
   private val (trainIdx, trainTag) =
-    computeHash(io.update.bits.startPc.toUInt, io.update.bits.foldedPathHistForTrain, tableId)
+    computeHash(io.update.bits.startPc, io.update.bits.foldedPathHistForTrain, tableId)
 
   private val oldTakenCtr = entries(trainIdx).takenCtr
   private val oldUseful   = usefulEntries(trainIdx)
@@ -148,9 +153,16 @@ class MicroTageTable(
     }
   }
 
+  // ------------ for debug signal ----------- //
+  io.trainDebug                := 0.U.asTypeOf(new MicroTageDebug)
+  io.trainDebug.debug_idx      := trainIdx
+  io.trainDebug.debug_tag      := trainTag
+  io.trainDebug.debug_tableId  := tableId.U
+  io.trainDebug.debug_useful   := oldUseful.value
+  io.trainDebug.debug_takenCtr := oldTakenCtr.value
   // Per-index access distribution
-  for (i <- 0 until numSets) {
-    XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
-    XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.allocValid)
-  }
+  // for (i <- 0 until numSets) {
+  //   XSPerfAccumulate(f"update_idx_access_$i", (trainIdx === i.U) && io.update.valid)
+  //   XSPerfAccumulate(f"alloc_idx_access_$i", (trainIdx === i.U) && io.update.valid && io.update.bits.allocValid)
+  // }
 }

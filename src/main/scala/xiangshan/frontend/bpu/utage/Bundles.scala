@@ -34,10 +34,34 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val baseCfiPosition:         UInt      = UInt(CfiPositionWidth.W)
 
   // only for test and debug
-  val testUseMicroTage:  Bool = Bool()
-  val testPredIdx0:      UInt = UInt(TestPredIdx0Width.W)
-  val testPredTag0:      UInt = UInt(TestPredTag0Width.W)
-  val testPredIdx1:      UInt = UInt(TestPredIdx1Width.W)
-  val testPredTag1:      UInt = UInt(TestPredTag1Width.W)
-  val testPredStartAddr: UInt = UInt(VAddrBits.W)
+
+  val debug_startVAddr:   UInt = UInt(VAddrBits.W)
+  val debug_useMicroTage: Bool = Bool()
+  val debug_predIdx0:     UInt = UInt(DebugPredIdxWidth.W)
+  val debug_predTag0:     UInt = UInt(DebugPredTagWidth.W)
+}
+
+class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
+  val startVAddr:  UInt = UInt(VAddrBits.W)
+  val branchPc:    UInt = UInt(VAddrBits.W)
+  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+  val hit:         Bool = Bool()
+  val misPred:     Bool = Bool()
+  val actualTaken: Bool = Bool()
+  val tableId:     UInt = UInt(log2Ceil(NumTables).W)
+  val setIdx:      UInt = UInt(log2Ceil(MaxNumSets).W)
+  val multiHit:    Bool = Bool()
+  val oldUseful:   UInt = UInt(UsefulWidth.W)
+  val oldTakenCtr: UInt = UInt(TakenCtrWidth.W)
+  val needUpdate:  Bool = Bool()
+  val needAlloc:   Bool = Bool()
+  val allocFailed: Bool = Bool()
+}
+
+class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
+  val debug_idx:      UInt = UInt(log2Ceil(MaxNumSets).W)
+  val debug_tag:      UInt = UInt(MaxTagLen.W)
+  val debug_tableId:  UInt = UInt(log2Ceil(NumTables).W)
+  val debug_useful:   UInt = UInt(UsefulWidth.W)
+  val debug_takenCtr: UInt = UInt(TakenCtrWidth.W)
 }
