@@ -23,6 +23,7 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.rob.RobPtr
 
 class RfReadPort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val addr = Input(UInt(addrWidth.W))
@@ -35,9 +36,11 @@ class RfWritePort(dataWidth: Int, addrWidth: Int) extends Bundle {
   val data = Input(UInt(dataWidth.W))
 }
 
-class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extends Bundle {
-  val addr: UInt = Input(UInt(addrWidth.W))
-  val srcType: UInt = Input(UInt(3.W))
+class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int)(implicit p: Parameters) extends Bundle {
+  val addr    = Input(UInt(addrWidth.W))
+  val srcType = Input(UInt(3.W))
+  val robIdx  = new RobPtr
+  val issueValid = Bool()
 
   def readInt: Boolean = IntRegSrcDataSet.contains(rfReadDataCfg)
   def readFp : Boolean = FpRegSrcDataSet .contains(rfReadDataCfg)

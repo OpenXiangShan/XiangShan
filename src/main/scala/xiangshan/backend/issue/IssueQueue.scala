@@ -902,6 +902,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // psrc in status array can be pregIdx of IntRegFile or VfRegFile
       rf.foreach(_.addr := psrc)
       rf.foreach(_.srcType := srcType)
+      rf.foreach(_.robIdx := deqEntryVec(i).bits.status.robIdx)
+      rf.foreach(_.issueValid := deqEntryVec(i).valid)
     }
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>
       sink := source
