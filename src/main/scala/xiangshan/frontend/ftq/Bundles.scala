@@ -79,7 +79,13 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
 }
 
 class PerfMeta(implicit p: Parameters) extends FtqBundle {
-  val bpuPerf:    BpuPerfMeta = new BpuPerfMeta
-  val isCfi:      Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
-  val mispredict: Vec[Bool]   = Vec(FetchBlockInstNum, Bool())
+  val bpuPerf: BpuPerfMeta = new BpuPerfMeta
+
+  // Whether a position is a Control-Flow Instruction
+  val isCfi: Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+
+  // This block mispredicted
+  // no matter how many mispredictions happened before, count correct-path only
+  val mispredict:           Bool       = Bool()
+  val mispredictBranchInfo: BranchInfo = new BranchInfo()
 }

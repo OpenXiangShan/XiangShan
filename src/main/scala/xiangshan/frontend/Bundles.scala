@@ -37,6 +37,7 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -353,4 +354,63 @@ class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
     val wdata: GPAMemEntry = new GPAMemEntry
   }
   val gpAddrMem: ToGpAddrMem = new ToGpAddrMem
+}
+
+object BlameBpuSource {
+  object BlameType extends EnumUInt(4) {
+    def BTB:    UInt = 0.U(width.W)
+    def TAGE:   UInt = 1.U(width.W)
+    def RAS:    UInt = 2.U(width.W)
+    def ITTAGE: UInt = 3.U(width.W)
+  }
+
+  def apply(perf: BpuPerfMeta, branch: BranchInfo): UInt = {
+    import BlameType.{BTB, TAGE, RAS, ITTAGE}
+    val src  = perf.bpSource
+    val pred = perf.bpPred
+    val attr = branch.attribute
+
+    // Check mispredict type
+    val onlyDirectionWrong = branch.taken =/= pred.taken && branch.cfiPosition === pred.cfiPosition
+    val blame              = WireInit(BTB) // Default to BTB
+
+    when(src.s3Ras) {
+      when(attr.isConditional) {
+        // If cond before, TAGE mispredicts
+        // If cond after, should trigger assertion, TODO
+        blame := TAGE
+      }.elsewhen(attr.isReturn) {
+        blame := RAS
+      }.otherwise {
+        // Other branch type mismatch
+        blame := BTB
+      }
+    }.elsewhen(src.s3ITTage) {
+      when(attr.isIndirect) {
+        blame := ITTAGE
+      }.elsewhen(attr.isConditional) {
+        blame := TAGE
+        // If cond after, should trigger assertion, TODO
+      }.otherwise {
+        blame := BTB
+      }
+    }.elsewhen(src.s3MbtbTage || src.s3FallthroughTage) {
+      when(attr.isConditional) {
+        blame := Mux(onlyDirectionWrong, TAGE, BTB)
+      }.otherwise {
+        blame := BTB
+      }
+    }.elsewhen(src.s3Mbtb) {
+      when(attr.isConditional) {
+        blame := Mux(onlyDirectionWrong, TAGE, BTB)
+      }.elsewhen(attr.isIndirect) {
+        blame := ITTAGE
+      }.otherwise {
+        blame := BTB
+      }
+    }.elsewhen(src.s3Fallthrough) {
+      blame := BTB
+    }
+    blame
+  }
 }

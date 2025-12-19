@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
+import xiangshan.Resolve
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
@@ -211,7 +212,7 @@ class BpuRedirect(implicit p: Parameters) extends BpuBundle {
   val attribute:       BranchAttribute    = new BranchAttribute
 }
 
-class BranchInfo(implicit p: Parameters) extends BpuBundle {
+class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val taken:       Bool            = Bool()
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
@@ -219,6 +220,14 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle {
   val mispredict:  Bool            = Bool()
 
   val debug_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
+
+  def fromResolve(resolve: Resolve): Unit = {
+    this.taken       := resolve.taken
+    this.target      := resolve.target
+    this.cfiPosition := getAlignedPosition(resolve.pc, resolve.ftqOffset)._1
+    this.attribute   := resolve.attribute
+    this.mispredict  := resolve.mispredict
+  }
 }
 
 // Backend & Ftq -> Bpu
