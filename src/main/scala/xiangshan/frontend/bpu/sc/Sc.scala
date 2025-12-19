@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.sc
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CFIType.branch
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
 import utility.ChiselDB
@@ -213,7 +214,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   private val s1_mergeResp = VecInit(s1_pathResp ++ s1_globalResp)
 
+  private val s1_pathPercsum =
+    VecInit.tabulate(NumWays)(w => s1_pathResp.map(e => getPercsum(e(w).ctr.value)).reduce(_ +& _))
+
+  private val s2_pathPercsum =
+    VecInit(s1_pathPercsum.map(s => RegEnable(s, s1_fire)))
+
+  private val s1_globalPercsum =
+    VecInit.tabulate(NumWays)(w => s1_globalResp.map(e => getPercsum(e(w).ctr.value)).reduce(_ +& _))
+
+  private val s2_globalPercsum =
+    VecInit(s1_globalPercsum.map(s => RegEnable(s, s1_fire)))
+
   private val s1_biasPercsum = VecInit(s1_biasResp.map(entry => getPercsum(entry.ctr.value)))
+
   private val s1_mergePercsum = VecInit(s1_mergeResp.map(entries =>
     VecInit(entries.map(entry => getPercsum(entry.ctr.value)))
   ))
@@ -310,12 +324,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.scGhr           := RegEnable(s2_ghr.value.asUInt, s2_fire)
   io.meta.tagePred        := RegEnable(s2_providerTakenMask, s2_fire)
   io.meta.tagePredValid   := RegEnable(s2_providerValid, s2_fire)
-  io.meta.tagePredCtr     := VecInit(s2_providerCtr.map(ctr => RegEnable(ctr.value, s2_fire)))
   io.meta.useScPred       := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres   := RegEnable(s2_sumAboveThres, s2_fire)
-  io.meta.predPathIdx     := RegEnable(VecInit(s2_pathIdx), s2_fire)
-  io.meta.predGlobalIdx   := RegEnable(VecInit(s2_globalIdx), s2_fire)
-  io.meta.predBiasIdx     := RegEnable(s2_biasIdx, s2_fire)
+
+  io.meta.scPathTakenVec   := VecInit(s2_pathPercsum.map(v => RegEnable(v >= 0.S, s2_fire)))
+  io.meta.scGlobalTakenVec := VecInit(s2_globalPercsum.map(v => RegEnable(v >= 0.S, s2_fire)))
+  io.meta.scBiasTakenVec   := VecInit(s2_biasPercsum.map(v => RegEnable(v >= 0.S, s2_fire)))
+
+  io.meta.predPathIdx   := RegEnable(VecInit(s2_pathIdx), s2_fire)
+  io.meta.predGlobalIdx := RegEnable(VecInit(s2_globalIdx), s2_fire)
+  io.meta.predBiasIdx   := RegEnable(s2_biasIdx, s2_fire)
 
   /*
    *  train pipeline stage 0
@@ -515,10 +533,18 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
   private val tageCorrectVec = WireInit(VecInit.fill(NumWays)(false.B))
   private val tageWrongVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val newBranchVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scUsedVec      = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scNotUsedVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val changeVec      = VecInit.fill(NumWays)(false.B)
+
+  private val scPathCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scPathWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scGlobalCorrectVec = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scGlobalWrongVec   = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scBiasCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scBiasWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
+
+  private val newBranchVec = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scUsedVec    = WireInit(VecInit.fill(NumWays)(false.B))
+  private val scNotUsedVec = WireInit(VecInit.fill(NumWays)(false.B))
+  private val changeVec    = VecInit.fill(NumWays)(false.B)
   // foreach train branches
   for (i <- 0 until ResolveEntryBranchNumber) {
     val branchWayIdx = t1_branchesScIdxVec(i)
@@ -527,7 +553,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.tagePred(branchWayIdx)
       scCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPred(branchWayIdx)
       scWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= t1_meta.scPred(branchWayIdx)
-      scUsedVec(branchWayIdx)      := true.B
+
+      scPathCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPathTakenVec(branchWayIdx)
+      scPathWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= !t1_meta.scPathTakenVec(branchWayIdx)
+      scGlobalCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.scGlobalTakenVec(branchWayIdx)
+      scGlobalWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= !t1_meta.scGlobalTakenVec(branchWayIdx)
+      scBiasCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scBiasTakenVec(branchWayIdx)
+      scBiasWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= !t1_meta.scBiasTakenVec(branchWayIdx)
+
+      scUsedVec(branchWayIdx) := true.B
     }.otherwise {
       scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)
     }
@@ -550,6 +584,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSPerfAccumulate(s"sc_wrong_tage_correct${i}", scWrongVec(i) && tageCorrectVec(i))
     XSPerfAccumulate(s"sc_correct_tage_correct${i}", scCorrectVec(i) && tageCorrectVec(i))
     XSPerfAccumulate(s"sc_wrong_tage_wrong${i}", scWrongVec(i) && tageWrongVec(i))
+
+    XSPerfAccumulate(s"sc_path_correct${i}", scPathCorrectVec(i))
+    XSPerfAccumulate(s"sc_path_wrong${i}", scPathWrongVec(i))
+    XSPerfAccumulate(s"sc_global_correct${i}", scGlobalCorrectVec(i))
+    XSPerfAccumulate(s"sc_global_wrong${i}", scGlobalWrongVec(i))
+    XSPerfAccumulate(s"sc_bias_correct${i}", scBiasCorrectVec(i))
+    XSPerfAccumulate(s"sc_bias_wrong${i}", scBiasWrongVec(i))
+
     XSPerfAccumulate(s"t1_use_sc${i}", scUsedVec(i))
     XSPerfAccumulate(s"t1_not_use_sc${i}", scNotUsedVec(i))
 
@@ -578,6 +620,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     s"total_sc_wrong_tage_wrong",
     scWrongVec zip tageWrongVec map { case (scW, tageW) => scW && tageW } reduce (_ || _)
   )
+  XSPerfAccumulate(s"total_sc_path_correct", scPathCorrectVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_path_wrong", scPathWrongVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_global_correct", scGlobalCorrectVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_global_wrong", scGlobalWrongVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_bias_correct", scBiasCorrectVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_bias_wrong", scBiasWrongVec.reduce(_ || _))
 
   dontTouch(s2_sumPercsum)
   dontTouch(s2_totalPercsum)
