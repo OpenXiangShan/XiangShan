@@ -1674,15 +1674,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )
   ))
   io.mem_to_ooo.topToBackendBypass match { case x =>
-    x.hartId            := io.hartId
+    x.hartId            := RegNext(io.hartId)
     x.l2FlushDone       := RegNext(io.l2_flush_done)
-    x.externalInterrupt.msip  := outer.clint_int_sink.in.head._1(0)
-    x.externalInterrupt.mtip  := outer.clint_int_sink.in.head._1(1)
-    x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
-    x.externalInterrupt.seip  := outer.plic_int_sink.in.last._1(0)
-    x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
-    x.externalInterrupt.nmi.nmi_31 := outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0)
-    x.externalInterrupt.nmi.nmi_43 := outer.nmi_int_sink.in.head._1(1)
+    x.externalInterrupt.msip  := RegNext(outer.clint_int_sink.in.head._1(0))
+    x.externalInterrupt.mtip  := RegNext(outer.clint_int_sink.in.head._1(1))
+    x.externalInterrupt.meip  := RegNext(outer.plic_int_sink.in.head._1(0))
+    x.externalInterrupt.seip  := RegNext(outer.plic_int_sink.in.last._1(0))
+    x.externalInterrupt.debug := RegNext(outer.debug_int_sink.in.head._1(0))
+    x.externalInterrupt.nmi.nmi_31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0))
+    x.externalInterrupt.nmi.nmi_43 := RegNext(outer.nmi_int_sink.in.head._1(1))
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
   }
@@ -1693,10 +1693,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)
-  io.outer_cpu_halt := io.ooo_to_mem.backendToTopBypass.cpuHalted
+  io.outer_cpu_halt := RegNext(io.ooo_to_mem.backendToTopBypass.cpuHalted)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
-  io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
+  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
