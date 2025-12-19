@@ -37,6 +37,7 @@ import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
@@ -66,12 +67,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
   private val ghr         = Module(new Ghr)
+  private val uras        = Module(new MicroRas)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
     abtb,
     utage,
+    uras,
     mbtb,
     tage,
     sc,
@@ -89,6 +92,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B
+  uras.io.enable        := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
@@ -216,6 +220,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
   utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
 
+  // uras
+  uras.io.specIn.startPc     := s1_startPc
+  uras.io.specIn.cfiPosition := s1_prediction.cfiPosition
+  uras.io.specIn.attribute   := s1_prediction.attribute
+  uras.io.hasRedirect        := redirect.valid
+  uras.io.hasOverride        := s3_override
+  // uras.io.stageCtrl          := stageCtrl
+  uras.io.fullRetAddr := ras.io.topRetAddr
+
   // ras
   ras.io.redirect.valid          := redirect.valid
   ras.io.redirect.bits.attribute := redirect.bits.attribute
@@ -295,10 +308,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_realUbtbTaken  = ubtb.io.prediction.taken && !abtb.io.useMicroTage
   private val s1_realUbtbResult = Wire(new Prediction)
   private val s1_realAbtbResult = Wire(new Prediction)
+  private val s1_ubtbUseRet     = ubtb.io.prediction.attribute.isReturn && uras.io.specOut.isCanUse
+  private val s1_abtbUseRet     = abtb.io.prediction.attribute.isReturn && uras.io.specOut.isCanUse
   s1_realUbtbResult        := ubtb.io.prediction
-  s1_realUbtbResult.target := Mux(ubtb.io.prediction.attribute.isReturn, ras.io.topRetAddr, ubtb.io.prediction.target)
+  s1_realUbtbResult.target := Mux(s1_ubtbUseRet, uras.io.specOut.retTarget, ubtb.io.prediction.target)
   s1_realAbtbResult        := abtb.io.prediction
-  s1_realAbtbResult.target := Mux(abtb.io.prediction.attribute.isReturn, ras.io.topRetAddr, abtb.io.prediction.target)
+  s1_realAbtbResult.target := Mux(s1_abtbUseRet, uras.io.specOut.retTarget, abtb.io.prediction.target)
   s1_prediction :=
     MuxCase(
       fallThrough.io.prediction,
@@ -729,6 +744,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       !(s3_prediction.target === s3_s1Prediction.target),
     perf_fullTakenSourceVec
   )
+  private val s3Override_targetMismatch_flag = io.toFtq.prediction.fire && s3_override &&
+    s3_prediction.taken && s3_s1Prediction.taken &&
+    s3_prediction.cfiPosition === s3_s1Prediction.cfiPosition &&
+    !(s3_prediction.target === s3_s1Prediction.target)
+  dontTouch(s3Override_targetMismatch_flag)
 
   /* *** perf train *** */
   private val t0_mispredictBranch = train.bits.mispredictBranch
