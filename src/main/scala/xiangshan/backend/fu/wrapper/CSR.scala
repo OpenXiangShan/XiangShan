@@ -302,6 +302,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.ftqIdx := RegEnable(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
   redirect.ftqOffset := RegEnable(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
   redirect.taken := true.B
+  redirect.fullTarget := csrMod.io.out.bits.targetPc.pc
   redirect.target := csrMod.io.out.bits.targetPc.pc
   redirect.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
   redirect.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF

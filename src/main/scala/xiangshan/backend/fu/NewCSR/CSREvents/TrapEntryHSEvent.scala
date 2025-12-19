@@ -116,7 +116,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.stval    .valid := valid
   out.htval    .valid := valid
   out.htinst   .valid := valid
-  out.targetPc .valid := valid
+  out.targetPc .valid := in.pcFromXtvec.valid
 
   out.privState.bits            := PrivState.ModeHS
   // mstatus
@@ -135,9 +135,9 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.stval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
   out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
-  out.targetPc.bits.pc          := in.pcFromXtvec
-  out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec)
-  out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.pc          := in.pcFromXtvec.bits
+  out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec.bits)
+  out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec.bits)
   out.targetPc.bits.raiseIGPF   := false.B
 
   dontTouch(isLSGuestExcp)

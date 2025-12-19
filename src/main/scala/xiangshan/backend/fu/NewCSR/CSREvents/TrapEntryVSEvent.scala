@@ -115,7 +115,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsepc    .valid := valid
   out.vscause  .valid := valid
   out.vstval   .valid := valid
-  out.targetPc .valid := valid
+  out.targetPc .valid := in.pcFromXtvec.valid
 
   out.privState.bits             := PrivState.ModeVS
   // vsstatus
@@ -128,10 +128,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
   out.vstval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
-  out.targetPc.bits.pc           := in.pcFromXtvec
-  out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
-  out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
-  out.targetPc.bits.raiseIGPF    := instrAddrTransType.checkGuestPageFault(in.pcFromXtvec)
+  out.targetPc.bits.pc           := in.pcFromXtvec.bits
+  out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec.bits)
+  out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec.bits)
+  out.targetPc.bits.raiseIGPF    := instrAddrTransType.checkGuestPageFault(in.pcFromXtvec.bits)
 
   dontTouch(tvalFillGVA)
 }
