@@ -55,7 +55,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   io.resetDone := true.B // FIXME: sram read ready
 
-  io.train.ready := true.B
+  io.trainReady := true.B
 
   private val s0_startPc = io.startPc
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
@@ -112,41 +112,43 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
   io.meta := ittageMeta
 
+  private val t0_fire = io.enable && io.stageCtrl.t0_fire
+
   private val t1_train = Wire(new BpuTrain)
-  t1_train := RegEnable(io.train.bits, 0.U.asTypeOf(new BpuTrain), io.train.fire)
+  t1_train := RegEnable(io.train, 0.U.asTypeOf(new BpuTrain), t0_fire)
 
   private val t1_meta = Wire(new IttageMeta)
   t1_train.meta.ittage := t1_meta
 
-  private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, io.train.fire)
+  private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, t0_fire)
 
   private val updateStartPc   = t1_train.startPc
   private val updateFoldedPhr = t1_trainFoldedPhr
 
   // To improve Clock Gating Efficiency
-  private val t0_meta = io.train.bits.meta.ittage
-  t1_meta := RegEnable(t0_meta, io.train.fire)
+  private val t0_meta = io.train.meta.ittage
+  t1_meta := RegEnable(t0_meta, t0_fire)
   t1_meta.provider.bits := RegEnable(
     t0_meta.provider.bits,
-    io.train.fire && t0_meta.provider.valid
+    t0_fire && t0_meta.provider.valid
   )
   t1_meta.providerTarget := RegEnable(
     t0_meta.providerTarget,
     0.U.asTypeOf(t0_meta.providerTarget),
-    io.train.fire && t0_meta.provider.valid
+    t0_fire && t0_meta.provider.valid
   )
   t1_meta.allocate.bits := RegEnable(
     t0_meta.allocate.bits,
-    io.train.fire && t0_meta.allocate.valid
+    t0_fire && t0_meta.allocate.valid
   )
   t1_meta.altProvider.bits := RegEnable(
     t0_meta.altProvider.bits,
-    io.train.fire && t0_meta.altProvider.valid
+    t0_fire && t0_meta.altProvider.valid
   )
   t1_meta.altProviderTarget := RegEnable(
     t0_meta.altProviderTarget,
     0.U.asTypeOf(t0_meta.altProviderTarget),
-    io.train.fire && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
+    t0_fire && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
   )
 
   // Select the branch needed for training
@@ -161,7 +163,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
 
   // Update condition for ittage
-  private val updateValid = hasTrainBranch && RegNext(io.train.fire, init = false.B)
+  private val updateValid = hasTrainBranch && RegNext(t0_fire, init = false.B)
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))

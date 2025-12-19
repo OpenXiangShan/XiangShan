@@ -78,7 +78,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   io.resetDone := resetDone
 
-  io.train.ready := true.B
+  io.trainReady := true.B
 
   /*
    * ghr stage ctrl signals
@@ -314,12 +314,17 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.predBiasIdx     := RegEnable(s2_biasIdx, s2_fire)
 
   /*
+   *  train pipeline stage 0
+   */
+  private val t0_fire = io.stageCtrl.t0_fire
+
+  /*
    *  train pipeline stage 1
    */
-  private val t1_trainValid = RegNext(io.train.fire, init = false.B)
-  private val t1_train      = RegEnable(io.train.bits, io.train.fire)
-  private val t1_branches   = t1_train.branches
-  private val t1_meta       = t1_train.meta.sc
+  private val t1_fire     = RegNext(t0_fire, false.B)
+  private val t1_train    = RegEnable(io.train, t0_fire)
+  private val t1_branches = t1_train.branches
+  private val t1_meta     = t1_train.meta.sc
 
   private val t1_bankMask = getBankMask(t1_train.startPc)
 
@@ -327,7 +332,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     getPathTableIdx(
       t1_train.startPc,
       new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays / NumBanks))),
-      RegEnable(io.trainFoldedPathHist, io.train.valid),
+      RegEnable(io.trainFoldedPathHist, t0_fire),
       info.Size / NumWays / NumBanks
     )
   )
@@ -354,7 +359,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     WireInit(VecInit.fill(ResolveEntryBranchNumber)(false.B)) // if the branch cfi not in mbtbResult, do not train
   private val t1_writeValidVec =
     VecInit(t1_branches.zip(t1_branchesScIdxHitVec).map { case (b, hit) =>
-      b.valid && b.bits.attribute.isConditional && t1_trainValid && hit
+      b.valid && b.bits.attribute.isConditional && t1_fire && hit
     })
   private val t1_writeValid = t1_writeValidVec.reduce(_ || _)
   private val t1_writeTakenVec =

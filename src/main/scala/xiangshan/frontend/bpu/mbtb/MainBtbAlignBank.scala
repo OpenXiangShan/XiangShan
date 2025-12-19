@@ -194,7 +194,7 @@ class MainBtbAlignBank(
   /* *** t1 ***
    * send write req to internal banks (srams)
    */
-  private val t1_valid            = w.req.valid
+  private val t1_fire             = w.req.valid
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
   private val t1_meta             = w.req.bits.meta
@@ -231,17 +231,17 @@ class MainBtbAlignBank(
   t1_entry.attribute       := t1_mispredictInfo.bits.attribute
 
   // similar to s0 case
-  assert(!t1_valid || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
+  assert(!t1_fire || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.writeEntry.req.valid        := t1_valid && t1_entryNeedWrite && t1_internalBankMask(i)
+    b.io.writeEntry.req.valid        := t1_fire && t1_entryNeedWrite && t1_internalBankMask(i)
     b.io.writeEntry.req.bits.setIdx  := t1_setIdx
     b.io.writeEntry.req.bits.wayMask := t1_entryWayMask
     b.io.writeEntry.req.bits.entry   := t1_entry
   }
 
   // update replacer
-  replacer.io.trainTouch.valid        := t1_valid && t1_entryNeedWrite
+  replacer.io.trainTouch.valid        := t1_fire && t1_entryNeedWrite
   replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
 
@@ -265,7 +265,7 @@ class MainBtbAlignBank(
   private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.writeCounter.req.valid         := t1_valid && t1_counterNeedWrite && t1_internalBankMask(i)
+    b.io.writeCounter.req.valid         := t1_fire && t1_counterNeedWrite && t1_internalBankMask(i)
     b.io.writeCounter.req.bits.setIdx   := t1_setIdx
     b.io.writeCounter.req.bits.wayMask  := t1_counterWayMask.asUInt
     b.io.writeCounter.req.bits.counters := t1_newCounters
@@ -284,7 +284,7 @@ class MainBtbAlignBank(
 
   XSPerfAccumulate(
     "", // no common prefix is needed
-    t1_valid && t1_mispredictInfo.valid,
+    t1_fire && t1_mispredictInfo.valid,
     Seq(
       ("allocate", !t1_hit),
       ("fixTarget", t1_hit && t1_mispredictInfo.bits.attribute.needIttage),
@@ -292,5 +292,5 @@ class MainBtbAlignBank(
     )
   )
 
-  XSPerfAccumulate("updateCounter", Mux(t1_valid, PopCount(t1_counterWayMask), 0.U))
+  XSPerfAccumulate("updateCounter", Mux(t1_fire, PopCount(t1_counterWayMask), 0.U))
 }
