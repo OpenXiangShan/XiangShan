@@ -32,6 +32,7 @@ case class MicroTageParameters(
     NumTables:     Int = 2,
     TickWidth:     Int = 5,
     UsefulWidth:   Int = 2,
+    EnableTrace:   Boolean = false,
     BaseTableSize: Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
@@ -51,7 +52,7 @@ trait HasMicroTageParameters extends HasBpuParameters {
 
   // utage can only be fast-trained, we don't have continous predict block on resolve
   def EnableFastTrain: Boolean = true
-  def EnableTrace:     Boolean = true
+  def EnableTrace:     Boolean = utageParameters.EnableTrace
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
   def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)
