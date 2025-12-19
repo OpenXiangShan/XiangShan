@@ -87,8 +87,8 @@ class MicroTageTable(
     val tagFh       = allFh.getHistWithInfo(tagFhInfo).foldedHist
     val altTagFh    = allFh.getHistWithInfo(altTagFhInfo).foldedHist
     val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
-      // (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(numSets) - 1, 0)
-      (unhashedIdx ^ Cat(0.U(3.W), idxFh) ^ (idxFh << 3))(log2Ceil(numSets) - 1, 0)
+      val foldShift = log2Ceil(numSets) - idxFhInfo.FoldedLength
+      (unhashedIdx ^ Cat(0.U(foldShift.W), idxFh) ^ (idxFh << foldShift))(log2Ceil(numSets) - 1, 0)
     } else {
       (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
     }
