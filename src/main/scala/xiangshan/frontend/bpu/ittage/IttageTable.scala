@@ -79,24 +79,20 @@ class IttageTable(
     println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
   }
 
-  require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
+  require((histLen > 0) && (tagLen > 0))
   private val idxFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, log2Ceil(nRows)))
   private val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, tagLen))
   private val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, tagLen - 1))
 
-  def computeTagAndHash(unhashedIdx: UInt, allFh: PhrAllFoldedHistories): (UInt, UInt) =
-    if (histLen > 0) {
-      val idxFh    = allFh.getHistWithInfo(idxFhInfo).foldedHist
-      val tagFh    = allFh.getHistWithInfo(tagFhInfo).foldedHist
-      val altTagFh = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-      // require(idxFh.getWidth == log2Ceil(nRows))
-      val idx = (unhashedIdx ^ idxFh)(log2Ceil(nRows) - 1, 0)
-      val tag = ((unhashedIdx >> log2Ceil(nRows)).asUInt ^ tagFh ^ (altTagFh << 1).asUInt)(tagLen - 1, 0)
-      (idx, tag)
-    } else {
-      require(tagLen == 0)
-      (unhashedIdx(log2Ceil(nRows) - 1, 0), 0.U)
-    }
+  def computeTagAndHash(unhashedIdx: UInt, allFh: PhrAllFoldedHistories): (UInt, UInt) = {
+    val idxFh    = allFh.getHistWithInfo(idxFhInfo).foldedHist
+    val tagFh    = allFh.getHistWithInfo(tagFhInfo).foldedHist
+    val altTagFh = allFh.getHistWithInfo(altTagFhInfo).foldedHist
+    // require(idxFh.getWidth == log2Ceil(nRows))
+    val idx = (unhashedIdx ^ idxFh)(log2Ceil(nRows) - 1, 0)
+    val tag = ((unhashedIdx >> log2Ceil(nRows)).asUInt ^ tagFh ^ (altTagFh << 1).asUInt)(tagLen - 1, 0)
+    (idx, tag)
+  }
 
   // sanity check, FIXME: is this really needed?
   // The least significant bit of offset is pruned
@@ -137,9 +133,12 @@ class IttageTable(
 
   private val tableReadData = table.io.r.resp.data(0)
 
-  private val s1_reqReadHit = tableReadData.valid && (if (tagLen != 0) tableReadData.tag === s1_tag else true.B)
+  private val s1_reqReadHit = tableReadData.valid && tableReadData.tag === s1_tag
 
-  io.resp.valid             := s1_reqReadHit && s1_valid // && s1_mask(b)
+  private val readWriteConflict    = io.update.valid && io.req.valid
+  private val s1_readWriteConflict = RegEnable(readWriteConflict, io.req.valid)
+
+  io.resp.valid             := s1_reqReadHit && !s1_readWriteConflict && s1_valid // && s1_mask(b)
   io.resp.bits.cnt          := tableReadData.confidenceCnt
   io.resp.bits.usefulCnt    := tableReadData.usefulCnt
   io.resp.bits.targetOffset := tableReadData.targetOffset
@@ -169,7 +168,7 @@ class IttageTable(
     Mux(io.update.valid, updateNoUsBitmask, Mux(usefulCanReset, updateUsBitmask, updateNoBitmask))
   )
 
-  /**
+  /** 
     Bypass write data from WriteBuffer to sram when read port is empty.
   */
   private val writeBuffer = Module(new WriteBuffer(
@@ -236,9 +235,7 @@ class IttageTable(
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
   XSPerfAccumulate("ittage_us_tick_reset", io.update.resetUsefulCnt)
-  // read-write conflict: can provide data to sram write port, but sram read port is also requesting
-  XSPerfAccumulate("ittage_table_read_write_conflict", table.io.r.req.valid && writeBufferRPort.valid)
-  XSPerfAccumulate("ittage_table_update_drop", io.update.valid && !writeBufferWPort.ready)
+  XSPerfAccumulate("ittage_table_read_write_conflict", readWriteConflict)
 
   if (debug) {
     val u   = io.update
