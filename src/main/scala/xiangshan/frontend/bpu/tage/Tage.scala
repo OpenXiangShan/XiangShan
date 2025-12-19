@@ -39,13 +39,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val foldedPathHist:         PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val foldedPathHistForTrain: PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val mbtbResult:             Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
-
-    val takenMask:   Vec[Bool] = Output(Vec(NumBtbResultEntries, Bool()))
-    val hasProvided: Vec[Bool] = Output(Vec(NumBtbResultEntries, Bool()))
-    val providerTakenCtrVec: Vec[Valid[SaturateCounter]] =
-      Output(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TakenCtrWidth))))
-
-    val meta: TageMeta = Output(new TageMeta)
+    val prediction:             Vec[TagePrediction]    = Output(Vec(NumBtbResultEntries, new TagePrediction))
+    val toSc:                   TageToScIO             = new TageToScIO
+    val meta:                   TageMeta               = Output(new TageMeta)
   }
   val io: TageIO = IO(new TageIO)
 
@@ -55,8 +51,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // reset usefulCtr of all entries when usefulResetCtr saturated
   private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
 
-  // use altPred when useAltCtr is positive
-  private val useAltCtrVec = RegInit(VecInit.fill(NumUseAltCtrs)(0.U.asTypeOf(new SaturateCounter(UseAltCtrWidth))))
+  // use the alternate prediction when counter is positive
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(0.U.asTypeOf(new SaturateCounter(UseAltOnNaWidth))))
 
   /* *** reset *** */
   private val resetDone = RegInit(false.B)
@@ -129,16 +125,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_branches = io.mbtbResult
 
   // generate prediction
-  private val s2_takenMask   = Wire(Vec(NumBtbResultEntries, Bool()))
-  private val s2_hasProvided = Wire(Vec(NumBtbResultEntries, Bool()))
+  private val s2_prediction = Wire(Vec(NumBtbResultEntries, new TagePrediction))
+
   // to sc
   private val s2_providerTakenCtrVec = Wire(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TakenCtrWidth))))
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
-    val isCond    = branch.valid && branch.bits.attribute.isConditional
-    val position  = branch.bits.cfiPosition
-    val cfiPc     = getCfiPcFromPosition(s2_startPc, position)
-    val useAltIdx = getUseAltIndex(cfiPc)
+    val position      = branch.bits.cfiPosition
+    val cfiPc         = getCfiPcFromPosition(s2_startPc, position)
+    val useAltOnNaIdx = getUseAltIndex(cfiPc)
+    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
 
     // compare tags of each branch with all tables
     val allTableTagMatchResults = s2_allTableEntries.zip(s2_allTableUsefulCtrs).zipWithIndex.map {
@@ -148,10 +144,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
         val result = Wire(new TagMatchResult).suggestName(s"s2_branch_${i}_table_${tableIdx}_result")
-        result.hit          := isCond && hitWayMask.reduce(_ || _)
-        result.entry        := Mux1H(hitWayMaskOH, entriesPerTable)
-        result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
+        result.hit          := hitWayMask.reduce(_ || _)
         result.hitWayMaskOH := hitWayMaskOH.asUInt
+        result.tag          := tag
+        result.takenCtr     := Mux1H(hitWayMaskOH, entriesPerTable.map(_.takenCtr))
+        result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
         result.hitWayMask   := hitWayMask.asUInt
         result
     }
@@ -159,7 +156,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val hitTableMask     = allTableTagMatchResults.map(_.hit)
     val hasProvider      = hitTableMask.reduce(_ || _)
     val providerTableOH  = getLongestHistTableOH(hitTableMask)
-    val providerTakenCtr = Mux1H(providerTableOH, allTableTagMatchResults.map(_.entry.takenCtr))
+    val providerTakenCtr = Mux1H(providerTableOH, allTableTagMatchResults.map(_.takenCtr))
 
     s2_providerTakenCtrVec(i).valid      := hasProvider
     s2_providerTakenCtrVec(i).bits.value := providerTakenCtr.value
@@ -168,26 +165,24 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
     val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
-    val altTakenCtr            = Mux1H(altTableOH, allTableTagMatchResults.map(_.entry.takenCtr))
+    val altTakenCtr            = Mux1H(altTableOH, allTableTagMatchResults.map(_.takenCtr))
 
-    val providerIsWeak = providerTakenCtr.isWeak
-    val pred           = providerTakenCtr.isPositive
-    val altPred        = altTakenCtr.isPositive
-    val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(useAltIdx).isPositive
+    val useProviderPred = hasProvider && (!useAltOnNa || !providerTakenCtr.isWeak)
+
+    // get prediction for each branch
+    s2_prediction(i).useProviderPred := useProviderPred
+    s2_prediction(i).providerPred    := providerTakenCtr.isPositive
+    s2_prediction(i).hasAlt          := hasAlt
+    s2_prediction(i).altPred         := altTakenCtr.isPositive
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_way",
       allTableTagMatchResults.map(e => (s2_valid && PopCount(e.hitWayMask) > 1.U).asUInt).reduce(_ +& _)
     )
-
-    // get prediction for each branch
-    s2_takenMask(i)   := Mux(useAlt, altPred, pred)
-    s2_hasProvided(i) := hasProvider
   }
 
-  io.takenMask           := s2_takenMask
-  io.hasProvided         := s2_hasProvided
-  io.providerTakenCtrVec := s2_providerTakenCtrVec
+  io.prediction               := s2_prediction
+  io.toSc.providerTakenCtrVec := s2_providerTakenCtrVec
 
   io.meta.debug_setIdx  := s2_setIdx
   io.meta.debug_tempTag := s2_rawTag
@@ -327,20 +322,26 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_cfiUseAltIdxVec = RegEnable(t1_cfiUseAltIdxVec, t1_valid)
   dontTouch(t2_cfiPcVec)
 
-  private val t2_allBranchUpdateInfo = t2_branches.zipWithIndex.map { case (branch, brIdx) =>
-    val isCond = t2_condMask(brIdx)
+  private val t2_allBranchUpdateInfo = t2_branches.zipWithIndex.map { case (branch, i) =>
+    val isCond        = t2_condMask(i)
+    val position      = branch.bits.cfiPosition
+    val actualTaken   = branch.bits.taken
+    val useAltOnNaIdx = t2_cfiUseAltIdxVec(i)
+    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+
     val allTableTagMatchResults = t2_allTableEntries.zip(t2_allTableUsefulCtrs).zipWithIndex.map {
       case ((entriesPerTable, usefulCtrsPerTable), tableIdx) =>
-        val tag          = t2_rawTag(tableIdx) ^ branch.bits.cfiPosition
+        val tag          = t2_rawTag(tableIdx) ^ position
         val hitWayMask   = entriesPerTable.map(entry => entry.valid && entry.tag === tag)
         val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
-        dontTouch(tag.suggestName(s"branch_${brIdx}_table_${tableIdx}_tag"))
+        dontTouch(tag.suggestName(s"branch_${i}_table_${tableIdx}_tag"))
 
-        val result = Wire(new TagMatchResult).suggestName(s"t2_branch_${brIdx}_table_${tableIdx}_result")
+        val result = Wire(new TagMatchResult).suggestName(s"t2_branch_${i}_table_${tableIdx}_result")
         result.hit          := isCond && hitWayMask.reduce(_ || _)
-        result.entry        := Mux1H(hitWayMaskOH, entriesPerTable)
-        result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
         result.hitWayMaskOH := hitWayMaskOH.asUInt
+        result.tag          := Mux1H(hitWayMaskOH, entriesPerTable.map(_.tag))
+        result.takenCtr     := Mux1H(hitWayMaskOH, entriesPerTable.map(_.takenCtr))
+        result.usefulCtr    := Mux1H(hitWayMaskOH, usefulCtrsPerTable)
         result.hitWayMask   := hitWayMask.asUInt
         result
     }
@@ -348,63 +349,68 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val hasProvider     = hitTableMask.reduce(_ || _)
     val providerTableOH = getLongestHistTableOH(hitTableMask)
     val providerInfo    = Mux1H(providerTableOH, allTableTagMatchResults)
-    dontTouch(hitTableMask.asUInt.suggestName(s"t2_branch_${brIdx}_hitTableMask"))
+    dontTouch(hitTableMask.asUInt.suggestName(s"t2_branch_${i}_hitTableMask"))
 
     val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
     val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
     val altInfo                = Mux1H(altTableOH, allTableTagMatchResults)
-    dontTouch(hitTableMaskNoProvider.asUInt.suggestName(s"t2_branch_${brIdx}_hitTableMaskNoProvider"))
+    dontTouch(hitTableMaskNoProvider.asUInt.suggestName(s"t2_branch_${i}_hitTableMaskNoProvider"))
 
-    val pred           = providerInfo.entry.takenCtr.isPositive
-    val providerIsWeak = providerInfo.entry.takenCtr.isWeak
-    val altPred        = altInfo.entry.takenCtr.isPositive
-    val basePred       = t2_basePred(brIdx)
-    val useAlt         = providerIsWeak && hasAlt && useAltCtrVec(t2_cfiUseAltIdxVec(brIdx)).isPositive
-    val finalPred      = Mux(useAlt, altPred, Mux(hasProvider, pred, basePred))
-    val actualTaken    = branch.bits.taken
+    val providerPred    = providerInfo.takenCtr.isPositive
+    val basePred        = t2_basePred(i)
+    val altPred         = altInfo.takenCtr.isPositive
+    val useProviderPred = hasProvider && (!useAltOnNa || !providerInfo.takenCtr.isWeak)
+    val finalPred       = Mux(useProviderPred, providerPred, Mux(hasAlt, altPred, basePred))
 
     XSPerfAccumulate(
-      s"t2_branch_${brIdx}_mispredict_diff",
+      s"t2_branch_${i}_mispredict_diff",
       t2_valid && branch.valid && isCond && ((finalPred =/= actualTaken) =/= branch.bits.mispredict)
     )
 
-    val providerNewTakenCtr       = providerInfo.entry.takenCtr.getUpdate(actualTaken)
-    val increaseProviderUsefulCtr = hasProvider && pred === actualTaken && pred =/= Mux(hasAlt, altPred, basePred)
-    val providerNewUsefulCtr = Mux(
-      increaseProviderUsefulCtr,
-      providerInfo.usefulCtr.getIncrease,
-      providerInfo.usefulCtr.value
-    )
-    val altNewTakenCtr = altInfo.entry.takenCtr.getUpdate(actualTaken)
+    val providerNewTakenCtr = providerInfo.takenCtr.getUpdate(actualTaken)
+    val altNewTakenCtr      = altInfo.takenCtr.getUpdate(actualTaken)
 
-    val increaseUseAlt = hasProvider && providerIsWeak && Mux(hasAlt, altPred, basePred) === actualTaken
-    val decreaseUseAlt = hasProvider && providerIsWeak && Mux(hasAlt, altPred, basePred) =/= actualTaken
+    val increaseProviderUsefulCtr =
+      hasProvider && providerPred === actualTaken && providerPred =/= Mux(hasAlt, altPred, basePred)
+    val providerNewUsefulCtr =
+      Mux(increaseProviderUsefulCtr, providerInfo.usefulCtr.getIncrease, providerInfo.usefulCtr.value)
 
-    val updateInfo = Wire(new UpdateInfo).suggestName(s"branch_${brIdx}_updateInfo")
+    val increaseUseAlt =
+      hasProvider && providerInfo.takenCtr.isWeak && Mux(hasAlt, altPred, basePred) === actualTaken
+    val decreaseUseAlt =
+      hasProvider && providerInfo.takenCtr.isWeak && Mux(hasAlt, altPred, basePred) =/= actualTaken
+
+    val updateInfo = Wire(new UpdateInfo).suggestName(s"t2_branch_${i}_updateInfo")
     updateInfo.valid                        := isCond // Only consider update if conditional branch
     updateInfo.providerTableOH              := providerTableOH.asUInt & Fill(NumTables, hasProvider)
     updateInfo.providerWayOH                := providerInfo.hitWayMaskOH
     updateInfo.providerEntry.valid          := true.B
-    updateInfo.providerEntry.tag            := providerInfo.entry.tag
+    updateInfo.providerEntry.tag            := providerInfo.tag
     updateInfo.providerEntry.takenCtr.value := providerNewTakenCtr
     updateInfo.providerOldUsefulCtr         := providerInfo.usefulCtr
     updateInfo.providerNewUsefulCtr.value   := providerNewUsefulCtr
 
-    updateInfo.altTableOH              := altTableOH.asUInt & Fill(NumTables, useAlt)
+    updateInfo.altTableOH              := altTableOH.asUInt & Fill(NumTables, !useProviderPred && hasAlt)
     updateInfo.altWayOH                := altInfo.hitWayMaskOH
     updateInfo.altEntry.valid          := true.B
-    updateInfo.altEntry.tag            := altInfo.entry.tag
+    updateInfo.altEntry.tag            := altInfo.tag
     updateInfo.altEntry.takenCtr.value := altNewTakenCtr
     updateInfo.altOldUsefulCtr         := altInfo.usefulCtr
 
-    updateInfo.useAlt    := useAlt
+    updateInfo.useAlt    := !useProviderPred && hasAlt
     updateInfo.finalPred := finalPred
 
-    updateInfo.needAllocate := isCond && finalPred =/= actualTaken && !(hasProvider && providerTableOH(NumTables - 1))
-    updateInfo.notNeedUpdate := providerInfo.entry.takenCtr.shouldHold(actualTaken) &&
+    // allocate when mispredict, but except when:
+    // 1. already on the highest table
+    // 2. providerPred is not used, providerPred is right and provider is weak
+    updateInfo.needAllocate := isCond && finalPred =/= actualTaken &&
+      !(hasProvider && providerTableOH(NumTables - 1)) &&
+      !(hasProvider && !useProviderPred && providerPred === actualTaken && providerInfo.takenCtr.isWeak)
+
+    updateInfo.notNeedUpdate := hasProvider && providerInfo.takenCtr.shouldHold(actualTaken) &&
       providerInfo.usefulCtr.isSaturatePositive && increaseProviderUsefulCtr &&
-      (!useAlt || altInfo.entry.takenCtr.shouldHold(actualTaken))
+      (useProviderPred || !hasAlt || altInfo.takenCtr.shouldHold(actualTaken))
 
     updateInfo.increaseUseAlt := increaseUseAlt
     updateInfo.decreaseUseAlt := decreaseUseAlt
@@ -413,7 +419,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     updateInfo
   }
 
-  useAltCtrVec.zipWithIndex.map { case (ctr, i) =>
+  useAltOnNaVec.zipWithIndex.map { case (ctr, i) =>
     val idxMatchMask = t2_cfiUseAltIdxVec.map(_ === i.U)
     val increase = idxMatchMask.zip(t2_allBranchUpdateInfo).map { case (idxMatch, updateInfo) =>
       idxMatch && updateInfo.increaseUseAlt
