@@ -135,7 +135,8 @@ class IttageTable(
 
   private val s1_reqReadHit = tableReadData.valid && tableReadData.tag === s1_tag
 
-  private val readWriteConflict    = io.update.valid && io.req.valid
+  private val writeValid           = Wire(Bool())
+  private val readWriteConflict    = writeValid && io.req.valid
   private val s1_readWriteConflict = RegEnable(readWriteConflict, io.req.valid)
 
   io.resp.valid             := s1_reqReadHit && !s1_readWriteConflict && s1_valid // && s1_mask(b)
@@ -168,34 +169,12 @@ class IttageTable(
     Mux(io.update.valid, updateNoUsBitmask, Mux(usefulCanReset, updateUsBitmask, updateNoBitmask))
   )
 
-  /** 
-    Bypass write data from WriteBuffer to sram when read port is empty.
-  */
-  private val writeBuffer = Module(new WriteBuffer(
-    gen = new IttageWriteReq(tagLen, nRows, ittageEntrySz),
-    numEntries = TableWriteBufferSize,
-    numPorts = 1,
-    nameSuffix = s"ittageTable$tableIdx"
-  ))
-
-  // read/write port of write buffer
-  private val writeBufferWPort = writeBuffer.io.write.head
-  private val writeBufferRPort = writeBuffer.io.read.head
-  // read the stored write req from write buffer
-  private val writeValid   = writeBufferRPort.valid && !table.io.r.req.valid
-  private val writeEntry   = writeBufferRPort.bits.entry
-  private val writeSetIdx  = writeBufferRPort.bits.setIdx
+  // write to ittage table sram
+  writeValid := io.update.valid || usefulCanReset
+  private val writeEntry   = updateWdata
+  private val writeSetIdx  = Mux(usefulCanReset, resetSet, updateIdx)
   private val writeWayMask = true.B
-  private val writeBitmask = writeBufferRPort.bits.bitmask
-  writeBufferRPort.ready := table.io.w.req.ready && !table.io.r.req.valid
-
-  // write to writeBuffer
-  writeBufferWPort.valid        := io.update.valid || usefulCanReset
-  writeBufferWPort.bits.entry   := updateWdata
-  writeBufferWPort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
-  writeBufferWPort.bits.bitmask := updateBitmask
-
-  // write from writeBuffer to sram
+  private val writeBitmask = updateBitmask
   table.io.w.apply(writeValid, writeEntry, writeSetIdx, writeWayMask, writeBitmask)
 
   // Power-on reset
@@ -206,9 +185,9 @@ class IttageTable(
   }
   // Do not use table banks io.r.req.ready directly
   // All table_banks are single port SRAM, ready := !wen
-  // We do not want write request block the whole BPU pipeline
-  // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
-  io.req.ready := !powerOnResetState
+  // We want write request first priority here when there is read/write conflict
+  io.req.ready := !powerOnResetState && !io.update.valid
+  assert(!(table.io.r.req.valid && table.io.w.req.valid))
 
   private val oldCtr = io.update.oldCnt
   updateWdata.valid := true.B
