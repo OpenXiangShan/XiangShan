@@ -26,7 +26,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
-import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility._
 import utility.sram.SramBroadcastBundle
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
@@ -53,10 +53,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
   val nmi_int_node = l2top.inner.nmi_int_node
-  memBlock.clint_int_sink := clint_int_node
-  memBlock.plic_int_sink :*= plic_int_node
-  memBlock.debug_int_sink := debug_int_node
-  memBlock.nmi_int_sink := nmi_int_node
+  memBlock.clint_int_sink := IntBuffer() := clint_int_node
+  memBlock.plic_int_sink :*= IntBuffer() :*= plic_int_node
+  memBlock.debug_int_sink := IntBuffer() := debug_int_node
+  memBlock.nmi_int_sink   := IntBuffer() := nmi_int_node
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
