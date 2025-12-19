@@ -3,37 +3,66 @@
 
 package pbus
 
-
-import chisel3.{IO, _}
-import device.standalone.StandAloneDebugModule
-import system.{CVMParameters, CVMParamsKey, HasSoCParameter, SoCParameters, SoCParamsKey}
-import device.{EnableJtag, SYSCNT, SYSCNTConsts, SYSCNTParams}
-import chisel3.experimental.{ChiselAnnotation, annotate}
-import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import device.standalone.StandAloneSYSCNT
+import _root_.circt.stage._
+import aia.AXI4IMSIC
+import aia.IMSICParameKey
+import aia.IMSICParameters
+import chisel3._
+import chisel3.IO
+import chisel3.experimental.ChiselAnnotation
+import chisel3.experimental.annotate
+import chisel3.experimental.dataview._
+import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3.util._
-import freechips.rocketchip.diplomacy
+import device.EnableJtag
+import device.SYSCNT
+import device.SYSCNTConsts
+import device.SYSCNTParams
+import device.standalone.StandAloneDebugModule
+import device.standalone.StandAloneSYSCNT
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.devices.debug.{APB, CJTAG, DMI, DebugAttachParams, DebugExportProtocol, DebugIO, DebugModuleParams, ExportDebug, JTAG, JtagDTMKey, ResetCtrlIO}
+import freechips.rocketchip.devices.debug.APB
+import freechips.rocketchip.devices.debug.CJTAG
+import freechips.rocketchip.devices.debug.DebugAttachParams
+import freechips.rocketchip.devices.debug.DebugExportProtocol
+import freechips.rocketchip.devices.debug.DebugIO
+import freechips.rocketchip.devices.debug.DebugModuleKey
+import freechips.rocketchip.devices.debug.DebugModuleParams
+import freechips.rocketchip.devices.debug.DMI
+import freechips.rocketchip.devices.debug.ExportDebug
+import freechips.rocketchip.devices.debug.JTAG
+import freechips.rocketchip.devices.debug.JtagDTMKey
+import freechips.rocketchip.devices.debug.ResetCtrlIO
+import freechips.rocketchip.diplomacy
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.ValName
 import freechips.rocketchip.interrupts.IntSinkParameters
-import freechips.rocketchip.subsystem.{CBUS, FBUS, TLBusWrapperLocation}
-import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
+import freechips.rocketchip.subsystem.CBUS
+import freechips.rocketchip.subsystem.FBUS
+import freechips.rocketchip.subsystem.TLBusWrapperLocation
+import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.HeterogeneousBag
-import top.ArgParser
-import top.TopMain.args
-import xiangshan.{DFTOptions, DFTOptionsKey, DebugOptions, DebugOptionsKey, PMParameKey, PMParameters, XSCoreParameters, XSTileKey}
 //import org.chipsalliance.cde.config.{Config, Parameters}
 import org.chipsalliance.cde.config._
+import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import system.CVMParameters
+import system.CVMParamsKey
+import system.HasSoCParameter
+import system.SoCParameters
+import system.SoCParamsKey
+import top.ArgParser
+import top.TopMain.args
 import utils.VerilogAXI4Record
-import _root_.circt.stage._
-import aia.{AXI4IMSIC, IMSICParameKey, IMSICParameters}
-import chisel3.stage.ChiselGeneratorAnnotation
-import freechips.rocketchip.devices.debug.DebugModuleKey
-import chisel3.experimental.dataview._
-
+import xiangshan.DebugOptions
+import xiangshan.DebugOptionsKey
+import xiangshan.DFTOptions
+import xiangshan.DFTOptionsKey
+import xiangshan.PMParameKey
+import xiangshan.PMParameters
+import xiangshan.XSCoreParameters
+import xiangshan.XSTileKey
 
 /**
  * Configurable parameters for the Pbus2 interconnect.
@@ -48,29 +77,32 @@ import chisel3.experimental.dataview._
 case class AplicParams(
     CFG_ADDR_WIDTH: Int = 40,
     CFG_DATA_WIDTH: Int = 64,
-    CFG_ID_WIDTH: Int = 16,
-    APLICAddrMap: AddressSet = AddressSet(0x31100000L, 0x7fff),
+    CFG_ID_WIDTH:   Int = 16,
+    APLICAddrMap:   AddressSet = AddressSet(0x31100000L, 0x7fff),
     MSI_DATA_WIDTH: Int = 32,
-    NumIntSrcs: Int = 512
-    )
+    NumIntSrcs:     Int = 512
+)
 case class PeriParams(
     slaveDataBytes: Int = 8,
-    timedataBytes: Int = 8,
-    addrWidth: Int = 32
-                     )
+    timedataBytes:  Int = 8,
+    addrWidth:      Int = 32
+)
 
 case class Pbus2Params(
-    NumHarts:    Int = 2, // number of cpus +1(aplic)+1(pcie msi)
-    idBits: Int = 2,
-    cpuAddrWidth: Int = 32,
-    cpuDataWidth: Int = 64,
+    NumHarts:       Int = 1, // number of cpus +1(aplic)+1(pcie msi)
+    idBits:         Int = 2,
+    cpuAddrWidth:   Int = 32,
+    cpuDataWidth:   Int = 64,
     dmHasBusMaster: Boolean = true,
 //  inputDataWidths: Seq[Int] = Seq.fill(10)(64),
 //  numOutputs: Int = 3, // This topology is fixed to 3 outputs
 //    APLICcfgAddr:  AddressSet = AddressSet(0x31100000L, 0x7fff),      // 32KB
     SYSCNTAddrMap: AddressSet = AddressSet(0x38040000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
-    DebugAddrMap: AddressSet = AddressSet(0x00010000L, 0x1000 - 1), // 4KB
-    dmsize: Int = 0x1000,
+    DebugAddrMap:  AddressSet = AddressSet(0x00010000L, 0x1000 - 1),  // 4KB
+    dmsize:        Int = 0x1000,
+    DieIDWidth:    Int = 3,
+    CrsDataWidth:  Int = 128,
+    CrsAddrWidth:  Int = 48,
     IMSICAddrMap: Seq[AddressSet] = Seq(
       AddressSet(0x3a000000L, 0xffffff),
       AddressSet(0x3b000000L, 0xffffff)
@@ -92,9 +124,9 @@ case class Pbus2Params(
 //    AddressSet(0x80000000L, 0xffffffffL)  // 2GB for Slave 2
 //  ),
     MSIOutDataWidth: Int = 32,
-    periParams: PeriParams
+    periParams:      PeriParams
 ) {
-  lazy val NumInputs = NumHarts + 0
+  lazy val NumInputs  = NumHarts + 0
   lazy val NumIntSrcs = 1 << IMSICParams.imsicIntSrcWidth
 }
 
@@ -186,7 +218,7 @@ case class Pbus2Params(
 //
 //  for (slaveNode <- slaves) { xbar4to3 :*= slaveNode }
 
-class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule{
+class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
 //  with HasSoCParameter{
 //  val IMSICPbus = LazyModule(new IMSICPbus(params))
   val pbus_xbar = AXI4Xbar()
@@ -204,7 +236,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       id = IdRange(0, 1 << params.idBits)
     ))
   )))
-  val sNode = {
+  val sNode =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = params.IMSICAddrMap,
@@ -213,13 +245,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       )),
       beatBytes = params.MSIOutDataWidth / 8
     )))
-  }
   for (i <- 0 until params.NumHarts) {
     pbus_xbar :*= cpu_mNodes(i)
   }
   pbus_xbar := aplic_mNode
-  sNode := pbus_xbar
-
+  sNode     := pbus_xbar
 
 //  aplic_top.i_axi4 := s_peri
 //  val s_periIO = InModuleBody {
@@ -251,16 +281,20 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 
   // --- Module Implementation ---
   lazy val module = new Imp
-  class Imp extends LazyModuleImp(this)  {
+  class Imp extends LazyModuleImp(this) {
     // slave access from cpu
     val s_aplic = IO(Flipped(new AXI4Bundle(aplic_mNode.out.head._2.bundle))) // mNode.head.out for vector TDO
-    val s_cpu = IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // mNode.head.out for vector TDO
+    val s_cpu =
+      IO(Vec(
+        params.NumHarts,
+        Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle))
+      )) // mNode.head.out for vector TDO
     // master to imsic
     val m = IO(new AXI4Bundle(sNode.in.head._2.bundle))
     // connect io
     aplic_mNode.out.head._1 <> s_aplic
     m <> sNode.in.head._1
-    (cpu_mNodes.zip(s_cpu)).foreach { case (node, io) => node.out.head._1 <> io }
+    cpu_mNodes.zip(s_cpu).foreach { case (node, io) => node.out.head._1 <> io }
     // Define IO ports using a HeterogeneousBag for varied input widths
 //    val in_bundles = params.inputDataWidths.map { w =>
 //      AXI4Bundle(AXI4BundleParameters(addrBits = 32, dataBits = w, idBits = params.idBits))
@@ -275,14 +309,14 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 }
 class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
 
- // Define the address map for the two output slave devices.
+  // Define the address map for the two output slave devices.
 // val slaveAddress = Seq(
 //     AddressSet(0x38000000, 0xFFF), // 2GB for 64-bit device
 //     AddressSet(0x38020000, 0xFFF)  // 2GB for 32-bit device
 // )
 
- // --- Diplomacy Nodes ---
- // Input nodes
+  // --- Diplomacy Nodes ---
+  // Input nodes
 // val msiMnodes = Seq.fill(params.NumInputs) {
 //   AXI4MasterNode(Seq(AXI4MasterPortParameters(
 //     masters = Seq(AXI4MasterParameters(
@@ -332,15 +366,15 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       beatBytes = params.cpuDataWidth / 8
     )))
   }
-  val cpu_xbar1to2 = Seq.fill(params.NumHarts) {AXI4Xbar()}
+  val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
   for (i <- 0 until params.NumHarts) {
     cpu_xbar1to2(i) := cpu_mNodes(i)
-    msi_sNodes(i) := cpu_xbar1to2(i)
-    dm_sNodes(i) := cpu_xbar1to2(i)
+    msi_sNodes(i)   := cpu_xbar1to2(i)
+    dm_sNodes(i)    := cpu_xbar1to2(i)
   }
   // instance modules
   private val clintParam = SYSCNTParams(params.SYSCNTAddrMap.base)
-  val imsic_pbus_top = LazyModule(new imsicPbusTop(params))
+  val imsic_pbus_top     = LazyModule(new imsicPbusTop(params))
   val syscnt = LazyModule(new StandAloneSYSCNT(
     useTL = false,
     baseAddress = params.SYSCNTAddrMap.base,
@@ -358,7 +392,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   )))
   // peri snode <> aplic cfg
   // aplic cfg <> slaveNode <> xbar <> perixbar
-  val peri_sNode = {
+  val peri_sNode =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.aplicParams.APLICAddrMap),
@@ -367,10 +401,9 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )),
       beatBytes = params.aplicParams.CFG_DATA_WIDTH / 8
     )))
-  }
-  peri_xbar := peri_mNode
+  peri_xbar  := peri_mNode
   peri_sNode := peri_xbar
-  val peri_s1Node = {
+  val peri_s1Node =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.SYSCNTAddrMap),
@@ -379,7 +412,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )),
       beatBytes = params.periParams.timedataBytes
     )))
-  }
   peri_s1Node := peri_xbar
   // debugModule integration
   val dm = LazyModule(new StandAloneDebugModule(
@@ -387,9 +419,9 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     baseAddress = params.DebugAddrMap.base,
     addrWidth = params.cpuAddrWidth,
     dataWidth = params.cpuDataWidth,
-    hartNum  = params.NumHarts
+    hartNum = params.NumHarts
   ))
-
+  println("=== dm instance finish ====")
   val dmxbar = AXI4Xbar()
   val dm_mNodes = Seq.fill(params.NumHarts) {
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -399,61 +431,130 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       ))
     )))
   }
-  val dm_sNode = {
+  val dm_sNode =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.DebugAddrMap),
         supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
         supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
       )),
-      beatBytes = params.cpuAddrWidth/8
+      beatBytes = params.cpuAddrWidth / 8
     )))
-  }
+  val dm_sNode_self =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = Seq(params.DebugAddrMap),
+        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
+        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
+      )),
+      beatBytes = params.cpuAddrWidth / 8
+    )))
   for (i <- 0 until params.NumHarts) {
     dmxbar :*= dm_mNodes(i)
   }
   dm_sNode := dmxbar
+  val dm_mNodes_2 =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-Mnode",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dm_mNode_crs =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-mnode-crs",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dmxbar2to1 = AXI4Xbar()
+  dmxbar2to1 := dm_mNodes_2
+  dmxbar2to1 := dm_mNode_crs
+  dm_sNode_self := dmxbar2to1
+
+  println("==== 12.17 start uncoreTop Imp..==")
+//  println(s"dm_mNodes_2 size: ${dm_mNodes_2.edges.out.size}")
+//  println(s"dm_mNode_crs edges: ${dm_mNode_crs.edges.out.size}")
+//  println(s"dm_mNodes_2 size0: ${dm_mNodes_2.out.size}")
+//  println(s"dm_mNode_crs edges0: ${dm_mNode_crs.out.size}")
   // define debugModule sba node
-  class Imp(outer: uncoreTop) extends LazyRawModuleImp(outer)  {
+  class Imp(outer: uncoreTop) extends LazyRawModuleImp(outer) {
     // 在模块实现类中添加前缀注解
     val target = this.toNamed
     annotate(new ChiselAnnotation {
       def toFirrtl = NestedPrefixModulesAnnotation(
-        target = target,  // 目标模块为当前 uncoreTop 的实现类
+        target = target, // 目标模块为当前 uncoreTop 的实现类
         prefix = "uncore_",
-        inclusive = true        // 递归为所有子模块添加前缀
+        inclusive = true // 递归为所有子模块添加前缀
       )
     })
     val i_dft_icg_scan_en    = IO(Input(Bool()))
     val i_aplic_wire_int_vld = IO(Input(UInt(params.NumIntSrcs.W)))
-    val rtc_clock = IO(Input(Clock()))
-    val rtc_reset = IO(Input(AsyncReset()))
-    val clock = IO(Input(Clock()))
-    val reset = IO(Input(AsyncReset()))
-    val time      = IO(Output(ValidIO(UInt(64.W))))
+    val rtc_clock            = IO(Input(Clock()))
+    val rtc_reset            = IO(Input(AsyncReset()))
+    val clock                = IO(Input(Clock()))
+    val reset                = IO(Input(AsyncReset()))
+    val time                 = IO(Output(ValidIO(UInt(64.W))))
     val peri_s = IO(Flipped(new AXI4Bundle(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
-    val msi_m = IO(new AXI4Bundle(imsic_pbus_top.sNode.in.head._2.bundle)) // to imsic master ports
-    val cpu_s = IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+    val msi_m  = IO(new AXI4Bundle(imsic_pbus_top.sNode.in.head._2.bundle)) // to imsic master ports
+    val cpu_s =
+      IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+    val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
+      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
+    )))) // cross-die slave ports for debug
+    val dm_crs_m = IO(new AXI4Bundle(AXI4BundleParameters(
+      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
+    )))
     // instance debugModule sba port
-    val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
-    val dmio = IO(new dm.debugModule.DebugModuleIO)
-    val dmint = IO(Output(Vec(params.NumHarts,Bool())))
-    //instance aplic
-    withClockAndReset(clock, reset){
+    val dm_m    = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
+    val dmio    = IO(new dm.debugModule.DebugModuleIO)
+    val dmint   = IO(Output(Vec(params.NumHarts, Bool())))
+    val req_id  = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
+    val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
+    // instance aplic
+    withClockAndReset(clock, reset) {
       val aplic_top = Module(new aplic_top(params.aplicParams))
       // aplic
       aplic_top.i_aplic_wire_int_vld := i_aplic_wire_int_vld
-      aplic_top.i_dft_icg_scan_en := i_dft_icg_scan_en
+      aplic_top.i_dft_icg_scan_en    := i_dft_icg_scan_en
       aplic_top.aplic_s <> peri_sNode.in.head._1
       imsic_pbus_top.module.s_aplic <> aplic_top.aplic_m
     }
     // connect io
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
-    (cpu_mNodes.zip(cpu_s)).foreach { case (node, io) => node.out.head._1 <> io }
+    cpu_mNodes.zip(cpu_s).foreach { case (node, io) => node.out.head._1 <> io }
+    // connection about cross-die access ports for debug
+    println("==== 12.17start to connect debugModule..==")
+    val isselfid = req_id === self_id
+    dm_mNode_crs.out.head._1 <> dm_crs_s
+    println("==== 12.17 test00..==")
+    dm_crs_m.aw <> dm_sNode.in.head._1.aw
+    println("==== 12.17 test01..==")
+    dm_crs_m.w <> dm_sNode.in.head._1.w
+    dm_crs_m.b <> dm_sNode.in.head._1.b
+    dm_crs_m.ar <> dm_sNode.in.head._1.ar
+    dm_crs_m.r <> dm_sNode.in.head._1.r
+    println("==== 12.17 test02..==")
+    dm_crs_m.aw.valid := !isselfid & dm_sNode.in.head._1.aw.valid
+    println("==== 12.17 test03..==")
+    dm_crs_m.w.valid := !isselfid & dm_sNode.in.head._1.w.valid
+    dm_crs_m.ar.valid := !isselfid & dm_sNode.in.head._1.ar.valid
+    println("==== 12.17 test04..==")
     dm_m.foreach(_ <> dm.axi4masternode.get)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode_self.in.head._1)
+//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    println("==== 12.17 test05..==")
+    dm_mNodes_2.out.head._1 <> dm_sNode.in.head._1
+    println("==== 12.17 test06..==")
+    dm_mNodes_2.out.head._1.aw.valid := isselfid & dm_sNode.in.head._1.aw.valid
+    println("==== 12.17 test07..==")
+    dm_mNodes_2.out.head._1.w.valid  := isselfid & dm_sNode.in.head._1.w.valid
+    dm_mNodes_2.out.head._1.ar.valid := isselfid & dm_sNode.in.head._1.ar.valid
+    println("==== 12.17 test08..==")
+
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
-    //msi_sNodes -> imsicPbusTop
+    // msi_sNodes -> imsicPbusTop
     imsic_pbus_top.module.s_cpu.zip(msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
     msi_m <> imsic_pbus_top.module.m
     for (i <- 0 until params.NumHarts) {
@@ -465,17 +566,20 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     require(dmintsig.size == params.NumHarts, "信号数量不匹配！")
     (dmintsig zip dmint).foreach { case (dms, io) => io := dms }
     // syscnt connect
-    syscnt.module.rtc_clock := rtc_clock
-    syscnt.module.rtc_reset := rtc_reset
-    syscnt.module.clock := clock
-    syscnt.module.reset := reset
-    syscnt.module.io.stop_en := false.B
-    syscnt.module.io.update_en := false.B
+    syscnt.module.rtc_clock       := rtc_clock
+    syscnt.module.rtc_reset       := rtc_reset
+    syscnt.module.clock           := clock
+    syscnt.module.reset           := reset
+    syscnt.module.io.stop_en      := false.B
+    syscnt.module.io.update_en    := false.B
     syscnt.module.io.update_value := false.B
-    time := syscnt.module.io.time
+    time                          := syscnt.module.io.time
+    println("==== 12.17 test10..==")
   }
-  lazy val module = new Imp(this)
+  println("==== 12.17 test11..==")
+  override lazy val module = new Imp(this)
 }
+
 /**
  * Main object to generate SystemVerilog for the IMSICPbus module.
  */
@@ -494,51 +598,54 @@ object PbusGen extends App {
     timedataBytes = 8
   )
   val dmParams = DebugModuleParams(
-       baseAddress = 0x38020000L,
-       //nDMIAddrSize  : Int = 7,
-       //nProgramBufferWords: Int = 16,
-       nAbstractDataWords  = 2,
-       nScratch = 2,
-       hasBusMaster = true,
-       //clockGate : Boolean = true,
-       maxSupportedSBAccess  = 64,
-       //supportQuickAccess : Boolean = false,
-       //supportHartArray   : Boolean = true,
-       //nHaltGroups        : Int = 1,
-       //nExtTriggers       : Int = 0,
-       hasHartResets    = true,
-       //hasImplicitEbreak  = false,
-       //hasAuthentication  = false,
-       crossingHasSafeReset = false
+    baseAddress = 0x38020000L,
+    // nDMIAddrSize  : Int = 7,
+    // nProgramBufferWords: Int = 16,
+    nAbstractDataWords = 2,
+    nScratch = 2,
+    hasBusMaster = true,
+    // clockGate : Boolean = true,
+    maxSupportedSBAccess = 64,
+    // supportQuickAccess : Boolean = false,
+    // supportHartArray   : Boolean = true,
+    // nHaltGroups        : Int = 1,
+    // nExtTriggers       : Int = 0,
+    hasHartResets = true,
+    // hasImplicitEbreak  = false,
+    // hasAuthentication  = false,
+    crossingHasSafeReset = false
   )
   val dmAtParams = DebugAttachParams(
     protocols = Set(JTAG)
   )
   val params = Pbus2Params(aplicParams = aplicparams, periParams = periParams)
-  implicit val p: Parameters = Parameters.empty.alterPartial({
-      case SoCParamsKey => SoCParameters()
-      case DebugModuleKey => Some(dmParams)
-      case ExportDebug => dmAtParams
-      case MaxHartIdBits => log2Up(params.NumHarts) max 6
-    })
+  implicit val p: Parameters = Parameters.empty.alterPartial {
+    case SoCParamsKey   => SoCParameters()
+    case DebugModuleKey => Some(dmParams)
+    case ExportDebug    => dmAtParams
+    case MaxHartIdBits  => log2Up(params.NumHarts) max 6
+  }
 
   val pbusM = LazyModule(new uncoreTop(params)(p))
 
   println("Generating the Pbus SystemVerilog...")
-    val path = """./build/rtl/"""
-    (new ChiselStage).execute(
-      Array(
-        "--target-dir", path,
-        "--split-verilog"
+  val path = """./build/rtl/"""
+  (new ChiselStage).execute(
+    Array(
+      "--target-dir",
+      path,
+      "--split-verilog"
+    ),
+    Seq(
+      ChiselGeneratorAnnotation(() => pbusM.module),
+      FirtoolOption("--disable-all-randomization"),
+      FirtoolOption("--disable-annotation-unknown"),
+      FirtoolOption(
+        "--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
       ),
-      Seq(
-        ChiselGeneratorAnnotation(() => pbusM.module),
-        FirtoolOption("--disable-all-randomization"),
-        FirtoolOption("--disable-annotation-unknown"),
-        FirtoolOption("--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"),
-        _root_.circt.stage.CIRCTTargetAnnotation(_root_.circt.stage.CIRCTTarget.SystemVerilog)
-      )
+      _root_.circt.stage.CIRCTTargetAnnotation(_root_.circt.stage.CIRCTTarget.SystemVerilog)
     )
+  )
 //println("Generating the Pbus SystemVerilog...")
 //(new ChiselStage).execute(
 //  args,
