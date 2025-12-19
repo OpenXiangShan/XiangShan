@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
+import utility.ChiselDB
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -608,4 +609,42 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", sc_global_predIdx_diff_trainIdx)
   XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
+  // Sc Trace
+  private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
+  scTraceVec.zipWithIndex.foreach { case (trace, i) =>
+    val predWayIdx = t1_branchesScIdxVec(i)
+    trace.valid        := t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional && t1_trainValid
+    trace.bits.startPc := t1_train.startPc
+    trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
+
+    trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
+    trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
+    trace.bits.providerCtr   := t1_meta.tagePred(predWayIdx)
+
+    trace.bits.pathResp   := VecInit(t1_oldPathCtrs.map(v => v(predWayIdx).asUInt))
+    trace.bits.globalResp := VecInit(t1_oldGlobalCtrs.map(v => v(predWayIdx).asUInt))
+    val biasWayIdx = Cat(t1_branchesWayIdxVec(i), t1_oldBiasLowBits(predWayIdx))
+    trace.bits.biasResp := t1_oldBiasCtrs(biasWayIdx).asUInt
+
+    trace.bits.sumAboveThres := t1_meta.sumAboveThres(predWayIdx)
+    trace.bits.scPred        := t1_meta.scPred(predWayIdx)
+    trace.bits.useSc         := t1_meta.useScPred(predWayIdx)
+
+    trace.bits.scCorrectTageWrong   := scCorrectVec(predWayIdx) && tageWrongVec(predWayIdx)
+    trace.bits.scWrongTageCorrect   := scWrongVec(predWayIdx) && tageCorrectVec(predWayIdx)
+    trace.bits.scCorrectTageCorrect := scCorrectVec(predWayIdx) && tageCorrectVec(predWayIdx)
+    trace.bits.scWrongTageWrong     := scWrongVec(predWayIdx) && tageWrongVec(predWayIdx)
+  }
+
+  private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
+    ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, EnableScTrace)
+  }
+  scTraceDBTables.zip(scTraceVec).foreach { case (dbTable, condTrace) =>
+    dbTable.log(
+      data = condTrace.bits,
+      en = t1_writeValid && condTrace.valid,
+      clock = clock,
+      reset = reset
+    )
+  }
 }

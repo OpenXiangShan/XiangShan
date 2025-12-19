@@ -39,7 +39,8 @@ case class ScParameters(
     NumTables:       Int = 2,
     NumBanks:        Int = 2,
     WriteBufferSize: Int = 4,
-    TagWidth:        Int = 12
+    TagWidth:        Int = 12,
+    EnableScTrace:   Boolean = true
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
@@ -69,4 +70,5 @@ trait HasScParameters extends HasBpuParameters {
 
   def WriteBufferSize: Int = scParameters.WriteBufferSize
   def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2
+  def EnableScTrace: Boolean = scParameters.EnableScTrace
 }

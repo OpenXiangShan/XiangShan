@@ -89,3 +89,28 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
     Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
   val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
 }
+
+class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
+  private def ScEntryWidth = (new ScEntry).getWidth
+  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
+  val cfiPc:   UInt       = UInt(VAddrBits.W)
+
+  val providerValid: Bool = Bool()
+  val providerTaken: Bool = Bool()
+  val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
+
+  val pathResp: Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
+
+  val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
+
+  val biasResp: UInt = UInt(ScEntryWidth.W)
+
+  val sumAboveThres: Bool = Bool()
+  val scPred:        Bool = Bool()
+  val useSc:         Bool = Bool()
+
+  val scCorrectTageWrong:   Bool = Bool()
+  val scWrongTageCorrect:   Bool = Bool()
+  val scCorrectTageCorrect: Bool = Bool()
+  val scWrongTageWrong:     Bool = Bool()
+}
