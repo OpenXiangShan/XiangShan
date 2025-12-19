@@ -3,7 +3,7 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{SignExt, ZeroExt}
+import utility.{SignExt, ZeroExt, GatedValidRegNext}
 import xiangshan.{ExceptionNO, HasXSParameter, TriggerAction}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR
@@ -81,7 +81,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.valid              := valid
   out.dpc.valid               := valid
   // !debugMode trap || debugMode hasExp
-  out.targetPc.valid          := valid || hasExceptionInDmode
+  out.targetPc.valid          := GatedValidRegNext(valid || hasExceptionInDmode)
   out.debugMode.valid         := valid
   out.privState.valid         := valid
   out.debugIntrEnable.valid   := valid
@@ -91,7 +91,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.bits.CAUSE         := Mux(hasDebugIntr, causeIntr, causeExp)
   out.dpc.bits.epc            := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
 
-  out.targetPc.bits.pc        := debugPc
+  out.targetPc.bits.pc        := RegEnable(debugPc, valid || hasExceptionInDmode)
   out.targetPc.bits.raiseIPF  := false.B
   out.targetPc.bits.raiseIAF  := false.B
   out.targetPc.bits.raiseIGPF := false.B
