@@ -104,6 +104,10 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
   def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
 
+  val memoryType               = MemoryType()
+  val cboType                  = CboType()
+  val prefetch                 = Bool() //TODO: need it ?
+
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
   val debugVaddr               = Option.when(debugEn)(UInt((VAddrBits).W))
@@ -115,21 +119,21 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
 
 }
 
+// need initial when reset
 class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val dataValid          = Bool()
   val addrValid          = Bool()
-  val memoryType         = MemoryType()
+
   val waitStoreS2        = Bool() //TODO: will be remove in the feature
-  val prefetch           = Bool()
   val isVec              = Bool() // TODO: need it ?
   // vecInactive indicate storage a inactive vector element, it will not write to Sbuffer. written when vector split.
   val vecInactive        = Bool()
-  val cross16Byte        = Bool() // TODO: need it ?
-  val hasException       = Bool() // TODO: need it ?
+  val cross16Byte        = Bool()
+  val hasException       = Bool()
   val committed          = Bool()
   val allocated          = Bool()
-  val cboType            = CboType()
-  val isCbo              = Bool()
+
+  val isCbo              = Bool() // Indicate if is cbo request, true is cbo request
   val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
 
   //debug information
@@ -278,7 +282,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         io.ctrlEntriesIn(j).addrValid && !CrossPageVec(j))))
       // if is cbo zero, it can forward; other cbo type's data is invalid.
       val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-        io.ctrlEntriesIn(j).dataValid && (isCboZero(io.ctrlEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
+        io.ctrlEntriesIn(j).dataValid && (isCboZero(io.dataEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
       val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).allValid)))
 
@@ -377,7 +381,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // prevent X-state
       // Virtual address match (high bits only, ignore byte offset)
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
-        val storeIsCboZero = ctrlEntry.isCbo && isCboZero(ctrlEntry.cboType)
+        val storeIsCboZero = ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
         // vaddr two part match:
         // [1]: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline), The high bits of vaddr, must match.
         // [2]: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)], The bits within cacheline, if store is cboZero, it can be ignored.
@@ -462,13 +466,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //
       //   Load at s2ByteSelectOffset=2 (loadStart=3, loadSize=1B):
       //     +--------+--------+--------+--------+
-      //     | 0x66   | 0x55   | 0x88   | 0x77   |  <- MerotateByteRight && ParallelLookUp
+      //     | 0x66   | 0x55   | 0x88   | 0x77   |  <- rotateByteRight && ParallelLookUp
       //     +--------+--------+--------+--------+
       //                                  ^^^^
       //                                  Load needs this byte (0x77)
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val selectIsCboZero     = selectCtrlEntry.isCbo && isCboZero(selectCtrlEntry.cboType)
+      val selectIsCboZero     = selectCtrlEntry.isCbo && isCboZero(selectDataEntry.cboType)
       // !Paddrmatch
       val paddrNoMatch       = !(
         (s2SelectDataEntry.paddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s2LoadPaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || selectIsCboZero) &&
@@ -788,7 +792,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     switch(cboState) {
       is(CboState.idle) {
         when(cboCanHandle) {
-          cboStateNext := Mux(isCboZero(headCtrlEntry.cboType), CboState.writeZero, CboState.flushSb)
+          cboStateNext := Mux(isCboZero(headDataEntry.cboType), CboState.writeZero, CboState.flushSb)
         }
       }
       is(CboState.writeZero) {
@@ -798,7 +802,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
       is(CboState.flushSb) {
         when(io.sbufferCtrl.resp.empty && dataQueue.io.empty) { // Ensure there are no in-flight request.
-          cboStateNext := Mux(isCboZero(headCtrlEntry.cboType), CboState.writeback, CboState.sendReq)
+          cboStateNext := Mux(isCboZero(headDataEntry.cboType), CboState.writeback, CboState.sendReq)
         }
       }
       is(CboState.sendReq) {
@@ -823,7 +827,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     io.toDCache.req.valid        := cboState === CboState.sendReq
     io.toDCache.req.bits.address := headDataEntry.paddr
-    io.toDCache.req.bits.opcode  := headCtrlEntry.cboType
+    io.toDCache.req.bits.opcode  := headDataEntry.cboType
     io.toDCache.resp.ready       := cboState === CboState.waitResp
 
     /*================================================================================================================*/
@@ -839,8 +843,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val uncacheStateNext: UncacheState.Type = WireInit(uncacheState)
     uncacheState := uncacheStateNext
 
-    private val isNC             = isPbmtNC(headCtrlEntry.memoryType)
-    private val uncacheCanHandle = !isCacheable(headCtrlEntry.memoryType) &&
+    private val isNC             = isPbmtNC(headDataEntry.memoryType)
+    private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) &&
       headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated && headCtrlEntry.committed
     private val hasHardwareError = RegInit(false.B)
 
@@ -902,8 +906,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.writeBack.bits.exceptionVec.foreach(_(hardwareError) := hasHardwareError)// override
     // for difftest, ref will skip mmio store
     if(debugEn) {
-      io.writeBack.bits.debug.isMMIO  := isMmio(ctrlEntries.head.memoryType) || isPbmtIO(ctrlEntries.head.memoryType)
-      io.writeBack.bits.debug.isNCIO  := isPbmtNC(ctrlEntries.head.memoryType)
+      io.writeBack.bits.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
+      io.writeBack.bits.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
       io.writeBack.bits.debug.vaddr   := dataEntries.head.debugVaddr.get
       io.writeBack.bits.debug.paddr   := dataEntries.head.debugPaddr.get
       io.writeBack.bits.debug_seqNum  := dataEntries.head.debugUop.get.debug_seqNum
@@ -1003,13 +1007,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     // when deq is MMIO/NC/CMO request, don't need to write sbuffer.
     for (i <- 0 until EnsbufferWidth) {
       val ctrlEntry = ctrlEntries(i)
+      val dataEntry = dataEntries(i)
 
       if(i == 0) {
-        uncacheStall(i) := !isCacheable(ctrlEntry.memoryType)
+        uncacheStall(i) := !isCacheable(dataEntry.memoryType)
         cboStall(i)     := ctrlEntry.isCbo
       }
       else {
-        uncacheStall(i) := !isCacheable(ctrlEntry.memoryType) || uncacheStall(i - 1)
+        uncacheStall(i) := !isCacheable(dataEntry.memoryType) || uncacheStall(i - 1)
         cboStall(i)     := ctrlEntry.isCbo || cboStall(i - 1)
       }
     }
@@ -1063,8 +1068,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := ctrlEntry.isCbo && isCboZero(ctrlEntry.cboType)
-      port.bits.prefetch := ctrlEntry.prefetch
+      port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+      port.bits.prefetch := dataEntry.prefetch
       port.bits.vecValid := true.B
       port.valid         := toSbufferValid(i)
 
@@ -1476,7 +1481,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       val index         = port.bits.uop.sqIdx.value
       val setValid      = cboSetVec(j)
       when(setValid) {
-        ctrlEntries(i).cboType   := Mux1H(List(
+        dataEntries(i).cboType   := Mux1H(List(
           isCboClean(port.bits.uop.fuOpType(1, 0)) -> CboType.clean, // TODO: don't use (1, 0)
           isCboFlush(port.bits.uop.fuOpType(1, 0)) -> CboType.flush,
           isCboInval(port.bits.uop.fuOpType(1, 0)) -> CboType.inval,
@@ -1515,7 +1520,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }.reduce(_ || _) // memBackTypeMM  = true.B means it is main memory region , false.B means it is IO region.
 
     when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
-      ctrlEntries(i).prefetch := prefetchSet
+      dataEntries(i).prefetch := prefetchSet
     }//  don't need to set false for low power, it will be set every instruction.
 
     when(staSetValid) {
@@ -1537,7 +1542,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
          pbmtIo:    "10".U
          io:        "11".U // IO device
       */
-      ctrlEntries(i).memoryType := Cat(mmioSet, ncSet || !memBackTypeSet)
+      dataEntries(i).memoryType := Cat(mmioSet, ncSet || !memBackTypeSet)
       /*
        * [NOTE]: To explain the logical operations above, the truth table is as follows:
        * The signal of [memBackTypeMM] means request is main memory region.
@@ -1693,7 +1698,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
       (ctrlEntries(ptr.value).addrValid && // currently, dataValid but addrInvalid also need to replay laod.
-        (isMmio(ctrlEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) ||
+        (isMmio(dataEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) ||
         ctrlEntries(ptr.value).vecMbCommit) && //TODO: vecMbCommit will be remove in the future, entry maybe inactive, so we nned to or vecMbCommit.
       ctrlEntries(ptr.value).allocated &&
       ptr =/= enqPtrExt(0)
@@ -1704,7 +1709,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
     stDataReadyVecReg(i) := (ctrlEntries(i).addrValid &&
-        (isMmio(ctrlEntries(i).memoryType) || ctrlEntries(i).dataValid) ||
+        (isMmio(dataEntries(i).memoryType) || ctrlEntries(i).dataValid) ||
       ctrlEntries(i).vecMbCommit) &&
       ctrlEntries(i).allocated
   })
@@ -1872,7 +1877,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 //     commit cbo.inval to difftest
     val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
     cmoInvalEvent.coreid := io.hartId
-    cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqCtrlEntries.head.cboType)
+    cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqDataEntries.head.cboType)
     cmoInvalEvent.addr   := deqDataEntries.head.paddr
 
 //     DiffStoreEvent happens when rdataPtr moves.
@@ -1900,7 +1905,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       for (i <- 0 until EnsbufferWidth) {
         val ptr = deqPtrExt(i).value
         val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
-        val wen = ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed(ptr) && isCacheable(ctrlEntries(ptr).memoryType)
+        val wen = ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed(ptr) && isCacheable(dataEntries(ptr).memoryType)
         val waddr = ((rdataDataEntries(i).paddr - "h80000000".U) >> 3).asUInt
         val wdata = Mux(rdataDataEntries(i).paddr(3), rdataDataEntries(i).data(127, 64), rdataDataEntries(i).data(63, 0))
         val wmask = Mux(rdataDataEntries(i).paddr(3), outMask(i)(15, 8), outMask(i)(7, 0))
@@ -1918,9 +1923,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 //  QueuePerf(StoreQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", (mmioBusy)) // lq is busy dealing with uncache req
-  XSPerfAccumulate("mmioCnt", io.writeBack.fire && isMmio(rdataCtrlEntries.head.memoryType))
-  XSPerfAccumulate("mmio_wb_success", io.writeBack.fire && isMmio(rdataCtrlEntries.head.memoryType))
-  XSPerfAccumulate("mmio_wb_blocked", (io.writeBack.valid && !io.writeBack.ready && isMmio(rdataCtrlEntries.head.memoryType)))
+  XSPerfAccumulate("mmioCnt", io.writeBack.fire && isMmio(rdataDataEntries.head.memoryType))
+  XSPerfAccumulate("mmio_wb_success", io.writeBack.fire && isMmio(rdataDataEntries.head.memoryType))
+  XSPerfAccumulate("mmio_wb_blocked", (io.writeBack.valid && !io.writeBack.ready && isMmio(rdataDataEntries.head.memoryType)))
   XSPerfAccumulate("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
@@ -1929,8 +1934,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val perfEvents = Seq(
     ("mmioCycle      ", WireInit(mmioBusy)),
     ("mmioCnt        ", io.toUncacheBuffer.req.fire && !io.toUncacheBuffer.req.bits.nc),
-    ("mmio_wb_success", io.writeBack.fire && isMmio(rdataCtrlEntries.head.memoryType)),
-    ("mmio_wb_blocked", io.writeBack.valid && !io.writeBack.ready && isMmio(rdataCtrlEntries.head.memoryType)),
+    ("mmio_wb_success", io.writeBack.fire && isMmio(rdataDataEntries.head.memoryType)),
+    ("mmio_wb_blocked", io.writeBack.valid && !io.writeBack.ready && isMmio(rdataDataEntries.head.memoryType)),
     ("stq_1_4_valid  ", (perfValidCount < (StoreQueueSize.U/4.U))),
     ("stq_2_4_valid  ", (perfValidCount > (StoreQueueSize.U/4.U)) & (perfValidCount <= (StoreQueueSize.U/2.U))),
     ("stq_3_4_valid  ", (perfValidCount > (StoreQueueSize.U/2.U)) & (perfValidCount <= (StoreQueueSize.U*3.U/4.U))),
