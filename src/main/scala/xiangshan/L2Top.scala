@@ -246,15 +246,15 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     beu.module.io.errors.uncache := io.beu_errors.uncache
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
-    io.hartId.toCore := io.hartId.fromTile
+    io.hartId.toCore := RegNext(io.hartId.fromTile)
     // add buffer to satisfy PE
     io.msiInfo.toCore.valid := RegNext(io.msiInfo.fromTile.valid)
     io.msiInfo.toCore.bits := RegEnable(io.msiInfo.fromTile.bits, io.msiInfo.fromTile.valid)
-    io.cpu_halt.toTile := io.cpu_halt.fromCore
-    io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
+    io.cpu_halt.toTile := RegNext(io.cpu_halt.fromCore)
+    io.cpu_critical_error.toTile := RegNext(io.cpu_critical_error.fromCore)
     io.msiAck.toTile := io.msiAck.fromCore
-    io.l3Miss.toCore := io.l3Miss.fromTile
-    io.clintTime.toCore := io.clintTime.fromTile
+    io.l3Miss.toCore := RegNext(io.l3Miss.fromTile)
+    io.clintTime.toCore := DelayNWithValid(io.clintTime.fromTile, 1)
     // trace interface
     val traceToTile = io.traceCoreInterface.toTile
     val traceFromCore = io.traceCoreInterface.fromCore
