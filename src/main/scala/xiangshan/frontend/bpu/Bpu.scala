@@ -166,6 +166,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   stageCtrl.s1_fire := s1_fire
   stageCtrl.s2_fire := s2_fire
   stageCtrl.s3_fire := s3_fire
+  stageCtrl.t0_fire := io.fromFtq.train.fire
 
   private val t0_compareMatrix = CompareMatrix(VecInit(io.fromFtq.train.bits.branches.map(_.bits.cfiPosition)))
   // mark all branches after the first mispredict as invalid
@@ -176,13 +177,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     VecInit(io.fromFtq.train.bits.branches.map(b => b.valid && b.bits.mispredict))
   )
 
-  private val train = Wire(Decoupled(new BpuTrain))
-  train.valid := io.fromFtq.train.valid
-  train.bits  := io.fromFtq.train.bits
-  train.bits.branches.zipWithIndex.foreach { case (b, i) =>
+  private val train = Wire(new BpuTrain)
+  train := io.fromFtq.train.bits
+  train.branches.zipWithIndex.foreach { case (b, i) =>
     b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
   }
-  io.fromFtq.train.ready := train.ready
 
   private val fastTrain = Wire(Valid(new BpuFastTrain))
   fastTrain.valid                := s3_valid
@@ -194,13 +193,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
-    p.io.startPc     := s0_startPc
-    p.io.stageCtrl   := stageCtrl
-    p.io.train.valid := train.valid
-    p.io.train.bits  := train.bits
+    p.io.startPc   := s0_startPc
+    p.io.stageCtrl := stageCtrl
+    p.io.train     := train
     p.io.fastTrain.foreach(_ := fastTrain) // fastTrain is an Option[Valid[BpuFastTrain]]
   }
-  train.ready := predictors.map(_.io.train.ready).reduce(_ && _)
+  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
   // FIXME: should use s3_prediction to train ubtb
@@ -234,6 +232,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   tage.io.mbtbResult             := mbtb.io.result
   tage.io.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  tage.io.debug_trainValid       := io.fromFtq.train.valid // for perf counters
 
   // ittage
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
@@ -461,8 +460,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s1_prediction := s1_prediction
   phr.io.train.s1_startPc    := s1_startPc
 
-  phr.io.commit.valid := train.fire
-  phr.io.commit.bits  := train.bits
+  phr.io.commit.valid := io.fromFtq.train.fire
+  phr.io.commit.bits  := train
 
   s0_foldedPhr   := phr.io.s0_foldedPhr
   s1_foldedPhr   := phr.io.s1_foldedPhr
@@ -574,7 +573,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   predictionTrace.perfMeta := s3_perfMeta
 
   private val trainTrace = Wire(new TrainTrace)
-  trainTrace.train := train.bits
+  trainTrace.train := train
 
   predictionTable.log(
     data = predictionTrace,
@@ -585,7 +584,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   trainTable.log(
     data = trainTrace,
-    en = train.fire,
+    en = io.fromFtq.train.fire,
     clock = clock,
     reset = reset
   )
@@ -725,15 +724,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   /* *** perf train *** */
-  private val t0_mispredictBranch = train.bits.mispredictBranch
-  private val t0_mbtbMeta         = train.bits.meta.mbtb
-  private val t0_branches         = train.bits.branches
+  private val t0_mispredictBranch = train.mispredictBranch
+  private val t0_mbtbMeta         = train.meta.mbtb
+  private val t0_branches         = train.branches
   private val t0_mbtbHit          = t0_mbtbMeta.entries.flatten.map(_.hit(t0_mispredictBranch.bits)).reduce(_ || _)
 
-  XSPerfAccumulate("train", train.fire)
+  XSPerfAccumulate(
+    "train",
+    io.fromFtq.train.fire,
+    Seq(
+      ("total", true.B),
+      ("stall", !io.fromFtq.train.ready)
+    )
+  )
   XSPerfAccumulate(
     "train_branch",
-    train.fire,
+    io.fromFtq.train.fire,
     Seq(
       ("total", true.B, PopCount(t0_branches.map(_.valid))),
       ("direct", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isDirect))),
@@ -745,7 +751,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   XSPerfAccumulate(
     "train_mispredict",
-    train.fire && t0_mispredictBranch.valid,
+    io.fromFtq.train.fire && t0_mispredictBranch.valid,
     Seq(
       ("total", true.B),
       ("direct", t0_mispredictBranch.bits.attribute.isDirect),

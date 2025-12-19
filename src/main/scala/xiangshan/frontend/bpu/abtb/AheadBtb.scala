@@ -60,7 +60,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
   io.resetDone := resetDone
 
-  io.train.ready := true.B
+  io.trainReady := true.B
 
   private val takenCounter = RegInit(
     VecInit.fill(NumBanks)(
@@ -247,7 +247,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_valid = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousStartPc.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.previousStartPc.valid
   private val t0_previousStartPc = io.previousStartPc.bits
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -256,9 +256,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_valid           = RegNext(t0_valid) & io.enable
-  private val t1_train           = RegEnable(t0_train, t0_valid)
-  private val t1_previousStartPc = RegEnable(t0_previousStartPc, t0_valid)
+  private val t1_fire            = RegNext(t0_fire) & io.enable
+  private val t1_train           = RegEnable(t0_train, t0_fire)
+  private val t1_previousStartPc = RegEnable(t0_previousStartPc, t0_fire)
 
   private val t1_setIdx  = getSetIndex(t1_previousStartPc)
   private val t1_setMask = UIntToOH(t1_setIdx)
@@ -293,7 +293,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
           val needReset = bank.io.writeResp.valid && bank.io.writeResp.bits.needResetCtr &&
             setIdx.U === bank.io.writeResp.bits.setIdx && wayIdx.U === bank.io.writeResp.bits.wayIdx
 
-          val updateThisSet = t1_valid && t1_bankMask(bankIdx) && t1_setMask(setIdx)
+          val updateThisSet = t1_fire && t1_bankMask(bankIdx) && t1_setMask(setIdx)
           val needDecrease  = updateThisSet && (!t1_trainTaken || t1_trainTaken && before) && isCond
           val needIncrease  = updateThisSet && t1_trainTaken && equal && isCond
 
@@ -333,13 +333,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   // TODO: the prioriority of write?
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_valid && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
       b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
       b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(t1_valid && t1_needCorrectTarget && t1_bankMask(i)) {
+    }.elsewhen(t1_fire && t1_needCorrectTarget && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
@@ -367,31 +367,31 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val perf_directionWrong = t1_valid &&
+  private val perf_directionWrong = t1_fire &&
     ((!t1_predictTaken && t1_trainTaken) || (t1_predictTaken && !t1_trainTaken))
 
-  private val perf_missWrong = t1_valid && !t1_predictTaken && t1_trainTaken && !t1_hitTakenBranch
+  private val perf_missWrong = t1_fire && !t1_predictTaken && t1_trainTaken && !t1_hitTakenBranch
 
-  private val perf_takenPositionWrong = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_takenPositionWrong = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictPosition =/= t1_trainPosition
 
-  private val perf_targetWrong = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_targetWrong = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictAttribute === t1_trainAttribute && t1_predictPosition === t1_trainPosition &&
     t1_predictTargetLowerBits =/= t1_trainTargetLowerBits
 
-  private val perf_predictNotTakenRight = t1_valid && !t1_predictTaken && !t1_trainTaken
+  private val perf_predictNotTakenRight = t1_fire && !t1_predictTaken && !t1_trainTaken
 
-  private val perf_predictTakenRight = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_predictTakenRight = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictAttribute === t1_trainAttribute && t1_predictPosition === t1_trainPosition &&
     t1_predictTargetLowerBits === t1_trainTargetLowerBits
 
-  private val perf_condTakenRight = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_condTakenRight = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictAttribute.isConditional && t1_trainAttribute.isConditional && t1_predictPosition === t1_trainPosition
 
-  private val perf_directRight = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_directRight = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictAttribute.isDirect && t1_trainAttribute.isDirect && t1_predictPosition === t1_trainPosition
 
-  private val perf_indirectRight = t1_valid && t1_predictTaken && t1_trainTaken &&
+  private val perf_indirectRight = t1_fire && t1_predictTaken && t1_trainTaken &&
     t1_predictAttribute.isIndirect && t1_trainAttribute.isIndirect && t1_predictPosition === t1_trainPosition &&
     t1_predictTargetLowerBits === t1_trainTargetLowerBits
 
@@ -405,20 +405,20 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   XSPerfAccumulate("predict_multi_hit", s2_fire && s2_multiHit)
 
   XSPerfAccumulate("train_req_num", io.fastTrain.get.valid)
-  XSPerfAccumulate("train_num", t1_valid)
-  XSPerfAccumulate("train_hit_path", t1_valid && t1_meta.hitMask.reduce(_ || _))
-  XSPerfAccumulate("train_hit_taken_branch", t1_valid && t1_hitTakenBranch)
-  XSPerfAccumulate("train_predict_taken", t1_valid && t1_predictTaken)
-  XSPerfAccumulate("train_predict_not_taken", t1_valid && t1_meta.hitMask.reduce(_ || _) && !t1_predictTaken)
-  XSPerfAccumulate("train_actual_taken", t1_valid && t1_trainTaken)
-  XSPerfAccumulate("train_actual_not_taken", t1_valid && !t1_trainTaken)
+  XSPerfAccumulate("train_num", t1_fire)
+  XSPerfAccumulate("train_hit_path", t1_fire && t1_meta.hitMask.reduce(_ || _))
+  XSPerfAccumulate("train_hit_taken_branch", t1_fire && t1_hitTakenBranch)
+  XSPerfAccumulate("train_predict_taken", t1_fire && t1_predictTaken)
+  XSPerfAccumulate("train_predict_not_taken", t1_fire && t1_meta.hitMask.reduce(_ || _) && !t1_predictTaken)
+  XSPerfAccumulate("train_actual_taken", t1_fire && t1_trainTaken)
+  XSPerfAccumulate("train_actual_not_taken", t1_fire && !t1_trainTaken)
 
-  XSPerfAccumulate("total_write", t1_valid && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
-  XSPerfAccumulate("train_write_new_entry", t1_valid && t1_needWriteNewEntry)
-  XSPerfAccumulate("train_correct_target", t1_valid && t1_needCorrectTarget)
+  XSPerfAccumulate("total_write", t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
+  XSPerfAccumulate("train_write_new_entry", t1_fire && t1_needWriteNewEntry)
+  XSPerfAccumulate("train_correct_target", t1_fire && t1_needCorrectTarget)
   XSPerfAccumulate(
     "train_write_conflict",
-    t1_valid && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
+    t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
   )
 
   XSPerfAccumulate("train_direction_wrong", perf_directionWrong)

@@ -42,8 +42,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val meta:                   Valid[MicroTageMeta]       = Output(Valid(new MicroTageMeta))
   }
   val io: MicroTageIO = IO(new MicroTageIO)
-  io.resetDone   := true.B
-  io.train.ready := true.B
+  io.resetDone  := true.B
+  io.trainReady := true.B
 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map {
@@ -103,9 +103,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   io.meta       := RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
+  private val t0_fire                    = io.fastTrain.get.valid
   private val t0_trainMeta               = io.fastTrain.get.bits.utageMeta
   private val t0_trainData               = io.fastTrain.get.bits.finalPrediction
-  private val t0_trainValid              = io.fastTrain.get.valid
   private val t0_trainStartPc            = io.fastTrain.get.bits.startPc
   private val t0_trainOverride           = io.fastTrain.get.bits.hasOverride
   private val t0_histTableTakenMap       = t0_trainMeta.histTableTakenMap
@@ -134,8 +134,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     !t0_predHit && t0_trainData.attribute.isConditional && t0_trainData.taken && io.fastTrain.get.bits.hasOverride
 
   private val t0_misPred             = t0_histHitMisPred || t0_histMissHitMisPred
-  private val t0_histTableNeedAlloc  = t0_misPred && t0_trainValid
-  private val t0_histTableNeedUpdate = t0_predHit && t0_trainValid
+  private val t0_histTableNeedAlloc  = t0_misPred && t0_fire
+  private val t0_histTableNeedUpdate = t0_predHit && t0_fire
   private val t0_updateTaken         = (t0_predCfiPosition === t0_trainData.cfiPosition) && t0_trainData.taken
   private val t0_updateCfiPosition   = t0_predCfiPosition
   private val t0_actualTaken         = t0_trainData.attribute.isConditional && t0_trainData.taken
@@ -154,7 +154,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   when(tickCounter(TickWidth)) {
     tickCounter := 0.U
-  }.elsewhen((t0_allocMask === 0.U) && t0_histTableNeedAlloc && t0_trainValid) {
+  }.elsewhen((t0_allocMask === 0.U) && t0_histTableNeedAlloc && t0_fire) {
     tickCounter := tickCounter + 1.U
   }
 
@@ -181,7 +181,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // - Decrement on misprediction.
 // - Increment only if prediction is correct AND base table failed to predict correctly.
   tables.zipWithIndex.foreach { case (t, i) =>
-    t.update.valid := t0_trainValid &&
+    t.update.valid := t0_fire &&
       ((t0_allocMask(i) && t0_histTableNeedAlloc) || (t0_providerMask(i) && t0_histTableNeedUpdate))
     t.update.bits.allocValid  := (t0_allocMask(i) && t0_histTableNeedAlloc)
     t.update.bits.updateValid := (t0_providerMask(i) && t0_histTableNeedUpdate) && fastTrainHasPredBr
@@ -208,7 +208,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val debug_tableMeta  = MuxCase(0.U.asTypeOf(new MicroTageDebug), debug_metaCases.reverse)
 
   private val utageTrace = Wire(Valid(new MicroTageTrace))
-  utageTrace.valid            := t0_trainValid && (t0_histTableNeedAlloc || t0_histTableNeedUpdate)
+  utageTrace.valid            := t0_fire && (t0_histTableNeedAlloc || t0_histTableNeedUpdate)
   utageTrace.bits.startVAddr  := t0_trainStartPc.toUInt
   utageTrace.bits.branchPc    := getCfiPcFromPosition(t0_trainStartPc, t0_actualCfiPosition).toUInt
   utageTrace.bits.cfiPosition := t0_actualCfiPosition
@@ -227,7 +227,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTraceAndDebug)
   utageTraceDBTables.log(
     data = utageTrace.bits,
-    en = t0_trainValid && utageTrace.valid,
+    en = t0_fire && utageTrace.valid,
     clock = clock,
     reset = reset
   )
@@ -246,19 +246,18 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val trainIdx0 = debug_tableMetas(0).debug_idx
   private val trainTag0 = debug_tableMetas(0).debug_tag
 
-  XSPerfAccumulate("train_needAlloc", t0_trainValid && t0_histTableNeedAlloc)
-  XSPerfAccumulate("train_needUpdate", t0_trainValid && t0_histTableNeedUpdate)
-  XSPerfAccumulate("train_histHitMisPred", t0_trainValid && t0_histHitMisPred)
+  XSPerfAccumulate("train_needAlloc", t0_fire && t0_histTableNeedAlloc)
+  XSPerfAccumulate("train_needUpdate", t0_fire && t0_histTableNeedUpdate)
+  XSPerfAccumulate("train_histHitMisPred", t0_fire && t0_histHitMisPred)
   if (EnableTraceAndDebug) {
     XSPerfAccumulate(
       "train_useMicroTage_and_override_fromFastTrain",
-      t0_trainValid && t0_trainMeta.debug_useMicroTage.get && io.fastTrain.get.bits.hasOverride
+      t0_fire && t0_trainMeta.debug_useMicroTage.get && io.fastTrain.get.bits.hasOverride
     )
-    XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.debug_useMicroTage.get)
-    XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.debug_predIdx0.get === trainIdx0))
-    XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.debug_predTag0.get === trainTag0))
-    XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.debug_predIdx0.get =/= trainIdx0))
-    XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.debug_predTag0.get =/= trainTag0))
+    XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_fire && t0_trainMeta.debug_useMicroTage.get)
+    XSPerfAccumulate("train_idx_hit", t0_fire && (t0_trainMeta.debug_predIdx0.get === trainIdx0))
+    XSPerfAccumulate("train_tag_hit", t0_fire && (t0_trainMeta.debug_predTag0.get === trainTag0))
+    XSPerfAccumulate("train_idx_miss", t0_fire && (t0_trainMeta.debug_predIdx0.get =/= trainIdx0))
+    XSPerfAccumulate("train_tag_miss", t0_fire && (t0_trainMeta.debug_predTag0.get =/= trainTag0))
   }
-
 }

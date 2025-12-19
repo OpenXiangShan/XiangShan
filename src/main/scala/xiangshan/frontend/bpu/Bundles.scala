@@ -329,6 +329,8 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
   val s1_fire: Bool = Bool()
   val s2_fire: Bool = Bool()
   val s3_fire: Bool = Bool()
+
+  val t0_fire: Bool = Bool()
 }
 
 // sub predictors -> Bpu top
