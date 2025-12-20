@@ -150,6 +150,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   def getTrainBaseAddr2HT(vaddr: UInt): UInt = {
     getTrainBaseAddr(vaddr)(HtLineVAddrWidth - 1, 0)
   }
+  def checkTimeliness(currTsp: UInt, latency: UInt, recordTsp: UInt): Bool = {
+    // control the width of the calculation
+    val timelyTsp = Cat(0.U, currTsp(LATENCY_WIDTH-1, 0)) - latency(LATENCY_WIDTH-1, 0)
+    // head: the overflow bit, tail(1): the tsp bit
+    !timelyTsp.head(1) && timelyTsp.tail(1) > recordTsp(LATENCY_WIDTH-1, 0)
+  }
   def checkDissatisfy(delta: SInt): Bool = {
     delta < (DELTA_THRESHOLD).S(DeltaWidth.W) && delta > (-DELTA_THRESHOLD).S(DeltaWidth.W)
   }
@@ -203,6 +209,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
   val decrModes = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
   val currTime = GTimer()
+  val currTsp = Wire(UInt(LATENCY_WIDTH.W))
+  currTsp := currTime(LATENCY_WIDTH-1, 0)
   // PLRU: replace record
   val replacer = Option.when(usePLRU)(ReplacementPolicy.fromString("setplru", HtWaySize, HtSetSize))
   // FIFO: for FIFO replace policy
@@ -244,12 +252,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     assert(PopCount(matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
-      entries(set)(hitWay).update(baseVAddr, currTime)
+      entries(set)(hitWay).update(baseVAddr, currTsp)
       replacer.get.access(set, hitWay)
       isReplace := false.B
     }.otherwise{
       val way = replacer.get.way(set)
-      entries(set)(way).alloc(tag, baseVAddr, currTime)
+      entries(set)(way).alloc(tag, baseVAddr, currTsp)
       valids(set)(way) := true.B
       isReplace := true.B
     }
@@ -267,8 +275,9 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
       val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
-      stat_find_delta := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
-      res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp) && pair._1
+      val isTimely = checkTimeliness(currTsp, latency, entries(set)(hitWay).tsp)
+      stat_find_delta := latency =/= 0.U && isTimely && pair._1
+      res.valid := latency =/= 0.U && isTimely && pair._1
       res.pc := pc
       res.delta := pair._2
       replacer.get.access(set, hitWay)
@@ -295,11 +304,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       val lastWay = (accessPtrs.get(set)-1.U).value
       decrModes(set) := valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr
       valids(set)(way) := true.B
-      entries(set)(way).alloc(
-        getTag(pc),
-        baseVAddr,
-        currTime
-      )
+      entries(set)(way).alloc(getTag(pc), baseVAddr, currTsp)
       accessPtrs.get(set) := accessPtrs.get(set) + 1.U
     }
     isReplace
@@ -313,7 +318,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val tag = getTag(pc)
     val way = learnPtrs.get(set).value
     val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
-    stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
+    val isTimely = checkTimeliness(currTsp, latency, entries(set)(way).tsp)
+    stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && isTimely
     res.pc := pc
     res.valid := stat_find_delta && pair._1
     when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
