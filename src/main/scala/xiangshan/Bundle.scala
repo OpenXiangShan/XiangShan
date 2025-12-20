@@ -206,42 +206,6 @@ class LSIdx(implicit p: Parameters) extends XSBundle {
   val sqIdx = new SqPtr
 }
 
-// CfCtrl -> MicroOp at Rename Stage
-class MicroOp(implicit p: Parameters) extends CfCtrl {
-  val srcState = Vec(4, SrcState())
-  val psrc = Vec(4, UInt(PhyRegIdxWidth.W))
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val robIdx = new RobPtr
-  val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
-  val lqIdx = new LqPtr
-  val sqIdx = new SqPtr
-  val eliminatedMove = Bool()
-  val snapshot = Bool()
-  val debugInfo = new PerfDebugInfo
-  def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
-    val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
-    val readReg = if (isFp) {
-      ctrl.srcType(index) === SrcType.fp
-    } else {
-      ctrl.srcType(index) === SrcType.reg && ctrl.lsrc(index) =/= 0.U
-    }
-    readReg && stateReady
-  }
-  def srcIsReady: Vec[Bool] = {
-    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcOrImm(t) || s === SrcState.rdy })
-  }
-  def clearExceptions(
-    exceptionBits: Seq[Int] = Seq(),
-    flushPipe: Boolean = false,
-    replayInst: Boolean = false
-  ): MicroOp = {
-    cf.exceptionVec.zipWithIndex.filterNot(x => exceptionBits.contains(x._2)).foreach(_._1 := false.B)
-    if (!flushPipe) { ctrl.flushPipe := false.B }
-    if (!replayInst) { ctrl.replayInst := false.B }
-    this
-  }
-}
-
 class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
   val uop = new DynInst
 }
