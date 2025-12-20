@@ -451,3 +451,27 @@ object mLookUpTable2 {
       7.U -> "b10_10010".U(7.W)
     ))
 }
+
+class RightShifter(len: Int, lzc_width: Int) extends Module {
+  val io = IO(new Bundle() {
+    val shiftNum = Input(UInt(lzc_width.W))
+    val in = Input(UInt(len.W))
+    val msb = Input(Bool())
+    val out = Output(UInt(len.W))
+  })
+  require(len == 64 || len == 32)
+  val shift = io.shiftNum
+  val msb = io.msb
+  val s0 = Mux(shift(0), Cat(VecInit(Seq.fill(1)(msb)).asUInt, io.in(len - 1, 1)), io.in)
+  val s1 = Mux(shift(1), Cat(VecInit(Seq.fill(2)(msb)).asUInt, s0(len - 1, 2)), s0)
+  val s2 = Mux(shift(2), Cat(VecInit(Seq.fill(4)(msb)).asUInt, s1(len - 1, 4)), s1)
+  val s3 = Mux(shift(3), Cat(VecInit(Seq.fill(8)(msb)).asUInt, s2(len - 1, 8)), s2)
+  val s4 = Mux(shift(4), Cat(VecInit(Seq.fill(16)(msb)).asUInt, s3(len - 1, 16)), s3)
+  val s5 = Wire(UInt(len.W))
+  if (len == 64) {
+    s5 := Mux(shift(5), Cat(VecInit(Seq.fill(32)(msb)).asUInt, s4(len - 1, 32)), s4)
+  } else if (len == 32) {
+    s5 := s4
+  }
+  io.out := s5
+}
