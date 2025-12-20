@@ -767,7 +767,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (i <- 0 until RenameWidth) {
 
     updatedUop(i).connectRenameOutUop(fromRename(i).bits)
-    updatedUop(i).debugInfo.eliminatedMove := fromRename(i).bits.isMove
+    updatedUop(i).perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U

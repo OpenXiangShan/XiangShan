@@ -615,7 +615,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
-  io.writeBack.bits.debugInfo := req.uop.debugInfo
+  io.writeBack.bits.perfDebugInfo := req.uop.perfDebugInfo
   io.writeBack.bits.debug_seqNum := req.uop.debug_seqNum
 
   io.vecWriteBack.zipWithIndex.map{

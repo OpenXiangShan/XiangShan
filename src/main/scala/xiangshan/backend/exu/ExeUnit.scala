@@ -418,7 +418,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
   io.out.bits.debug.isPerfCnt := funcUnits.map(_.io.csrio.map(_.isPerfCnt)).map(_.getOrElse(false.B)).reduce(_ || _)
-  io.out.bits.debugInfo := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfDebugInfo))
+  io.out.bits.perfDebugInfo := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfDebugInfo))
   io.out.bits.debug_seqNum := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.debug_seqNum))
 }
 

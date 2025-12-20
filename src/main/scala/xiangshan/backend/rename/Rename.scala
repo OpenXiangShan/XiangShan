@@ -422,7 +422,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     ))
 
     // Assign performance counters
-    uops(i).debug.foreach(_.debugInfo.renameTime := GTimer())
+    uops(i).debug.foreach(_.perfDebugInfo.renameTime := GTimer())
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)

@@ -263,7 +263,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s0_out.isMisalign      := s0_isMisalign
   s0_out.vecBaseVaddr := s0_vecBaseVaddr
   when(s0_valid && s0_isFirstIssue) {
-    s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
+    s0_out.uop.perfDebugInfo.tlbFirstReqTime := GTimer()
   }
   s0_out.isFrmMisAlignBuf := s0_use_flow_ma
   s0_out.isFinalSplit := s0_isFinalSplit
@@ -420,7 +420,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s1_tlb_memidx = io.tlb.resp.bits.memidx
   when(s1_tlb_memidx.is_st && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_out.uop.sqIdx.value) {
     // printf("Store idx = %d\n", s1_tlb_memidx.idx)
-    s1_out.uop.debugInfo.tlbRespTime := GTimer()
+    s1_out.uop.perfDebugInfo.tlbRespTime := GTimer()
   }
   val s1_mis_align = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isCbo && !s1_out.nc && !s1_out.mmio &&
                       GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
@@ -602,7 +602,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s3_out.debug.isPerfCnt := false.B
   s3_out.debug.paddr := s3_in.paddr
   s3_out.debug.vaddr := s3_in.vaddr
-  s3_out.debugInfo := s3_in.uop.debugInfo
+  s3_out.perfDebugInfo := s3_in.uop.perfDebugInfo
   s3_out.debug_seqNum := s3_in.uop.debug_seqNum
 
   XSError(s3_valid && s3_in.isvec && s3_in.vecActive && !s3_in.mask.orR, "In vecActive, mask complement should not be 0")

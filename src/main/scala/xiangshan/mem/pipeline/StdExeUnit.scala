@@ -47,7 +47,7 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.bits.robIdx := io.in.bits.robIdx
   io.out.bits.pdest := io.in.bits.pdest
   io.out.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
-  io.out.bits.debugInfo := io.in.bits.perfDebugInfo
+  io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
   io.out.bits.debug_seqNum := io.in.bits.debug_seqNum
 
   io.atomicData.valid := io.in.fire && FuType.storeIsAMO(io.in.bits.fuType)

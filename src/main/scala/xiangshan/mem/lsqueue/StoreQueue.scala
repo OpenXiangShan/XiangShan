@@ -567,7 +567,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     when (io.storeAddrIn(i).fire) {
       uop(stWbIndex) := io.storeAddrIn(i).bits.uop
-      uop(stWbIndex).debugInfo := io.storeAddrIn(i).bits.uop.debugInfo
+      uop(stWbIndex).perfDebugInfo := io.storeAddrIn(i).bits.uop.perfDebugInfo
       uop(stWbIndex).debug_seqNum := io.storeAddrIn(i).bits.uop.debug_seqNum
     }
     XSInfo(io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.isFrmMisAlignBuf,
@@ -1062,7 +1062,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.flushPipe.foreach(_ := deqCanDoCbo) // flush Pipeline to keep order in CMO
   io.mmioStout.bits.sqIdx.foreach(_ := deqPtrExt(0))
   io.mmioStout.bits.trigger.foreach(_ := uncacheUop.trigger)
-  io.mmioStout.bits.debugInfo := uncacheUop.debugInfo
+  io.mmioStout.bits.perfDebugInfo := uncacheUop.perfDebugInfo
   io.mmioStout.bits.debug_seqNum := uncacheUop.debug_seqNum
   io.mmioStout.bits.debug.isMMIO := true.B
   io.mmioStout.bits.debug.isNCIO := false.B
@@ -1085,7 +1085,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.cboZeroStout.bits.flushPipe.foreach(_ := cboZeroUop.flushPipe) // false.B ?
   io.cboZeroStout.bits.sqIdx.foreach(_ := cboZeroSqIdx)
   io.cboZeroStout.bits.trigger.foreach(_ := cboZeroUop.trigger)
-  io.cboZeroStout.bits.debugInfo := cboZeroUop.debugInfo
+  io.cboZeroStout.bits.perfDebugInfo := cboZeroUop.perfDebugInfo
   io.cboZeroStout.bits.debug_seqNum := cboZeroUop.debug_seqNum
 
   when (cboZeroWaitFlushSb && io.flushSbuffer.empty) {
