@@ -708,7 +708,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
 
     def getPrefetchVA: UInt = Cat(vline, 0.U(LineOffsetWidth.W))
     def getPrefetchPA: UInt = Cat(pline, 0.U(LineOffsetWidth.W))
-    def getPrefetchAlias: UInt = get_alias(getPrefetchPA)
+    def getPrefetchAlias: UInt = get_alias(getPrefetchVA)
     def fromSourcePrefetchReq(src: SourcePrefetchReq): Unit ={
       this.vline := getLine(src.prefetchVA)
       this.pline := 0.U
