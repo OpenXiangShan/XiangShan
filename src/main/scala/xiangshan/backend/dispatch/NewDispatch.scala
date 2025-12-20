@@ -288,26 +288,28 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.read.map(_.req).zip(readAddr).map(x => x._1 := x._2)
     // only int src need srcLoadDependency, src0 src1
     if (i == 0) {
-      // int and fp idx 0 1 2(only fp)
-      val srcLoadDependencyUpdate = fromRenameUpdate.map(x => x.bits.srcLoadDependency.zipWithIndex.filter(x => x._2 < 3).map(_._1))
-      val srcType = fromRenameUpdate.map(x => x.bits.srcType.zipWithIndex.filter(x => x._2 < 3).map(_._1))
-      // for int is 2 src, fp is 3 src
-      srcLoadDependencyUpdate.zip(srcType).zipWithIndex.map{ case ((sinks, srctypes), idx) =>
-        sinks.zip(srctypes).zipWithIndex.map{ case ((sink, srctype), srcidx) =>
-          println(s"srcidx = ${srcidx}")
-          val fpRead = busyTables(1).io.read(idx * 3 + srcidx).loadDependency
-          if (srcidx < 2) {
-            val intRead = busyTables(0).io.read(idx * 2 + srcidx).loadDependency
-            sink := Mux1H(
-              Seq(SrcType.isFp(srctype), SrcType.isXp(srctype), !SrcType.isFp(srctype) && !SrcType.isXp(srctype)),
-              Seq(fpRead, intRead, 0.U.asTypeOf(sink))
-            )
-          }
-          else {
-            sink := Mux(SrcType.isFp(srctype), fpRead, 0.U.asTypeOf(sink))
-          }
+      val srcLoadDependencyUpdate = fromRenameUpdate.map(x => x.bits.srcLoadDependency)
+      val srcType = fromRenameUpdate.map(x => x.bits.srcType)
+        srcLoadDependencyUpdate.zip(srcType).zipWithIndex.foreach {
+          case ((sinks, srcTypes), uopIdx) =>
+            // int and fp idx 0 1 2(only fp)
+            for (srcidx <- 0 until 3) {
+              val sink = sinks(srcidx)
+              val srcType = srcTypes(srcidx)
+              val fpRead = busyTables(1).io.read(uopIdx * 3 + srcidx).loadDependency
+              // for int is 2 src, fp is 3 src
+              if (srcidx < 2) {
+                val intRead = busyTables(0).io.read(uopIdx * 2 + srcidx).loadDependency
+                sink := Mux1H(Seq(
+                  SrcType.isFp(srcType) -> fpRead,
+                  SrcType.isXp(srcType) -> intRead,
+                ))
+              }
+              else {
+                sink := Mux(SrcType.isFp(srcType), fpRead, 0.U.asTypeOf(sink))
+              }
+            }
         }
-      }
       // only int src need rcTag
       val rcTagUpdate = fromRenameUpdate.map(x => x.bits.regCacheIdx.zipWithIndex.filter(x => idxseq.contains(x._2)).map(_._1)).flatten
       rcTagUpdate.zip(rcTagTable.io.readPorts.map(_.addr)).map(x => x._1 := x._2)
