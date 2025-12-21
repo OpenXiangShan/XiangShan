@@ -246,7 +246,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     beu.module.io.errors.uncache := io.beu_errors.uncache
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
-    io.hartId.toCore := RegNext(io.hartId.fromTile)
+    io.hartId.toCore := io.hartId.fromTile
     // add buffer to satisfy PE
     io.msiInfo.toCore.valid := RegNext(io.msiInfo.fromTile.valid)
     io.msiInfo.toCore.bits := RegEnable(io.msiInfo.fromTile.bits, io.msiInfo.fromTile.valid)
