@@ -454,9 +454,11 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   PipelineConnect(stageDelay, stageResp, stageResp.ready, flush)
   stageResp.ready := !stageResp.valid || io.resp.ready
 
-  val te = ClockGate.genTeSink
-  val bc_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush && io.refill.valid) | mbistBC.map(_.mbist.req).getOrElse(false.B), clock)
-  bitmapcache.clock := bc_masked_clock
+  if (EnableClockGate) {
+    val te = ClockGate.genTeSink
+    val bc_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush && io.refill.valid) | mbistBC.map(_.mbist.req).getOrElse(false.B), clock)
+    bitmapcache.clock := bc_masked_clock
+  }
 
   val ppn_search = stageReq.bits.tag
   val ridx = genPtwBCSetIdx(ppn_search)

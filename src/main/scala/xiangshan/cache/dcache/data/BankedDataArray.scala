@@ -187,7 +187,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
       shouldReset = false,
       holdRead = false,
       singlePort = true,
-      withClockGate = true,
+      withClockGate = EnableClockGate,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl,
       suffix = Some("dcsh_dat")

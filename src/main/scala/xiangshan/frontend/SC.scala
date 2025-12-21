@@ -88,7 +88,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     shouldReset = true,
     holdRead = true,
     singlePort = true,
-    withClockGate = true,
+    withClockGate = EnableClockGate,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl
   )))
