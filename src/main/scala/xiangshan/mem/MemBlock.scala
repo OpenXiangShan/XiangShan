@@ -1674,7 +1674,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )
   ))
   io.mem_to_ooo.topToBackendBypass match { case x =>
-    x.hartId            := RegNext(io.hartId)
+    x.hartId            := io.hartId
     x.l2FlushDone       := RegNext(io.l2_flush_done)
     x.externalInterrupt.msip  := RegNext(outer.clint_int_sink.in.head._1(0))
     x.externalInterrupt.mtip  := RegNext(outer.clint_int_sink.in.head._1(1))
