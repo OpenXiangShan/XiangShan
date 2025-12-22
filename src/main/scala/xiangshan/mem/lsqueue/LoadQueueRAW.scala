@@ -336,7 +336,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
-    stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.preDecodeInfo.isRVC, storeIn(w).valid, TotalSelectCycles)._2
+    stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
