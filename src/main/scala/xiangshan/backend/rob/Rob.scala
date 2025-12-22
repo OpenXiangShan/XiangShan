@@ -1051,12 +1051,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   // TODO: Check if meet the require that only set scommit when commit scala store uop
-  val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
+//  val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
+  val newStCommit = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).hasStore && !robEntries(deqPtrVec(i).value).vls)).asUInt.orR
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
-  io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
+//  io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
+//  io.lsq.scommit := RegNext(Mux(io.commits.isCommit && newStCommit, 1.U, 0.U))
+
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
-  io.lsq.pendingPtr := RegNext(deqPtr)
-  io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
+
+  val pendingPtr = deqPtr
+  val pendingEntry = robDeqGroup(deqPtr.value(bankAddrWidth-1, 0))
+  pendingPtr.isFormer := pendingEntry.uopNum =/= 1.U
+  io.lsq.pendingPtr := RegNext(pendingPtr)
+  io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head) // TODO: useless, delete it
+  io.lsq.scommit := RegNext(
+    Mux(io.commits.isCommit && newStCommit ||
+      CompressType.isCC(pendingEntry.compressType) && pendingEntry.hasStore && pendingEntry.uopNum === 1.U, 1.U, 0.U))
 
   /**
    * state changes
