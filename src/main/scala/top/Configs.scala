@@ -453,6 +453,28 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
+class FrontendDebugConfig(n: Int = 1) extends Config(
+  (new DefaultConfig(n)).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map{ p => p.copy(
+      frontendParameters = p.frontendParameters.copy(
+        bpuParameters = p.frontendParameters.bpuParameters.copy(
+          EnableBpTrace = true,
+          tageParameters = p.frontendParameters.bpuParameters.tageParameters.copy(
+            EnableTageTrace = true,
+          )
+        ),
+      )
+    )}
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      EnableChiselDB = true,
+      EnableRollingDB = true,
+      EnableConstantin = true,
+      EnableDebug = true,
+      EnablePerfDebug = true,
+    )
+  })
+)
+
 class CVMCompile extends Config((site, here, up) => {
   case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
