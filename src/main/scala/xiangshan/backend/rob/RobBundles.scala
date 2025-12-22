@@ -233,6 +233,47 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
 
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RobSize)
 
+  // TODO: override opearation!
+
+  override def === (that: RobPtr): Bool = this.flag === that.flag && this.value === that.value && this.isFormer === that.isFormer
+
+  override def =/= (that: RobPtr): Bool = this.flag =/= that.flag || this.value =/= that.value || this.isFormer =/= that.isFormer
+
+  override def > (that: RobPtr): Bool = {
+    val differentFlag = this.flag ^ that.flag
+    val compare = this.value > that.value
+    val sameEntry = this.flag === that.flag && this.value === that.value
+    val entryTrue = !this.isFormer && that.isFormer
+    (differentFlag ^ compare) || (sameEntry && entryTrue)
+  }
+
+  override def < (that: RobPtr): Bool = {
+    val differentFlag = this.flag ^ that.flag
+    val compare = this.value < that.value
+    val sameEntry = this.flag === that.flag && this.value === that.value
+    val entryTrue = this.isFormer && !that.isFormer
+    (differentFlag ^ compare) || (sameEntry && entryTrue)
+  }
+
+  override def >= (that: RobPtr): Bool = {
+    val differentFlag = this.flag ^ that.flag
+    val compare = this.value >= that.value
+    val sameEntry = this.flag === that.flag && this.value === that.value
+    val entryTrue = !this.isFormer || that.isFormer
+    (differentFlag ^ compare) || (sameEntry && entryTrue)
+  }
+
+  override def <= (that: RobPtr): Bool = {
+    val differentFlag = this.flag ^ that.flag
+    val compare = this.value <= that.value
+    val sameEntry = this.flag === that.flag && this.value === that.value
+    val entryTrue = this.isFormer || !that.isFormer
+    (differentFlag ^ compare) || (sameEntry && entryTrue)
+  }
+
+  //  TODO: check is it necessary to rewrite func: isAfter/isBefore/isNotAfter/isNorBefor
+  //  Conclusion: when isAfter is called with 2 RobPtr, this compare op will use the RobPtr's, rather than CircularQueuePtr's
+
   def needFlush(redirect: Valid[Redirect]): Bool = {
     // TODO: is it only used for redirect? May be Fixed Later
     // TODO: Maybe We should reload some operation or func
