@@ -78,8 +78,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
     val s0_s1_s2_valid = Output(Bool())
   })
-
-  PerfCCT.updateInstPos(io.stin.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
+  io.stin.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset))
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
@@ -602,8 +601,8 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s3_out.debug.isPerfCnt := false.B
   s3_out.debug.paddr := s3_in.paddr
   s3_out.debug.vaddr := s3_in.vaddr
-  s3_out.debugInfo := s3_in.uop.debugInfo
-  s3_out.debug_seqNum := s3_in.uop.debug_seqNum
+  s3_out.perfDebugInfo.foreach(_ := s3_in.uop.debugInfo)
+  s3_out.debug_seqNum.foreach(_ := s3_in.uop.debug_seqNum)
 
   XSError(s3_valid && s3_in.isvec && s3_in.vecActive && !s3_in.mask.orR, "In vecActive, mask complement should not be 0")
   // Pipeline

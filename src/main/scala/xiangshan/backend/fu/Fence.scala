@@ -87,8 +87,8 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
   io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-  io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
-  io.out.bits.debug_seqNum := io.in.bits.debug_seqNum
+  io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
+  io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
 
   XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")

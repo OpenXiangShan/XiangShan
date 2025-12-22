@@ -60,9 +60,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
-
-  PerfCCT.updateInstPos(io.in.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
-
+  io.in.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset))
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------

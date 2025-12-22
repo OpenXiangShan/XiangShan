@@ -147,10 +147,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
-  PerfCCT.tick(clock, reset)
-
-  io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
-    PerfCCT.updateInstPos(wb.bits.debug_seqNum, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+  if (backendParams.debugEn){
+    PerfCCT.tick(clock, reset)
+    io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
+      PerfCCT.updateInstPos(wb.bits.debug_seqNum.get, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+    }
   }
 
   val numExuWbPorts = exuWBs.length
@@ -561,13 +562,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when(wb.valid) {
       debug_exuData(wbIdx) := wb.bits.data(0)
       debug_exuDebug(wbIdx) := wb.bits.debug
-      debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.debugInfo.enqRsTime
-      debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.debugInfo.selectTime
-      debug_microOp(wbIdx).debugInfo.issueTime := wb.bits.debugInfo.issueTime
-      debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.debugInfo.writebackTime
-      debug_microOp(wbIdx).debugInfo.tlbFirstReqTime := wb.bits.debugInfo.tlbFirstReqTime
-      debug_microOp(wbIdx).debugInfo.tlbRespTime := wb.bits.debugInfo.tlbRespTime
-
+      wb.bits.perfDebugInfo.foreach { x =>
+        debug_microOp(wbIdx).debugInfo.enqRsTime := x.enqRsTime
+        debug_microOp(wbIdx).debugInfo.selectTime := x.selectTime
+        debug_microOp(wbIdx).debugInfo.issueTime := x.issueTime
+        debug_microOp(wbIdx).debugInfo.writebackTime := x.writebackTime
+        debug_microOp(wbIdx).debugInfo.tlbFirstReqTime := x.tlbFirstReqTime
+        debug_microOp(wbIdx).debugInfo.tlbRespTime := x.tlbRespTime
+      }
       // debug for lqidx and sqidx
       debug_microOp(wbIdx).lqIdx := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
       debug_microOp(wbIdx).sqIdx := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
@@ -1448,15 +1450,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         debug_instData.robIdx := idx
         debug_instData.dvaddr := wb.bits.debug.vaddr
         debug_instData.dpaddr := wb.bits.debug.paddr
-        debug_instData.issueTime := wb.bits.debugInfo.issueTime
-        debug_instData.writebackTime := wb.bits.debugInfo.writebackTime
-        debug_instData.dispatchLatency := wb.bits.debugInfo.dispatchTime - wb.bits.debugInfo.renameTime
-        debug_instData.enqRsLatency := wb.bits.debugInfo.enqRsTime - wb.bits.debugInfo.dispatchTime
-        debug_instData.selectLatency := wb.bits.debugInfo.selectTime - wb.bits.debugInfo.enqRsTime
-        debug_instData.issueLatency := wb.bits.debugInfo.issueTime - wb.bits.debugInfo.selectTime
-        debug_instData.executeLatency := wb.bits.debugInfo.writebackTime - wb.bits.debugInfo.issueTime
-        debug_instData.rsFuLatency := wb.bits.debugInfo.writebackTime - wb.bits.debugInfo.enqRsTime
-        debug_instData.tlbLatency := wb.bits.debugInfo.tlbRespTime - wb.bits.debugInfo.tlbFirstReqTime
+        debug_instData.issueTime := wb.bits.perfDebugInfo.get.issueTime
+        debug_instData.writebackTime := wb.bits.perfDebugInfo.get.writebackTime
+        debug_instData.dispatchLatency := wb.bits.perfDebugInfo.get.dispatchTime - wb.bits.perfDebugInfo.get.renameTime
+        debug_instData.enqRsLatency := wb.bits.perfDebugInfo.get.enqRsTime - wb.bits.perfDebugInfo.get.dispatchTime
+        debug_instData.selectLatency := wb.bits.perfDebugInfo.get.selectTime - wb.bits.perfDebugInfo.get.enqRsTime
+        debug_instData.issueLatency := wb.bits.perfDebugInfo.get.issueTime - wb.bits.perfDebugInfo.get.selectTime
+        debug_instData.executeLatency := wb.bits.perfDebugInfo.get.writebackTime - wb.bits.perfDebugInfo.get.issueTime
+        debug_instData.rsFuLatency := wb.bits.perfDebugInfo.get.writebackTime - wb.bits.perfDebugInfo.get.enqRsTime
+        debug_instData.tlbLatency := wb.bits.perfDebugInfo.get.tlbRespTime - wb.bits.perfDebugInfo.get.tlbFirstReqTime
         debug_instData.exceptType := Cat(wb.bits.exceptionVec.getOrElse(ExceptionVec(false.B)))
         debug_instData.lsInfo := debug_lsInfo(idx)
         // debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID

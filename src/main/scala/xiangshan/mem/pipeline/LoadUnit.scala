@@ -192,8 +192,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   })
 
 
-  PerfCCT.updateInstPos(io.ldin.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
-
+  io.ldin.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset))
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
   // Pipeline
@@ -1583,8 +1582,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s3_wb.debug.isPerfCnt := false.B
   s3_wb.debug.paddr := s3_in.paddr
   s3_wb.debug.vaddr := s3_in.vaddr
-  s3_wb.debugInfo := s3_out.bits.uop.debugInfo
-  s3_wb.debug_seqNum := s3_out.bits.uop.debug_seqNum
+  s3_wb.perfDebugInfo.foreach(_ := s3_out.bits.uop.debugInfo)
+  s3_wb.debug_seqNum.foreach(_  := s3_out.bits.uop.debug_seqNum)
 
   val s3_ld_wb_meta = Wire(new ExuOutput(param))
   s3_ld_wb_meta := Mux(s3_valid, s3_wb, s3_mmio_req.bits)
