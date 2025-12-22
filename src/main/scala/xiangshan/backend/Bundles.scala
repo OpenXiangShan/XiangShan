@@ -191,6 +191,8 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val hasLastInFtqEntry = UInt(2.W)
     val compressType = CompressType()
+    val complexHasDest = UInt(1.W)
+    val hasStore = Bool()
     val needFlush = UInt(2.W)
     val interrupt_safe = Bool()
     val commitType = CommitType()
@@ -459,6 +461,8 @@ object Bundles {
     val crossFtq        = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     val hasLastInFtqEntry = UInt(2.W)
     val compressType    = CompressType()
+    val complexHasDest = UInt(1.W)
+    val hasStore = Bool()
     val needFlush = UInt(2.W)
     val interrupt_safe = Bool()
     val fusionNum       = UInt(2.W)

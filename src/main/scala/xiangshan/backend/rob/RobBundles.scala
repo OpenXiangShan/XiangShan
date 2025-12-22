@@ -51,6 +51,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
+    val complexHasDest = UInt(1.W)
+    val hasStore = Bool()
 
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W) // TODO: it could change to 'instrEndOffset'
@@ -98,6 +100,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_v = Bool()
     val commit_w = Bool()
     val compressType = CompressType()
+    val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
     val wflags = Bool()
@@ -110,6 +113,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vls = Bool()
     val mmio = Bool()
     val commitType = CommitType()
+    val hasStore = Bool()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val hasLastInFtqEntry = UInt(2.W)
@@ -142,6 +146,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
 //    robEntry.uopNum
 //    robEntry.realDestSize
+    robEntry.complexHasDest := robEnq.complexHasDest
+    robEntry.hasStore := robEnq.hasStore
 
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -183,7 +189,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
     robCommitEntry.commit_w := robEntry.uopNum === 0.U
-    robCommitEntry.compressType := robEntry.commitType
+    robCommitEntry.compressType := robEntry.compressType
+    robCommitEntry.uopNum := robEntry.uopNum
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe
     robCommitEntry.rfWen := robEntry.rfWen
@@ -195,12 +202,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
-    robCommitEntry.vls := robEntry.vls
+    robCommitEntry.vls := robEntry.vls // TODO: it is Duplicate
     robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.hasLastInFtqEntry := robEntry.hasLastInFtqEntry
     robCommitEntry.commitType := robEntry.commitType
+    robCommitEntry.hasStore := robEntry.hasStore
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
