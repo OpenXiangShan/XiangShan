@@ -135,7 +135,8 @@ class CtrlBlockImp(
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
-    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
+    delayed.valid := GatedValidRegNext(valid)
+//    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
@@ -163,7 +164,8 @@ class CtrlBlockImp(
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
-    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
+    delayed.valid := GatedValidRegNext(valid)
+//    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     val isIntSche = intScheWbData.contains(x)
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
@@ -190,7 +192,8 @@ class CtrlBlockImp(
     }
     val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
       val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
-      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
+      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid
+//      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
     delayed.bits := RegEnable(PopCount(sameRobidxBools), x.valid)
     delayed
