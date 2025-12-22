@@ -212,10 +212,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val validCount = PopCount(io.in.zip(needRobFlags).zip(io.validVec).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = GatedValidRegNext(io.redirect.valid && !io.redirect.bits.flushItself())
-  val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
-         Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
+  val robIdxHeadNext = Mux(io.redirect.valid,
+      Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx, io.redirect.bits.robIdx + 1.U), // redirect: move ptr to given rob index
+//         Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
            Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
-                      /* default */  robIdxHead))) // no instructions passed by this cycle: stick to old value
+                      /* default */  robIdxHead)) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
 
   /**
