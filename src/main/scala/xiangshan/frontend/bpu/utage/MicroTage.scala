@@ -224,7 +224,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   utageTrace.bits.needAlloc   := t0_histTableNeedAlloc
   utageTrace.bits.allocFailed := (t0_allocMask === 0.U) && t0_histTableNeedAlloc
 
-  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTrace)
+  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTraceAndDebug)
   utageTraceDBTables.log(
     data = utageTrace.bits,
     en = t0_trainValid && utageTrace.valid,
@@ -236,25 +236,29 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // === PERF === Performance Counters Section
   // ==========================================================================
   // === PHR Test ===
-  predMeta.bits.debug_startVAddr   := io.startPc.toUInt
-  predMeta.bits.debug_useMicroTage := false.B // no use, only for placeholder.
-  predMeta.bits.debug_predIdx0     := tables(0).debug_predIdx
-  predMeta.bits.debug_predTag0     := tables(0).debug_predTag
+  if (EnableTraceAndDebug) {
+    predMeta.bits.debug_startVAddr.foreach(_ := io.startPc.toUInt)
+    predMeta.bits.debug_useMicroTage.foreach(_ := false.B) // no use, only for placeholder.
+    predMeta.bits.debug_predIdx0.foreach(_ := tables(0).debug_predIdx)
+    predMeta.bits.debug_predTag0.foreach(_ := tables(0).debug_predTag)
+  }
 
   private val trainIdx0 = debug_tableMetas(0).debug_idx
   private val trainTag0 = debug_tableMetas(0).debug_tag
 
-  XSPerfAccumulate(
-    "train_useMicroTage_and_override_fromFastTrain",
-    t0_trainValid && t0_trainMeta.debug_useMicroTage && io.fastTrain.get.bits.hasOverride
-  )
-  XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.debug_useMicroTage)
-
   XSPerfAccumulate("train_needAlloc", t0_trainValid && t0_histTableNeedAlloc)
   XSPerfAccumulate("train_needUpdate", t0_trainValid && t0_histTableNeedUpdate)
   XSPerfAccumulate("train_histHitMisPred", t0_trainValid && t0_histHitMisPred)
-  XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.debug_predIdx0 === trainIdx0))
-  XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.debug_predTag0 === trainTag0))
-  XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.debug_predIdx0 =/= trainIdx0))
-  XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.debug_predTag0 =/= trainTag0))
+  if (EnableTraceAndDebug) {
+    XSPerfAccumulate(
+      "train_useMicroTage_and_override_fromFastTrain",
+      t0_trainValid && t0_trainMeta.debug_useMicroTage.get && io.fastTrain.get.bits.hasOverride
+    )
+    XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.debug_useMicroTage.get)
+    XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.debug_predIdx0.get === trainIdx0))
+    XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.debug_predTag0.get === trainTag0))
+    XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.debug_predIdx0.get =/= trainIdx0))
+    XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.debug_predTag0.get =/= trainTag0))
+  }
+
 }

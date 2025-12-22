@@ -34,11 +34,10 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val baseCfiPosition:         UInt      = UInt(CfiPositionWidth.W)
 
   // only for test and debug
-
-  val debug_startVAddr:   UInt = UInt(VAddrBits.W)
-  val debug_useMicroTage: Bool = Bool()
-  val debug_predIdx0:     UInt = UInt(DebugPredIdxWidth.W)
-  val debug_predTag0:     UInt = UInt(DebugPredTagWidth.W)
+  val debug_startVAddr:   Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(VAddrBits.W))
+  val debug_useMicroTage: Option[Bool] = Option.when(EnableTraceAndDebug)(Bool())
+  val debug_predIdx0:     Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(DebugPredIdxWidth.W))
+  val debug_predTag0:     Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(DebugPredTagWidth.W))
 }
 
 class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {

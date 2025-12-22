@@ -56,13 +56,14 @@ class MicroTageTable(
       val usefulCorrect:          Bool                  = Bool()
       val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
     }
-    val req:           MicroTageReq           = Input(new MicroTageReq)
-    val resp:          Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
-    val update:        Valid[MicroTageUpdate] = Input(Valid(new MicroTageUpdate))
-    val usefulReset:   Bool                   = Input(Bool())
-    val debug_predIdx: UInt                   = UInt(log2Ceil(numSets).W)
-    val debug_predTag: UInt                   = UInt(tagLen.W)
-    val trainDebug:    MicroTageDebug         = Output(new MicroTageDebug)
+    val req:         MicroTageReq           = Input(new MicroTageReq)
+    val resp:        Valid[MicroTageResp]   = Output(Valid(new MicroTageResp))
+    val update:      Valid[MicroTageUpdate] = Input(Valid(new MicroTageUpdate))
+    val usefulReset: Bool                   = Input(Bool())
+    // Will be automatically optimized away when unused; no need to wrap in Option.
+    val debug_predIdx: UInt           = UInt(log2Ceil(numSets).W)
+    val debug_predTag: UInt           = UInt(tagLen.W)
+    val trainDebug:    MicroTageDebug = Output(new MicroTageDebug)
   }
   class MicroTageEntry() extends MicroTageBundle {
     val valid:       Bool            = Bool()
