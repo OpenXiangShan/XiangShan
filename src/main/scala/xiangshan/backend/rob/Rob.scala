@@ -1206,13 +1206,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //      }
     }
 
-    when(robEntries(i).valid && (needFlush.asUInt.orR || needFlushWriteBack)) {
+    when(robEntries(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === i.U && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
+      robEntries(i).uopNum := 0.U
+    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && (needFlush.asUInt.orR || needFlushWriteBack)) {
       // exception flush
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
       // enq set num of uops
       robEntries(i).uopNum := enqWBNum
-    }.elsewhen(robEntries(i).valid) {
+    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR) {
       // update by writing back
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
       assert(!(robEntries(i).uopNum - wbCnt > robEntries(i).uopNum), s"robEntries $i uopNum is overflow!")
@@ -1277,13 +1279,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //      needUpdate(i).needFlush(1) := needUpdate(i).needFlush(1) || (needFlushWriteBack && !isFormer)
     }
 
-    when(needUpdate(i).valid && (needFlush.asUInt.orR || needFlushWriteBack)) {
+    // TODO: clear uopNum
+    when(needUpdate(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === needUpdateRobIdx(i) && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
+      needUpdate(i).uopNum := 0.U
+    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && (needFlush.asUInt.orR || needFlushWriteBack)) {
       // exception flush
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
       // enq set num of uops
       needUpdate(i).uopNum := enqWBNum
-    }.elsewhen(needUpdate(i).valid) {
+    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR) {
       // update by writing back
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }
