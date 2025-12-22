@@ -199,6 +199,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when(enqOH.asUInt.orR && !io.redirect.valid){
       // TODO: enq
       connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
+    }.elsewhen(io.redirect.valid && io.redirect.bits.robIdx.value === i.U){
+      val compressType = robEntries(i).compressType
+      val redirectIsFormer = io.redirect.bits.robIdx.isFormer
+      val redirectFlushItSelf = io.redirect.bits.flushItself()
+      when(CompressType.isCC(compressType) && (redirectIsFormer ^ redirectFlushItSelf)){
+        robEntries(i).compressType := CompressType.NORMAL
+      }.elsewhen(CompressType.isCS(compressType) && redirectIsFormer && !redirectFlushItSelf){
+        robEntries(i).compressType := CompressType.NORMAL
+      }.elsewhen(CompressType.isSC(compressType) && !redirectIsFormer && redirectFlushItSelf){
+        robEntries(i).compressType := CompressType.NORMAL
+      }
     }
   }
   // robBanks0 include robidx : 0 8 16 24 32 ...
@@ -384,6 +395,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dest.valid := src.valid && io.enq.canAccept
   }
 
+  // TODO:
   val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
   val realDestSizeSeq = VecInit(robDeqGroup.zip(hasCommitted).map{case (r, h) => Mux(h, 0.U, r.realDestSize)})
   val walkDestSizeSeq = VecInit(robDeqGroup.zip(donotNeedWalk).map{case (r, d) => Mux(d, 0.U, r.realDestSize)})
@@ -466,32 +478,62 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
-    when(canEnqueue(i)) {
-      val enqUop = io.enq.req(i).bits
-      val enqIndex = allocatePtrVec(i).value
-      val subIndex = !io.enq.req(i).bits.robIdx.isFormer
-      // store uop in data module and debug_microOp Vec
-      debug_microOp(enqIndex)(subIndex) := enqUop
-      debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
-      debug_lsInfo(enqIndex) := DebugLsInfo.init
-      debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
-      debug_lqIdxValid(enqIndex) := false.B
-      debug_lsIssued(enqIndex) := false.B
-      when (enqUop.waitForward) {
-        hasWaitForward := true.B
+    if (i == 0) {
+      when(canEnqueue(i)) {
+        val enqUop = io.enq.req(i).bits
+        val enqIndex = allocatePtrVec(i).value
+        val subIndex = !io.enq.req(i).bits.robIdx.isFormer
+        // store uop in data module and debug_microOp Vec
+        debug_microOp(enqIndex)(subIndex) := enqUop
+        debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
+        debug_lsInfo(enqIndex) := DebugLsInfo.init
+        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
+        debug_lqIdxValid(enqIndex) := false.B
+        debug_lsIssued(enqIndex) := false.B
+        when (enqUop.waitForward) {
+          hasWaitForward := true.B
+        }
+        val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
+        val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
+        when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
+          hasWFI := true.B
+        }
       }
-      val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
-      val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
-      when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
-        hasWFI := true.B
+    } else {
+      when(canEnqueue(i) || canEnqueue(i-1) && CompressType.isCC(io.enq.req(i-1).bits.compressType)) {
+        val enqUop = io.enq.req(i).bits
+        val enqIndex = Mux(canEnqueue(i), allocatePtrVec(i).value, allocatePtrVec(i-1).value)
+        val subIndex = !io.enq.req(i).bits.robIdx.isFormer
+        // store uop in data module and debug_microOp Vec
+        debug_microOp(enqIndex)(subIndex) := enqUop
+        debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
+        debug_lsInfo(enqIndex) := DebugLsInfo.init
+        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
+        debug_lqIdxValid(enqIndex) := false.B
+        debug_lsIssued(enqIndex) := false.B
+        when (enqUop.waitForward) {
+          hasWaitForward := true.B
+        }
+        val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
+        val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
+        when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
+          hasWFI := true.B
+        }
       }
     }
+
   }
 
   for (i <- 0 until RenameWidth) {
@@ -1183,10 +1225,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val hasExcpFlag = Cat(hasExcpSeq).orR
     val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
+    val compressType = robEntries(i).compressType
+    val redirectIsFormer = io.redirect.bits.robIdx.isFormer
+    val redirectFlushItSelf = io.redirect.bits.flushItself()
     when(isFirstEnq){
       robEntries(i).realDestSize := realDestEnqNum //Mux(hasExcpFlag, 0.U, realDestEnqNum)
     }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
       robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
+    }.elsewhen(io.redirect.valid && io.redirect.bits.robIdx.value === i.U){
+      when(CompressType.isCC(compressType) && (redirectIsFormer ^ redirectFlushItSelf)){
+        robEntries(i).realDestSize := robEntries(i).complexHasDest
+      }.elsewhen(CompressType.isCS(compressType) && redirectIsFormer && !redirectFlushItSelf){
+        robEntries(i).realDestSize := robEntries(i).complexHasDest
+      }.elsewhen(CompressType.isSC(compressType) && !redirectIsFormer && redirectFlushItSelf){
+        robEntries(i).realDestSize := robEntries(i).realDestSize - robEntries(i).complexHasDest
+      }
     }
     val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
     val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
@@ -1707,15 +1760,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     for (i <- 0 until RenameWidth) {
       val idxInEntry = !io.enq.req(i).bits.robIdx.isFormer.asUInt
-      val robIdx = allocatePtrVec(i).value
       if (i == 0) {
         when(canEnqueue(i)) {
+          val robIdx = allocatePtrVec(i).value
           dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
           dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
           dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
         }
       } else {
         when(canEnqueue(i) || canEnqueue(i-1) && CompressType.isCC(io.enq.req(i-1).bits.compressType)) {
+          val robIdx = Mux(canEnqueue(i), allocatePtrVec(i).value, allocatePtrVec(i-1).value)
           dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
           dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
           dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
@@ -1832,11 +1886,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   //store evetn difftest information
-  // TODO:
   io.storeDebugInfo := DontCare
   if (env.EnableDifftest) {
     io.storeDebugInfo.map{port =>
-      port.pc := debug_microOp(port.robidx.value).head.pc
+      port.pc := debug_microOp(port.robidx.value)((!port.robidx.isFormer).asUInt).pc
     }
   }
 
