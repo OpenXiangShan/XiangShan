@@ -323,6 +323,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     // update cf according to waittable result
     uops(i).loadWaitBit := io.waittable(i)
+    uops(i).ftqPtr := io.in(i).bits.ftqPtr
+    uops(i).ftqOffset := io.in(i).bits.ftqOffset
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
@@ -376,8 +378,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         dontTouch(numFusion)
         dontTouch(numuops)
         uops(i).firstUop := false.B
-        uops(i).ftqPtr := uops(i - 1).ftqPtr
-        uops(i).ftqOffset := uops(i - 1).ftqOffset
+//        uops(i).ftqPtr := uops(i - 1).ftqPtr
+//        uops(i).ftqOffset := uops(i - 1).ftqOffset
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
         uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
