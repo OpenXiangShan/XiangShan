@@ -449,7 +449,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val writebackVldu = vecWriteback.filter(_.bits.params.hasVLoadFu)
 
   writeback.zipWithIndex.foreach{ case (wb, i) =>
-    PerfCCT.updateInstPos(wb.bits.debug_seqNum, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset)
+    wb.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset))
   }
 
   dontTouch(io.inner_hartId)

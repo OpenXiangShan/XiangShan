@@ -918,8 +918,8 @@ object Bundles {
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
-    val perfDebugInfo = new PerfDebugInfo()
-    val debug_seqNum = InstSeqNum()
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
     def exuIdx = this.params.exuIdx
 
@@ -946,7 +946,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
-      this.debug_seqNum  := source.common.debug_seqNum
+      this.debug_seqNum  .foreach(_ := source.common.debug_seqNum.get)
       this.exuSources    .foreach(_ := source.common.exuSources.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
@@ -999,8 +999,8 @@ object Bundles {
       uop.sqIdx          := this.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
       uop.ftqPtr         := this.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
       uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
-      uop.debugInfo      := this.perfDebugInfo
-      uop.debug_seqNum   := this.debug_seqNum
+      uop.debugInfo      := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
+      uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
       uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
@@ -1053,8 +1053,8 @@ object Bundles {
     // isFromLoadUnit indicates whether this ExuOutput is issued from LoadUnit (e.g., not so for atomics)
     val isFromLoadUnit = if (params.hasLoadFu) Some(Bool()) else None
     val debug = new DebugBundle
-    val debugInfo = new PerfDebugInfo
-    val debug_seqNum = InstSeqNum()
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
@@ -1074,8 +1074,8 @@ object Bundles {
     val vxsat = Bool()
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
-    val debugInfo = new PerfDebugInfo
-    val debug_seqNum = InstSeqNum()
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
     this.wakeupSource = s"WB(${params.toString})"
 
@@ -1097,8 +1097,8 @@ object Bundles {
       this.vxsat := source.vxsat.getOrElse(0.U.asTypeOf(this.vxsat))
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
-      this.debugInfo := source.debugInfo
-      this.debug_seqNum := source.debug_seqNum
+      this.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
+      this.debug_seqNum.foreach(_ := source.debug_seqNum.get)
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortBundle = {
@@ -1273,8 +1273,8 @@ object Bundles {
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
       output.debug := this.debug
-      output.debugInfo := this.uop.debugInfo
-      output.debug_seqNum := this.uop.debug_seqNum
+      output.perfDebugInfo.foreach(_ := this.uop.debugInfo)
+      output.debug_seqNum.foreach(_ := this.uop.debug_seqNum)
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)
       output.isRVC.foreach(_ := this.uop.isRVC)

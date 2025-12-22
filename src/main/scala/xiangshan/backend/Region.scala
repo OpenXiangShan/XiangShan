@@ -141,10 +141,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     stdiq.io.vlFromVfIsVlmax := false.B
     }
   }
-  issueQueues.filter(_.param.needUncertainWakeupFromExu).zip(exuBlock.io.uncertainWakeupOut.get).map { case (iq, exuWakeUpIn) =>
-    iq.io.wakeupFromExu.get.map(x => x.valid := false.B)
-    iq.io.wakeupFromExu.get.map(x => x.bits := 0.U.asTypeOf(x.bits))
-    iq.io.wakeupFromExu.get.head <> exuWakeUpIn
+  issueQueues.filter(_.param.needUncertainWakeupFromExu).map(_.io.wakeupFromExu.get).flatten.zip(exuBlock.io.uncertainWakeupOut.get).map { case (iq, exuWakeUpIn) =>
+    iq <> exuWakeUpIn
   }
   val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
     issueQueues.flatMap(_.io.wakeupToIQ)

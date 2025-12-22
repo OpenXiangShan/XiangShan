@@ -170,8 +170,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   // update isrvc to dispatch: branch need last isrvc, rob need first isrvc as rob should attach interrupt to first uop
   for (i <- 0 until RenameWidth) {
     fromRenameUpdate(i).valid := fromRename(i).valid
-    // srcLoadDependency and srcState
-    fromRenameUpdate(i).bits := 0.U.asTypeOf(fromRenameUpdate(i).bits)
+    // v0 and vl don't need srcLoadDependency, srcState unpdated with allSrcState
+    fromRenameUpdate(i).bits.srcLoadDependency(3) := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcLoadDependency(3))
+    fromRenameUpdate(i).bits.srcLoadDependency(4) := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcLoadDependency(4))
+    fromRenameUpdate(i).bits.srcState := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcState)
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
@@ -286,7 +288,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val readAddr = VecInit(fromRename.map(x => x.bits.psrc.zipWithIndex.filter(xx => idxseq.contains(xx._2)).map(_._1)).flatten)
     val readValid = VecInit(fromRename.map(x => x.bits.psrc.zipWithIndex.filter(xx => idxseq.contains(xx._2)).map(y => x.valid && SrcType.isXp(x.bits.srcType(y._2)))).flatten)
     b.io.read.map(_.req).zip(readAddr).map(x => x._1 := x._2)
-    // only int src need srcLoadDependency, src0 src1
     if (i == 0) {
       val srcLoadDependencyUpdate = fromRenameUpdate.map(x => x.bits.srcLoadDependency)
       val srcType = fromRenameUpdate.map(x => x.bits.srcType)

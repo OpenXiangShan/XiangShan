@@ -582,14 +582,14 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
     x.isVlm := VlduType.isMasked(req.uop.fuOpType) && VlduType.isVecLd(req.uop.fuOpType)
   }
   io.writeBack.bits.isFromLoadUnit.get := true.B
-  io.writeBack.bits.debugInfo := req.uop.debugInfo
+  io.writeBack.bits.perfDebugInfo.foreach(_ := req.uop.debugInfo)
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
   io.writeBack.bits.debug.vaddr := req.vaddr
-  io.writeBack.bits.debug_seqNum := req.uop.debug_seqNum
+  io.writeBack.bits.debug_seqNum.foreach(_ := req.uop.debug_seqNum)
   // vector output
   io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && req.isvec
 

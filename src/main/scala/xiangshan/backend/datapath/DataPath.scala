@@ -584,8 +584,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       val s1_data = s1_toExuData(i)(j)
       val s1_addrOH = s1_addrOHs(i)(j)
       val s0 = fromIQ(i)(j) // s0
-      PerfCCT.updateInstPos(s0.bits.common.debug_seqNum, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset)
-      PerfCCT.updateInstPos(s1_data.debug_seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset)
+      s0.bits.common.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset))
+      s1_data.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset))
 
       val srcNotBlock = Wire(Bool())
       srcNotBlock := s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip fpRdArbWinner(i)(j) zip vfRdArbWinner(i)(j) zip v0RdArbWinner(i)(j) zip vlRdArbWinner(i)(j)).map {
