@@ -4,6 +4,26 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 中文说明[在此](readme.zh-cn.md)。
 
+## XiangShan-DSE
+
+This branch is for agile Design Space Exploration (DSE) for XiangShan, which is based on the Kunminghu branch.
+
+If you want to use the agile DSE framework for XiangShan, you will need to run a driver program which is loaded in flash. We provide an example DSE driver program in the `dse-driver` folder.
+
+Note that our agile DSE framework needs specific versions of NEMU and Difftest. You need to change the branch for both submodules to the `dse` branch and recompile NEMU.
+
+You can also use the NEMU so file provided by us, by swtiching the `ready-to-run` to the `dse` branch.
+
+Running Example:
+```
+cd dse-driver
+make
+cd ..
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse_1.bin 
+```
+
+This driver can simulate worloads with RobSize varies in `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` , and evaluate the ipc for each config, no need to re-compile each time.
+
 ## Documentation
 
 XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).

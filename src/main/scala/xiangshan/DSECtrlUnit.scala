@@ -13,9 +13,9 @@ import system._
 import utility._
 import chisel3.util.experimental.BoringUtils
 
-case class DSEParams(baseAddress: BigInt = 0x39020000L)
+case class DSEParams(baseAddress: BigInt = 0x39002000L)
 {
-  def address = AddressSet(baseAddress, 0xffff)
+  def address = AddressSet(baseAddress, 0xfff)
   def beatBytes = 8
 }
 

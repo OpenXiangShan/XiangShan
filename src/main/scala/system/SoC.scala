@@ -59,7 +59,7 @@ case class SoCParameters
     PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
     PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x3A000000L, a = 1),
-    PMAConfigEntry(0x39002000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x39020000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x39000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x38022000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
@@ -215,6 +215,8 @@ trait HasPeripheralRanges {
       Map("MEMENC"  -> cvm.MEMENCRange)
     else
       Map()
+  ) ++ (
+    Map("DSECtrl" -> AddressSet(0x39002000, 0xfff))
   )
 
   def peripheralRange = onChipPeripheralRanges.values.foldLeft(Seq(AddressSet(0x0, 0x7fffffffL))) { (acc, x) =>

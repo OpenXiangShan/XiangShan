@@ -45,6 +45,7 @@ import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
+import chisel3.util.experimental.BoringUtils
 
 import difftest.common.DifftestWiring
 import difftest.util.Profile
@@ -306,9 +307,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         })
       })
       // DSE Signals
-      val instrCnt = Output(UInt(64.W))
       val dse_rst = Input(Reset())
-      val reset_vector = Input(UInt(36.W))
+//      val instrCnt = Output(UInt(64.W))
       val dse_reset_valid = Output(Bool())
       val dse_reset_vec = Output(UInt(36.W))
       val dse_max_epoch = Output(UInt(64.W))
@@ -361,7 +361,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
 
     val true_reset_vector = withClock(io.clock) {
-      RegNext(RegNext(Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)))
+      // RegNext(RegNext(Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)))
+      Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)
       // RegNextN(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector), 20)
     }
 
@@ -489,6 +490,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       }
     }
 
+    val instrCnt_sink = Wire(UInt(64.W))
+    BoringUtils.addSink(instrCnt_sink, "DSE_INSTRCNT")
+
+    dseCtrl.module.io.clk := io.clock
+    dseCtrl.module.io.rst := io.dse_rst
+    dseCtrl.module.io.instrCnt := instrCnt_sink // TODO: connect to instr counter
   }
 
 lazy val module = new XSTopImp(this)

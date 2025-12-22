@@ -26,7 +26,8 @@ import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog, HardenXSPerfAccumulate}
+import utility.HardenXSPerfAccumulate.generateCppParser
 import xiangshan.DebugOptionsKey
 import system.SoCParamsKey
 
@@ -90,8 +91,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val io = IO(new Bundle(){
     val dse_rst = Input(Bool())
-    val instrCnt = Output(UInt(64.W))
-    val reset_vector = Input(UInt(36.W))
+//    val instrCnt = Output(UInt(64.W))
     val dse_reset_valid = Output(Bool())
     val dse_reset_vec = Output(UInt(36.W))
     val dse_max_epoch = Output(UInt(64.W))
@@ -104,8 +104,8 @@ class SimTop(implicit p: Parameters) extends Module {
   simMMIO.io.uart <> difftest.uart
 
   // DSE Ctrl Signals
-  io.instrCnt := soc.io.instrCnt
-  soc.io.reset_vector := io.reset_vector
+  soc.io.dse_rst := io.dse_rst
+//  io.instrCnt := soc.io.instrCnt
   io.dse_reset_valid := soc.io.dse_reset_valid
   io.dse_reset_vec := soc.io.dse_reset_vec
   io.dse_max_epoch := soc.io.dse_max_epoch
@@ -120,7 +120,14 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
-  XSLog.collect(timer, logEnable, clean, dump)
+  lazy val io_perf = HardenXSPerfAccumulate.reclaim()
+
+  // XSLog.collect(timer, logEnable, clean, dump)
+  dontTouch(timer)
+  dontTouch(logEnable)
+  dontTouch(clean)
+  dontTouch(dump)
+  dontTouch(io_perf)
 }
 
 object SimTop extends App {

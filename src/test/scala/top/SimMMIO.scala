@@ -36,12 +36,14 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val flashRange = AddressSet(0x10000000L, 0xfffffff)
   val sdRange = AddressSet(0x40002000L, 0xfff)
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
+  val upramRange = AddressSet(0x39010000L, 0xffff)
 
   val illegalRange = (onChipPeripheralRanges.values ++ Seq(
     soc.UARTLiteRange,
     flashRange,
     sdRange,
-    intrGenRange
+    intrGenRange,
+    upramRange
   )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
@@ -53,6 +55,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   // ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x40002000L, 0xfff))))
   val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x40070000L, 0x0000ffffL))))
+  val uparam = LazyModule(new AXI4UParam(Seq(AddressSet(0x39010000L, 0xffff))))
   val error = LazyModule(new AXI4Error(illegalRange))
 
   val axiBus = AXI4Xbar()
@@ -62,6 +65,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   flash.node := axiBus
   sd.node := axiBus
   intrGen.node := axiBus
+  uparam.node := axiBus
   error.node := axiBus
 
   axiBus := node
