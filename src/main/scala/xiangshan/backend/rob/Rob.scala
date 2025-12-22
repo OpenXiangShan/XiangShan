@@ -296,12 +296,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
 //    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
-    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + MuxLookup(rawInfo(i).hasLastInFtqEntry.asUInt, 0.U)(Seq(
-      "b00".U -> -1.S.asUInt,
-      "b01".U -> 0.U,
-      "b10".U -> 0.U,
-      "b11".U -> 1.U
-    ))
+    when (CompressType.isNORMAL(rawInfo(i).compressType)) {
+      commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - Mux(rawInfo(i).hasLastInFtqEntry(0), 0.U, 1.U)
+    }.otherwise {
+      when (rawInfo(i).hasLastInFtqEntry === "b11".U) {
+        commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + 1.U
+      }.elsewhen (rawInfo(i).hasLastInFtqEntry === "b00".U) {
+        commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
+      }.otherwise {
+        commitInfo(i).ftqIdx := rawInfo(i).ftqIdx
+      }
+    }
   }
 
   // data for debug
