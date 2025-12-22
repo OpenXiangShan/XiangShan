@@ -325,7 +325,7 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
   )))
   val tlXbar = Option.when(!isNONE)(TLXbar())
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
-  tl.foreach(_ := tlXbar.get)
+  tl.foreach(_ := TLSourceShrinker(8) := tlXbar.get) // fix id width is 3bit from teacher ma.
 
   // AXI part (optional)
   val axiSlaveNodeOpt = Option.when(isAXI) {
