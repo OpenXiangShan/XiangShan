@@ -118,7 +118,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    req.uop.robIdx === pendingPtr
+    req.uop.robIdx === pendingPtr && (req.uop.robIdx.isFormer.asUInt >= pendingPtr.isFormer.asUInt)
   )
   switch (uncacheState) {
     is (s_idle) {
@@ -398,6 +398,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   mmioReq.valid := false.B
   mmioReq.bits := DontCare
   mmioOut.valid := false.B
+  mmioOut.ready := true.B
   mmioOut.bits := DontCare
   mmioRawData := DontCare
   for (i <- 0 until LoadUncacheBufferSize) {
@@ -474,10 +475,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   // uncache Request
   AddPipelineReg(uncacheReq, io.uncache.req, false.B)
 
-  // uncache Writeback
-  AddPipelineReg(mmioOut, io.mmioOut(UncacheWBPort), false.B)
-  io.mmioRawData(UncacheWBPort) := RegEnable(mmioRawData, mmioOut.fire)
-
   (0 until LoadPipelineWidth).foreach { i => AddPipelineReg(ncOut(i), io.ncOut(i), false.B) }
 
   // uncache exception
@@ -537,15 +534,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *                     rollback req
    *
    ******************************************************************/
-  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
-    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
-      (if (j < i) !xs(j).valid || compareVec(i)(j)
-      else if (j == i) xs(i).valid
-      else !xs(j).valid || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
   val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
     s2_enqueue(w) && !s2_enqValidVec(w)
   ))
@@ -563,7 +551,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
-  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = Wire(Valid(new Redirect))
   lastCycleRedirect.valid := RegNext(io.redirect.valid)
@@ -571,11 +559,34 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = Wire(Valid(new Redirect))
   lastLastCycleRedirect.valid := RegNext(lastCycleRedirect.valid)
   lastLastCycleRedirect.bits := RegEnable(lastCycleRedirect.bits, lastCycleRedirect.valid)
-  io.rollback.valid := GatedValidRegNext(oldestRedirect.valid &&
-                      !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
-                      !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
-                      !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
+  val oldestRedirectNotFlushed = oldestRedirect.valid &&
+    !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
+    !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
+    !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect)
+  io.rollback.valid := GatedValidRegNext(oldestRedirectNotFlushed)
   io.rollback.bits := RegEnable(oldestRedirect.bits, oldestRedirect.valid)
+
+  val rollbackUop = Reg(new DynInst())
+  val rollbackWritebacked = RegInit(true.B)
+  when (rollbackWritebacked && oldestRedirectNotFlushed) {
+    rollbackWritebacked := false.B
+    rollbackUop := Mux1H(oldestOneHot, reqSelUops)
+  }.elsewhen(oldestRedirectNotFlushed && rollbackUop.robIdx.needFlush(oldestRedirect)) {
+    rollbackWritebacked := false.B
+    rollbackUop := Mux1H(oldestOneHot, reqSelUops)
+  }.elsewhen(!mmioOut.valid) {
+    rollbackWritebacked := true.B
+  }
+
+  val mmioOutWB = Wire(DecoupledIO(io.mmioOut(0).bits.cloneType))
+  mmioOutWB.ready := true.B
+  mmioOutWB.bits  := mmioOut.bits
+  mmioOutWB.valid := mmioOut.valid || !rollbackWritebacked
+  mmioOutWB.bits.uop := Mux(mmioOut.valid, mmioOut.bits.uop, rollbackUop)
+
+  // uncache Writeback
+  AddPipelineReg(mmioOutWB, io.mmioOut(UncacheWBPort), false.B)
+  io.mmioRawData(UncacheWBPort) := RegEnable(mmioRawData, mmioOutWB.fire)
 
 
   /******************************************************************
