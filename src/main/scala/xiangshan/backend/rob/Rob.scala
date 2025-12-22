@@ -79,7 +79,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited)
     }
     val rabCommits = Output(new RabCommitIO)
+    val vlCommits = Output(new VlCommitBundle(CommitWidth))
     val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
+    val diffVlCommits = Option.when(backendParams.basicDebugEn)(new DiffVlCommitBundle(CommitWidth))
     val isVsetFlushPipe = Output(Bool())
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
@@ -394,7 +396,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // pipe rab commits for better timing and area
   io.rabCommits := RegNext(rab.io.commits)
+  io.vlCommits := RegNext(vtypeBuffer.io.commits)
   io.diffCommits.foreach(_ := rab.io.diffCommits.get)
+  io.diffVlCommits.foreach(_ := vtypeBuffer.io.diffCommits.get)
 
   /**
    * connection of [[vtypeBuffer]]
@@ -1002,7 +1006,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // if the first uop of an instruction is valid , write writebackedCounter
   val uopEnqValidSeq = io.enq.req.map(req => io.enq.canAccept && req.valid)
   val instEnqValidSeq = io.enq.req.map(req => io.enq.canAccept && req.valid && req.bits.firstUop)
-  val enqNeedWriteRFSeq = io.enq.req.map(_.bits.needWriteRf)
+  val enqNeedWriteRFSeq = io.enq.req.map(_.bits.needEnqRab)
   val enqHasExcpSeq = io.enq.req.map(_.bits.hasException)
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))

@@ -25,21 +25,25 @@ import utils._
 import utility._
 
 
-abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+abstract class BaseFreeList(
+  size: Int,
+  commitWidth: Int,
+  numLogicRegs:Int = 32,
+)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Input(Bool())
     val walk = Input(Bool())
 
     val allocateReq = Input(Vec(RenameWidth, Bool()))
-    val walkReq = Input(Vec(RabCommitWidth, Bool()))
+    val walkReq = Input(Vec(commitWidth, Bool()))
     val allocatePhyReg = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
     val canAllocate = Output(Bool())
     val doAllocate = Input(Bool())
 
-    val freeReq = Input(Vec(RabCommitWidth, Bool()))
-    val freePhyReg = Input(Vec(RabCommitWidth, UInt(PhyRegIdxWidth.W)))
+    val freeReq = Input(Vec(commitWidth, Bool()))
+    val freePhyReg = Input(Vec(commitWidth, UInt(PhyRegIdxWidth.W)))
 
-    val commit = Input(new RabCommitIO)
+    val commit = Input(new FreeListCommitBundle(commitWidth))
 
     val snpt = Input(new SnapshotPort)
 
@@ -80,4 +84,9 @@ abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parame
     (snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq)).toOH,
     (archHeadPtr + PopCount(io.walkReq)).toOH
   )
+}
+
+class FreeListCommitBundle(commitWidth: Int) extends Bundle {
+  val doCommit = Bool()
+  val archAlloc = Vec(commitWidth, Bool())
 }

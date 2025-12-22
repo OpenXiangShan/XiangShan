@@ -50,6 +50,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val rabCommits = Input(new RabCommitIO)
+    val vlCommits = Input(new VlCommitBundle(CommitWidth))
     // from csr
     val singleStep = Input(Bool())
     // from decode
@@ -111,23 +112,58 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(IntPhyRegs))
-  val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F))
-  val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, 31))
-  val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, 1))
-  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, 1))
+  val intFreeList = Module(new MEFreeList(IntPhyRegs, RabCommitWidth))
+  val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth))
+  val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, 31))
+  val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, RabCommitWidth, 1))
+  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, CommitWidth, 1))
 
 
-  intFreeList.io.commit    <> io.rabCommits
-  intFreeList.io.debug_rat.foreach(_ <> io.debug_int_rat.get)
-  fpFreeList.io.commit     <> io.rabCommits
-  fpFreeList.io.debug_rat.foreach(_ <> io.debug_fp_rat.get)
-  vecFreeList.io.commit    <> io.rabCommits
-  vecFreeList.io.debug_rat.foreach(_ <> io.debug_vec_rat.get)
-  v0FreeList.io.commit <> io.rabCommits
-  v0FreeList.io.debug_rat.foreach(_ <> io.debug_v0_rat.get)
-  vlFreeList.io.commit <> io.rabCommits
-  vlFreeList.io.debug_rat.foreach(_ <> io.debug_vl_rat.get)
+  intFreeList.io.commit match {
+    case commit =>
+      commit.doCommit := io.rabCommits.isCommit
+      commit.archAlloc := io.rabCommits.commitValid zip io.rabCommits.info map {
+        case (valid, info) => valid && info.rfWen && !info.isMove
+      }
+  }
+  intFreeList.io.debug_rat.foreach(_ := io.debug_int_rat.get)
+
+  fpFreeList.io.commit match {
+    case commit =>
+      commit.doCommit := io.rabCommits.isCommit
+      commit.archAlloc := io.rabCommits.commitValid zip io.rabCommits.info map {
+        case (valid, info) =>
+          valid && info.fpWen
+      }
+  }
+  fpFreeList.io.debug_rat.foreach(_ := io.debug_fp_rat.get)
+
+  vecFreeList.io.commit match {
+    case commit =>
+      commit.doCommit := io.rabCommits.isCommit
+      commit.archAlloc := io.rabCommits.commitValid zip io.rabCommits.info map {
+        case (valid, info) =>
+          valid && info.vecWen
+      }
+  }
+  vecFreeList.io.debug_rat.foreach(_ := io.debug_vec_rat.get)
+
+  v0FreeList.io.commit match {
+    case commit =>
+      commit.doCommit := io.rabCommits.isCommit
+      commit.archAlloc := io.rabCommits.commitValid zip io.rabCommits.info map {
+        case (valid, info) =>
+          valid && info.v0Wen
+      }
+  }
+  v0FreeList.io.debug_rat.foreach(_ := io.debug_v0_rat.get)
+
+  vlFreeList.io.commit match {
+    case commit =>
+      commit.doCommit := io.vlCommits.isCommit
+      commit.archAlloc := io.vlCommits.commitValid
+  }
+  vlFreeList.io.debug_rat.foreach(_ := io.debug_vl_rat.get)
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodeOutUop](reg_t: RegType, x: T): Bool = reg_t match {
@@ -143,7 +179,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       case Reg_F => x.fpWen
       case Reg_V => x.vecWen
       case Reg_V0 => x.v0Wen
-      case Reg_Vl => x.vlWen
     }
   }
   def needDestRegWalk[T <: RabCommitInfo](reg_t: RegType, x: T): Bool = {
@@ -152,7 +187,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       case Reg_F => x.fpWen
       case Reg_V => x.vecWen
       case Reg_V0 => x.v0Wen
-      case Reg_Vl => x.vlWen
     }
   }
 
@@ -323,7 +357,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       walkNeedFpDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_F, io.rabCommits.info(i))
       walkNeedVecDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_V, io.rabCommits.info(i))
       walkNeedV0Dest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_V0, io.rabCommits.info(i))
-      walkNeedVlDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_Vl, io.rabCommits.info(i))
+      // Need no vlwen here, since walkValid only assert when there are some vl regs needed to walk.
+      walkNeedVlDest(i) := io.vlCommits.walkValid(i)
       walkIsMove(i) := io.rabCommits.info(i).isMove
     }
     fpFreeList.io.allocateReq(i) := needFpDest(i)
@@ -400,7 +435,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
     uops(i).psrc(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(io.fpReadPorts(i)(2), io.vecReadPorts(i)(2)))
     uops(i).psrc(3) := io.v0ReadPorts(i)(0)
-    uops(i).psrc(4) := io.vlReadPorts(i)(0)
+    uops(i).psrcVl := io.vlReadPorts(i).head
 
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
@@ -418,8 +453,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       needFpDest(i)     ->  fpFreeList.io.allocatePhyReg(i),
       needVecDest(i)    ->  vecFreeList.io.allocatePhyReg(i),
       needV0Dest(i)    ->  v0FreeList.io.allocatePhyReg(i),
-      needVlDest(i)    ->  vlFreeList.io.allocatePhyReg(i),
     ))
+
+    uops(i).pdestVl := vlFreeList.io.allocatePhyReg(i)
 
     // Assign performance counters
     uops(i).debug.foreach(_.debugInfo.renameTime := GTimer())
@@ -562,7 +598,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
+  // bypassCond(j)(i)(k): src(j) of uop(i) depends on dest of uop(k)
   val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  // bypassCondVl(i)(k): vl of uop(i) depends on dest of uop(k)
+  val bypassCondVl: MixedVec[UInt] = Wire(MixedVec(Seq.tabulate(RenameWidth - 1)(i => UInt((i + 1).W))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
@@ -571,23 +610,25 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)
       else false.B
     }
-    val vlCond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
-      if (i == 4) s === SrcType.vp
-      else false.B
-    }
+    val vlCond = io.in(i).bits.vlRen
     val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp)
     val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp)
     val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp)
-    val target = io.in(i).bits.lsrc
-    for ((((((cond1, (condV0, condVl)), cond2), cond3), t), j) <- vecCond.zip(v0Cond.zip(vlCond)).zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
+    val lsrcVec = io.in(i).bits.lsrc
+
+    for ((
+      (intRen, fpRen, vecRen, v0Ren),
+      (lsrc, j)
+    ) <- (intCond lazyZip fpCond lazyZip vecCond lazyZip v0Cond) lazyZip lsrcVec.zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
-        val indexMatch = in.bits.ldest === t
-        val writeMatch =  cond3 && needIntDest(j) || cond2 && needFpDest(j) || cond1 && needVecDest(j)
-        val v0vlMatch = condV0 && needV0Dest(j) || condVl && needVlDest(j)
-        indexMatch && writeMatch || v0vlMatch
+        val indexMatch = in.bits.ldest === lsrc
+        val writeMatch = intRen && needIntDest(j) || fpRen && needFpDest(j) || vecRen && needVecDest(j)
+        val v0Match = v0Ren && needV0Dest(j)
+        indexMatch && writeMatch || v0Match
       }
       bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
     }
+    bypassCondVl(i - 1) := VecInit(io.in.take(i).map(_.bits.vlWen && io.in(i).bits.vlRen)).asUInt
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
       (z, next) => Mux(next._2, next._1, z)
@@ -601,9 +642,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(3) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
       (z, next) => Mux(next._2, next._1, z)
     }
-    io.out(i).bits.psrc(4) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(4)(i-1).asBools).foldLeft(uops(i).psrc(4)) {
-      (z, next) => Mux(next._2, next._1, z)
-    }
+    io.out(i).bits.psrcVl := MuxCase(
+      uops(i).psrcVl,
+      (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdest)).reverse
+    )
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
 
     // Todo: better implementation for fields reuse
@@ -620,7 +662,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.srcType(0) := SrcType.imm
       io.out(i).bits.imm := Cat(lui_imm, ld_imm)
     }
-
   }
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
@@ -679,7 +720,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.v0RenamePorts(i).data := v0FreeList.io.allocatePhyReg(i)
 
     io.vlRenamePorts(i).wen := vlSpecWen(i)
-    io.vlRenamePorts(i).addr := inVec(i).ldest(log2Ceil(VlLogicRegs) - 1, 0)
+    io.vlRenamePorts(i).addr := 0.U // only one vl reg
     io.vlRenamePorts(i).data := vlFreeList.io.allocatePhyReg(i)
 
     // II. Free List Update
@@ -691,7 +732,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     vecFreeList.io.freePhyReg(i) := io.vec_old_pdest(i)
     v0FreeList.io.freeReq(i) := GatedValidRegNext(commitValid && needDestRegCommit(Reg_V0, io.rabCommits.info(i)))
     v0FreeList.io.freePhyReg(i) := io.v0_old_pdest(i)
-    vlFreeList.io.freeReq(i) := GatedValidRegNext(commitValid && needDestRegCommit(Reg_Vl, io.rabCommits.info(i)))
+    vlFreeList.io.freeReq(i) := GatedValidRegNext(io.vlCommits.isCommit && io.vlCommits.commitValid(i))
     vlFreeList.io.freePhyReg(i) := io.vl_old_pdest(i)
   }
 
@@ -767,7 +808,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   for (i <- 0 until RabCommitWidth) {
     val info = io.rabCommits.info(i)
     XSDebug(io.rabCommits.isWalk && io.rabCommits.walkValid(i), p"[#$i walk info] " +
-      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} vecWen:${info.vecWen} v0Wen:${info.v0Wen} vlWen:${info.vlWen}")
+      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} vecWen:${info.vecWen} v0Wen:${info.v0Wen}")
   }
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")

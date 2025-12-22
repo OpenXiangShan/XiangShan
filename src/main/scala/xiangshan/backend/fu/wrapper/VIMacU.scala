@@ -103,7 +103,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
       mod.io.info.ma     := vma
       mod.io.info.ta     := vta
       mod.io.info.vlmul  := vlmul
-      mod.io.info.vl     := srcVConfig.vl
+      mod.io.info.vl     := vl
       mod.io.info.vstart := vstart
       mod.io.info.uopIdx := vuopIdx
       mod.io.info.vxrm   := vxrm

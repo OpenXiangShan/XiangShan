@@ -23,10 +23,15 @@ case class ExeUnitParams(
   copyWakeupOut: Boolean = false,
   copyDistance: Int = 1,
   fakeUnit      : Boolean = false,
+  vlRD          : VlRD = null,
+  vlWB          : VlWB = null,
 )(
   implicit
   val schdType: SchedulerType,
 ) {
+  require(rfrPortConfigs.forall(!_.exists(_.isInstanceOf[VlRD])), "VlRD should not appear in rfrPortConfigs")
+  require(!wbPortConfigs.exists(_.isInstanceOf[VlWB]), "VlWB should not appear in wbPortConfigs")
+
   // calculated configs
   var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
   var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
@@ -50,7 +55,7 @@ case class ExeUnitParams(
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
   val readVfRf: Boolean = numVfSrc > 0
-  val readVlRf: Boolean = numVlSrc > 0
+  val readVlRf: Boolean = fuConfigs.exists(_.readVl)
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
@@ -85,7 +90,6 @@ case class ExeUnitParams(
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
@@ -410,10 +414,8 @@ case class ExeUnitParams(
     }
   }
 
-  def getVlWBPort = {
-    wbPortConfigs.collectFirst {
-      case x: VlWB => x
-    }
+  def getVlWBPort: Option[VlWB] = {
+    Option(vlWB)
   }
 
   /**
@@ -444,12 +446,11 @@ case class ExeUnitParams(
     *
     * @example
     * {{{
-    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), V0Data(), VlData())
+    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), V0Data())
     *   getRfReadSrcIdx(VecData()) = Seq(0, 1, 2)
     *   getRfReadSrcIdx(V0Data()) = Seq(3)
-    *   getRfReadSrcIdx(VlData()) = Seq(4)
     * }}}
-    * @return Map[DataConfig -> Seq[indices]]
+    * @return Map[DataConfig -> Seq[indices] ]
     */
   def getRfReadSrcIdx: Map[DataConfig, Seq[Int]] = {
     val dataCfgs = DataConfig.RegSrcDataSet

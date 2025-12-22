@@ -35,7 +35,7 @@ import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 import xiangshan.backend.trace._
 import freechips.rocketchip.rocket.CSRs
-import xiangshan.backend.fu.vector.Bundles.Vstart
+import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
@@ -48,7 +48,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(Vstart())
   val vxrm = Input(UInt(2.W))
 
-  val vl = Output(UInt(XLEN.W))
+  val vl = Output(Vl())
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))

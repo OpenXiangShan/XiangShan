@@ -245,6 +245,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         }
       }
     }
+    exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
 
     if (exuParm.hasAluFu) {
       when(isAlu) {

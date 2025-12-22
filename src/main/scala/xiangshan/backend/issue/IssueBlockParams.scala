@@ -6,7 +6,7 @@ import chisel3.util._
 import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
-import xiangshan.backend.datapath.DataConfig.DataConfig
+import xiangshan.backend.datapath.DataConfig.{DataConfig, FpData, IntData, V0Data, VecData, VlData}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.ExeUnitParams
@@ -142,7 +142,7 @@ case class IssueBlockParams(
 
   def needSrcVxrm: Boolean = exuBlockParams.map(_.needSrcVxrm).reduce(_ || _)
 
-  def writeVConfig: Boolean = exuBlockParams.map(_.writeVConfig).reduce(_ || _)
+  def writeVConfig: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
   
   def writeVType: Boolean = exuBlockParams.map(_.writeVType).reduce(_ || _)
 
@@ -400,23 +400,23 @@ case class IssueBlockParams(
 
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case IntScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case IntScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, IntData()))).toSeq
       case _ => Seq()
     }
     val fpBundle = schdType match {
-      case FpScheduler() => needWakeupFromFpWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case FpScheduler() => needWakeupFromFpWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, FpData()))).toSeq
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VecScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VecData()))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {
-      case VecScheduler() => needWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, V0Data()))).toSeq
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VecScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VlData()))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)

@@ -76,6 +76,7 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
 
   out.res.data := vl
+  out.ctrl.pdestVl.get := in.ctrl.pdestVl.get
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid && isVsetvl
@@ -95,7 +96,7 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   * @param p [[Parameters]]
   */
 class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
-  val oldVL = in.data.src(4).asTypeOf(VConfig()).vl
+  val oldVL = in.data.vl.get
   vsetModule.io.in.avl := oldVL
   vsetModule.io.in.vtype := vtype
 
@@ -106,6 +107,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   // csrr vl instruction will use this exu to read vl
   out.res.data := Mux(isReadVl, oldVL, vl)
+  out.ctrl.pdestVl.get := in.ctrl.pdestVl.get
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid

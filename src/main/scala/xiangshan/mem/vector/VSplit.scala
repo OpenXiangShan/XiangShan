@@ -97,7 +97,7 @@ class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p
     (s0_nf +& 1.U) << emulLog2Pos
   )
 
-  val vvl = io.in.bits.src(vlIndice).asTypeOf(Vl())
+  val vvl = io.in.bits.vl.get
   val evl = Mux(isUsWholeReg,
                 GenUSWholeRegVL(io.in.bits.vpu.get.nf +& 1.U, s0_eew),
                 Mux(isMaskReg,

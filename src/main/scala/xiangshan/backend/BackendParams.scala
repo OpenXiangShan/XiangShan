@@ -185,7 +185,7 @@ case class BackendParams(
   }
 
   def getVlWbArbiterParams: WbArbiterParams = {
-    val vlWbCfgs: Seq[VlWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVl)).map(_.asInstanceOf[VlWB])
+    val vlWbCfgs: Seq[VlWB] = allIssueParams.flatMap(_.exuBlockParams.filter(_.writeVlRf).map(_.vlWB))
     datapath.WbArbiterParams(vlWbCfgs, vlPregParams, this)
   }
 
@@ -208,6 +208,22 @@ case class BackendParams(
     cfgs
   }
 
+  def getVlRdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
+    allRealExuParams
+      .filter(_.vlRD != null)
+      .map(x => (x.vlRD, x.exuIdx))
+      .groupBy { case (rdCfg, exuIdx) => rdCfg.port }
+      .map {
+        case (port, cfgExuIdxSeq) =>
+          port ->
+            cfgExuIdxSeq
+              .map { case (vlRd, exuIdx) => (exuIdx, vlRd.priority) }
+              .sortBy { case (exuIdx, prio) => prio }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
+  }
+
   /**
     * Get regfile write back port params
     *
@@ -226,12 +242,36 @@ case class BackendParams(
     cfgs
   }
 
+  /**
+   * Get vl regfile write back port params
+   *
+   * @return Seq[port -> Seq[(exuIdx, priority)] ]
+   */
+  def getVlWbPortParams = {
+    allRealExuParams
+      .filter(_.vlWB != null)
+      .map(exuParams => exuParams.vlWB -> exuParams.exuIdx)
+      .groupBy{ case (vlwb, exuIdx) => vlwb.port }
+      .map{
+        case (port, wbIdxSeq) =>
+          port -> wbIdxSeq.map { case (wb, exuIdx) => (exuIdx, wb.priority) }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
+  }
+
   def getRdPortIndices(dataCfg: DataConfig) = {
-    this.getRdPortParams(dataCfg).map(_._1)
+    dataCfg match {
+      case VlData() => this.getVlRdPortParams.map(_._1)
+      case _ => this.getRdPortParams(dataCfg).map(_._1)
+    }
   }
 
   def getWbPortIndices(dataCfg: DataConfig) = {
-    this.getWbPortParams(dataCfg).map(_._1)
+    dataCfg match {
+      case VlData() => this.getVlWbPortParams.map(_._1)
+      case _ => this.getWbPortParams(dataCfg).map(_._1)
+    }
   }
 
   def getRdCfgs[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
@@ -246,8 +286,16 @@ case class BackendParams(
     rdCfgs
   }
 
+  def getVlRdCfgs: Seq[Seq[Seq[VlRD]]] = {
+    allIssueParams.map(
+      _.exuBlockParams.map(
+        x => Option(x.vlRD).toSeq
+      )
+    )
+  }
+
   def getAllWbCfgs: Seq[Seq[Set[PregWB]]] = {
-    allIssueParams.map(_.exuBlockParams.map(_.wbPortConfigs.toSet))
+    allIssueParams.map(_.exuBlockParams.map(x => x.wbPortConfigs.toSet ++ x.getVlWBPort))
   }
 
   def getWbCfgs[T <: PregWB](implicit tag: ClassTag[T]): Seq[Seq[PregWB]] = {
@@ -310,11 +358,7 @@ case class BackendParams(
 
   def getRfReadSize(dataCfg: DataConfig) = {
     dataCfg match{
-      case IntData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case FpData()  => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case VecData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case V0Data() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
+      case IntData() | FpData() | VecData() | V0Data() | VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
       case _ => throw new IllegalArgumentException(s"DataConfig ${dataCfg} can not get RfReadSize")
     }
   }
@@ -385,11 +429,11 @@ case class BackendParams(
     ldExuParams.indexOf(exu)
   }
 
-  def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
-  def getFpWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
-  def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
-  def getV0WBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
-  def getVlWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
+  def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getIntWBPort.nonEmpty).groupBy(_.getIntWBPort.get.port)
+  def getFpWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getFpWBPort .nonEmpty).groupBy(_.getFpWBPort.get.port)
+  def getVfWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getVfWBPort .nonEmpty).groupBy(_.getVfWBPort.get.port)
+  def getV0WBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getV0WBPort .nonEmpty).groupBy(_.getV0WBPort.get.port)
+  def getVlWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getVlWBPort .nonEmpty).groupBy(_.getVlWBPort.get.port)
 
   private def isContinuous(portIndices: Seq[Int]): Boolean = {
     val portIndicesSet = portIndices.toSet

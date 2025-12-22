@@ -327,6 +327,12 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))
         enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := s0_enqBits(enqIdx).regCacheIdx(j))
       }
+      enq.bits.status.srcStatusVl.foreach {
+        vlSrcStatus =>
+          vlSrcStatus.srcState                                  := s0_enqBits(enqIdx).srcStateVl.get
+          vlSrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcVl.get
+          vlSrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
+      }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
       enq.bits.status.firstIssue                                := false.B
@@ -875,6 +881,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen.get)
     deq.bits.common.flushPipe.foreach(_ := false.B)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
+    deq.bits.common.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
@@ -895,6 +902,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       }
     }
     deq.bits.common.src := DontCare
+    deq.bits.common.vl.foreach(_ := DontCare) // will connect it in datapath, DontCare here
     deq.bits.common.isRVC.foreach(_ := deqEntryVec(i).bits.payload.isRVC.getOrElse(false.B))
     deq.bits.common.rasAction.foreach(_ := deqEntryVec(i).bits.payload.rasAction.getOrElse(0.U))
 
@@ -902,6 +910,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // psrc in status array can be pregIdx of IntRegFile or VfRegFile
       rf.foreach(_.addr := psrc)
       rf.foreach(_.srcType := srcType)
+    }
+    deq.bits.rfVl lazyZip deqEntryVec(i).bits.status.srcStatusVl.map(_.psrc) foreach {
+      case (rf, psrc) =>
+        rf.addr := psrc
+        rf.srcType := SrcType.vp // this is vl
     }
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>
       sink := source

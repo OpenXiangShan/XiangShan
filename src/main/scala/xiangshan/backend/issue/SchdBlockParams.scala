@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.PregWB
 
@@ -201,23 +202,23 @@ case class SchdBlockParams(
 
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case IntScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case IntScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, IntData()))).toSeq
       case _ => Seq()
     }
     val fpBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
-      case FpScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case FpScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, FpData()))).toSeq
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VecScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VecData()))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {
-      case VecScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, V0Data()))).toSeq
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VecScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case VecScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VlData()))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)

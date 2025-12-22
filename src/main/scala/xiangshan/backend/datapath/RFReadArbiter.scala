@@ -148,6 +148,6 @@ class VlRFReadArbiter(
   backendParams: BackendParams
 )(implicit
   p: Parameters
-) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[VlRD], backendParams.vlPregParams)) {
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getVlRdCfgs, backendParams.vlPregParams)) {
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(VlData()).max
 }
