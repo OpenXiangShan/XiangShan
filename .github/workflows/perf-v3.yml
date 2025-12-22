@@ -6,41 +6,15 @@ on:
     - cron: '0 4 * * 5'
   workflow_dispatch:
     inputs:
-      test_commit:
-        description: 'Commit SHA to run the workflow on'
-        required: false
-        default: ""
-      benchmark_type:
+      test_branch:
+        description: Only fill this option when retrying with the same branch/commit as previous attempts
         required: false
         type: string
-        description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
-  #only for test push
-  # push:
-  #   branches: [ ci-perf-yml ]
+        default: kunminghu-v3
 
 jobs:
-  check-run:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Determine if this is even-week run or specified commit
-        id: check
-        run: |
-          WEEK_NUM=$(date +'%V')
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          elif [ $(( 10#$WEEK_NUM % 2 )) -eq 0 ]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
   performance-test:
-    needs: check-run
-    if: needs.check-run.outputs.should_run == 'true'
     uses: ./.github/workflows/perf-template.yml
     with:
-      test_branch: kunminghu-v3
-      test_commit: ${{ github.event.inputs.test_commit }}
-      benchmark_type: ${{ github.event.inputs.benchmark_type || 'spec06-1.0c' }}
-      all_spec_dir: /nfs/home/cirunner/perf-report-kmhv3
+      test_branch: ${{ github.event.inputs.test_branch }}
+      perf_report_dir: /nfs/home/cirunner/perf-report-kmhv3
