@@ -46,6 +46,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
+  println(f"AheadBtb:")
+  println(f"  Size(set, way, bank): $NumSets * $NumWays * $NumBanks = $NumEntries")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
+
   private val banks     = Seq.tabulate(NumBanks)(i => Module(new AheadBtbBank(i)))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
