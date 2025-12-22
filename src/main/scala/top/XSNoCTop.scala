@@ -326,7 +326,8 @@ trait HasSeperatedBusOpt { this: BaseXSSoc with HasXSTile =>
     )
   )))
   val tlXbar = Option.when(!isNONE)(TLXbar())
-  tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
+  // fix ID width of sepbus to 3-bit
+  tlAsyncSinkOpt.foreach(sink => tlXbar.get := TLSourceShrinker(8) := sink.node)
   tl.foreach(_ := tlXbar.get)
 
   // AXI part (optional)
