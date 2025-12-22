@@ -91,6 +91,8 @@ abstract class XSDecodeBase {
   def generate() : List[BitPat]
 }
 
+// TODO: add a uopidx, it is ok that use a i value
+
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: FuType.OHType, fuOp: BitPat, selImm: BitPat,
@@ -496,6 +498,7 @@ object SvinvalDecode extends DecodeConstants {
  */
 object CBODecode extends DecodeConstants {
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    // TODO: add blockBack, and use to prevent CROB
     CBO_ZERO  -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_zero , SelImm.IMM_S),
     CBO_CLEAN -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_clean, SelImm.IMM_S),
     CBO_FLUSH -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_flush, SelImm.IMM_S),
