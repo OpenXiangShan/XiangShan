@@ -35,7 +35,9 @@ import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BlameBpuSource
+import xiangshan.frontend.BpuPerfInfo
 import xiangshan.frontend.BpuToFtqIO
+import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FrontendTopDownBundle
@@ -47,7 +49,6 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuSpeculationMeta
-import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.ras.RasMeta
 
@@ -70,17 +71,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
 
-    val bpuInfo = new Bundle {
-      val bpRight: UInt = Output(UInt(XLEN.W))
-      val bpWrong: UInt = Output(UInt(XLEN.W))
-    }
+    val bpuInfo: BpuPerfInfo = Output(new BpuPerfInfo)
 
     // for perf
-    val ControlBTBMissBubble: Bool = Output(Bool())
-    val TAGEMissBubble:       Bool = Output(Bool())
-    val SCMissBubble:         Bool = Output(Bool())
-    val ITTAGEMissBubble:     Bool = Output(Bool())
-    val RASMissBubble:        Bool = Output(Bool())
+    val bpuTopDownInfo: BpuTopDownInfo = Output(new BpuTopDownInfo)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -398,11 +392,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // io.toIfu.req.bits.topdownInfo is assigned above
   io.toIfu.topdownRedirect := backendRedirect
 
-  io.ControlBTBMissBubble := false.B // TODO: add more info to distinguish
-  io.TAGEMissBubble       := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isConditional)
-  io.SCMissBubble         := false.B // TODO: add SC info
-  io.ITTAGEMissBubble     := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.needIttage)
-  io.RASMissBubble        := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isReturn)
+  io.bpuTopDownInfo.btbMissBubble    := false.B // TODO: add more info to distinguish
+  io.bpuTopDownInfo.tageMissBubble   := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isConditional)
+  io.bpuTopDownInfo.scMissBubble     := false.B // TODO: add SC info
+  io.bpuTopDownInfo.ittageMissBubble := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.needIttage)
+  io.bpuTopDownInfo.rasMissBubble    := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isReturn)
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
