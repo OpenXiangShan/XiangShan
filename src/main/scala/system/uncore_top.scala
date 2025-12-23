@@ -89,7 +89,7 @@ case class PeriParams(
 )
 
 case class Pbus2Params(
-    NumHarts:       Int = 1, // number of cpus +1(aplic)+1(pcie msi)
+    NumHarts:       Int = 2, // number of cpus +1(aplic)+1(pcie msi)
     idBits:         Int = 2,
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
@@ -307,6 +307,116 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 //    (slaves.zip(out)).foreach { case (node, io) => io <> node.in.head._1 }
   }
 }
+class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
+  // debugModule instance
+  val dm = LazyModule(new StandAloneDebugModule(
+    useTL = false,
+    baseAddress = params.DebugAddrMap.base,
+    addrWidth = params.cpuAddrWidth,
+    dataWidth = params.cpuDataWidth,
+    hartNum = params.NumHarts
+  ))
+  println("=== dm instance finish ====")
+  // dm master: cpus--> cpu_xbarNto1-->cpu2dm_s
+  val cpu_mNodes = Seq.fill(params.NumHarts) {
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "cpu-Mnode",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  }
+  val cpu_xbarNto1 = AXI4Xbar()
+  for (i <- 0 until params.NumHarts) {
+    cpu_xbarNto1 :*= cpu_mNodes(i)
+  }
+
+  val cpu2dm_s =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = Seq(params.DebugAddrMap),
+        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
+        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
+      )),
+      beatBytes = params.cpuAddrWidth / 8
+    )))
+  cpu2dm_s := cpu_xbarNto1
+  // define dm_s_self
+  val dm_sNode =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = Seq(params.DebugAddrMap),
+        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
+        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
+      )),
+      beatBytes = params.cpuAddrWidth / 8
+    )))
+  // define dm_self channel dm_self_mNode <> cpu2dm_s & is_self_id
+  // dm_self_mNode,dm_crs_mNode --> dmxbar2to1 --->debugModule
+  val dm_self_mNode =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-self-Mnode",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dm_mNode_crs =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-mnode-crs",
+        id = IdRange(0, 1 << params.idBits)
+      ))
+    )))
+  val dmxbar2to1 = AXI4Xbar()
+  dmxbar2to1 := dm_self_mNode
+  dmxbar2to1 := dm_mNode_crs
+  dm_sNode := dmxbar2to1
+  println("==== 12.17 start uncoreTop Imp..==")
+  class Imp(outer: dmPbusTop) extends LazyRawModuleImp(outer) {
+    val cpu_s =
+      IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+    val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
+      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
+    ))))// cross-die slave ports for debug
+    val dm_crs_m = IO(new AXI4Bundle(AXI4BundleParameters(
+      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
+    )))
+    // instance debugModule sba port
+    val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
+    val dmio = IO(new dm.debugModule.DebugModuleIO)
+    val dmint = IO(Output(UInt(params.NumHarts.W)))
+    val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
+    val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
+    val isselfid = req_id === self_id
+    dm_mNode_crs.out.head._1 <> dm_crs_s
+    println("==== 12.17 test00..==")
+    dm_crs_m.aw <> cpu2dm_s.in.head._1.aw
+    println("==== 12.17 test01..==")
+    dm_crs_m.w <> cpu2dm_s.in.head._1.w
+    dm_crs_m.b <> cpu2dm_s.in.head._1.b
+    dm_crs_m.ar <> cpu2dm_s.in.head._1.ar
+    dm_crs_m.r <> cpu2dm_s.in.head._1.r
+    println("==== 12.17 test02..==")
+    dm_crs_m.aw.valid := !isselfid & cpu2dm_s.in.head._1.aw.valid
+    println("==== 12.17 test03..==")
+    dm_crs_m.w.valid := !isselfid & cpu2dm_s.in.head._1.w.valid
+    dm_crs_m.ar.valid := !isselfid & cpu2dm_s.in.head._1.ar.valid
+    println("==== 12.17 test04..==")
+    dm_m.foreach(_ <> dm.axi4masternode.get)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dm_self_mNode.out.head._1 <> cpu2dm_s.in.head._1
+    dm_self_mNode.out.head._1.aw.valid := isselfid & cpu2dm_s.in.head._1.aw.valid
+    dm_self_mNode.out.head._1.w.valid  := isselfid & cpu2dm_s.in.head._1.w.valid
+    dm_self_mNode.out.head._1.ar.valid := isselfid & cpu2dm_s.in.head._1.ar.valid
+    for (i <- 0 until params.NumHarts) {
+      cpu_mNodes(i).out.head._1 <> cpu_s(i)
+    }
+    dmio <> dm.module.io
+    val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
+    dmint := dmintSrc.head.asUInt
+  }
+  override lazy val module = new Imp(this)
+}
 class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
 
   // Define the address map for the two output slave devices.
@@ -346,7 +456,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       ))
     )))
   }
-  val msi_sNodes = Seq.fill(params.NumHarts) {
+  val cpu2msi_sNodes = Seq.fill(params.NumHarts) {
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = params.IMSICAddrMap,
@@ -356,7 +466,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       beatBytes = params.cpuDataWidth / 8
     )))
   }
-  val dm_sNodes = Seq.fill(params.NumHarts) {
+  val cpu2dm_sNodes = Seq.fill(params.NumHarts) {
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.DebugAddrMap),
@@ -369,12 +479,13 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
   for (i <- 0 until params.NumHarts) {
     cpu_xbar1to2(i) := cpu_mNodes(i)
-    msi_sNodes(i)   := cpu_xbar1to2(i)
-    dm_sNodes(i)    := cpu_xbar1to2(i)
+    cpu2msi_sNodes(i)   := cpu_xbar1to2(i)
+    cpu2dm_sNodes(i)    := cpu_xbar1to2(i)
   }
   // instance modules
   private val clintParam = SYSCNTParams(params.SYSCNTAddrMap.base)
-  val imsic_pbus_top     = LazyModule(new imsicPbusTop(params))
+  val imsicTop = LazyModule(new imsicPbusTop(params))
+  val dmTop = LazyModule(new dmPbusTop(params))
   val syscnt = LazyModule(new StandAloneSYSCNT(
     useTL = false,
     baseAddress = params.SYSCNTAddrMap.base,
@@ -413,70 +524,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       beatBytes = params.periParams.timedataBytes
     )))
   peri_s1Node := peri_xbar
-  // debugModule integration
-  val dm = LazyModule(new StandAloneDebugModule(
-    useTL = false,
-    baseAddress = params.DebugAddrMap.base,
-    addrWidth = params.cpuAddrWidth,
-    dataWidth = params.cpuDataWidth,
-    hartNum = params.NumHarts
-  ))
-  println("=== dm instance finish ====")
-  val dmxbar = AXI4Xbar()
-  val dm_mNodes = Seq.fill(params.NumHarts) {
-    AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "dm-Mnode",
-        id = IdRange(0, 1 << params.idBits)
-      ))
-    )))
-  }
-  val dm_sNode =
-    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-      slaves = Seq(AXI4SlaveParameters(
-        address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
-      )),
-      beatBytes = params.cpuAddrWidth / 8
-    )))
-  val dm_sNode_self =
-    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-      slaves = Seq(AXI4SlaveParameters(
-        address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
-      )),
-      beatBytes = params.cpuAddrWidth / 8
-    )))
-  for (i <- 0 until params.NumHarts) {
-    dmxbar :*= dm_mNodes(i)
-  }
-  dm_sNode := dmxbar
-  val dm_mNodes_2 =
-    AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "dm-Mnode",
-        id = IdRange(0, 1 << params.idBits)
-      ))
-    )))
-  val dm_mNode_crs =
-    AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "dm-mnode-crs",
-        id = IdRange(0, 1 << params.idBits)
-      ))
-    )))
-  val dmxbar2to1 = AXI4Xbar()
-  dmxbar2to1 := dm_mNodes_2
-  dmxbar2to1 := dm_mNode_crs
-  dm_sNode_self := dmxbar2to1
-
-  println("==== 12.17 start uncoreTop Imp..==")
-//  println(s"dm_mNodes_2 size: ${dm_mNodes_2.edges.out.size}")
-//  println(s"dm_mNode_crs edges: ${dm_mNode_crs.edges.out.size}")
-//  println(s"dm_mNodes_2 size0: ${dm_mNodes_2.out.size}")
-//  println(s"dm_mNode_crs edges0: ${dm_mNode_crs.out.size}")
   // define debugModule sba node
   class Imp(outer: uncoreTop) extends LazyRawModuleImp(outer) {
     // 在模块实现类中添加前缀注解
@@ -496,20 +543,16 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val reset                = IO(Input(AsyncReset()))
     val time                 = IO(Output(ValidIO(UInt(64.W))))
     val peri_s = IO(Flipped(new AXI4Bundle(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
-    val msi_m  = IO(new AXI4Bundle(imsic_pbus_top.sNode.in.head._2.bundle)) // to imsic master ports
+    val msi_m  = IO(new AXI4Bundle(imsicTop.sNode.in.head._2.bundle)) // to imsic master ports
     val cpu_s =
       IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
-    val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
-      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
-    )))) // cross-die slave ports for debug
-    val dm_crs_m = IO(new AXI4Bundle(AXI4BundleParameters(
-      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
-    )))
+    val dm_crs_s = IO(Flipped(new AXI4Bundle(dmTop.module.dm_crs_s.params))) // cross-die slave ports for debug
+    val dm_crs_m = IO(dmTop.module.dm_crs_m.cloneType)
     // instance debugModule sba port
-    val dm_m    = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
-    val dmio    = IO(new dm.debugModule.DebugModuleIO)
-    val dmint   = IO(Output(Vec(params.NumHarts, Bool())))
-    val req_id  = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
+    val dm_m    = Option.when(params.dmHasBusMaster)(IO(dmTop.module.dm_m.get.cloneType))
+    val dmio    = IO(dmTop.module.dmio.cloneType)
+    val dmint   = IO(dmTop.module.dmint.cloneType)
+    val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
     // instance aplic
     withClockAndReset(clock, reset) {
@@ -518,54 +561,27 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       aplic_top.i_aplic_wire_int_vld := i_aplic_wire_int_vld
       aplic_top.i_dft_icg_scan_en    := i_dft_icg_scan_en
       aplic_top.aplic_s <> peri_sNode.in.head._1
-      imsic_pbus_top.module.s_aplic <> aplic_top.aplic_m
+      imsicTop.module.s_aplic <> aplic_top.aplic_m
     }
     // connect io
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
     cpu_mNodes.zip(cpu_s).foreach { case (node, io) => node.out.head._1 <> io }
     // connection about cross-die access ports for debug
     println("==== 12.17start to connect debugModule..==")
-    val isselfid = req_id === self_id
-    dm_mNode_crs.out.head._1 <> dm_crs_s
-    println("==== 12.17 test00..==")
-    dm_crs_m.aw <> dm_sNode.in.head._1.aw
-    println("==== 12.17 test01..==")
-    dm_crs_m.w <> dm_sNode.in.head._1.w
-    dm_crs_m.b <> dm_sNode.in.head._1.b
-    dm_crs_m.ar <> dm_sNode.in.head._1.ar
-    dm_crs_m.r <> dm_sNode.in.head._1.r
-    println("==== 12.17 test02..==")
-    dm_crs_m.aw.valid := !isselfid & dm_sNode.in.head._1.aw.valid
-    println("==== 12.17 test03..==")
-    dm_crs_m.w.valid := !isselfid & dm_sNode.in.head._1.w.valid
-    dm_crs_m.ar.valid := !isselfid & dm_sNode.in.head._1.ar.valid
-    println("==== 12.17 test04..==")
-    dm_m.foreach(_ <> dm.axi4masternode.get)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode_self.in.head._1)
-//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
-//    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
-    println("==== 12.17 test05..==")
-    dm_mNodes_2.out.head._1 <> dm_sNode.in.head._1
-    println("==== 12.17 test06..==")
-    dm_mNodes_2.out.head._1.aw.valid := isselfid & dm_sNode.in.head._1.aw.valid
-    println("==== 12.17 test07..==")
-    dm_mNodes_2.out.head._1.w.valid  := isselfid & dm_sNode.in.head._1.w.valid
-    dm_mNodes_2.out.head._1.ar.valid := isselfid & dm_sNode.in.head._1.ar.valid
-    println("==== 12.17 test08..==")
-
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
-    // msi_sNodes -> imsicPbusTop
-    imsic_pbus_top.module.s_cpu.zip(msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
-    msi_m <> imsic_pbus_top.module.m
-    for (i <- 0 until params.NumHarts) {
-      dm_mNodes(i).out.head._1 <> dm_sNodes(i).in.head._1
-    }
-    dmio <> dm.module.io
-    val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
-    val dmintsig = dmintSrc.getElements.map(_.asInstanceOf[Vec[Bool]]).flatMap(_.toSeq)
-    require(dmintsig.size == params.NumHarts, "信号数量不匹配！")
-    (dmintsig zip dmint).foreach { case (dms, io) => io := dms }
-    // syscnt connect
+    // cpu2msi_sNodes -> imsicTop
+    imsicTop.module.s_cpu.zip(cpu2msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
+    msi_m <> imsicTop.module.m
+    // cpu2dm_sNodes <> dmTop
+    dmTop.module.cpu_s.zip(cpu2dm_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
+    dm_crs_s <> dmTop.module.dm_crs_s
+    dm_crs_m <> dmTop.module.dm_crs_m
+    dmTop.module.dm_m.foreach(_ <> dm_m.get)
+    dmio <> dmTop.module.dmio
+    dmint <> dmTop.module.dmint
+    dmTop.module.req_id := req_id
+    dmTop.module.self_id := self_id
+  // syscnt connect
     syscnt.module.rtc_clock       := rtc_clock
     syscnt.module.rtc_reset       := rtc_reset
     syscnt.module.clock           := clock
