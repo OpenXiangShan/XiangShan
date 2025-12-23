@@ -194,7 +194,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val hitMask   = mbtbMeta.map(_.hit(branch.bits))
     val hitMaskOH = PriorityEncoderOH(hitMask)
     val mbtbHit   = hitMask.reduce(_ || _)
-    val basePred  = Mux1H(hitMaskOH, mbtbMeta.map(_.counter.isPositive))
+    val basePred  = Mux1H(hitMaskOH, mbtbMeta.map(_.shared.asShort.counter.isPositive))
     val meta      = Mux1H(hitMaskOH, tageMeta)
     (mbtbHit, basePred, meta)
   }.unzip3

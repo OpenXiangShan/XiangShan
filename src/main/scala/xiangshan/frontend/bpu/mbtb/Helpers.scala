@@ -17,15 +17,18 @@ package xiangshan.frontend.bpu.mbtb
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config
 import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.CrossPageHelper
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMainBtbParameters
-    with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
+    with HasXSParameter with HalfAlignHelper with CrossPageHelper with TargetFixHelper {
 
   val addrFields = AddrField(
     Seq(
@@ -33,12 +36,14 @@ trait Helpers extends HasMainBtbParameters
       ("alignBankIdx", AlignBankIdxLen),
       ("internalBankIdx", InternalBankIdxLen),
       ("setIdx", SetIdxLen),
-      ("tag", TagWidth)
+      ("tagFull", TagFullWidth)
     ),
     maxWidth = Option(VAddrBits),
     extraFields = Seq(
       ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
-      ("targetLower", instOffsetBits, TargetWidth),
+      ("tagLower", FetchBlockSizeWidth + InternalBankIdxLen + SetIdxLen, TagLowerWidth),
+      ("targetLower", instOffsetBits, TargetLowerWidth),
+      ("vpnLower", instOffsetBits + TargetLowerWidth, VpnLowerWidth),
       ("position", instOffsetBits, FetchBlockAlignWidth),
       ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
     )
@@ -56,17 +61,45 @@ trait Helpers extends HasMainBtbParameters
   def getAlignBankIndexFromPosition(cfiPosition: UInt): UInt =
     addrFields.extractFrom("cfiPosition", "alignBankIdx", cfiPosition)
 
-  def getTargetUpper(pc: PrunedAddr): UInt =
-    pc(pc.length - 1, addrFields.getEnd("targetLower") + 1)
+  def getTargetLowerUpper(target: PrunedAddr): UInt =
+    target(target.length - 1, addrFields.getEnd("targetLower") + 1)
 
-  def getTargetLowerBits(target: PrunedAddr): UInt =
+  def getTargetLower(target: PrunedAddr): UInt =
     addrFields.extract("targetLower", target)
+
+  def getVpnLower(pc: PrunedAddr): UInt =
+    addrFields.extract("vpnLower", pc)
+
+  def getVpnUpper(pc: PrunedAddr): UInt =
+    pc(pc.length - 1, addrFields.getEnd("vpnLower") + 1)
 
   def getInternalBankIndex(pc: PrunedAddr): UInt =
     addrFields.extract("internalBankIdx", pc)
 
-  def getTag(pc: PrunedAddr): UInt =
-    addrFields.extract("tag", pc)
+  def getTagLower(pc: PrunedAddr): UInt =
+    addrFields.extract("tagLower", pc)
+
+  def getTagUpperFromTagFull(tagFull: UInt): UInt =
+    tagFull(TagFullWidth - 1, TagLowerWidth)
+
+  def getTagFull(pc: PrunedAddr): UInt =
+    addrFields.extract("tagFull", pc)
+
+  def getTagLowerFromTagFull(tagFull: UInt): UInt =
+    addrFields.extractFrom("tagFull", "tagLower", tagFull)
+
+  def getPageIdx(setIdx: UInt, wayIdx: UInt): UInt =
+    Cat(wayIdx, setIdx)
+
+  def getPageSetIdx(pageIdx: UInt): UInt =
+    pageIdx(log2Ceil(NumPageTableSet) - 1, 0)
+
+  // TODO: Use Hashing for better distribution
+  def getPageSetIdx(target: PrunedAddr): UInt =
+    getVpnLower(target)(log2Ceil(NumPageTableSet) - 1, 0)
+
+  def getPageWayIdx(pageIdx: UInt): UInt =
+    pageIdx(log2Ceil(NumPageTableEntries) - 1, log2Ceil(NumPageTableSet))
 
   // detect multi-hit, return a mask indicating which way has multi-hit
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): UInt = {
@@ -85,4 +118,6 @@ trait Helpers extends HasMainBtbParameters
     }
     PriorityEncoderOH(multiHitMask.asUInt)
   }
+
+  override def getTargetUpper(pc: PrunedAddr): UInt = getTargetLowerUpper(pc)
 }
