@@ -26,7 +26,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle
-import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.{L1PrefetchReq, LqPtr}
 
 object PrefetchTarget extends Enumeration{
   val L1 = Value("toL1")
@@ -81,6 +81,7 @@ class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool()
   val metaSource = UInt(L1PfSourceBits.W)
   val refillLatency = UInt(LATENCY_WIDTH.W)
+  val lqIdx = new LqPtr()
 }
 
 class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
