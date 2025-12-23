@@ -122,7 +122,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       vls.isVecLoad := VlduType.isVecLd(source.uop.fuOpType)
       vls.isVlm := VlduType.isMasked(source.uop.fuOpType) && VlduType.isVecLd(source.uop.fuOpType)
     })
-    sink.perfDebugInfo.foreach(_ := source.uop.debugInfo)
+    sink.perfDebugInfo.foreach(_ := source.uop.perfDebugInfo)
     sink.debug_seqNum.foreach(_ := source.uop.debug_seqNum)
     sink
   }
@@ -514,7 +514,7 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
       vls.isVecLoad := VlduType.isVecLd(source.uop.fuOpType)
       vls.isVlm := VlduType.isMasked(source.uop.fuOpType) && VlduType.isVecLd(source.uop.fuOpType)
     })
-    sink.perfDebugInfo.foreach(_ := source.uop.debugInfo)
+    sink.perfDebugInfo.foreach(_ := source.uop.perfDebugInfo)
     sink.debug_seqNum.foreach(_ := source.uop.debug_seqNum)
     sink
   }

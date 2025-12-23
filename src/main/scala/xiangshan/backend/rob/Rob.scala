@@ -456,13 +456,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val enqIndex = allocatePtrVec(i).value
       // store uop in data module and debug_microOp Vec
       debug_microOp(enqIndex) := enqUop
-      debug_microOp(enqIndex).debugInfo.dispatchTime := timer
-      debug_microOp(enqIndex).debugInfo.enqRsTime := timer
-      debug_microOp(enqIndex).debugInfo.selectTime := timer
-      debug_microOp(enqIndex).debugInfo.issueTime := timer
-      debug_microOp(enqIndex).debugInfo.writebackTime := timer
-      debug_microOp(enqIndex).debugInfo.tlbFirstReqTime := timer
-      debug_microOp(enqIndex).debugInfo.tlbRespTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.dispatchTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.enqRsTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.selectTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.issueTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.writebackTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.tlbFirstReqTime := timer
+      debug_microOp(enqIndex).perfDebugInfo.tlbRespTime := timer
       debug_lsInfo(enqIndex) := DebugLsInfo.init
       debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
       debug_lqIdxValid(enqIndex) := false.B
@@ -563,12 +563,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_exuData(wbIdx) := wb.bits.data(0)
       debug_exuDebug(wbIdx) := wb.bits.debug
       wb.bits.perfDebugInfo.foreach { x =>
-        debug_microOp(wbIdx).debugInfo.enqRsTime := x.enqRsTime
-        debug_microOp(wbIdx).debugInfo.selectTime := x.selectTime
-        debug_microOp(wbIdx).debugInfo.issueTime := x.issueTime
-        debug_microOp(wbIdx).debugInfo.writebackTime := x.writebackTime
-        debug_microOp(wbIdx).debugInfo.tlbFirstReqTime := x.tlbFirstReqTime
-        debug_microOp(wbIdx).debugInfo.tlbRespTime := x.tlbRespTime
+        debug_microOp(wbIdx).perfDebugInfo.enqRsTime := x.enqRsTime
+        debug_microOp(wbIdx).perfDebugInfo.selectTime := x.selectTime
+        debug_microOp(wbIdx).perfDebugInfo.issueTime := x.issueTime
+        debug_microOp(wbIdx).perfDebugInfo.writebackTime := x.writebackTime
+        debug_microOp(wbIdx).perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
+        debug_microOp(wbIdx).perfDebugInfo.tlbRespTime := x.tlbRespTime
       }
       // debug for lqidx and sqidx
       debug_microOp(wbIdx).lqIdx := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
@@ -1386,14 +1386,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
   )
   XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
-  val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
-  val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
-  val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)
-  val issueLatency = commitDebugUop.map(uop => uop.debugInfo.issueTime - uop.debugInfo.selectTime)
-  val executeLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.issueTime)
-  val rsFuLatency = commitDebugUop.map(uop => uop.debugInfo.writebackTime - uop.debugInfo.enqRsTime)
-  val commitLatency = commitDebugUop.map(uop => timer - uop.debugInfo.writebackTime)
-  val tlbLatency = commitDebugUop.map(uop => uop.debugInfo.tlbRespTime - uop.debugInfo.tlbFirstReqTime)
+  val dispatchLatency = commitDebugUop.map(uop => uop.perfDebugInfo.dispatchTime - uop.perfDebugInfo.renameTime)
+  val enqRsLatency = commitDebugUop.map(uop => uop.perfDebugInfo.enqRsTime - uop.perfDebugInfo.dispatchTime)
+  val selectLatency = commitDebugUop.map(uop => uop.perfDebugInfo.selectTime - uop.perfDebugInfo.enqRsTime)
+  val issueLatency = commitDebugUop.map(uop => uop.perfDebugInfo.issueTime - uop.perfDebugInfo.selectTime)
+  val executeLatency = commitDebugUop.map(uop => uop.perfDebugInfo.writebackTime - uop.perfDebugInfo.issueTime)
+  val rsFuLatency = commitDebugUop.map(uop => uop.perfDebugInfo.writebackTime - uop.perfDebugInfo.enqRsTime)
+  val commitLatency = commitDebugUop.map(uop => timer - uop.perfDebugInfo.writebackTime)
+  val tlbLatency = commitDebugUop.map(uop => uop.perfDebugInfo.tlbRespTime - uop.perfDebugInfo.tlbFirstReqTime)
 
   def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
     cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)

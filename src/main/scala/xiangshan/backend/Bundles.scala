@@ -249,7 +249,7 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
     val instr = UInt(32.W)
     val fusionNum = UInt(2.W)
-    val debugInfo = new PerfDebugInfo
+    val perfDebugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
   }
 
@@ -484,7 +484,7 @@ object Bundles {
 
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
-    val debugInfo       = new PerfDebugInfo
+    val perfDebugInfo   = new PerfDebugInfo
     val debug_seqNum    = InstSeqNum()
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
@@ -542,7 +542,7 @@ object Bundles {
         this.debug_seqNum := x.debug_seqNum
         this.instr := x.instr
         this.fusionNum := x.fusionNum
-        this.debugInfo := x.debugInfo
+        this.perfDebugInfo := x.perfDebugInfo
         this.debug_sim_trig.get := x.debug_sim_trig
       })
     }
@@ -999,7 +999,7 @@ object Bundles {
       uop.sqIdx          := this.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
       uop.ftqPtr         := this.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
       uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
-      uop.debugInfo      := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
+      uop.perfDebugInfo      := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
       uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
       uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
@@ -1273,7 +1273,7 @@ object Bundles {
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
       output.debug := this.debug
-      output.perfDebugInfo.foreach(_ := this.uop.debugInfo)
+      output.perfDebugInfo.foreach(_ := this.uop.perfDebugInfo)
       output.debug_seqNum.foreach(_ := this.uop.debug_seqNum)
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)

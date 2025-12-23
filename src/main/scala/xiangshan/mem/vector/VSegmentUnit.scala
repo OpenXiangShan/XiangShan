@@ -932,7 +932,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
       vls.isVecLoad := VlduType.isVecLd(fofBuffer.fuOpType)
       vls.isVlm := VlduType.isMasked(fofBuffer.fuOpType) && VlduType.isVecLd(fofBuffer.fuOpType)
     })
-    writebackOut.perfDebugInfo.foreach(_ := fofBuffer.debugInfo)
+    writebackOut.perfDebugInfo.foreach(_ := fofBuffer.perfDebugInfo)
     writebackOut.debug_seqNum.foreach(_ := fofBuffer.debug_seqNum)
   }.otherwise{
     writebackOut.data := VecInit(Seq.fill(param.wbPathNum)(data(deqPtr.value)))
@@ -964,7 +964,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
       vls.isVlm := VlduType.isMasked(instMicroOp.uop.fuOpType) && VlduType.isVecLd(instMicroOp.uop.fuOpType)
     })
     writebackOut.debug := DontCare
-    writebackOut.perfDebugInfo.foreach(_ := uopq(deqPtr.value).uop.debugInfo)
+    writebackOut.perfDebugInfo.foreach(_ := uopq(deqPtr.value).uop.perfDebugInfo)
     writebackOut.debug_seqNum.foreach(_ := uopq(deqPtr.value).uop.debug_seqNum)
   }
 
