@@ -265,6 +265,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
   val stIsRVC  = Bool()
+  val isRAW    = Bool() // if is memory RAW violation, for MDP train.
 
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()

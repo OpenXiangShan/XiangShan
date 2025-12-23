@@ -79,7 +79,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val real_pc = s1_redirect_bits_reg.pc
   // update load violation predictor if load violation redirect triggered
   val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, s1_redirect_valid_reg)
-  io.memPredUpdate.valid := GatedValidRegNext(s1_isReplay && s1_redirect_valid_reg && s1_redirect_bits_reg.flushItself(), init = false.B)
+  io.memPredUpdate.valid := GatedValidRegNext(s1_isReplay && s1_redirect_valid_reg && s1_redirect_bits_reg.flushItself() && s1_redirect_bits_reg.isRAW, init = false.B)
   // update wait table
   io.memPredUpdate.waddr := RegEnable(XORFold(real_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
   io.memPredUpdate.wdata := true.B
