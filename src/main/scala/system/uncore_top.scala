@@ -554,6 +554,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val dmint   = IO(dmTop.module.dmint.cloneType)
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
+    childClock := clock
+    childReset := reset
     // instance aplic
     withClockAndReset(clock, reset) {
       val aplic_top = Module(new aplic_top(params.aplicParams))
