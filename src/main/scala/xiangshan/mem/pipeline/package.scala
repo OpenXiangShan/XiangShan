@@ -39,6 +39,8 @@ trait OnLoadStage {
   import LoadStage._
   implicit val s: LoadStage
 
+  def is(sn: LoadStage): Boolean = s.id == sn.id
+  def isS0: Boolean = is(LoadS0())
   def after(s1: LoadStage, s2: LoadStage): Boolean = s1.id >= s2.id
   def afterS1: Boolean = after(s, LoadS1())
   def afterS2: Boolean = after(s, LoadS2())
@@ -139,6 +141,7 @@ object PrefetchCoh {
 }
 
 object TlbAccessResult extends ChiselOHEnum {
+  val unknown = 0
   val noQuery = addType("noQuery")
   val hit = addType("hit")
   val miss = addType("miss")
