@@ -46,11 +46,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   override implicit val s: LoadStage = LoadS0()
 ) extends LoadUnitStage(param)
   with HasL1PrefetchSourceParameter {
-
-  // TODO: parameters these somewhere else
-  val bankBytes = 16
-  val bankOffsetWidth = log2Up(bankBytes)
-
   val io = IO(new Bundle() {
     /**
       * Request sources
@@ -82,7 +77,8 @@ class LoadUnitS0(param: ExeUnitParams)(
       */
     val sqSbForwardReq = ValidIO(new StoreForwardReqS0)
     val uncacheForwardReq = ValidIO(new StoreForwardReqS0)
-    val dcacheForwardReq = ValidIO(new DCacheForwardReqS0)
+    val mshrForwardReq = ValidIO(new DCacheForwardReqS0)
+    val tldForwardReq = ValidIO(new DCacheForwardReqS0)
 
     // IQ wakeup
     val wakeup = ValidIO(new MemWakeUpBundle)
@@ -135,6 +131,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 1. high-priority replay from LRQ, including NC / MMIO replay
   val replay = Wire(new LoadStageIO)
   connectSamePort(replay, io.replay.bits)
+  replay.noQuery.get := io.replay.bits.uncacheReplay.get
   replay.DontCarePAddr()
   replay.DontCareUnalign() // assign later in sink
   val replayIsHiPrio = io.replay.bits.forwardDChannel.get // TODO: consider uncache replay
@@ -145,6 +142,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 2. fast replay from s3
   fastReplay.valid := io.fastReplay.valid
   connectSamePort(fastReplay.bits, io.fastReplay.bits)
+  fastReplay.bits.noQuery.get := true.B
   fastReplay.bits.entrance := LoadEntrance.fastReplay.U
   fastReplay.bits.DontCareUnalign() // assign later in sink
 
@@ -167,8 +165,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.vaddr := io.prefetchReq.bits.getVaddr() // not actual vaddr, but Cat(alias, page offset)
   prefetch.fullva := io.prefetchReq.bits.getVaddr()
   prefetch.size := DontCare
-  prefetch.mask := DontCare
+  prefetch.mask := 0.U
   prefetch.DontCarePAddr()
+  prefetch.noQuery.get := true.B
   prefetch.DontCareUnalign() // assign later in sink
   prefetch.DontCareReplayFromLRQFields()
   prefetch.DontCareVectorFields()
@@ -186,6 +185,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   vectorIssue.bits.accessType.pftType := DontCare
   vectorIssue.bits.accessType.pftCoh := DontCare
   vectorIssue.bits.DontCarePAddr()
+  vectorIssue.bits.noQuery.get := false.B
   vectorIssue.bits.DontCareUnalign() // assign later in sink
   vectorIssue.bits.DontCareReplayFromLRQFields()
 
@@ -215,8 +215,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
-  scalarIssue.bits.mask := genVWmask(ldinVAddr, ldinSize)
+  scalarIssue.bits.mask := Mux(LSUOpType.isPrefetch(ldin.fuOpType), 0.U, genVWmask(ldinVAddr, ldinSize))
   scalarIssue.bits.DontCarePAddr()
+  scalarIssue.bits.noQuery.get := ldin.fuOpType === LSUOpType.prefetch_i // swInstr
   scalarIssue.bits.DontCareUnalign() // assign later in sink
   scalarIssue.bits.DontCareReplayFromLRQFields()
   scalarIssue.bits.DontCareVectorFields()
@@ -257,11 +258,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   val tlbHlv = LSUOpType.isHlv(tlbFuOpType)
   val tlbHlvx = LSUOpType.isHlvx(tlbFuOpType)
 
-  val noNeedTlbTransSources = sources.filterNot(needTlbTransSources.contains)
-  val noQuerySources = Cat(noNeedTlbTransSources.map(_.fire)).orR // hardware prefetch & fast replay
-  val noQuerySwInstrPrefetch = isSwInstrPrefetch // software instruction prefetch
-  val noQueryUncacheReplay = isUncacheReplay // uncache replay
-  val noQuery = noQuerySources || noQuerySwInstrPrefetch || noQueryUncacheReplay
+  val noQuery = sink.bits.noQuery.get
 
   val firstIssueSources = Seq(vectorIssue, scalarIssue)
   val firstIssue = Cat(firstIssueSources.map(_.fire)).orR
@@ -299,9 +296,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   val align = noAlignCheck || _align
   val crossWordInsideBank = needAlignCheck && _crossWordInsideBank
   val crossBank = needAlignCheck && _crossBank
+  val readWholeBank = unalignTail.valid || crossWordInsideBank
 
   sink.bits.align.get := align
   sink.bits.unalignHead.get := crossBank
+  sink.bits.readWholeBank.get := readWholeBank
 
   def alignCheck(offset: UInt, size: UInt) = {
     require(offset.getWidth == DCacheLineOffset)
@@ -346,8 +345,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   val noDCacheAccessUncacheReplay = isUncacheReplay // uncache replay
   val noDCacheAccess = noDCacheAccessSwInstrPrefetch || noDCacheAccessUncacheReplay
 
-  val readWholeBank = unalignTail.valid || crossWordInsideBank
-
   /**
     * Data forward
     */
@@ -357,7 +354,13 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.size := sink.bits.size
   storeForwardReq.uop := uop
 
-  val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.ncReplay
+  val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay
+
+  val dcacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.forwardDChannel.get
+  val dcacheForwardReq = Wire(new DCacheForwardReqS0)
+  dcacheForwardReq.vaddr := sink.bits.vaddr
+  dcacheForwardReq.size := sink.bits.size
+  dcacheForwardReq.mshrId := sink.bits.mshrId.get
 
   /**
     * IQ wakeup
@@ -437,10 +440,10 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.uncacheForwardReq.valid := uncacheForwardReqValid
   io.uncacheForwardReq.bits := storeForwardReq
 
-  io.dcacheForwardReq.valid := sink.valid
-  io.dcacheForwardReq.bits.vaddr := sink.bits.vaddr
-  io.dcacheForwardReq.bits.size := sink.bits.size
-  io.dcacheForwardReq.bits.mshrId := sink.bits.mshrId.get
+  io.mshrForwardReq.valid := dcacheForwardReqValid
+  io.mshrForwardReq.bits := dcacheForwardReq
+  io.tldForwardReq.valid := dcacheForwardReqValid
+  io.tldForwardReq.bits := dcacheForwardReq
 
   io.wakeup.valid := wakeupValid
   io.wakeup.bits := wakeup
@@ -452,13 +455,14 @@ class LoadUnitS0(param: ExeUnitParams)(
 class LoadUnitS1(param: ExeUnitParams)(
   implicit p: Parameters,
   override implicit val s: LoadStage = LoadS1()
-) extends LoadUnitStage(param) {
+) extends LoadUnitStage(param) with HasVLSUParameters {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
+    val kill = Input(Bool())
 
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp(2))) // TODO: parameterize 2
-    val tlbReqKill = Output(Bool()) // TODO: this is ugly
+    val tlbReqKill = Output(Bool())
     val tlbPAddr = Output(UInt(PAddrBits.W)) // only used for no_translate
 
     // DCache request: paddr and s1 kill signal
@@ -469,11 +473,13 @@ class LoadUnitS1(param: ExeUnitParams)(
       * Data forward request and kill
       */
     val storeForwardReq = Output(new StoreForwardReqS1) // including SQ, Sbuffer and Uncache
-    val dcacheForwardReq = Output(new DCacheForwardReqS1)
+    val mshrForwardReq = Output(new DCacheForwardReqS1)
+    val tldForwardReq = Output(new DCacheForwardReqS1)
     val sqForwardKill = Output(Bool())
     val sbufferForwardKill = Output(Bool())
     val uncacheForwardKill = Output(Bool())
-    val dcacheForwardKill = Output(Bool())
+    val mshrForwardKill = Output(Bool())
+    val tldForwardKill = Output(Bool())
 
     // Unalign tail inject to s0
     val unalignTail = DecoupledIO(new LoadStageIO()(p, prevStage(s)))
@@ -497,12 +503,200 @@ class LoadUnitS1(param: ExeUnitParams)(
     })
   })
 
+  // TODO: remove this
   dontTouch(io)
   dontTouch(io_pipeIn.get)
   dontTouch(io_pipeOut.get)
-  io <> DontCare
-  io_pipeIn.get <> DontCare
-  io_pipeOut.get <> DontCare
+
+  val pipeIn = io_pipeIn.get
+  val pipeOut = io_pipeOut.get
+  val in = pipeIn.bits
+
+  val entrance = in.entrance
+  val accessType = in.accessType
+  val uop = in.uop
+  val robIdx = uop.robIdx
+  val fuOpType = uop.fuOpType
+  val mop = fuOpType(6, 5) // ?
+  val vaddr = in.vaddr
+  val mask = in.mask
+
+  val isSwInstrPrefetch = accessType.isSwPrefetch && accessType.isInstrPrefetch
+
+  /**
+    * Redirect
+    */
+  val redirect = io.redirect
+  val redirectNext = Wire(redirect.cloneType)
+  redirectNext.valid := GatedValidRegNext(redirect.valid)
+  redirectNext.bits := RegEnable(redirect.bits, redirect.valid)
+  val kill = io.kill || isSwInstrPrefetch || robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext)
+
+  /**
+    * Tlb & DCache
+    */
+  val tlbResp = io.tlbResp
+  val noQuery = in.noQuery.get
+  val tlbHit = tlbResp.valid && !tlbResp.bits.miss && !noQuery
+  val tlbMiss = tlbResp.valid && tlbResp.bits.miss
+  val paddrEffective = tlbHit || noQuery // hit or noQuery
+  val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
+  val paddr = Mux(noQuery, in.paddr.get, tlbResp.bits.paddr(0))
+  val paddrDCache = Mux(noQuery, in.paddr.get, tlbResp.bits.paddr(1))
+  val gpaddr = tlbResp.bits.gpaddr(0)
+  val fullva = tlbResp.bits.fullva
+
+  val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
+  val af = tlbHit && tlbResp.bits.excp.head.af.ld
+  val gpf = tlbHit && tlbResp.bits.excp.head.gpf.ld
+  val exception = pf || af || gpf
+
+  val killDCache = kill || tlbMiss || exception
+
+  assert(!(pipeIn.valid && !tlbResp.valid && !noQuery))
+
+  /**
+    * Load trigger
+    */
+  val loadTrigger = Module(new MemTrigger(MemType.LOAD))
+  loadTrigger.io.fromCsrTrigger.tdataVec := io.csrTrigger.tdataVec
+  loadTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
+  loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
+  loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
+  loadTrigger.io.fromLoadStore.vaddr := vaddr
+  loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector && isUnitStride(mop)
+  loadTrigger.io.fromLoadStore.mask := mask
+  loadTrigger.io.isPrf.get := accessType.isPrefetch
+
+  val triggerAction = loadTrigger.io.toLoadStore.triggerAction
+  val isDebugMode = TriggerAction.isDmode(triggerAction)
+  val bp = TriggerAction.isExp(triggerAction)
+  val vecVaddrOffset = Mux(
+    isDebugMode || bp,
+    loadTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.get,
+    vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.get
+  )
+  val vecTriggerMask = Mux(
+    isDebugMode || bp,
+    loadTrigger.io.toLoadStore.triggerMask,
+    0.U
+  )
+
+  /**
+    * Unalign tail inject to s0
+    */
+  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get
+  val unalignTail = Wire(io.unalignTail.bits.cloneType)
+  connectSamePort(unalignTail, in)
+  unalignTail.entrance := LoadEntrance.unalignTail.U
+  unalignTail.vaddr := ((vaddr >> bankOffsetWidth) + 1.U) << bankOffsetWidth
+  unalignTail.fullva := ((in.fullva >> bankOffsetWidth) + 1.U) << bankOffsetWidth
+  unalignTail.size := MemorySize.Q.U
+  unalignTail.mask := genVWmask(vaddr, LSUOpType.size(fuOpType)) >> bankBytes
+  unalignTail.align.get := false.B // align is only used for misalign exception, which unalignTail does not care
+  unalignTail.unalignHead.get := false.B
+  unalignTail.readWholeBank.get := true.B
+
+  /**
+    * Nuke check with StoreUnit
+    */
+  val nukeQueryValids = io.staNukeQueryReq.map(_.valid)
+  val nukeQueryReqs = io.staNukeQueryReq.map(_.bits)
+  val nukePAddrMatches = nukeQueryReqs.map(req => nukePAddrMatch(req.paddr, req.matchType, paddr))
+  val nukeStoreOlders = nukeQueryReqs.map(req => isAfter(robIdx, req.robIdx))
+  val nukeMaskMatches = nukeQueryReqs.map(req => (req.mask & in.mask).orR)
+  val nuke = Cat((nukeQueryValids lazyZip nukePAddrMatches lazyZip nukeStoreOlders lazyZip nukeMaskMatches).map {
+    case (valid, paddrMatch, storeOlder, maskMatch) => valid && paddrMatch && storeOlder && maskMatch
+  }).orR && paddrEffective
+
+  def nukePAddrMatch(storePAddr: UInt, storeMatchType: UInt, loadPAddr: UInt): Bool = {
+    Mux(
+      StLdNukeMatchType.isCacheLine(storeMatchType),
+      (storePAddr >> blockOffBits) === (loadPAddr >> blockOffBits),
+      (storePAddr >> bankOffsetWidth) === (loadPAddr >> bankOffsetWidth)
+    )
+  }
+
+  /**
+    * Pipeline connect
+    */
+  val pipeOutValid = RegInit(false.B)
+  val pipeOutBits = Reg(new LoadStageIO)
+  when (kill) { pipeOutValid := false.B }
+  .elsewhen (pipeIn.fire) { pipeOutValid := true.B }
+  .elsewhen (pipeOut.fire) { pipeOutValid := false.B }
+
+  val stageInfo = Wire(pipeOut.bits.cloneType)
+  connectSamePort(stageInfo, in)
+  stageInfo.uop.trigger := triggerAction
+  stageInfo.uop.exceptionVec(breakPoint) := bp
+  stageInfo.uop.exceptionVec(loadPageFault) := pf
+  stageInfo.uop.exceptionVec(loadAccessFault) := af
+  stageInfo.uop.exceptionVec(loadGuestPageFault) := gpf
+  stageInfo.uop.debugInfo.tlbRespTime := Mux(
+    pipeIn.valid && paddrEffective,
+    GTimer(),
+    Mux(pipeIn.valid && tlbMiss, uop.debugInfo.tlbFirstReqTime, uop.debugInfo.tlbRespTime)
+  )
+  // update tlb response
+  stageInfo.fullva := tlbResp.bits.fullva
+  stageInfo.paddr.get := paddr
+  stageInfo.tlbAccessResult.get := Mux(
+    noQuery,
+    TlbAccessResult.noQuery.U,
+    Mux(tlbHit, TlbAccessResult.hit.U, TlbAccessResult.miss.U)
+  )
+  stageInfo.tlbException.get := tlbResp.bits.excp.head
+  stageInfo.pbmt.get := pbmt
+  stageInfo.gpaddr.get := gpaddr
+  stageInfo.isForVSnonLeafPTE.get := tlbResp.bits.isForVSnonLeafPTE
+  // update replay cause (only nuke is detected in S1)
+  stageInfo.cause.get(LoadReplayCauses.C_NK) := nuke
+  // update trigger info
+  stageInfo.vecVaddrOffset.get := vecVaddrOffset
+  stageInfo.vecTriggerMask.get := vecTriggerMask
+
+  when (pipeIn.fire) { pipeOutBits := stageInfo }
+
+  /**
+    * IO assignment
+    */
+  io_pipeOut.get.valid := pipeOutValid
+  io_pipeOut.get.bits := pipeOutBits
+  io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
+ 
+  io.tlbResp.ready := true.B
+  io.tlbReqKill := kill
+  io.tlbPAddr := in.paddr.get
+
+  io.dcachePAddr := paddrDCache
+  io.dcacheKill := killDCache
+
+  // use kill instead of killDCache if timing does not allow it
+  io.storeForwardReq.paddr := paddr
+  io.mshrForwardReq.paddr := paddr
+  io.tldForwardReq.paddr := paddr
+  io.sqForwardKill := killDCache
+  io.sbufferForwardKill := killDCache
+  io.uncacheForwardKill := kill
+  io.mshrForwardKill := killDCache
+  io.tldForwardKill := killDCache
+
+  io.unalignTail.valid := unalignTailInjectValid
+  io.unalignTail.bits := unalignTail
+  assert(!io.unalignTail.valid || io.unalignTail.ready)
+
+  io.swInstrPrefetch.valid := pipeIn.valid && isSwInstrPrefetch
+  io.swInstrPrefetch.bits.vaddr := vaddr
+
+  io.debugInfo.isTlbFirstMiss := pipeIn.valid && tlbMiss &&
+    LoadEntrance.isScalarIssue(entrance) &&
+    LoadEntrance.isVectorIssue(entrance)
+  io.debugInfo.isLoadToLoadForward := false.B
+  io.debugInfo.robIdx := robIdx.value
+  io.debugInfo.vaddr.valid := pipeIn.valid
+  io.debugInfo.vaddr.bits := vaddr
+  io.debugInfo.pc := uop.pc
 }
 
 class LoadUnitS2(param: ExeUnitParams)(
@@ -532,7 +726,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     val sqForwardResp = Flipped(ValidIO(new SQForwardResp))
     val sbufferForwardResp = Flipped(ValidIO(new SbufferForwardResp))
     val uncacheForwardResp = Flipped(ValidIO(new UncacheForwardResp))
-    val dcacheForwardResp = Flipped(ValidIO(new DCacheForwardResp)) // TODO: is it necessary to distinguish MSHR and TL-D?
+    val mshrForwardResp = Flipped(ValidIO(new DCacheForwardResp))
+    val tldForwardResp = Flipped(ValidIO(new DCacheForwardResp))
 
     // Nuke query from StoreUnit
     val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
@@ -647,7 +842,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val sqForward = new SQForward
   val sbufferForward = new SbufferForward
   val uncacheForward = new UncacheForward
-  val dcacheForward = new DCacheForward
+  val mshrForward = new DCacheForward
+  val tldForward = new DCacheForward
   // Uncache data
   val uncacheData = Input(new LoadDataFromLQBundle)
   // Nuke check with StoreUnit
@@ -696,11 +892,13 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.sqForward.s0Req := s0.io.sqSbForwardReq
   io.sbufferForward.s0Req := s0.io.sqSbForwardReq
   io.uncacheForward.s0Req := s0.io.uncacheForwardReq
-  io.dcacheForward.s0Req := s0.io.dcacheForwardReq
+  io.mshrForward.s0Req := s0.io.mshrForwardReq
+  io.tldForward.s0Req := s0.io.tldForwardReq
   io.wakeup := s0.io.wakeup
 
   // S1
   s1.io.redirect := io.redirect
+  s1.io.kill := false.B
   s1.io.tlbResp <> io.tlb.resp
   io.tlb.req_kill := s1.io.tlbReqKill
   io.tlb.req.bits.pmp_addr := s1.io.tlbPAddr // TODO
@@ -713,8 +911,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.sbufferForward.s1Kill := s1.io.sbufferForwardKill
   io.uncacheForward.s1Req := s1.io.storeForwardReq
   io.uncacheForward.s1Kill := s1.io.uncacheForwardKill
-  io.dcacheForward.s1Req := s1.io.dcacheForwardReq
-  io.dcacheForward.s1Kill := s1.io.dcacheForwardKill
+  io.mshrForward.s1Req := s1.io.mshrForwardReq
+  io.mshrForward.s1Kill := s1.io.mshrForwardKill
+  io.tldForward.s1Req := s1.io.tldForwardReq
+  io.tldForward.s1Kill := s1.io.tldForwardKill
   s1.io.staNukeQueryReq := io.staNukeQueryReq
   io.swInstrPrefetch := s1.io.swInstrPrefetch
   s1.io.csrTrigger := io.csrTrigger
@@ -730,7 +930,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.sqForwardResp := io.sqForward.s2Resp
   s2.io.sbufferForwardResp := io.sbufferForward.s2Resp
   s2.io.uncacheForwardResp := io.uncacheForward.s2Resp
-  s2.io.dcacheForwardResp := io.dcacheForward.s2Resp
+  s2.io.mshrForwardResp := io.mshrForward.s2Resp
+  s2.io.tldForwardResp := io.tldForward.s2Resp
   s2.io.staNukeQueryReq := io.staNukeQueryReq
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq
   io.rawNukeQuery.req <> s2.io.rawNukeQueryReq
@@ -778,6 +979,11 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
 ) extends XSModule with OnLoadStage
   with HasDCacheParameters
   with HasCircularQueuePtrHelper {
+
+  // TODO: parameters these somewhere else
+  val bankBytes = 16
+  val bankOffsetWidth = log2Up(bankBytes)
+
   val io_pipeIn = if (afterS1) {
     Some(IO(Flipped(DecoupledIO(new LoadStageIO()(p, prevStage(s))))))
   } else None
