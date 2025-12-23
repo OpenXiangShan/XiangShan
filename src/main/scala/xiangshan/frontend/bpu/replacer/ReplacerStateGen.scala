@@ -31,8 +31,22 @@ abstract class ReplacerStateGen(NumWays: Int, AccessSize: Int = 1) extends Modul
 
   val io: ReplacerStateGenIO = IO(new ReplacerStateGenIO)
 
-  def getNextState(state: UInt, touchWays: Vec[Valid[UInt]]): UInt =
-    touchWays.foldLeft(state)((prev, touchWay) => Mux(touchWay.valid, getNextState(prev, touchWay.bits), prev))
+  def getNextState(state: UInt, touchWays: Vec[Valid[UInt]]): UInt = {
+    val touchWayMask = VecInit.tabulate(NumWays) { i =>
+      touchWays.map(touchWay => touchWay.valid && (touchWay.bits === i.U)).reduce(_ || _)
+    }
+    val miss      = !touchWayMask.reduce(_ || _)
+    val victim    = getVictim(state)
+    val nextState = WireInit(state)
+    when(miss) {
+      nextState := getNextState(state, victim)
+    }.otherwise {
+      nextState := touchWays.foldLeft(state)((prev, touchWay) =>
+        Mux(touchWay.valid, getNextState(prev, touchWay.bits), prev)
+      )
+    }
+    nextState
+  }
 
   def getNextState(state: UInt, touch: UInt): UInt
 
@@ -47,6 +61,7 @@ object ReplacerStateGen {
     algorithm match {
       case "Plru" => new PlruStateGen(numWays, accessSize)
       case "Lru"  => new LruStateGen(numWays, accessSize)
+      case "Rrip" => new RripStateGen(numWays, accessSize)
       case _      => throw new Exception(s"Unsupported replacement algorithm: $algorithm")
     }
 }

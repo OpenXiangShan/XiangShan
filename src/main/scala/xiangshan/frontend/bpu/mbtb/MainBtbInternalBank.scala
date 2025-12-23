@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
+import xiangshan.frontend.bpu.FilterQueue
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
@@ -33,8 +34,8 @@ class MainBtbInternalBank(
         val setIdx: UInt = UInt(SetIdxLen.W)
       }
       class Resp extends Bundle {
-        val entries:  Vec[MainBtbEntry]    = Vec(NumWay, new MainBtbEntry)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val entries: Vec[MainBtbEntry]      = Vec(NumWay, new MainBtbEntry)
+        val shareds: Vec[MainBtbSharedInfo] = Vec(NumWay, new MainBtbSharedInfo)
       }
 
       val req:  Valid[Req] = Flipped(Valid(new Req))
@@ -43,19 +44,20 @@ class MainBtbInternalBank(
 
     class WriteEntry extends Bundle {
       class Req extends Bundle {
-        val setIdx:  UInt         = UInt(SetIdxLen.W)
-        val wayMask: UInt         = UInt(NumWay.W)
-        val entry:   MainBtbEntry = new MainBtbEntry
+        val setIdx:  UInt              = UInt(SetIdxLen.W)
+        val wayMask: UInt              = UInt(NumWay.W)
+        val entry:   MainBtbEntry      = new MainBtbEntry
+        val shared:  MainBtbSharedInfo = new MainBtbSharedInfo
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
-    class WriteCounter extends Bundle {
+    class WriteShared extends Bundle {
       class Req extends Bundle {
-        val setIdx:   UInt                 = UInt(SetIdxLen.W)
-        val wayMask:  UInt                 = UInt(NumWay.W)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val setIdx:  UInt                   = UInt(SetIdxLen.W)
+        val wayMask: UInt                   = UInt(NumWay.W)
+        val shareds: Vec[MainBtbSharedInfo] = Vec(NumWay, new MainBtbSharedInfo)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -73,19 +75,19 @@ class MainBtbInternalBank(
 
     val resetDone: Bool = Output(Bool())
 
-    val read:         Read         = new Read
-    val writeEntry:   WriteEntry   = new WriteEntry
-    val writeCounter: WriteCounter = new WriteCounter
-    val flush:        Flush        = new Flush
+    val read:        Read        = new Read
+    val writeEntry:  WriteEntry  = new WriteEntry
+    val writeShared: WriteShared = new WriteShared
+    val flush:       Flush       = new Flush
   }
 
   val io: MainBtbInternalBankIO = IO(new MainBtbInternalBankIO)
 
   // alias
-  private val read         = io.read
-  private val writeEntry   = io.writeEntry
-  private val writeCounter = io.writeCounter
-  private val flush        = io.flush
+  private val read        = io.read
+  private val writeEntry  = io.writeEntry
+  private val writeShared = io.writeShared
+  private val flush       = io.flush
 
   private val entrySrams = Seq.tabulate(NumWay) { wayIdx =>
     Module(
@@ -105,18 +107,22 @@ class MainBtbInternalBank(
   }
 
   // we often need to update counter, but not the whole entry, so store counters in separate SRAMs for better power
-  private val counterSram = Module(new SRAMTemplate(
-    TakenCounter(),
-    set = NumSets,
-    way = NumWay,
-    singlePort = true,
-    shouldReset = true,
-    holdRead = true,
-    withClockGate = true,
-    hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl,
-    suffix = Option("bpu_mbtb_counter")
-  )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
+  private val sharedSrams = Seq.tabulate(NumWay) { wayIdx =>
+    Module(
+      new SRAMTemplate(
+        new MainBtbSharedInfo,
+        set = NumSets,
+        way = 1, // Not using way in the template, preparing for future skewed assoc
+        singlePort = true,
+        shouldReset = true,
+        holdRead = true,
+        withClockGate = true,
+        hasMbist = hasMbist,
+        hasSramCtl = hasSramCtl,
+        suffix = Option("bpu_mbtb_entry")
+      )
+    ).suggestName(s"mbtb_sram_shared_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
+  }
 
   private val entryWriteBuffer = Module(new WriteBuffer(
     new MainBtbEntrySramWriteReq,
@@ -125,28 +131,34 @@ class MainBtbInternalBank(
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
 
-  private val counterWriteBuffer = Module(new Queue(
-    new MainBtbCounterSramWriteReq,
-    WriteBufferSize,
-    pipe = true,
-    flow = true
-  ))
+  private val sharedWriteBuffers = Seq.tabulate(NumWay) { _ =>
+    Module(new FilterQueue(
+      new MainBtbSharedSramWriteReq,
+      WriteBufferSize,
+      pipe = true,
+      flow = false,
+      hasFilter = true,
+      hasOverrider = false,
+      filter = (older: MainBtbSharedSramWriteReq, newer: MainBtbSharedSramWriteReq) =>
+        older.setIdx === newer.setIdx
+    ))
+  }
 
   private val resetDone = RegInit(false.B)
-  when(entrySrams.map(_.io.r.req.ready).reduce(_ && _) && counterSram.io.r.req.ready) {
+  when((entrySrams :++ sharedSrams).map(_.io.r.req.ready).reduce(_ && _)) {
     resetDone := true.B
   }
   io.resetDone := resetDone
 
   /* *** sram -> io *** */
-  // handle entry & counter together
-  (entrySrams :+ counterSram).foreach { sram =>
+  // handle entry & shared together
+  (entrySrams :++ sharedSrams).foreach { sram =>
     sram.io.r.req.valid       := read.req.valid
     sram.io.r.req.bits.setIdx := read.req.bits.setIdx
   }
   // each entry sram template has 1 way, so here we only read data.head
-  read.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
-  read.resp.counters := counterSram.io.r.resp.data
+  read.resp.entries := VecInit(entrySrams.map(_.io.r.resp.data.head))
+  read.resp.shareds := VecInit(sharedSrams.map(_.io.r.resp.data.head))
 
   /* *** writeBuffer -> sram *** */
   // entry
@@ -156,19 +168,43 @@ class MainBtbInternalBank(
     way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
-  // counter
-  counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
-  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
-  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
-  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
-  counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
+
+  // state
+  private val entryWriteShared = Wire(Vec(NumWay, Decoupled(new MainBtbSharedSramWriteReq)))
+  entryWriteShared.zipWithIndex.foreach { case (shared, i) =>
+    shared.valid       := entryWriteBuffer.io.read(i).fire
+    shared.bits.setIdx := entryWriteBuffer.io.read(i).bits.setIdx
+    shared.bits.shared := entryWriteBuffer.io.read(i).bits.shared
+    assert( // when entry write fires, shared SRAM write must be ready, since they are read at the same time
+      !shared.valid || sharedSrams(i).io.w.req.ready,
+      s"entry fire but shared SRAM not ready, blame to align${alignIdx}_bank${bankIdx}_way${i}"
+    )
+  }
+  // have arbiter between shared write and entry write
+  // filter same setIdx writes in shared write buffer when entry write occurs
+  private val sharedWriteArbiter = Seq.tabulate(NumWay)(_ => Module(new Arbiter(new MainBtbSharedSramWriteReq, 2)))
+  (sharedSrams zip sharedWriteArbiter zip entryWriteShared zip sharedWriteBuffers).foreach {
+    case (((way, arbiter), entry), shared) =>
+      way.io.w.req.valid        := arbiter.io.out.valid && !way.io.r.req.valid
+      way.io.w.req.bits.data(0) := arbiter.io.out.bits.shared
+      way.io.w.req.bits.setIdx  := arbiter.io.out.bits.setIdx
+      arbiter.io.out.ready      := way.io.w.req.ready && !way.io.r.req.valid
+
+      // entry write has higher priority
+      arbiter.io.in(0) <> entry
+      arbiter.io.in(1) <> shared.io.deq
+
+      // filter same setIdx writes
+      shared.io.filter.valid := entry.valid
+      shared.io.filter.bits  := entry.bits
+  }
 
   /* *** io -> writeBuffer *** */
   // entry
   private val conflict =
     writeEntry.req.valid &&
       writeEntry.req.bits.setIdx === flush.req.bits.setIdx &&
-      writeEntry.req.bits.entry.tag === 0.U
+      writeEntry.req.bits.entry.tagLower === 0.U
 
   entryWriteBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
     val writeValid = writeEntry.req.valid && writeEntry.req.bits.wayMask(i)
@@ -191,15 +227,30 @@ class MainBtbInternalBank(
       ),
       valid
     )
+    bufWrite.bits.shared := RegEnable(
+      Mux(
+        writeValid,
+        writeEntry.req.bits.shared,
+        0.U.asTypeOf(new MainBtbSharedInfo)
+      ),
+      valid
+    )
   }
-  // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid
-  counterWriteBuffer.io.enq.bits.setIdx   := writeCounter.req.bits.setIdx
-  counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
-  counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters
 
+  // shared
+  sharedWriteBuffers.zipWithIndex.foreach { case (buf, i) =>
+    buf.io.enq.valid       := writeShared.req.valid && writeShared.req.bits.wayMask(i)
+    buf.io.enq.bits.setIdx := writeShared.req.bits.setIdx
+    buf.io.enq.bits.shared := writeShared.req.bits.shareds(i)
+  }
+
+  /* *** perf *** */
   private val perf_entryDropWrite = (0 until NumWay).map { i =>
     writeEntry.req.valid && writeEntry.req.bits.wayMask(i) && !entryWriteBuffer.io.write(i).ready
+  }.reduce(_ || _)
+
+  private val perf_sharedDropWrite = (0 until NumWay).map { i =>
+    writeShared.req.valid && writeShared.req.bits.wayMask(i) && !sharedWriteBuffers(i).io.enq.ready
   }.reduce(_ || _)
 
   XSPerfAccumulate(
@@ -207,13 +258,12 @@ class MainBtbInternalBank(
     writeEntry.req.valid && flush.req.valid && writeEntry.req.bits.setIdx === flush.req.bits.setIdx &&
       (writeEntry.req.bits.wayMask & flush.req.bits.wayMask).orR
   )
-
-  XSPerfAccumulate(
-    "counter_writebuffer_drop_write",
-    !counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
-  )
   XSPerfAccumulate(
     "entry_writebuffer_drop_write",
     perf_entryDropWrite
+  )
+  XSPerfAccumulate(
+    "shared_writebuffer_drop_write",
+    perf_sharedDropWrite
   )
 }

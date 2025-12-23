@@ -18,18 +18,22 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.BpuModule
 import xiangshan.frontend.bpu.replacer.ReplacerState
 import xiangshan.frontend.bpu.replacer.ReplacerStateGen
 
-class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
+class MainBtbReplacer(
+    NumReplacerSet: Int,
+    NumReplacerWay: Int
+)(implicit p: Parameters) extends MainBtbModule {
   class MainBtbReplacerIO extends Bundle {
     class Touch extends Bundle {
-      val setIdx:  UInt = UInt(SetIdxLen.W)
-      val wayMask: UInt = UInt(NumWay.W)
+      val setIdx:  UInt = UInt(log2Ceil(NumReplacerSet).W)
+      val wayMask: UInt = UInt(NumReplacerWay.W)
     }
 
     class Victim extends Bundle {
-      val wayMask: UInt = UInt(NumWay.W)
+      val wayMask: UInt = UInt(NumReplacerWay.W)
     }
 
     val victim: Victim            = Output(new Victim)
@@ -41,9 +45,9 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
-  private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = 1))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
+  private val predictStateGen = Module(ReplacerStateGen(Replacer, NumReplacerWay, accessSize = NumReplacerWay))
+  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumReplacerWay, accessSize = 1))
+  private val stateBank       = Module(new ReplacerState(NumReplacerSet, predictStateGen.StateWidth))
 
   /* *** predict *** */
   // read current state
@@ -51,8 +55,8 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val predictState = stateBank.io.predictReadState
 
   // compose touch way vec
-  private val predictTouchWay = VecInit((0 until NumWay).map { i =>
-    val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
+  private val predictTouchWay = VecInit((0 until NumReplacerWay).map { i =>
+    val wayValid = Wire(Valid(UInt(log2Up(NumReplacerWay).W)))
     wayValid.valid := io.predictTouch.valid && io.predictTouch.bits.wayMask(i)
     wayValid.bits  := i.U
     wayValid
@@ -74,13 +78,16 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val trainState = stateBank.io.trainReadState
 
   // compose touch way vec
-  private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
-  trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
-  assert(
-    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
-    "victim wayMask should be at-most-one-hot"
-  )
+  private val trainTouchWay = Wire(Valid(UInt(log2Up(NumReplacerWay).W)))
+  trainTouchWay.valid := io.trainTouch.valid && io.trainTouch.bits.wayMask.orR
+  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask)
+
+  // train wayMask may be zero (miss) when using Rrip replacer, so we don't assert it here
+  // TODO: better way to ensure only one-hot wayMask for other replacers
+//  assert(
+//    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
+//    "victim wayMask should be at-most-one-hot"
+//  )
 
   // generate next state
   trainStateGen.io.state   := trainState

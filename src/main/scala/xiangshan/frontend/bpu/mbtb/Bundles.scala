@@ -36,7 +36,12 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // whether the entry is valid
   val valid: Bool = Bool()
 
-  val tag:       UInt            = UInt(TagWidth.W)
+  // Short branch appears more frequently than long branch
+  // So we use full tag for short branch to reduce conflict miss
+  // and use short/lower tag for long branch to save area
+  // TODO: use folded tag
+  val tagLower: UInt = UInt(TagLowerWidth.W)
+
   val attribute: BranchAttribute = new BranchAttribute
 
   // Whether a branch is bias toward a single target
@@ -47,30 +52,84 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // Relative position to the aligned start addr
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
 
-  //  Branch target info
-  val targetCarry:     TargetCarry = new TargetCarry
-  val targetLowerBits: UInt        = UInt(TargetWidth.W)
+  val targetLower: UInt = UInt(TargetLowerWidth.W)
+
+  // Whether is a long branch, see below for details
+  val targetCrossPage: Bool = Bool()
 
 //  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
 }
+// Shared Info
+// short branch :
+// - need target carry to reconstruct full target
+// - appears more frequently, so store full tag to reduce conflict miss
+//
+// long branch :
+// - always taken, no counter and carry needed, but need to access page table
+//
+// Therefore, the static info has two different formats, store them together to save area
+//
 
-class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx:       UInt         = UInt(SetIdxLen.W)
-  val entry:        MainBtbEntry = new MainBtbEntry
-  override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
+class ShortSharedInfo(implicit p: Parameters) extends MainBtbBundle {
+  val tagUpper:    UInt            = UInt((TagFullWidth - TagLowerWidth).W)
+  val targetCarry: TargetCarry     = new TargetCarry
+  val counter:     SaturateCounter = TakenCounter()
 }
 
-class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
-  val setIdx:   UInt                 = UInt(SetIdxLen.W)
-  val wayMask:  UInt                 = UInt(NumWay.W)
-  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+class LongSharedInfo(implicit p: Parameters) extends MainBtbBundle {
+  val pageIdx: UInt = UInt(log2Ceil(NumPageTableEntries).W)
+}
+
+class MainBtbSharedInfo(implicit p: Parameters) extends MainBtbBundle {
+  private def SharedInfoWidth: Int = math.max(
+    new ShortSharedInfo().getWidth,
+    new LongSharedInfo().getWidth
+  )
+
+  val bits: UInt = UInt(SharedInfoWidth.W)
+
+  def asShort: ShortSharedInfo = bits.asTypeOf(new ShortSharedInfo)
+  def asLong:  LongSharedInfo  = bits.asTypeOf(new LongSharedInfo)
+}
+
+class MainBtbPageTableEntry(implicit p: Parameters) extends MainBtbBundle {
+  val vpnLower:  UInt = UInt(VpnLowerWidth.W)
+  val regionWay: UInt = UInt(RegionWayIdxLen.W)
+  // TODO: move RRPV here
+}
+
+class MainBtbRegionTableEntry(implicit p: Parameters) extends MainBtbBundle {
+  val vpnUpper: UInt = UInt(VpnUpperWidth.W)
+}
+
+class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
+  val setIdx: UInt              = UInt(SetIdxLen.W)
+  val entry:  MainBtbEntry      = new MainBtbEntry
+  val shared: MainBtbSharedInfo = new MainBtbSharedInfo
+  override def tag: Option[UInt] =
+    Some(Cat(
+      // if not cross page, i.e. a short branch, use full tag
+      Mux(!entry.targetCrossPage, shared.asShort.tagUpper, 0.U),
+      entry.tagLower,
+      entry.position
+    ))
+}
+
+class MainBtbSharedSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx: UInt              = UInt(SetIdxLen.W)
+  val shared: MainBtbSharedInfo = new MainBtbSharedInfo
+}
+
+class MainBtbPageTableEntrySramWriteReq(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx: UInt                  = UInt(PageTableSetIdxLen.W)
+  val entry:  MainBtbPageTableEntry = new MainBtbPageTableEntry
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
-  val rawHit:    Bool            = Bool()
-  val position:  UInt            = UInt(CfiPositionWidth.W)
-  val attribute: BranchAttribute = new BranchAttribute
-  val counter:   SaturateCounter = TakenCounter()
+  val rawHit:    Bool              = Bool()
+  val position:  UInt              = UInt(CfiPositionWidth.W)
+  val attribute: BranchAttribute   = new BranchAttribute
+  val shared:    MainBtbSharedInfo = new MainBtbSharedInfo
 
   def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
 }
@@ -80,7 +139,6 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbTrace(implicit p: Parameters) extends MainBtbBundle {
-
   val startPc:     PrunedAddr      = PrunedAddr(VAddrBits)
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
