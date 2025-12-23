@@ -155,7 +155,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
     vls.vpu.vl := entries.vl
     vls.vpu.vmask := Fill(VLEN, 1.U)
   })
-  io.uopWriteback.bits.perfDebugInfo.foreach(_ := entries.uop.debugInfo)
+  io.uopWriteback.bits.perfDebugInfo.foreach(_ := entries.uop.perfDebugInfo)
   io.uopWriteback.bits.debug_seqNum.foreach(_ := entries.uop.debug_seqNum)
 
 }

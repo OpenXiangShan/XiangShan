@@ -763,9 +763,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s0_out.isMisalign := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
   when(io.tlb.req.valid && (s0_sel_src.isFirstIssue || s0_sel_src.repForTlbMiss)) {
-    s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
+    s0_out.uop.perfDebugInfo.tlbFirstReqTime := GTimer()
   }.otherwise{
-    s0_out.uop.debugInfo.tlbFirstReqTime := s0_sel_src.uop.debugInfo.tlbFirstReqTime
+    s0_out.uop.perfDebugInfo.tlbFirstReqTime := s0_sel_src.uop.perfDebugInfo.tlbFirstReqTime
   }
   s0_out.schedIndex     := s0_sel_src.sched_idx
   //for Svpbmt Nc
@@ -891,11 +891,11 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s1_gpaddr_dup_lsu   := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
 
   when (io.tlb.resp.valid && !s1_tlb_miss) {
-    s1_out.uop.debugInfo.tlbRespTime := GTimer()
+    s1_out.uop.perfDebugInfo.tlbRespTime := GTimer()
   }.elsewhen (io.tlb.resp.valid && s1_tlb_miss) {
-    s1_out.uop.debugInfo.tlbRespTime := s1_in.uop.debugInfo.tlbFirstReqTime
+    s1_out.uop.perfDebugInfo.tlbRespTime := s1_in.uop.perfDebugInfo.tlbFirstReqTime
   }.otherwise {
-    s1_out.uop.debugInfo.tlbRespTime := s1_in.uop.debugInfo.tlbRespTime
+    s1_out.uop.perfDebugInfo.tlbRespTime := s1_in.uop.perfDebugInfo.tlbRespTime
   }
 
   io.tlb.req_kill   := s1_kill || s1_dly_err
@@ -964,7 +964,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s1_out.isForVSnonLeafPTE := io.tlb.resp.bits.isForVSnonLeafPTE
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
-  s1_out.rep_info.debug    := s1_in.uop.debugInfo
+  s1_out.rep_info.debug    := s1_in.uop.perfDebugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.delayedLoadError  := s1_dly_err
   s1_out.nc := (s1_nc || Pbmt.isNC(s1_pbmt)) && !s1_prf
@@ -1326,7 +1326,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.rep_info.rep_carry       := io.dcache.resp.bits.replayCarry
   s2_out.rep_info.mshr_id         := io.dcache.resp.bits.mshr_id
   s2_out.rep_info.last_beat       := s2_in.paddr(log2Up(refillBytes))
-  s2_out.rep_info.debug           := s2_in.uop.debugInfo
+  s2_out.rep_info.debug           := s2_in.uop.perfDebugInfo
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
 
@@ -1517,7 +1517,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.rollback.bits.ftqOffset := s3_out.bits.uop.ftqOffset
   io.rollback.bits.level     := Mux(s3_rep_frm_fetch || s3_frm_mis_flush, RedirectLevel.flush, RedirectLevel.flushAfter)
   io.rollback.bits.target    := s3_out.bits.uop.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
+  io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.perfDebugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   io.lsq.ldin.bits.uop := s3_out.bits.uop
@@ -1582,7 +1582,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s3_wb.debug.isPerfCnt := false.B
   s3_wb.debug.paddr := s3_in.paddr
   s3_wb.debug.vaddr := s3_in.vaddr
-  s3_wb.perfDebugInfo.foreach(_ := s3_out.bits.uop.debugInfo)
+  s3_wb.perfDebugInfo.foreach(_ := s3_out.bits.uop.perfDebugInfo)
   s3_wb.debug_seqNum.foreach(_  := s3_out.bits.uop.debug_seqNum)
 
   val s3_ld_wb_meta = Wire(new ExuOutput(param))
