@@ -193,6 +193,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // if need replay deallocate entry
   val lastCanAccept = GatedValidRegNext(acceptedVec)
   val lastAllocIndex = GatedRegNext(enqIndexVec)
+  val willRevoke = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -201,6 +202,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
       freeMaskVec(revokeIndex) := true.B
+      willRevoke(revokeIndex) := true.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -295,7 +297,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect) && !willRevoke(j)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
