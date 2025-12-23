@@ -437,7 +437,7 @@ object Pbmt {
   def rsvd: UInt = "b11".U  // Reserved for future standard use
   def width: Int = 2
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(width.W)
   def isUncache(a: UInt) = a===nc || a===io
   def isPMA(a: UInt) = a===pma
   def isNC(a: UInt) = a===nc
