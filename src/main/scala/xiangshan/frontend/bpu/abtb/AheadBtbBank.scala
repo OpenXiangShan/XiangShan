@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import utility.sram.SRAMTemplate
+import utility.sram.SplittedSRAMTemplate
 import xiangshan.frontend.bpu.WriteBuffer
 
 /**
@@ -34,26 +34,29 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
   }
   val io: BankIO = IO(new BankIO)
 
-  private val sram = Module(new SRAMTemplate(
+  private val sram = Module(new SplittedSRAMTemplate(
     new AheadBtbEntry,
     set = NumSets,
     way = NumWays,
-    singlePort = true,
+    waySplit = NumWays / 2,
+    dataSplit = 1,
     shouldReset = true,
-    holdRead = true,
+    singlePort = true,
     withClockGate = true,
+    holdRead = true,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl,
     suffix = Option("bpu_abtb")
   ))
-
   /* --------------------------------------------------------------------------------------------------------------
      read
      -------------------------------------------------------------------------------------------------------------- */
 
-  sram.io.r.req.valid       := io.readReq.valid
-  sram.io.r.req.bits.setIdx := io.readReq.bits.setIdx
-  io.readReq.ready          := sram.io.r.req.ready
+  sram.io.r.apply(
+    valid = io.readReq.valid,
+    setIdx = io.readReq.bits.setIdx
+  )
+  io.readReq.ready := sram.io.r.req.ready
 
   io.readResp.entries := sram.io.r.resp.data
 
@@ -71,19 +74,23 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     nameSuffix = s"abtbBank$bandIdx"
   ))
 
+  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
+  private val writeEntry   = writeBuffer.io.read.head.bits.entry
+  private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
+  private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)
+
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
   writeBuffer.io.write.head.valid := io.writeReq.valid
   writeBuffer.io.write.head.bits  := io.writeReq.bits
 
   writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid
 
-  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
-  private val writeEntry   = writeBuffer.io.read.head.bits.entry
-  private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
-  private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)
-
-  sram.io.w.apply(writeValid, writeEntry, writeSetIdx, writeWayMask)
-
+  sram.io.w.apply(
+    valid = writeValid,
+    data = writeEntry,
+    setIdx = writeSetIdx,
+    waymask = writeWayMask
+  )
   // when entry is written to sram, we need to notify takenCounter and replacer
   io.writeResp.valid             := writeBuffer.io.read.head.fire
   io.writeResp.bits.needResetCtr := writeBuffer.io.read.head.bits.needResetCtr
