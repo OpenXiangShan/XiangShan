@@ -175,9 +175,21 @@ class MainBtbAlignBank(
   dontTouch(s2_hitMask)
 
   // update replacer
-  replacer.io.predictTouch.valid        := s2_fire && s2_hitMask.reduce(_ || _)
+  /* touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
+   * TODO: As tage/sc results have worse timing and more complexity, here we use baseTable (in mbtb) only,
+   *       hopefully this is enough for replacer updates.
+   */
+  private val s2_takenMask = VecInit(r.resp.predictions.map { pred =>
+    pred.valid && (
+      pred.bits.attribute.isConditional && pred.bits.taken ||
+        pred.bits.attribute.isDirect ||
+        pred.bits.attribute.isIndirect
+    )
+  })
+
+  replacer.io.predictTouch.valid        := s2_fire && s2_takenMask.reduce(_ || _)
   replacer.io.predictTouch.bits.setIdx  := getReplacerSetIndex(s2_startPc)
-  replacer.io.predictTouch.bits.wayMask := s2_hitMask.asUInt
+  replacer.io.predictTouch.bits.wayMask := s2_takenMask.asUInt
 
   /* *** t1 ***
    * send write req to internal banks (srams)
