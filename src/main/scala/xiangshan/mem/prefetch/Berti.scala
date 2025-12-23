@@ -956,7 +956,7 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   val trainValid = trainFilter.io.trainReq.valid
   val trainBits = trainFilter.io.trainReq.bits
   val demandMiss = trainValid && trainBits.miss
-  val demandPfHit = trainValid && isFromBerti(trainBits.metaSource)
+  val demandPfHit = trainValid && isFromL1Prefetch(trainBits.metaSource)
 
   historyTable.io.access.valid := demandMiss || demandPfHit
   historyTable.io.access.bits.pc := trainBits.pc
