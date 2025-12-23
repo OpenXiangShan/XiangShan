@@ -562,7 +562,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trace.bits.allocWayIdx       := OHToUInt(t2_allocateWayMaskOH)
   }
 
-  private val tageTraceDBTables = (0 until NumTables).map { i =>
+  private val tageTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
     ChiselDB.createTable(s"CondTrace_${i}", new ConditionalBranchTrace, EnableTageTrace)
   }
   tageTraceDBTables.zip(condTraceVec).foreach { case (dbTable, condTrace) =>
