@@ -58,7 +58,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircu
   })
 
   val bankAddrWidth = log2Up(CommitWidth)
-  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RobPtr))))
+  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(i => RobPtr(false.B, i.U))))
   val deqPosition = deqPtrVec(0).value(bankAddrWidth - 1, 0)
 
   // for exceptions (flushPipe included) and interrupts:
