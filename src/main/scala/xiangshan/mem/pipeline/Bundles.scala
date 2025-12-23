@@ -30,6 +30,7 @@ import xiangshan.mem.LoadStage._
 sealed trait HasLoadPipeBundleParam {
   def hasPAddr: Boolean = false
   def hasAddrTrans: Boolean = false
+  def hasNoQuery: Boolean = false
   def hasPAddrChecked: Boolean = false
   def replayToLRQ: Boolean = false
   def replayFromLRQ: Boolean = false
@@ -61,15 +62,18 @@ class LoadPipeBundle(
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val paddr = Option.when(param.hasAddrTrans || param.hasPAddr)(UInt(PAddrBits.W))
+  val noQuery = Option.when(param.hasNoQuery)(Bool())
 
   // unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
+  val readWholeBank = Option.when(param.hasUnalignHandling)(Bool()) // TODO: remove this
 
   // MMU & exception handling
   val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
   val tlbException = Option.when(param.hasAddrTrans)(new TlbRespExcp)
   val pbmt = Option.when(param.hasAddrTrans)(Pbmt())
+  val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
   val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
 
   val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
@@ -88,9 +92,10 @@ class LoadPipeBundle(
 
   val forwardDChannel = Option.when(param.replayFromLRQ)(Bool())
   val uncacheReplay = Option.when(param.replayFromLRQ)(Bool())
-  val nc = Option.when(param.replayFromLRQ)(Bool())
-  def ncReplay(): Bool = uncacheReplay.getOrElse(false.B) && nc.getOrElse(false.B)
-  def mmioReplay(): Bool = uncacheReplay.getOrElse(false.B) && !nc.getOrElse(false.B)
+  val ncReplay = Option.when(param.replayFromLRQ)(Bool())
+  def isNCReplay(): Bool = uncacheReplay.getOrElse(false.B) && ncReplay.getOrElse(false.B)
+  def isMMIOReplay(): Bool = uncacheReplay.getOrElse(false.B) && !ncReplay.getOrElse(false.B)
+  def isUncacheReplay(): Bool = uncacheReplay.getOrElse(false.B)
 
   // vector
   val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
@@ -119,6 +124,7 @@ class LoadPipeBundle(
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare
+    readWholeBank.get := DontCare
   }
   def DontCareReplayFromLRQFields(): Unit = {
     mshrId.get := DontCare
@@ -126,7 +132,7 @@ class LoadPipeBundle(
     cause.get := 0.U.asTypeOf(cause.get)
     forwardDChannel.get := false.B
     uncacheReplay.get := false.B
-    nc.get := false.B
+    ncReplay.get := false.B
   }
   def DontCareVectorFields(): Unit = {
     elemIdx.get := 0.U
@@ -160,7 +166,8 @@ case class LoadStageIOParam()(
 ) extends HasLoadPipeBundleParam with OnLoadStage {
   // TODO
   override val hasPAddr: Boolean = true
-  // override val hasAddrTrans: Boolean =
+  override val hasAddrTrans: Boolean = afterS1
+  override val hasNoQuery: Boolean = isS0
   // override val hasPAddrChecked: Boolean =
   // override val replayToLRQ: Boolean =
   override val replayFromLRQ: Boolean = true
