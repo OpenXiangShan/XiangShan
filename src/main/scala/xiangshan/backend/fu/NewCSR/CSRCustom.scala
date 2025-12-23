@@ -68,7 +68,6 @@ trait CSRCustom { self: NewCSR =>
 }
 
 class SbpctlBundle extends CSRBundle {
-  // val UTAGE_ENABLE  = RW(7).withReset(true.B)
   val RAS_ENABLE    = RW(6).withReset(true.B)
   val ITTAGE_ENABLE = RW(5).withReset(true.B)
   val SC_ENABLE     = RW(4).withReset(true.B)
