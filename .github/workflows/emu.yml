@@ -103,7 +103,7 @@ jobs:
       - name: check interface between XSNoCDiffTop and Difftest
         run: |
           cd $GITHUB_WORKSPACE
-          python3 difftest/scripts/st_tools/interface.py build/rtl/SimTop.sv --interface build/difftest-interface.sv
+          python3 difftest/scripts/st_tools/interface.py build/rtl/SimTop.sv --interface build/difftest-interface.sv --path_level 4
           sed 's|^|build/rtl/|' difftest/build/rtl/filelist.f | xargs -d '\n' rm -f
           rm -rf build/rtl/DiffExt*
           verilator --lint-only -Wno-fatal -Wno-MODDUP -Wno-lint --top-module XSDiffTopChecker \
