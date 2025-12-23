@@ -226,8 +226,11 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RobSize)
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    val flushItself = redirect.bits.flushItself() && this === redirect.bits.robIdx
-    redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx))
+    // TODO: is it only used for redirect? May be Fixed Later
+    // TODO: Maybe We should reload some operation or func
+    val flushItself = this === redirect.bits.robIdx && this.isFormer === redirect.bits.robIdx.isFormer && redirect.bits.flushItself()
+    val flushHalf   = this === redirect.bits.robIdx && this.isFormer.asUInt < redirect.bits.robIdx.isFormer.asUInt
+      redirect.valid && (flushItself || flushHalf || isAfter(this, redirect.bits.robIdx))
   }
 
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
