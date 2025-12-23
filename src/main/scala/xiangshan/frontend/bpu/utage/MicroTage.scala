@@ -19,6 +19,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
+import utility.ChiselDB
 import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
@@ -105,6 +106,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_trainMeta               = io.fastTrain.get.bits.utageMeta
   private val t0_trainData               = io.fastTrain.get.bits.finalPrediction
   private val t0_trainValid              = io.fastTrain.get.valid
+  private val t0_trainStartPc            = io.fastTrain.get.bits.startPc
   private val t0_trainOverride           = io.fastTrain.get.bits.hasOverride
   private val t0_histTableTakenMap       = t0_trainMeta.histTableTakenMap
   private val t0_histTableHitMap         = t0_trainMeta.histTableHitMap
@@ -136,8 +138,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_histTableNeedUpdate = t0_predHit && t0_trainValid
   private val t0_updateTaken         = (t0_predCfiPosition === t0_trainData.cfiPosition) && t0_trainData.taken
   private val t0_updateCfiPosition   = t0_predCfiPosition
-  private val t0_allocTaken          = t0_trainData.attribute.isConditional && t0_trainData.taken
-  private val t0_allocCfiPosition =
+  private val t0_actualTaken         = t0_trainData.attribute.isConditional && t0_trainData.taken
+  private val t0_actualCfiPosition =
     Mux(t0_trainData.attribute.isConditional, t0_trainData.cfiPosition, t0_predCfiPosition)
 
   private val t0_providerMask      = PriorityEncoderOH(t0_trainMeta.histTableHitMap.reverse).reverse
@@ -187,8 +189,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       (t0_histHitMisPred || (baseNotMatchHistPred && fastTrainHasPredBr))
 
     t.update.bits.startPc                := io.fastTrain.get.bits.startPc
-    t.update.bits.allocTaken             := t0_allocTaken
-    t.update.bits.allocCfiPosition       := t0_allocCfiPosition
+    t.update.bits.allocTaken             := t0_actualTaken
+    t.update.bits.allocCfiPosition       := t0_actualCfiPosition
     t.update.bits.updateTaken            := t0_updateTaken
     t.update.bits.updateCfiPosition      := t0_updateCfiPosition
     t.update.bits.usefulCorrect          := !t0_histHitMisPred
@@ -197,69 +199,66 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // t.update.bits.oldUseful              := t0_trainMeta.hitUseful
   }
 
+  /* --------------------------------------------------------------------------------------------------------------
+     MicroTage Trace
+     -------------------------------------------------------------------------------------------------------------- */
+  private val debug_multiHit   = PopCount(t0_histTableHitMap) > 1.U
+  private val debug_tableMetas = tables.map(_.trainDebug)
+  private val debug_metaCases  = t0_histTableHitMap.zip(debug_tableMetas).map { case (valid, meta) => valid -> meta }
+  private val debug_tableMeta  = MuxCase(0.U.asTypeOf(new MicroTageDebug), debug_metaCases.reverse)
+
+  private val utageTrace = Wire(Valid(new MicroTageTrace))
+  utageTrace.valid            := t0_trainValid && (t0_histTableNeedAlloc || t0_histTableNeedUpdate)
+  utageTrace.bits.startVAddr  := t0_trainStartPc.toUInt
+  utageTrace.bits.branchPc    := getCfiPcFromPosition(t0_trainStartPc, t0_actualCfiPosition).toUInt
+  utageTrace.bits.cfiPosition := t0_actualCfiPosition
+  utageTrace.bits.hit         := t0_predHit
+  utageTrace.bits.misPred     := t0_histHitMisPred
+  utageTrace.bits.actualTaken := t0_actualTaken
+  utageTrace.bits.tableId     := debug_tableMeta.debug_tableId
+  utageTrace.bits.setIdx      := debug_tableMeta.debug_idx
+  utageTrace.bits.multiHit    := debug_multiHit
+  utageTrace.bits.oldUseful   := debug_tableMeta.debug_useful
+  utageTrace.bits.oldTakenCtr := debug_tableMeta.debug_takenCtr
+  utageTrace.bits.needUpdate  := t0_histTableNeedUpdate
+  utageTrace.bits.needAlloc   := t0_histTableNeedAlloc
+  utageTrace.bits.allocFailed := (t0_allocMask === 0.U) && t0_histTableNeedAlloc
+
+  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTraceAndDebug)
+  utageTraceDBTables.log(
+    data = utageTrace.bits,
+    en = t0_trainValid && utageTrace.valid,
+    clock = clock,
+    reset = reset
+  )
+
   // ==========================================================================
   // === PERF === Performance Counters Section
   // ==========================================================================
   // === PHR Test ===
-  private val testIdxFhInfos = TableInfos.zipWithIndex.map {
-    case (info, i) =>
-      val t = new FoldedHistoryInfo(info.HistoryLength, min(log2Ceil(info.NumSets), info.HistoryLength))
-      t
-  }
-  private val testTagFhInfos = TableInfos.zipWithIndex.map {
-    case (info, i) =>
-      val t = new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, info.HistBitsInTag))
-      t
-  }
-  private val testAltTagFhInfos = TableInfos.zipWithIndex.map {
-    case (info, i) =>
-      val t = new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, info.HistBitsInTag - 1))
-      t
+  if (EnableTraceAndDebug) {
+    predMeta.bits.debug_startVAddr.foreach(_ := io.startPc.toUInt)
+    predMeta.bits.debug_useMicroTage.foreach(_ := false.B) // no use, only for placeholder.
+    predMeta.bits.debug_predIdx0.foreach(_ := tables(0).debug_predIdx)
+    predMeta.bits.debug_predTag0.foreach(_ := tables(0).debug_predTag)
   }
 
-  def computeHash(startPc: UInt, allFh: PhrAllFoldedHistories, tableId: Int): (UInt, UInt) = {
-    val unhashedIdx = getUnhashedIdx(startPc)
-    val unhashedTag = getUnhashedTag(startPc)
-    val idxFh       = allFh.getHistWithInfo(testIdxFhInfos(tableId)).foldedHist
-    val tagFh       = allFh.getHistWithInfo(testTagFhInfos(tableId)).foldedHist
-    val altTagFh    = allFh.getHistWithInfo(testAltTagFhInfos(tableId)).foldedHist
-    val idx = if (testIdxFhInfos(tableId).FoldedLength < log2Ceil(TableInfos(tableId).NumSets)) {
-      (unhashedIdx ^ Cat(idxFh, idxFh))(log2Ceil(TableInfos(tableId).NumSets) - 1, 0)
-    } else {
-      (unhashedIdx ^ idxFh)(log2Ceil(TableInfos(tableId).NumSets) - 1, 0)
-    }
-    val lowTag  = (unhashedTag ^ tagFh ^ (altTagFh << 1))(TableInfos(tableId).HistBitsInTag - 1, 0)
-    val highTag = connectPcTag(unhashedIdx, tableId)
-    val tag     = Cat(highTag, lowTag)(TableInfos(tableId).TagWidth - 1, 0)
-    (idx, tag)
-  }
-
-  private val (s0_idxTable0, s0_tagTable0) = computeHash(io.startPc.toUInt, io.foldedPathHist, 0)
-  private val (s0_idxTable1, s0_tagTable1) = computeHash(io.startPc.toUInt, io.foldedPathHist, 1)
-
-  predMeta.bits.testUseMicroTage  := false.B // no use, only for placeholder.
-  predMeta.bits.testPredIdx0      := s0_idxTable0
-  predMeta.bits.testPredTag0      := s0_tagTable0
-  predMeta.bits.testPredIdx1      := s0_idxTable1
-  predMeta.bits.testPredTag1      := s0_tagTable1
-  predMeta.bits.testPredStartAddr := io.startPc.toUInt
-
-  private val (trainIdx0, trainTag0) =
-    computeHash(io.fastTrain.get.bits.startPc.toUInt, io.foldedPathHistForTrain, 0)
-  private val (trainIdx1, trainTag1) =
-    computeHash(io.fastTrain.get.bits.startPc.toUInt, io.foldedPathHistForTrain, 1)
-
-  XSPerfAccumulate(
-    "train_useMicroTage_and_override_fromFastTrain",
-    t0_trainValid && t0_trainMeta.testUseMicroTage && io.fastTrain.get.bits.hasOverride
-  )
-  XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.testUseMicroTage)
+  private val trainIdx0 = debug_tableMetas(0).debug_idx
+  private val trainTag0 = debug_tableMetas(0).debug_tag
 
   XSPerfAccumulate("train_needAlloc", t0_trainValid && t0_histTableNeedAlloc)
   XSPerfAccumulate("train_needUpdate", t0_trainValid && t0_histTableNeedUpdate)
   XSPerfAccumulate("train_histHitMisPred", t0_trainValid && t0_histHitMisPred)
-  XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.testPredIdx0 === trainIdx0))
-  XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.testPredTag0 === trainTag0))
-  XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.testPredIdx0 =/= trainIdx0))
-  XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.testPredTag0 =/= trainTag0))
+  if (EnableTraceAndDebug) {
+    XSPerfAccumulate(
+      "train_useMicroTage_and_override_fromFastTrain",
+      t0_trainValid && t0_trainMeta.debug_useMicroTage.get && io.fastTrain.get.bits.hasOverride
+    )
+    XSPerfAccumulate("train_useMicroTage_fromFastTrain", t0_trainValid && t0_trainMeta.debug_useMicroTage.get)
+    XSPerfAccumulate("train_idx_hit", t0_trainValid && (t0_trainMeta.debug_predIdx0.get === trainIdx0))
+    XSPerfAccumulate("train_tag_hit", t0_trainValid && (t0_trainMeta.debug_predTag0.get === trainTag0))
+    XSPerfAccumulate("train_idx_miss", t0_trainValid && (t0_trainMeta.debug_predIdx0.get =/= trainIdx0))
+    XSPerfAccumulate("train_tag_miss", t0_trainValid && (t0_trainMeta.debug_predTag0.get =/= trainTag0))
+  }
+
 }

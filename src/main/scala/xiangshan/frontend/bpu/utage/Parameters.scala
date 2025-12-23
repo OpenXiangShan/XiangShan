@@ -28,11 +28,12 @@ case class MicroTageParameters(
       new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
       // new MicroTageInfo(128, 32, 16, 24)
     ),
-    TakenCtrWidth: Int = 3,
-    NumTables:     Int = 2,
-    TickWidth:     Int = 5,
-    UsefulWidth:   Int = 2,
-    BaseTableSize: Int = 512 // TODO: Not necessarily required; currently unused.
+    TakenCtrWidth:       Int = 3,
+    NumTables:           Int = 2,
+    TickWidth:           Int = 5,
+    UsefulWidth:         Int = 2,
+    EnableTraceAndDebug: Boolean = false,
+    BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
 trait HasMicroTageParameters extends HasBpuParameters {
@@ -44,12 +45,14 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
 
-  def TestPredIdx0Width: Int = log2Ceil(TableInfos(0).NumSets)
-  def TestPredTag0Width: Int = TableInfos(0).TagWidth
-  def TestPredIdx1Width: Int = log2Ceil(TableInfos(1).NumSets)
-  def TestPredTag1Width: Int = TableInfos(1).TagWidth
+  def MaxNumSets:        Int = 512
+  def MaxTagLen:         Int = 16
+  def DebugPredIdxWidth: Int = log2Ceil(TableInfos(0).NumSets)
+  def DebugPredTagWidth: Int = TableInfos(0).TagWidth
+
   // utage can only be fast-trained, we don't have continous predict block on resolve
-  def EnableFastTrain: Boolean = true
+  def EnableFastTrain:     Boolean = true
+  def EnableTraceAndDebug: Boolean = utageParameters.EnableTraceAndDebug
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
   def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)

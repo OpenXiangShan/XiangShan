@@ -20,21 +20,22 @@ import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
-trait Helpers extends HasMicroTageParameters {
+trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
   private object TAGEHistoryType {
     val Short   = 0
     val Medium  = 1
     val Long    = 2
     val Unknown = 3
   }
-  def getUnhashedIdx(pc: UInt): UInt = pc(VAddrBits - 1, instOffsetBits)
-  def getUnhashedTag(pc: UInt): UInt = pc(VAddrBits - 1, log2Ceil(FetchBlockAlignSize))
-  def connectPcTag(pc: UInt, tableId: Int): UInt = {
+  def getUnhashedIdx(pc: PrunedAddr): UInt = pc(VAddrBits - 1, instOffsetBits)
+  def getUnhashedTag(pc: PrunedAddr): UInt = pc(VAddrBits - 1, log2Ceil(FetchBlockAlignSize))
+  def connectPcTag(partPc: UInt, tableId: Int): UInt = {
     require(tableId >= 0 && tableId <= 3, s"tableId must be in [0,3], got $tableId")
     def concatBits(bits: Seq[Bool]): UInt = if (bits.isEmpty) 0.U(1.W) else bits.foldLeft(0.U(0.W))(Cat(_, _))
-    val tagPC = pc
+    val tagPC = partPc
     val hashPC = tableId match {
       case TAGEHistoryType.Short =>
         concatBits(PCTagHashBitsForShortHistory.map(tagPC(_)))
