@@ -45,7 +45,7 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val out = Output(Vec(RenameWidth, new RobPtr))
   })
 
-  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(_.U.asTypeOf(new RobPtr)))
+  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(i => RobPtr(false.B, i.U)))
 
   // enqueue
   val canAccept = io.allowEnqueue && !io.hasBlockBackward

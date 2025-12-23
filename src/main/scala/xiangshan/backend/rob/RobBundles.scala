@@ -235,7 +235,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     val out = Wire(new RobPtr)
     out.flag := this.flag
     out.value := Cat(this.value(this.PTR_WIDTH-1, log2Up(CommitWidth)), 0.U(log2Up(CommitWidth).W))
-    out.isFormer := false.B
+    out.isFormer := true.B
     out
   }
 
@@ -246,7 +246,7 @@ object RobPtr {
     val ptr = Wire(new RobPtr)
     ptr.flag := f
     ptr.value := v
-    ptr.isFormer := false.B
+    ptr.isFormer := true.B
     ptr
   }
 }
