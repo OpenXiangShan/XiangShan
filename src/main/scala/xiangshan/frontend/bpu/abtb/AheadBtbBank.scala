@@ -74,16 +74,16 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     nameSuffix = s"abtbBank$bandIdx"
   ))
 
-  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
-  private val writeEntry   = writeBuffer.io.read.head.bits.entry
-  private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
-  private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)
-
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
   writeBuffer.io.write.head.valid := io.writeReq.valid
   writeBuffer.io.write.head.bits  := io.writeReq.bits
 
   writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid
+
+  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
+  private val writeEntry   = writeBuffer.io.read.head.bits.entry
+  private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
+  private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)
 
   sram.io.w.apply(
     valid = writeValid,
