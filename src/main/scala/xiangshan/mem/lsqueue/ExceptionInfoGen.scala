@@ -54,7 +54,7 @@ class ExceptionOut(implicit p: Parameters) extends XSBundle {
 }
 
 class ExceptionInfoGen(implicit p: Parameters) extends XSModule {
-  // storeUnit, loadUnit, VLoad, VStore, storeQueue Uncache, LoadQueue Uncache, VSegmentUnit, Atomic
+  // loadUnit, storeUnit, VLoad, VStore, storeQueue Uncache, LoadQueue Uncache, VSegmentUnit, Atomic
   private val enqPortNum = StorePipelineWidth + LoadPipelineWidth + VecLoadPipelineWidth + VecStorePipelineWidth + 1 + 1 + 1 + 1
   val io = IO(new Bundle{
     val redirect      = Flipped(ValidIO(new Redirect))
@@ -164,7 +164,7 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule {
 
   // have exception and don't need to be flushed.
   private val selectValid = s1Valid.zip(s1Bits).map{case (v, p) =>
-    v && p.hasException && p.robIdx.needFlush(io.redirect)
+    v && p.hasException && !p.robIdx.needFlush(io.redirect)
   } // for timing, generate selectValid here
 
   private val oldest = getOldest(selectValid, s1Bits)
