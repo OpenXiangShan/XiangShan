@@ -514,7 +514,8 @@ object XSNoCDiffTopChecker {
     val verilog =
       """
         |`define CONFIG_XSCORE_NR 2
-        |`define CORE_INST(i) XSDiffTopChecker.u_CPU_TOP[i].u_XSTop
+        |`define XSTILE_INST(i) XSDiffTopChecker.u_CPU_TOP[i].u_XSTop.core_with_l2.tile
+        |`define DIFF_CORE_INST(i) `XSTILE_INST(i)
         |module XSDiffTopChecker(
         | input                                 cpu_clk,
         | input                                 cpu_rstn,
