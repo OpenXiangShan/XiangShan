@@ -173,7 +173,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
 
   def matched(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
-    block_match && reg_valid() && !(req.isFromPrefetch)
+    block_match && reg_valid()
   }
 
   def prefetch_late_en(new_req: MissReqWoStoreData, new_req_valid: Bool): Bool = {
@@ -448,7 +448,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
 
     val prefetch_info = new DCacheBundle {
-      val late_prefetch = Output(Bool())
+      val hit_prefetch = Output(Bool())
+      val hit_pf_source = UInt(L1PfSourceBits.W)
     }
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
@@ -945,10 +946,11 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
   io.forwardInfo.corrupt := error
 
-  io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
-  io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr))
+  io.prefetch_info.hit_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.prefetch_info.hit_pf_source := req.pf_source
 
-  when(io.prefetch_info.late_prefetch) {
+  when(io.prefetch_info.hit_prefetch) {
     prefetch := false.B
   }
 
@@ -1047,18 +1049,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val memSetPattenDetected = Output(Bool())
     val lqEmpty = Input(Bool())
 
-    val prefetch_info = new Bundle {
-      val naive = new Bundle {
-        val late_miss_prefetch = Output(Bool())
-        val pf_source = Output(UInt(L1PfSourceBits.W))
-      }
-
-      val fdp = new Bundle {
-        val late_miss_prefetch = Output(Bool())
-        val prefetch_monitor_cnt = Output(Bool())
-        val total_prefetch = Output(Bool())
-      }
-    }
+    val prefetch_stat = Output(new MissPrefetchStatBundle)
 
     val wfi = Flipped(new WfiReqBundle)
 
@@ -1298,12 +1289,23 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   // prefetch related
-  io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
-  io.prefetch_info.naive.pf_source := io.req.bits.pf_source
-
-  io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
-  io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
-  io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  val pf_late_reg = miss_req_pipe_reg.matched(io.req.bits)
+  io.prefetch_stat.pf_late_in_mshr := io.req.valid && io.req.bits.isFromPrefetch && (pf_late_reg || Cat(entries.map(_.io.matched)).orR)
+  io.prefetch_stat.pf_late_in_mshr_source := ParallelMux(
+    Seq(pf_late_reg) ++ entries.map(_.io.matched)
+    zip
+    Seq(miss_req_pipe_reg.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+  )
+  io.prefetch_stat.prefetch_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromPrefetch
+  io.prefetch_stat.pf_source := io.req.bits.pf_source
+  io.prefetch_stat.load_miss := accept && io.req.fire && !io.req.bits.cancel && io.req.bits.isFromLoad
+  val hit_pf_reg = miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid)
+  io.prefetch_stat.hit_pf_in_mshr := hit_pf_reg || Cat(entries.map(_.io.prefetch_info.hit_prefetch)).orR
+  io.prefetch_stat.hit_pf_in_mshr_source := ParallelMux(
+    Seq(hit_pf_reg) ++ entries.map(_.io.prefetch_info.hit_prefetch)
+    zip
+    Seq(miss_req_pipe_reg.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+  )
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)

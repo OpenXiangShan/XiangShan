@@ -161,7 +161,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
 
   private val Seq(bothOff, strideOnBertiOff, strideOffBertiOn, bothOn) = Seq(0, 1, 2, 3)
-  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOnBertiOff)
+  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOffBertiOn)
   val strideModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOffBertiOn.U && HasBerti.B)
   val bertiModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOnBertiOff.U && HasStreamStride.B)
 
@@ -185,8 +185,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.ld_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
-      ) // && isLoadAccess(source.bits.uop)
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.meta_prefetch))
+      )
       pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.uop.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
@@ -201,8 +201,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.st_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
-      ) // && isStoreAccess(source.bits.uop)
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.meta_prefetch))
+      )
       pf.io.st_in(i).bits := source.bits
       pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
     }
@@ -228,18 +228,19 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
+      // for stride
       val source = io.trainSource.s3_load(i)
       pf.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromStride(source.bits.meta_prefetch)
-      ) && !source.bits.is_from_hw_pf // && isLoadAccess(source.bits.uop)
+        source.bits.miss || isFromL1Prefetch(source.bits.meta_prefetch)
+      ) && !source.bits.is_from_hw_pf
       pf.stride_train(i).bits := source.bits
       pf.stride_train(i).bits.uop.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
+      // for stream
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.is_from_hw_pf
-      // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
 
@@ -267,8 +268,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     for(i <- 0 until LD_TRAIN_WIDTH){
       val source = io.trainSource.s3_load(i)
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromBerti(source.bits.meta_prefetch)
-      ) && !source.bits.is_from_hw_pf // && isLoadAccess(source.bits.uop)
+        source.bits.miss || isFromL1Prefetch(source.bits.meta_prefetch)
+      ) && !source.bits.is_from_hw_pf
       pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.uop.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
@@ -303,16 +304,16 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
    * load prefetch to l1 Dcache
    * stride
    */
-  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, pipe = false, name = Some("pf_to_ldu_reg"))
+  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
 
   /** load/store prefetch to l2 cache
    *  stride, sms
    */
-  l2_pf_req <> Pipeline(in = l2_pf_arb.io.out, depth = L2_PF_REG_CNT, pipe = false, name = Some("pf_to_l2cache_reg"))
+  l2_pf_req <> Pipeline(in = l2_pf_arb.io.out, depth = L2_PF_REG_CNT, name = Some("pf_to_l2cache_reg"))
   l2_pf_req.ready := true.B
 
   // load/store prefetch to l3 cache
-  l3_pf_req <> Pipeline(in = l3_pf_arb.io.out, depth = L3_PF_REG_CNT, pipe = false, name = Some("pf_to_l3cache_reg"))
+  l3_pf_req <> Pipeline(in = l3_pf_arb.io.out, depth = L3_PF_REG_CNT, name = Some("pf_to_l3cache_reg"))
   l3_pf_req.ready := true.B
 
   io.fromDCache.sms_agt_evict_req.ready := false.B
