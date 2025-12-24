@@ -85,7 +85,7 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
 
   val scPathTakenVec:   Vec[Bool] = Vec(NumWays, Bool())
   val scGlobalTakenVec: Vec[Bool] = Vec(NumWays, Bool())
-  val scBiasTakenVec:   Vec[Bool] = Vec(BiasTableNumWays, Bool())
+  val scBiasTakenVec:   Vec[Bool] = Vec(NumWays, Bool())
 
   val predPathIdx: Vec[UInt] =
     Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
