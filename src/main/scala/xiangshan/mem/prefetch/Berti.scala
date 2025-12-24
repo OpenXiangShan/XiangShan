@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.cache.{DCacheBundle, DCacheModule, HasDCacheParameters, HasL1CacheParameters}
-import xiangshan.mem.{L1PrefetchReq, LqPtr}
+import xiangshan.mem.L1PrefetchReq
 
 case class BertiParams
 (
@@ -142,7 +142,6 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_overflow = WireInit(false.B)
   val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
-  val stat_olderButLater = WireInit(false.B)
   val stat_histLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   /*** built-in function */
@@ -179,19 +178,16 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val pcTag = UInt(HtPcTagWidth.W)
     val baseVAddr = UInt(HtLineVAddrWidth.W)
     val tsp = UInt(LATENCY_WIDTH.W)
-    val lqIdx = new LqPtr()
 
-    def alloc(_pcTag: UInt, _baseVAddr: UInt, _tsp: UInt, _lqIdx: LqPtr): Unit = {
+    def alloc(_pcTag: UInt, _baseVAddr: UInt, _tsp: UInt): Unit = {
       pcTag := _pcTag
       baseVAddr := _baseVAddr
       tsp := _tsp
-      lqIdx := _lqIdx
     }
 
-    def update(_baseVAddr: UInt, _tsp: UInt, _lqIdx: LqPtr): Unit = {
+    def update(_baseVAddr: UInt, _tsp: UInt): Unit = {
       baseVAddr := _baseVAddr
       tsp := _tsp
-      lqIdx := _lqIdx
     }
   }
 
@@ -202,7 +198,6 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val access = Flipped(ValidIO(new Bundle{
       val pc = UInt(VAddrBits.W)
       val vaddr = UInt(VAddrBits.W)
-      val lqIdx = new LqPtr()
     }))
     val search = new Bundle{
       val req = Flipped(ValidIO(new HTSearchReq()))
@@ -247,7 +242,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     *   Maybe hard due to set division.
     * 
     */
-  def accessPLRU(pc: UInt, vaddr: UInt, lqIdx: LqPtr): Bool = {
+  def accessPLRU(pc: UInt, vaddr: UInt): Bool = {
     // ensure option exists in this code path
     require(replacer.isDefined, "PLRU replacer must be defined when usePLRU == true")
     val isReplace = Wire(Bool())
@@ -258,12 +253,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     assert(PopCount(matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
-      entries(set)(hitWay).update(baseVAddr, currTsp, lqIdx)
+      entries(set)(hitWay).update(baseVAddr, currTsp)
       replacer.get.access(set, hitWay)
       isReplace := false.B
     }.otherwise{
       val way = replacer.get.way(set)
-      entries(set)(way).alloc(tag, baseVAddr, currTsp, lqIdx)
+      entries(set)(way).alloc(tag, baseVAddr, currTsp)
       valids(set)(way) := true.B
       isReplace := true.B
     }
@@ -296,7 +291,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     res
   }
 
-  def accessFIFO(pc: UInt, vaddr: UInt, lqIdx: LqPtr): Bool = {
+  def accessFIFO(pc: UInt, vaddr: UInt): Bool = {
     // ensure option exists in this code path
     require(accessPtrs.isDefined, "accessPtrs must be defined when useFIFO == true")
     val isReplace = Wire(Bool())
@@ -309,13 +304,9 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     }.otherwise {
       isReplace := valids(set)(way)
       val lastWay = (accessPtrs.get(set)-1.U).value
-      decrModes(set) := valids(set)(lastWay) && (
-        (lqIdx > entries(set)(lastWay).lqIdx && baseVAddr < entries(set)(lastWay).baseVAddr) ||
-        (lqIdx < entries(set)(lastWay).lqIdx && baseVAddr > entries(set)(lastWay).baseVAddr)
-      )
-      stat_olderButLater := valids(set)(lastWay) && lqIdx < entries(set)(lastWay).lqIdx
+      decrModes(set) := valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr
       valids(set)(way) := true.B
-      entries(set)(way).alloc(getTag(pc), baseVAddr, currTsp, lqIdx)
+      entries(set)(way).alloc(getTag(pc), baseVAddr, currTsp)
       accessPtrs.get(set) := accessPtrs.get(set) + 1.U
     }
     isReplace
@@ -344,8 +335,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     res
   }
 
-  def access(pc: UInt, vaddr: UInt, lqIdx: LqPtr): Bool = {
-    if (usePLRU) accessPLRU(pc, vaddr, lqIdx) else accessFIFO(pc, vaddr, lqIdx)
+  def access(pc: UInt, vaddr: UInt): Bool = {
+    if (usePLRU) accessPLRU(pc, vaddr) else accessFIFO(pc, vaddr)
   }
   def searchLite(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
     if (usePLRU) searchLitePLRU(pc, vaddr, latency) else searchLiteFIFO(pc, vaddr, latency)
@@ -354,7 +345,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** processing logic */
   val isReplace = Wire(Bool())
   when(io.access.valid){
-    isReplace := this.access(io.access.bits.pc, io.access.bits.vaddr, io.access.bits.lqIdx)
+    isReplace := this.access(io.access.bits.pc, io.access.bits.vaddr)
   }.otherwise{
     isReplace := false.B
   }
@@ -373,7 +364,6 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** performance counter */
   XSPerfAccumulate("access_req", io.access.valid)
   XSPerfAccumulate("access_replace", io.access.valid && isReplace)
-  XSPerfAccumulate("access_olderButLater", stat_olderButLater)
   XSPerfAccumulate("search_req", io.search.req.valid)
   XSPerfAccumulate("search_resp_valid", io.search.resp.valid)
   XSPerfAccumulate("search_resp_find_total", stat_find_delta)
@@ -985,7 +975,6 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   historyTable.io.access.valid := demandMiss || demandPfHit
   historyTable.io.access.bits.pc := trainBits.pc
   historyTable.io.access.bits.vaddr := trainBits.vaddr
-  historyTable.io.access.bits.lqIdx := trainBits.lqIdx
 
   historyTable.io.search.req.valid := demandRefill || demandPfHit
   historyTable.io.search.req.bits.pc := Mux(demandRefill, io.refillTrain.bits.pc, trainBits.pc)
