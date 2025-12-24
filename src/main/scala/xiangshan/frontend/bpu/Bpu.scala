@@ -229,10 +229,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
   // tage
-  tage.io.mbtbResult             := mbtb.io.result
-  tage.io.foldedPathHist         := phr.io.s0_foldedPhr
-  tage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  tage.io.debug_trainValid       := io.fromFtq.train.valid // for perf counters
+  tage.io.fromMainBtb.result             := mbtb.io.result
+  tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
+  tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
   // ittage
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
@@ -332,7 +332,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_mbtbResult = mbtb.io.result
   private val s2_condTakenMask = VecInit((s2_mbtbResult zip tage.io.prediction).map { case (e, p) =>
     e.valid && e.bits.attribute.isConditional &&
-    Mux(p.useProviderPred, p.providerPred, Mux(p.hasAlt, p.altPred, e.bits.taken))
+    Mux(p.useProvider, p.providerPred, Mux(p.hasAlt, p.altPred, e.bits.taken))
   })
 
   // private val s2_condTakenMask = VecInit(scUsed.zip(scTakenMask).zip(tage.io.condTakenMask).map {
