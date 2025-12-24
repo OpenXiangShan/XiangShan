@@ -385,7 +385,7 @@ class CtrlBlockImp(
     val vld = rob.io.commits.isCommit && rob.io.commits.commitValid(i)
     crc.valid := GatedValidRegNext(vld)
     crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
-    crc.bits.rasAction := RegEnable(Itype.isPop(blk.bits.tracePipe.itype) ## Itype.isPush(blk.bits.tracePipe.itype), vld)
+    crc.bits.rasAction := RegEnable(Itype.isPush(blk.bits.tracePipe.itype) ## Itype.isPop(blk.bits.tracePipe.itype), vld)
   }
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
