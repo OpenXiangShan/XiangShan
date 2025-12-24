@@ -45,14 +45,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 
-  io.train.ready := true.B
+  io.trainReady := true.B
 
   private val s0_fire, s1_fire, s2_fire = Wire(Bool())
   alignBanks.foreach { b =>
     b.io.stageCtrl.s0_fire := s0_fire
     b.io.stageCtrl.s1_fire := s1_fire
     b.io.stageCtrl.s2_fire := s2_fire
-    b.io.stageCtrl.s3_fire := false.B
+    b.io.stageCtrl.s3_fire := false.B // we don't have a s3 stage in mainBtb
+    b.io.stageCtrl.t0_fire := false.B // dont care, alignBank is using t1
   }
 
   /* *** s0 ***
@@ -106,14 +107,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t0 ***
    * receive training data and latch
    */
-  private val t0_valid = io.train.fire && io.enable
-  private val t0_train = io.train.bits
+  private val t0_fire  = io.stageCtrl.t0_fire && io.enable
+  private val t0_train = io.train
 
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_valid = RegNext(t0_valid) && io.enable
-  private val t1_train = RegEnable(t0_train, t0_valid)
+  private val t1_fire  = RegNext(t0_fire) && io.enable
+  private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_startPc = t1_train.startPc
   private val t1_rotator = VecRotate(getAlignBankIndex(t1_startPc))
@@ -127,7 +128,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid         := t1_valid && t1_writeAlignBankMask(i)
+    b.io.write.req.valid         := t1_fire && t1_writeAlignBankMask(i)
     b.io.write.req.bits.startPc  := t1_startPcVec(i)
     b.io.write.req.bits.branches := t1_train.branches
     b.io.write.req.bits.meta     := t1_meta.entries(i)
@@ -139,10 +140,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
 
-  XSPerfAccumulate("total_train", t1_valid)
+  XSPerfAccumulate("total_train", t1_fire)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
   XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
-  XSPerfAccumulate("train_has_mispredict", t1_valid && t1_mispredictInfo.valid)
-  XSPerfAccumulate("train_hit_mispredict", t1_valid && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
+  XSPerfAccumulate("train_has_mispredict", t1_fire && t1_mispredictInfo.valid)
+  XSPerfAccumulate("train_hit_mispredict", t1_fire && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
   XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
 }

@@ -42,9 +42,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   println(f"  Address fields:")
   addrFields.show(indent = 4)
 
-  io.resetDone := true.B
-
-  io.train.ready := true.B
+  io.resetDone  := true.B
+  io.trainReady := true.B
 
   /* *** submodules *** */
   private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))
@@ -92,7 +91,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - check if hits t1 stage
    * - calculate hit flags
    */
-  private val t0_valid       = Wire(Bool())
+  private val t0_fire        = Wire(Bool())
   private val t0_startPc     = Wire(PrunedAddr(VAddrBits))
   private val t0_actualTaken = Wire(Bool())
   private val t0_position    = Wire(UInt(CfiPositionWidth.W))
@@ -100,7 +99,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_attribute   = Wire(new BranchAttribute)
 
   if (UseFastTrain) {
-    t0_valid       := io.fastTrain.get.valid && io.enable
+    t0_fire        := io.fastTrain.get.valid && io.enable
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
@@ -108,12 +107,12 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?
-    t0_valid       := io.train.fire && io.train.bits.mispredictBranch.valid && io.enable
-    t0_startPc     := io.train.bits.startPc
-    t0_actualTaken := io.train.bits.mispredictBranch.bits.taken
-    t0_position    := io.train.bits.mispredictBranch.bits.cfiPosition
-    t0_fullTarget  := io.train.bits.mispredictBranch.bits.target
-    t0_attribute   := io.train.bits.mispredictBranch.bits.attribute
+    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable
+    t0_startPc     := io.train.startPc
+    t0_actualTaken := io.train.mispredictBranch.bits.taken
+    t0_position    := io.train.mispredictBranch.bits.cfiPosition
+    t0_fullTarget  := io.train.mispredictBranch.bits.target
+    t0_attribute   := io.train.mispredictBranch.bits.attribute
   }
 
   private val t0_tag         = getTag(t0_startPc)
@@ -129,7 +128,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // the second train might be a false "not hit" and allocate a new entry, causing a multi-hit;
   // or, the first may replace the entry, causing a false "hit" in the second train, causing wrong update.
   // So, we define some of the t1 signals in advance, and use them to check if the contiguous trains are hit.
-  private val t1_valid        = Wire(Bool())
+  private val t1_fire         = Wire(Bool())
   private val t1_tag          = Wire(UInt(TagWidth.W))
   private val t1_updateIdx    = Wire(UInt(log2Up(NumEntries).W))
   private val t1_hitEntry     = Wire(new MicroBtbEntry)
@@ -139,7 +138,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // if t0_tag === t1_tag, t1 must be updating the entry, so we can see it as a hit, and use t1_updateIdx as hitIdx
   private val t0_hitT1Update = Wire(Bool())
   // if t0 hits but t1 is replacing it, we should see it as not hit
-  private val t0_hitT1Victim = t1_valid && t0_realHitIdx === replacer.io.victim && t1_allocate
+  private val t0_hitT1Victim = t1_fire && t0_realHitIdx === replacer.io.victim && t1_allocate
 
   // fix final hit
   private val t0_hit = t0_realHit && !t0_hitT1Victim || t0_hitT1Update
@@ -159,25 +158,25 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - update entries
    * - update replacer
    */
-  t1_valid := RegNext(t0_valid, false.B)
-  t1_tag   := RegEnable(t0_tag, t0_valid)
-  private val t1_actualTaken = RegEnable(t0_actualTaken, t0_valid)
-  private val t1_position    = RegEnable(t0_position, t0_valid)
-  private val t1_target      = RegEnable(t0_target, t0_valid)
-  private val t1_attribute   = RegEnable(t0_attribute, t0_valid)
-  private val t1_targetCarry = t0_targetCarry.map(w => RegEnable(w, t0_valid)) // if (EnableTargetFix)
+  t1_fire := RegNext(t0_fire, false.B)
+  t1_tag  := RegEnable(t0_tag, t0_fire)
+  private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
+  private val t1_position    = RegEnable(t0_position, t0_fire)
+  private val t1_target      = RegEnable(t0_target, t0_fire)
+  private val t1_attribute   = RegEnable(t0_attribute, t0_fire)
+  private val t1_targetCarry = t0_targetCarry.map(w => RegEnable(w, t0_fire)) // if (EnableTargetFix)
 
-  private val t1_hit    = RegEnable(t0_hit, t0_valid)
-  private val t1_hitIdx = RegEnable(t0_hitIdx, t0_valid)
-  t1_hitEntry := RegEnable(t0_hitEntry, t0_valid)
+  private val t1_hit    = RegEnable(t0_hit, t0_fire)
+  private val t1_hitIdx = RegEnable(t0_hitIdx, t0_fire)
+  t1_hitEntry := RegEnable(t0_hitEntry, t0_fire)
 
   // hit states (flags), valid only when t1_hit
-  private val t1_hitNotUseful     = RegEnable(t0_hitNotUseful, t0_valid)
-  private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_valid)
-  private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_valid)
-  private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_valid)
+  private val t1_hitNotUseful     = RegEnable(t0_hitNotUseful, t0_fire)
+  private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_fire)
+  private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_fire)
+  private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_fire)
   // only when t1 is updating/allocating can t0 hit it
-  t0_hitT1Update := t1_valid && t0_tag === t1_tag && (t1_hit || t1_allocate)
+  t0_hitT1Update := t1_fire && t0_tag === t1_tag && (t1_hit || t1_allocate)
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
     when(notUseful) {
@@ -195,7 +194,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
       t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getDecrease
     }
 
-  when(t1_valid) {
+  when(t1_fire) {
     when(!t1_hit) {
       // not hit
       // init a new entry if actually taken
@@ -219,34 +218,34 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   t1_allocate  := !t1_hit && t1_actualTaken
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
-  when(t1_valid && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
+  when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
     entries(t1_updateIdx) := t1_updatedEntry
   }
 
   // update replacer
-  replacer.io.trainTouch.valid := t1_valid
+  replacer.io.trainTouch.valid := t1_fire
   replacer.io.trainTouch.bits  := t1_updateIdx
 
   /* *** perf *** */
   XSPerfAccumulate("predHit", s1_hit && s1_fire)
   XSPerfAccumulate("predMiss", !s1_hit && s1_fire)
 
-  XSPerfAccumulate("s1Hits3FallThrough", t1_valid && t1_hit && !t1_actualTaken)
-  XSPerfAccumulate("s1Misses3Taken", t1_valid && !t1_hit && t1_actualTaken)
-  XSPerfAccumulate("s1Hits3Taken", t1_valid && t1_hit && t1_actualTaken)
-  XSPerfAccumulate("s1Misses3FallThrough", t1_valid && !t1_hit && !t1_actualTaken)
+  XSPerfAccumulate("s1Hits3FallThrough", t1_fire && t1_hit && !t1_actualTaken)
+  XSPerfAccumulate("s1Misses3Taken", t1_fire && !t1_hit && t1_actualTaken)
+  XSPerfAccumulate("s1Hits3Taken", t1_fire && t1_hit && t1_actualTaken)
+  XSPerfAccumulate("s1Misses3FallThrough", t1_fire && !t1_hit && !t1_actualTaken)
 
-  XSPerfAccumulate("s1InvalidatedEntries", t1_valid && t1_hit && !t1_actualTaken && t1_hitNotUseful)
+  XSPerfAccumulate("s1InvalidatedEntries", t1_fire && t1_hit && !t1_actualTaken && t1_hitNotUseful)
 
-  XSPerfAccumulate("trainHitEntries", t0_valid && t0_realHit)
-  XSPerfAccumulate("trainHitT1Update", t0_valid && t0_hitT1Update)
-  XSPerfAccumulate("trainHitT1Victim", t0_valid && t0_hitT1Victim)
+  XSPerfAccumulate("trainHitEntries", t0_fire && t0_realHit)
+  XSPerfAccumulate("trainHitT1Update", t0_fire && t0_hitT1Update)
+  XSPerfAccumulate("trainHitT1Victim", t0_fire && t0_hitT1Victim)
 
-  XSPerfAccumulate("allocateNotUseful", t1_valid && t1_allocate && replacer.io.perf.replaceNotUseful)
-  XSPerfAccumulate("allocatePlru", t1_valid && t1_allocate && !replacer.io.perf.replaceNotUseful)
+  XSPerfAccumulate("allocateNotUseful", t1_fire && t1_allocate && replacer.io.perf.replaceNotUseful)
+  XSPerfAccumulate("allocatePlru", t1_fire && t1_allocate && !replacer.io.perf.replaceNotUseful)
   XSPerfAccumulate(
     "replace",
-    t1_valid && t1_hit && (
+    t1_fire && t1_hit && (
       !t1_hitAttributeSame && t1_hitNotUseful ||
         t1_hitAttributeSame && !t1_hitPositionSame && t1_hitNotUseful
     )
