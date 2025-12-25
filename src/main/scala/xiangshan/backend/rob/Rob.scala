@@ -781,7 +781,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   dirtyFs.valid := io.commits.isCommit && dirtyFs.bits && updateDirtyFs
   dirtyFs.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-    case (valid, idx) => valid & (idx === oldestRobidxupdateDirtyFs)
+    case (valid, idx) => valid & idx.isSameEntry(oldestRobidxupdateDirtyFs)
   }.reduce(_ | _)
 
   val enqUpdateDirtyFsSeq = io.enq.req.map(req => req.valid && (req.bits.fpWen || req.bits.wfflags)).zip(canEnqueue).map(x => x._1 && x._2)
@@ -808,7 +808,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   dirtyVs.valid := io.commits.isCommit && dirtyVs.bits && updateDirtyVs
   dirtyVs.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-    case (valid, idx) => valid & (idx === oldestRobidxupdateDirtyVs)
+    case (valid, idx) => valid & idx.isSameEntry(oldestRobidxupdateDirtyVs)
   }.reduce(_ | _)
 
   val enqUpdateDirtyVsSeq = io.enq.req.map(req => req.valid && req.bits.dirtyVs).zip(canEnqueue).map {
@@ -877,7 +877,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   vxsat.valid := io.commits.isCommit && vxsat.bits && updateVxsat
   vxsat.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-    case (valid, idx) => valid & (idx === oldestRobidxUpdateVxsat)
+    case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateVxsat)
   }.reduce(_ | _)
 
   val wbUpdateVxsat = vxsatWBs.map(wb => wb.valid && wb.bits.vxsat.get).reduce(_ | _)
@@ -927,7 +927,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     fflags(i).valid := io.commits.isCommit && fflags(i).bits && updateFflags(i)
     fflags(i).bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-      case (valid, idx) => valid & (idx === oldestRobidxUpdateFflags(i))
+      case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateFflags(i))
     }.reduce(_ | _)
 
     val wbUpdateFflags = fflagsWBs.map(wb => wb.valid && wb.bits.wflags.get && wb.bits.fflags.get(i)).reduce(_ | _)
