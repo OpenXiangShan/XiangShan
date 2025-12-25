@@ -235,6 +235,8 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
 
   // TODO: override opearation!
 
+  def isSameEntry(that: RobPtr): Bool = this.flag === that.flag && this.value === that.value
+
   override def === (that: RobPtr): Bool = this.flag === that.flag && this.value === that.value && this.isFormer === that.isFormer
 
   override def =/= (that: RobPtr): Bool = this.flag =/= that.flag || this.value =/= that.value || this.isFormer =/= that.isFormer
