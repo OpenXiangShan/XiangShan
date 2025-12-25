@@ -1844,7 +1844,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           val splitDest = (vecDest << 1).asUInt
           Seq(splitDest, splitDest + 1.U)
         }
-        difftest.nFused := instrSize - 1.U  // TODO: recover fusion
+        difftest.nFused := 0.U  // TODO: recover fusion
         when(difftest.valid) { // TODO
           assert(instrSize >= 1.U)
         }
