@@ -163,7 +163,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     Option.when(soc.EnableICacheCtrl)(soc.ICacheCtrlRange) ++
     Option.when(soc.EnableDCacheCtrl)(soc.DCacheCtrlRange)
   ).toSeq
-  private def mmioFilters = if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet :+ soc.BEURange) else cacheAddressSet
+  private def mmioFilters = if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet :+ soc.BEURange) else (cacheAddressSet :+ soc.BEURange)
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
