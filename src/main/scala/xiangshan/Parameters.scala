@@ -113,28 +113,33 @@ case class XSCoreParameters
   IssueQueueCompEntrySize: Int = 12,
   intPreg: PregParams = IntPregParams(
     numEntries = 224,
-    numRead = None,
-    numWrite = None,
+    numBank    = 4,
+    numRead    = None,
+    numWrite   = None,
   ),
   fpPreg: PregParams = FpPregParams(
     numEntries = 256,
-    numRead = None,
-    numWrite = None,
+    numBank    = 1,
+    numRead    = None,
+    numWrite   = None,
   ),
   vfPreg: VfPregParams = VfPregParams(
     numEntries = 128,
-    numRead = None,
-    numWrite = None,
+    numBank    = 1,
+    numRead    = None,
+    numWrite   = None,
   ),
   v0Preg: V0PregParams = V0PregParams(
     numEntries = 22,
-    numRead = None,
-    numWrite = None,
+    numBank    = 1,
+    numRead    = None,
+    numWrite   = None,
   ),
   vlPreg: VlPregParams = VlPregParams(
     numEntries = 32,
-    numRead = None,
-    numWrite = None,
+    numBank    = 1,
+    numRead    = None,
+    numWrite   = None,
   ),
   IntRegCacheSize: Int = 16,
   MemRegCacheSize: Int = 12,
@@ -475,7 +480,7 @@ case class XSCoreParameters
     ).flatten
   }
 
-  def fakeIntPreg = FakeIntPregParams(intPreg.numEntries, intPreg.numRead, intPreg.numWrite)
+  def fakeIntPreg = FakeIntPregParams(intPreg.numEntries, intPreg.numBank, intPreg.numRead, intPreg.numWrite)
 
   val backendParams: BackendParams = backend.BackendParams(
     Map(

@@ -20,6 +20,7 @@ abstract class XSTester extends AnyFlatSpec with ChiselSim with Matchers {
       // Example of how to change params
       intPreg = IntPregParams(
         numEntries = 64,
+        numBank = 4,
         numRead = Some(14),
         numWrite = Some(8),
       ),
