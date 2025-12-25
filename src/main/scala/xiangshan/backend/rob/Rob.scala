@@ -1061,8 +1061,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val pendingPtr = deqPtr
   val pendingEntry = robDeqGroup(deqPtr.value(bankAddrWidth-1, 0))
-  pendingPtr.isFormer := pendingEntry.uopNum =/= 1.U
   io.lsq.pendingPtr := RegNext(pendingPtr)
+  io.lsq.pendingPtr.isFormer := RegNext(pendingEntry.uopNum =/= 1.U)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head) // TODO: useless, delete it
   io.lsq.scommit := RegNext(
     Mux(io.commits.isCommit && newStCommit ||
