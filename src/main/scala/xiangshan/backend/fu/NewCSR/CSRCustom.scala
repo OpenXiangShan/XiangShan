@@ -78,14 +78,15 @@ class SbpctlBundle extends CSRBundle {
 }
 
 class SpfctlBundle extends CSRBundle {
-  val BERTI_ENABLE            = RW(    32).withReset(true.B)
+  val L1D_PF_STREAM_ENABLE    = RW(    33).withReset(true.B)
+  val L1D_PF_BERTI_ENABLE     = RW(    32).withReset(true.B)
   val L2_PF_DELAY_LATENCY     = SpfctlL2PfDelayLatency(31, 22).withReset(SpfctlL2PfDelayLatency.initValue) // delay latency for l2 prefetcher train
   val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B)  // (Train L2, Prefetch L2) TP
   val L2_PF_VBOP_ENABLE       = RW(    20).withReset(true.B)  // (Train L2, Prefetch L2) VBOP
   val L2_PF_PBOP_ENABLE       = RW(    19).withReset(true.B)  // (Train L2, Prefetch L2) PBOP
   val L2_PF_RECV_ENABLE       = RW(    18).withReset(true.B)  // (Train L1, Prefetch L2) receive from sms
   val L2_PF_STORE_ONLY        = RW(    17).withReset(false.B)     // L2 pf store only
-  val L1D_PF_ENABLE_STRIDE    = RW(    16).withReset(true.B)      // L1D prefetch enable stride
+  val L1D_PF_STRIDE_ENABLE    = RW(    16).withReset(true.B)      // L1D prefetch enable stride
   val L1D_PF_ACTIVE_STRIDE    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue)   // L1D prefetch active page stride
   val L1D_PF_ACTIVE_THRESHOLD = SpfctlL1DPfActiveThreshold( 9,  6).withReset(SpfctlL1DPfActiveThreshold.initValue)   // L1D prefetch active page threshold
   val L1D_PF_ENABLE_PHT       = RW(     5).withReset(true.B)      // L1D prefetch enable pht
