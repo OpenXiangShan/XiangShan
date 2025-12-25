@@ -75,6 +75,8 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   def raw_nack      = cause(LoadReplayCauses.C_RAW)
   def misalign_nack = cause(LoadReplayCauses.C_MF)
   def nuke          = cause(LoadReplayCauses.C_NK)
+  def mmioOrNc      = cause(LoadReplayCauses.C_UNCACHE)
+  def storeMultiFwd = cause(LoadReplayCauses.C_SMF)
   def need_rep      = cause.asUInt.orR
 }
 
@@ -260,6 +262,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     val alignedType   = UInt(alignTypeBits.W)
     val vecBaseVaddr  = UInt(VAddrBits.W)
     //for Svpbmt NC
+    val isMmioOrNc    = Bool()
     val isnc          = Bool()
     val paddr         = UInt(PAddrBits.W)
     val data          = UInt((VLEN+1).W)
@@ -284,19 +287,20 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // priority: high to low
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
                                io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
-  private val SRC_NUM = 10
+  private val SRC_NUM = 8
   private val Seq(
-    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, nc_idx, lsq_rep_idx,
+    mab_idx, super_rep_idx, fast_rep_idx, //mmio_idx, nc_idx,
+    lsq_rep_idx,
     high_pf_idx, vec_iss_idx, int_iss_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
   val s0_src_valid_vec = WireInit(VecInit(Seq(
     io.misalign_ldin.valid,
-    io.replay.valid && io.replay.bits.forward_tlDchannel,
+    io.replay.valid && (io.replay.bits.forward_tlDchannel || io.replay.bits.isMmioOrNc),
     io.fast_rep_in.valid,
-    io.lsq.uncache.valid,
-    io.lsq.nc_ldin.valid,
-    io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
+    // io.lsq.uncache.valid,
+    // io.lsq.nc_ldin.valid,
+    io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall && !io.replay.bits.isMmioOrNc,
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
@@ -313,23 +317,26 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s0_hw_prf_select = s0_src_select_vec(high_pf_idx) || s0_src_select_vec(low_pf_idx)
 
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
-    s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
-    s0_src_select_vec(nc_idx)
-  s0_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
+    s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(super_rep_idx) && (io.replay.bits.nc || io.replay.bits.isMmioOrNc)
+    // s0_src_select_vec(mmio_idx) ||
+    // s0_src_select_vec(nc_idx)
+  s0_valid := !s0_kill && ((s0_src_valid_vec(super_rep_idx) && io.replay.bits.nc)||  // s0_src_valid_vec(nc_idx)
+  ((
     s0_src_valid_vec(mab_idx) ||
-    s0_src_valid_vec(super_rep_idx) ||
+    s0_src_valid_vec(super_rep_idx) && !(io.replay.bits.isMmioOrNc && !io.replay.bits.nc)||
     s0_src_valid_vec(fast_rep_idx) ||
     s0_src_valid_vec(lsq_rep_idx) ||
     s0_src_valid_vec(high_pf_idx) ||
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx) ||
     s0_src_valid_vec(low_pf_idx)
-  ) && !s0_src_select_vec(mmio_idx) && io.dcache.req.ready &&
+  ) //&& !s0_src_select_vec(mmio_idx) 
+  && io.dcache.req.ready &&
     !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
   ))
 
-  s0_mmio_select := s0_src_select_vec(mmio_idx) && !s0_kill
-  s0_nc_select := s0_src_select_vec(nc_idx) && !s0_kill
+  s0_mmio_select := s0_src_select_vec(super_rep_idx) && !io.replay.bits.forward_tlDchannel && (io.replay.bits.isMmioOrNc && !io.replay.bits.nc) && !s0_kill
+  s0_nc_select := s0_src_select_vec(super_rep_idx) && io.replay.bits.nc && !s0_kill
   //judgment: is NC with data or not.
   //If true, it's from `io.lsq.nc_ldin` or `io.fast_rep_in`
   val s0_nc_with_data = s0_sel_src.isnc && !s0_kill
@@ -507,6 +514,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     out.sched_idx     := src.schedIndex
     out.isvec         := src.isvec
     out.is128bit      := src.is128bit
+    out.isMmioOrNc    := src.isMmioOrNc
+    out.isnc          := src.nc
     out.uop_unit_stride_fof := src.uop_unit_stride_fof
     out.reg_offset    := src.reg_offset
     out.vecActive     := src.vecActive
@@ -630,8 +639,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     fromMisAlignBufferSource(io.misalign_ldin.bits),
     fromNormalReplaySource(io.replay.bits),
     fromFastReplaySource(io.fast_rep_in.bits),
-    fromMmioSource(io.lsq.uncache.bits),
-    fromNcSource(io.lsq.nc_ldin.bits),
+    // fromMmioSource(io.lsq.uncache.bits),
+    // fromNcSource(io.lsq.nc_ldin.bits),
     fromNormalReplaySource(io.replay.bits),
     fromPrefetchSource(io.prefetch_req.bits),
     fromVecIssueSource(io.vecldin.bits),
@@ -655,7 +664,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.vaddr,
     Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(),
-    Mux(s0_src_select_vec(nc_idx), io.lsq.nc_ldin.bits.vaddr, // not for dcache access, but for address alignment check
+    Mux(s0_src_select_vec(super_rep_idx) && io.replay.bits.nc, io.replay.bits.vaddr, // not for dcache access, but for address alignment check
     s0_tlb_vaddr))
   )
 
@@ -750,7 +759,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s0_out.isFrmMisAlignBuf    := s0_sel_src.frm_mabuf
   s0_out.uop_unit_stride_fof := s0_sel_src.uop_unit_stride_fof
   s0_out.paddr         :=
-    Mux(s0_src_select_vec(nc_idx), io.lsq.nc_ldin.bits.paddr,
+    Mux(s0_src_select_vec(super_rep_idx) && io.replay.bits.nc, io.lsq.nc_ldin.bits.paddr,
     Mux(s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.paddr,
     Mux(s0_src_select_vec(int_iss_idx) && s0_sel_src.prf_i, 0.U,
     io.prefetch_req.bits.paddr))) // only for nc, fast_rep, prefetch
@@ -790,7 +799,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   // mmio
   io.lsq.uncache.ready := s0_mmio_fire
-  io.lsq.nc_ldin.ready := s0_src_ready_vec(nc_idx) && s0_can_go
+  io.lsq.nc_ldin.ready := s0_src_ready_vec(super_rep_idx) && io.replay.bits.nc && s0_can_go
 
   // load flow source ready
   // cache missed load has highest priority
@@ -1169,6 +1178,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   val s2_raw_nack      = io.lsq.stld_nuke_query.req.valid &&
                          !io.lsq.stld_nuke_query.req.ready
+
+  val s2_mmioOrNc      = s2_in.nc || s2_mmio
   // st-ld violation query
   //  NeedFastRecovery Valid when
   //  1. Fast recovery query request Valid.
@@ -1330,6 +1341,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
+  s2_out.rep_info.mmioOrNc        := s2_mmioOrNc && !s2_exception && !s2_prf && !s2_in.delayedLoadError && !s2_nc_with_data
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
@@ -1427,7 +1439,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
-  val s3_can_enter_lsq_valid = s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked
+  val s3_can_enter_lsq_valid = s3_valid && (!s3_fast_rep || s3_fast_rep_canceled || RegNext(s2_out.rep_info.mmioOrNc)) && !s3_in.feedbacked
   io.lsq.ldin.valid := s3_can_enter_lsq_valid
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
