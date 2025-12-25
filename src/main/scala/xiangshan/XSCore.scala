@@ -23,7 +23,7 @@ import chisel3.util._
 import coupledL2.PrefetchCtrlFromCore
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.HasSoCParameter
+import system.{HasSoCParameter, SoCParamsKey}
 import utils._
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
@@ -68,7 +68,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
-  if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+  if (p(SoCParamsKey).EnableICacheCtrl) {
     frontend.inner.icache.ctrlUnitOpt.get.node := memBlock.inner.frontendBridge.icachectrl_node
   }
 }
