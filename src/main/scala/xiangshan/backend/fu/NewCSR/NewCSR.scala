@@ -350,12 +350,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // interrupt
   val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
-  when(nonMaskableIRP.NMI_43) {
-    nmip.NMI_43 := true.B
-  }
-  when(nonMaskableIRP.NMI_31) {
-    nmip.NMI_31 := true.B
-  }
+  nmip.NMI_43 := nonMaskableIRP.NMI_43
+  nmip.NMI_31 := nonMaskableIRP.NMI_31
 
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
@@ -398,11 +394,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val virtualInterruptIsHvictlInject = RegEnable(intrMod.io.out.virtualInterruptIsHvictlInject, false.B, intrMod.io.out.interruptVec.valid)
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
-
-  when(hasTrap && trapIsInterrupt && nmi) {
-    nmip.NMI_31 := nmip.NMI_31 & !UIntToOH(intrVec, 64)(NonMaskableIRNO.NMI_31)
-    nmip.NMI_43 := nmip.NMI_43 & !UIntToOH(intrVec, 64)(NonMaskableIRNO.NMI_43)
-  }
 
   val trapHandleMod = Module(new TrapHandleModule)
 
