@@ -113,11 +113,14 @@ class IttageTableInfo(
   def asTuple: (Int, Int) =
     (Size, HistoryLength)
 
-  def getFoldedHistoryInfoSet(tagWidth: Int): Set[FoldedHistoryInfo] = {
+  def getFoldedHistoryInfoSet(tagWidth: Int, numBanks: Int): Set[FoldedHistoryInfo] = {
     require(tagWidth > 0, "tagWidth must be > 0")
+    require(numBanks > 0, "numBanks must be > 0")
+    require(Size % numBanks == 0, "Size must be divisible by numBanks")
+    val setIdxWidth = log2Ceil(Size / numBanks)
     if (HistoryLength > 0)
       Set(
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, setIdxWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
