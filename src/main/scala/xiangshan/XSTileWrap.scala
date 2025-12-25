@@ -79,7 +79,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
-      val cpu_halt = Output(Bool())
+      val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
@@ -125,7 +125,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
-    io.cpu_halt := tile.module.io.cpu_halt
+    io.cpu_wfi := tile.module.io.cpu_wfi
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.msiAck := tile.module.io.msiAck
     io.hartIsInReset := tile.module.io.hartIsInReset

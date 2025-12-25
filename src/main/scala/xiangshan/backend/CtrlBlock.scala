@@ -804,7 +804,7 @@ class CtrlBlockImp(
   rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
   rob.io.wfi_enable := decode.io.csrCtrl.wfi_enable
 
-  io.toTop.cpuHalt := DelayN(rob.io.cpu_halt, 5)
+  io.toTop.cpuWfi := DelayN(rob.io.cpu_wfi, 5)
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
@@ -892,7 +892,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val hartId = Input(UInt(8.W))
   }
   val toTop = new Bundle {
-    val cpuHalt = Output(Bool())
+    val cpuWfi = Output(Bool())
   }
   val frontend = Flipped(new FrontendToCtrlIO())
   val fromBJUResolve = Flipped(Vec(backendParams.BrhCnt, Valid(new Resolve)))

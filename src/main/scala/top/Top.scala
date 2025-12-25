@@ -274,7 +274,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       val debug_reset = Output(Bool())
       val rtc_clock = Input(Clock())
       val cacheable_check = new TLPMAIO()
-      val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_wfi = Output(Vec(NumCores, Bool()))
       val riscv_critical_error = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
       val traceCoreInterface = Vec(NumCores, new Bundle {
@@ -342,7 +342,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       core.module.io.hartId := i.U
       core.module.io.msiInfo := msiInfo
       core.module.io.clintTime := misc.module.clintTime
-      io.riscv_halt(i) := core.module.io.cpu_halt
+      io.riscv_wfi(i) := core.module.io.cpu_wfi
       io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
       // trace Interface
       val traceInterface = core.module.io.traceCoreInterface

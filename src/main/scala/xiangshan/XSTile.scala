@@ -104,7 +104,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
-      val cpu_halt = Output(Bool())
+      val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
@@ -136,8 +136,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.clintTime := l2top.module.io.clintTime.toCore
     l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
-    l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
-    io.cpu_halt := l2top.module.io.cpu_halt.toTile
+    l2top.module.io.cpu_wfi.fromCore := core.module.io.cpu_wfi
+    io.cpu_wfi := l2top.module.io.cpu_wfi.toTile
     l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
     l2top.module.io.msiAck.fromCore := core.module.io.msiAck
