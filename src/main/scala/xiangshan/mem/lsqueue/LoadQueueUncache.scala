@@ -118,7 +118,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    req.uop.robIdx === pendingPtr && (req.uop.robIdx.isFormer.asUInt >= pendingPtr.isFormer.asUInt)
+    isNotAfter(req.uop.robIdx, pendingPtr)
   )
   switch (uncacheState) {
     is (s_idle) {
