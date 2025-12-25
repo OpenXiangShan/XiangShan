@@ -323,14 +323,14 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s0_valid := !s0_kill && ((s0_src_valid_vec(super_rep_idx) && io.replay.bits.nc)||  // s0_src_valid_vec(nc_idx)
   ((
     s0_src_valid_vec(mab_idx) ||
-    s0_src_valid_vec(super_rep_idx) && !(io.replay.bits.isMmioOrNc && !io.replay.bits.nc)||
+    s0_src_valid_vec(super_rep_idx) ||
     s0_src_valid_vec(fast_rep_idx) ||
     s0_src_valid_vec(lsq_rep_idx) ||
     s0_src_valid_vec(high_pf_idx) ||
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx) ||
     s0_src_valid_vec(low_pf_idx)
-  ) //&& !s0_src_select_vec(mmio_idx) 
+  ) && !(s0_src_select_vec(super_rep_idx) && io.replay.bits.isMmioOrNc && !io.replay.bits.nc) 
   && io.dcache.req.ready &&
     !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
   ))
@@ -345,7 +345,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
    // if is hardware prefetch or fast replay, don't send valid to tlb
   s0_tlb_valid := (
     s0_src_valid_vec(mab_idx) ||
-    s0_src_valid_vec(super_rep_idx) ||
+    s0_src_valid_vec(super_rep_idx) && !io.replay.bits.isMmioOrNc||
     s0_src_valid_vec(lsq_rep_idx) ||
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx)
