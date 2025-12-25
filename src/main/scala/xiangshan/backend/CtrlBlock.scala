@@ -135,8 +135,8 @@ class CtrlBlockImp(
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
-    delayed.valid := GatedValidRegNext(valid)
-//    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
+//    delayed.valid := GatedValidRegNext(valid)
+    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
