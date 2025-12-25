@@ -347,6 +347,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s1deqMask      = RegEnable(deqMask, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
       val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
+      val s1StoreSetHitVec = RegEnable(storeSetHitVec, s0Valid)
 
       val s1AgeMaskLow   = RegEnable(ageMaskLow, s0Valid)
       val s1AgeMaskHigh  = RegEnable(ageMaskHigh, s0Valid)
@@ -417,11 +418,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // select offset generate
       val byteSelectOffset   = s1LoadStart - selectDataEntry.byteStart
 
-      val HasAddrInvalid = ((s1AgeMaskLow | canForwardHigh) & VecInit(addrValidVec.map(!_)).asUInt).orR
+      val HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt).orR
 
       // find youngest addrInvalid store
-      val addrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt
-      val addrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt &
+      val addrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt
+      val addrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt &
         VecInit(Seq.fill(StoreQueueSize)(!addrInvalidLow.orR)).asUInt
 
       val (addrInvLowOH, _)   = findYoungest(Reverse(addrInvalidLow))
@@ -508,7 +509,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         sink := finalMask(j) && s2Valid && safeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
       s2Resp.bits.dataInvalid      := s2DataInValid || !safeForward
       s2Resp.bits.dataInvalidSqIdx := s2DataInvalidSqIdx
-      s2Resp.bits.addrInvalid      := s2HasAddrInvalid || !safeForward
+      s2Resp.bits.addrInvalid      := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
       s2Resp.bits.addrInvalidSqIdx := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !safeForward
       s2Resp.bits.matchInvalid     := paddrNoMatch

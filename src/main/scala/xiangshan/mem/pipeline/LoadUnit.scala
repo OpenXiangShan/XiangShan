@@ -1147,7 +1147,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
-                         io.lsq.forward.resp.sqToLduStage2.bits.addrInvalid && io.lsq.forward.resp.sqToLduStage2.valid
+                         io.lsq.forward.resp.sqToLduStage2.bits.addrInvalid
 
   val s2_tlb_miss      = s2_in.tlbMiss
   val s2_fwd_fail      = io.lsq.forward.resp.sqToLduStage2.bits.dataInvalid && io.lsq.forward.resp.sqToLduStage2.valid
