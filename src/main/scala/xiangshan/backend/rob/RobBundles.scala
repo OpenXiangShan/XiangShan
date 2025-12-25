@@ -258,19 +258,11 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   }
 
   override def >= (that: RobPtr): Bool = {
-    val differentFlag = this.flag ^ that.flag
-    val compare = this.value >= that.value
-    val sameEntry = this.flag === that.flag && this.value === that.value
-    val entryTrue = !this.isFormer || that.isFormer
-    (differentFlag ^ compare) || (sameEntry && entryTrue)
+    (this > that) || (this === that)
   }
 
   override def <= (that: RobPtr): Bool = {
-    val differentFlag = this.flag ^ that.flag
-    val compare = this.value <= that.value
-    val sameEntry = this.flag === that.flag && this.value === that.value
-    val entryTrue = this.isFormer || !that.isFormer
-    (differentFlag ^ compare) || (sameEntry && entryTrue)
+    (this < that) || (this === that)
   }
 
   //  TODO: check is it necessary to rewrite func: isAfter/isBefore/isNotAfter/isNorBefor
