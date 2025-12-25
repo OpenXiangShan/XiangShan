@@ -528,7 +528,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.csrCustomCtrl := csrio.customCtrl
 
-  io.toTop.cpuHalted := ctrlBlock.io.toTop.cpuHalt
+  io.toTop.cpuWfi := ctrlBlock.io.toTop.cpuWfi
 
   io.traceCoreInterface <> ctrlBlock.io.traceCoreInterface
 
@@ -706,7 +706,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle with HasSoCPar
 }
 
 class BackendToTopBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter{
-  val cpuHalted = Output(Bool())
+  val cpuWfi = Output(Bool())
   val cpuCriticalError = Output(Bool())
   val msiAck = Output(Bool())
   val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
