@@ -1,20 +1,26 @@
 package xiangshan.backend.regfile
 
-import chisel3.util.log2Up
+import chisel3.util._
 import xiangshan.backend.datapath.DataConfig._
 
 abstract class PregParams {
   val numEntries: Int
-  val numRead: Option[Int]
-  val numWrite: Option[Int]
-  val dataCfg: DataConfig
-  val isFake: Boolean
+  val numBank   : Int
+  val numRead   : Option[Int]
+  val numWrite  : Option[Int]
+  val dataCfg   : DataConfig
+  val isFake    : Boolean
 
   def addrWidth = log2Up(numEntries)
+  // addr for datas after read each bank
+  def bankRaddrWidth = log2Ceil(numBank)
+  // addr for read each bank
+  def arbiterAddrWidth = addrWidth - bankRaddrWidth
 }
 
 case class IntPregParams(
   numEntries: Int,
+  numBank   : Int,
   numRead   : Option[Int],
   numWrite  : Option[Int],
 ) extends PregParams {
@@ -25,6 +31,7 @@ case class IntPregParams(
 
 case class FpPregParams(
                           numEntries: Int,
+                          numBank   : Int,
                           numRead   : Option[Int],
                           numWrite  : Option[Int],
                         ) extends PregParams {
@@ -35,6 +42,7 @@ case class FpPregParams(
 
 case class VfPregParams(
   numEntries: Int,
+  numBank   : Int,
   numRead   : Option[Int],
   numWrite  : Option[Int],
 ) extends PregParams {
@@ -45,6 +53,7 @@ case class VfPregParams(
 
 case class V0PregParams(
   numEntries: Int,
+  numBank: Int,
   numRead   : Option[Int],
   numWrite  : Option[Int],
 ) extends PregParams {
@@ -55,6 +64,7 @@ case class V0PregParams(
 
 case class VlPregParams(
   numEntries: Int,
+  numBank   : Int,
   numRead   : Option[Int],
   numWrite  : Option[Int],
 ) extends PregParams {
@@ -65,6 +75,7 @@ case class VlPregParams(
 
 case class NoPregParams() extends PregParams {
   val numEntries: Int = 0
+  val numBank   : Int = 0
   val numRead   : Option[Int] = None
   val numWrite  : Option[Int] = None
 
@@ -74,6 +85,7 @@ case class NoPregParams() extends PregParams {
 
 case class FakeIntPregParams(
   numEntries: Int,
+  numBank   : Int,
   numRead   : Option[Int],
   numWrite  : Option[Int],
 ) extends PregParams {

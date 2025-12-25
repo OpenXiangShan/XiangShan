@@ -98,6 +98,11 @@ class RFReadArbiterIO(params: RFRdArbParams)(implicit p: Parameters) extends Bun
   val out = Vec(params.portMax + 1, Valid(new RFArbiterBundle(pregWidth)))
 }
 
+class RFBankReadArbiterIO(params: RFRdArbParams)(implicit p: Parameters) extends Bundle {
+  val in = Flipped(params.genInputBundle)
+  val out = Vec(params.portMax + 1, Vec(params.pregParams.numBank, Valid(new RFArbiterBundle(params.pregParams.arbiterAddrWidth))))
+}
+
 abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Parameters) extends Module {
   protected def portRange: Range
 
@@ -171,6 +176,80 @@ class IntRFReadArbiter(
 )(implicit
   p: Parameters
 ) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[IntRD], backendParams.intPregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getRdPortIndices(IntData()).max
+}
+
+abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Parameters) extends Module {
+  protected def portRange: Range
+
+  val io = IO(new RFBankReadArbiterIO(params))
+  dontTouch(io)
+
+  protected val pregParams = params.pregParams
+  protected val pregWidth = pregParams.addrWidth
+  protected val bankAddrWidth = log2Ceil(pregParams.numBank)
+
+  protected val inGroup: Map[Int, Seq[DecoupledIO[RFArbiterBundle]]] = io.in
+    .flatten.flatten
+    .groupBy(_.bits.rdCfg.get.port)
+    .map(x => (x._1, x._2.sortBy(_.bits.rdCfg.get.priority).toSeq))
+  protected val arbiters: Seq[Option[Seq[OldestArbiter]]] = portRange.map { portIdx =>
+    Option.when(inGroup.isDefinedAt(portIdx))(
+      Seq.fill(params.pregParams.numBank)(Module(new OldestArbiter(pregWidth - bankAddrWidth, inGroup(portIdx).size)))
+    )
+  }
+
+  arbiters.zipWithIndex.foreach { case (arbiters, portIdx) =>
+    if (arbiters.nonEmpty) {
+      arbiters.get.zipWithIndex.map{ case (arbiter, i) => {
+          arbiter.io.in.zip(inGroup(portIdx)).zipWithIndex.foreach { case ((arbiterIn, ioIn), idx) =>
+            arbiterIn.valid := ioIn.valid && (ioIn.bits.addr.head(bankAddrWidth) === i.U)
+            arbiterIn.bits := ioIn.bits
+            ioIn.ready := arbiters.get.map(x => x.io.in(idx).ready).reduce(_ && _)
+          }
+        }
+      }
+      // perfCounter
+      val arbitersIn = arbiters.get.map(_.io.in)
+      val numReq = arbitersIn.head.length
+      if (params.pregParams.dataCfg.isInstanceOf[IntData] && numReq > 1) {
+        println(f"numReq = ${numReq}")
+        for (conflictNum <- 2 to numReq) {
+          val hasConflict = arbitersIn.map { case x =>
+            PopCount(x.map(_.valid)) === conflictNum.U
+          }
+          for (i <- hasConflict.indices) {
+            XSPerfAccumulate(s"IntRFReadPort_portIdx_${portIdx}_bankIdx_${i}_Conflict_ReqNumIs${conflictNum}", PopCount(hasConflict(i)))
+          }
+        }
+      }
+    }
+  }
+
+  // connection of NoRD
+  io.in.map(_.map(_.map(x =>
+    if (x.bits.rdCfg.get.isInstanceOf[NoRD]) {
+      x.ready := true.B
+    }
+  )))
+
+  for (portIdx <- io.out.indices) {
+    val arb = arbiters(portIdx)
+    val out = io.out(portIdx)
+    if (arb.nonEmpty) {
+      val arbOut = VecInit(arb.get.map(_.io.out))
+      out := arbOut
+    } else {
+      out := 0.U.asTypeOf(out)
+    }
+  }
+}
+
+class IntRFBankReadArbiter(
+  backendParams: BackendParams
+)(implicit
+  p: Parameters
+) extends RFBankReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[IntRD], backendParams.intPregParams)) {
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(IntData()).max
 }
 
