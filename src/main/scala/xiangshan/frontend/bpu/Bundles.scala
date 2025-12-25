@@ -149,6 +149,7 @@ class BpuPredictionSource extends Bundle {
   def s1Fallthrough:     Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
   def s3Ras:             Bool = s3Source === BpuPredictionSource.Stage3.Ras
   def s3ITTage:          Bool = s3Source === BpuPredictionSource.Stage3.ITTage
+  def s3MbtbSc:          Bool = s3Source === BpuPredictionSource.Stage3.MbtbSc
   def s3MbtbTage:        Bool = s3Source === BpuPredictionSource.Stage3.MbtbTage
   def s3Mbtb:            Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
   def s3FallthroughTage: Bool = s3Source === BpuPredictionSource.Stage3.FallthroughTage
@@ -161,13 +162,14 @@ object BpuPredictionSource {
     def Abtb:        UInt = 1.U(width.W)
     def Fallthrough: UInt = 2.U(width.W)
   }
-  object Stage3 extends EnumUInt(6) {
+  object Stage3 extends EnumUInt(7) {
     def Ras:             UInt = 0.U(width.W)
     def ITTage:          UInt = 1.U(width.W)
-    def MbtbTage:        UInt = 2.U(width.W)
-    def Mbtb:            UInt = 3.U(width.W)
-    def FallthroughTage: UInt = 4.U(width.W)
-    def Fallthrough:     UInt = 5.U(width.W)
+    def MbtbSc:          UInt = 2.U(width.W)
+    def MbtbTage:        UInt = 3.U(width.W)
+    def Mbtb:            UInt = 4.U(width.W)
+    def FallthroughTage: UInt = 5.U(width.W)
+    def Fallthrough:     UInt = 6.U(width.W)
   }
 }
 

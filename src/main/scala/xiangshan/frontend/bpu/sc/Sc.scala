@@ -681,7 +681,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
     val predWayIdx = t1_branchesScIdxVec(i)
-    trace.valid        := t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional && t1_trainValid
+    trace.valid        := t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional && t1_fire
     trace.bits.startPc := t1_train.startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
