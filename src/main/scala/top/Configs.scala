@@ -111,8 +111,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nSets = 64, // 16KB ICache
           tagECC = Some("parity"),
           dataECC = Some("parity"),
-          replacer = Some("setplru"),
-          cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f)),
+          replacer = Some("setplru")
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -125,8 +124,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
           enableTagEcc = true,
-          enableDataEcc = true,
-          cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+          enableDataEcc = true
         )),
         // ============ BPU ===============
         EnableLoop = false,
@@ -272,8 +270,7 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
         nReleaseEntries = 18,
         nMaxPrefetchEntry = 6,
         enableTagEcc = true,
-        enableDataEcc = true,
-        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+        enableDataEcc = true
       ))
     ))
 })
