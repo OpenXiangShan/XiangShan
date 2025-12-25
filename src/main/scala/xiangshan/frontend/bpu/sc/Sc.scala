@@ -283,7 +283,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
 
   private val s2_scPred     = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds = scThreshold.map(_.thres.value >> 3)
+  private val s2_thresholds = VecInit(scThreshold.map(_.thres.value >> 3))
   // private val s2_thresholds    = scThreshold.thres.value >> 3
   private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
@@ -292,7 +292,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val hit   = s2_hitMask(i)
     val valid = s2_providerValid(i)
     val sum   = s2_totalPercsum(i)
-    val thres = s2_thresholds(i)
+    val thres = s2_thresholds(s2_wayIdx(i))
     // val thres        = s2_thresholds
     val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
     val tageConfMid  = s2_providerCtr(i).isMid
@@ -428,10 +428,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
     val updated =
-      t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesScIdxVec).foldLeft(scThreshold(wayIdx)) {
-        case (prevThres, ((writeValid, taken), branchIdx)) =>
+      t1_writeValidVec.zip(t1_branchesWayIdxVec).zip(t1_writeTakenVec).zip(t1_branchesScIdxVec).foldLeft(scThreshold(
+        wayIdx
+      )) {
+        case (prevThres, (((writeValid, writeWayIdx), taken), branchIdx)) =>
           val scWrong = taken =/= t1_meta.scPred(branchIdx)
-          val shouldUpdate = writeValid && t1_meta.tagePredValid(branchIdx) &&
+          val shouldUpdate = writeValid && writeWayIdx === wayIdx.U && t1_meta.tagePredValid(branchIdx) &&
             (t1_meta.tagePred(branchIdx) =/= t1_meta.scPred(branchIdx)) &&
             (scWrong || !t1_meta.sumAboveThres(branchIdx))
           val nextThres = prevThres.update(scWrong)
@@ -681,7 +683,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
     val predWayIdx = t1_branchesScIdxVec(i)
-    trace.valid        := t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional && t1_trainValid
+    trace.valid        := t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional && t1_fire
     trace.bits.startPc := t1_train.startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
