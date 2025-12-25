@@ -246,7 +246,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
     val (beu_int_out, _) = beu_local_int_source.out(0)
-    beu_int_out(0) := beu.module.io.interrupt
+    val interruptReg = RegNext(beu.module.io.interrupt, false.B)
+    beu_int_out(0) := beu.module.io.interrupt && !interruptReg
 
     beu.module.io.errors.icache := io.beu_errors.icache
     beu.module.io.errors.dcache := io.beu_errors.dcache
