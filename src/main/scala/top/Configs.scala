@@ -467,10 +467,7 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
     )}
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       EnableChiselDB = true,
-      EnableRollingDB = true,
       EnableConstantin = true,
-      EnableDebug = true,
-      EnablePerfDebug = true,
     )
   })
 )
