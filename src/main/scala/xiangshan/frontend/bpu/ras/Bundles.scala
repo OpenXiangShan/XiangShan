@@ -117,3 +117,20 @@ class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
   val meta:      RasInternalMeta = new RasInternalMeta
   val level:     UInt            = RedirectLevel()
 }
+
+class RASTrace(implicit p: Parameters) extends RasBundle {
+  val redirectPushPc: UInt   = UInt(VAddrBits.W)
+  val specPushPc:     UInt   = UInt(VAddrBits.W)
+  val topRetAddr:     UInt   = UInt(VAddrBits.W)
+  val specPush:       Bool   = Bool()
+  val specPop:        Bool   = Bool()
+  val normalRedirect: Bool   = Bool()
+  val pushRedirect:   Bool   = Bool()
+  val popRedirect:    Bool   = Bool()
+  val commitPush:     Bool   = Bool()
+  val tosw:           RasPtr = new RasPtr
+  val tosr:           RasPtr = new RasPtr
+  val bos:            RasPtr = new RasPtr
+  val ssp:            UInt   = UInt(log2Up(CommitStackSize).W)
+  val nsp:            UInt   = UInt(log2Up(CommitStackSize).W)
+}

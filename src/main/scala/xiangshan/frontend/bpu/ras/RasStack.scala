@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.ras
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ChiselDB
 import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
@@ -423,4 +424,29 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
   io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
   io.debug.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
+
+  private val rasTrace = Wire(Valid(new RASTrace))
+  rasTrace.valid               := io.redirect.valid || io.commit.pushValid || io.spec.pushValid || io.spec.popValid
+  rasTrace.bits.redirectPushPc := io.redirect.callAddr.toUInt
+  rasTrace.bits.specPushPc     := io.spec.pushAddr.toUInt
+  rasTrace.bits.topRetAddr     := io.spec.popAddr.toUInt
+  rasTrace.bits.specPush       := io.spec.pushValid
+  rasTrace.bits.specPop        := io.spec.popValid
+  rasTrace.bits.normalRedirect := io.redirect.valid && !io.redirect.isCall && !io.redirect.isRet
+  rasTrace.bits.pushRedirect   := io.redirect.valid && io.redirect.isCall
+  rasTrace.bits.popRedirect    := io.redirect.valid && io.redirect.isRet
+  rasTrace.bits.commitPush     := io.commit.pushValid
+  rasTrace.bits.tosw           := tosw
+  rasTrace.bits.tosr           := tosr
+  rasTrace.bits.bos            := bos
+  rasTrace.bits.ssp            := ssp
+  rasTrace.bits.nsp            := nsp
+
+  private val rasTraceDBTables = ChiselDB.createTable(s"rasTrace", new RASTrace, true)
+  rasTraceDBTables.log(
+    data = rasTrace.bits,
+    en = rasTrace.valid,
+    clock = clock,
+    reset = reset
+  )
 }
