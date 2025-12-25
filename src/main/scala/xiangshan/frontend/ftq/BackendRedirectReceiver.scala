@@ -20,6 +20,7 @@ import chisel3.util._
 import utility.XSError
 import xiangshan.Redirect
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.Bundles.connectSamePort
 
 trait BackendRedirectReceiver extends HasFtqParameters {
   def receiveBackendRedirect(
@@ -44,7 +45,10 @@ trait BackendRedirectReceiver extends HasFtqParameters {
 //      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
 //    )
 
-    val redirect    = fromBackend.redirect
+    // val redirect    = fromBackend.redirect
+    val redirect    = Wire(Valid(new Redirect))
+    redirect.valid := fromBackend.redirect.valid
+    connectSamePort(redirect.bits, fromBackend.redirect.bits)
     val redirectReg = RegNext(redirect)
     redirectReg.valid := redirect.valid && !ftqIdxInAdvanceValidNext
 

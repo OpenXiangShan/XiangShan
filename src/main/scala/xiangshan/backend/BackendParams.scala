@@ -126,7 +126,7 @@ case class BackendParams(
 
   def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
 
-  def numRedirect = 1 // only for ahead info to frontend
+  def numRedirect = 4 // only for ahead info to frontend
 
   def numLoadDp = intSchdParams.get.issueBlockParams.filter(x => x.isLdAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
 

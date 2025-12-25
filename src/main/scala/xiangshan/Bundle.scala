@@ -249,6 +249,10 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   }
 }
 
+class RedirectToFrontend(implicit p: Parameters) extends Redirect {
+  val instrAddrTransType = new AddrTransType
+}
+
 object Redirect extends HasCircularQueuePtrHelper {
 
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {

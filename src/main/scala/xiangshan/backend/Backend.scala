@@ -196,7 +196,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromBJUResolve := intRegion.io.toFrontendBJUResolve.get
   ctrlBlock.io.fromCSR.toDecode := intRegion.io.csrToDecode.get
   ctrlBlock.io.fromCSR.traceCSR := intRegion.io.csrio.get.traceCSR
-  ctrlBlock.io.fromCSR.instrAddrTransType := RegNext(intRegion.io.csrio.get.instrAddrTransType)
+  ctrlBlock.io.fromCSR.instrAddrTransType := intRegion.io.csrio.get.instrAddrTransType
   val wbDataPathToCtrlBlock = intRegion.io.wbDataPathToCtrlBlock.writeback ++
     fpRegion.io.wbDataPathToCtrlBlock.writeback ++
     vecRegion.io.wbDataPathToCtrlBlock.writeback

@@ -1373,15 +1373,15 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
-  io.status.instrAddrTransType.bare := privState.isModeM ||
+  io.status.instrAddrTransType.bare := !debugMode && (privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
-    (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Bare)
-  io.status.instrAddrTransType.sv39 := !privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv39 ||
-    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv39
-  io.status.instrAddrTransType.sv48 := !privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv48 ||
-    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv48
-  io.status.instrAddrTransType.sv39x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv39x4
-  io.status.instrAddrTransType.sv48x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4
+    (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Bare))
+  io.status.instrAddrTransType.sv39 := !debugMode && (!privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv39 ||
+    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv39)
+  io.status.instrAddrTransType.sv48 := !debugMode && (!privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv48 ||
+    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv48)
+  io.status.instrAddrTransType.sv39x4 := !debugMode && (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv39x4)
+  io.status.instrAddrTransType.sv48x4 := !debugMode && (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4)
   assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
   private val csrAccess = wenLegalReg || RegNext(ren)

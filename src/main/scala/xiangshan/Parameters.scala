@@ -664,7 +664,7 @@ trait HasXSParameter {
   def MemIQSizeMax = backendParams.intSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
-  def NumRedirect = backendParams.numRedirect
+  def NumRedirect = backendParams.numRedirect  //4: jmp/brh/xret
   def BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   def FtqRedirectAheadNum = NumRedirect
   def IfuRedirectNum = coreParams.IfuRedirectNum

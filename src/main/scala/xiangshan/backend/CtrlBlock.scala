@@ -42,7 +42,7 @@ import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
-  val redirect = Valid(new Redirect)
+  val redirect = Valid(new RedirectToFrontend)
   val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
   val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 
@@ -118,6 +118,7 @@ class CtrlBlockImp(
     robFlushPCOffset := s0_robFlushRedirect.bits.getPcOffset()
   }
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + robFlushPCOffset
+  private val s2_redirectGen = redirectGen.io.stage1Redirect
   private val s3_redirectGen = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
@@ -206,11 +207,6 @@ class CtrlBlockImp(
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
     // for fix timing, next cycle assgin
-    if (!hasCSR) {
-      out.bits.backendIAF := false.B
-      out.bits.backendIPF := false.B
-      out.bits.backendIGPF := false.B
-    }
     out
   }).toSeq
   private val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
@@ -323,8 +319,8 @@ class CtrlBlockImp(
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
-  redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
+  redirectGen.io.oldestExuRedirectIsCSR := false.B
+  redirectGen.io.instrAddrTransType := 0.U.asTypeOf(redirectGen.io.instrAddrTransType)
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
@@ -364,14 +360,19 @@ class CtrlBlockImp(
     frontendCommit
   )
 
-  io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s3_redirectGen.valid
-  io.frontend.toFtq.redirect.bits := Mux(s6_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
+  io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s2_redirectGen.valid
+  connectSamePort(io.frontend.toFtq.redirect.bits, Mux(s6_flushFromRobValid, frontendFlushBits, s2_redirectGen.bits))
   io.frontend.toFtq.ftqIdxSelOH.valid := s6_flushFromRobValid || redirectGen.io.stage2Redirect.valid
   io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s6_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s6_flushFromRobValid))
 
   //jmp/brh, sel oldest first, only use one read port
   io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(0).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
+
+  io.frontend.toFtq.ftqIdxAhead.zip(exuRedirects).map{ case(toftq, wb) =>
+    toftq.valid := wb.valid && !s0_robFlushRedirect.valid && !s5_flushFromRobValidAhead
+    toftq.bits  := wb.bits.ftqIdx
+  }
   //loadreplay
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
@@ -412,6 +413,11 @@ class CtrlBlockImp(
     io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
     io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
   }
+
+  io.frontend.toFtq.redirect.bits.backendIAF := false.B
+  io.frontend.toFtq.redirect.bits.backendIPF := false.B
+  io.frontend.toFtq.redirect.bits.backendIGPF := false.B
+  io.frontend.toFtq.redirect.bits.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
 
   for (i <- 0 until DecodeWidth) {
     gpaMem.io.fromIFU := io.frontend.fromIfu

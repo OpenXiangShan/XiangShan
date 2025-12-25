@@ -274,4 +274,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.dft_reset.zip(memBlock.io.dft_reset_frnt).foreach({ case (a, b) => a := b })
   backend.io.dft.zip(memBlock.io.dft_bcknd).foreach({ case (a, b) => a := b })
   backend.io.dft_reset.zip(memBlock.io.dft_reset_bcknd).foreach({ case (a, b) => a := b })
+
+  dontTouch(backend.io.frontend.toFtq)
 }
