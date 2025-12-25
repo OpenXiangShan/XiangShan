@@ -207,6 +207,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needFlush = compressUnit.io.out.needFlush
   val interrupt_safe = compressUnit.io.out.interrupt_safe
   val isRVC = compressUnit.io.out.isRVC
+  val complexHasDest = compressUnit.io.out.complexHasDest
+  val hasStore = compressUnit.io.out.hasStore
 
   // speculatively assign the instruction with an robIdx
   val validCount = PopCount(io.in.zip(needRobFlags).zip(io.validVec).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
@@ -334,6 +336,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).needFlush := needFlush(i)
     uops(i).interrupt_safe := interrupt_safe(i)
     uops(i).isRVC := isRVC(i)
+    uops(i).complexHasDest := complexHasDest(i)
+    uops(i).hasStore := hasStore(i)
     uops(i).lastIsRVC := io.in(i).bits.isRVC
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
