@@ -236,6 +236,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) // The control signals need to explicitly indicate the initial value
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
+  val isNC = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W),
@@ -559,6 +560,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     val s1_replayIdx = s1_oldestSel(i).bits
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
+    val s2_nc      = RegEnable(isNC(s1_replayIdx), s1_can_go(i))
     val s2_vecReplay = RegEnable(vecReplay(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))
@@ -595,6 +597,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.missDbUpdated := s2_missDbUpdated
     replay_req(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
     replay_req(i).bits.isMmioOrNc := s2_replayCauses(LoadReplayCauses.C_UNCACHE)
+    replay_req(i).bits.nc       := s2_nc
     replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
     replay_req(i).bits.tlbMiss      := s2_replayCauses(LoadReplayCauses.C_TM)
@@ -670,6 +673,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop
       uop(enqIndex).exceptionVec := 0.U.asTypeOf(enq.bits.uop.exceptionVec)
+      isNC(enqIndex)      := enq.bits.nc
       vecReplay(enqIndex).isvec := enq.bits.isvec
       vecReplay(enqIndex).isLastElem := enq.bits.isLastElem
       vecReplay(enqIndex).is128bit := enq.bits.is128bit

@@ -344,7 +344,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   })
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
-  val s2_need_replay = s2_req.map(_.rep_info.need_rep)
+  val s2_need_replay = s2_req.map { req =>
+     req.rep_info.need_rep && !req.rep_info.mmioOrNc}
 
   for (w <- 0 until LoadPipelineWidth) {
     s2_enqueue(w) := s2_valid(w) && !s2_has_exception(w) && !s2_need_replay(w) && (s2_req(w).mmio || s2_req(w).nc)
