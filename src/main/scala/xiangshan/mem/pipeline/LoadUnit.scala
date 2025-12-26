@@ -201,6 +201,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
   val s0_valid         = Wire(Bool())
+  val s0_sel_valid     = Wire(Bool())
   val s0_mmio_select   = Wire(Bool())
   val s0_nc_select     = Wire(Bool())
   val s0_misalign_select= Wire(Bool())
@@ -311,7 +312,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
     s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
     s0_src_select_vec(nc_idx)
-  s0_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
+  s0_sel_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
     s0_src_valid_vec(mab_idx) ||
     s0_src_valid_vec(super_rep_idx) ||
     s0_src_valid_vec(fast_rep_idx) ||
@@ -320,9 +321,11 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx) ||
     s0_src_valid_vec(low_pf_idx)
-  ) && !s0_src_select_vec(mmio_idx) && io.dcache.req.ready &&
-    !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
+  ) && !s0_src_select_vec(mmio_idx) &&
+    !(io.misalign_ldin.valid && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
   ))
+
+  s0_valid := s0_sel_valid && io.dcache.req.ready
 
   s0_mmio_select := s0_src_select_vec(mmio_idx) && !s0_kill
   s0_nc_select := s0_src_select_vec(nc_idx) && !s0_kill
@@ -369,7 +372,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
 
   // query DCache
-  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
+  io.dcache.req.valid             := s0_sel_valid && !s0_sel_src.prf_i && !s0_nc_with_data
   io.dcache.req.bits.cmd          := Mux(s0_sel_src.prf_rd,
                                       MemoryOpConstants.M_PFR,
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
@@ -1772,7 +1775,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   XSPerfAccumulate("s0_fast_replay_issue",         io.fast_rep_in.fire)
   XSPerfAccumulate("s0_fast_replay_vecissue",      io.fast_rep_in.fire && io.fast_rep_in.bits.isvec)
   XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
-  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
+  XSPerfAccumulate("s0_stall_dcache",              s0_sel_valid && !io.dcache.req.ready)
   XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)

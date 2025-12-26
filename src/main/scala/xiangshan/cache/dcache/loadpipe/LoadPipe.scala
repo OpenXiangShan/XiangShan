@@ -117,7 +117,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val wr_conflict_check = Wire(Bool())
 
-  // ready can wait for valid
+  // ready depends on valid
   io.lsu.req.ready := ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready)) && !wr_conflict_check
   io.meta_read.valid := io.lsu.req.fire && !io.nack
   io.tag_read.valid := io.lsu.req.fire && !io.nack
