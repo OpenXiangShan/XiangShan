@@ -64,6 +64,7 @@ import xiangshan.PMParameters
 import xiangshan.XSCoreParameters
 import xiangshan.XSTileKey
 
+
 /**
  * Configurable parameters for the Pbus2 interconnect.
  *
@@ -374,7 +375,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   println("==== 12.17 start uncoreTop Imp..==")
   class Imp(outer: dmPbusTop) extends LazyRawModuleImp(outer) {
     val cpu_s =
-      IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+      IO(Vec(params.NumHarts, Flipped(new VerilogAXI4Record(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
     val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
       addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
     ))))// cross-die slave ports for debug
@@ -409,7 +410,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm_self_mNode.out.head._1.w.valid  := isselfid & cpu2dm_s.in.head._1.w.valid
     dm_self_mNode.out.head._1.ar.valid := isselfid & cpu2dm_s.in.head._1.ar.valid
     for (i <- 0 until params.NumHarts) {
-      cpu_mNodes(i).out.head._1 <> cpu_s(i)
+      cpu_mNodes(i).out.head._1 <> cpu_s(i).viewAs[AXI4Bundle]
     }
     dmio <> dm.module.io
     val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
@@ -545,7 +546,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val peri_s = IO(Flipped(new AXI4Bundle(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
     val msi_m  = IO(new AXI4Bundle(imsicTop.sNode.in.head._2.bundle)) // to imsic master ports
     val cpu_s =
-      IO(Vec(params.NumHarts, Flipped(new AXI4Bundle(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
+      IO(Vec(params.NumHarts, Flipped(new VerilogAXI4Record(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
     val dm_crs_s = IO(Flipped(new AXI4Bundle(dmTop.module.dm_crs_s.params))) // cross-die slave ports for debug
     val dm_crs_m = IO(dmTop.module.dm_crs_m.cloneType)
     // instance debugModule sba port
@@ -567,7 +568,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     }
     // connect io
     peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
-    cpu_mNodes.zip(cpu_s).foreach { case (node, io) => node.out.head._1 <> io }
+    cpu_mNodes.zip(cpu_s).foreach { case (node, io) => node.out.head._1 <> io.viewAs[AXI4Bundle] }
     // connection about cross-die access ports for debug
     println("==== 12.17start to connect debugModule..==")
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
@@ -575,7 +576,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     imsicTop.module.s_cpu.zip(cpu2msi_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
     msi_m <> imsicTop.module.m
     // cpu2dm_sNodes <> dmTop
-    dmTop.module.cpu_s.zip(cpu2dm_sNodes).foreach { case (io, node) => node.in.head._1 <> io }
+    dmTop.module.cpu_s.zip(cpu2dm_sNodes).foreach { case (io, node) => node.in.head._1 <> io.viewAs[AXI4Bundle] }
     dm_crs_s <> dmTop.module.dm_crs_s
     dm_crs_m <> dmTop.module.dm_crs_m
     dmTop.module.dm_m.foreach(_ <> dm_m.get)
