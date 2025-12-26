@@ -39,6 +39,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // req got nacked in stage 0?
     val nack      = Input(Bool())
 
+    val wr_conflict = Flipped(Valid(Bits(DCacheBanks.W)))
+
     // meta and data array read port
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
@@ -113,8 +115,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // --------------------------------------------------------------------------------
   // read tag
 
+  val wr_conflict_check = Wire(Bool())
+
   // ready can wait for valid
-  io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
+  io.lsu.req.ready := ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready)) && !wr_conflict_check
   io.meta_read.valid := io.lsu.req.fire && !io.nack
   io.tag_read.valid := io.lsu.req.fire && !io.nack
 
@@ -131,6 +135,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
+
+  wr_conflict_check := io.wr_conflict.valid && (io.wr_conflict.bits & s0_bank_oh).orR
 
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
