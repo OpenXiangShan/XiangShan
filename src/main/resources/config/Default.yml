@@ -36,15 +36,15 @@ DebugModuleParams:
 
 WFIResume: true
 
-BEURange: { base: 0x38010000, mask: 0xFFF }
+# BEURange: { base: 0x38010000, mask: 0xFFF }
 
-EnableDCacheCtrl: true
+# EnableDCacheCtrl: true
 
-DCacheCtrlRange: { base: 0x38022000, mask: 0x7F }
+# DCacheCtrlRange: { base: 0x38022000, mask: 0x7F }
 
-EnableICacheCtrl: true
+# EnableICacheCtrl: true
 
-ICacheCtrlRange: { base: 0x38022080, mask: 0x7F }
+# ICacheCtrlRange: { base: 0x38022080, mask: 0x7F }
 
 SeperateDM: false
 
