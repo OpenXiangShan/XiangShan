@@ -23,14 +23,15 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class MicroTageParameters(
     // TODO: The length of the Tag and its alias status will need to be adjusted later. The same applies to the number of items.
     TableInfos: Seq[MicroTageInfo] = Seq(
-      new MicroTageInfo(512, 9, 9, 15), // 3Taken maybe better than 2Taken
+      new MicroTageInfo(512, 6, 6, 15), // 3Taken maybe better than 2Taken
       // new MicroTageInfo(64, 16, 8, 18),
-      new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
+      // new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
+      new MicroTageInfo(512, 16, 12, 15) // follow Tage.
       // new MicroTageInfo(128, 32, 16, 24)
     ),
     TakenCtrWidth:       Int = 3,
     NumTables:           Int = 2,
-    TickWidth:           Int = 5,
+    TickWidth:           Int = 10,
     UsefulWidth:         Int = 2,
     EnableTraceAndDebug: Boolean = false,
     BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
