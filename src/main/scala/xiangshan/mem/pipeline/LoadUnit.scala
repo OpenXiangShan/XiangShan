@@ -1333,6 +1333,17 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
 
+  XSPerfAccumulate("wr_mem_amb", io.dcache.s2_wr_conflict && s2_mem_amb && s2_troublem)
+  XSPerfAccumulate("wr_tlb_miss", io.dcache.s2_wr_conflict && s2_tlb_miss && s2_troublem)
+  XSPerfAccumulate("wr_fwd_fail", io.dcache.s2_wr_conflict && s2_fwd_fail && s2_troublem)
+  XSPerfAccumulate("wr_dcache_rep", io.dcache.s2_wr_conflict && s2_mq_nack && s2_troublem)
+  XSPerfAccumulate("wr_dcache_miss", io.dcache.s2_wr_conflict && s2_dcache_miss && s2_troublem)
+  XSPerfAccumulate("wr_bank_conflict", io.dcache.s2_wr_conflict && s2_bank_conflict && s2_troublem)
+  XSPerfAccumulate("wr_wpu_fail", io.dcache.s2_wr_conflict && s2_wpu_pred_fail && s2_troublem)
+  XSPerfAccumulate("wr_rar_nack", io.dcache.s2_wr_conflict && s2_rar_nack && s2_troublem)
+  XSPerfAccumulate("wr_raw_nack", io.dcache.s2_wr_conflict && s2_raw_nack && s2_troublem)
+  XSPerfAccumulate("wr_nuke", io.dcache.s2_wr_conflict && s2_nuke && s2_troublem)
+
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
   // if ld-ld violation is detected, replay from this inst from fetch

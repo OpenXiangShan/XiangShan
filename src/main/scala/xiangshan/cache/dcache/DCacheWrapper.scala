@@ -595,6 +595,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_wpu_pred_fail = Input(Bool())
   val s2_mq_nack = Input(Bool())
 
+  val s2_wr_conflict = Input(Bool())
+
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
   val debug_s2_pred_way_num = Input(UInt(XLEN.W))
