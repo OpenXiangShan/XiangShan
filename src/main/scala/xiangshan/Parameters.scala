@@ -140,7 +140,16 @@ case class XSCoreParameters
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), BertiParams(), SMSParams()),
+  /**
+    * NOTE:
+    *   1. The prefetch priority is from high to low according to the order in the Seq.
+    *   2. Add BertiParams() will enable Berti and Stride will be closed by default.
+    *      If you want to enable both Berti and Stride prefetcher,
+    *      please set constant "modeStrideBerti" in PrefetcherWrapper.scala to "bothOn".
+    *      TODO: separate Stream and Stride prefetcher in the future.
+    */
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  // prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), BertiParams(), SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
