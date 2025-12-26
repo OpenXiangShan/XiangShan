@@ -581,6 +581,12 @@ trait HasXSParameter {
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
+  val socParams = p(SoCParamsKey)
+  def EnableDCacheCtrl = socParams.EnableDCacheCtrl
+  def DCacheCtrlRange = socParams.DCacheCtrlRange
+  def EnableICacheCtrl = socParams.EnableICacheCtrl
+  def ICacheCtrlRange = socParams.ICacheCtrlRange
+
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
 

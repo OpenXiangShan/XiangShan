@@ -167,8 +167,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
 
   // L1 DCache controller
   val cacheCtrlParamsOpt  = OptionWrapper(
-                              p(SoCParamsKey).EnableDCacheCtrl,
-                              L1CacheCtrlParams(p(SoCParamsKey).DCacheCtrlRange)
+                              EnableDCacheCtrl,
+                              L1CacheCtrlParams(DCacheCtrlRange)
                             )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)

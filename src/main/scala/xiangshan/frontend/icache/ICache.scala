@@ -86,9 +86,9 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val cacheParams: ICacheParameters = icacheParameters
 
   def ctrlUnitParamsOpt: Option[L1ICacheCtrlParams] = OptionWrapper(
-    p(SoCParamsKey).EnableICacheCtrl,
+    EnableICacheCtrl,
     L1ICacheCtrlParams(
-      address = p(SoCParamsKey).ICacheCtrlRange,
+      address = ICacheCtrlRange,
       regWidth = XLEN
     )
   )
