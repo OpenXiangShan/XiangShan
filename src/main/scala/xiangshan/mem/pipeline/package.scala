@@ -147,6 +147,7 @@ object TlbAccessResult extends ChiselOHEnum {
   val miss = addType("miss")
 
   def apply() = UInt(this.values.size.W)
+  def isHit(r: UInt): Bool = IsOneOf(r, hit)
   def isMiss(r: UInt): Bool = IsOneOf(r, miss)
   def isNotMiss(r: UInt): Bool = !isMiss(r)
 }
