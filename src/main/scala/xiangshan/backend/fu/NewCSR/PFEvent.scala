@@ -1,10 +1,10 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{DistributedCSRIO, XSModule}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.decode.isa.CSRs
 
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {

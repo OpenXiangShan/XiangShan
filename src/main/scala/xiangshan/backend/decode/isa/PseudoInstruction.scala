@@ -1,7 +1,6 @@
 package xiangshan.backend.decode.isa
 
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 
 object PseudoInstructions {
   // no write csr

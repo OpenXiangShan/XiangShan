@@ -2,7 +2,6 @@ package xiangshan.backend.fu.NewCSR
 
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.rocket.CSRs
 import chisel3._
 import chisel3.util._
 import utils.ConsecutiveOnes
@@ -15,6 +14,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSREvents._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
+import xiangshan.backend.decode.isa.CSRs
 import CSRConfig._
 import utility.SignExt
 import xiangshan.TriggerAction

@@ -25,10 +25,11 @@ import chisel3.util._
 import utility.MaskedRegMap.WritableMask
 import xiangshan._
 import xiangshan.backend.fu.util.HasCSRConst
+import xiangshan.backend.decode.isa.CSRs
 import utils._
 import utility._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
-import freechips.rocketchip.rocket.CSRs
+
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes

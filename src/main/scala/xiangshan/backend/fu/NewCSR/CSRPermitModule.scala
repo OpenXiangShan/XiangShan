@@ -3,9 +3,9 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
-import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
+import xiangshan.backend.decode.isa.CSRs
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
 

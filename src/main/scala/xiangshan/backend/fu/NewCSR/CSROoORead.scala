@@ -1,6 +1,6 @@
 package xiangshan.backend.fu.NewCSR
 
-import freechips.rocketchip.rocket.CSRs
+import xiangshan.backend.decode.isa.CSRs
 
 object CSROoORead {
   /**
