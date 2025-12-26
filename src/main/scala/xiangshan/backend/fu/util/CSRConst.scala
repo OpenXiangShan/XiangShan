@@ -18,7 +18,6 @@ package xiangshan.backend.fu.util
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 
 trait HasCSRConst {
   // Supervisor Custom Read/Write
