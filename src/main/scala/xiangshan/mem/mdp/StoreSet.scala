@@ -411,6 +411,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     })
   })
 
+  val overflowVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   // when store is dispatched, mark it as valid
   (0 until RenameWidth).map(i => {
     when(io.dispatch.req(i).valid && io.dispatch.req(i).bits.isstore){
@@ -419,6 +420,9 @@ class LFST(implicit p: Parameters) extends XSModule {
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
       robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
+      when(validVec(waddr)(wptr)) {
+        overflowVec(i) := true.B
+      }
     }
   })
 
@@ -443,4 +447,6 @@ class LFST(implicit p: Parameters) extends XSModule {
       })
     })
   }
+
+  XSPerfAccumulate("LFST_Overflow_Count", PopCount(overflowVec))
 }
