@@ -325,8 +325,7 @@ case class XSCoreParameters
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setplru"),
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
+    replacer = Some("setplru")
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -337,8 +336,7 @@ case class XSCoreParameters
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
     enableTagEcc = true,
-    enableDataEcc = true,
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+    enableDataEcc = true
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
@@ -582,6 +580,11 @@ trait HasXSParameter {
   def KeyIDBits = p(CVMParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
+
+  def EnableDCacheCtrl = true
+  def DCacheCtrlRange = AddressSet(0x38022000L, 0x7f)
+  def EnableICacheCtrl = true
+  def ICacheCtrlRange = AddressSet(0x38022080L, 0x7f)
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
