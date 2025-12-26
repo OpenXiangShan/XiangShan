@@ -27,6 +27,7 @@ case class IttageParameters(
       new IttageTableInfo(512, 16),
       new IttageTableInfo(512, 32)
     ),
+    NumBanks:           Int = 2,
     TagWidth:           Int = 9,
     ConfidenceCntWidth: Int = 2,
     UsefulCntWidth:     Int = 1,
@@ -50,6 +51,10 @@ trait HasIttageParameters extends HasBpuParameters {
 
   def TableInfos: Seq[IttageTableInfo] = ittageParameters.TableInfos
   def NumTables:  Int                  = TableInfos.length
+
+  def IttageNumBanks:     Int = ittageParameters.NumBanks
+  def IttageBankIdxWidth: Int = log2Ceil(IttageNumBanks)
+  require(isPow2(IttageNumBanks), "IttageNumBanks must be a power of 2")
 
   def TagWidth:           Int = ittageParameters.TagWidth
   def ConfidenceCntWidth: Int = ittageParameters.ConfidenceCntWidth
