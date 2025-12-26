@@ -463,6 +463,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
   XSPerfAccumulate(
+    "commit_branch_type",
+    commit,
+    Seq(
+      ("conditional", commitPerfMeta.mispredictBranchInfo.attribute.isConditional),
+      ("direct", commitPerfMeta.mispredictBranchInfo.attribute.isDirect),
+      ("indirect", commitPerfMeta.mispredictBranchInfo.attribute.isIndirect),
+      (
+        "indirect_retcall",
+        commitPerfMeta.mispredictBranchInfo.attribute.isReturnAndCall
+          && commitPerfMeta.mispredictBranchInfo.attribute.isIndirect
+      ),
+      ("call", commitPerfMeta.mispredictBranchInfo.attribute.isCall),
+      ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
+    )
+  )
+  XSPerfAccumulate(
     "commit_branch_mispredicts_s1_source",
     commit && commitPerfMeta.mispredict,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
@@ -475,6 +491,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "commit_branch_mispredicts_reason",
     commit && commitPerfMeta.mispredict,
+    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
+  )
+  XSPerfAccumulate(
+    "commit_conditional_branch_mispredicts_reason",
+    commit && commitPerfMeta.mispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
   )
   XSPerfAccumulate(
