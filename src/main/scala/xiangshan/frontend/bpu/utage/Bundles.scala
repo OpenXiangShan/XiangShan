@@ -32,6 +32,10 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val histTableCfiPositionVec: Vec[UInt] = Vec(NumTables, UInt(CfiPositionWidth.W))
   val baseTaken:               Bool      = Bool()
   val baseCfiPosition:         UInt      = UInt(CfiPositionWidth.W)
+  val finalTaken:              Bool      = Bool()
+  val finalCfiPosition:        UInt      = UInt(CfiPositionWidth.W)
+  val finalIsBr:               Bool      = Bool()
+  val hasOverride:             Bool      = Bool()
 
   // only for test and debug
   val debug_startVAddr:   Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(VAddrBits.W))

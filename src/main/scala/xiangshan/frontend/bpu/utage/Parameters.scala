@@ -33,7 +33,7 @@ case class MicroTageParameters(
     NumTables:           Int = 2,
     TickWidth:           Int = 10,
     UsefulWidth:         Int = 2,
-    EnableTraceAndDebug: Boolean = false,
+    EnableTraceAndDebug: Boolean = true,
     BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
