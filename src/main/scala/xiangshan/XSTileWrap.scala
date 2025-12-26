@@ -176,7 +176,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
       case Some(param) =>
-        val time_sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        val time_sink = withClockAndReset(clock, reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
         time_sink.io.async <> io.clintTime
         time_sink.io.deq.ready := true.B
         tile.module.io.clintTime.valid := time_sink.io.deq.valid
@@ -189,7 +189,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     if (isOpenLLC) {
       EnableCHIAsyncBridge match {
         case Some(param) =>
-          val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
+          val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
           source.io.enq <> tile.module.io.chi.get
           io.chi.get <> source.io.async
         case None =>
