@@ -89,7 +89,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val msiAck = Output(Bool())
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
-    val cpu_halt = Output(Bool())
+    val cpu_wfi = Output(Bool())
     val l2_flush_done = Input(Bool())
     val l2_flush_en = Output(Bool())
     val power_down_en = Output(Bool())
@@ -237,7 +237,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
   memBlock.io.debugRolling := backend.io.debugRolling
 
-  io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.cpu_wfi := memBlock.io.outer_cpu_wfi
   io.l2_flush_en := memBlock.io.outer_l2_flush_en
   io.power_down_en := memBlock.io.outer_power_down_en
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error

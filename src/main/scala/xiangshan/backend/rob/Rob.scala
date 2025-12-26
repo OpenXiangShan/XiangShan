@@ -87,7 +87,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val snpt = Input(new SnapshotPort)
     val robFull = Output(Bool())
     val headNotReady = Output(Bool())
-    val cpu_halt = Output(Bool())
+    val cpu_wfi = Output(Bool())
     val wfi = new Bundle {
       val wfiReq = Output(Bool())
       val safeFromMem = Input(Bool())
@@ -434,7 +434,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val hasWFI = RegInit(false.B)
   val wfiSafe = io.wfi.safeFromMem && io.wfi.safeFromFrontend
   io.wfi.wfiReq := hasWFI
-  io.cpu_halt := hasWFI && wfiSafe
+  io.cpu_wfi := hasWFI && wfiSafe
   // WFI Timeout: 2^20 = 1M cycles
   val wfi_cycles = RegInit(0.U(20.W))
   if (wfiResume) {

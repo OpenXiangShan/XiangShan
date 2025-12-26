@@ -113,7 +113,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
       AsyncResetSynchronizerShiftReg(core.io.l2_flush_done.getOrElse(false.B), 3, 0)
     }
     val isWFI = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg(core.io.cpu_halt, 3, 0)
+      AsyncResetSynchronizerShiftReg(core.io.cpu_wfi, 3, 0)
     }
     val exitco = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !sync_chi_syscoack),3, 0)}
@@ -231,7 +231,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 
   val tileio = IO(new Bundle {
     val hartId = Input(UInt(p(MaxHartIdBits).W))
-    val riscv_halt = Output(Bool())
+    val riscv_wfi = Output(Bool())
     val riscv_critical_error = Output(Bool())
     val hartResetReq = Input(Bool())
     val hartIsInReset = Output(Bool())
@@ -243,7 +243,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
 
-  tileio.riscv_halt := core_with_l2.module.io.cpu_halt
+  tileio.riscv_wfi := core_with_l2.module.io.cpu_wfi
   tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
   core_with_l2.module.io.hartResetReq := tileio.hartResetReq
   tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
