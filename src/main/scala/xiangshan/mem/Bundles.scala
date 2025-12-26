@@ -331,7 +331,7 @@ object Bundles {
     val sqIdx = new SqPtr
     val nc = Bool() // always mark a writebacked NC load as released in RAR
     val mask = UInt((VLEN/8).W)
-    val preDecodeInfo = new PreDecodeInfo
+    val isRVC = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   }

@@ -742,6 +742,7 @@ class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
   val matchInvalid = Bool()
   val forwardMask = Vec((VLEN/8), Bool())
   val forwardData = Vec((VLEN/8), UInt(8.W))
+  // denied and corrupt are only valid when forwarding matches
   val denied = Bool()
   val corrupt = Bool()
 }
