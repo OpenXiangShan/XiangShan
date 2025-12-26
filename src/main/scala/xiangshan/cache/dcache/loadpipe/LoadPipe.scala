@@ -39,6 +39,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // req got nacked in stage 0?
     val nack      = Input(Bool())
 
+    val wr_conflict = Flipped(Valid(Bits(DCacheBanks.W)))
+
     // meta and data array read port
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
@@ -106,6 +108,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // it you got nacked, you can directly passdown
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
+  XSPerfAccumulate("other_no_ready", io.lsu.req.valid && !not_nacked_ready)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -113,8 +116,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // --------------------------------------------------------------------------------
   // read tag
 
-  // ready can wait for valid
-  io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
+  val wr_conflict_check = Wire(Bool())
+  XSPerfAccumulate("wr_conflict_no_ready", io.lsu.req.valid && wr_conflict_check)
+  XSPerfAccumulate("loadpipe_req", io.lsu.req.valid)
+
+  XSPerfAccumulate("wr_conflict_load", io.lsu.req.valid && wr_conflict_check && io.lsu.req.bits.instrtype === LOAD_SOURCE.U)
+  XSPerfAccumulate("wr_conflict_prefetch", io.lsu.req.valid && wr_conflict_check && io.lsu.req.bits.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  XSPerfAccumulate("wr_conflict_amo", io.lsu.req.valid && wr_conflict_check && io.lsu.req.bits.instrtype === AMO_SOURCE.U)
+
+  // ready depends on valid
+  io.lsu.req.ready := ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready)) && !wr_conflict_check
   io.meta_read.valid := io.lsu.req.fire && !io.nack
   io.tag_read.valid := io.lsu.req.fire && !io.nack
 
@@ -131,6 +142,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
+
+  wr_conflict_check := io.lsu.req.valid && io.wr_conflict.valid && (io.wr_conflict.bits & s0_bank_oh).orR
+
+  val s0_wr_conflict_addr = RegNext(io.lsu.req.bits.vaddr)
+  val s0_wr_conflict_stall = RegNext(wr_conflict_check)
+  XSPerfAccumulate("wr_conflict_change_req", s0_wr_conflict_stall && (s0_wr_conflict_addr =/= io.lsu.req.bits.vaddr) && io.lsu.req.valid)
 
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
@@ -175,6 +192,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_vaddr = Mux(s1_load128Req, Cat(s1_vaddr_update(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update)
   val s1_vaddr_dup = Mux(s1_load128Req, Cat(s1_vaddr_update_dup(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update_dup)
   val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
+  val s1_wr_conflict_stall = RegEnable(s0_wr_conflict_stall, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
@@ -326,6 +344,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_pred_way_en = RegEnable(s1_pred_tag_match_way_dup_dc, s1_fire)
   val s2_dm_way_num = RegEnable(s1_direct_map_way_num, s1_fire)
   val s2_wpu_pred_fail_and_real_hit = RegEnable(s1_wpu_pred_fail_and_real_hit, s1_fire)
+  val s2_wr_conflict_stall = RegEnable(s1_wr_conflict_stall, s1_fire)
+
+  io.lsu.s2_wr_conflict := s2_wr_conflict_stall
 
   // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
   io.occupy_set := addr_to_dcache_set(s2_vaddr)
@@ -480,7 +501,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }else{
     io.lsu.debug_s2_dm_way_num := 0.U
   }
-
+  XSPerfAccumulate("wr_conflict_stall_still_replay", s2_wr_conflict_stall && resp.bits.replay && s2_valid)
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
@@ -536,6 +557,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
+  val s3_wr_conflict_stall = RegEnable(s2_wr_conflict_stall, s2_fire)
+  XSPerfAccumulate("s3_wrconflict_stall_BC", s3_wr_conflict_stall && s3_valid && s2_valid && s1_valid)
+  XSPerfAccumulate("s3_wrconflict_stall_B_C", s3_wr_conflict_stall && s3_valid && ((s2_valid && !s1_valid) || (!s2_valid && s1_valid)))
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid

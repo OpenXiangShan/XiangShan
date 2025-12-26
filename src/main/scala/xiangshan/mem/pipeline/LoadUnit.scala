@@ -201,6 +201,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
   val s0_valid         = Wire(Bool())
+  val s0_sel_valid     = Wire(Bool())
   val s0_mmio_select   = Wire(Bool())
   val s0_nc_select     = Wire(Bool())
   val s0_misalign_select= Wire(Bool())
@@ -311,7 +312,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
     s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
     s0_src_select_vec(nc_idx)
-  s0_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
+  s0_sel_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
     s0_src_valid_vec(mab_idx) ||
     s0_src_valid_vec(super_rep_idx) ||
     s0_src_valid_vec(fast_rep_idx) ||
@@ -320,9 +321,11 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx) ||
     s0_src_valid_vec(low_pf_idx)
-  ) && !s0_src_select_vec(mmio_idx) && io.dcache.req.ready &&
-    !(io.misalign_ldin.fire && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
+  ) && !s0_src_select_vec(mmio_idx) &&
+    !(io.misalign_ldin.valid && io.misalign_ldin.bits.misalignNeedWakeUp) // Currently, misalign is the highest priority
   ))
+
+  s0_valid := s0_sel_valid && io.dcache.req.ready
 
   s0_mmio_select := s0_src_select_vec(mmio_idx) && !s0_kill
   s0_nc_select := s0_src_select_vec(nc_idx) && !s0_kill
@@ -369,7 +372,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
 
   // query DCache
-  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
+  io.dcache.req.valid             := s0_sel_valid && !s0_sel_src.prf_i && !s0_nc_with_data
   io.dcache.req.bits.cmd          := Mux(s0_sel_src.prf_rd,
                                       MemoryOpConstants.M_PFR,
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
@@ -1330,6 +1333,17 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
 
+  XSPerfAccumulate("wr_mem_amb", io.dcache.s2_wr_conflict && s2_mem_amb && s2_troublem)
+  XSPerfAccumulate("wr_tlb_miss", io.dcache.s2_wr_conflict && s2_tlb_miss && s2_troublem)
+  XSPerfAccumulate("wr_fwd_fail", io.dcache.s2_wr_conflict && s2_fwd_fail && s2_troublem)
+  XSPerfAccumulate("wr_dcache_rep", io.dcache.s2_wr_conflict && s2_mq_nack && s2_troublem)
+  XSPerfAccumulate("wr_dcache_miss", io.dcache.s2_wr_conflict && s2_dcache_miss && s2_troublem)
+  XSPerfAccumulate("wr_bank_conflict", io.dcache.s2_wr_conflict && s2_bank_conflict && s2_troublem)
+  XSPerfAccumulate("wr_wpu_fail", io.dcache.s2_wr_conflict && s2_wpu_pred_fail && s2_troublem)
+  XSPerfAccumulate("wr_rar_nack", io.dcache.s2_wr_conflict && s2_rar_nack && s2_troublem)
+  XSPerfAccumulate("wr_raw_nack", io.dcache.s2_wr_conflict && s2_raw_nack && s2_troublem)
+  XSPerfAccumulate("wr_nuke", io.dcache.s2_wr_conflict && s2_nuke && s2_troublem)
+
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
   // if ld-ld violation is detected, replay from this inst from fetch
@@ -1772,7 +1786,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   XSPerfAccumulate("s0_fast_replay_issue",         io.fast_rep_in.fire)
   XSPerfAccumulate("s0_fast_replay_vecissue",      io.fast_rep_in.fire && io.fast_rep_in.bits.isvec)
   XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
-  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
+  XSPerfAccumulate("s0_stall_dcache",              s0_sel_valid && !io.dcache.req.ready)
   XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
