@@ -2,10 +2,10 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
+import xiangshan.backend.decode.isa.CSRs
 import xiangshan.PMParameKey
 import freechips.rocketchip.tile.XLen
 import CSRConfig._

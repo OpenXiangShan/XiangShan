@@ -2,7 +2,6 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.PMAConfigEntry
 import xiangshan.backend.fu.util.CSRConst

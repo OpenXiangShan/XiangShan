@@ -2,7 +2,6 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import utility.ZeroExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
@@ -12,6 +11,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryHSEventSinkBundle}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
+import xiangshan.backend.decode.isa.CSRs
 import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap

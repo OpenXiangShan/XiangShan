@@ -2,13 +2,13 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import CSRConfig._
 import system.HasSoCParameter
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
+import xiangshan.backend.decode.isa.CSRs
 import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap

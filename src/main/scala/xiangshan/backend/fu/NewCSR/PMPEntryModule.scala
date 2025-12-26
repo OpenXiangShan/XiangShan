@@ -3,9 +3,9 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.HasPMParameters
+import xiangshan.backend.decode.isa.CSRs
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes

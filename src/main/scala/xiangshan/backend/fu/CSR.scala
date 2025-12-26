@@ -34,7 +34,7 @@ import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 import xiangshan.backend.trace._
-import freechips.rocketchip.rocket.CSRs
+
 import xiangshan.backend.fu.vector.Bundles.Vstart
 
 class FpuCsrIO extends Bundle {
