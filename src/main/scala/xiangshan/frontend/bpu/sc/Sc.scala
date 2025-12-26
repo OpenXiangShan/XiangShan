@@ -385,9 +385,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_writeThresVec =
     t1_writeValidVec.zip(t1_branchesWayIdxVec).zip(t1_writeTakenVec).zip(t1_branchesScIdxVec).foldLeft(scThreshold) {
       case (prevThres, (((writeValid, writeWayIdx), taken), branchIdx)) =>
-        val scWrong      = taken =/= t1_meta.scPred(branchIdx)
-        val shouldUpdate = writeValid && (scWrong || !t1_meta.sumAboveThres(branchIdx)) && false.B
-        val nextThres    = prevThres.update(scWrong)
+        val scWrong = taken =/= t1_meta.scPred(branchIdx)
+        val shouldUpdate = writeValid && t1_meta.tagePredValid(branchIdx) &&
+          (t1_meta.tagePred(branchIdx) =/= t1_meta.scPred(branchIdx)) &&
+          (scWrong || !t1_meta.sumAboveThres(branchIdx))
+        val nextThres = prevThres.update(scWrong)
         Mux(shouldUpdate, nextThres, prevThres)
     }
 
@@ -435,7 +437,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     ).foldLeft(oldEntry.ctr) {
       case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
         val biasWayIdx = Cat(writeWayIdx, t1_oldBiasLowBits(branchIdx))
-        val needUpdate = writeValid && biasWayIdx === wayIdx.U &&
+        val needUpdate = writeValid && biasWayIdx === wayIdx.U && t1_meta.tagePredValid(branchIdx) &&
           (t1_meta.scPred(branchIdx) =/= writeTaken || !t1_meta.sumAboveThres(branchIdx))
         val nextValue = prevCtr.getUpdate(writeTaken)
         val nextCtr   = WireInit(prevCtr)
@@ -525,6 +527,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   XSPerfAccumulate(s"total_sc_train", t1_writeValid && changeVec.reduce(_ || _))
   XSPerfAccumulate(s"total_pred_use_sc", t1_writeValid && t1_meta.useScPred.reduce(_ || _))
+  XSPerfAccumulate(
+    s"total_sc_correct_tage_wrong",
+    scCorrectVec zip tageWrongVec map { case (scC, tageW) => scC && tageW } reduce (_ || _)
+  )
+  XSPerfAccumulate(
+    s"total_sc_wrong_tage_correct",
+    scWrongVec zip tageCorrectVec map { case (scW, tageC) => scW && tageC } reduce (_ || _)
+  )
+  XSPerfAccumulate(
+    s"total_sc_correct_tage_correct",
+    scCorrectVec zip tageCorrectVec map { case (scC, tageC) => scC && tageC } reduce (_ || _)
+  )
+  XSPerfAccumulate(
+    s"total_sc_wrong_tage_wrong",
+    scWrongVec zip tageWrongVec map { case (scW, tageW) => scW && tageW } reduce (_ || _)
+  )
 
   dontTouch(s2_sumPercsum)
   dontTouch(s2_totalPercsum)

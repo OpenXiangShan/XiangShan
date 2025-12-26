@@ -49,9 +49,10 @@ object ScThreshold {
 
 class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasScParameters {
-  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
-  val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
-  val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
+  val setIdx:       UInt         = UInt(log2Ceil(numSets).W)
+  val wayMask:      Vec[Bool]    = Vec(numWays, Bool())
+  val entryVec:     Vec[ScEntry] = Vec(numWays, new ScEntry())
+  override def tag: Option[UInt] = Some(this.wayMask.asUInt) // use wayMask as tag
 }
 
 class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
