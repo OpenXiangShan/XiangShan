@@ -72,9 +72,9 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val misalign_enq = new MisalignBufferEnqIO
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
-    val sqDeqPtr       = Input(new SqPtr)
-    val sqDeqUopIdx    = Input(UopIdx())
-    val sqDeqRobIdx    = Input(new RobPtr())
+    val sqCommitPtr    = Input(new SqPtr)
+    val sqCommitUopIdx = Input(UopIdx())
+    val sqCommitRobIdx = Input(new RobPtr)
 
     val s0_s1_s2_valid = Output(Bool())
   })
@@ -180,7 +180,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   )) + s0_addr_low
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqDeqPtr || s0_uop.robIdx === io.sqDeqRobIdx && s0_uop.uopIdx === io.sqDeqUopIdx)
+  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -470,7 +470,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     s2_in.uop.exceptionVec(storeGuestPageFault)
   )
   // This real physical address is located in uncache space.
-  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
+  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
   val s2_isCbo  = RegEnable(s1_isCbo, s1_fire) // all cbo instr
   val s2_isCbo_noZero = LSUOpType.isCbo(s2_in.uop.fuOpType)
 
@@ -494,11 +494,11 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // TODO: dcache resp
   io.dcache.resp.ready := true.B
 
-  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
+  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire)
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
-  val s2_misalignBufferNack = !io.misalign_enq.revoke &&
-    RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
+  val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
+  val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -506,7 +506,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec && !s1_frm_mabuf
   io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
   io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
-  io.feedback_slow.bits.hit  := RegEnable(s1_feedback.bits.hit, feedback_slow_valid) && !s2_misalignBufferNack
+  io.feedback_slow.bits.hit  := RegEnable(s1_feedback.bits.hit, feedback_slow_valid) && !s2_misalignNeedReplay
 
   val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit && s1_feedback.valid) &&
                        !s2_misalignBufferNack && s2_in.isvec && !s2_frm_mabuf
@@ -517,7 +517,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
   io.misalign_stout := s2_misalign_stout
 
-  val s2_misalign_cango = !s2_mis_align || s2_in.isvec && s2_misalignBufferNack
+  val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
 
   // mmio and exception
   io.lsq_replenish := s2_out

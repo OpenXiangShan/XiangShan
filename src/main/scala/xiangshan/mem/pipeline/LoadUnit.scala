@@ -282,20 +282,20 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                                io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
   private val SRC_NUM = 10
   private val Seq(
-    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, nc_idx, lsq_rep_idx,
-    high_pf_idx, vec_iss_idx, int_iss_idx, low_pf_idx
+    mab_idx, super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
+    vec_iss_idx, int_iss_idx, mmio_idx, nc_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
   val s0_src_valid_vec = WireInit(VecInit(Seq(
     io.misalign_ldin.valid,
     io.replay.valid && io.replay.bits.forward_tlDchannel,
     io.fast_rep_in.valid,
-    io.lsq.uncache.valid,
-    io.lsq.nc_ldin.valid,
     io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
+    io.lsq.uncache.valid,
+    io.lsq.nc_ldin.valid,
     io.prefetch_req.valid, // lower confidence prefetch or lower prefetch-priority ldu
   )))
   // load flow source ready
@@ -626,12 +626,12 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     fromMisAlignBufferSource(io.misalign_ldin.bits),
     fromNormalReplaySource(io.replay.bits),
     fromFastReplaySource(io.fast_rep_in.bits),
-    fromMmioSource(io.lsq.uncache.bits),
-    fromNcSource(io.lsq.nc_ldin.bits),
     fromNormalReplaySource(io.replay.bits),
     fromPrefetchSource(io.prefetch_req.bits),
     fromVecIssueSource(io.vecldin.bits),
     fromIntIssueSource(io.ldin.bits),
+    fromMmioSource(io.lsq.uncache.bits),
+    fromNcSource(io.lsq.nc_ldin.bits),
     fromPrefetchSource(io.prefetch_req.bits)
   )
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
@@ -886,8 +886,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
-  s1_paddr_dup_lsu    := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(0))
-  s1_paddr_dup_dcache := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(1))
+  s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
+  s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
   s1_gpaddr_dup_lsu   := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
 
   when (io.tlb.resp.valid && !s1_tlb_miss) {
@@ -1105,7 +1105,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s2_in.uop.exceptionVec(loadGuestPageFault)
   )
   // This real physical address is located in uncache space.
-  val s2_actually_uncache = !s2_in.tlbMiss && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
+  val s2_actually_uncache = !s2_in.tlbMiss && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && (s2_pmp.mmio && !s2_pmp.ld) || s2_in.nc || s2_in.mmio
   val s2_uncache = !s2_prf && s2_actually_uncache
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
@@ -1128,8 +1128,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
                      s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_uncache
-  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
-  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_corrupt) = io.forward_mshr.forward()
+  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_denied, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
+  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_denied, s2_mshr_corrupt) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
 
   // writeback access fault caused by ecc error / bus error
@@ -1233,8 +1233,12 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
   s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_uncache && !s2_isvec
   s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
-    s2_fwd_frm_d_chan && s2_d_corrupt ||
-    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt
+    s2_fwd_frm_d_chan && s2_d_denied ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied
+  s2_real_exceptionVec(hardwareError) := s2_exception_vec(hardwareError) ||
+    s2_fwd_frm_d_chan && s2_d_corrupt && !s2_d_denied ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied
+
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
 
@@ -1479,8 +1483,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // Int load, if hit, will be writebacked at s3
   s3_out.valid := s3_valid && s3_safe_writeback && !toMisalignBufferValid
   s3_out.bits := s3_in
-  s3_out.bits.uop.exceptionVec(loadAccessFault) := s3_in.uop.exceptionVec(loadAccessFault) && s3_vecActive
-  s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err) && s3_vecActive
+  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
+  s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err ||
+                                                 io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
 

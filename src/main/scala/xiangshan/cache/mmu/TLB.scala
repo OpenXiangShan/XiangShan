@@ -106,6 +106,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   )))
   val need_gpa = RegInit(false.B)
   val need_gpa_wire = WireInit(false.B)
+  val maybe_need_gpa_not_allow_refill = WireInit(false.B)
+  val need_clear_need_gpa = RegInit(false.B)
   val need_gpa_robidx = Reg(new RobPtr)
   val need_gpa_vpn = Reg(UInt(vpnLen.W))
   val resp_gpa_gvpn = Reg(UInt(ptePPNLen.W))
@@ -131,7 +133,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
     (mode(i) < ModeM)
   )
-  val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
+
+  val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
+  val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
+  val portTranslateEnable = (0 until Width).map(i => privNeedTranslate(i) && !useReqS1Paddr(i))
 
   // pre fault: check fault before real do translate
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -221,7 +226,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
 
-  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !need_gpa_wire && !flush_mmu
+  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
 
   refill_to_mem := DontCare
@@ -280,16 +285,21 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
     val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
-    when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i)){
+    need_clear_need_gpa := false.B
+    when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i) || need_clear_need_gpa){
       need_gpa := false.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
-    }.elsewhen (req_out_v(i) && !p_hit_fast && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
+    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
+      maybe_need_gpa_not_allow_refill := true.B
       need_gpa_wire := true.B
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
       need_gpa_robidx := req_out(i).debug.robIdx
+      when (p_hit_fast) {
+        need_clear_need_gpa := true.B
+      }
     }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
       resp_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genGVPN(need_gpa_vpn))
       resp_s1_level := ptw.resp.bits.s1.entry.level.get
@@ -308,6 +318,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
+    val notTranslatePaddr = Mux(useReqS1Paddr(i), req_in(i).bits.pmp_addr, SignExt(req_out(i).vaddr, PAddrBits))
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
@@ -352,7 +363,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val crossPageVaddr = Mux(isitlb || req_out(i).fullva(12) =/= vaddr(12), req_out(i).vaddr, req_out(i).fullva)
       val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
-      resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
+      resp(i).bits.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
       resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
     }
 

@@ -213,8 +213,7 @@ trait PMACheckMethod extends PMPConst {
     resp.ld := TlbCmd.isRead(cmd) && !cfg.r
     resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
-    //TODO We require that a `PMA` can generate an mmio response only if the address has the appropriate `PMA` permissions.
-    resp.mmio := !cfg.c && !(resp.ld || resp.st || resp.instr)
+    resp.mmio := !cfg.c
     resp.atomic := cfg.atomic
     resp
   }

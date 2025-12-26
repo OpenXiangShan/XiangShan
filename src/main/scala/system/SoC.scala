@@ -104,10 +104,10 @@ case class SoCParameters
   SeperateBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
-    imsicIntSrcWidth = 8,
+    imsicIntSrcWidth = 9,
     mAddr = 0x3A800000,
     sgAddr = 0x3B000000,
-    geilen = 5,
+    geilen = 7,
     vgeinWidth = 6,
     iselectWidth = 12,
     EnableImsicAsyncBridge = true,
@@ -116,12 +116,19 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
   SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  // when UsePrivateClint is true, private clint is used, Timer will be instanced and mtip is generated inside XSTileWrap
+  // when UsePrivateClint is false, mtip is from soc.
+  UsePrivateClint: Boolean = false,
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
     "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
+  )
+  require(
+    !UsePrivateClint || (SeperateBus != top.SeperatedBusType.NONE),
+    "SeperateBus should not be None when UsePrivateClint is true"
   )
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -176,11 +183,10 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val SeperateBusAsyncBridge = if (SeperateBus != top.SeperatedBusType.NONE && soc.SeperateBusAsyncBridge.isDefined)
-    soc.SeperateBusAsyncBridge else None
+  val SeperateBusAsyncBridge = soc.SeperateBusAsyncBridge
 
-  // seperate TL bus
-  val EnableSeperateBusAsync = SeperateBusAsyncBridge.isDefined
+  val UsePrivateClint = soc.UsePrivateClint
+  val TIMERRange = soc.TIMERRange
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown

@@ -40,6 +40,10 @@ SeperateDM: false
 
 SeperateBus: NONE
 
+UsePrivateClint: false
+
+TIMERRange: { base: 0x38000000, mask: 0xFFFF }
+
 SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
 
