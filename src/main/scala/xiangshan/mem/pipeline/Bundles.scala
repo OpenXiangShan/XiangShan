@@ -21,6 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils._
 import xiangshan._
+import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.cache._
@@ -32,6 +33,8 @@ sealed trait HasLoadPipeBundleParam {
   def hasAddrTrans: Boolean = false
   def hasNoQuery: Boolean = false
   def hasPAddrChecked: Boolean = false
+  def hasNC: Boolean = false
+  def hasMMIO: Boolean = false
   def replayToLRQ: Boolean = false
   def replayFromLRQ: Boolean = false
   def hasVector: Boolean = false
@@ -77,6 +80,8 @@ class LoadPipeBundle(
   val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
 
   val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
+  val nc = Option.when(param.hasNC)(Bool())
+  val mmio = Option.when(param.hasMMIO)(Bool())
 
   // replay
   val mshrId = Option.when(param.replayFromToLRQ)(UInt(log2Up(cfg.nMissEntries).W)) // valid when `handledByMSHR` is HIGH
@@ -84,7 +89,6 @@ class LoadPipeBundle(
   val cause = Option.when(param.replayFromToLRQ)(Vec(LoadReplayCauses.allCauses, Bool()))
 
   val handledByMSHR = Option.when(param.replayToLRQ)(Bool())
-  val fullForward = Option.when(param.replayToLRQ)(Bool())
   val dataInvalidSqIdx = Option.when(param.replayToLRQ)(new SqPtr)
   val addrInvalidSqIdx = Option.when(param.replayToLRQ)(new SqPtr)
   val tlbId = Option.when(param.replayToLRQ)(UInt(log2Up(loadfiltersize).W))
@@ -108,6 +112,7 @@ class LoadPipeBundle(
 
   // data
   val data = Option.when(param.hasData)(UInt((VLEN+1).W))
+  val forwardMask = Option.when(param.hasData)(UInt(VLENB.W))
 
   // virtualLoadQueue
   val writebacked = Option.when(hasWritebacked)(Bool()) // `updateAddrValid` in the original version
@@ -143,6 +148,12 @@ class LoadPipeBundle(
     vecVaddrOffset.get := 0.U
     vecTriggerMask.get := 0.U
   }
+  def exception(): Bool = {
+    ExceptionNO.selectByFu(uop.exceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(uop.trigger)
+  }
+  def isFirstIssue(): Bool = {
+    LoadEntrance.isScalarIssue(entrance) || LoadEntrance.isVectorIssue(entrance)
+  }
 }
 
 case class LoadReplayIOParam(
@@ -168,8 +179,10 @@ case class LoadStageIOParam()(
   override val hasPAddr: Boolean = true
   override val hasAddrTrans: Boolean = afterS1
   override val hasNoQuery: Boolean = isS0
-  // override val hasPAddrChecked: Boolean =
-  // override val replayToLRQ: Boolean =
+  override val hasPAddrChecked: Boolean = afterS2
+  override val hasNC: Boolean = afterS2
+  override val hasMMIO: Boolean = afterS2
+  override val replayToLRQ: Boolean = afterS2
   override val replayFromLRQ: Boolean = true
   override val hasVector: Boolean = true
   // override val hasData: Boolean =
