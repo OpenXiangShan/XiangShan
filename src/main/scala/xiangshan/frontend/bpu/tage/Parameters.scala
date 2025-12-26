@@ -64,6 +64,9 @@ trait HasTageParameters extends HasBpuParameters {
   def NumTables:     Int = TableInfos.length
   def TableIdxWidth: Int = log2Ceil(NumTables)
 
+  def MaxNumSets:     Int = TableInfos.map(_.getNumSets(NumBanks)).max
+  def MaxSetIdxWidth: Int = log2Ceil(MaxNumSets)
+
   def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
 

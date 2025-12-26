@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -37,9 +38,15 @@ trait TopHelper extends HasTageParameters {
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
 
-  def getUseAltIndex(pc: PrunedAddr): UInt = {
-    val useAltIdxWidth = log2Ceil(NumUseAltOnNa)
-    pc(useAltIdxWidth - 1 + instOffsetBits, instOffsetBits)
+  def getUseAltOnNaIdx(pc: PrunedAddr): UInt = {
+    val useAltOnNaIdxWidth = log2Ceil(NumUseAltOnNa)
+    pc(useAltOnNaIdxWidth - 1 + instOffsetBits, instOffsetBits)
+  }
+
+  def initUsefulCtr: SaturateCounter = {
+    val ctr = Wire(new SaturateCounter(UsefulCtrWidth))
+    ctr.value := UsefulCtrInitValue.U
+    ctr
   }
 }
 
