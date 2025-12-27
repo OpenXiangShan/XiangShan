@@ -137,7 +137,7 @@ class MicroTageTable(
 
   private val updateUseful = Mux(
     io.update.bits.allocValid,
-    oldUseful.getWeakPositive,
+    oldUseful.getWeakNegative,
     oldUseful.getUpdate(io.update.bits.usefulCorrect)
   )
 

@@ -167,7 +167,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val baseGTNotMatch =
     (t0_baseCfiPosition > t0_predCfiPosition) && ((!t0_baseTaken && t0_predTaken) || (t0_baseTaken && t0_predTaken))
 
-  private val fastTrainHasPredBr   = t0_predCfiPosition <= t0_trainData.cfiPosition
+  private val fastTrainHasPredBr = (t0_predCfiPosition === t0_trainData.cfiPosition) ||
+    ((t0_predCfiPosition < t0_trainData.cfiPosition) || t0_trainData.attribute.isConditional)
   private val baseNotMatchHistPred = baseEQNotMatch || baseLTNotMatch || baseGTNotMatch
 
 // Allocation policy:
