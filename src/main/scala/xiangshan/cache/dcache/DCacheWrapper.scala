@@ -166,7 +166,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def dataECCBits = encDataBits - DCacheSRAMRowBits
 
   // L1 DCache controller
-  val cacheCtrlParamsOpt  = OptionWrapper(
+  def cacheCtrlParamsOpt  = OptionWrapper(
                               p(SoCParamsKey).EnableDCacheCtrl,
                               L1CacheCtrlParams(p(SoCParamsKey).DCacheCtrlRange)
                             )
