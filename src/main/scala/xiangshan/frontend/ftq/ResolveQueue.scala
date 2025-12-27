@@ -155,4 +155,5 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   // because it is a sequential queue, which results in multiple flushed entries staying in the queue and blocking new
   // entries from being enqueued. More sophisticated designs should be considered.
   XSPerfAccumulate("resolveQueueFull", full)
+  XSPerfAccumulate("dropResolve", PopCount(io.backendResolve.map(_.valid && full)))
 }
