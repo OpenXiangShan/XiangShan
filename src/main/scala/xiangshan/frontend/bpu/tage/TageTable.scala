@@ -95,13 +95,17 @@ class TageTable(
     }
   }
 
+  // delay one cycle for better timing
+  private val writeReqValid = RegNext(io.writeReq.valid, false.B)
+  private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
+
   // write to write buffer
   entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
     buffer.io.write.zipWithIndex.foreach { case (writePort, wayIdx) =>
-      writePort.valid := io.writeReq.valid && io.writeReq.bits.bankMask(bankIdx) && io.writeReq.bits.wayMask(wayIdx)
-      writePort.bits.setIdx    := io.writeReq.bits.setIdx
-      writePort.bits.entry     := io.writeReq.bits.entries(wayIdx)
-      writePort.bits.usefulCtr := io.writeReq.bits.usefulCtrs(wayIdx)
+      writePort.valid          := writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx)
+      writePort.bits.setIdx    := writeReq.setIdx
+      writePort.bits.entry     := writeReq.entries(wayIdx)
+      writePort.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
     }
   }
 
