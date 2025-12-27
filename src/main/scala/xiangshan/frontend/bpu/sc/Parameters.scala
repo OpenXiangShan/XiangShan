@@ -31,7 +31,7 @@ case class ScParameters(
     BiasTableSize:       Int = 1024,
     BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
 
-    PathEnable:      Boolean = false,
+    PathEnable:      Boolean = true,
     GlobalEnable:    Boolean = false,
     BiasEnable:      Boolean = true,
     CtrWidth:        Int = 6,
