@@ -161,11 +161,13 @@ class MinimalConfig(n: Int = 1) extends Config(
         IssueQueueCompEntrySize = 4,
         intPreg = IntPregParams(
           numEntries = 64,
+          numBank = 4,
           numRead = None,
           numWrite = None,
         ),
         vfPreg = VfPregParams(
           numEntries = 160,
+          numBank = 1,
           numRead = None,
           numWrite = None,
         ),

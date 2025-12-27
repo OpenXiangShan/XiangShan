@@ -23,6 +23,7 @@ object DecodeMain extends App {
       // Example of how to change params
       intPreg = IntPregParams(
           numEntries = 64,
+          numBank = 4,
           numRead = Some(14),
           numWrite = Some(8),
         ),
