@@ -76,6 +76,10 @@ case class SoCParameters
   TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
+  EnableDCacheCtrl: Boolean = true,
+  DCacheCtrlRange: AddressSet = AddressSet(0x38022000L, 0x7f),
+  EnableICacheCtrl: Boolean = true,
+  ICacheCtrlRange: AddressSet = AddressSet(0x38022080L, 0x7f),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO

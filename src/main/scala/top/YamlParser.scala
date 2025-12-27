@@ -43,6 +43,11 @@ case class YamlConfig(
   DebugAttachProtocals: Option[List[String]],
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
+  BEURange: Option[AddressSet],
+  EnableDCacheCtrl: Option[Boolean],
+  DCacheCtrlRange: Option[AddressSet],
+  EnableICacheCtrl: Option[Boolean],
+  ICacheCtrlRange: Option[AddressSet],
   SeperateDM: Option[Boolean],
   SeperateBus: Option[String],
   SeperateBusRanges: Option[List[AddressSet]],
@@ -122,6 +127,31 @@ object YamlParser {
       newConfig = newConfig.alter((site, here, up) => {
         case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = enable))
       })
+    }
+    yamlConfig.BEURange.foreach { range =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(BEURange = range)
+      })
+    }
+    yamlConfig.EnableDCacheCtrl.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(EnableDCacheCtrl = enable)
+      })
+    }
+    yamlConfig.DCacheCtrlRange.foreach { range =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(DCacheCtrlRange = range)
+      })  
+    }
+    yamlConfig.EnableICacheCtrl.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(EnableICacheCtrl = enable)
+      })
+    }
+    yamlConfig.ICacheCtrlRange.foreach { range =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(ICacheCtrlRange = range)
+      })  
     }
     yamlConfig.SeperateDM.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {

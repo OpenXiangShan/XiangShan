@@ -325,8 +325,7 @@ case class XSCoreParameters
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setplru"),
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
+    replacer = Some("setplru")
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -337,8 +336,7 @@ case class XSCoreParameters
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
     enableTagEcc = true,
-    enableDataEcc = true,
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+    enableDataEcc = true
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",

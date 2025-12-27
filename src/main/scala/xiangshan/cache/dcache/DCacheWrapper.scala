@@ -25,6 +25,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import huancun.{AliasField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
+import system.SoCParamsKey
 import utility._
 import utils._
 import xiangshan._
@@ -54,8 +55,7 @@ case class DCacheParameters
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = false,
-  cacheCtrlAddressOpt: Option[AddressSet] = None,
+  enableTagEcc: Boolean = false
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -166,9 +166,9 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def dataECCBits = encDataBits - DCacheSRAMRowBits
 
   // L1 DCache controller
-  val cacheCtrlParamsOpt  = OptionWrapper(
-                              cacheParams.cacheCtrlAddressOpt.nonEmpty,
-                              L1CacheCtrlParams(cacheParams.cacheCtrlAddressOpt.get)
+  def cacheCtrlParamsOpt  = OptionWrapper(
+                              p(SoCParamsKey).EnableDCacheCtrl,
+                              L1CacheCtrlParams(p(SoCParamsKey).DCacheCtrlRange)
                             )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)

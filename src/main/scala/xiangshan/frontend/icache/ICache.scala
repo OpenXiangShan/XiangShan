@@ -36,6 +36,7 @@ import freechips.rocketchip.util.BundleFieldBase
 import huancun.AliasField
 import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
+import system.SoCParamsKey
 import utility._
 import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
@@ -64,10 +65,9 @@ case class ICacheParameters(
     ICacheDataBanks:     Int = 8,
     ICacheDataSRAMWidth: Int = 66,
     // TODO: hard code, need delete
-    partWayNum:          Int = 4,
-    nMMIOs:              Int = 1,
-    blockBytes:          Int = 64,
-    cacheCtrlAddressOpt: Option[AddressSet] = None
+    partWayNum: Int = 4,
+    nMMIOs:     Int = 1,
+    blockBytes: Int = 64
 ) extends L1CacheParameters {
 
   val setBytes:     Int         = nSets * blockBytes
@@ -86,9 +86,9 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val cacheParams: ICacheParameters = icacheParameters
 
   def ctrlUnitParamsOpt: Option[L1ICacheCtrlParams] = OptionWrapper(
-    cacheParams.cacheCtrlAddressOpt.nonEmpty,
+    p(SoCParamsKey).EnableICacheCtrl,
     L1ICacheCtrlParams(
-      address = cacheParams.cacheCtrlAddressOpt.get,
+      address = p(SoCParamsKey).ICacheCtrlRange,
       regWidth = XLEN
     )
   )
