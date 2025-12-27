@@ -149,9 +149,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s0_pathIdx = PathTableInfos.map(info =>
     getPathTableIdx(
       s0_startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays / NumBanks))),
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size))),
       io.foldedPathHist,
-      info.Size / NumWays / NumBanks
+      info.Size
     )
   )
 
@@ -162,7 +162,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     getGlobalTableIdx(
       s0_startPc,
       s0_ghr.value.asUInt(info.HistoryLength - 1, 0),
-      info.Size / NumWays / NumBanks,
+      info.Size,
       info.HistoryLength
     )
   )
@@ -170,7 +170,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_globalIdx = s0_globalIdx.map(RegEnable(_, s0_fire)) // for debug
   private val s2_globalIdx = s1_globalIdx.map(RegEnable(_, s1_fire)) // for debug
 
-  private val s0_biasIdx = getBiasTableIdx(s0_startPc, BiasTableSize / BiasTableNumWays / NumBanks)
+  private val s0_biasIdx = getBiasTableIdx(s0_startPc, BiasTableSize)
 
   private val s1_biasIdx = RegEnable(s0_biasIdx, s0_fire)
   private val s2_biasIdx = RegEnable(s1_biasIdx, s1_fire)
@@ -363,21 +363,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_pathSetIdx = PathTableInfos.map(info =>
     getPathTableIdx(
       t1_train.startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size / NumWays / NumBanks))),
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.Size))),
       RegEnable(io.trainFoldedPathHist, t0_fire),
-      info.Size / NumWays / NumBanks
+      info.Size
     )
   )
   private val t1_globalSetIdx = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
       t1_train.startPc,
       t1_meta.scGhr(info.HistoryLength - 1, 0),
-      info.Size / NumWays / NumBanks,
+      info.Size,
       info.HistoryLength
     )
   )
 
-  private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, BiasTableSize / BiasTableNumWays / NumBanks)
+  private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, BiasTableSize)
 
   private val t1_oldPathCtrs    = VecInit(t1_meta.scPathResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
   private val t1_oldGlobalCtrs  = VecInit(t1_meta.scGlobalResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))

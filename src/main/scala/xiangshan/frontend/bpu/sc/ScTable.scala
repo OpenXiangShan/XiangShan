@@ -41,7 +41,7 @@ class ScTable(
 
   val io = IO(new ScTableIO())
 
-  def numRows: Int = numSets / numWays / NumBanks
+  def numRows: Int = numSets
 
   private val sram = Seq.fill(NumBanks)(
     Module(new SRAMTemplate(
