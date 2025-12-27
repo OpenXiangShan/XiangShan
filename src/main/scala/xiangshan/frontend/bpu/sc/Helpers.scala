@@ -74,12 +74,14 @@ trait Helpers extends HasScParameters with PhrHelper {
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
       val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).foldLeft(oldEntry.ctr) {
         case (prevCtr, ((writeValid, writeTaken), writeWayIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U &&
-            (metaData.scPred(wayIdx) =/= writeTaken || !metaData.sumAboveThres(wayIdx))
-          val nextValue = prevCtr.getUpdate(writeTaken)
-          val nextCtr   = WireInit(prevCtr)
-          nextCtr.value := nextValue
-          Mux(needUpdate, nextCtr, prevCtr)
+          val needUpdate = writeValid && writeWayIdx === wayIdx.U && (
+            metaData.scPred(wayIdx) =/= writeTaken ||
+              !metaData.sumAboveThres(wayIdx)
+          )
+          prevCtr.getUpdate(
+            writeTaken,
+            needUpdate
+          )
       }
       newEntry.ctr := WireInit(newCtr)
     }

@@ -34,7 +34,7 @@ class MainBtbInternalBank(
       }
       class Resp extends Bundle {
         val entries:  Vec[MainBtbEntry]    = Vec(NumWay, new MainBtbEntry)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, new SaturateCounter(TakenCntWidth))
+        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
       }
 
       val req:  Valid[Req] = Flipped(Valid(new Req))
@@ -55,7 +55,7 @@ class MainBtbInternalBank(
       class Req extends Bundle {
         val setIdx:   UInt                 = UInt(SetIdxLen.W)
         val wayMask:  UInt                 = UInt(NumWay.W)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, new SaturateCounter(TakenCntWidth))
+        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -106,7 +106,7 @@ class MainBtbInternalBank(
 
   // we often need to update counter, but not the whole entry, so store counters in separate SRAMs for better power
   private val counterSram = Module(new SRAMTemplate(
-    new SaturateCounter(TakenCntWidth),
+    TakenCounter(),
     set = NumSets,
     way = NumWay,
     singlePort = true,

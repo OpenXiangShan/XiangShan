@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.ghr.GhrEntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.tage.{TakenCounter => TageTakenCounter}
 
 /**
  * This module is the implementation of the Statistical Corrector.
@@ -36,7 +37,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult: Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
     val providerTakenCtrs: Vec[Valid[SaturateCounter]] =
-      Input(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TageTakenCtrWidth)))) // s2 stage tage info
+      Input(Vec(NumBtbResultEntries, Valid(TageTakenCounter()))) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s3_override:         Bool                  = Input(Bool())
     val ghr:                 GhrEntry              = Input(new GhrEntry())
@@ -68,7 +69,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val biasTable = Module(new ScTable(BiasTableSize, BiasTableNumWays, "biasTable", 0))
 
-  private val scThreshold = RegInit(ScThreshold(p))
+  private val scThreshold = RegInit(ThresholdCounter.Init)
 
   private val resetDone = RegInit(false.B)
   when(pathTable.map(_.io.resetDone).reduce(_ && _) &&
@@ -262,7 +263,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val s2_scPred        = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds    = scThreshold.thres.value >> 3
+  private val s2_thresholds    = scThreshold.value >> 3
   private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
@@ -387,8 +388,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       case (prevThres, (((writeValid, writeWayIdx), taken), branchIdx)) =>
         val scWrong      = taken =/= t1_meta.scPred(branchIdx)
         val shouldUpdate = writeValid && (scWrong || !t1_meta.sumAboveThres(branchIdx)) && false.B
-        val nextThres    = prevThres.update(scWrong)
-        Mux(shouldUpdate, nextThres, prevThres)
+        prevThres.getUpdate(scWrong, shouldUpdate)
     }
 
   // calculate pathTable and globalTable write wayMask
@@ -424,7 +424,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   t1_branchesWayIdxVec.zip(t1_writeValidVec).zip(t1_branchesScIdxVec).foreach {
     case ((wayIdx, writeValid), branchIdx) =>
       val biasWayIdx = Cat(wayIdx, t1_oldBiasLowBits(branchIdx))
-      when(writeValid && t1_oldBiasCtrs(biasWayIdx).ctr.value =/= t1_writeBiasEntryVec(biasWayIdx).ctr.value) {
+      when(writeValid && t1_oldBiasCtrs(biasWayIdx).ctr =/= t1_writeBiasEntryVec(biasWayIdx).ctr) {
         t1_writeBiasWayMask(biasWayIdx) := true.B
       }
   }
@@ -435,12 +435,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     ).foldLeft(oldEntry.ctr) {
       case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
         val biasWayIdx = Cat(writeWayIdx, t1_oldBiasLowBits(branchIdx))
-        val needUpdate = writeValid && biasWayIdx === wayIdx.U &&
-          (t1_meta.scPred(branchIdx) =/= writeTaken || !t1_meta.sumAboveThres(branchIdx))
-        val nextValue = prevCtr.getUpdate(writeTaken)
-        val nextCtr   = WireInit(prevCtr)
-        nextCtr.value := nextValue
-        Mux(needUpdate, nextCtr, prevCtr)
+        val needUpdate = writeValid && biasWayIdx === wayIdx.U && (
+          t1_meta.scPred(branchIdx) =/= writeTaken ||
+            !t1_meta.sumAboveThres(branchIdx)
+        )
+        prevCtr.getUpdate(
+          writeTaken,
+          needUpdate
+        )
     }
     newEntry.ctr := WireInit(newCtr)
   }
@@ -499,11 +501,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   for (i <- 0 until NumWays) {
     val pChange = t1_oldPathCtrs.zip(t1_writePathEntryVec).map {
       case (oldEntries, writeEntries) =>
-        (oldEntries(i).ctr.value =/= writeEntries(i).ctr.value) && t1_writeWayMask(i)
+        (oldEntries(i).ctr =/= writeEntries(i).ctr) && t1_writeWayMask(i)
     }.reduce(_ || _) && PathEnable.B
     val gChange = t1_oldGlobalCtrs.zip(t1_writeGlobalEntryVec).map {
       case (oldEntries, writeEntries) =>
-        (oldEntries(i).ctr.value =/= writeEntries(i).ctr.value) && t1_writeWayMask(i)
+        (oldEntries(i).ctr =/= writeEntries(i).ctr) && t1_writeWayMask(i)
     }.reduce(_ || _) && GlobalEnable.B
     // val bChange =
     //   (t1_oldBiasCtrs(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B

@@ -28,6 +28,7 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -51,10 +52,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
   // reset usefulCtr of all entries when usefulResetCtr saturated
-  private val usefulResetCtr = RegInit(0.U.asTypeOf(new SaturateCounter(UsefulResetCtrWidth)))
+  private val usefulResetCtr = RegInit(UsefulResetCounter.Zero)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(0.U.asTypeOf(new SaturateCounter(UseAltOnNaWidth))))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
 
   /* *** reset *** */
   private val resetDone = RegInit(false.B)
@@ -130,7 +131,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_prediction = Wire(Vec(NumBtbResultEntries, new TagePrediction))
 
   // to sc
-  private val s2_providerTakenCtrVec = Wire(Vec(NumBtbResultEntries, Valid(new SaturateCounter(TakenCtrWidth))))
+  private val s2_providerTakenCtrVec = Wire(Vec(NumBtbResultEntries, Valid(TakenCounter())))
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val position      = branch.bits.cfiPosition
@@ -160,8 +161,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val providerTableOH  = getLongestHistTableOH(hitTableMask)
     val providerTakenCtr = Mux1H(providerTableOH, allTableTagMatchResults.map(_.takenCtr))
 
-    s2_providerTakenCtrVec(i).valid      := hasProvider
-    s2_providerTakenCtrVec(i).bits.value := providerTakenCtr.value
+    s2_providerTakenCtrVec(i).valid := hasProvider
+    s2_providerTakenCtrVec(i).bits  := providerTakenCtr
 
     // find the alt, the table with the second longest history among the hit tables
     val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
@@ -384,8 +385,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val increaseProviderUsefulCtr =
       hasProvider && providerPred === actualTaken && providerPred =/= Mux(hasAlt, altPred, basePred)
-    val providerNewUsefulCtr =
-      Mux(increaseProviderUsefulCtr, providerInfo.usefulCtr.getIncrease, providerInfo.usefulCtr.value)
+    val providerNewUsefulCtr = providerInfo.usefulCtr.getIncrease(increaseProviderUsefulCtr)
 
     val increaseUseAlt =
       hasProvider && providerInfo.takenCtr.isWeak && Mux(hasAlt, altPred, basePred) === actualTaken
@@ -393,21 +393,21 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       hasProvider && providerInfo.takenCtr.isWeak && Mux(hasAlt, altPred, basePred) =/= actualTaken
 
     val updateInfo = Wire(new UpdateInfo).suggestName(s"t2_branch_${i}_updateInfo")
-    updateInfo.valid                        := isCond // Only consider update if conditional branch
-    updateInfo.providerTableOH              := providerTableOH.asUInt & Fill(NumTables, hasProvider)
-    updateInfo.providerWayOH                := providerInfo.hitWayMaskOH
-    updateInfo.providerEntry.valid          := true.B
-    updateInfo.providerEntry.tag            := providerInfo.tag
-    updateInfo.providerEntry.takenCtr.value := providerNewTakenCtr
-    updateInfo.providerOldUsefulCtr         := providerInfo.usefulCtr
-    updateInfo.providerNewUsefulCtr.value   := providerNewUsefulCtr
+    updateInfo.valid                  := isCond // Only consider update if conditional branch
+    updateInfo.providerTableOH        := providerTableOH.asUInt & Fill(NumTables, hasProvider)
+    updateInfo.providerWayOH          := providerInfo.hitWayMaskOH
+    updateInfo.providerEntry.valid    := true.B
+    updateInfo.providerEntry.tag      := providerInfo.tag
+    updateInfo.providerEntry.takenCtr := providerNewTakenCtr
+    updateInfo.providerOldUsefulCtr   := providerInfo.usefulCtr
+    updateInfo.providerNewUsefulCtr   := providerNewUsefulCtr
 
-    updateInfo.altTableOH              := altTableOH.asUInt & Fill(NumTables, !useProviderPred && hasAlt)
-    updateInfo.altWayOH                := altInfo.hitWayMaskOH
-    updateInfo.altEntry.valid          := true.B
-    updateInfo.altEntry.tag            := altInfo.tag
-    updateInfo.altEntry.takenCtr.value := altNewTakenCtr
-    updateInfo.altOldUsefulCtr         := altInfo.usefulCtr
+    updateInfo.altTableOH        := altTableOH.asUInt & Fill(NumTables, !useProviderPred && hasAlt)
+    updateInfo.altWayOH          := altInfo.hitWayMaskOH
+    updateInfo.altEntry.valid    := true.B
+    updateInfo.altEntry.tag      := altInfo.tag
+    updateInfo.altEntry.takenCtr := altNewTakenCtr
+    updateInfo.altOldUsefulCtr   := altInfo.usefulCtr
 
     updateInfo.useAlt    := !useProviderPred && hasAlt
     updateInfo.finalPred := finalPred
@@ -440,9 +440,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     }.reduce(_ || _)
 
     when(t2_fire && increase) {
-      ctr.increase()
+      ctr.selfIncrease()
     }.elsewhen(t2_fire && decrease) {
-      ctr.decrease()
+      ctr.selfDecrease()
     }
   }
 
@@ -465,7 +465,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_allTableCanAllocateWayMask =
     t2_allTableEntries.zip(t2_allTableUsefulCtrs).map { case (entriesPerTable, ctrsPerTable) =>
       entriesPerTable.zip(ctrsPerTable).map { case (entry, usefulCtr) =>
-        !entry.valid || entry.valid && entry.takenCtr.isWeak && usefulCtr.value === 0.U
+        !entry.valid || entry.valid && entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
       }.asUInt
     }
   private val t2_canAllocateTableMask = t2_longerHistoryTableMask & t2_allTableCanAllocateWayMask.map(_.orR).asUInt
@@ -481,10 +481,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_allocateEntry = Wire(new TageEntry)
   t2_allocateEntry.valid := true.B
   t2_allocateEntry.tag   := Mux1H(t2_allocateTableMaskOH, t2_rawTag) ^ t2_allocateBranch.bits.cfiPosition
-  t2_allocateEntry.takenCtr.value := Mux(
+  t2_allocateEntry.takenCtr := Mux(
     t2_allocateBranch.bits.taken,
-    (1 << (TakenCtrWidth - 1)).U,      // weak taken
-    ((1 << (TakenCtrWidth - 1)) - 1).U // weak not taken
+    TakenCounter.WeakPositive, // weak taken
+    TakenCounter.WeakNegative  // weak not taken
   )
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
@@ -492,7 +492,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val updateMask       = Wire(Vec(NumWays, Bool()))
     val updateEntries    = Wire(Vec(NumWays, new TageEntry))
-    val updateUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+    val updateUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
 
     updateMask.zip(updateEntries).zip(updateUsefulCtrs).zipWithIndex.foreach {
       case (((updateEn, entry), usefulCtr), wayIdx) =>
@@ -518,14 +518,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.bankMask := t2_bankMask
 
     val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, new SaturateCounter(UsefulCtrWidth)))
+    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
 
     writeEntries.zip(writeUsefulCtrs).zipWithIndex.foreach { case ((entry, usefulCtr), wayIdx) =>
       val thisWayNeedUpdate   = updateMask(wayIdx)
       val thisWayNeedAllocate = thisTableNeedAllocate && t2_allocateWayMaskOH(wayIdx)
-      entry                := Mux(thisWayNeedAllocate, t2_allocateEntry, updateEntries(wayIdx))
-      usefulCtr.value      := Mux(thisWayNeedAllocate, UsefulCtrInitValue.U, updateUsefulCtrs(wayIdx).value)
+      entry := Mux(thisWayNeedAllocate, t2_allocateEntry, updateEntries(wayIdx))
+      usefulCtr := Mux(
+        thisWayNeedAllocate,
+        UsefulCounter.Init,
+        updateUsefulCtrs(wayIdx)
+      )
       writeWayMask(wayIdx) := thisWayNeedUpdate || thisWayNeedAllocate
     }
 
@@ -539,7 +543,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   when(t2_usefulReset) {
     usefulResetCtr.resetZero()
   }.elsewhen(t2_fire && t2_needAllocate && !t2_canAllocate) {
-    usefulResetCtr.increase()
+    usefulResetCtr.selfIncrease()
   }
 
   /* --------------------------------------------------------------------------------------------------------------
