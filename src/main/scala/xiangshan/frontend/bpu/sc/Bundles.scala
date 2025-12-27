@@ -56,13 +56,13 @@ class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parame
 }
 
 class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
-  val setIdx:   UInt = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val setIdx:   UInt = UInt(log2Ceil(numSets).W)
   val bankMask: UInt = UInt(NumBanks.W)
 }
 
 class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
   val valid:    Bool         = Bool()
-  val setIdx:   UInt         = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
   val bankMask: UInt         = UInt(NumBanks.W)
   val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
   val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
@@ -83,15 +83,15 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
   val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
 
-  val scPathTakenVec:   Vec[Bool] = Vec(NumWays, Bool())
-  val scGlobalTakenVec: Vec[Bool] = Vec(NumWays, Bool())
-  val scBiasTakenVec:   Vec[Bool] = Vec(NumWays, Bool())
-
-  val predPathIdx: Vec[UInt] =
-    Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
-  val predGlobalIdx: Vec[UInt] =
-    Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
-  val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
+  // for debug
+  val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_predPathIdx: Option[Vec[UInt]] =
+    Some(Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size).W)))
+  val debug_predGlobalIdx: Option[Vec[UInt]] =
+    Some(Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size).W)))
+  val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableSize).W))
 }
 
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
