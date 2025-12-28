@@ -23,15 +23,16 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class MicroTageParameters(
     // TODO: The length of the Tag and its alias status will need to be adjusted later. The same applies to the number of items.
     TableInfos: Seq[MicroTageInfo] = Seq(
-      new MicroTageInfo(512, 6, 6, 15), // 3Taken maybe better than 2Taken
+      new MicroTageInfo(512, 6, 6, 8), // 3Taken maybe better than 2Taken
       // new MicroTageInfo(64, 16, 8, 18),
       // new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
-      new MicroTageInfo(512, 14, 12, 15) // follow Tage.
+      new MicroTageInfo(512, 18, 12, 15) // follow Tage.
       // new MicroTageInfo(128, 32, 16, 24)
     ),
     TakenCtrWidth:       Int = 3,
     NumTables:           Int = 2,
-    TickWidth:           Int = 9,
+    LowTickWidth:        Int = 8,
+    HighTickWidth:       Int = 12,
     UsefulWidth:         Int = 2,
     EnableTraceAndDebug: Boolean = false,
     BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
@@ -42,7 +43,8 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def TableInfos:      Seq[MicroTageInfo]  = utageParameters.TableInfos
   def TakenCtrWidth:   Int                 = utageParameters.TakenCtrWidth
   def NumTables:       Int                 = utageParameters.NumTables
-  def TickWidth:       Int                 = utageParameters.TickWidth
+  def LowTickWidth:    Int                 = utageParameters.LowTickWidth
+  def HighTickWidth:   Int                 = utageParameters.HighTickWidth
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
 

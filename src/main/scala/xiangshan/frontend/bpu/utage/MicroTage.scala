@@ -57,13 +57,16 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       )).io
       t
   }
-  private val tickCounter = RegInit(0.U((TickWidth + 1).W))
+  private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))
+  private val highTickCounter = RegInit(0.U((HighTickWidth + 1).W))
   // Predict
   tables.foreach { t =>
     t.req.startPc        := io.startPc
     t.req.foldedPathHist := io.foldedPathHist
-    t.usefulReset        := tickCounter(TickWidth)
+    t.usefulReset        := false.B
   }
+  tables(0).usefulReset := lowTickCounter(LowTickWidth)
+  tables(1).usefulReset := highTickCounter(HighTickWidth)
   private val takenCases       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.taken)
   private val cfiPositionCases = tables.reverse.map(t => t.resp.valid -> t.resp.bits.cfiPosition)
   private val usefulCase       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitUseful)
@@ -153,10 +156,16 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val normalAllocMask      = PriorityEncoderOH(allocCandidateMask)
   private val t0_allocMask         = Mux(t0_fastAllocMask.orR, t0_fastAllocMask, normalAllocMask)
 
-  when(tickCounter(TickWidth)) {
-    tickCounter := 0.U
+  when(lowTickCounter(LowTickWidth)) {
+    lowTickCounter := 0.U
   }.elsewhen((t0_allocMask === 0.U) && t0_histTableNeedAlloc && t0_fire) {
-    tickCounter := tickCounter + 1.U
+    lowTickCounter := lowTickCounter + 1.U
+  }
+
+  when(highTickCounter(HighTickWidth)) {
+    highTickCounter := 0.U
+  }.elsewhen((t0_allocMask === 0.U) && t0_histTableNeedAlloc && t0_fire) {
+    highTickCounter := highTickCounter + 1.U
   }
 
   // ------------------------ Consistency Check Between Base Table and Hist Table Predictions ----------------------
