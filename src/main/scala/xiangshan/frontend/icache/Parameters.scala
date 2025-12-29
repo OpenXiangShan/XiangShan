@@ -114,6 +114,7 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   // missUnit
   def NumFetchMshr:    Int = icacheParameters.NumFetchMshr
   def NumPrefetchMshr: Int = icacheParameters.NumPrefetchMshr
+  def NumAllMshr:      Int = NumFetchMshr + NumPrefetchMshr
 
   // wayLookup
   def WayLookupSize: Int = icacheParameters.WayLookupSize

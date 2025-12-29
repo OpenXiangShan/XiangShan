@@ -47,6 +47,8 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     val info: Valid[MshrInfoBundle] = ValidIO(new MshrInfoBundle)
     // after respond to requester, invalid the MSHR
     val invalid: Bool = Input(Bool())
+
+    val perf_latency: UInt = Output(UInt(16.W)) // magic number: latency should less than 65536 cycles
   }
 
   val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
@@ -59,7 +61,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   private val issue = RegInit(false.B)
 
   // perf: start counting when acquire.fire, stop counting when invalid
-  private val perf_latency = RegInit(0.U(XLEN.W))
+  private val perf_latency = RegInit(0.U(16.W)) // magic number: latency should less than 65536 cycles
 
   private val blkPAddr = RegInit(0.U((PAddrBits - blockOffBits).W))
   private val vSetIdx  = RegInit(0.U(idxBits.W))
@@ -140,6 +142,8 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := !(valid && issue)
+
+  io.perf_latency := perf_latency
 
   XSPerfHistogram(
     "responseLatency",
