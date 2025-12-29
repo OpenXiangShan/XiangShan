@@ -60,13 +60,16 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))
   private val highTickCounter = RegInit(0.U((HighTickWidth + 1).W))
   // Predict
-  tables.foreach { t =>
-    t.req.startPc        := io.startPc
-    t.req.foldedPathHist := io.foldedPathHist
-    t.usefulReset        := false.B
+  tables.zipWithIndex.foreach {
+    case (t, idx) =>
+      t.req.startPc        := io.startPc
+      t.req.foldedPathHist := io.foldedPathHist
+      idx match {
+        case 0 => t.usefulReset := lowTickCounter(LowTickWidth)
+        case 1 => t.usefulReset := highTickCounter(HighTickWidth)
+        case _ => t.usefulReset := false.B
+      }
   }
-  tables(0).usefulReset := lowTickCounter(LowTickWidth)
-  tables(1).usefulReset := highTickCounter(HighTickWidth)
   private val takenCases       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.taken)
   private val cfiPositionCases = tables.reverse.map(t => t.resp.valid -> t.resp.bits.cfiPosition)
   private val usefulCase       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitUseful)
