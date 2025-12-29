@@ -472,7 +472,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   accessTrace.itlbPbmt   := s1_itlbPbmt
   accessTrace.rawHits    := s1_rawHits
 
-  private val accessTable = ChiselDB.createTable("ICacheAccessTable", new AccessTrace)
+  private val accessTable = ChiselDB.createTable("ICacheAccessTable", new AccessTrace, EnableTrace)
   accessTable.log(
     data = accessTrace,
     en = s1_fire,
