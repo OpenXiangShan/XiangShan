@@ -93,5 +93,6 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
   XSPerfAccumulate("read", sram.io.r.req.fire)
   XSPerfAccumulate("write", sram.io.w.req.fire)
   XSPerfAccumulate("write_buffer_full", !writeBuffer.io.write.head.ready)
+  XSPerfAccumulate("write_buffer_full_drop_write", !writeBuffer.io.write.head.ready && io.writeReq.valid)
   XSPerfAccumulate("need_reset_ctr", io.writeResp.valid && io.writeResp.bits.needResetCtr)
 }
