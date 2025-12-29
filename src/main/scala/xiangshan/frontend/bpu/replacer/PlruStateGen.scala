@@ -20,13 +20,13 @@
 // See LICENSE.SiFive for license details at:
 //          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.SiFive
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.bpu.replacer
 
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.UIntToAugmentedUInt
 
-class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
+class PlruStateGen(NumWays: Int, AccessSize: Int = 1) extends ReplacerStateGen(NumWays, AccessSize) {
   // Pseudo-LRU tree algorithm: https://en.wikipedia.org/wiki/Pseudo-LRU#Tree-PLRU
   //
   //
@@ -48,14 +48,7 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   //            bit[5]: ways 7+6 > 5+4                bit[2]: ways 3+2 > 1+0
   //            /                    \                /                    \
   //     bit[4]: way 7>6    bit[3]: way 5>4    bit[1]: way 3>2    bit[0]: way 1>0
-
-  class PlruStateGenIO extends Bundle {
-    val stateIn:    UInt             = Input(UInt((n_ways - 1).W))
-    val touchWays:  Vec[Valid[UInt]] = Input(Vec(accessSize, Valid(UInt(log2Ceil(n_ways).W))))
-    val nextState:  UInt             = Output(UInt((n_ways - 1).W))
-    val replaceWay: UInt             = Output(UInt(log2Ceil(n_ways).W))
-  }
-  val io: PlruStateGenIO = IO(new PlruStateGenIO)
+  def StateWidth: Int = NumWays - 1
 
   /**
     * Computes the next PLRU (Pseudo-Least Recently Used) state based on current state and access patterns.
@@ -134,15 +127,15 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
   }
 
   def getNextState(state: UInt, touchWay: UInt): UInt = {
-    val touchWaySized = if (touchWay.getWidth < log2Ceil(n_ways)) touchWay.padTo(log2Ceil(n_ways))
-    else touchWay.extract(log2Ceil(n_ways) - 1, 0)
-    getNextState(state, touchWaySized, n_ways)
+    val touchWaySized = if (touchWay.getWidth < log2Ceil(NumWays)) touchWay.padTo(log2Ceil(NumWays))
+    else touchWay.extract(log2Ceil(NumWays) - 1, 0)
+    getNextState(state, touchWaySized, NumWays)
   }
 
   /** @param state stateOut bits for this sub-tree
     * @param treeNways number of ways in this sub-tree
     */
-  def getReplaceWay(state: UInt, treeNways: Int): UInt = {
+  def getVictim(state: UInt, treeNways: Int): UInt = {
     require(state.getWidth == (treeNways - 1), s"wrong state bits width ${state.getWidth} for $treeNways ways")
 
     // this algorithm recursively descends the binary tree, filling in the way-to-replace encoded value from msb to lsb
@@ -159,9 +152,9 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
         Cat(
           leftSubtreeOlder, // return the top state bit (current tree node) as msb of the way-to-replace encoded value
           Mux(
-            leftSubtreeOlder,                           // if left sub-tree is older, recurse left, else recurse right
-            getReplaceWay(leftSubtreeState, leftNways), // recurse left
-            getReplaceWay(rightSubtreeState, rightNways)
+            leftSubtreeOlder,                       // if left sub-tree is older, recurse left, else recurse right
+            getVictim(leftSubtreeState, leftNways), // recurse left
+            getVictim(rightSubtreeState, rightNways)
           )
         ) // recurse right
       } else {
@@ -171,7 +164,7 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
           Mux(
             leftSubtreeOlder, // if left sub-tree is older, return and do not recurse right
             0.U(1.W),
-            getReplaceWay(rightSubtreeState, rightNways)
+            getVictim(rightSubtreeState, rightNways)
           )
         ) // recurse right
       }
@@ -186,26 +179,5 @@ class PlruStateGen(val n_ways: Int, val accessSize: Int = 1) extends Module {
     }
   }
 
-  def getReplaceWay(state: UInt): UInt = getReplaceWay(state, n_ways)
-
-  def way(state: UInt): UInt = getReplaceWay(state)
-
-  def nBits: Int = n_ways - 1
-
-  def stateRead: UInt = if (nBits == 0) 0.U else io.stateIn
-
-  io.replaceWay := getReplaceWay(stateRead)
-
-  protected val stateOut = if (nBits == 0) Wire(UInt(0.W)) else WireInit(0.U(nBits.W))
-
-  def access(touchWay: UInt): Unit =
-    stateOut := getNextState(stateRead, touchWay)
-
-  def access(touchWays: Seq[Valid[UInt]]): Unit =
-    when(touchWays.map(_.valid).reduce(_ || _)) {
-      stateOut := getNextState(stateRead, touchWays)
-    }
-  access(io.touchWays.toSeq)
-
-  io.nextState := stateOut
+  def getVictim(state: UInt): UInt = getVictim(state, NumWays)
 }

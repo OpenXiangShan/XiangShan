@@ -30,8 +30,9 @@ case class MainBtbParameters(
     // When using align banking, the BTB can provide at most banks - 1 / banks * predict width wide prediction
     NumAlignBanks:   Int = 2,
     TagWidth:        Int = 16,
-    TargetWidth:     Int = 20, // 2B aligned
+    TargetWidth:     Int = 20,        // 2B aligned
     WriteBufferSize: Int = 4,
+    Replacer:        String = "Plru", // "Lru" or "Plru"
     // Base table
     TakenCntWidth: Int = 2,
     // Mbtb write trace
@@ -47,13 +48,14 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def NumInternalBanks: Int = mbtbParameters.NumInternalBanks
   def NumAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
   // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
-  def NumSets:            Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
-  def TagWidth:           Int = mbtbParameters.TagWidth
-  def TargetWidth:        Int = mbtbParameters.TargetWidth
-  def SetIdxLen:          Int = log2Ceil(NumSets)
-  def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)
-  def AlignBankIdxLen:    Int = log2Ceil(NumAlignBanks)
-  def WriteBufferSize:    Int = mbtbParameters.WriteBufferSize
+  def NumSets:            Int    = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
+  def TagWidth:           Int    = mbtbParameters.TagWidth
+  def TargetWidth:        Int    = mbtbParameters.TargetWidth
+  def SetIdxLen:          Int    = log2Ceil(NumSets)
+  def InternalBankIdxLen: Int    = log2Ceil(NumInternalBanks)
+  def AlignBankIdxLen:    Int    = log2Ceil(NumAlignBanks)
+  def WriteBufferSize:    Int    = mbtbParameters.WriteBufferSize
+  def Replacer:           String = mbtbParameters.Replacer
 
   // Base table
   def TakenCntWidth: Int = mbtbParameters.TakenCntWidth
