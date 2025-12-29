@@ -348,7 +348,7 @@ object Bundles {
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
-    val storeSetHit       = Option.when(params.isLdAddrIQ)(Bool())
+    val storeSetHit       = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
     val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
     val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
     val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
@@ -397,7 +397,7 @@ object Bundles {
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
-    val storeSetHit       = Option.when(params.isLdAddrIQ)(Bool())
+    val storeSetHit       = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
     val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
     val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
     val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
@@ -933,9 +933,9 @@ object Bundles {
     }) else None
     val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
     val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
-    val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
+    val storeSetHit    = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, Bool()) // inst has been allocated an store set
     val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
-    val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
+    val ssid           = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, UInt(SSIDWidth.W))
     // only vector load store need
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
     val lqIdx = OptionWrapper(params.hasLoadFu || params.hasVecLsFu, new LqPtr)
