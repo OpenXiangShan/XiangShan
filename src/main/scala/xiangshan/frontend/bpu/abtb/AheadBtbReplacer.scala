@@ -19,8 +19,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
-import xiangshan.frontend.bpu.PlruStateGen
-import xiangshan.frontend.bpu.ReplacerState
+import xiangshan.frontend.bpu.replacer.PlruStateGen
+import xiangshan.frontend.bpu.replacer.ReplacerState
 
 /**
   * This module implement the replacement policy for the ahead BTB.
@@ -29,20 +29,20 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
   // use PlruStateGen caclulate next state and replace way
-  private val states           = Module(new ReplacerState(NumSets, NumWays, hasExtraReadPort = true))
-  private val predReplacerGen  = Module(new PlruStateGen(NumWays, accessSize = NumWays))
+  private val states           = Module(new ReplacerState(NumSets, NumWays - 1, HasExtraReadPort = true))
+  private val predReplacerGen  = Module(new PlruStateGen(NumWays, AccessSize = NumWays))
   private val writeReplacerGen = Module(new PlruStateGen(NumWays))
   private val writeTouch       = Wire(Valid(UInt(WayIdxWidth.W)))
   private val touchWays        = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
 
-  writeTouch.valid              := io.writeValid
-  writeTouch.bits               := io.writeWayIdx
-  states.io.trainReadSetIdx     := io.writeSetIdx
-  states.io.trainWriteValid     := io.writeValid
-  states.io.trainWriteSetIdx    := io.writeSetIdx
-  states.io.trainWriteState     := writeReplacerGen.io.nextState
-  writeReplacerGen.io.stateIn   := states.io.trainReadState
-  writeReplacerGen.io.touchWays := Seq(writeTouch)
+  writeTouch.valid            := io.writeValid
+  writeTouch.bits             := io.writeWayIdx
+  states.io.trainReadSetIdx   := io.writeSetIdx
+  states.io.trainWriteValid   := io.writeValid
+  states.io.trainWriteSetIdx  := io.writeSetIdx
+  states.io.trainWriteState   := writeReplacerGen.io.nextState
+  writeReplacerGen.io.state   := states.io.trainReadState
+  writeReplacerGen.io.touches := Seq(writeTouch)
 
   touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
     t.valid := r
@@ -52,13 +52,13 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   states.io.predictWriteValid  := io.readValid && io.readWayMask.reduce(_ || _)
   states.io.predictWriteSetIdx := io.readSetIdx
   states.io.predictWriteState  := predReplacerGen.io.nextState
-  predReplacerGen.io.stateIn   := states.io.predictReadState
-  predReplacerGen.io.touchWays := touchWays
+  predReplacerGen.io.state     := states.io.predictReadState
+  predReplacerGen.io.touches   := touchWays
 
   states.io.readSetIdx.foreach(_ := io.replaceSetIdx)
   private val replacerState = states.io.readState.getOrElse(0.U)
 
-  private val genReplaceWay = writeReplacerGen.way(replacerState)
+  private val genReplaceWay = writeReplacerGen.getVictim(replacerState)
 
   if (EnableCommitGHistDiff) {
     // use ReplacementPolicy class caclulate next state replace way

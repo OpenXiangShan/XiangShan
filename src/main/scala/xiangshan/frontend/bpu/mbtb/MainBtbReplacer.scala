@@ -18,8 +18,8 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.bpu.PlruStateGen
-import xiangshan.frontend.bpu.ReplacerState
+import xiangshan.frontend.bpu.replacer.ReplacerState
+import xiangshan.frontend.bpu.replacer.ReplacerStateGen
 
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   class MainBtbReplacerIO extends Bundle {
@@ -41,9 +41,9 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
-  private val stateBank       = Module(new ReplacerState(NumSets, NumWay))
-  private val predictStateGen = Module(new PlruStateGen(NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(new PlruStateGen(NumWay, accessSize = 1))
+  private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
+  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = 1))
+  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
 
   /* *** predict *** */
   // read current state
@@ -59,8 +59,8 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   })
 
   // generate next state
-  predictStateGen.io.stateIn   := predictState
-  predictStateGen.io.touchWays := predictTouchWay
+  predictStateGen.io.state   := predictState
+  predictStateGen.io.touches := predictTouchWay
   private val predictNextState = Mux(io.predictTouch.valid, predictStateGen.io.nextState, predictState)
 
   // write back next state
@@ -80,8 +80,8 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   assert(!io.trainTouch.valid || PopCount(io.victim.wayMask) <= 1.U, "victim wayMask should be at-most-one-hot")
 
   // generate next state
-  trainStateGen.io.stateIn   := trainState
-  trainStateGen.io.touchWays := VecInit(Seq(trainTouchWay))
+  trainStateGen.io.state   := trainState
+  trainStateGen.io.touches := VecInit(Seq(trainTouchWay))
   private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
 
   // write back next state
@@ -90,5 +90,5 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   stateBank.io.trainWriteState  := trainNextState
 
   /* *** victim *** */
-  io.victim.wayMask := UIntToOH(trainStateGen.io.replaceWay)
+  io.victim.wayMask := UIntToOH(trainStateGen.io.victim)
 }
