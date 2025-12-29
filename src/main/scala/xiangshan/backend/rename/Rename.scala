@@ -771,6 +771,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val is_fused_lui_load = io.out.map(o => o.fire && o.bits.fuType === FuType.ldu.U && o.bits.srcType(0) === SrcType.imm)
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
+  HardenXSPerfAccumulate("rename_reads", PopCount(uops.zipWithIndex.map{case (uop, i) => uop.srcType(0) === SrcType.reg && io.in(i).bits.lsrc(0) =/= 0.U && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.srcType(1) === SrcType.reg && io.in(i).bits.lsrc(1) =/= 0.U && io.in(i).valid}))
+  HardenXSPerfAccumulate("rename_writes", PopCount(intSpecWen))
+  HardenXSPerfAccumulate("fp_rename_reads", PopCount(uops.zipWithIndex.map{case (uop, i) => uop.srcType(0) === SrcType.fp && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.srcType(1) === SrcType.fp && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.srcType(2) === SrcType.fp && io.in(i).valid}))
+  HardenXSPerfAccumulate("fp_rename_writes", PopCount(fpSpecWen))
+
   val renamePerf = Seq(
     ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))),
     ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))),

@@ -759,6 +759,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     ("icache_miss_penalty", BoolStopWatch(start = false.B, stop = false.B || false.B, startHighPriority = true))
   )
   generatePerfEvent()
+
+  // performance counters for MCPAT
+  HardenXSPerfAccumulate("ICache_read_access", PopCount(io.fetch.req.valid))
+  HardenXSPerfAccumulate("ICache_read_miss", PopCount(missUnit.io.fetch_req.valid))
+  HardenXSPerfAccumulate("ICache_conflit", PopCount(replacer.io.touch.map(_.valid)))
 }
 
 //class ICachePartWayReadBundle[T <: Data](gen: T, pWay: Int)(implicit p: Parameters)

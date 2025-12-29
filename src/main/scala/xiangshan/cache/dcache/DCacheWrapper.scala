@@ -1734,18 +1734,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // st_access.valid := RegNext(mainPipe.io.store_req.fire)
   // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
   // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)
-  // val access_info = ld_access.toSeq ++ Seq(st_access)
-  // val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate
-  // val access_early_replace = access_info.map {
-  //   case acc =>
-  //     Cat(early_replace.map {
-  //       case r =>
-  //         acc.valid && r.valid &&
-  //           acc.bits.tag === r.bits.tag &&
-  //           acc.bits.idx === r.bits.idx
-  //     })
-  // }
-  // XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
+
+  // // performance events for MCPAT
+  // HardenXSPerfAccumulate("dcache_read_access", PopCount(ld_access.map(_.valid)))
+  // HardenXSPerfAccumulate("dcache_write_access", st_access.valid)
+  // HardenXSPerfAccumulate("dcache_read_miss", PopCount(io.lsu.load.map(x => x.resp.valid && x.resp.bits.miss)))
+  // HardenXSPerfAccumulate("dcache_write_miss", missQueue.io.refill_info.valid)
+  // HardenXSPerfAccumulate("dcache_conflit", mainPipe.io.replace.req.valid)
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()

@@ -660,6 +660,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     )
   generatePerfEvent()
 
+  // performance counters for MCPAT
+  HardenXSPerfAccumulate(s"access_${q.name}", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire else portTranslateEnable(i) && result_ok(i) }))
+  HardenXSPerfAccumulate(s"miss_${q.name}", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire }))
+  HardenXSPerfAccumulate(s"replace_${q.name}", refill)
+
   // perf log
   for (i <- 0 until Width) {
     if (Block(i)) {
