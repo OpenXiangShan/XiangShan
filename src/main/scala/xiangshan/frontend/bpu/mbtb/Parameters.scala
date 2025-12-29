@@ -33,7 +33,9 @@ case class MainBtbParameters(
     TargetWidth:     Int = 20, // 2B aligned
     WriteBufferSize: Int = 4,
     // Base table
-    TakenCntWidth: Int = 2
+    TakenCntWidth: Int = 2,
+    // Victim cache
+    NumVictimEntries: Int = 4
 ) {}
 
 // TODO: expose this to Parameters.scala / XSCore.scala
@@ -55,6 +57,9 @@ trait HasMainBtbParameters extends HasBpuParameters {
 
   // Base table
   def TakenCntWidth: Int = mbtbParameters.TakenCntWidth
+
+  // Victim cache
+  def NumVictimEntries: Int = mbtbParameters.NumVictimEntries
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen

@@ -127,6 +127,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
+  // we need to allocate a new entry in victim cache when:
+  private val t1_needVictimCache =
+    // writeAlignBank is full, and
+    t1_meta.entries(t1_writeAlignBankIdx).map(_.rawHit).reduce(_ && _) &&
+      // the mispredict branch is not hitting any entry in writeAlignBank
+      !t1_meta.entries(t1_writeAlignBankIdx).map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
+
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.write.req.valid         := t1_fire && t1_writeAlignBankMask(i)
     b.io.write.req.bits.startPc  := t1_startPcVec(i)
