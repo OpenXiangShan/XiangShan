@@ -153,4 +153,8 @@ class TageTable(
   XSPerfAccumulate("predict_read", io.predictReadReq.valid)
   XSPerfAccumulate("train_read", io.trainReadReq.valid)
   XSPerfAccumulate("write", io.writeReq.valid)
+  XSPerfAccumulate(
+    "drop_write",
+    PopCount(entryWriteBuffers.flatMap(writePorts => writePorts.io.write.map(p => p.valid && !p.ready)))
+  )
 }
