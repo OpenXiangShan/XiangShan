@@ -42,7 +42,6 @@ class MainBtbAlignBank(
         val predictions: Vec[Valid[Prediction]] = Vec(NumWay, Valid(new Prediction))
         val metas:       Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
       }
-
       // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
       val req: Req = Input(new Req)
 
@@ -63,12 +62,20 @@ class MainBtbAlignBank(
 
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
+    class Trace extends Bundle {
+      val needWrite: Bool                       = Bool()
+      val setIdx:    UInt                       = UInt(SetIdxLen.W)
+      val bankIdx:   UInt                       = UInt(log2Ceil(NumInternalBanks).W)
+      val wayIdx:    UInt                       = UInt(log2Ceil(NumWay).W)
+      val entry:     MainBtbEntry               = new MainBtbEntry
+    }
 
     val resetDone: Bool      = Output(Bool())
     val stageCtrl: StageCtrl = Input(new StageCtrl)
 
     val read:  Read  = new Read
     val write: Write = new Write
+    val trace: Trace = Output(new Trace)
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -269,7 +276,12 @@ class MainBtbAlignBank(
     b.io.writeCounter.req.bits.wayMask  := t1_counterWayMask.asUInt
     b.io.writeCounter.req.bits.counters := t1_newCounters
   }
-
+  // mainBTB trace
+  io.trace.needWrite := t1_fire && t1_entryNeedWrite
+  io.trace.setIdx    := t1_setIdx
+  io.trace.bankIdx   := t1_internalBankIdx
+  io.trace.wayIdx    := PriorityEncoder(t1_entryWayMask.asUInt)
+  io.trace.entry     := t1_entry
   /* *** multi-hit detection & flush *** */
   private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
 
