@@ -18,7 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.bpu.PlruStateGen
+import xiangshan.frontend.bpu.LruStateGen
 import xiangshan.frontend.bpu.ReplacerState
 
 class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
@@ -41,9 +41,9 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
-  private val stateBank       = Module(new ReplacerState(NumSets, NumWay))
-  private val predictStateGen = Module(new PlruStateGen(NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(new PlruStateGen(NumWay, accessSize = 1))
+  private val stateBank       = Module(new ReplacerState(NumSets, NumWay * (NumWay - 1) / 2))
+  private val predictStateGen = Module(new LruStateGen(NumWay, accessSize = NumWay))
+  private val trainStateGen   = Module(new LruStateGen(NumWay, accessSize = 1))
 
   /* *** predict *** */
   // read current state

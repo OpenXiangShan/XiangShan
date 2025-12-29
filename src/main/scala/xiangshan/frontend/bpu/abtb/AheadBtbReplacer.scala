@@ -29,7 +29,7 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
   // use PlruStateGen caclulate next state and replace way
-  private val states           = Module(new ReplacerState(NumSets, NumWays, hasExtraReadPort = true))
+  private val states           = Module(new ReplacerState(NumSets, NumWays - 1, hasExtraReadPort = true))
   private val predReplacerGen  = Module(new PlruStateGen(NumWays, accessSize = NumWays))
   private val writeReplacerGen = Module(new PlruStateGen(NumWays))
   private val writeTouch       = Wire(Valid(UInt(WayIdxWidth.W)))
