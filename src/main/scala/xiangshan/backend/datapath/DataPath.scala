@@ -800,9 +800,13 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   })
 
   // Top-Down
-  val IQsFire = fromFlattenIQ.map(_.fire)
-  val uopsIssued = IQsFire.reduce(_ || _)  
-  val uopsIssuedCnt = PopCount(IQsFire)
+  val IQsFireDelay = fromFlattenIQ.map{ case x =>
+    val delayed = Wire(Bool())
+    delayed := RegNext(x.fire)
+    delayed
+  }
+  val uopsIssued = IQsFireDelay.reduce(_ || _)  
+  val uopsIssuedCnt = PopCount(IQsFireDelay)
 
   val noStoreIssued = !fromIntIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
                                                          memIq.bits.exuParams.fuConfigs.contains(FuConfig.StdCfg)
