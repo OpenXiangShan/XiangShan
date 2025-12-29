@@ -21,7 +21,6 @@ import coupledL2.MemBackTypeMM
 import freechips.rocketchip.tilelink.TLEdgeOut
 import huancun.AliasKey
 import org.chipsalliance.cde.config.Parameters
-import utility.BoolStopWatch
 import utility.MemReqSource
 import utility.ReqSourceKey
 import utility.XSPerfHistogram
@@ -52,16 +51,19 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
 
-  private val valid = RegInit(Bool(), false.B)
+  private val valid = RegInit(false.B)
   // this MSHR doesn't respond to fetch and sram
-  private val flush  = RegInit(Bool(), false.B)
-  private val fencei = RegInit(Bool(), false.B)
+  private val flush  = RegInit(false.B)
+  private val fencei = RegInit(false.B)
   // this MSHR has been issued
-  private val issue = RegInit(Bool(), false.B)
+  private val issue = RegInit(false.B)
 
-  private val blkPAddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
-  private val vSetIdx  = RegInit(UInt(idxBits.W), 0.U)
-  private val way      = RegInit(UInt(wayBits.W), 0.U)
+  // perf: start counting when acquire.fire, stop counting when invalid
+  private val perf_latency = RegInit(0.U(XLEN.W))
+
+  private val blkPAddr = RegInit(0.U((PAddrBits - blockOffBits).W))
+  private val vSetIdx  = RegInit(0.U(idxBits.W))
+  private val way      = RegInit(0.U(wayBits.W))
   // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
   // vSetIdx is vAddr(untagBits, blockOffBits), aliasTag should be vAddr(untagBits, pgIdxBits)
   // and, AliasTagBits = untagBits - pgIdxBits, so we actually need AliasTagBits-most-significant bits of vSetIdx
@@ -117,6 +119,12 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   when(io.acquire.fire) {
     issue := true.B
     way   := io.victimWay
+
+    perf_latency := 0.U
+  }
+
+  when(valid && issue) {
+    perf_latency := perf_latency + 1.U
   }
 
   // invalid request when grant finish
@@ -135,7 +143,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   XSPerfHistogram(
     "responseLatency",
-    BoolStopWatch(io.acquire.fire, io.invalid),
+    perf_latency,
     io.invalid,
     0,
     200,
