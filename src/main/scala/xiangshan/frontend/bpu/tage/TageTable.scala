@@ -93,6 +93,7 @@ class TageTable(
       way.io.r.req.valid       := predictReadValid || trainReadValid
       way.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
     }
+    assert(!(predictReadValid && trainReadValid), s"read conflict in tage_table_${tableIdx}_bank_${bankIdx}")
   }
 
   // delay one cycle for better timing
