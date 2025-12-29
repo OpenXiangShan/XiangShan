@@ -334,6 +334,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
+  private val s3_takenMask = RegEnable(s2_takenMask, s2_fire)
+  mbtb.io.s3_takenMask := s3_takenMask
+
   s3_prediction.taken       := s3_taken
   s3_prediction.cfiPosition := Mux(s3_taken, s3_firstTakenBranch.bits.cfiPosition, s3_fallThroughPrediction.cfiPosition)
   s3_prediction.attribute   := Mux(s3_taken, s3_firstTakenBranch.bits.attribute, s3_fallThroughPrediction.attribute)
