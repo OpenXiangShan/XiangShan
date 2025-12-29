@@ -17,10 +17,10 @@ class TopDownGen(implicit p: Parameters) extends XSModule
   val fewUopsIssued = (0 until p(XSCoreParamsKey).fewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
 
   val stallLoad = !uopsIssued
-  val stallStore = uopsIssued && noStoreIssued
+  val stallStore = uopsIssued && RegNext(noStoreIssued)
 
-  val stallLoadDly2 = DelayN(stallLoad, 2)
-  val stallStoreDly2 = DelayN(stallStore, 2)
+  val stallLoadDly = RegNext(stallLoad)
+  val stallStoreDly = RegNext(stallStore)
 
   val lqEmpty = io.topDownInfo.lqEmpty
   val sqEmpty = io.topDownInfo.sqEmpty
@@ -28,8 +28,8 @@ class TopDownGen(implicit p: Parameters) extends XSModule
   val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
   val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
 
-  val memStallAnyLoad = stallLoadDly2 && !lqEmpty
-  val memStallStore = stallStoreDly2 && !sqEmpty
+  val memStallAnyLoad = stallLoadDly && !lqEmpty
+  val memStallStore = stallStoreDly && !sqEmpty
   val memStallL1Miss = memStallAnyLoad && l1Miss
   val memStallL2Miss = memStallL1Miss && l2Miss
   val memStallL3Miss = memStallL2Miss && l3Miss
