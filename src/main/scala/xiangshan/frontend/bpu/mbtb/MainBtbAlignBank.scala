@@ -70,6 +70,9 @@ class MainBtbAlignBank(
 
     val read:  Read  = new Read
     val write: Write = new Write
+
+    // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
+    val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -174,22 +177,17 @@ class MainBtbAlignBank(
   private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
   dontTouch(s2_hitMask)
 
-  // update replacer
-  /* touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-   * TODO: As tage/sc results have worse timing and more complexity, here we use baseTable (in mbtb) only,
-   *       hopefully this is enough for replacer updates.
+  /* *** s3 ***
+   * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  private val s2_takenMask = VecInit(r.resp.predictions.map { pred =>
-    pred.valid && (
-      pred.bits.attribute.isConditional && pred.bits.taken ||
-        pred.bits.attribute.isDirect ||
-        pred.bits.attribute.isIndirect
-    )
-  })
+  private val s3_fire           = io.stageCtrl.s3_fire
+  private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
+  private val s3_takenMask      = io.s3_takenMask
 
-  replacer.io.predictTouch.valid        := s2_fire && s2_takenMask.reduce(_ || _)
-  replacer.io.predictTouch.bits.setIdx  := getReplacerSetIndex(s2_startPc)
-  replacer.io.predictTouch.bits.wayMask := s2_takenMask.asUInt
+  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
+  replacer.io.predictTouch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
+  replacer.io.predictTouch.bits.setIdx  := s3_replacerSetIdx
+  replacer.io.predictTouch.bits.wayMask := s3_takenMask.asUInt
 
   /* *** t1 ***
    * send write req to internal banks (srams)
