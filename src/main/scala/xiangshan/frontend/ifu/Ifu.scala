@@ -494,8 +494,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_uncacheLowerPc     = RegEnable(s2_alignCompactInfo.instrPcLower(s2_alignShiftNum), s2_fire)
   private val s3_alignBlockStartPos = RegEnable(s2_alignBlockStartPos, s2_fire)
   private val s3_uncachePc = catPC(s3_uncacheLowerPc, s3_alignFetchBlock(0).pcHigh, s3_alignFetchBlock(0).pcHighPlus1)
-  private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, false.B, s2_fire)
-  private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, false.B, s2_fire)
+  private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, s2_fire)
+  private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, s2_fire)
   private val s3_uncacheCanGo =
     (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage) || !s3_useUncacheFetch
   private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
@@ -688,7 +688,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s3_alignFetchBlock(0).startVAddr + 2.U,
       s3_alignFetchBlock(0).startVAddr + 4.U
     )
-  uncacheFlushWb.valid          := s3_reqIsUncache && !backendRedirect && (s3_uncacheCanGo || uncacheCheckFault)
+  // Due to the presence of uncache requests, s3_valid && io.toIBuffer.ready is not equivalent to s3_fire.
+  uncacheFlushWb.valid :=
+    s3_valid && io.toIBuffer.ready && s3_reqIsUncache && !backendRedirect && (s3_uncacheCanGo || uncacheCheckFault)
   uncacheFlushWb.bits.ftqIdx    := s3_alignFetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s3_alignFetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
@@ -727,7 +729,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     uncacheFlushWb.bits.attribute := brAttribute
   }
 
-  uncacheRedirect.valid          := s3_reqIsUncache && (s3_uncacheCanGo || uncacheCheckFault)
+  uncacheRedirect.valid := s3_valid && io.toIBuffer.ready && s3_reqIsUncache && (s3_uncacheCanGo || uncacheCheckFault)
   uncacheRedirect.instrCount     := Mux(uncacheCheckFault, 0.U, 1.U)
   uncacheRedirect.prevIBufEnqPtr := s3_prevIBufEnqPtr
   uncacheRedirect.isHalfInstr    := false.B
