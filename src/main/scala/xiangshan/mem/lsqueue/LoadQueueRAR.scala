@@ -58,6 +58,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     // Check ptr for current probe
     val check = Valid(new ReleaseCheck)
+
+    // CSR controls (for TSO activation)
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   private val PartialPAddrStride: Int = 6
@@ -104,7 +107,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released.
-  val tsoActive = RegInit(true.B)
+  val tsoActive = RegNext(io.csrCtrl.tso_enable, true.B)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val pending = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
@@ -250,7 +253,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val recentWrittenMerged = recentWrittenMasks.reduce(_ | _)
   val released = (releasedRaw | recentWrittenMerged).take(releasedRaw.getWidth)
 
-  // What to check?
+  // What to check against?
   val check = dontTouch(allocated.asUInt & Mux(tsoActive, pending.asUInt, released & pending.asUInt))
 
   // Find oldest check

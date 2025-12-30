@@ -1405,6 +1405,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
+  io.status.custom.tso_enable := stsoctl.regOut.TSO_ENABLE.asBool
+
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
     (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Bare)

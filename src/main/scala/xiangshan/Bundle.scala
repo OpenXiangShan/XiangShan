@@ -649,6 +649,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())
 
+  // TSO
+  val tso_enable = Output(Bool())
+
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
   // TODO: move it to a new bundle, since single step is not a custom control signal

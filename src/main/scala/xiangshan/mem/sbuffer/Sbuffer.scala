@@ -314,6 +314,8 @@ class Sbuffer(implicit p: Parameters)
   
   // When TSO active, behaves as a queue, where no duplicated ptags are allowed, and merge only happens at tail
   val tsoActive = RegInit(true.B)
+  // If we're transitioning to TSO. During the time, block all enqueuing, and drain the buffer
+  val tsoTransitioning = RegInit(false.B)
   val tsoTail = RegInit(0.U(log2Up(StoreBufferSize).W))
   val tsoLast = tsoTail -% 1.U
 
@@ -326,6 +328,15 @@ class Sbuffer(implicit p: Parameters)
     PriorityEncoder(Mux(validAfterTail.orR, validAfterTail(StoreBufferSize-1, 0), validBeforeTail(StoreBufferSize-1, 0))),
     PriorityEncoder(activeMask)
   ))
+
+  // Transition in & out of tsoTransitioning
+  when(tsoTransitioning && !validMask.orR) {
+    tsoTransitioning := false.B
+    tsoActive := !tsoActive
+  }
+  when(!tsoTransitioning && tsoActive =/= io.csrCtrl.tso_enable) {
+    tsoTransitioning := true.B
+  }
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
 
@@ -388,7 +399,7 @@ class Sbuffer(implicit p: Parameters)
     Mux(
       tsoActive,
       Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoTail, tsoTail + 1.U),
-      Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
+      Mux(!enbufferSelReg, evenInsertIdx, oddInsertIdx)
     )
   ) // slow to generate, for debug only
   val firstInsertVec = Mux(
@@ -401,7 +412,7 @@ class Sbuffer(implicit p: Parameters)
     Mux(
       tsoActive,
       Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoInsertFirstMask, tsoInsertSecondMask),
-      Mux(~enbufferSelReg, evenInsertVec, oddInsertVec)
+      Mux(!enbufferSelReg, evenInsertVec, oddInsertVec)
     )
   ) // slow to generate, for debug only
   val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && firstInsertVec.orR  && !(tsoActive && canMerge(0) && !tsoMergeLast(0))
@@ -411,8 +422,8 @@ class Sbuffer(implicit p: Parameters)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
-  io.in(0).ready := firstCanInsert
-  io.in(1).ready := secondCanInsert && io.in(0).ready
+  io.in(0).ready := !tsoTransitioning && firstCanInsert
+  io.in(1).ready := !tsoTransitioning && secondCanInsert && io.in(0).ready
   assert(io.in(0).valid || !io.in(1).valid) // 1 valid implies 0 valid
 
   val tsoTailInc = (

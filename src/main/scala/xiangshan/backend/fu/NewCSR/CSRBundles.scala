@@ -217,6 +217,8 @@ object CSRBundles {
     // Rename
     val fusion_enable = Output(Bool())
     val wfi_enable = Output(Bool())
+    // Sbuffer
+    val tso_enable = Output(Bool())
   }
 
   class SatpInfo(implicit p: Parameters) extends Bundle {
