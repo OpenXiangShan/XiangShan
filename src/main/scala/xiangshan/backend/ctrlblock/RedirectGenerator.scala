@@ -15,8 +15,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
     val hartId = Input(UInt(8.W))
     val oldestExuRedirect = Flipped(ValidIO(new Redirect))
-    val oldestExuRedirectIsCSR = Input(Bool())
-    val instrAddrTransType = Input(new AddrTransType)
     val loadReplay = Flipped(ValidIO(new Redirect))
     val robFlush = Flipped(ValidIO(new Redirect))
     val stage2Redirect = ValidIO(new Redirect)
@@ -32,12 +30,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val robFlush = io.robFlush
   val oldestExuRedirect = Wire(chiselTypeOf(io.oldestExuRedirect))
   oldestExuRedirect := io.oldestExuRedirect
-  oldestExuRedirect.bits.fullTarget := Cat(io.oldestExuRedirect.bits.fullTarget.head(XLEN - VAddrBits), io.oldestExuRedirect.bits.target)
-  when(!io.oldestExuRedirectIsCSR){
-    oldestExuRedirect.bits.backendIAF := io.instrAddrTransType.checkAccessFault(oldestExuRedirect.bits.fullTarget)
-    oldestExuRedirect.bits.backendIPF := io.instrAddrTransType.checkPageFault(oldestExuRedirect.bits.fullTarget)
-    oldestExuRedirect.bits.backendIGPF := io.instrAddrTransType.checkGuestPageFault(oldestExuRedirect.bits.fullTarget)
-  }
   val allRedirect: Vec[ValidIO[Redirect]] = VecInit(oldestExuRedirect, loadRedirect)
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val flushAfter = RegInit(0.U.asTypeOf(ValidIO(new Redirect)))

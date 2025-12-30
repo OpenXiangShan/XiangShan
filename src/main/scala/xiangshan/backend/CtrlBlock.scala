@@ -196,28 +196,6 @@ class CtrlBlockImp(
     delayed
   }).toSeq
 
-  private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
-    val hasCSR = x.bits.params.hasCSR
-    val out = Wire(Valid(new Redirect()))
-    out.valid := x.valid && x.bits.redirect.get.valid &&
-      (x.bits.redirect.get.bits.isMisPred ||
-        x.bits.redirect.get.bits.hasBackendFault) && !x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
-    out.bits := x.bits.redirect.get.bits
-    out.bits.debugIsCtrl := true.B
-    out.bits.debugIsMemVio := false.B
-    // for fix timing, next cycle assgin
-    if (!hasCSR) {
-      out.bits.backendIAF := false.B
-      out.bits.backendIPF := false.B
-      out.bits.backendIGPF := false.B
-    }
-    out
-  }).toSeq
-  private val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
-  private val CSROH = VecInit(io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.params.hasCSR.B))
-  private val oldestExuRedirectIsCSR = oldestOneHot === CSROH
-  private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
-
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
@@ -319,12 +297,10 @@ class CtrlBlockImp(
    * trace end
    */
 
-
+  val oldestExuRedirect = io.fromWB.delayedOldestExuRedirect
   redirectGen.io.hartId := io.fromTop.hartId
-  redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
-  redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
-  redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
+  redirectGen.io.oldestExuRedirect.valid := oldestExuRedirect.valid
+  redirectGen.io.oldestExuRedirect.bits := oldestExuRedirect.bits
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
@@ -370,8 +346,8 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s5_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s5_flushFromRobValid))
 
   //jmp/brh, sel oldest first, only use one read port
-  io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
-  io.frontend.toFtq.ftqIdxAhead(0).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
+  io.frontend.toFtq.ftqIdxAhead(0).valid := oldestExuRedirect.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead(0).bits := oldestExuRedirect.bits.ftqIdx
   //loadreplay
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
@@ -958,6 +934,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2CtrlBundles))
+    val delayedOldestExuRedirect = Flipped(ValidIO(new Redirect)) 
   }
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {
