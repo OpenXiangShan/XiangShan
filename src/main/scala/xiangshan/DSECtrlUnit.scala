@@ -58,21 +58,21 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val robSize1 = RegInit(RobSize.U(64.W))
     val robSize = Wire(UInt(64.W))
 
-//    val lqSize0 = RegInit(LoadQueueSize.U(64.W))
-//    val lqSize1 = RegInit(LoadQueueSize.U(64.W))
-//    val lqSize = Wire(UInt(64.W))
-//
-//    val sqSize0 = RegInit(StoreQueueSize.U(64.W))
-//    val sqSize1 = RegInit(StoreQueueSize.U(64.W))
-//    val sqSize = Wire(UInt(64.W))
-//
-//    val ftqSize0 = RegInit(FtqSize.U(64.W))
-//    val ftqSize1 = RegInit(FtqSize.U(64.W))
-//    val ftqSize = Wire(UInt(64.W))
-//
-//    val ibufSize0 = RegInit(IBufSize.U(64.W))
-//    val ibufSize1 = RegInit(IBufSize.U(64.W))
-//    val ibufSize = Wire(UInt(64.W))
+    val lqSize0 = RegInit(VirtualLoadQueueSize.U(64.W))
+    val lqSize1 = RegInit(VirtualLoadQueueSize.U(64.W))
+    val lqSize = Wire(UInt(64.W))
+
+    val sqSize0 = RegInit(StoreQueueSize.U(64.W))
+    val sqSize1 = RegInit(StoreQueueSize.U(64.W))
+    val sqSize = Wire(UInt(64.W))
+
+   val ftqSize0 = RegInit(FtqSize.U(64.W))
+   val ftqSize1 = RegInit(FtqSize.U(64.W))
+   val ftqSize = Wire(UInt(64.W))
+
+   val ibufSize0 = RegInit(IBufSize.U(64.W))
+   val ibufSize1 = RegInit(IBufSize.U(64.W))
+   val ibufSize = Wire(UInt(64.W))
 //
 //    val intDqSize0 = RegInit(dpParams.IntDqSize.U(64.W))
 //    val intDqSize1 = RegInit(dpParams.IntDqSize.U(64.W))
@@ -136,14 +136,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x018 -> Seq(RegField(64, max_epoch)),
       0x100 -> Seq(RegField(64, robSize0)),
       0x108 -> Seq(RegField(64, robSize1)),
-//      0x110 -> Seq(RegField(64, lqSize0)),
-//      0x118 -> Seq(RegField(64, lqSize1)),
-//      0x120 -> Seq(RegField(64, sqSize0)),
-//      0x128 -> Seq(RegField(64, sqSize1)),
-//      0x130 -> Seq(RegField(64, ftqSize0)),
-//      0x138 -> Seq(RegField(64, ftqSize1)),
-//      0x140 -> Seq(RegField(64, ibufSize0)),
-//      0x148 -> Seq(RegField(64, ibufSize1)),
+      0x110 -> Seq(RegField(64, lqSize0)),
+      0x118 -> Seq(RegField(64, lqSize1)),
+      0x120 -> Seq(RegField(64, sqSize0)),
+      0x128 -> Seq(RegField(64, sqSize1)),
+     0x130 -> Seq(RegField(64, ftqSize0)),
+     0x138 -> Seq(RegField(64, ftqSize1)),
+     0x140 -> Seq(RegField(64, ibufSize0)),
+     0x148 -> Seq(RegField(64, ibufSize1)),
 //      0x150 -> Seq(RegField(64, intDqSize0)),
 //      0x158 -> Seq(RegField(64, intDqSize1)),
 //      0x160 -> Seq(RegField(64, fpDqSize0)),
@@ -172,10 +172,10 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
 
     // Mux logic
     robSize := Mux(ctrlSel.orR, robSize1, robSize0)
-//    lqSize := Mux(ctrlSel.orR, lqSize1, lqSize0)
-//    sqSize := Mux(ctrlSel.orR, sqSize1, sqSize0)
-//    ftqSize := Mux(ctrlSel.orR, ftqSize1, ftqSize0)
-//    ibufSize := Mux(ctrlSel.orR, ibufSize1, ibufSize0)
+    lqSize := Mux(ctrlSel.orR, lqSize1, lqSize0)
+    sqSize := Mux(ctrlSel.orR, sqSize1, sqSize0)
+   ftqSize := Mux(ctrlSel.orR, ftqSize1, ftqSize0)
+   ibufSize := Mux(ctrlSel.orR, ibufSize1, ibufSize0)
 //    intDqSize := Mux(ctrlSel.orR, intDqSize1, intDqSize0)
 //    fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
 //    lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
@@ -191,32 +191,32 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
 
     // Bore to/from modules
     BoringUtils.addSource(robSize, "DSE_ROBSIZE")
-//    ExcitingUtils.addSource(lqSize, "DSE_LQSIZE")
-//    ExcitingUtils.addSource(sqSize, "DSE_SQSIZE")
-//    ExcitingUtils.addSource(ftqSize, "DSE_FTQSIZE")
-//    ExcitingUtils.addSource(ibufSize, "DSE_IBUFSIZE")
-//    ExcitingUtils.addSource(intDqSize, "DSE_INTDQSIZE")
-//    ExcitingUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
-//    ExcitingUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
-//    ExcitingUtils.addSource(l2MSHRs, "DSE_L2MSHRS")
-//    ExcitingUtils.addSource(l3MSHRs, "DSE_L3MSHRS")
-//    ExcitingUtils.addSource(l2Sets, "DSE_L2SETS")
-//    ExcitingUtils.addSource(l3Sets, "DSE_L3SETS")
-//    ExcitingUtils.addSource(intPhyRegs, "DSE_INTFLSIZE")
-//    ExcitingUtils.addSource(fpPhyRegs, "DSE_FPFLSIZE")
-//    ExcitingUtils.addSource(rasSize, "DSE_RASSIZE")
-//    ExcitingUtils.addSource(dcacheWays, "DSE_DCACHEWAYS")
-//    ExcitingUtils.addSource(dcacheMSHRs, "DSE_DCACHEMSHRS")
+    BoringUtils.addSource(lqSize, "DSE_LQSIZE")
+    BoringUtils.addSource(sqSize, "DSE_SQSIZE")
+    BoringUtils.addSource(ftqSize, "DSE_FTQSIZE")
+    BoringUtils.addSource(ibufSize, "DSE_IBUFSIZE")
+//    BoringUtils.addSource(intDqSize, "DSE_INTDQSIZE")
+//    BoringUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
+//    BoringUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
+//    BoringUtils.addSource(l2MSHRs, "DSE_L2MSHRS")
+//    BoringUtils.addSource(l3MSHRs, "DSE_L3MSHRS")
+//    BoringUtils.addSource(l2Sets, "DSE_L2SETS")
+//    BoringUtils.addSource(l3Sets, "DSE_L3SETS")
+//    BoringUtils.addSource(intPhyRegs, "DSE_INTFLSIZE")
+//    BoringUtils.addSource(fpPhyRegs, "DSE_FPFLSIZE")
+//    BoringUtils.addSource(rasSize, "DSE_RASSIZE")
+//    BoringUtils.addSource(dcacheWays, "DSE_DCACHEWAYS")
+//    BoringUtils.addSource(dcacheMSHRs, "DSE_DCACHEMSHRS")
 
     BoringUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
 
     // assertion
     assert(robSize <= RobSize.U, "DSE parameter must not exceed ROBSZIE")
-//    assert(lqSize <= LoadQueueSize.U, "DSE parameter must not exceed LoadQueueSize")
-//    assert(sqSize <= StoreQueueSize.U, "DSE parameter must not exceed StoreQueueSize")
-//    assert(ftqSize <= FtqSize.U, "DSE parameter must not exceed FtqSize")
-//    assert(ibufSize <= IBufSize.U, "DSE parameter must not exceed IBufSize")
+    assert(lqSize <= VirtualLoadQueueSize.U, "DSE parameter must not exceed LoadQueueSize")
+    assert(sqSize <= StoreQueueSize.U, "DSE parameter must not exceed StoreQueueSize")
+    assert(ftqSize <= FtqSize.U, "DSE parameter must not exceed FtqSize")
+    assert(ibufSize <= IBufSize.U, "DSE parameter must not exceed IBufSize")
 //    assert(intDqSize <= dpParams.IntDqSize.U, "DSE parameter must not exceed IntDqSize")
 //    assert(fpDqSize <= dpParams.FpDqSize.U, "DSE parameter must not exceed FpDqSize")
 //    assert(lsDqSize <= dpParams.LsDqSize.U, "DSE parameter must not exceed LsDqSize")

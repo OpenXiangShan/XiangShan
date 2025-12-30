@@ -23,6 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.ExceptionNO._
+import chisel3.util.experimental.BoringUtils
 
 class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](p => p(XSCoreParamsKey).IBufSize) {}
 
@@ -216,6 +217,9 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   private val numOut = Wire(UInt(log2Ceil(DecodeWidth).W))
   private val numDeq = numOut
 
+  val pIBufSize = WireInit(IBufSize.U(log2Up(IBufSize + 1).W))
+  BoringUtils.addSink(pIBufSize, "DSE_IBUFSIZE")
+
   // counter current number of valid
   val numValid         = distanceBetween(enqPtr, deqPtr)
   val numValidAfterDeq = numValid - numDeq
@@ -224,7 +228,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val allowEnq     = RegInit(true.B)
   val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
 
-  allowEnq := (IBufSize - PredictWidth).U >= numValidNext // Disable when almost full
+  allowEnq := (pIBufSize - PredictWidth.U) >= numValidNext // Disable when almost full
 
   val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData   = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))

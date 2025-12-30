@@ -35,6 +35,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.icache._
+import chisel3.util.experimental.BoringUtils
 
 class FtqDebugBundle extends Bundle {
   val pc        = UInt(39.W)
@@ -588,6 +589,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit    = Wire(Bool())
 
+  val pFtqSize = WireInit(FtqSize.U(log2Up(FtqSize + 1).W))
+  BoringUtils.addSink(pFtqSize, "DSE_FTQSIZE")
+
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
   // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
   // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
@@ -614,7 +618,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U || canCommit
+  val new_entry_ready = validEntries < pFtqSize || canCommit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp     = io.fromBpu.resp.bits.s2

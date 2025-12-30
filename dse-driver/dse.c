@@ -45,10 +45,10 @@ void main() {
     // 根据 ctrlsel 写入参数寄存器
     if (*(volatile uint8_t *)PINGPONG_REG == 0) {
         *(volatile uint64_t *)ROBSIZE0_REG = *(volatile uint64_t *)ROBSIZE_ADDR;
-        // *(volatile uint64_t *)LQSIZE0_REG = *(volatile uint64_t *)LQSIZE_ADDR;
-        // *(volatile uint64_t *)SQSIZE0_REG = *(volatile uint64_t *)SQSIZE_ADDR;
-        // *(volatile uint64_t *)FTQ0_REG = *(volatile uint64_t *)FTQSIZE_ADDR;
-        // *(volatile uint64_t *)IBUFSIZE0_REG = *(volatile uint64_t *)IBUFSIZE_ADDR;
+        *(volatile uint64_t *)LQSIZE0_REG = *(volatile uint64_t *)LQSIZE_ADDR;
+        *(volatile uint64_t *)SQSIZE0_REG = *(volatile uint64_t *)SQSIZE_ADDR;
+        *(volatile uint64_t *)FTQ0_REG = *(volatile uint64_t *)FTQSIZE_ADDR;
+        *(volatile uint64_t *)IBUFSIZE0_REG = *(volatile uint64_t *)IBUFSIZE_ADDR;
         // *(volatile uint64_t *)INTDQSIZE0_REG = *(volatile uint64_t *)INTDQSIZE_ADDR;
         // *(volatile uint64_t *)FPDQSIZE0_REG = *(volatile uint64_t *)FPDQSIZE_ADDR;
         // *(volatile uint64_t *)LSDQSIZE0_REG = *(volatile uint64_t *)LSDQSIZE_ADDR;
@@ -63,10 +63,10 @@ void main() {
         // *(volatile uint64_t *)DCACHEMSHRS0_REG = *(volatile uint64_t *)DCACHEMSHRS_ADDR;
     } else {
         *(volatile uint64_t *)ROBSIZE1_REG = *(volatile uint64_t *)ROBSIZE_ADDR;
-        // *(volatile uint64_t *)LQSIZE1_REG = *(volatile uint64_t *)LQSIZE_ADDR;
-        // *(volatile uint64_t *)SQSIZE1_REG = *(volatile uint64_t *)SQSIZE_ADDR;
-        // *(volatile uint64_t *)FTQ1_REG = *(volatile uint64_t *)FTQSIZE_ADDR;
-        // *(volatile uint64_t *)IBUFSIZE1_REG = *(volatile uint64_t *)IBUFSIZE_ADDR;
+        *(volatile uint64_t *)LQSIZE1_REG = *(volatile uint64_t *)LQSIZE_ADDR;
+        *(volatile uint64_t *)SQSIZE1_REG = *(volatile uint64_t *)SQSIZE_ADDR;
+        *(volatile uint64_t *)FTQ1_REG = *(volatile uint64_t *)FTQSIZE_ADDR;
+        *(volatile uint64_t *)IBUFSIZE1_REG = *(volatile uint64_t *)IBUFSIZE_ADDR;
         // *(volatile uint64_t *)INTDQSIZE1_REG = *(volatile uint64_t *)INTDQSIZE_ADDR;
         // *(volatile uint64_t *)FPDQSIZE1_REG = *(volatile uint64_t *)FPDQSIZE_ADDR;
         // *(volatile uint64_t *)LSDQSIZE1_REG = *(volatile uint64_t *)LSDQSIZE_ADDR;

@@ -35,6 +35,7 @@ import xiangshan.cache._
 import xiangshan.cache.{CMOReq, CMOResp, DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import difftest._
 import difftest.common.DifftestMem
+import chisel3.util.experimental.BoringUtils
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -295,7 +296,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rdPtr = rdataPtrExt(0).value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
-  val allowEnqueue = validCount <= (StoreQueueSize - LSQStEnqWidth).U
+
+  val pStoreQueueSize = WireInit(StoreQueueSize.U((log2Up(StoreQueueSize + 1)).W))
+  BoringUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
+  val allowEnqueue = validCount <= (pStoreQueueSize - LSQStEnqWidth.U)
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)

@@ -30,6 +30,7 @@ import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.FuType
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
+import chisel3.util.experimental.BoringUtils
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -57,7 +58,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val noUopsIssued = Input(Bool())
   })
 
-  println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
+  val pLoadQueueSize = WireInit(VirtualLoadQueueSize.U)
+  BoringUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+
+  println("VirtualLoadQueue: size: " + pLoadQueueSize)
   //  VirtualLoadQueue field
   //  +-----------+---------+-------+
   //  | Allocated | MicroOp | Flags |
@@ -90,7 +94,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
+  val allowEnqueue = validCount <= (pLoadQueueSize - LSQLdEnqWidth.U)
   val canEnqueue = io.enq.req.map(_.valid)
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
