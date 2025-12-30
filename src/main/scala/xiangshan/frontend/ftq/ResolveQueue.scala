@@ -64,10 +64,41 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     "Backend resolves branches that should have been flushed\n"
   )
 
+  private val dropResolveCounter = RegInit(0.U.asTypeOf(UInt(6.W)))
+
+  private val sIdle :: sDrop :: Nil = Enum(2)
+
+  private val state = RegInit(sIdle)
+
+  private val hasResolve    = io.backendResolve.map(_.valid).reduce(_ || _)
+  private val hasMispredict = io.backendResolve.map(branch => branch.valid && branch.bits.mispredict).reduce(_ || _)
+
+  when(hasResolve && !hasMispredict) {
+    dropResolveCounter := Mux(dropResolveCounter === 63.U, dropResolveCounter, dropResolveCounter + 1.U)
+  }.elsewhen(hasResolve && hasMispredict) {
+    dropResolveCounter := Mux(dropResolveCounter === 0.U, dropResolveCounter, dropResolveCounter - 16.U)
+  }
+
+  switch(state) {
+    is(sIdle) {
+      when(dropResolveCounter === 63.U) {
+        state := sDrop
+      }
+    }
+    is(sDrop) {
+      when(dropResolveCounter < 32.U) {
+        state := sIdle
+      }
+    }
+  }
+
   private val resolve = io.backendResolve.map { backendResolve =>
     val filteredResolve = Wire(Valid(new Resolve))
-    filteredResolve.valid := backendResolve.valid &&
-      !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
+    filteredResolve.valid := Mux(
+      state === sDrop && !backendResolve.bits.mispredict,
+      false.B,
+      backendResolve.valid && !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
+    )
     filteredResolve.bits := backendResolve.bits
     filteredResolve
   }
@@ -156,4 +187,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   // entries from being enqueued. More sophisticated designs should be considered.
   XSPerfAccumulate("resolveQueueFull", full)
   XSPerfAccumulate("dropResolve", PopCount(io.backendResolve.map(_.valid && full)))
+  XSPerfAccumulate(
+    "customDropResolve",
+    PopCount(io.backendResolve.map(branch => branch.valid && !branch.bits.mispredict && state === sDrop))
+  )
 }
