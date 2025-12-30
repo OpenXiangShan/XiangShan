@@ -382,6 +382,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
+
+      custom.tso_enable  := csrMod.io.status.custom.tso_enable
       // distribute csr write signal
       // write to frontend and memory
       custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
