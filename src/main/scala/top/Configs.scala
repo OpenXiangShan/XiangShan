@@ -42,7 +42,7 @@ import xiangshan.frontend.ibuffer.IBufferParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
-import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
+import xiangshan.backend.regfile.{FpPregParams, IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.EnableJtag
@@ -162,6 +162,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         intPreg = IntPregParams(
           numEntries = 64,
           numBank = 4,
+          numRead = None,
+          numWrite = None,
+        ),
+        fpPreg = FpPregParams(
+          numEntries = 64,
+          numBank = 1,
           numRead = None,
           numWrite = None,
         ),
