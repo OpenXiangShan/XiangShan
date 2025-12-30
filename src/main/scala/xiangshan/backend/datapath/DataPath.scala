@@ -521,7 +521,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   }
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)).toSeq)))
-  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(intRFReadReq.map(x => MixedVecInit(x.map(xx => VecInit(xx.map(xxx => RegEnable(xxx.bits.addr.head(intRfBankRaddrWidth), xxx.valid)))))))
+  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(intRFReadReq.map(x => MixedVecInit(x.map(xx => VecInit(xx.map(xxx =>
+      RegEnable(xxx.bits.addr.pad(intSchdParams.pregIdxWidth).head(intRfBankRaddrWidth), xxx.valid)))))))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
