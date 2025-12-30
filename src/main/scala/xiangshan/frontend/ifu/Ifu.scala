@@ -400,9 +400,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_alignPd         = preDecoderOut.pd
   private val s2_alignJumpOffset = preDecoderOut.jumpOffset
-
-  private val s2_reqIsUncache = s2_valid && s2_icacheMeta(0).isUncache &&
-    s2_icacheMeta(0).exception.isNone
+  // reqIsUncache is used to limit the number of fetch requests and enable special pre-decode configurations.
+  private val s2_reqIsUncache = s2_valid && s2_icacheMeta(0).isUncache
+  // useUncacheFetch controls whether the instruction fetch operation follows the uncache control logic.
+  private val s2_useUncacheFetch = s2_valid && s2_icacheMeta(0).isUncache && s2_icacheMeta(0).exception.isNone
   private val s2_alignFetchBlock = Wire(Vec(FetchPorts, new FetchBlockInfo))
   s2_alignFetchBlock                      := s2_fetchBlock
   s2_alignFetchBlock(0).predTakenIdx.bits := s2_fetchBlock(0).predTakenIdx.bits + s2_prevIBufEnqPtr.value(1, 0)
@@ -493,12 +494,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_uncacheLowerPc     = RegEnable(s2_alignCompactInfo.instrPcLower(s2_alignShiftNum), s2_fire)
   private val s3_alignBlockStartPos = RegEnable(s2_alignBlockStartPos, s2_fire)
   private val s3_uncachePc = catPC(s3_uncacheLowerPc, s3_alignFetchBlock(0).pcHigh, s3_alignFetchBlock(0).pcHighPlus1)
-  private val s3_reqIsUncache         = RegEnable(s2_reqIsUncache, s2_fire)
-  private val s3_uncacheCanGo         = uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage
+  private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, s2_fire)
+  private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, s2_fire)
+  private val s3_uncacheCanGo =
+    (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage) || !s3_useUncacheFetch
   private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
-  private val s3_toIBufferValid = s3_valid && (!s3_reqIsUncache || (s3_uncacheCanGo && s3_reqIsUncache)) && !s3_flush
-  private val s3_shiftNum       = s3_prevIBufEnqPtr.value(1, 0)
-  private val s3_ignore         = s3_prevShiftSelect // possibly redundant, may remove later.
+  private val s3_toIBufferValid =
+    s3_valid && (!s3_reqIsUncache || (s3_uncacheCanGo && s3_reqIsUncache)) && !s3_flush
+  private val s3_shiftNum = s3_prevIBufEnqPtr.value(1, 0)
+  private val s3_ignore   = s3_prevShiftSelect // possibly redundant, may remove later.
 
   /* ** unache state handle ** */
   private val uncacheBusy = RegInit(false.B)
@@ -523,7 +527,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     uncacheCrossPageCheck := false.B
   }
 
-  uncacheUnit.io.req.valid       := s3_valid && s3_reqIsUncache && !uncacheBusy
+  uncacheUnit.io.req.valid       := s3_valid && s3_useUncacheFetch && !uncacheBusy
   uncacheUnit.io.req.bits.ftqIdx := s3_alignFetchBlock(0).ftqIdx
   uncacheUnit.io.req.bits.pbmt   := s3_icacheMeta(0).itlbPbmt
   uncacheUnit.io.req.bits.isMmio := s3_icacheMeta(0).pmpMmio
