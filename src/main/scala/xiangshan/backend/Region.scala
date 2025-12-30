@@ -716,7 +716,28 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits := source.bits
     }
   }
-  io.wbDataPathToCtrlBlock := wbDataPath.io.toCtrlBlock
+  io.wbDataPathToCtrlBlock.writeback := wbDataPath.io.toCtrlBlock.writeback
+  io.wbDataPathToCtrlBlock.writeback.filter(_.bits.redirect.nonEmpty).map{ x =>
+    x.bits.redirect.get := 0.U.asTypeOf(x.bits.redirect.get)
+  } 
+  // oldestRedirect
+  if (params.isIntSchd) {
+    val exuRedirects: Seq[ValidIO[Redirect]] = wbDataPath.io.toCtrlBlock.writeback.filter(_.bits.redirect.nonEmpty).map(x => {
+      val out = Wire(Valid(new Redirect()))
+      out.valid := x.valid && x.bits.redirect.get.valid &&
+        (x.bits.redirect.get.bits.isMisPred || x.bits.redirect.get.bits.hasBackendFault) && 
+        !x.bits.robIdx.needFlush(Seq(io.flush, flushCopyReg2))
+      out.bits := x.bits.redirect.get.bits
+      out.bits.debugIsCtrl := true.B
+      out.bits.debugIsMemVio := false.B
+      out
+    }).toSeq
+    val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
+    val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
+    io.wbDataPathToCtrlBlock.delayedOldestExuRedirect.get.valid := RegNext(oldestExuRedirect.valid)
+    io.wbDataPathToCtrlBlock.delayedOldestExuRedirect.get.bits  := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
+  }
+
   io.IQValidNumVec := issueQueues.filter(_.param.StdCnt == 0).map(_.io.validCntDeqVec).flatten
   io.og0Cancel := dataPath.io.og0Cancel
   io.diffVl.foreach(_ := dataPath.io.diffVl.get)
@@ -821,6 +842,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val wbDataPathToCtrlBlock = new Bundle {
     val writeback: MixedVec[ValidIO[ExuOutput]] = MixedVec(params.genExuOutputValidBundle.flatten)
+    val delayedOldestExuRedirect = Option.when(params.isIntSchd)(ValidIO(new Redirect))
   }
   val memWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.genExuOutputDecoupledBundleMemBlock)
   val lduWriteback: Option[MixedVec[MixedVec[DecoupledIO[ExuOutput]]]] = Option.when(params.isFpSchd)(
