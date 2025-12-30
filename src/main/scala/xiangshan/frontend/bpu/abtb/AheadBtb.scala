@@ -169,23 +169,19 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     s3_startPc  := s2_startPc
   }
 
-  //  private val s2_entriesDelay1 = RegNext(s2_entries)
-
   private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
 
   private val s2_tag = getTag(s2_startPc)
   dontTouch(s2_tag)
-//  private val s2_realEntries = Mux(RegNext(io.overrideValid), s2_entriesDelay1, s2_entries)
-  private val s2_realEntries = s2_entries // TODO
-  private val s2_hitMask     = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hit         = s2_hitMask.reduce(_ || _)
-  private val s2_takenMask   = VecInit(s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken })
-  private val s2_taken       = s2_takenMask.reduce(_ || _)
+  private val s2_hitMask   = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
+  private val s2_hit       = s2_hitMask.reduce(_ || _)
+  private val s2_takenMask = VecInit(s2_hitMask.zip(s2_ctrResult).map { case (hit, taken) => hit && taken })
+  private val s2_taken     = s2_takenMask.reduce(_ || _)
 
-  private val s2_positions         = VecInit(s2_realEntries.map(_.position))
+  private val s2_positions         = VecInit(s2_entries.map(_.position))
   private val s2_compareMatrix     = CompareMatrix(s2_positions)
   private val s2_firstTakenEntryOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
-  private val s2_firstTakenEntry   = Mux1H(s2_firstTakenEntryOH, s2_realEntries)
+  private val s2_firstTakenEntry   = Mux1H(s2_firstTakenEntryOH, s2_entries)
 
   // When detect multi-hit, we need to invalidate one entry.
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
@@ -194,10 +190,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     getFullTarget(s2_startPc, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
 
   private val microTagePred = io.microTagePred
-  private val s2_jumpMask = s2_realEntries.zip(s2_hitMask).map {
+  private val s2_jumpMask = s2_entries.zip(s2_hitMask).map {
     case (entry, hit) => (entry.attribute.isDirect || entry.attribute.isIndirect) && hit
   }
-  private val s2_microTageHit = s2_realEntries.zip(s2_hitMask).map {
+  private val s2_microTageHit = s2_entries.zip(s2_hitMask).map {
     case (entry, hit) => hit && (entry.position === microTagePred.bits.cfiPosition) && entry.attribute.isConditional
   }
   private val useMicroTage = s2_microTageHit.reduce(_ || _) && microTagePred.valid && s2_valid
@@ -206,7 +202,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     case (jump, microTageHit) => jump || (microTageHit && microTagePred.bits.taken)
   })
   private val microTageTakenOH = s2_compareMatrix.getLeastElementOH(s2_microTageTakenMask)
-  private val microTageEntry   = Mux1H(microTageTakenOH, s2_realEntries)
+  private val microTageEntry   = Mux1H(microTageTakenOH, s2_entries)
   private val microTageTarget =
     getFullTarget(s2_startPc, microTageEntry.targetLowerBits, microTageEntry.targetCarry)
 
@@ -224,7 +220,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   io.meta.valid           := s2_valid
   io.meta.hitMask         := s2_hitMask
-  io.meta.attributes      := s2_realEntries.map(_.attribute)
+  io.meta.attributes      := s2_entries.map(_.attribute)
   io.meta.positions       := s2_positions
   io.meta.taken           := s2_taken
   io.meta.takenMaskOH     := s2_firstTakenEntryOH
