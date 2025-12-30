@@ -211,7 +211,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // so we use a debug_ signal for perf counters
   private val debug_readBankConflict = io.debug_trainValid && t0_readBankConflict
 
-  io.trainReady := !t0_readBankConflict
+  io.trainReady := true.B
 
   private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
 
@@ -267,10 +267,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.trainReadReq.valid         := t0_fire
     table.io.trainReadReq.bits.setIdx   := t0_setIdx(tableIdx)
     table.io.trainReadReq.bits.bankMask := t0_bankMask
-  }
-
-  when(t0_fire) {
-    assert(!(s0_fire && s0_bankIdx === t0_bankIdx), "TageTable: predictReadReq and trainReadReq conflict")
   }
 
   /* --------------------------------------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.tage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.SyncDataModuleTemplate
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
@@ -48,16 +49,14 @@ class TageTable(
 
   private val entrySram =
     Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
-      Module(new SRAMTemplate(
+      Module(new SyncDataModuleTemplate(
         new TageEntry,
-        set = NumSets,
-        way = 1,
-        singlePort = true,
-        shouldReset = true,
-        withClockGate = true,
-        hasMbist = hasMbist,
-        hasSramCtl = hasSramCtl,
-        suffix = Option("bpu_tage")
+        numEntries = NumSets,
+        numRead = 2,
+        numWrite = 1,
+        parentModule = "tage",
+        perReadPortBypassEnable = Some(Seq(true, true)),
+        hasRen = true
       )).suggestName(s"tage_entry_sram_bank${bankIdx}_way${wayIdx}")
     }
 
@@ -72,61 +71,44 @@ class TageTable(
     )
   )
 
-  // use a write buffer to store a entrySram write request
-  // TODO: add writeBuffer multi port simultaneous writing
-  private val entryWriteBuffers =
-    Seq.tabulate(NumBanks) { bankIdx =>
-      Module(new WriteBuffer(
-        new EntrySramWriteReq,
-        WriteBufferSize,
-        numPorts = NumWays,
-        hasCnt = false, // FIXME: set to true when bug fixed
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
-    }
-
   // read sram
   entrySram.zipWithIndex.foreach { case (bank, bankIdx) =>
     val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
     val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
     bank.foreach { way =>
-      way.io.r.req.valid       := predictReadValid || trainReadValid
-      way.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
+      if (way.io.ren.isDefined) {
+        way.io.ren.get(0) := predictReadValid
+        way.io.ren.get(1) := trainReadValid
+      }
+      way.io.raddr(0) := io.predictReadReq.bits.setIdx
+      way.io.raddr(1) := io.trainReadReq.bits.setIdx
     }
   }
 
-  // write to write buffer
-  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
-    buffer.io.write.zipWithIndex.foreach { case (writePort, wayIdx) =>
-      writePort.valid := io.writeReq.valid && io.writeReq.bits.bankMask(bankIdx) && io.writeReq.bits.wayMask(wayIdx)
-      writePort.bits.setIdx    := io.writeReq.bits.setIdx
-      writePort.bits.entry     := io.writeReq.bits.entries(wayIdx)
-      writePort.bits.usefulCtr := io.writeReq.bits.usefulCtrs(wayIdx)
-    }
-  }
-
-  // write to sram from write buffer
-  entrySram.zip(usefulCtrs).zip(entryWriteBuffers) foreach { case ((bank, ctrsPerBank), buffer) =>
-    bank.zip(ctrsPerBank).zip(buffer.io.read).foreach { case ((way, ctrsPerWay), readPort) =>
-      val valid  = readPort.valid && !way.io.r.req.valid
-      val setIdx = readPort.bits.setIdx
-      val entry  = readPort.bits.entry
-      way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
-      readPort.ready := way.io.w.req.ready && !way.io.r.req.valid
+  // write sram
+  entrySram.zipWithIndex.foreach { case (bank, bankIdx) =>
+    bank.zipWithIndex.foreach { case (way, wayIdx) =>
+      val writeValid = io.writeReq.valid && io.writeReq.bits.bankMask(bankIdx) && io.writeReq.bits.wayMask(wayIdx)
+      val setIdx     = io.writeReq.bits.setIdx
+      val entry      = io.writeReq.bits.entries(wayIdx)
+      way.io.wen(0)   := writeValid
+      way.io.waddr(0) := setIdx
+      way.io.wdata(0) := entry
 
       when(io.resetUseful) {
-        ctrsPerWay.foreach(_.resetZero())
-      }.elsewhen(readPort.fire) {
-        ctrsPerWay(setIdx).value := readPort.bits.usefulCtr.value
+        usefulCtrs(bankIdx)(wayIdx).foreach(_.resetZero())
+      }.elsewhen(writeValid) {
+        usefulCtrs(bankIdx)(wayIdx)(setIdx).value := io.writeReq.bits.usefulCtrs(wayIdx).value
       }
     }
   }
+
 
   private val predictReadSetIdxNext   = RegEnable(io.predictReadReq.bits.setIdx, io.predictReadReq.valid)
   private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
   io.predictReadResp.entries := Mux1H(
     predictReadBankMaskNext,
-    entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+    entrySram.map(bank => VecInit(bank.map(way => way.io.rdata(0))))
   )
   io.predictReadResp.usefulCtrs := Mux1H(
     predictReadBankMaskNext,
@@ -139,7 +121,7 @@ class TageTable(
   private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
   io.trainReadResp.entries := Mux1H(
     trainReadBankMaskNext,
-    entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+    entrySram.map(bank => VecInit(bank.map(way => way.io.rdata(1))))
   )
   io.trainReadResp.usefulCtrs := Mux1H(
     trainReadBankMaskNext,
@@ -148,7 +130,7 @@ class TageTable(
     )
   )
 
-  io.resetDone := entrySram.flatten.map(_.io.r.req.ready).reduce(_ && _)
+  io.resetDone := true.B
 
   XSPerfAccumulate("predict_read", io.predictReadReq.valid)
   XSPerfAccumulate("train_read", io.trainReadReq.valid)
