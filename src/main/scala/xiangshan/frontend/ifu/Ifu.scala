@@ -494,8 +494,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_uncacheLowerPc     = RegEnable(s2_alignCompactInfo.instrPcLower(s2_alignShiftNum), s2_fire)
   private val s3_alignBlockStartPos = RegEnable(s2_alignBlockStartPos, s2_fire)
   private val s3_uncachePc = catPC(s3_uncacheLowerPc, s3_alignFetchBlock(0).pcHigh, s3_alignFetchBlock(0).pcHighPlus1)
-  private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, s2_fire)
-  private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, s2_fire)
+  private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, false.B, s2_fire)
+  private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, false.B, s2_fire)
   private val s3_uncacheCanGo =
     (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage) || !s3_useUncacheFetch
   private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
