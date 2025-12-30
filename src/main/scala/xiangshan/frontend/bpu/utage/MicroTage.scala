@@ -143,9 +143,10 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_misPred             = t0_histHitMisPred || t0_histMissHitMisPred
   private val t0_histTableNeedAlloc  = t0_misPred && t0_fire
   private val t0_histTableNeedUpdate = t0_predHit && t0_fire
-  private val t0_updateTaken         = (t0_predCfiPosition === t0_trainData.cfiPosition) && t0_trainData.taken
-  private val t0_updateCfiPosition   = t0_predCfiPosition
-  private val t0_actualTaken         = t0_trainData.attribute.isConditional && t0_trainData.taken
+  private val t0_updateTaken =
+    (t0_predCfiPosition === t0_trainData.cfiPosition) && t0_trainData.taken && t0_trainData.attribute.isConditional
+  private val t0_updateCfiPosition = t0_predCfiPosition
+  private val t0_actualTaken       = t0_trainData.attribute.isConditional && t0_trainData.taken
   private val t0_actualCfiPosition =
     Mux(t0_trainData.attribute.isConditional, t0_trainData.cfiPosition, t0_predCfiPosition)
 
@@ -180,7 +181,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     (t0_baseCfiPosition > t0_predCfiPosition) && ((!t0_baseTaken && t0_predTaken) || (t0_baseTaken && t0_predTaken))
 
   private val fastTrainHasPredBr = (t0_predCfiPosition === t0_trainData.cfiPosition) ||
-    ((t0_predCfiPosition < t0_trainData.cfiPosition) || t0_trainData.attribute.isConditional)
+    ((t0_predCfiPosition < t0_trainData.cfiPosition) && !t0_trainData.attribute.isConditional)
   private val baseNotMatchHistPred = baseEQNotMatch || baseLTNotMatch || baseGTNotMatch
 
 // Allocation policy:

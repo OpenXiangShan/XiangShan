@@ -26,15 +26,16 @@ case class MicroTageParameters(
       new MicroTageInfo(512, 9, 9, 15), // 3Taken maybe better than 2Taken
       // new MicroTageInfo(64, 16, 8, 18),
       // new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
-      new MicroTageInfo(512, 18, 12, 16) // follow Tage.
+      new MicroTageInfo(512, 14, 12, 15) // follow Tage.
       // new MicroTageInfo(128, 32, 16, 24)
     ),
     TakenCtrWidth:       Int = 3,
     NumTables:           Int = 2,
-    LowTickWidth:        Int = 8,
-    HighTickWidth:       Int = 12,
+    LowTickWidth:        Int = 9,
+    HighTickWidth:       Int = 11,
     UsefulWidth:         Int = 2,
-    EnableTraceAndDebug: Boolean = false,
+    PCHighTagStart:      Int = 7,
+    EnableTraceAndDebug: Boolean = true,
     BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
@@ -47,6 +48,7 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def HighTickWidth:   Int                 = utageParameters.HighTickWidth
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
+  def PCHighTagStart:  Int                 = utageParameters.PCHighTagStart
 
   def MaxNumSets:        Int = 512
   def MaxTagLen:         Int = 16
@@ -58,11 +60,8 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def EnableTraceAndDebug: Boolean = utageParameters.EnableTraceAndDebug
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
-  // def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)
-  // def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(16, 15, 13, 11, 10, 8, 6, 4, 2, 1)
-  def PCTagHashBitsForShortHistory: Seq[Int] = Seq(15, 13, 11, 4, 2, 1)
-  // def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(18, 16, 14, 12, 10, 8, 4, 2, 1)
-  def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(19, 17, 3, 2, 1)
+  def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)
+  def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(18, 16, 14, 12, 10, 8, 4, 2, 1)
   def PCTagHashXorPairsForLongHistory: Seq[(Int, Int)] = Seq(
     (17, 3),
     (16, 1),

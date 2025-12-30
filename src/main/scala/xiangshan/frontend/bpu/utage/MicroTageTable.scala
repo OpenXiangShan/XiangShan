@@ -152,7 +152,11 @@ class MicroTageTable(
 
   when(io.usefulReset) {
     usefulEntries.zipWithIndex.foreach { case (entry, i) =>
-      usefulEntries(i).value := entry.value >> 1.U
+      if (tableId == 0) {
+        usefulEntries(i).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
+      } else {
+        usefulEntries(i).value := entry.value >> 1.U
+      }
     }
   }
 
