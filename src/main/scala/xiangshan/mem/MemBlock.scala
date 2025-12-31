@@ -394,7 +394,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
     val outer_reset_vector = Input(UInt(PAddrBits.W))
-    val outer_cpu_halt = Output(Bool())
+    val outer_cpu_wfi = Output(Bool())
     val outer_l2_flush_en = Output(Bool())
     val outer_power_down_en = Output(Bool())
     val outer_cpu_critical_error = Output(Bool())
@@ -455,7 +455,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
   dontTouch(io.outer_reset_vector)
-  dontTouch(io.outer_cpu_halt)
+  dontTouch(io.outer_cpu_wfi)
   dontTouch(io.outer_l2_flush_en)
   dontTouch(io.outer_power_down_en)
   dontTouch(io.outer_cpu_critical_error)
@@ -1693,7 +1693,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)
-  io.outer_cpu_halt := io.ooo_to_mem.backendToTopBypass.cpuHalted
+  io.outer_cpu_wfi := io.ooo_to_mem.backendToTopBypass.cpuWfi
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
