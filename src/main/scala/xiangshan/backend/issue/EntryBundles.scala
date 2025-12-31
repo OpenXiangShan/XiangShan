@@ -385,7 +385,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           (commonIn.deqSel && !cancelBypassVec.asUInt.orR)  -> true.B,
                                                           (srcCancelByLoad || respIssueFail)                -> false.B,
                                                          ))
-    entryUpdate.status.firstIssue                     := commonIn.deqSel || status.firstIssue
+    entryUpdate.status.firstIssue                     := Mux(status.firstIssue && status.issueTimer === "b11".U, !respIssueFail, status.firstIssue)
     entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, Mux(status.issueTimer === "b11".U, status.issueTimer, status.issueTimer + 1.U), "b11".U))
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.imm.foreach(_                         := entryReg.imm.get)
@@ -428,7 +428,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                               ))
                                                           })
     }
-    commonOut.isFirstIssue                            := !status.firstIssue
+    commonOut.isFirstIssue                            := status.firstIssue
     commonOut.entry.valid                             := validReg
     commonOut.entry.bits                              := entryReg
     if(isEnq) {
