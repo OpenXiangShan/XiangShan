@@ -97,6 +97,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
     ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
+    // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
   } else {
     ubtb.io.enable   := ctrl.ubtbEnable
     abtb.io.enable   := ctrl.abtbEnable
@@ -105,6 +106,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := ctrl.rasEnable
+    // utage.io.enable  := ctrl.utageEnable
   }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
