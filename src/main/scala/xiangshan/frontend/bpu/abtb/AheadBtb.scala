@@ -40,6 +40,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val prediction:            Prediction                 = Output(new Prediction)
     val basePrediction:        Prediction                 = Output(new Prediction)
     val useMicroTage:          Bool                       = Output(Bool())
+    val abtbResult:            Vec[Valid[Prediction]]     = Output(Vec(NumAbtbResultEntries, Valid(new Prediction)))
     val meta:                  AheadBtbMeta               = Output(new AheadBtbMeta)
     val debug_startPc:         PrunedAddr                 = Output(PrunedAddr(VAddrBits))
     val debug_previousStartPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
@@ -193,8 +194,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_jumpMask = s2_entries.zip(s2_hitMask).map {
     case (entry, hit) => (entry.attribute.isDirect || entry.attribute.isIndirect) && hit
   }
-  private val s2_microTageHit = s2_entries.zip(s2_hitMask).map {
-    case (entry, hit) => hit && (entry.position === microTagePred.bits.cfiPosition) && entry.attribute.isConditional
+
+  private val s2_microTageHit = microTagePred.bits.hitAbtbVec.zip(s2_hitMask).map {
+    case (utageHit, hit) => hit && utageHit
   }
   private val useMicroTage = s2_microTageHit.reduce(_ || _) && microTagePred.valid && s2_valid
   // When microTAGE makes a prediction, it must be compared against the position of the jump branch instruction.
@@ -206,6 +208,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val microTageTarget =
     getFullTarget(s2_startPc, microTageEntry.targetLowerBits, microTageEntry.targetCarry)
 
+  private val abtbResult = Wire(Vec(NumAbtbResultEntries, Valid(new Prediction)))
+  for (i <- 0 until NumAbtbResultEntries) {
+    abtbResult(i).bits.cfiPosition := s2_entries(i).position
+    abtbResult(i).bits.attribute   := s2_entries(i).attribute
+    abtbResult(i).bits.target      := DontCare
+    abtbResult(i).bits.taken       := DontCare
+    abtbResult(i).valid            := s2_hitMask(i) && s2_valid
+  }
   // Only use the microTage result when microTage is valid and a hit occurs.
   io.useMicroTage           := useMicroTage
   io.prediction.taken       := Mux(useMicroTage, s2_microTageTakenMask.reduce(_ || _), s2_valid && s2_taken)
@@ -217,6 +227,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.basePrediction.target      := DontCare
   io.basePrediction.attribute   := s2_firstTakenEntry.attribute
   io.basePrediction.cfiPosition := s2_firstTakenEntry.position
+  io.abtbResult                 := abtbResult
 
   io.meta.valid           := s2_valid
   io.meta.hitMask         := s2_hitMask

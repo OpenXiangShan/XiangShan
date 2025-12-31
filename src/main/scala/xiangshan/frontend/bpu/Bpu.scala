@@ -97,6 +97,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
     ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
+    // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
   } else {
     ubtb.io.enable   := ctrl.ubtbEnable
     abtb.io.enable   := ctrl.abtbEnable
@@ -105,6 +106,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := ctrl.rasEnable
+    // utage.io.enable  := ctrl.utageEnable
   }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -158,7 +160,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // private val s1_utageMeta = utage.io.prediction.meta.bits
   private val s1_utageMeta = Wire(new MicroTageMeta)
   private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
-  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+  // private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+  private val s3_utageMeta = Wire(new MicroTageMeta)
+  s3_utageMeta := RegEnable(s2_utageMeta, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -213,6 +217,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // utage
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
   utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
+  utage.io.abtbResult             := abtb.io.abtbResult
 
   // ras
   ras.io.redirect.valid          := redirect.valid
@@ -419,13 +424,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_speculationMeta.rasMeta    := s3_rasMeta
   s3_speculationMeta.topRetAddr := ras.io.topRetAddr
 
-  s3_meta.utage  := s3_utageMeta
-  s3_meta.mbtb   := s3_mbtbMeta
-  s3_meta.tage   := s3_tageMeta
-  s3_meta.ras    := s3_rasMeta
-  s3_meta.phr    := s3_phrMeta
-  s3_meta.ittage := s3_ittageMeta
-  s3_meta.sc     := s3_scMeta
+  s3_utageMeta.finalTaken       := s3_prediction.taken
+  s3_utageMeta.finalCfiPosition := s3_prediction.cfiPosition
+  s3_utageMeta.finalIsBr        := s3_prediction.attribute.isConditional
+  s3_utageMeta.hasOverride      := s3_override
+  s3_meta.utage                 := s3_utageMeta
+  s3_meta.mbtb                  := s3_mbtbMeta
+  s3_meta.tage                  := s3_tageMeta
+  s3_meta.ras                   := s3_rasMeta
+  s3_meta.phr                   := s3_phrMeta
+  s3_meta.ittage                := s3_ittageMeta
+  s3_meta.sc                    := s3_scMeta
 
   io.toFtq.meta.valid := s3_valid
   io.toFtq.meta.bits  := s3_meta
