@@ -873,8 +873,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
     Output(UInt(RegCacheIdxWidth.W))
   )
 
-  val diffVlRat  = if (params.basicDebugEn && param.isVecSchd) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
-  val diffVl     = if (params.basicDebugEn && param.isVecSchd) Some(Output(UInt(VlData().dataWidth.W))) else None
+  val diffVlRat = Option.when(params.basicDebugEn && param.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
+  val diffVl = Option.when(params.basicDebugEn && param.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
 
   val uopTopDown = new UopTopDown
 }
