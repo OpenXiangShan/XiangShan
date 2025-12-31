@@ -96,6 +96,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
+    // mdp train io
+    val mdpTrain        = ValidIO(new Redirect)
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
@@ -241,6 +243,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
+  io.mdpTrain                      := loadQueue.io.mdpTrain
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit

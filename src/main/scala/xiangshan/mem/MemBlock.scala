@@ -209,6 +209,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val memoryViolation = ValidIO(new Redirect)
   val sbIsEmpty = Output(Bool())
 
+  val mdpTrain = ValidIO(new Redirect)
+
   val lsTopdownInfo = Vec(LdExuCnt, Output(new LsTopdownInfo))
 
   val lsqio = new Bundle {
@@ -1156,6 +1158,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+  io.mem_to_ooo.mdpTrain           := lsq.io.mdpTrain
 
   // lsq.io.uncache        <> uncache.io.lsq
   val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)
