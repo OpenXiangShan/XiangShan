@@ -52,6 +52,15 @@ class SaturateCounter(width: Int) extends Bundle {
   def decrease(): Unit =
     value := getDecrease
 
+  def increase(step: Int): Unit = {
+    val sum = value +& step.U
+    val max = ((1 << width) - 1).U
+    value := Mux(sum >= max, max, sum(width - 1, 0))
+  }
+
+  def decrease(step: Int): Unit =
+    value := Mux(value <= step.U, 0.U, value - step.U)
+
   def resetZero(): Unit =
     value := 0.U
 
