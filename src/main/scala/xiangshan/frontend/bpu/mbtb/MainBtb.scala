@@ -18,7 +18,9 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{ChiselDB, XSPerfAccumulate, XSPerfHistogram}
+import utility.ChiselDB
+import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -138,24 +140,24 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
      MainBTB Trace
      -------------------------------------------------------------------------------------------------------------- */
   private val alignBankTraceVec = alignBanks.map(_.io.trace)
-  private val finalTrace = Mux1H(t1_writeAlignBankMask, alignBankTraceVec)
+  private val finalTrace        = Mux1H(t1_writeAlignBankMask, alignBankTraceVec)
   private val finalTraceStartPc = Mux1H(t1_writeAlignBankMask, t1_startPcVec)
-  private val mbtbTrace      = Wire(new MainBtbTrace)
+  private val mbtbTrace         = Wire(new MainBtbTrace)
 
-  mbtbTrace.startPc := finalTraceStartPc
-  mbtbTrace.setIdx := finalTrace.setIdx
-  mbtbTrace.internalIdx := finalTrace.bankIdx
+  mbtbTrace.startPc      := finalTraceStartPc
+  mbtbTrace.setIdx       := finalTrace.setIdx
+  mbtbTrace.internalIdx  := finalTrace.bankIdx
   mbtbTrace.alignBankIdx := PriorityEncoder(t1_writeAlignBankMask)
-  mbtbTrace.wayIdx := finalTrace.wayIdx
-  mbtbTrace.attribute := finalTrace.entry.attribute
-  mbtbTrace.cfiPosition := finalTrace.entry.position
+  mbtbTrace.wayIdx       := finalTrace.wayIdx
+  mbtbTrace.attribute    := finalTrace.entry.attribute
+  mbtbTrace.cfiPosition  := finalTrace.entry.position
 
   private val mbtbTraceDBTable = ChiselDB.createTable("MBTBTrace", new MainBtbTrace(), EnableMainbtbTrace)
   mbtbTraceDBTable.log(
-   data = mbtbTrace,
-   en = t1_fire && finalTrace.needWrite,
-   clock = clock,
-   reset = reset
+    data = mbtbTrace,
+    en = t1_fire && finalTrace.needWrite,
+    clock = clock,
+    reset = reset
   )
 
   /* *** statistics *** */

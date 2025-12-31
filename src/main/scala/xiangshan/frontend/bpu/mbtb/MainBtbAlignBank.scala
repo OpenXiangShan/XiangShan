@@ -63,11 +63,11 @@ class MainBtbAlignBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
     class Trace extends Bundle {
-      val needWrite: Bool                       = Bool()
-      val setIdx:    UInt                       = UInt(SetIdxLen.W)
-      val bankIdx:   UInt                       = UInt(log2Ceil(NumInternalBanks).W)
-      val wayIdx:    UInt                       = UInt(log2Ceil(NumWay).W)
-      val entry:     MainBtbEntry               = new MainBtbEntry
+      val needWrite: Bool         = Bool()
+      val setIdx:    UInt         = UInt(SetIdxLen.W)
+      val bankIdx:   UInt         = UInt(log2Ceil(NumInternalBanks).W)
+      val wayIdx:    UInt         = UInt(log2Ceil(NumWay).W)
+      val entry:     MainBtbEntry = new MainBtbEntry
     }
 
     val resetDone: Bool      = Output(Bool())
@@ -276,12 +276,7 @@ class MainBtbAlignBank(
     b.io.writeCounter.req.bits.wayMask  := t1_counterWayMask.asUInt
     b.io.writeCounter.req.bits.counters := t1_newCounters
   }
-  // mainBTB trace
-  io.trace.needWrite := t1_fire && t1_entryNeedWrite
-  io.trace.setIdx    := t1_setIdx
-  io.trace.bankIdx   := t1_internalBankIdx
-  io.trace.wayIdx    := PriorityEncoder(t1_entryWayMask.asUInt)
-  io.trace.entry     := t1_entry
+
   /* *** multi-hit detection & flush *** */
   private val s2_multiHitMask = detectMultiHit(s2_hitMask, VecInit(s2_rawEntries.map(_.position)))
 
@@ -291,13 +286,19 @@ class MainBtbAlignBank(
     b.io.flush.req.bits.wayMask := s2_multiHitMask
   }
 
+  // mainBTB trace bundle
+  io.trace.needWrite := t1_fire && t1_entryNeedWrite
+  io.trace.setIdx    := t1_setIdx
+  io.trace.bankIdx   := t1_internalBankIdx
+  io.trace.wayIdx    := PriorityEncoder(t1_entryWayMask.asUInt)
+  io.trace.entry     := t1_entry
   XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)
 
   XSPerfAccumulate(
     "", // no common prefix is needed
     t1_fire && t1_mispredictInfo.valid,
     Seq(
-      ("allocate", !t1_hit),
+      ("allocate", t1_entryNeedWrite),
       ("fixTarget", t1_hit && t1_mispredictInfo.bits.attribute.needIttage),
       ("fixAttribute", t1_hit && !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute))))
     )

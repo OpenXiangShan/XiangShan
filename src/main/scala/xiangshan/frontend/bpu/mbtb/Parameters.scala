@@ -25,7 +25,6 @@ case class MainBtbParameters(
     // Lowest level banks, each bank is a physical SRAM
     // This banking is used to resolve read-write conflicts and reduce SRAM power
     NumInternalBanks: Int = 4,
-    EnableMainbtbTrace:Boolean = true,
     // Highest level banks
     // This banking is used to resolve the alignement restriction of the BTB
     // When using align banking, the BTB can provide at most banks - 1 / banks * predict width wide prediction
@@ -34,7 +33,9 @@ case class MainBtbParameters(
     TargetWidth:     Int = 20, // 2B aligned
     WriteBufferSize: Int = 4,
     // Base table
-    TakenCntWidth: Int = 2
+    TakenCntWidth: Int = 2,
+    // Mbtb write trace
+    EnableMainbtbTrace: Boolean = false
 ) {}
 
 // TODO: expose this to Parameters.scala / XSCore.scala
@@ -60,5 +61,5 @@ trait HasMainBtbParameters extends HasBpuParameters {
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
 
-  def EnableMainbtbTrace:Boolean = mbtbParameters.EnableMainbtbTrace
+  def EnableMainbtbTrace: Boolean = mbtbParameters.EnableMainbtbTrace
 }
