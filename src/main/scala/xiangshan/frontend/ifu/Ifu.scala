@@ -388,7 +388,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
   }.elsewhen(uncacheRedirect.valid) {
     s2_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
-  }.elsewhen(s2_fire) {
+  }.elsewhen(s2_fire && !s2_icacheMeta(0).isUncache) {
     s2_prevIBufEnqPtr := s2_prevIBufEnqPtr + s2_instrCount
   }
 
@@ -714,7 +714,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.isRvc(s3_shiftNum)                 := uncacheIsRvc
     io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
-    io.toIBuffer.bits.exceptionType := uncacheException || uncacheRvcException
+    io.toIBuffer.bits.exceptionType := s3_icacheMeta(0).exception || uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.
     io.toIBuffer.bits.exceptionCrossPage := prevUncacheCrossPage && uncacheException.hasException
     io.toIBuffer.bits.exceptionOffset    := 0.U
