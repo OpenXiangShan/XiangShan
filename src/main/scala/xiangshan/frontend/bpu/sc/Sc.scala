@@ -422,7 +422,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
           val shouldUpdate = writeValid && writeWayIdx === wayIdx.U && t1_meta.tagePredValid(branchIdx) &&
             (t1_meta.tagePred(branchIdx) =/= t1_meta.scPred(branchIdx)) &&
             (scWrong || !t1_meta.sumAboveThres(branchIdx))
-          prevThres.getUpdate(scWrong, shouldUpdate)
+          prevThres.getUpdate(scWrong, en = shouldUpdate)
       }
     WireInit(updated)
   })

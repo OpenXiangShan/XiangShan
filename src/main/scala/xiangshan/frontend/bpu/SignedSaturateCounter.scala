@@ -18,10 +18,10 @@ package xiangshan.frontend.bpu
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 
-class SignedSaturateCounter(width: Int) extends Bundle {
+class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.of.methods
   val value: SInt = SInt(width.W)
 
-  // === is defined in Bundle, but =/= is not
+  def ===(that: SignedSaturateCounter): Bool = this.value === that.value
   def =/=(that: SignedSaturateCounter): Bool = this.value =/= that.value // scalastyle:ignore method.name
   def <(that:   SignedSaturateCounter): Bool = this.value < that.value
   def <=(that:  SignedSaturateCounter): Bool = this.value <= that.value
@@ -60,31 +60,55 @@ class SignedSaturateCounter(width: Int) extends Bundle {
     // hold if already saturated on the direction
     Mux(!en || shouldHold(positive), value, Mux(positive, value + 1.S, value - 1.S))
 
-  private def getIncreasedValue(en: Bool): SInt =
-    Mux(!en || isSaturatePositive, value, value + 1.S)
+  private def getIncreasedValue(step: SInt, en: Bool): SInt =
+    if (step.isLit && step.litValue == 1) {
+      Mux(!en || isSaturatePositive, value, value + 1.S)
+    } else {
+      Mux(
+        !en,
+        value,
+        Mux(
+          value +& step >= SignedSaturateCounter.Value.SaturatePositive(width).S,
+          SignedSaturateCounter.Value.SaturatePositive(width).S,
+          value + step
+        )
+      )
+    }
 
-  private def getDecreasedValue(en: Bool): SInt =
-    Mux(!en || isSaturateNegative, value, value - 1.S)
+  private def getDecreasedValue(step: SInt, en: Bool): SInt =
+    if (step.isLit && step.litValue == 1) {
+      Mux(!en || isSaturateNegative, value, value - 1.S)
+    } else {
+      Mux(
+        !en,
+        value,
+        Mux(
+          value -& step <= SignedSaturateCounter.Value.SaturateNegative(width).S,
+          SignedSaturateCounter.Value.SaturateNegative(width).S,
+          value - step
+        )
+      )
+    }
 
   /* *** update method for wires *** */
   def getUpdate(increase: Bool, en: Bool = true.B): SignedSaturateCounter =
     SignedSaturateCounterInit(this.width, getUpdatedValue(increase, en))
 
-  def getIncrease(en: Bool = true.B): SignedSaturateCounter =
-    SignedSaturateCounterInit(this.width, getIncreasedValue(en))
+  def getIncrease(step: SInt = 1.S, en: Bool = true.B): SignedSaturateCounter =
+    SignedSaturateCounterInit(this.width, getIncreasedValue(step, en))
 
-  def getDecrease(en: Bool = true.B): SignedSaturateCounter =
-    SignedSaturateCounterInit(this.width, getDecreasedValue(en))
+  def getDecrease(step: SInt = 1.S, en: Bool = true.B): SignedSaturateCounter =
+    SignedSaturateCounterInit(this.width, getDecreasedValue(step, en))
 
   /* *** update method for regs *** */
   def selfUpdate(increase: Bool, en: Bool = true.B): Unit =
     value := getUpdatedValue(increase, en)
 
-  def selfIncrease(en: Bool = true.B): Unit =
-    value := getIncreasedValue(en)
+  def selfIncrease(step: SInt = 1.S, en: Bool = true.B): Unit =
+    value := getIncreasedValue(step, en)
 
-  def selfDecrease(en: Bool = true.B): Unit =
-    value := getDecreasedValue(en)
+  def selfDecrease(step: SInt = 1.S, en: Bool = true.B): Unit =
+    value := getDecreasedValue(step, en)
 
   /* *** reset method for regs *** */
   def resetZero(): Unit =

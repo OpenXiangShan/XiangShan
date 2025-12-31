@@ -390,7 +390,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altNewTakenCtr      = alt.takenCtr.getUpdate(actualTaken)
 
     val incProviderUsefulCtr = hasProvider && providerPred === actualTaken && providerPred =/= altOrBasePred
-    val providerNewUsefulCtr = provider.usefulCtr.getIncrease(incProviderUsefulCtr)
+    val providerNewUsefulCtr = provider.usefulCtr.getIncrease(en = incProviderUsefulCtr)
 
     // allocate when mispredict, but except when:
     // 1. already on the highest table
