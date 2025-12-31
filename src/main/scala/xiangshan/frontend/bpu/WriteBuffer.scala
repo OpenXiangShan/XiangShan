@@ -51,9 +51,10 @@ class WriteBuffer[T <: WriteReqBundle](
   require(numPorts >= 1)
   require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
-    val write: Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
-    val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
-    val flush: Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
+    val write:     Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
+    val read:      Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
+    val takenMask: Option[Vec[Bool]]   = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:     Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -169,10 +170,11 @@ class WriteBuffer[T <: WriteReqBundle](
       // If the write request has counter need update counter
       val temporarily = WireInit(io.write(portIdx).bits)
       if (hasCnt) {
+        val takenMask = io.takenMask.getOrElse(VecInit.fill(numPorts)(false.B))
         when(hit) {
           // If a write request hits an entry, update its counter using 'taken'
           // and write other entry information
-          val writePortTaken = io.write(portIdx).bits.taken.getOrElse(false.B)
+          val writePortTaken = takenMask(portIdx)
           val updateCnt      = entries(rowIdx)(hitIdx).cnt.get.getUpdate(writePortTaken)
           temporarily.cnt.get     := updateCnt.asTypeOf(temporarily.cnt.get)
           entries(rowIdx)(hitIdx) := temporarily
