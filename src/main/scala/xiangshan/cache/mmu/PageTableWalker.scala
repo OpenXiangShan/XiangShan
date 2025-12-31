@@ -29,6 +29,124 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
+class NewPtwReqBundle(implicit p: Parameters) extends PtwBundle {
+  val vpn = UInt(vpnLen.W)
+  val doUpdateDBit = Bool()
+  // TODO: req source for debug
+  // val source = UInt(bSourceWidth.W)
+}
+
+class NewPtwPpnSector(implicit p: Parameters) extends PtwBundle {
+  val valid = Vec(tlbcontiguous, Bool())
+  val ppnHigh = UInt(sectorppnLen.W)
+  val ppnLow = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
+  val gppnHigh = UInt(sectorgvpnLen.W)
+  val gppnLow = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
+
+  def getPpn(idx: UInt): (Bool, UInt) = {
+    (valid(idx), Cat(ppnHigh, ppnLow(idx)))
+  }
+
+  def getGppn(idx: UInt): (Bool, UInt) = {
+    (valid(idx), Cat(gppnHigh, gppnLow(idx)))
+  }
+}
+
+class NewPtwGranularity(implicit p: Parameters) extends PtwBundle {
+  val level = UInt(log2Up(Level + 1).W)
+  val napot = Bool()
+  // Reserved for future extension
+  // val napotBits = UInt(log2Up(vpnnLen + 1).W)
+}
+
+class NewPteInfoBundle(implicit p: Parameters) extends PtwBundle {
+  val v = Bool()
+  val r = Bool()
+  val w = Bool()
+  val x = Bool()
+  val u = Bool()
+  val g = Bool()
+  val a = Bool()
+  val d = Bool()
+  val pbmt = UInt(ptePbmtLen.W)
+}
+
+class NewPtwExceptionBundle(implicit p: Parameters) extends PtwBundle {
+  val pageFault = Bool()
+  val guestPageFault = Bool()
+  val accessFault = Bool()
+  val hardwareError = Bool()
+
+  val forSPte = Bool()        // for GPF, AF, HE
+  val forGPte = Bool()        // for AF, HE
+}
+
+class NewPtwRespBundle(implicit p: Parameters) extends PtwBundle {
+  val vpn = UInt(vpnLen.W)
+  val ppnSector = new NewPtwPpnSector()
+  val sStageGranularity = new NewPtwGranularity()
+  val gStageGranularity = new NewPtwGranularity()
+  // val pmpGranularity = new NewPtwGranularity()
+  val sStagePteInfo = new NewPteInfoBundle()
+  val gStagePteInfo = new NewPteInfoBundle()
+  // val pmpCfgInfo = new NewPteInfoBundle()
+  val exception = new NewPtwExceptionBundle()
+}
+
+class PageTableWalkerIO()(implicit p: Parameters) extends TlbBundle with HasPtwConst {
+  // Global Status
+  val sfence = Input(new SfenceBundle)
+  val csr = Input(new TlbCsrBundle)
+
+  // PTW req and resp
+  val req = Flipped(DecoupledIO(new NewPtwReqBundle()))
+  val resp = DecoupledIO(new NewPtwRespBundle())
+
+  // Mem req and resp
+  // TODO
+}
+
+class NewPageTableWalker()(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new PTWIO)
+
+  private def nPtwFsmState: Int = 5
+  private object PtwFsmState extends EnumUInt(nPtwFsmState) {
+    def Idle:                     UInt = 0.U(width.W)
+    def PageCacheReq:             UInt = 1.U(width.W)
+    def PageCacheWait:            UInt = 2.U(width.W)
+    def CalculatePteAddr:         UInt = 3.U(width.W)
+    def PteAddrGStageTranslate:   UInt = 4.U(width.W)
+    def PtePaddrProtectReq:       UInt = 5.U(width.W)
+    def PtePaddrProtectWait:      UInt = 6.U(width.W)
+    def MemoryReadReq:            UInt = 7.U(width.W)
+    def MemoryReadWait:           UInt = 8.U(width.W)
+    def HandlePte:                UInt = 9.U(width.W)
+    def AddrGStageTranslate:      UInt = 10.U(width.W)
+    def PaddrProtectReq:          UInt = 11.U(width.W)
+    def PaddrProtectWait:         UInt = 12.U(width.W)
+    def DoResp:                   UInt = 13.U(width.W)
+  }
+
+  val originReqInfo = Reg(new L2TlbInnerBundle())
+
+  // Main State
+  private val state     = RegInit(PtwFsmState.Idle)
+  private val nextState = WireDefault(state)
+  state := nextState
+
+  // Additional State
+  private val level = Reg(UInt(log2Up(Level).W))
+
+  // Idle
+  when (state === PtwFsmState.Idle) {
+    when (io.req.fire) {
+      nextState := PtwFsmState.PageCacheReq
+      level := Level.U
+    }
+  }
+
+}
+
 /** Page Table Walk is divided into two parts
   * One,   PTW: page walk for pde, except for leaf entries, one by one
   * Two, LLPTW: page walk for pte, only the leaf entries(4KB), in parallel
