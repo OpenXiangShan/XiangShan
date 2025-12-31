@@ -204,6 +204,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
 
+    // mdp train io
+    val mdpTrain        = ValidIO(new Redirect)
+
     val lqDeqPtr = Output(new LqPtr)
 
     val rarValidCount = Output(UInt())
@@ -243,6 +246,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     loadQueueRAW.io.query(w).resp   <> io.ldu.stld_nuke_query(w).resp // to load_s2
     loadQueueRAW.io.query(w).revoke := io.ldu.stld_nuke_query(w).revoke // from load_s3
   }
+  io.mdpTrain                       := loadQueueRAW.io.mdpTrain
 
   /**
    * VirtualLoadQueue
