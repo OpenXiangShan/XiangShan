@@ -48,6 +48,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // global rollback flush
     val rollback = Vec(StorePipelineWidth,Output(Valid(new Redirect)))
 
+    // mdp train io
+    val mdpTrain        = ValidIO(new Redirect)
+
     // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
     val stIssuePtr       = Input(new SqPtr)
@@ -357,7 +360,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
     redirect.bits.stIsRVC     := stIsRVC(i)
     redirect.bits.stFtqIdx    := stFtqIdx(i)
-    redirect.bits.isRAW       := true.B
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
     redirect.bits.target      := rollbackLqWb(i).bits.pc
@@ -365,6 +367,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect
   })
   io.rollback := allRedirect
+
+  val oldestOH = Redirect.selectOldestRedirect(allRedirect)
+  io.mdpTrain := Mux1H(oldestOH, allRedirect)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))

@@ -143,6 +143,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sink := source
   }
   backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
+  backend.io.mem.mdpTrain := memBlock.io.mem_to_ooo.mdpTrain
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
   backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
   backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq

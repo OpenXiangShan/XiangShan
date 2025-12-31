@@ -76,7 +76,8 @@ class CtrlBlockImp(
 {
   val pcMemRdIndexes = new NamedIndexes(Seq(
     "redirect"  -> 1,
-    "memPred"   -> 1,
+    "memPredLoad"   -> 1,
+    "memPredStore"  -> 1,
     "robFlush"  -> 1,
     "bjuPc"     -> params.BrhCnt,
     "bjuTarget" -> params.BrhCnt,
@@ -207,13 +208,28 @@ class CtrlBlockImp(
 
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
-  pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := memViolation.valid
-  pcMem.io.raddr(pcMemRdIndexes("memPred").head) := memViolation.bits.stFtqIdx.value
-  val memPredPCOffset = Reg(UInt(VAddrBits.W))
-  when(memViolation.valid) {
-    memPredPCOffset := memViolation.bits.getStPcOffset()
+  val mdpTrainValid = io.fromMem.mdpTrain.valid
+  for ((pcMemIdx, i) <- pcMemRdIndexes("memPredLoad").zipWithIndex) {
+    val ren   = mdpTrainValid
+    val raddr = io.fromMem.mdpTrain.bits.ftqIdx.value
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset, mdpTrainValid)
+    pcMem.io.ren.get(pcMemIdx) := ren
+    pcMem.io.raddr(pcMemIdx) := raddr
+    memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+
+    // update wait table, will be remove in the future
+    memCtrl.io.memPredUpdate.waddr := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    memCtrl.io.memPredUpdate.wdata := true.B
   }
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).toUInt + memPredPCOffset
+  for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
+    val ren   = mdpTrainValid
+    val raddr = io.fromMem.mdpTrain.bits.stFtqIdx.value
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset, mdpTrainValid)
+    pcMem.io.ren.get(pcMemIdx) := ren
+    pcMem.io.raddr(pcMemIdx) := raddr
+    memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+  }
+  memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
@@ -619,19 +635,14 @@ class CtrlBlockImp(
   private val mdpFlodPcVecVld = Wire(Vec(DecodeWidth, Bool()))
   private val mdpFlodPcVec = Wire(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
   for (i <- 0 until DecodeWidth) {
-    mdpFlodPcVecVld(i) := decode.io.out(i).fire || GatedValidRegNext(decode.io.out(i).fire)
-    mdpFlodPcVec(i) := Mux(
-      decode.io.out(i).fire,
-      decode.io.in(i).bits.foldpc,
-      rename.io.in(i).bits.foldpc
-    )
+    mdpFlodPcVecVld(i) := decode.io.out(i).fire
+    mdpFlodPcVec(i) := decode.io.out(i).bits.foldpc
   }
 
   // currently, we only update mdp info when isReplay
   memCtrl.io.redirect := s1_s3_redirect
   memCtrl.io.csrCtrl := io.csrCtrl                          // RegNext in memCtrl
   memCtrl.io.stIn := io.fromMem.stIn                        // RegNext in memCtrl
-  memCtrl.io.memPredUpdate := redirectGen.io.memPredUpdate  // RegNext in memCtrl
   memCtrl.io.mdpFoldPcVecVld := mdpFlodPcVecVld
   memCtrl.io.mdpFlodPcVec := mdpFlodPcVec
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
@@ -945,6 +956,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val fromMem = new Bundle {
     val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, robIdx
     val violation = Flipped(ValidIO(new Redirect))
+    val mdpTrain = Flipped(ValidIO(new Redirect))
   }
   val memStPcRead = Vec(params.StaCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val memHyPcRead = Vec(params.HyuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
