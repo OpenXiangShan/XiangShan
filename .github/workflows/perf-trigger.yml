@@ -37,7 +37,7 @@ on:
         description: Servers to run emulation on
         required: false
         type: string
-        default: node029, node033, node034, node036, node037, node038, node039, node040, node041, node042, node003, node004, node005, node006, node007, node008, node009, node020, node021, node022, node023, node024, node025, node026, node027, node028
+        default: ''
 
 jobs:
   performance-test:
