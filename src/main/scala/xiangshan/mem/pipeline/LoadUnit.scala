@@ -733,8 +733,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     )
   )
   // query storequeue, s0Req
-  io.lsq.forward.req.lduStage0ToSq.valid       := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
-  io.lsq.forward.req.lduStage0ToSq.bits.vaddr  := Mux(s0_nc_with_data, s0_sel_src.vaddr, s0_dcache_vaddr)
+  io.lsq.forward.req.lduStage0ToSq.valid       := s0_valid && !s0_sel_src.prf_i
+  io.lsq.forward.req.lduStage0ToSq.bits.vaddr  := s0_dcache_vaddr
   io.lsq.forward.req.lduStage0ToSq.bits.sqIdx  := s0_sel_src.uop.sqIdx
   io.lsq.forward.req.lduStage0ToSq.bits.size   := Cat(s0_sel_src.is128bit, s0_alignType)
   connectSamePort(io.lsq.forward.req.lduStage0ToSq.bits.uop, s0_sel_src.uop)
