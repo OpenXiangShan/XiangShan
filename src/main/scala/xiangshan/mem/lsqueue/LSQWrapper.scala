@@ -248,6 +248,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
+  loadQueue.io.forward             <> io.forward
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint

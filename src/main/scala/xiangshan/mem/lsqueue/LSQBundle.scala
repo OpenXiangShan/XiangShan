@@ -19,7 +19,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx, MemExuOutput}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
@@ -27,6 +27,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{CMOReq, CMOResp, DCacheWordReqWithVaddrAndPfFlag, UncacheWordIO}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.Bundles.StoreMaskBundle
+import xiangshan.mem.Bundles.{LoadDataFromLQBundle}
 
 
 class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
@@ -206,16 +207,34 @@ class ForwardQueryIO(implicit p: Parameters) extends MemBlockBundle {
     val forwardData      = Vec((VLEN/8), UInt(8.W)) // resp to load_s2
   }
 
+  class ReqS0LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
+    val lqIdx            = new LqPtr
+    val isnc             = Bool()
+  }
+  class RespS1LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
+    val paddr  = UInt(PAddrBits.W) // resp to load_s1
+  }
+  class RespS2LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
+    val forwardData      = UInt((VLEN+1).W) // resp to load_s2
+    val addrOffset = UInt(3.W) // only mmio
+    val nderr = Bool()
+  }
+
   class ReqIO(implicit p: Parameters) extends MemBlockBundle {
     // query storeQueue for load s0
     val lduStage0ToSq    = ValidIO(new ReqS0InfoBundle)
     // send info for forward check
     val lduStage1ToSq    = Output(new ReqS1InfoBundle)
+
+    val lduStage0ToLq    = ValidIO(new ReqS0LqInfoBundle)
   }
 
   class RespIO(implicit p: Parameters) extends MemBlockBundle {
     val sqToLduStage1    = ValidIO(new RespS1InfoBundle)
     val sqToLduStage2    = ValidIO(new RespS2InfoBundle)
+
+    val lqToLduStage1    = ValidIO(new RespS1LqInfoBundle)
+    val lqToLduStage2    = ValidIO(new RespS2LqInfoBundle)
   }
 
   val req                = Flipped(new ReqIO)
