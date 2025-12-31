@@ -31,7 +31,7 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
     val Unknown = 3
   }
   def getUnhashedIdx(pc: PrunedAddr): UInt = pc(VAddrBits - 1, instOffsetBits)
-  def getUnhashedTag(pc: PrunedAddr): UInt = pc(VAddrBits - 1, log2Ceil(FetchBlockAlignSize))
+  def getUnhashedTag(pc: PrunedAddr): UInt = pc(VAddrBits - 1, PCHighTagStart)
   def connectPcTag(partPc: UInt, tableId: Int): UInt = {
     require(tableId >= 0 && tableId <= 3, s"tableId must be in [0,3], got $tableId")
     def concatBits(bits: Seq[Bool]): UInt = if (bits.isEmpty) 0.U(1.W) else bits.foldLeft(0.U(0.W))(Cat(_, _))
