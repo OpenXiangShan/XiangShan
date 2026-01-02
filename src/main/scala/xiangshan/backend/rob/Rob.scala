@@ -412,8 +412,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sink.bits := source.bits
   }
 
-  private val commitIsVTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.isVset })
-  private val walkIsVTypeVec = VecInit(io.commits.walkValid.zip(walkInfo).map { case (valid, info) => io.commits.isWalk && valid && info.isVset })
+  private val commitIsVTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.needVTB })
+  private val walkIsVTypeVec = VecInit(io.commits.walkValid.zip(walkInfo).map { case (valid, info) => io.commits.isWalk && valid && info.needVTB })
   vtypeBuffer.io.fromRob.commitSize := PopCount(commitIsVTypeVec)
   vtypeBuffer.io.fromRob.walkSize := PopCount(walkIsVTypeVec)
   vtypeBuffer.io.snpt := io.snpt

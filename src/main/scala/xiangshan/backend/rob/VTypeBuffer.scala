@@ -164,7 +164,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   // There are two uops mapped to one vset inst.
   // Only record the last here.
-  private val needAllocVec = VecInit(io.req.map(req => req.valid && req.bits.isVset && req.bits.vlWen))
+  private val needAllocVec = VecInit(io.req.map(req => req.valid && req.bits.vlWen))
   private val enqCount = PopCount(needAllocVec)
 
   private val commitCount   = Wire(UInt(CommitWidth.U.getWidth.W))
