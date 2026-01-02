@@ -140,7 +140,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   io.uopWriteback.valid := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
   io.uopWriteback.bits := 0.U.asTypeOf(new ExuOutput(param))
   io.uopWriteback.bits.data := VecInit(Seq.fill(param.wbPathNum)(entries.vl))
-  io.uopWriteback.bits.pdest := entries.uop.pdest
+  io.uopWriteback.bits.pdestVl.get := entries.uop.pdestVl
   io.uopWriteback.bits.robIdx := entries.uop.robIdx
   io.uopWriteback.bits.intWen.foreach(_ := entries.uop.rfWen)
   io.uopWriteback.bits.fpWen.foreach(_ := entries.uop.fpWen)

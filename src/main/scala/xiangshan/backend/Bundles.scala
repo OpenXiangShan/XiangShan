@@ -1010,6 +1010,7 @@ object Bundles {
       uop.imm            := this.imm
       uop.robIdx         := this.robIdx
       uop.pdest          := this.pdest
+      uop.pdestVl        := this.pdestVl.getOrElse(0.U)
       uop.rfWen          := this.rfWen.getOrElse(false.B)
       uop.fpWen          := this.fpWen.getOrElse(false.B)
       uop.vecWen         := this.vecWen.getOrElse(false.B)
