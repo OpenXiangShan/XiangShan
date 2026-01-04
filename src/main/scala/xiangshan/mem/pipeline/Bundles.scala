@@ -38,7 +38,7 @@ sealed trait HasLoadPipeBundleParam {
   def replayToLRQ: Boolean = false
   def replayFromLRQ: Boolean = false
   def hasVector: Boolean = false
-  def hasData: Boolean = false
+  def hasS3PreProcess: Boolean = false
   def hasWritebacked: Boolean = false
   def hasUnalignHandling: Boolean = false
 
@@ -110,19 +110,21 @@ class LoadPipeBundle(
   val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W)) // only used in s1 & s2, to generate vstart
   val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
 
-  // data
-  val data = Option.when(param.hasData)(UInt((VLEN+1).W))
-  val forwardMask = Option.when(param.hasData)(UInt(VLENB.W))
-
-  // virtualLoadQueue
-  val writebacked = Option.when(hasWritebacked)(Bool()) // `updateAddrValid` in the original version
-
+  // To optimize timing, part of the combinational logic is precomputed in advance
+  // S2 -> S3
+  val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
+  val shouldFastReplay = Option.when(param.hasS3PreProcess)(Bool())
+  val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
+  val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
+  val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())
+  
   // debug info and top-down
   // TODO: use Option
   val hasROBEntry = Bool()
   val missDbUpdated = Bool()
 
-  def offset = vaddr.take(DCacheLineOffset)
+  def offset(): UInt = vaddr.take(DCacheLineOffset)
+  def bankOffset(): UInt = vaddr.take(DCacheVWordOffset)
   def DontCarePAddr(): Unit = {
     paddr.get := DontCare
   }
@@ -175,7 +177,6 @@ case class VectorLoadInParam(
 case class LoadStageIOParam()(
   implicit val s: LoadStage
 ) extends HasLoadPipeBundleParam with OnLoadStage {
-  // TODO
   override val hasPAddr: Boolean = true
   override val hasAddrTrans: Boolean = afterS1
   override val hasNoQuery: Boolean = isS0
@@ -185,7 +186,7 @@ case class LoadStageIOParam()(
   override val replayToLRQ: Boolean = afterS2
   override val replayFromLRQ: Boolean = true
   override val hasVector: Boolean = true
-  // override val hasData: Boolean =
+  override val hasS3PreProcess: Boolean = afterS2 // or isS2?
   // override val hasWritebacked: Boolean =
   override val hasUnalignHandling: Boolean = true
 }

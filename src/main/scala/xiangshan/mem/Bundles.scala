@@ -241,6 +241,28 @@ object Bundles {
     val s2Resp = Flipped(ValidIO(new UncacheForwardResp))
   }
 
+  class UncacheBypassReqS0(implicit p: Parameters) extends XSBundle {
+    val lqIdx = new LqPtr
+    val isNCReplay = Bool()
+    val isMMIOReplay = Bool()
+  }
+
+  class UncacheBypassRespS1(implicit p: Parameters) extends XSBundle {
+    val paddr = UInt(PAddrBits.W)
+  }
+
+  class UncacheBypassRespS2(implicit p: Parameters) extends XSBundle {
+    val data = UInt(VLEN.W)
+    val denied = Bool()
+    val corrupt = Bool()
+  }
+
+  class UncacheBypass(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new UncacheBypassReqS0)
+    val s1Resp = Flipped(ValidIO(new UncacheBypassRespS1))
+    val s2Resp = Flipped(ValidIO(new UncacheBypassRespS2))
+  }
+
   // TODO: LoadForwardQueryIO = LoadForwardReq + LoadForwardResp
   class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
     val vaddr = Output(UInt(VAddrBits.W))
