@@ -852,8 +852,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fnmadd- b1001111
   private val isFMA = inst.OPCODE === BitPat("b100??11")
   private val isVppu = FuType.isVppu(decodedInst.fuType)
-  private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
-
+  private val isVecOPF = (FuType.isVecOPF(decodedInst.fuType) && (!SrcType.isVp(decodedInst.srcType(0)))) || FuType.isVecOPFDepend(decodedInst.fuType)
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
   decodedInst.lsrc(1) := inst.RS2
@@ -960,6 +959,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VNSRA_WV, VNSRA_WX, VNSRA_WI, VNSRL_WV, VNSRL_WX, VNSRL_WI,
     VNCLIP_WV, VNCLIP_WX, VNCLIP_WI, VNCLIPU_WV, VNCLIPU_WX, VNCLIPU_WI,
   )
+
   private val maskDstInsts = Seq(
     VMADC_VV, VMADC_VX,  VMADC_VI,  VMADC_VVM, VMADC_VXM, VMADC_VIM,
     VMSBC_VV, VMSBC_VX,  VMSBC_VVM, VMSBC_VXM,
@@ -970,6 +970,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
     VMFEQ_VV, VMFEQ_VF, VMFNE_VV, VMFNE_VF, VMFLT_VV, VMFLT_VF, VMFLE_VV, VMFLE_VF, VMFGT_VF, VMFGE_VF,
   )
+
   private val maskOpInsts = Seq(
     VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
   )
@@ -1037,6 +1038,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFSLIDE1UP_VF, VFSLIDE1DOWN_VF,
   )
 
+  private val vectorFloatNarrow = Seq (
+    VFREDOSUM_VS, VFREDUSUM_VS, VFREDMAX_VS, VFREDMIN_VS, VFWREDOSUM_VS, VFWREDUSUM_VS,
+  )
+
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
@@ -1058,15 +1063,18 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
   val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
   val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
+  val isVfNarrow = vectorFloatNarrow.map(_ === inst.ALL).reduce(_ || _)
   val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
   val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
   val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
-  val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
+  val positive_emulIsFrac = decodedInst.vpu.vlmul +& decodedInst.vpu.veew < decodedInst.vpu.vsew
+  val negative_emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 3.U +& decodedInst.vpu.vsew
+  val emulIsFrac = Mux(decodedInst.vpu.vlmul(2), negative_emulIsFrac, positive_emulIsFrac)
   val vstartIsNotZero = io.enq.vstart =/= 0.U
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
   decodedInst.vpu.isOpMask := isOpMask
-  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
+  decodedInst.vpu.isDependOldVd := isVppu || (isVecOPF || isVfNarrow) || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
