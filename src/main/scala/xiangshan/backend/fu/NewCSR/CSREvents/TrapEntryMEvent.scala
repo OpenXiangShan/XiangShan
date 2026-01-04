@@ -19,7 +19,6 @@ class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val mtval     = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtval2    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtinst    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc  = ValidIO(new TargetPCBundle)
 }
 
 class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -107,7 +106,6 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mtval    .valid := valid
   out.mtval2   .valid := valid
   out.mtinst   .valid := valid
-  out.targetPc .valid := in.pcFromXtvec.valid
 
   out.privState.bits            := PrivState.ModeM
   out.mstatus.bits.MPV          := current.privState.V
@@ -122,10 +120,6 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mtval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   out.mtval2.bits.ALL           := Mux(isDTExcp, precause, tval2 >> 2)
   out.mtinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
-  out.targetPc.bits.pc          := in.pcFromXtvec.bits
-  out.targetPc.bits.raiseIPF    := false.B
-  out.targetPc.bits.raiseIAF    := AddrTransType(bare = true).checkAccessFault(in.pcFromXtvec.bits)
-  out.targetPc.bits.raiseIGPF   := false.B
 
   dontTouch(isLSGuestExcp)
   dontTouch(tvalFillGVA)

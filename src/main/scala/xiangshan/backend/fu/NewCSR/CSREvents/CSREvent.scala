@@ -143,8 +143,6 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val menvcfg = Input(new MEnvCfg)
   val henvcfg = Input(new HEnvCfg)
 
-  val pcFromXtvec = Flipped(ValidIO(UInt(XLEN.W)))
-
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)

@@ -90,8 +90,6 @@ class NewCSROutput(implicit p: Parameters) extends Bundle {
   val EX_VI = Bool()
   val flushPipe = Bool()
   val rData = UInt(64.W)
-  val targetPcUpdate = Bool()
-  val targetPc = new TargetPCBundle
   val regOut = UInt(64.W)
   // perf
   val isPerfCnt = Bool()
@@ -227,6 +225,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fetchMalTval = Input(UInt(XLEN.W))
 
     val distributedWenLegal = Output(Bool())
+
+    val trapTargetPc = ValidIO(new TargetPCBundle)
+    val xretTargetPc = ValidIO(new TargetPCBundle)
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -786,18 +787,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  private val trapEventValid = Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent).map(_.valid).reduce(_ || _)
-  private val delayedPcFromXtvec = RegEnable(trapHandleMod.io.out.pcFromXtvec, trapEventValid)
   trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
   trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
-
-  trapEntryDEvent .in.pcFromXtvec.valid  := false.B
-  trapEntryMNEvent.in.pcFromXtvec.valid  := GatedValidRegNext(trapEntryMNEvent.valid)
-  trapEntryMEvent .in.pcFromXtvec.valid  := GatedValidRegNext(trapEntryMEvent .valid)
-  trapEntryHSEvent.in.pcFromXtvec.valid  := GatedValidRegNext(trapEntryHSEvent.valid)
-  trapEntryVSEvent.in.pcFromXtvec.valid  := GatedValidRegNext(trapEntryVSEvent.valid)
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -825,7 +818,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.hstatus := hstatus.regOut
         in.sstatus := mstatus.sstatus
         in.vsstatus := vsstatus.regOut
-        in.pcFromXtvec.bits  := delayedPcFromXtvec
 
         in.menvcfg := menvcfg.regOut
         in.henvcfg := henvcfg.regOut
@@ -1022,11 +1014,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   })
 
-  private val xretTargetUpdate = mnretEvent.out.targetPc.valid || mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid
-  private val trapTargetUpdate = trapEntryMEvent.out.targetPc.valid || trapEntryMNEvent.out.targetPc.valid || 
-    trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid || trapEntryDEvent.out.targetPc.valid
-  private val needTargetUpdate = xretTargetUpdate || trapTargetUpdate
-
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
 
   private val noCSRIllegalReg = RegEnable(noCSRIllegal, ren || wen)
@@ -1116,22 +1103,6 @@ class NewCSR(implicit val p: Parameters) extends Module
       fromAIA.rdata.valid -> fromAIA.rdata.bits.data
     )), 0.U(64.W), io.in.fire || fromAIA.rdata.valid || claimAIA)
   io.out.bits.regOut := regOut
-  io.out.bits.targetPc := DataHoldBypass(
-    Mux(trapEntryDEvent.out.targetPc.valid,
-      trapEntryDEvent.out.targetPc.bits,
-      Mux1H(Seq(
-        mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
-        mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
-        sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
-        dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
-        trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
-        trapEntryMNEvent.out.targetPc.valid -> trapEntryMNEvent.out.targetPc.bits,
-        trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
-        trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits)
-      )
-    ),
-  needTargetUpdate)
-  io.out.bits.targetPcUpdate := trapTargetUpdate
   io.out.bits.isPerfCnt := DataHoldBypass(addrInPerfCnt, false.B, io.in.fire)
 
   io.status.privState := privState
@@ -1149,6 +1120,37 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR || nmip.asUInt.orR
   io.status.debugMode := debugMode
   io.status.singleStepFlag := !debugMode && dcsr.regOut.STEP
+
+  private val nonDebugTrapEventValid = Cat(Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent).map(_.valid)).asUInt.orR
+  private val delayedPcFromXtvec = RegEnable(trapHandleMod.io.out.pcFromXtvec, nonDebugTrapEventValid)
+  private val nonDebugTrapTargetPc = Wire(new TargetPCBundle)
+  nonDebugTrapTargetPc.pc        := delayedPcFromXtvec
+  nonDebugTrapTargetPc.raiseIPF  := io.status.instrAddrTransType.checkPageFault(delayedPcFromXtvec)
+  nonDebugTrapTargetPc.raiseIAF  := io.status.instrAddrTransType.checkAccessFault(delayedPcFromXtvec)
+  nonDebugTrapTargetPc.raiseIGPF := io.status.instrAddrTransType.checkGuestPageFault(delayedPcFromXtvec)
+  
+  private val trapTargetUpdate = RegNext(nonDebugTrapEventValid || trapEntryDEvent.valid, false.B)
+  io.trapTargetPc.valid := trapTargetUpdate
+  io.trapTargetPc.bits := DataHoldBypass(
+    Mux(
+      trapEntryDEvent.out.targetPc.valid,
+      trapEntryDEvent.out.targetPc.bits,
+      nonDebugTrapTargetPc,
+    ),
+    trapTargetUpdate
+  )
+
+  private val xretTargetUpdate = mnretEvent.out.targetPc.valid || mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid
+  io.xretTargetPc.valid := xretTargetUpdate
+  io.xretTargetPc.bits := DataHoldBypass(
+    Mux1H(Seq(
+      mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
+      mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
+      sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
+      dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
+    )),
+    xretTargetUpdate
+  )
 
   /**
    * debug_begin

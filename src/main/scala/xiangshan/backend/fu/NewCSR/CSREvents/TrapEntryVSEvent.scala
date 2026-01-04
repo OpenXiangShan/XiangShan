@@ -18,7 +18,6 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc = ValidIO(new TargetPCBundle)
 }
 
 class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -99,14 +98,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     tvalFillInst     -> trapInst,
   ))
 
-  private val instrAddrTransType = AddrTransType(
-    bare = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Bare,
-    sv39 = vsatp.MODE === SatpMode.Sv39,
-    sv48 = vsatp.MODE === SatpMode.Sv48,
-    sv39x4 = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4,
-    sv48x4 = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
-  )
-
   out := DontCare
 
   out.privState.valid := valid
@@ -115,7 +106,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsepc    .valid := valid
   out.vscause  .valid := valid
   out.vstval   .valid := valid
-  out.targetPc .valid := in.pcFromXtvec.valid
 
   out.privState.bits             := PrivState.ModeVS
   // vsstatus
@@ -128,10 +118,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
   out.vstval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
-  out.targetPc.bits.pc           := in.pcFromXtvec.bits
-  out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec.bits)
-  out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec.bits)
-  out.targetPc.bits.raiseIGPF    := instrAddrTransType.checkGuestPageFault(in.pcFromXtvec.bits)
 
   dontTouch(tvalFillGVA)
 }
