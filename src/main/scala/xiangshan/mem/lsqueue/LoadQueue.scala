@@ -182,9 +182,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val stDataReadyVec   = Input(Vec(StoreQueueSize, Bool()))
       val stIssuePtr       = Input(new SqPtr)
       val sqEmpty          = Input(Bool())
+      val sqDeqPtr         = Input(new SqPtr)
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val forward = Vec(LoadPipelineWidth, new ForwardQueryIO)
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
@@ -269,6 +271,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.mmioOut <> io.ldout
   uncacheBuffer.io.ncOut <> io.ncOut
   uncacheBuffer.io.mmioRawData <> io.ld_raw_data
+  uncacheBuffer.io.forward <> io.forward
   uncacheBuffer.io.rob <> io.rob
   uncacheBuffer.io.uncache <> io.uncache
 
@@ -303,6 +306,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.stDataReadySqPtr <> io.sq.stDataReadySqPtr
   loadQueueReplay.io.stDataReadyVec   <> io.sq.stDataReadyVec
   loadQueueReplay.io.sqEmpty          <> io.sq.sqEmpty
+  loadQueueReplay.io.sqDeqPtr         <> io.sq.sqDeqPtr
   loadQueueReplay.io.lqFull           <> io.lq_rep_full
   loadQueueReplay.io.ldWbPtr          <> virtualLoadQueue.io.ldWbPtr
   loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
@@ -311,6 +315,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
+  for(i <- 0 until LoadPipelineWidth) {
+    loadQueueReplay.io.mmioOut(i).valid := uncacheBuffer.io.mmioOut(i).valid
+    loadQueueReplay.io.mmioOut(i).bits := uncacheBuffer.io.mmioOut(i).bits
+    loadQueueReplay.io.ncOut(i).valid := uncacheBuffer.io.ncOut(i).valid
+    loadQueueReplay.io.ncOut(i).bits := uncacheBuffer.io.ncOut(i).bits
+  }
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
