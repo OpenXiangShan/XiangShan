@@ -728,8 +728,6 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, VstuCfg)
   io.vecstout.bits.hasException := sx_last_in.hasException
-  io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
-  io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
   io.vecstout.bits.alignedType := sx_last_in.alignedType
   io.vecstout.bits.mask        := sx_last_in.mask
