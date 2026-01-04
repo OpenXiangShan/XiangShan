@@ -1435,6 +1435,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
+  // TODO: consider s3_hw_err?
   io.lsq.ldin.bits.miss := s3_in.miss
 
   // connect to misalignBuffer
@@ -1706,7 +1707,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // vector output
   io.vecldout.bits.alignedType := s3_vec_alignedType
   // vec feedback
-  io.vecldout.bits.vecFeedback := vecFeedback
+//  io.vecldout.bits.vecFeedback := vecFeedback // deleted
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_pipe(1))
   io.vecldout.bits.vecdata.get := Mux(
@@ -1724,7 +1725,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.vecldout.bits.mask := s3_vecout.mask
   io.vecldout.bits.hasException := s3_exception
   io.vecldout.bits.reg_offset.get := s3_vecout.reg_offset
-  io.vecldout.bits.usSecondInv := s3_usSecondInv
   io.vecldout.bits.mBIndex := s3_vec_mBIndex
   io.vecldout.bits.hit := !s3_lrq_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull

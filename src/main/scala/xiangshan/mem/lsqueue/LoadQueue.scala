@@ -48,6 +48,7 @@ object LqPtr {
   }
 }
 
+// TODO: remove this
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
     val fpWen = uop.fpWen
@@ -78,6 +79,7 @@ trait HasLoadHelper { this: XSModule =>
     ))
   }
 
+  // TODO: remove genRdataOH and newRdataHelper when old LoadUnit is removed
   def genRdataOH(uop: DynInst): UInt = {
     val fuOpType = uop.fuOpType
     val fpWen    = uop.fpWen

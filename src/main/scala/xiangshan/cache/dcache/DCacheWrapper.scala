@@ -142,7 +142,7 @@ trait HasDCacheParameters
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
-  val DCacheVWordBytes = VLEN / 8
+  def DCacheVWordBytes = VLEN / 8
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -155,7 +155,7 @@ trait HasDCacheParameters
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = log2Up(DCacheWordBytes)
-  val DCacheVWordOffset = log2Up(DCacheVWordBytes)
+  def DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
   val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
@@ -728,7 +728,7 @@ class DCacheForwardReqS1(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
   val matchInvalid = Bool()
-  val forwardMask = Vec((VLEN/8), Bool())
+  val forwardMask = Vec((VLEN/8), Bool()) // useless, remove this
   val forwardData = Vec((VLEN/8), UInt(8.W))
   // denied and corrupt are only valid when forwarding matches
   val denied = Bool()

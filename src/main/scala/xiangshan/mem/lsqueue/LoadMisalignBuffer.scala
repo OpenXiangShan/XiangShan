@@ -594,14 +594,12 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
   io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && req.isvec
 
   io.vecWriteBack.bits.alignedType          := req.alignedType
-  io.vecWriteBack.bits.vecFeedback          := true.B
   io.vecWriteBack.bits.vecdata.get          := combinedData
   io.vecWriteBack.bits.isvec                := req.isvec
   io.vecWriteBack.bits.elemIdx              := req.elemIdx
   io.vecWriteBack.bits.elemIdxInsideVd.get  := req.elemIdxInsideVd
   io.vecWriteBack.bits.mask                 := req.mask
   io.vecWriteBack.bits.reg_offset.get       := 0.U
-  io.vecWriteBack.bits.usSecondInv          := req.usSecondInv
   io.vecWriteBack.bits.mBIndex              := req.mbIndex
   io.vecWriteBack.bits.hit                  := true.B
   io.vecWriteBack.bits.sourceType           := RSFeedbackType.lrqFull
