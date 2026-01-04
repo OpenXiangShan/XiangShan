@@ -24,9 +24,13 @@ on:
           - DefaultConfig
         default: KunminghuV2Config
       benchmark_type:
-        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
+        description: Benchmark type
         required: false
-        type: string
+        type: choice
+        options:
+          - spec06-0.3c
+          - spec06-0.8c
+          - spec06-1.0c
         default: spec06-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
