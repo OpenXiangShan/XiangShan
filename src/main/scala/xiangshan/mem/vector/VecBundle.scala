@@ -126,11 +126,6 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val vstart               = UInt(elemIdxBits.W)
   val vecTriggerMask       = UInt((VLEN/8).W)
 
-  //val vec                  = new OnlyVecExuOutput
-   // feedback
-  val vecFeedback          = Bool()
-
-  val usSecondInv          = Bool() // only for unit stride, second flow is Invalid
   val elemIdx              = UInt(elemIdxBits.W) // element index
   val mask                 = UInt(VLENB.W)
   val alignedType          = UInt(alignTypeBits.W)

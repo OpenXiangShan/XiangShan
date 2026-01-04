@@ -631,8 +631,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.mmio              := globalMMIO
       wb.bits.exceptionVec      := ExceptionNO.selectByFu(exceptionVec, VstuCfg)
       wb.bits.hasException      := globalException
-      wb.bits.usSecondInv       := req.usSecondInv
-      wb.bits.vecFeedback       := true.B
       wb.bits.elemIdx           := req.elemIdx
       wb.bits.alignedType       := req.alignedType
       wb.bits.mask              := req.mask
