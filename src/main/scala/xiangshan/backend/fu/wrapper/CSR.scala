@@ -197,8 +197,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       t.valid && !t.bits.isInterrupt && (t.bits.trapVec(EX_II) || t.bits.trapVec(EX_VI))
   })
 
-  trapTvalMod.io.targetPc.valid := csrMod.io.out.bits.targetPcUpdate
-  trapTvalMod.io.targetPc.bits := csrMod.io.out.bits.targetPc
+  trapTvalMod.io.targetPc := csrMod.io.trapTargetPc
   trapTvalMod.io.clear := csrIn.exception.valid && csrIn.exception.bits.isFetchMalAddr
   trapTvalMod.io.fromCtrlBlock.flush := io.flush
   trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
@@ -302,11 +301,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.ftqIdx := RegEnable(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
   redirect.ftqOffset := RegEnable(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
   redirect.taken := true.B
-  redirect.fullTarget := csrMod.io.out.bits.targetPc.pc
-  redirect.target := csrMod.io.out.bits.targetPc.pc
-  redirect.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
-  redirect.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
-  redirect.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
+  redirect.fullTarget := csrMod.io.xretTargetPc.bits.pc
+  redirect.target := csrMod.io.xretTargetPc.bits.pc
+  redirect.backendIPF := csrMod.io.xretTargetPc.bits.raiseIPF
+  redirect.backendIAF := csrMod.io.xretTargetPc.bits.raiseIAF
+  redirect.backendIGPF := csrMod.io.xretTargetPc.bits.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.isMisPred := true.B
 
@@ -335,7 +334,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.isXRet := isXRet
 
-  csrOut.trapTarget := csrMod.io.out.bits.targetPc
+  csrOut.trapTarget := csrMod.io.trapTargetPc.bits
   csrOut.interrupt := csrMod.io.status.interrupt
   csrOut.wfi_event := csrMod.io.status.wfiEvent
 

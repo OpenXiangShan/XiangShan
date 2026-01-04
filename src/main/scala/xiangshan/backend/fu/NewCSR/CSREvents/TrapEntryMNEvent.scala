@@ -14,7 +14,6 @@ class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE))
   val mnepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
-  val targetPc = ValidIO(new TargetPCBundle)
 }
 
 class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -45,7 +44,6 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnstatus.valid  := valid
   out.mnepc.valid     := valid
   out.mncause.valid   := valid
-  out.targetPc.valid  := in.pcFromXtvec.valid
 
   out.privState.bits             := PrivState.ModeM
   out.mnstatus.bits.MNPP         := current.privState.PRVM
@@ -54,10 +52,6 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO
-  out.targetPc.bits.pc           := in.pcFromXtvec.bits
-  out.targetPc.bits.raiseIPF     := false.B
-  out.targetPc.bits.raiseIAF     := AddrTransType(bare = true).checkAccessFault(in.pcFromXtvec.bits)
-  out.targetPc.bits.raiseIGPF    := false.B
 
 }
 
