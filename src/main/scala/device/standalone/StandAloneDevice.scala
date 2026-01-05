@@ -147,17 +147,17 @@ abstract class StandAloneDevice (
 }
 
 class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) with RequireAsyncReset {
-  p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
+  p.lift(SoCParamsKey).foreach(_.XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-  }
+  })
 }
 
 class StandAloneDeviceRawImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
-  p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
+  p.lift(SoCParamsKey).foreach(_.XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
-  }
+  })
 }
 
 object ArgParser {
@@ -215,7 +215,7 @@ object ArgParser {
         )(p)))(p)
       case "StandAlonePLIC" =>
         DisableMonitors(p => LazyModule(new StandAlonePLIC(
-          useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size
+          useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size, p(SoCParamsKey).extIntrs
         )(p)))(p)
       case "StandAloneDebugModule" =>
         DisableMonitors(p => LazyModule(new StandAloneDebugModule(
