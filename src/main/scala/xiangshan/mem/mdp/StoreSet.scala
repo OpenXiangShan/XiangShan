@@ -323,6 +323,16 @@ class SSIT(implicit p: Parameters) extends XSModule {
     s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadStrict && s2_loadAssigned && s2_storeAssigned
   ) // should be zero
 
+  val pred_dependence = io.ren.zip(io.rdata).map{case (v, rdata) =>
+    RegNext(v) && rdata.valid
+  }
+  val pred_dependence_strict = io.ren.zip(io.rdata).map{case (v, rdata) =>
+    RegNext(v) && rdata.valid && rdata.strict
+  }
+
+  XSPerfAccumulate("ssit_pred_dependence", PopCount(pred_dependence))
+  XSPerfAccumulate("ssit_pred_strict", PopCount(pred_dependence_strict))
+
   // debug
   XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
   XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
