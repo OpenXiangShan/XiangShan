@@ -39,6 +39,7 @@ sealed trait HasLoadPipeBundleParam {
   def replayFromLRQ: Boolean = false
   def hasVector: Boolean = false
   def hasS3PreProcess: Boolean = false
+  def hasS4PreProcess: Boolean = false
   def hasWritebacked: Boolean = false
   def hasUnalignHandling: Boolean = false
 
@@ -117,7 +118,12 @@ class LoadPipeBundle(
   val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())
-  
+  // S3 -> S4
+  val hasException = Option.when(param.hasS4PreProcess)(Bool())
+  val headAlwaysWriteback = Option.when(param.hasS4PreProcess)(Bool())
+  val writebackDependOnTail = Option.when(param.hasS4PreProcess)(Bool())
+  val shouldRarViolation = Option.when(param.hasS4PreProcess)(Bool())
+
   // debug info and top-down
   // TODO: use Option
   val hasROBEntry = Bool()
@@ -149,9 +155,6 @@ class LoadPipeBundle(
     vecBaseVaddr.get := 0.U
     vecVaddrOffset.get := 0.U
     vecTriggerMask.get := 0.U
-  }
-  def exception(): Bool = {
-    ExceptionNO.selectByFu(uop.exceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(uop.trigger)
   }
   def isFirstIssue(): Bool = {
     LoadEntrance.isScalarIssue(entrance) || LoadEntrance.isVectorIssue(entrance)
@@ -186,7 +189,8 @@ case class LoadStageIOParam()(
   override val replayToLRQ: Boolean = afterS2
   override val replayFromLRQ: Boolean = true
   override val hasVector: Boolean = true
-  override val hasS3PreProcess: Boolean = afterS2 // or isS2?
+  override val hasS3PreProcess: Boolean = afterS2
+  override val hasS4PreProcess: Boolean = afterS3
   // override val hasWritebacked: Boolean =
   override val hasUnalignHandling: Boolean = true
 }
