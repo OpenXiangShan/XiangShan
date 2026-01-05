@@ -25,6 +25,7 @@ import freechips.rocketchip.tile.MaxHartIdBits
 import org.chipsalliance.cde.config.{Field, Parameters}
 import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.BackendParams
+import xiangshan.backend.BackendV2SchdParams
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.backend.datapath.WbConfig._
@@ -111,6 +112,7 @@ case class XSCoreParameters
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
+  EnableBackendV2Config: Boolean = false,
   intPreg: PregParams = IntPregParams(
     numEntries = 224,
     numBank    = 4,
@@ -484,9 +486,9 @@ case class XSCoreParameters
 
   val backendParams: BackendParams = backend.BackendParams(
     Map(
-      IntScheduler() -> intSchdParams,
-      FpScheduler() -> fpSchdParams,
-      VecScheduler() -> vecSchdParams,
+      IntScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.intSchdParams else intSchdParams),
+      FpScheduler()  -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.fpSchdParams else fpSchdParams),
+      VecScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.vecSchdParams else vecSchdParams),
     ),
     Seq(
       intPreg,
@@ -496,7 +498,7 @@ case class XSCoreParameters
       vlPreg,
       fakeIntPreg
     ),
-    iqWakeUpParams,
+    (if (EnableBackendV2Config) backend.BackendV2SchdParams.iqWakeUpParams else iqWakeUpParams),
   )
 
   // Parameters for trace extension.
