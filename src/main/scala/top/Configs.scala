@@ -484,6 +484,23 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
   })
 )
 
+class BackendV2Config(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map { p =>
+      p.copy(
+        frontendParameters = p.frontendParameters.copy(
+          ibufferParameters = p.frontendParameters.ibufferParameters.copy(
+            NumReadBank = 6
+          )
+        ),
+        DecodeWidth = 6,
+        RenameWidth = 6,
+        RabCommitWidth = 6,
+      )
+    }
+  })
+)
+
 class CVMCompile extends Config((site, here, up) => {
   case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
