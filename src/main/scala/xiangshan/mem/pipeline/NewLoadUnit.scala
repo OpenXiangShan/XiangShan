@@ -343,7 +343,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.vaddr := sink.bits.vaddr
   storeForwardReq.sqIdx := uop.sqIdx
   storeForwardReq.size := sink.bits.size
-  storeForwardReq.uop := uop
+  storeForwardReq.loadWaitBit := uop.loadWaitBit
+  storeForwardReq.loadWaitStrict := uop.loadWaitStrict
+  storeForwardReq.ssid := uop.ssid
+  storeForwardReq.storeSetHit := uop.storeSetHit
+  storeForwardReq.waitForRobIdx := uop.waitForRobIdx
 
   val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay()
 
@@ -482,6 +486,8 @@ class LoadUnitS1(param: ExeUnitParams)(
     val uncacheForwardKill = Output(Bool())
     val mshrForwardKill = Output(Bool())
     val tldForwardKill = Output(Bool())
+    // early reponse from SQ, unused for now
+    val sqForwardResp = Flipped(ValidIO(new SQForwardRespS1))
     
     val uncacheBypassResp = Flipped(ValidIO(new UncacheBypassRespS1))
 
@@ -729,7 +735,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     /**
       * Data forward response
       */
-    val sqForwardResp = Flipped(ValidIO(new SQForwardResp))
+    val sqForwardResp = Flipped(ValidIO(new SQForwardRespS2))
     val sbufferForwardResp = Flipped(ValidIO(new SbufferForwardResp))
     val uncacheForwardResp = Flipped(ValidIO(new UncacheForwardResp))
     val mshrForwardResp = Flipped(ValidIO(new DCacheForwardResp))
@@ -1475,7 +1481,7 @@ class LoadUnitDataPathMeta(implicit p: Parameters) extends XSBundle with HasDCac
 class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule with HadNewLoadHelper {
   val io = IO(new Bundle() {
     val s1Meta = Flipped(ValidIO(new LoadUnitDataPathMeta))
-    val s2SqForwardResp = Flipped(ValidIO(new SQForwardResp))
+    val s2SqForwardResp = Flipped(ValidIO(new SQForwardRespS2))
     val s2SbufferForwardResp = Flipped(ValidIO(new SbufferForwardResp))
     val s2UncacheForwardResp = Flipped(ValidIO(new UncacheForwardResp))
     val s2MSHRForwardResp = Flipped(ValidIO(new DCacheForwardResp))
@@ -1675,6 +1681,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.s1_kill := s1.io.dcacheKill
   io.sqForward.s1Req := s1.io.storeForwardReq
   io.sqForward.s1Kill := s1.io.sqForwardKill
+  s1.io.sqForwardResp := io.sqForward.s1Resp
   io.sbufferForward.s1Req := s1.io.storeForwardReq
   io.sbufferForward.s1Kill := s1.io.sbufferForwardKill
   io.uncacheForward.s1Req := s1.io.storeForwardReq

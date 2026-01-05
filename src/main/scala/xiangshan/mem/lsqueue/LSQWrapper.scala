@@ -94,7 +94,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = new SbufferWriteIO
-    val forward = Vec(LoadPipelineWidth, new ForwardQueryIO)
+    val forward = Flipped(Vec(LoadPipelineWidth, new SQForward))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce

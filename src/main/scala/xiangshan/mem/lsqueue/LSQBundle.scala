@@ -26,7 +26,7 @@ import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{CMOReq, CMOResp, DCacheWordReqWithVaddrAndPfFlag, UncacheWordIO}
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.mem.Bundles.StoreMaskBundle
+import xiangshan.mem.Bundles.{SQForward, StoreMaskBundle}
 
 
 class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
@@ -149,79 +149,6 @@ class ToCacheIO(implicit p: Parameters) extends MemBlockBundle {
   val resp            = Flipped(DecoupledIO(new CMOResp))
 }
 
-class ForwardQueryIO(implicit p: Parameters) extends MemBlockBundle {
-
-  class UopInfo(implicit p: Parameters) extends MemBlockBundle {
-    // load inst will not be executed until former store (predicted by mdp) addr calcuated
-    val loadWaitBit     = Bool()
-    // If (loadWaitBit && loadWaitStrict), strict load wait is needed
-    // load inst will not be executed until ALL former store addr calcuated
-    val loadWaitStrict  = Bool()
-    val ssid            = UInt(SSIDWidth.W)
-    val storeSetHit     = Bool() // inst has been allocated an store set
-    val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
-  }
-  class ReqS0InfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val vaddr            = UInt(VAddrBits.W)
-    val uop              = new UopInfo
-    val sqIdx            = new SqPtr
-    val size             = UInt(MemorySize.Size.width.W)
-  }
-
-  class ReqS1InfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val paddr            = UInt(PAddrBits.W)
-    val kill             = Bool()
-  }
-
-  class RespS1InfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    // dataInvalid: addr match, but data is not valid for now
-    val dataInvalidFast  = Bool() // resp to load_s1
-    val forwardMaskFast  = Vec((VLEN/8), Bool()) // resp to load_s1
-  }
-
-  class RespS2InfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val dataInvalidSqIdx = new SqPtr // resp to load_s2, sqIdx
-    val addrInvalidSqIdx = new SqPtr // resp to load_s2, sqIdx
-
-    // dataInvalid suggests store to load forward found forward should happen,
-    // but data is not available for now. If dataInvalid, load inst should
-    // be replayed from RS. Feedback type should be RSFeedbackType.dataInvalid
-    val dataInvalid      = Bool() // Addr match, but data is not valid for now
-
-    // matchInvalid suggests in store to load forward logic, paddr cam result does
-    // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
-    // should be raised to flush SQ and committed sbuffer.
-    val matchInvalid     = Bool() // resp to load_s2
-
-    // addrInvalid suggests store to load forward found forward should happen,
-    // but address (SSID) is not available for now. If addrInvalid, load inst should
-    // be replayed from RS. Feedback type should be RSFeedbackType.addrInvalid
-    val addrInvalid      = Bool()
-
-    // indicate multi dependence appear, can't safe forward
-    val forwardInvalid   = Bool()
-
-    // forward mask and data; mask is byte mask
-    val forwardMask      = Vec((VLEN/8), Bool()) // resp to load_s2
-    val forwardData      = Vec((VLEN/8), UInt(8.W)) // resp to load_s2
-  }
-
-  class ReqIO(implicit p: Parameters) extends MemBlockBundle {
-    // query storeQueue for load s0
-    val lduStage0ToSq    = ValidIO(new ReqS0InfoBundle)
-    // send info for forward check
-    val lduStage1ToSq    = Output(new ReqS1InfoBundle)
-  }
-
-  class RespIO(implicit p: Parameters) extends MemBlockBundle {
-    val sqToLduStage1    = ValidIO(new RespS1InfoBundle)
-    val sqToLduStage2    = ValidIO(new RespS2InfoBundle)
-  }
-
-  val req                = Flipped(new ReqIO)
-  val resp               = new RespIO
-}
-
 class FromRobIO(implicit p: Parameters) extends XSBundle {
   val pendingPtr         = new RobPtr
   val pendingPtrNext     = new RobPtr
@@ -273,7 +200,7 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   // cmo handle send clean, invalid, flush to dcache.
   val toDCache           = new ToCacheIO
   // from loadUnit, forward query.
-  val forward            = Vec(LoadPipelineWidth, new ForwardQueryIO)
+  val forward            = Flipped(Vec(LoadPipelineWidth, new SQForward))
   val fromRob            = Input(new FromRobIO)
   // write store request to uncacheBuffer.
   val toUncacheBuffer    = new UncacheWordIO
