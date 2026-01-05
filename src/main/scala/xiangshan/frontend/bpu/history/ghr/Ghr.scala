@@ -102,7 +102,7 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
 
   XSError(s3_fire && !ghrBuffer.io.enq.ready, "GHR stall queue overflow!\n")
 
-  s0_ghr := Mux(r0_valid, r0_ghr, Mux(s0_fire && ghrBuffer.io.deq.valid, ghrBuffer.io.deq.bits, ghr))
+  s0_ghr := Mux(r0_valid, r0_ghr, Mux(s0_fire && ghrBuffer.io.deq.valid, ghrBuffer.io.deq.bits, 0.U.asTypeOf(ghr)))
 
   if (EnableCommitGHistDiff) {
     val s3_lessThanFirstTakenUInt = s3_lessThanFirstTaken.asUInt
