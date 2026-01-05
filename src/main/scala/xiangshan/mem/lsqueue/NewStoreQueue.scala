@@ -24,14 +24,12 @@ import utility._
 import xiangshan.ExceptionNO.hardwareError
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx, connectSamePort}
-import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{DCacheWordReqWithVaddrAndPfFlag, MemoryOpConstants, UncacheWordIO}
-import xiangshan.mem.NewStoreQueueMain.config
-import freechips.rocketchip.util.SeqToAugmentedSeq
 import xiangshan.backend.fu.FuType
+import xiangshan.mem.Bundles.SQForward
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -213,7 +211,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
   private class ForwardModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
-      val query           = Vec(LoadPipelineWidth, new ForwardQueryIO)
+      val query           = Flipped(Vec(LoadPipelineWidth, new SQForward))
       val dataEntriesIn   = Vec(StoreQueueSize, Input(new SQDataEntryBundle())) // from storeQueue data
       val ctrlEntriesIn   = Vec(StoreQueueSize, Input(new SQCtrlEntryBundle())) // from storeQueue ctrl info
       val ctrlInfo = new Bundle {
@@ -320,30 +318,30 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //   ageMaskLow  = 0b00001111 (bits 0-3)
       //   ageMaskHigh = 0b11000000 (bits 6-7)
 
-      val s0Valid          = io.query(i).req.lduStage0ToSq.valid
+      val s0Req = io.query(i).s0Req
+      val s0Valid          = s0Req.valid
       val deqMask          = UIntToMask(io.ctrlInfo.deqPtr.value, StoreQueueSize)
-      val differentFlag    = io.ctrlInfo.deqPtr.flag =/= io.query(i).req.lduStage0ToSq.bits.sqIdx.flag
-      val forwardMask      = UIntToMask(io.query(i).req.lduStage0ToSq.bits.sqIdx.value, StoreQueueSize)
+      val differentFlag    = io.ctrlInfo.deqPtr.flag =/= s0Req.bits.sqIdx.flag
+      val forwardMask      = UIntToMask(s0Req.bits.sqIdx.value, StoreQueueSize)
       // generate load byte start and end
-      val loadStart        = io.query(i).req.lduStage0ToSq.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
-      val byteOffset       = MemorySize.ByteOffset(io.query(i).req.lduStage0ToSq.bits.size)
+      val loadStart        = s0Req.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
+      val byteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
       val loadEnd          = loadStart + byteOffset
 
       // mdp mask
       val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
       val storeSetHitVec = Mux(lfstEnable,
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
-          io.query(i).req.lduStage0ToSq.bits.uop.loadWaitBit &&
-            io.dataEntriesIn(j).uop.robIdx === io.query(i).req.lduStage0ToSq.bits.uop.waitForRobIdx))),
+          s0Req.bits.loadWaitBit && io.dataEntriesIn(j).uop.robIdx === s0Req.bits.waitForRobIdx))),
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
-          io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === io.query(i).req.lduStage0ToSq.bits.uop.ssid)))
+          io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === s0Req.bits.ssid)))
       )
 
       val ageMaskLow     = deqMask & forwardMask & VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt
       val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
 
       val s1ForwardMask  = RegEnable(forwardMask, s0Valid)
-      val s1LoadVaddr    = RegEnable(io.query(i).req.lduStage0ToSq.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB)), s0Valid)
+      val s1LoadVaddr    = RegEnable(s0Req.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB)), s0Valid)
       val s1deqMask      = RegEnable(deqMask, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
       val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
@@ -351,7 +349,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       val s1AgeMaskLow   = RegEnable(ageMaskLow, s0Valid)
       val s1AgeMaskHigh  = RegEnable(ageMaskHigh, s0Valid)
-      val s1Kill         = io.query(i).req.lduStage1ToSq.kill
+      val s1Kill         = io.query(i).s1Kill
       val s1Valid        = RegNext(s0Valid) && !s1Kill
 
 
@@ -378,7 +376,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //     Example: canForward = 0b1001 (stores 0 and 3 match)
       //     findYoungest(Reverse(0b1001)) -> selects store 3 (index 3)
 
-      val s1QueryPaddr = io.query(i).req.lduStage1ToSq.paddr(PAddrBits - 1, log2Ceil(VLENB))
+      val s1Req = io.query(i).s1Req
+      val s1QueryPaddr = s1Req.paddr(PAddrBits - 1, log2Ceil(VLENB))
       // prevent X-state
       // Virtual address match (high bits only, ignore byte offset)
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
@@ -497,8 +496,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val finalData          = outData << (s2LoadStart * 8.U)
       val finalMask          = outMask << s2LoadStart
 
-      io.query(i).resp.sqToLduStage1 <> DontCare //TODO: need it?
-      val s2Resp = io.query(i).resp.sqToLduStage2
+      val s1Resp = io.query(i).s1Resp
+      val s2Resp = io.query(i).s2Resp
+      s1Resp.valid := false.B //TODO: need it?
+      s1Resp.bits := DontCare
 //      s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
 //        sink := outData((j + 1) * 8 - 1, j * 8)}
 //      s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
@@ -507,10 +508,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         sink := finalData((j + 1) * 8 - 1, j * 8)}
       s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
         sink := finalMask(j) && s2Valid && safeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
-      s2Resp.bits.dataInvalid      := s2DataInValid || !safeForward
-      s2Resp.bits.dataInvalidSqIdx := s2DataInvalidSqIdx
-      s2Resp.bits.addrInvalid      := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
-      s2Resp.bits.addrInvalidSqIdx := s2AddrInvalidSqIdx
+      s2Resp.bits.dataInvalid.valid := s2DataInValid || !safeForward
+      s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
+      s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
+      s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !safeForward
       s2Resp.bits.matchInvalid     := paddrNoMatch
       s2Resp.valid                 := s2Valid
