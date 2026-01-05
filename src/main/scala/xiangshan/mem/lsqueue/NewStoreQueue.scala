@@ -490,7 +490,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val outMask            = ParallelLookUp(s2ByteSelectOffset, selectMask) & s2LoadMaskEnd
 
       val fullOverlap        = (s2SelectDataEntry.byteMask & s2LoadMaskEnd) === s2LoadMaskEnd
-      val safeForward        = s2MultiMatch && fullOverlap
+      val safeForward        = !s2MultiMatch || fullOverlap
 
       //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
       val finalData          = outData << (s2LoadStart * 8.U)
