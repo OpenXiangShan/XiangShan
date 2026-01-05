@@ -15,7 +15,7 @@ on:
       benchmark_type:
         required: false
         type: string
-        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
+        description: Benchmark type
         default: spec06-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
@@ -23,7 +23,7 @@ on:
         type: string
         default: ''
       servers:
-        description: Servers to run emulation on
+        description: Servers to run emulation on, uses 5 random servers by default
         required: false
         type: string
         default: ''
@@ -53,9 +53,6 @@ jobs:
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               ;;
             *)
-              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c"
-              exit 1
-              ;;
           esac
 
       - name: Set test branch or commit
@@ -75,10 +72,7 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          echo "NODE_SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
@@ -92,10 +86,7 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
-          if [ -e "$SPEC_DIR/emu" ]; then
-            mkdir -p $NOOP_HOME/build
-            cp $SPEC_DIR/emu $NOOP_HOME/build/emu
-          else
+          if [ ! -e "$SPEC_DIR/emu" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
               --config "${{ inputs.xs_config }}"                             \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
@@ -103,7 +94,7 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst
             mkdir -p $SPEC_DIR
-            cp $NOOP_HOME/build/emu $SPEC_DIR/emu
+            cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
           fi
 
       - name: Run SPEC CPU2006 checkpoints
@@ -112,8 +103,8 @@ jobs:
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
             --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
             --benchmarks "${{ inputs.benchmarks }}" \
-            --server-list "$NODE_SERVER_LIST" \
-            --nemu-so-path $NOOP_HOME/ready-to-run/riscv64-nemu-interpreter-so \
+            --server-list "$SERVER_LIST" \
+            --nemu-so-path $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so \
             --run
 
       - name: Report SPEC CPU2006 score
@@ -122,7 +113,7 @@ jobs:
           cd $SCRIPTS_HOME/perf
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
+            --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
 
       - name: Summary result
