@@ -1347,8 +1347,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
 
-    ldu(w).io.wr_conflict.valid := mainPipe.io.data_write.valid
-    ldu(w).io.wr_conflict.bits := mainPipe.io.data_write.bits.wmask
+    ldu(w).io.writehint.valid := mainPipe.io.data_write.valid
+    ldu(w).io.writehint.bits := mainPipe.io.data_write.bits.wmask
 
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict

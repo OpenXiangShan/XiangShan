@@ -39,8 +39,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // req got nacked in stage 0?
     val nack      = Input(Bool())
 
-    val wr_conflict = Flipped(Valid(Bits(DCacheBanks.W)))
-
     // meta and data array read port
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
@@ -70,6 +68,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // send miss request to wbq
     val wbq_conflict_check = Valid(UInt())
     val wbq_block_miss_req = Input(Bool())
+
+    // write hint from main pipe
+    val writehint = Flipped(Valid(Bits(DCacheBanks.W)))
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
@@ -108,6 +109,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // it you got nacked, you can directly passdown
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
+  XSPerfAccumulate("other_no_ready", io.lsu.req.valid && !not_nacked_ready)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -136,7 +138,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
-  wr_conflict_check := io.lsu.req.valid && io.wr_conflict.valid && (io.wr_conflict.bits & s0_bank_oh).orR
+  wr_conflict_check := io.lsu.req.valid && io.writehint.valid && (io.writehint.bits & s0_bank_oh).orR
+  XSPerfAccumulate("wr_conflict_no_ready", wr_conflict_check)
 
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
