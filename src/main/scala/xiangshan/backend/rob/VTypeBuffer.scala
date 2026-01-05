@@ -45,7 +45,7 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
   val canEnq = Output(Bool())
   val canEnqForDispatch = Output(Bool())
 
-  val commits = Output(new VlCommitBundle(CommitWidth))
+  val commits = Output(new VlCommitBundle(RabCommitWidth))
   val diffCommits = Option.when(backendParams.basicDebugEn)(Output(new DiffVlCommitBundle(CommitWidth)))
 
   val toDecode = Output(new Bundle {
@@ -80,8 +80,8 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val vtypeBuffer = Reg(Vec(size, new VTypeBufferEntry()))
 //  private val vtypeBuffer = Module(new SyncDataModuleTemplate(new VTypeBufferEntry(), size, numWrite = RenameWidth, numRead = CommitWidth))
 
-  private val vtypeBufferReadAddrVec = Wire(Vec(CommitWidth, UInt(log2Ceil(size).W)))
-  private val vtypeBufferReadDataVec = Wire(Vec(CommitWidth, new VTypeBufferEntry()))
+  private val vtypeBufferReadAddrVec = Wire(Vec(RabCommitWidth, UInt(log2Ceil(size).W)))
+  private val vtypeBufferReadDataVec = Wire(Vec(RabCommitWidth, new VTypeBufferEntry()))
   private val vtypeBufferWriteEnVec = Wire(Vec(RenameWidth, Bool()))
   private val vtypeBufferWriteAddrVec = Wire(Vec(RenameWidth, UInt(log2Ceil(size).W)))
   private val vtypeBufferWriteDataVec = Wire(Vec(RenameWidth, new VTypeBufferEntry()))
@@ -94,11 +94,11 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
       })
   })
 
-  private val commitValidVec = Wire(Vec(CommitWidth, Bool()))
-  private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
-  private val infoVec = Wire(Vec(CommitWidth, VType()))
-  private val hasVsetvlVec = Wire(Vec(CommitWidth, Bool()))
-  private val pdestVlVec = Wire(Vec(CommitWidth, UInt(VlPhyRegIdxWidth.W)))
+  private val commitValidVec = Wire(Vec(RabCommitWidth, Bool()))
+  private val walkValidVec = Wire(Vec(RabCommitWidth, Bool()))
+  private val infoVec = Wire(Vec(RabCommitWidth, VType()))
+  private val hasVsetvlVec = Wire(Vec(RabCommitWidth, Bool()))
+  private val pdestVlVec = Wire(Vec(RabCommitWidth, UInt(VlPhyRegIdxWidth.W)))
 
   private val vtypeBufferWdataVec: Vec[VTypeBufferEntry] = VecInit(vtypeBuffer.indices.map {
     case i =>
@@ -127,20 +127,20 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val enqPtrOHVec = VecInit.tabulate(RenameWidth + 1)(enqPtrOHShift.left)
   private val enqPtrVecNext = WireInit(enqPtrVec)
 
-  private val deqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(idx => VTypeBufferPtr(flag = false, idx)))
+  private val deqPtrVec = RegInit(VecInit.tabulate(RabCommitWidth)(idx => VTypeBufferPtr(flag = false, idx)))
   private val deqPtr = deqPtrVec.head
   private val deqPtrOH = RegInit(1.U(size.W))
   private val deqPtrOHShift = CircularShift(deqPtrOH)
-  private val deqPtrOHVec = VecInit.tabulate(CommitWidth + 1)(deqPtrOHShift.left)
+  private val deqPtrOHVec = VecInit.tabulate(RabCommitWidth + 1)(deqPtrOHShift.left)
   private val deqPtrVecNext = WireInit(deqPtrVec)
   XSError(deqPtr.toOH =/= deqPtrOH, p"wrong one-hot reg between $deqPtr and $deqPtrOH")
 
-  private val walkPtrVec = RegInit(VecInit.tabulate(CommitWidth)(idx => VTypeBufferPtr(flag = false, idx)))
+  private val walkPtrVec = RegInit(VecInit.tabulate(RabCommitWidth)(idx => VTypeBufferPtr(flag = false, idx)))
   private val walkPtr = Reg(new VTypeBufferPtr)
   private val walkPtrOH = walkPtr.toOH
-  private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
+  private val walkPtrOHVec = VecInit.tabulate(RabCommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new VTypeBufferPtr)
-  private val walkPtrVecNext = VecInit((0 until CommitWidth).map(x => walkPtrNext + x.U))
+  private val walkPtrVecNext = VecInit((0 until RabCommitWidth).map(x => walkPtrNext + x.U))
 
   private val diffPtr = RegInit(VTypeBufferPtr())
   private val diffPtrNext = Wire(chiselTypeOf(diffPtr))
@@ -167,17 +167,17 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val needAllocVec = VecInit(io.req.map(req => req.valid && req.bits.vlWen))
   private val enqCount = PopCount(needAllocVec)
 
-  private val commitCount   = Wire(UInt(CommitWidth.U.getWidth.W))
-  private val walkCount     = Wire(UInt(CommitWidth.U.getWidth.W))
-  private val spclWalkCount = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val commitCount   = Wire(UInt(RabCommitWidth.U.getWidth.W))
+  private val walkCount     = Wire(UInt(RabCommitWidth.U.getWidth.W))
+  private val spclWalkCount = Wire(UInt(RabCommitWidth.U.getWidth.W))
 
   private val commitSize   = RegInit(0.U(size.U.getWidth.W))
   private val walkSize     = RegInit(0.U(size.U.getWidth.W))
   private val spclWalkSize = RegInit(0.U(size.U.getWidth.W))
 
-  private val commitSizeNext   = Wire(UInt(CommitWidth.U.getWidth.W))
-  private val walkSizeNext     = Wire(UInt(CommitWidth.U.getWidth.W))
-  private val spclWalkSizeNext = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val commitSizeNext   = Wire(UInt(RabCommitWidth.U.getWidth.W))
+  private val walkSizeNext     = Wire(UInt(RabCommitWidth.U.getWidth.W))
+  private val spclWalkSizeNext = Wire(UInt(RabCommitWidth.U.getWidth.W))
 
   private val newCommitSize   = io.fromRob.commitSize
   private val newWalkSize     = io.fromRob.walkSize
@@ -265,7 +265,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }
 
 
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
     walkValidVec(i) := state === s_walk && i.U < walkSize || state === s_spcl_walk && i.U < spclWalkSize
 
@@ -349,7 +349,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   io.commits.isCommit := state === s_idle || state === s_spcl_walk
   io.commits.isWalk := state === s_walk || state === s_spcl_walk
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     io.commits.commitValid(i) := Mux1H(Seq(
       (state === s_idle) -> (i.U < commitSize),
       (state === s_spcl_walk) -> (i.U < spclWalkSize),

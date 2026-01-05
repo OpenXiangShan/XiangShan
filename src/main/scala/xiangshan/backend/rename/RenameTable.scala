@@ -218,7 +218,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val hartId = Input(UInt(8.W))
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
-    val vlCommits = Input(new VlCommitBundle(CommitWidth))
+    val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
     val diffVlCommits = Option.when(backendParams.basicDebugEn)(Input(new DiffVlCommitBundle(CommitWidth)))
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs))))
