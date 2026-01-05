@@ -194,7 +194,15 @@ object Bundles {
     val vaddr = UInt(VAddrBits.W)
     val sqIdx = new SqPtr
     val size = UInt(MemorySize.Size.width.W)
-    val uop = new DynInst // TODO: only MDP involved signals are needed
+    // MDP
+    // load inst will not be executed until former store (predicted by mdp) addr calcuated
+    val loadWaitBit = Bool()
+    // If (loadWaitBit && loadWaitStrict), strict load wait is needed
+    // load inst will not be executed until ALL former store addr calcuated
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val storeSetHit = Bool() // inst has been allocated an store set
+    val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
   }
 
   class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {
@@ -207,7 +215,13 @@ object Bundles {
     val matchInvalid = Bool()
   }
 
-  class SQForwardResp(implicit p: Parameters) extends XSBundle {
+  class SQForwardRespS1(implicit p: Parameters) extends XSBundle {
+    // dataInvalid: addr match, but data is not valid for now
+    val dataInvalidFast  = Bool() // resp to load_s1
+    val forwardMaskFast  = Vec((VLEN/8), Bool()) // resp to load_s1
+  }
+
+  class SQForwardRespS2(implicit p: Parameters) extends XSBundle {
     val forwardMask = Vec((VLEN/8), Bool())
     val forwardData = Vec((VLEN/8), UInt(8.W))
     val forwardInvalid = Bool()
@@ -229,7 +243,8 @@ object Bundles {
     val s0Req = ValidIO(new StoreForwardReqS0)
     val s1Req = Output(new StoreForwardReqS1)
     val s1Kill = Output(Bool())
-    val s2Resp = Flipped(ValidIO(new SQForwardResp))
+    val s1Resp = Flipped(ValidIO(new SQForwardRespS1))
+    val s2Resp = Flipped(ValidIO(new SQForwardRespS2))
   }
 
   class UncacheForward(implicit p: Parameters) extends XSBundle {
