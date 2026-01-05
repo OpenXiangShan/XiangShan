@@ -89,7 +89,7 @@ class XSArgs(object):
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
-        self.seed = random.randint(0, 9999)
+        self.seed = args.seed if args.seed is not None else random.randint(0, 9999)
         self.numa = args.numa
         self.diff = args.diff
         if args.spike and "nemu" in args.diff:
@@ -715,6 +715,7 @@ if __name__ == "__main__":
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
     parser.add_argument('--instr-trace', type=str, default="", help="run the test with the trace of the simfrontend")
+    parser.add_argument('--seed', type=int, help="run emu with the given random seed")
     # both makefile and emu arguments
     parser.add_argument('--dump-db', action='store_true', help='enable chiseldb dump')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
