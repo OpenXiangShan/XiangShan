@@ -44,6 +44,7 @@ trait OnLoadStage {
   def after(s1: LoadStage, s2: LoadStage): Boolean = s1.id >= s2.id
   def afterS1: Boolean = after(s, LoadS1())
   def afterS2: Boolean = after(s, LoadS2())
+  def afterS3: Boolean = after(s, LoadS3())
   def lastStage: Boolean = s match {
     // case _: LoadS4 => true // TODO
     case _: LoadS4 => true
