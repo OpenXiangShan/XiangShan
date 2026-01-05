@@ -335,6 +335,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
   val stIsRVC = Wire(Vec(StorePipelineWidth, Bool()))
+  val stIsFirstIssue = Wire(Vec(StorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
@@ -342,6 +343,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
     stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
+    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -376,10 +378,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRAWSize - LoadPipelineWidth).U
   val rollbaclValid = io.rollback.map(_.valid).reduce(_ || _).asUInt
+  val storeFirstIssue = Mux1H(oldestOH, stIsFirstIssue)
 
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
   XSPerfAccumulate("stld_rollback", rollbaclValid)
+  // store is tlb miss, and it occure RAW
+  XSPerfAccumulate("stld_rollback_store_delay", !storeFirstIssue && io.mdpTrain.valid)
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq ", canEnqCount),
     ("stld_rollback", rollbaclValid),
