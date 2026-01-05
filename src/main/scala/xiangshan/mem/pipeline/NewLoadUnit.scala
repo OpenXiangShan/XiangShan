@@ -85,10 +85,6 @@ class LoadUnitS0(param: ExeUnitParams)(
     })
   })
 
-  // TODO: remove this
-  dontTouch(io)
-  dontTouch(io_pipeOut.get)
-
   /**
     * Request sources arbitration, in order of priority:
     * 0. unalign tail inject from s1
@@ -514,11 +510,6 @@ class LoadUnitS1(param: ExeUnitParams)(
     })
   })
 
-  // TODO: remove this
-  dontTouch(io)
-  dontTouch(io_pipeIn.get)
-  dontTouch(io_pipeOut.get)
-
   val pipeIn = io_pipeIn.get
   val pipeOut = io_pipeOut.get
   val in = pipeIn.bits
@@ -693,6 +684,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.dataPathMeta.bits.fpWen := uop.fpWen
   io.dataPathMeta.bits.isNCReplay := in.isNCReplay()
   io.dataPathMeta.bits.isMMIOReplay := in.isMMIOReplay()
+  io.dataPathMeta.bits.isUnalignHead := in.unalignHead.get
 
   io.unalignTail.valid := unalignTailInjectValid
   io.unalignTail.bits := unalignTail
@@ -770,11 +762,6 @@ class LoadUnitS2(param: ExeUnitParams)(
     })
   })
 
-  // TODO: remove this
-  dontTouch(io)
-  dontTouch(io_pipeIn.get)
-  dontTouch(io_pipeOut.get)
-
   val pipeIn = io_pipeIn.get
   val pipeOut = io_pipeOut.get
   val in = pipeIn.bits
@@ -788,6 +775,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isNCReplay = in.isNCReplay()
   val isUncacheReplay = in.isUncacheReplay()
   val isPrefetch = accessType.isPrefetch()
+  val isUnalignHead = in.unalignHead.get
+  val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
+  val isUnalign = isUnalignHead || isUnalignTail
 
   /**
     * Redirect
@@ -909,6 +899,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     *     1.3.1 loads that have already fast replay should not fast replay again
     *     1.3.2 loads that are bank conflict, or mshr nacked, or nuked may fast replay, except there are other higher-
     *       priority replay causes
+    *     1.3.3 loads that are unaligned should not fast replay for simplicity
     * 2. Always writeback: loads that definitely do not require replay or RAR / RAW violation check, and can be directly
     *   written back to Backend, including:
     *   - exception
@@ -925,8 +916,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   val fastReplayMSHRNack = cause(C_DR) && !hasHigherPriorityCauses(cause, C_DR)
   val fastReplayBankConflict = cause(C_BC) && !hasHigherPriorityCauses(cause, C_BC)
   val fastReplayNuke = cause(C_NK) && !hasHigherPriorityCauses(cause, C_RAR) // TODO: use C_RAR or C_NK?
-  val fastReplay = (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke) &&
-    !LoadEntrance.isFastReplay(entrance)
+  val fastReplay = !LoadEntrance.isFastReplay(entrance) && // 1.3.1
+    (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke) && // 1.3.2
+    !isUnalign // 1.3.3
 
   /**
     * Nuke query to LQRAR / LQRAW
@@ -1064,7 +1056,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     // DCache response
     val dcacheError = Input(Bool())
 
-    // TODO
     // Unalign head from S4
     val unalignConcat = Flipped(ValidIO(new LoadStageIO))
 
@@ -1078,7 +1069,7 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
-    val revoke = Output(Bool())
+    val revokeLastCycle, revokeLastLastCycle = Output(Bool())
 
     /**
       * Rollback and re-fetch from IFU, including:
@@ -1112,12 +1103,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     })
   })
 
-  // TODO: consider unalign
-  // TODO: remove this
-  dontTouch(io)
-  dontTouch(io_pipeIn.get)
-  dontTouch(io_pipeOut.get)
-
   val pipeIn = io_pipeIn.get
   val pipeOut = io_pipeOut.get
   val in = pipeIn.bits
@@ -1143,19 +1128,67 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val redirect = io.redirect
   val kill = io.kill || robIdx.needFlush(redirect)
-  val endPipe = !isUnalignHead
+  val endPipe = !isUnalignHead // unalign head will flow to next stage
 
   /**
-    * DCache error handling
+    * Unalign concatenation
+    *
+    * We divide the `shouldWriteback` into two scenarios:
+    * 1. **s4HeadAlwaysWriteback**: Head does not need to consider tail – it writes back directly, which applies when
+    *   the head is an exception or a matchInvalid case
+    * 2. **s4HeadWritebackDependOnTail** Head needs to consider tail – it decides whether to write back, replay, or take
+    *   other actions based on the tail. This applies when the head can be written back normally (i.e., no exception or
+    *   matchInvalid case)
+    */
+  val s4HeadValid = io.unalignConcat.valid
+  val s4Head = io.unalignConcat.bits
+  val s4HeadExceptionVec = s4Head.uop.exceptionVec
+  val s4HeadReplayCause = s4Head.cause.get
+  val s4HeadMatchInvalid = s4Head.matchInvalid.get
+  val s4HeadShouldWakeup = s4Head.shouldWakeup.get
+  val s4HeadAlwaysWriteback = s4Head.headAlwaysWriteback.get
+  val s4HeadWritebackDependOnTail = s4Head.writebackDependOnTail.get
+  val s4HeadHasException = s4Head.hasException.get
+  val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
+  val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
+
+  /**
+    * DCache error handling & exception handling
     * 
     * Noted that exception can affect control signals for wakeup and writeback
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
-  val exceptionVec = WireInit(uop.exceptionVec)
-  val exception = ExceptionNO.selectByFu(exceptionVec, LduCfg).asUInt.orR
-  val shouldWakeup = in.shouldWakeup.get && !dcacheError
-  val shouldWriteback = in.shouldWriteback.get || dcacheError
-  exceptionVec(hardwareError) := uop.exceptionVec(hardwareError) || dcacheError
+  val s3ExceptionVec = WireInit(uop.exceptionVec)
+  val s3Exception = ExceptionNO.selectByFu(s3ExceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(uop.trigger)
+  val exceptionVec = Mux(
+    s4HeadValid && s4HeadHasException,
+    s4HeadExceptionVec,
+    s3ExceptionVec
+  )
+  val exception = s4HeadValid && s4HeadHasException || s3Exception
+  val exceptionFullva = Mux(s4HeadValid && s4HeadHasException, s4Head.fullva, in.fullva)
+  val exceptionGpaddr = Mux(s4HeadValid && s4HeadHasException, s4Head.gpaddr.get, in.gpaddr.get)
+  val exceptionIsForVSnonLeafPTE = Mux(
+    s4HeadValid && s4HeadHasException,
+    s4Head.isForVSnonLeafPTE.get,
+    in.isForVSnonLeafPTE.get
+  )
+  val exceptionVaNeedExt = Mux(
+    s4HeadValid && s4HeadHasException,
+    s4Head.tlbException.get.vaNeedExt,
+    in.tlbException.get.vaNeedExt
+  )
+
+  val s3ShouldWakeup = in.shouldWakeup.get && !dcacheError
+  val s3ShouldWriteback = in.shouldWriteback.get || dcacheError
+  val shouldWakeup = s3ShouldWakeup && (!s4HeadValid || s4HeadShouldWakeup)
+  val shouldWriteback = Mux(
+    s4HeadValid,
+    s4HeadAlwaysWriteback || s4HeadWritebackDependOnTail && s3ShouldWriteback,
+    s3ShouldWriteback
+  )
+
+  s3ExceptionVec(hardwareError) := uop.exceptionVec(hardwareError) || dcacheError
 
   /**
     * Fast replay
@@ -1168,15 +1201,14 @@ class LoadUnitS3(param: ExeUnitParams)(
   fastReplay.cause.get := 0.U.asTypeOf(fastReplay.cause.get)
 
   /**
-    * Unalign concatenation
-    */
-
-  /**
     * RAR / RAW revoke
     */
-  val revokeException = exception
-  val revokeReplay = in.cause.get.asUInt.orR
-  val revoke = revokeException || revokeReplay
+  val s3RevokeException = s3Exception
+  val s3RevokeReplay = in.cause.get.asUInt.orR
+  val s3Revoke = s3RevokeException || s3RevokeReplay
+  val s4HeadRevoke = s4HeadHasException || s4HeadShouldReplay
+  val revokeLastCycle = s3Revoke || s4HeadValid && s4HeadRevoke
+  val revokeLastLastCycle = s4HeadValid && !s4HeadRevoke && s3Revoke
 
   /**
     * Pipeline flush
@@ -1185,23 +1217,26 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   // RAR violation
   val rarResp = io.rarNukeQueryResp
-  val rarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldld_vio_check_enable
+  val s3RarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldld_vio_check_enable && !s3Exception
+  val rarViolation = s3RarViolation || s4HeadValid && s4HeadShouldRARViolation
   // vaddr / paddr mismatch in STLF
-  val matchInvalid = in.matchInvalid.get
+  val s3MatchInvalid = in.matchInvalid.get && !s3Exception
+  val matchInvalid = s3MatchInvalid || s4HeadValid && s4HeadMatchInvalid
 
-  val rollbackValid = pipeIn.valid && (rarViolation || matchInvalid) && !exception
+  val rollbackValid = pipeIn.valid && (rarViolation || matchInvalid) && endPipe
   val rollbackLevel = Mux(matchInvalid, RedirectLevel.flush, RedirectLevel.flushAfter)
 
   /**
     * Load cancel
     */
-  val cancel = pipeIn.valid && !shouldWakeup && isScalar
+  // For unaligned head (endPipe = 0), always cancel, because the unaligned head needs to be combined with tail.
+  val cancel = pipeIn.valid && (!endPipe || !shouldWakeup && isScalar)
 
   /**
     * Writeback to Backend / LQ / VLMergeBuffer
     */
   // Writeback to Backend
-  val ldoutValid = pipeIn.valid && shouldWriteback && isScalar
+  val ldoutValid = pipeIn.valid && shouldWriteback && isScalar && endPipe
   val ldout = Wire(new ExuOutput(param))
   ldout.data := DontCare // assign data from LoadUnitDataPath
   ldout.pdest := uop.pdest
@@ -1224,18 +1259,19 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.debug_seqNum := uop.debug_seqNum
 
   // Writeback to LQ
-  val lqWriteValid = pipeIn.valid && !doFastReplay
+  val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
-  val lqWriteCause = PriorityEncoderOH(in.cause.get)
+  val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, in.cause.get)
+  val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec := exceptionVec
   lqWrite.vaddr := in.vaddr
-  lqWrite.fullva := in.fullva
-  lqWrite.vaNeedExt := in.tlbException.get.vaNeedExt
+  lqWrite.fullva := exceptionFullva
+  lqWrite.vaNeedExt := exceptionVaNeedExt
   lqWrite.paddr := in.paddr.get
-  lqWrite.gpaddr := in.gpaddr.get
+  lqWrite.gpaddr := exceptionGpaddr
   lqWrite.mask := in.mask
   lqWrite.data := DontCare // TODO: remove this
   lqWrite.wlineflag := false.B // TODO: remove this
@@ -1248,7 +1284,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
   lqWrite.hasException := false.B // ?
   lqWrite.isHyper := in.tlbException.get.isHyper
-  lqWrite.isForVSnonLeafPTE := in.isForVSnonLeafPTE.get
+  lqWrite.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
   lqWrite.isPrefetch := false.B // TODO: remove this
   lqWrite.isHWPrefetch := false.B // TODO: remove this
   lqWrite.forwardMask := DontCare // TODO: remove this
@@ -1298,7 +1334,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.addr_inv_sq_idx := in.addrInvalidSqIdx.get
   lqWrite.rep_info.rep_carry := DontCare
   lqWrite.rep_info.last_beat := in.paddr.get(log2Up(refillBytes))
-  lqWrite.rep_info.cause := lqWriteCause
+  lqWrite.rep_info.cause := lqWriteCauseOH
   lqWrite.rep_info.debug := uop.debugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
@@ -1306,7 +1342,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.data_wen_dup := DontCare // TODO: remove this
 
   // Writeback to VLMergeBuffer
-  val vecldoutValid = pipeIn.valid && !kill && shouldWriteback && isVector
+  val vecldoutValid = pipeIn.valid && !kill && shouldWriteback && isVector && endPipe
   val vecldout = Wire(new VecPipelineFeedbackIO(isVStore = false))
   vecldout.mBIndex := in.mbIndex.get
   vecldout.hit := !shouldReplay || lqWriteReady
@@ -1318,10 +1354,10 @@ class LoadUnitS3(param: ExeUnitParams)(
   vecldout.mmio := false.B
   vecldout.exceptionVec := exceptionVec
   vecldout.hasException := exception
-  vecldout.vaddr := in.fullva
-  vecldout.vaNeedExt := in.tlbException.get.vaNeedExt
-  vecldout.gpaddr := in.gpaddr.get
-  vecldout.isForVSnonLeafPTE := in.isForVSnonLeafPTE.get
+  vecldout.vaddr := exceptionFullva
+  vecldout.vaNeedExt := exceptionVaNeedExt
+  vecldout.gpaddr := exceptionGpaddr
+  vecldout.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
   vecldout.vstart := uop.vpu.vstart
   vecldout.vecTriggerMask := in.vecTriggerMask.get
   vecldout.elemIdx := in.elemIdx.get
@@ -1338,10 +1374,10 @@ class LoadUnitS3(param: ExeUnitParams)(
   val exceptionInfo = Wire(new MemExceptionInfo)
   exceptionInfo.robIdx := robIdx
   exceptionInfo.exceptionVec := exceptionVec
-  exceptionInfo.vaddr := in.fullva
-  exceptionInfo.gpaddr := in.gpaddr.get
-  exceptionInfo.isForVSnonLeafPTE := in.isForVSnonLeafPTE.get
-  exceptionInfo.vaNeedExt := in.tlbException.get.vaNeedExt
+  exceptionInfo.vaddr := exceptionFullva
+  exceptionInfo.gpaddr := exceptionGpaddr
+  exceptionInfo.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
+  exceptionInfo.vaNeedExt := exceptionVaNeedExt
   exceptionInfo.isHyper := in.tlbException.get.isHyper
   exceptionInfo.uopIdx := 0.U.asTypeOf(UopIdx())
   exceptionInfo.vl := 0.U
@@ -1355,6 +1391,20 @@ class LoadUnitS3(param: ExeUnitParams)(
   when (kill || endPipe) { pipeOutValid := false.B }
   .elsewhen (pipeIn.fire) { pipeOutValid := true.B }
   .elsewhen (pipeOut.fire) { pipeOutValid := false.B }
+
+  // Consider only unalign head
+  val stageInfo = Wire(pipeOut.bits.cloneType)
+  connectSamePort(stageInfo, in)
+  stageInfo.uop.exceptionVec := s3ExceptionVec
+  stageInfo.matchInvalid.get := s3MatchInvalid
+  stageInfo.shouldWakeup.get := s3ShouldWakeup
+  stageInfo.shouldWriteback.get := s3ShouldWriteback
+  stageInfo.hasException.get := s3Exception
+  stageInfo.headAlwaysWriteback.get := s3Exception || s3MatchInvalid
+  stageInfo.writebackDependOnTail.get := s3ShouldWriteback && !s3Exception && !s3MatchInvalid
+  stageInfo.shouldRarViolation.get := s3RarViolation
+
+  when (pipeIn.fire) { pipeOutBits := stageInfo }
 
   /**
     * IO assignment
@@ -1373,7 +1423,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.fastReplay.valid := shouldFastReplay
   io.fastReplay.bits := fastReplay
 
-  io.revoke := revoke
+  io.revokeLastCycle := revokeLastCycle
+  io.revokeLastLastCycle := revokeLastLastCycle
 
   io.rollback.valid := rollbackValid
   io.rollback.bits := DontCare
@@ -1399,12 +1450,26 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.debugInfo.robIdx := robIdx.value
 }
 
+class LoadUnitS4(param: ExeUnitParams)(
+  implicit p: Parameters,
+  override implicit val s: LoadStage = LoadS4()
+) extends LoadUnitStage(param) {
+  val io = IO(new Bundle() {
+    val unalignConcat = ValidIO(new LoadStageIO()(p, LoadS3()))
+  })
+
+  io_pipeIn.get.ready := true.B
+  io.unalignConcat.valid := io_pipeIn.get.valid
+  io.unalignConcat.bits := io_pipeIn.get.bits
+}
+
 class LoadUnitDataPathMeta(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val bankOffset = UInt(DCacheVWordOffset.W)
   val fuOpType = FuOpType()
   val fpWen = Bool()
   val isNCReplay = Bool()
   val isMMIOReplay = Bool()
+  val isUnalignHead = Bool()
 }
 
 class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule with HadNewLoadHelper {
@@ -1434,6 +1499,9 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   val isNCReplay = s2Meta.isNCReplay
   val isMMIOReplay = s2Meta.isMMIOReplay
   val isUncacheReplay = isNCReplay || isMMIOReplay
+  val isUnalignHead = s2Meta.isUnalignHead
+  val isUnalignTail = RegNext(isUnalignHead && s2Valid, false.B)
+  val unalignHeadBankOffset = RegEnable(bankOffset, isUnalignHead && s2Valid) // from the perspective of unalign tail
 
   val uncacheBypassData = io.s2UncacheBypassResp.bits.data
   val dcacheData = io.s2DCacheResp.bits.data
@@ -1461,16 +1529,35 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   val s2Data = mergeData(rawData, datas, masks)
   val s2RdataTypeOH = genRdataOH(fuOpType, fpWen)
   val s2RdataSelByOffset = VecInit((0 until VLEN / 8).map(i => bankOffset === i.U))
+  // If the load is unaligned, its bank offset must reside in (8, 15]
+  val unalignHeadBankOffsetUpperBound = VLEN / 8 - 1 // 15
+  val unalignHeadBankOffsetLowerBound = XLEN / 8 // 8
+  val s2TailRdataSelByHeadOffset = VecInit(
+    (unalignHeadBankOffsetUpperBound until unalignHeadBankOffsetLowerBound by -1).map(i =>
+      unalignHeadBankOffset === i.U
+    )
+  )
 
   // S3
+  val s3Valid = RegNext(s2Valid, false.B)
   val s3Data = RegEnable(s2Data, s2Valid)
+  val s3IsUnalignTail = RegEnable(isUnalignTail, s2Valid)
   val s3RdataTypeOH = RegEnable(s2RdataTypeOH, s2Valid)
   val s3RdataSelByOffset = RegEnable(s2RdataSelByOffset, s2Valid)
+  val s3TailRdataSelByHeadOffset = RegEnable(s2TailRdataSelByHeadOffset, s2Valid)
   // Data shifting
-  val s3ShiftDataList = (0 until VLEN by 8).map(i => (s3Data >> i))
-  val s3ShiftData = Mux1H(s3RdataSelByOffset, s3ShiftDataList).take(XLEN)
+  val s3ShiftHeadList = (0 until VLEN by 8).map(i => (s3Data >> i))
+  val s3ShiftTailList = (1*8 until XLEN by 8).map(i => (s3Data << i).take(VLEN))
+  val s3ShiftHead = Mux1H(s3RdataSelByOffset, s3ShiftHeadList)
+  val s3ShiftTail = Mux1H(s3TailRdataSelByHeadOffset, s3ShiftTailList)
+  val s4ShiftHead = RegEnable(s3ShiftHead, s3Valid)
+  val s3ShiftData = Mux(
+    s3IsUnalignTail,
+    s4ShiftHead | s3ShiftTail,
+    s3ShiftHead
+  )
   // Sign / Zero extension
-  val s3ShiftAndExtData = genRdata(s3RdataTypeOH, s3ShiftData)
+  val s3ShiftAndExtData = genRdata(s3RdataTypeOH, s3ShiftData.take(XLEN))
 
   // IO assignment
   io.s3ShiftData := s3ShiftData
@@ -1488,22 +1575,6 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   }
 
   def getByte(data: UInt, i: Int): UInt = data((i + 1) * 8 - 1, i * 8)
-}
-
-class LoadUnitS4(param: ExeUnitParams)(
-  implicit p: Parameters,
-  override implicit val s: LoadStage = LoadS4()
-) extends LoadUnitStage(param) {
-  val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
-    val killUnalignTail = Output(Bool())
-    val unalignConcat = ValidIO(new LoadStageIO()(p, LoadS3()))
-  })
-
-  dontTouch(io)
-  dontTouch(io_pipeIn.get)
-  io <> DontCare
-  io_pipeIn.get <> DontCare
 }
 
 class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -1572,7 +1643,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s3.io.unalignConcat <> s4.io.unalignConcat
   s1.io.kill := false.B
   s2.io.kill := false.B
-  s3.io.kill := s4.io.killUnalignTail
+  s3.io.kill := false.B
   dataPath.io.s1Meta := s1.io.dataPathMeta
 
   // IO wiring
@@ -1645,15 +1716,14 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.lqWrite <> s3.io.lqWrite
   io.vecldout <> s3.io.vecldout
   s3.io.rarNukeQueryResp := io.rarNukeQuery.resp
-  io.rarNukeQuery.revoke := s3.io.revoke
-  io.rawNukeQuery.revoke := s3.io.revoke
+  io.rarNukeQuery.revokeLastCycle := s3.io.revokeLastCycle
+  io.rarNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
+  io.rawNukeQuery.revokeLastCycle := s3.io.revokeLastCycle
+  io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
   s3.io.uncacheData := RegNextN(io.uncacheData, 3) // TODO
   s3.io.csrCtrl := io.csrCtrl
-
-  // S4
-  s4.io.redirect := io.redirect
 
   // Data path
   dataPath.io.s2SqForwardResp := io.sqForward.s2Resp

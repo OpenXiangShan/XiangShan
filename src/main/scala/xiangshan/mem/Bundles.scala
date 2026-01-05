@@ -363,13 +363,15 @@ object Bundles {
   class LoadRARNukeQuery(implicit p: Parameters) extends XSBundle {
     val req = DecoupledIO(new LoadNukeQueryReq)
     val resp = Flipped(ValidIO(new LoadNukeQueryResp))
-    val revoke = Output(Bool())
+    val revokeLastCycle = Output(Bool()) // revoke the req in the last cycle
+    val revokeLastLastCycle = Output(Bool()) // revoke the req in the last cycle before last cycle
   }
 
   class LoadRAWNukeQuery(implicit p: Parameters) extends XSBundle {
     // RAW nuke is generated in LoadQueueRAW, therefore there is no response to LDU
     val req = DecoupledIO(new LoadNukeQueryReq)
-    val revoke = Output(Bool())
+    val revokeLastCycle = Output(Bool())
+    val revokeLastLastCycle = Output(Bool())
   }
 
   class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
