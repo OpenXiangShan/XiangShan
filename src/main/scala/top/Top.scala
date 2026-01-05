@@ -492,13 +492,14 @@ object TopMain extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
+  val topPrefix = config(SoCParamsKey).XSTopPrefix
   if (config(SoCParamsKey).UseXSNoCDiffTop) {
     if (enableDifftest) Gateway.setConfig("H") // use XMR to avoid extra topIO
     val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
-    Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
+    Generator.execute(firrtlOpts, DifftestModule.top(soc.module, topPrefix), firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
     val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
-    Generator.execute(firrtlOpts, DifftestModule.top(soc.module), firtoolOpts)
+    Generator.execute(firrtlOpts, DifftestModule.top(soc.module, topPrefix), firtoolOpts)
   } else {
     if (enableDifftest) {
       // TODO: Temporarily force XSTop to use internal DPI-C; will later split Top and Difftest like DiffTop
