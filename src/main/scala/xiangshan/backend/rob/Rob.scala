@@ -1753,7 +1753,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     for (wb <- exuWBs) {
       when(wb.valid) {
         val wbIdx = wb.bits.robIdx.value
-        val idxInEntry = !wb.bits.robIdx.isFormer.asUInt
+        val idxInEntry = !wb.bits.robIdx.isFormer
         dt_exuDebug(wbIdx)(idxInEntry) := wb.bits.debug
       }
     }
