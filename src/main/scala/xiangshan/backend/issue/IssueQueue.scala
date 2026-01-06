@@ -884,7 +884,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
     // when alu select jump uop, src0's dataSource change to imm
     if (params.aluDeqNeedPickJump && (i == 0)) {
-      deq.bits.common.dataSources(0).value := Mux(entries.io.aluDeqSelectJump.get, DataSource.imm, finalDataSources(i)(0).value)
+      val src0IsReadReg = finalDataSources(i)(0).readReg
+      deq.bits.common.dataSources(0).value := Mux(entries.io.aluDeqSelectJump.get && src0IsReadReg, DataSource.imm, finalDataSources(i)(0).value)
     }
     else if (params.aluDeqNeedPickJump && (i == 1)) {
       // assign jump uop form alu deq
