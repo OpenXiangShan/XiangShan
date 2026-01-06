@@ -1384,6 +1384,30 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
   )
   XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
+
+  // By CommitType
+  XSPerfAccumulate("NoCompressIsLoad", PopCount(io.commits.commitValid.zip(instrSizeCommit).zip(io.commits.info).map {
+    case ((valid, instrSize), info) => io.commits.isCommit && valid && instrSize === 1.U && info.commitType === CommitType.LOAD
+  }))
+  XSPerfAccumulate("NoCompressIsStore", PopCount(io.commits.commitValid.zip(instrSizeCommit).zip(io.commits.info).map {
+    case ((valid, instrSize), info) => io.commits.isCommit && valid && instrSize === 1.U && info.commitType === CommitType.STORE
+  }))
+  XSPerfAccumulate("NoCompressIsBranch", PopCount(io.commits.commitValid.zip(instrSizeCommit).zip(io.commits.info).map {
+    case ((valid, instrSize), info) => io.commits.isCommit && valid && instrSize === 1.U && info.commitType === CommitType.BRANCH
+  }))
+  XSPerfAccumulate("NoCompressIsNORMAL", PopCount(io.commits.commitValid.zip(instrSizeCommit).zip(io.commits.info).map {
+    case ((valid, instrSize), info) => io.commits.isCommit && valid && instrSize === 1.U && info.commitType === CommitType.NORMAL
+  }))
+
+  // By FuType
+  for (fuType <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(fuType)
+    val commitIsFuType = io.commits.commitValid.zip(instrSizeCommit).zip(commitDebugUop).map {
+      case ((valid, instrSize), uop) => valid && instrSize === 1.U && uop.fuType === fuType.U
+    }
+    XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
+  }
+
   val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
   val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
   val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)
