@@ -52,7 +52,6 @@ jobs:
             "spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               ;;
-            *)
           esac
 
       - name: Set test branch or commit
@@ -96,6 +95,9 @@ jobs:
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
           fi
+          if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
+            cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
+          fi
 
       - name: Run SPEC CPU2006 checkpoints
         run: |
@@ -104,7 +106,7 @@ jobs:
             --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
-            --nemu-so-path $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so \
+            --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --run
 
       - name: Report SPEC CPU2006 score
