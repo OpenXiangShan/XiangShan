@@ -332,8 +332,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt
 
-  csrOut.isXRet := isXRet
-
   csrOut.trapTarget := csrMod.io.trapTargetPc.bits
   csrOut.interrupt := csrMod.io.status.interrupt
   csrOut.wfi_event := csrMod.io.status.wfiEvent

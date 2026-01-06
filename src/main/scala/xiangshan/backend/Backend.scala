@@ -262,7 +262,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.csrCtrl <> intRegion.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intRegion.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intRegion.io.csrio.get.trapTarget
-  ctrlBlock.io.robio.csr.isXRet := intRegion.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intRegion.io.csrio.get.wfi_event
   ctrlBlock.io.robio.csr.criticalErrorState := intRegion.io.csrio.get.criticalErrorState
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
