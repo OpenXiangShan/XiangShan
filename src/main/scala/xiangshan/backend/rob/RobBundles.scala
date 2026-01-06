@@ -223,7 +223,6 @@ object RobPtr {
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(new TargetPCBundle)
-  val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
   val criticalErrorState = Input(Bool())
 

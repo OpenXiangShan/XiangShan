@@ -98,7 +98,6 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val exception = Flipped(ValidIO(new ExceptionInfo))
   val robDeqPtr = Input(new RobPtr)
   // to ROB
-  val isXRet = Output(Bool())
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
