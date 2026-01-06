@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
+import utility.XSError
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -38,10 +39,9 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   private val s3_fire = io.stageCtrl.s3_fire
 
   // global history
-  private val s0_ghr  = WireInit(0.U.asTypeOf(new GhrEntry))
-  private val ghr     = RegInit(0.U.asTypeOf(new GhrEntry))
-  private val ghrFlag = RegInit(false.B)
-  private val ghrReg  = RegInit(0.U.asTypeOf(new GhrEntry))
+  private val s0_ghr    = WireInit(0.U.asTypeOf(new GhrEntry))
+  private val ghr       = RegInit(0.U.asTypeOf(new GhrEntry))
+  private val ghrBuffer = Module(new Queue(new GhrEntry, StallQueueSize, pipe = true, flow = true, hasFlush = true))
 
   /*
    * GHR train from redirect/s3_prediction
@@ -61,9 +61,11 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
     case (pos, hit) => hit && (pos < s3_firstTakenPos)
   }
   // NOTE: GhrShamt is NumBtbResultEntries, but numLess may be 1 larger than GhrShamt
-  private val s3_numLess   = PopCount(s3_lessThanFirstTaken)
-  private val s3_numHit    = PopCount(s3_hitMask)
-  private val s3_updateGhr = getNewGhr(ghr.value, s3_numLess, s3_numHit, s3_taken)
+  private val s3_numLess = PopCount(s3_lessThanFirstTaken)
+  private val s3_numHit  = PopCount(s3_hitMask)
+  private val s3_ghr     = WireInit(0.U.asTypeOf(new GhrEntry))
+  s3_ghr.valid := true.B
+  s3_ghr.value := getNewGhr(ghr.value, s3_numLess, s3_numHit, s3_taken)
   require(isPow2(GhrShamt), "GhrShamt must be pow2")
 
   /*
@@ -81,36 +83,36 @@ class Ghr(implicit p: Parameters) extends GhrModule with Helpers {
   private val r0_numLess = PopCount(r0_lessThanPc)
   private val r0_numHit  = PopCount(r0_oldHits)
   // TODO: calculate the new ghr based on redirect info maybe need more cycles
-  private val r0_updateGhr = getNewGhr(r0_metaGhr, r0_numLess, r0_numHit, r0_taken)
-
-  when(!s0_fire && s2_fire) {
-    ghrFlag := true.B
-    ghrReg  := ghr
-  }.elsewhen(s0_fire || r0_valid) {
-    ghrFlag := false.B
-  }
+  private val r0_ghr = WireInit(0.U.asTypeOf(new GhrEntry))
+  r0_ghr.valid := false.B
+  r0_ghr.value := getNewGhr(r0_metaGhr, r0_numLess, r0_numHit, r0_taken)
 
   // update from redirect or update
   when(r0_valid) {
-    ghr.valid := false.B
-    ghr.value := r0_updateGhr // TODO: redirect ghr recovery can delay one/two cycle
+    ghr := r0_ghr // TODO: redirect ghr recovery can delay one/two cycle
   }.elsewhen(s3_fire) {
-    ghr.valid := true.B
-    ghr.value := s3_updateGhr
+    ghr := s3_ghr
   }
-  s0_ghr.valid := Mux(r0_valid, false.B, Mux(ghrFlag, ghrReg.valid, Mux(s3_fire, true.B, (!r0_valid) && ghr.valid)))
-  s0_ghr.value := Mux(r0_valid, r0_updateGhr, Mux(ghrFlag, ghrReg.value, Mux(s3_fire, s3_updateGhr, ghr.value)))
+
+  // avoid losing updates due to !s0_fire
+  ghrBuffer.io.enq.valid := s3_fire
+  ghrBuffer.io.enq.bits  := s3_ghr
+  ghrBuffer.io.flush.get := r0_valid
+  ghrBuffer.io.deq.ready := s0_fire
+
+  XSError(s3_fire && !ghrBuffer.io.enq.ready, "GHR stall queue overflow!\n")
+
+  s0_ghr := Mux(r0_valid, r0_ghr, Mux(s0_fire && ghrBuffer.io.deq.valid, ghrBuffer.io.deq.bits, 0.U.asTypeOf(ghr)))
+
   if (EnableCommitGHistDiff) {
-    val s3_updateGhrUInt          = s3_updateGhr.asUInt
     val s3_lessThanFirstTakenUInt = s3_lessThanFirstTaken.asUInt
-    val r0_updateGhrUInt          = r0_updateGhr.asUInt
     val r0_lessThanPcUInt         = r0_lessThanPc.asUInt
     val ghrUInt                   = ghr.value.asUInt
     dontTouch(s3_numLess)
-    dontTouch(s3_updateGhrUInt)
+    dontTouch(s3_ghr)
     dontTouch(s3_lessThanFirstTakenUInt)
     dontTouch(r0_numLess)
-    dontTouch(r0_updateGhrUInt)
+    dontTouch(r0_ghr)
     dontTouch(r0_lessThanPcUInt)
     dontTouch(ghrUInt)
   }
