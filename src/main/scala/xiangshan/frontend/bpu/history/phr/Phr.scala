@@ -95,7 +95,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   redirectData.taken   := io.train.redirect.bits.taken
   redirectData.cfiPc   := io.train.redirect.bits.cfiPc
   redirectData.target  := io.train.redirect.bits.target
-  redirectData.phrMeta := io.train.redirect.bits.speculationMeta.phrMeta
+  redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
@@ -212,7 +212,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
    */
   private val bpTrainValid  = io.commit.valid
   private val bpTrain       = io.commit.bits
-  private val predictHist   = getRedirectPhr(bpTrain.meta.phr)
+  private val predictHist   = getRedirectPhr(bpTrain.meta.debug_phr)
   private val metaPhrFolded = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   AllFoldedHistoryInfo.foreach { info =>
     metaPhrFolded.getHistWithInfo(info).foldedHist :=
@@ -297,11 +297,11 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   require(
-    io.commit.bits.meta.phr.predFoldedHist.hist.length == metaPhrFolded.hist.length,
+    io.commit.bits.meta.debug_phr.predFoldedHist.hist.length == metaPhrFolded.hist.length,
     "pred folded hist length mismatch"
   )
   private val predictFHist_diff_trainFHist =
-    io.commit.valid && io.commit.bits.meta.phr.predFoldedHist.asUInt =/= metaPhrFolded.asUInt
+    io.commit.valid && io.commit.bits.meta.debug_phr.predFoldedHist.asUInt =/= metaPhrFolded.asUInt
   XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
   // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)

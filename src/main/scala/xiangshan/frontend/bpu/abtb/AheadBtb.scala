@@ -26,23 +26,19 @@ import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.utage.MicroTagePrediction
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid:         Bool                       = Input(Bool())
-    val overrideValid:         Bool                       = Input(Bool())
-    val previousStartPc:       Valid[PrunedAddr]          = Flipped(Valid(PrunedAddr(VAddrBits)))
-    val microTagePred:         Valid[MicroTagePrediction] = Input(Valid(new MicroTagePrediction))
-    val prediction:            Prediction                 = Output(new Prediction)
-    val basePrediction:        Prediction                 = Output(new Prediction)
-    val useMicroTage:          Bool                       = Output(Bool())
-    val meta:                  AheadBtbMeta               = Output(new AheadBtbMeta)
-    val debug_startPc:         PrunedAddr                 = Output(PrunedAddr(VAddrBits))
-    val debug_previousStartPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val redirectValid:         Bool                   = Input(Bool())
+    val overrideValid:         Bool                   = Input(Bool())
+    val previousStartPc:       Valid[PrunedAddr]      = Flipped(Valid(PrunedAddr(VAddrBits)))
+    val result:                Vec[Valid[Prediction]] = Output(Vec(NumWays, Valid(new Prediction)))
+    val meta:                  AheadBtbMeta           = Output(new AheadBtbMeta)
+    val debug_startPc:         PrunedAddr             = Output(PrunedAddr(VAddrBits))
+    val debug_previousStartPc: PrunedAddr             = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -69,8 +65,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
       )
     )
   )
-
-  // TODO: write ctr bypass to read
 
   private val s0_fire = Wire(Bool())
   private val s1_fire = Wire(Bool())
@@ -186,37 +180,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   // When detect multi-hit, we need to invalidate one entry.
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_positions)
 
-  private val s2_firstTakenTarget =
-    getFullTarget(s2_startPc, s2_firstTakenEntry.targetLowerBits, s2_firstTakenEntry.targetCarry)
-
-  private val microTagePred = io.microTagePred
-  private val s2_jumpMask = s2_entries.zip(s2_hitMask).map {
-    case (entry, hit) => (entry.attribute.isDirect || entry.attribute.isIndirect) && hit
+  io.result.zipWithIndex.foreach { case (pred, i) =>
+    pred.valid            := s2_valid && s2_hitMask(i)
+    pred.bits.attribute   := s2_entries(i).attribute
+    pred.bits.cfiPosition := s2_entries(i).position
+    pred.bits.target      := getFullTarget(s2_startPc, s2_entries(i).targetLowerBits, s2_entries(i).targetCarry)
+    pred.bits.taken       := s2_takenMask(i)
   }
-  private val s2_microTageHit = s2_entries.zip(s2_hitMask).map {
-    case (entry, hit) => hit && (entry.position === microTagePred.bits.cfiPosition) && entry.attribute.isConditional
-  }
-  private val useMicroTage = s2_microTageHit.reduce(_ || _) && microTagePred.valid && s2_valid
-  // When microTAGE makes a prediction, it must be compared against the position of the jump branch instruction.
-  private val s2_microTageTakenMask = VecInit(s2_jumpMask.zip(s2_microTageHit).map {
-    case (jump, microTageHit) => jump || (microTageHit && microTagePred.bits.taken)
-  })
-  private val microTageTakenOH = s2_compareMatrix.getLeastElementOH(s2_microTageTakenMask)
-  private val microTageEntry   = Mux1H(microTageTakenOH, s2_entries)
-  private val microTageTarget =
-    getFullTarget(s2_startPc, microTageEntry.targetLowerBits, microTageEntry.targetCarry)
-
-  // Only use the microTage result when microTage is valid and a hit occurs.
-  io.useMicroTage           := useMicroTage
-  io.prediction.taken       := Mux(useMicroTage, s2_microTageTakenMask.reduce(_ || _), s2_valid && s2_taken)
-  io.prediction.target      := Mux(useMicroTage, microTageTarget, s2_firstTakenTarget)
-  io.prediction.attribute   := Mux(useMicroTage, microTageEntry.attribute, s2_firstTakenEntry.attribute)
-  io.prediction.cfiPosition := Mux(useMicroTage, microTageEntry.position, s2_firstTakenEntry.position)
-
-  io.basePrediction.taken       := s2_valid && s2_taken
-  io.basePrediction.target      := DontCare
-  io.basePrediction.attribute   := s2_firstTakenEntry.attribute
-  io.basePrediction.cfiPosition := s2_firstTakenEntry.position
 
   io.meta.valid           := s2_valid
   io.meta.hitMask         := s2_hitMask

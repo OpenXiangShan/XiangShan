@@ -51,13 +51,13 @@ class RasStack(implicit p: Parameters) extends RasModule
       val isCall:   Bool            = Input(Bool())
       val callAddr: PrunedAddr      = Input(PrunedAddr(VAddrBits))
       val isRet:    Bool            = Input(Bool())
-      val meta:     RasInternalMeta = Input(new RasInternalMeta)
+      val meta:     RasRedirectMeta = Input(new RasRedirectMeta)
     }
 
     val spec:     RasSpecIO       = new RasSpecIO
     val commit:   RasCommitIO     = new RasCommitIO
     val redirect: RasRedirectIO   = new RasRedirectIO
-    val meta:     RasInternalMeta = Output(new RasInternalMeta)
+    val meta:     RasRedirectMeta = Output(new RasRedirectMeta)
 
     val specNearOverflow: Bool     = Output(Bool())
     val debug:            RasDebug = new RasDebug
@@ -322,11 +322,12 @@ class RasStack(implicit p: Parameters) extends RasModule
 
   io.spec.popAddr := timingTop.retAddr
 
-  io.meta.tosw := tosw
-  io.meta.tosr := tosr
-  io.meta.nos  := topNos
-  io.meta.ssp  := ssp
-  io.meta.sctr := sctr
+  io.meta.tosw       := tosw
+  io.meta.tosr       := tosr
+  io.meta.nos        := topNos
+  io.meta.ssp        := ssp
+  io.meta.sctr       := sctr
+  io.meta.topRetAddr := timingTop.retAddr
 
   private val commitTop = commitStack(nsp)
 

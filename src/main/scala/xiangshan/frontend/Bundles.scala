@@ -23,7 +23,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import utils.EnumUInt
 import xiangshan.Redirect
-import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.TriggerAction
 import xiangshan.backend.GPAMemEntry
@@ -34,7 +33,6 @@ import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
-import xiangshan.frontend.bpu.BpuSpeculationMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
@@ -52,10 +50,9 @@ class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val prediction:      DecoupledIO[BpuPrediction]      = Decoupled(new BpuPrediction)
-  val speculationMeta: DecoupledIO[BpuSpeculationMeta] = Decoupled(new BpuSpeculationMeta)
-  val meta:            DecoupledIO[BpuMeta]            = Decoupled(new BpuMeta)
-  val s3FtqPtr:        FtqPtr                          = Output(new FtqPtr)
+  val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
+  val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
+  val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
