@@ -29,7 +29,7 @@ trait Helpers extends HasScParameters with PhrHelper {
   def neg(x:  SInt): Bool = sign(x)
 
   def getBankMask(pc: PrunedAddr): UInt =
-    UIntToOH((pc >> FetchBlockSizeWidth)(BankWidth - 1, 0))
+    UIntToOH((pc >> (instOffsetBits + log2Ceil(NumWays)))(BankWidth - 1, 0))
 
   def getWayIdx(cfiPosition: UInt): UInt = cfiPosition(log2Ceil(NumWays) - 1, 0)
 
@@ -37,20 +37,20 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
       val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
-      ((pc >> FetchBlockSizeWidth) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
+      ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
     } else {
-      (pc >> FetchBlockSizeWidth)(log2Ceil(numSets) - 1, 0)
+      (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
     }
 
   // get pc ^ ghr for index
   def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int, ghrLen: Int): UInt = {
     val foldedGhr = computeFoldedHist(ghr, log2Ceil(numSets))(ghrLen)
-    ((pc >> FetchBlockSizeWidth) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
+    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
   }
 
   // get pc ^ ghr for index
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
-    (pc >> (BankWidth + FetchBlockSizeWidth))(log2Ceil(numSets) - 1, 0)
+    (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
@@ -63,6 +63,7 @@ trait Helpers extends HasScParameters with PhrHelper {
       writeValidVec: Vec[Bool],
       takenMask:     Vec[Bool],
       wayIdxVec:     Vec[UInt],
+      branchIdxVec:  Vec[UInt],
       metaData:      ScMeta
   ): Vec[ScEntry] = {
     require(
@@ -72,10 +73,10 @@ trait Helpers extends HasScParameters with PhrHelper {
     )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
-      val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).foldLeft(oldEntry.ctr) {
-        case (prevCtr, ((writeValid, writeTaken), writeWayIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U &&
-            (metaData.scPred(wayIdx) =/= writeTaken || !metaData.sumAboveThres(wayIdx))
+      val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).foldLeft(oldEntry.ctr) {
+        case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
+          val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(branchIdx) &&
+            (metaData.scPred(branchIdx) =/= writeTaken || !metaData.sumAboveThres(branchIdx))
           val nextValue = prevCtr.getUpdate(writeTaken)
           val nextCtr   = WireInit(prevCtr)
           nextCtr.value := nextValue
@@ -84,5 +85,25 @@ trait Helpers extends HasScParameters with PhrHelper {
       newEntry.ctr := WireInit(newCtr)
     }
     newEntries
+  }
+
+  def updateWayMask(
+      oldEntries:    Vec[ScEntry],
+      newEntries:    Vec[ScEntry],
+      writeValidVec: Vec[Bool],
+      wayIdxVec:     Vec[UInt]
+  ): Vec[Bool] = {
+    require(
+      writeValidVec.length == wayIdxVec.length,
+      "Length of writeValidVec and wayIdxVec should be the same"
+    )
+    val updateWayMask = WireInit(VecInit.fill(NumWays)(false.B))
+    writeValidVec.zip(wayIdxVec).foreach {
+      case (writeValid, wayIdx) =>
+        when(writeValid && (oldEntries(wayIdx).ctr.value =/= newEntries(wayIdx).ctr.value)) {
+          updateWayMask(wayIdx) := true.B
+        }
+    }
+    updateWayMask
   }
 }

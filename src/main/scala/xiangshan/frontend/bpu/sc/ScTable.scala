@@ -41,7 +41,7 @@ class ScTable(
 
   val io = IO(new ScTableIO())
 
-  def numRows: Int = numSets / numWays / NumBanks
+  def numRows: Int = numSets
 
   private val sram = Seq.fill(NumBanks)(
     Module(new SRAMTemplate(
@@ -82,7 +82,7 @@ class ScTable(
   io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
 
   // update path table
-  private val updateValid    = io.update.valid
+  private val updateValid    = io.update.valid && io.update.wayMask.reduce(_ || _)
   private val updateIdx      = io.update.setIdx
   private val updateWayMask  = io.update.wayMask
   private val updateBankMask = io.update.bankMask

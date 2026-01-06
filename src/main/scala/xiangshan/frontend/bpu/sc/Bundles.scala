@@ -49,19 +49,20 @@ object ScThreshold {
 
 class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasScParameters {
-  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
-  val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
-  val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
+  val setIdx:       UInt         = UInt(log2Ceil(numSets).W)
+  val wayMask:      Vec[Bool]    = Vec(numWays, Bool())
+  val entryVec:     Vec[ScEntry] = Vec(numWays, new ScEntry())
+  override def tag: Option[UInt] = Some(this.wayMask.asUInt) // use wayMask as tag
 }
 
 class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
-  val setIdx:   UInt = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val setIdx:   UInt = UInt(log2Ceil(numSets).W)
   val bankMask: UInt = UInt(NumBanks.W)
 }
 
 class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {
   val valid:    Bool         = Bool()
-  val setIdx:   UInt         = UInt(log2Ceil(numSets / numWays / NumBanks).W)
+  val setIdx:   UInt         = UInt(log2Ceil(numSets).W)
   val bankMask: UInt         = UInt(NumBanks.W)
   val wayMask:  Vec[Bool]    = Vec(numWays, Bool())
   val entryVec: Vec[ScEntry] = Vec(numWays, new ScEntry())
@@ -79,12 +80,41 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
-  val tagePredCtr:     Vec[UInt]      = Vec(NumBtbResultEntries, UInt(TageTakenCtrWidth.W))
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
   val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
-  val predPathIdx: Vec[UInt] =
-    Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size / NumWays / NumBanks).W))
-  val predGlobalIdx: Vec[UInt] =
-    Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size / NumWays / NumBanks).W))
-  val predBiasIdx: UInt = UInt(log2Ceil(BiasTableSize / BiasTableNumWays / NumBanks).W)
+
+  // for debug
+  val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_predPathIdx: Option[Vec[UInt]] =
+    Some(Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size).W)))
+  val debug_predGlobalIdx: Option[Vec[UInt]] =
+    Some(Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size).W)))
+  val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableSize).W))
+}
+
+class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
+  private def ScEntryWidth = (new ScEntry).getWidth
+  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
+  val cfiPc:   UInt       = UInt(VAddrBits.W)
+
+  val providerValid: Bool = Bool()
+  val providerTaken: Bool = Bool()
+  val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
+
+  val pathResp: Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
+
+  val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
+
+  val biasResp: UInt = UInt(ScEntryWidth.W)
+
+  val sumAboveThres: Bool = Bool()
+  val scPred:        Bool = Bool()
+  val useSc:         Bool = Bool()
+
+  val scCorrectTageWrong:   Bool = Bool()
+  val scWrongTageCorrect:   Bool = Bool()
+  val scCorrectTageCorrect: Bool = Bool()
+  val scWrongTageWrong:     Bool = Bool()
 }

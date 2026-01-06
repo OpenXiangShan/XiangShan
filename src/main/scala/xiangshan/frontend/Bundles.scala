@@ -357,15 +357,16 @@ class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 object BlameBpuSource {
-  object BlameType extends EnumUInt(4) {
+  object BlameType extends EnumUInt(5) {
     def BTB:    UInt = 0.U(width.W)
     def TAGE:   UInt = 1.U(width.W)
     def RAS:    UInt = 2.U(width.W)
     def ITTAGE: UInt = 3.U(width.W)
+    def SC:     UInt = 4.U(width.W)
   }
 
   def apply(perf: BpuPerfMeta, branch: BranchInfo): UInt = {
-    import BlameType.{BTB, TAGE, RAS, ITTAGE}
+    import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
     val src  = perf.bpSource
     val pred = perf.bpPred
     val attr = branch.attribute
@@ -391,6 +392,12 @@ object BlameBpuSource {
       }.elsewhen(attr.isConditional) {
         blame := TAGE
         // If cond after, should trigger assertion, TODO
+      }.otherwise {
+        blame := BTB
+      }
+    }.elsewhen(src.s3MbtbSc) {
+      when(attr.isConditional) {
+        blame := Mux(onlyDirectionWrong, SC, BTB)
       }.otherwise {
         blame := BTB
       }

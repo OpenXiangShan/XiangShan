@@ -21,17 +21,17 @@ import xiangshan.frontend.bpu.ScTableInfo
 
 case class ScParameters(
     PathTableInfos: Seq[ScTableInfo] = Seq(
-      new ScTableInfo(1024, 8),
-      new ScTableInfo(1024, 16)
+      new ScTableInfo(128, 8),
+      new ScTableInfo(128, 16)
     ),
     GlobalTableInfos: Seq[ScTableInfo] = Seq(
-      new ScTableInfo(1024, 8),
-      new ScTableInfo(1024, 16)
+      new ScTableInfo(128, 8),
+      new ScTableInfo(128, 16)
     ),
-    BiasTableSize:       Int = 1024,
+    BiasTableSize:       Int = 128,
     BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
 
-    PathEnable:      Boolean = false,
+    PathEnable:      Boolean = true,
     GlobalEnable:    Boolean = false,
     BiasEnable:      Boolean = true,
     CtrWidth:        Int = 6,
@@ -39,7 +39,8 @@ case class ScParameters(
     NumTables:       Int = 2,
     NumBanks:        Int = 2,
     WriteBufferSize: Int = 4,
-    TagWidth:        Int = 12
+    TagWidth:        Int = 12,
+    EnableScTrace:   Boolean = false
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
@@ -69,4 +70,5 @@ trait HasScParameters extends HasBpuParameters {
 
   def WriteBufferSize: Int = scParameters.WriteBufferSize
   def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2
+  def EnableScTrace: Boolean = scParameters.EnableScTrace
 }

@@ -143,7 +143,7 @@ class ScTableInfo(
     require(numBanks > 0, "numBanks must be > 0")
     if (HistoryLength > 0)
       Set(
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size / numBanks / numWays)))
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size)))
       )
     else
       Set[FoldedHistoryInfo]()
