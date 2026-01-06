@@ -478,62 +478,32 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
-    if (i == 0) {
-      when(canEnqueue(i)) {
-        val enqUop = io.enq.req(i).bits
-        val enqIndex = allocatePtrVec(i).value
-        val subIndex = !io.enq.req(i).bits.robIdx.isFormer
-        // store uop in data module and debug_microOp Vec
-        debug_microOp(enqIndex)(subIndex) := enqUop
-        debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
-        debug_lsInfo(enqIndex) := DebugLsInfo.init
-        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
-        debug_lqIdxValid(enqIndex) := false.B
-        debug_lsIssued(enqIndex) := false.B
-        when (enqUop.waitForward) {
-          hasWaitForward := true.B
-        }
-        val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
-        val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
-        when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
-          hasWFI := true.B
-        }
+    when(io.enq.canAccept && io.enq.req(i).valid) {
+      val enqUop = io.enq.req(i).bits
+      val enqIndex = io.enq.req(i).bits.robIdx.value
+      val subIndex = !io.enq.req(i).bits.robIdx.isFormer
+      // store uop in data module and debug_microOp Vec
+      debug_microOp(enqIndex)(subIndex) := enqUop
+      debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
+      debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
+      debug_lsInfo(enqIndex) := DebugLsInfo.init
+      debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
+      debug_lqIdxValid(enqIndex) := false.B
+      debug_lsIssued(enqIndex) := false.B
+      when(enqUop.waitForward) {
+        hasWaitForward := true.B
       }
-    } else {
-      when(canEnqueue(i) || canEnqueue(i-1) && CompressType.isCC(io.enq.req(i-1).bits.compressType)) {
-        val enqUop = io.enq.req(i).bits
-        val enqIndex = Mux(canEnqueue(i), allocatePtrVec(i).value, allocatePtrVec(i-1).value)
-        val subIndex = !io.enq.req(i).bits.robIdx.isFormer
-        // store uop in data module and debug_microOp Vec
-        debug_microOp(enqIndex)(subIndex) := enqUop
-        debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
-        debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
-        debug_lsInfo(enqIndex) := DebugLsInfo.init
-        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
-        debug_lqIdxValid(enqIndex) := false.B
-        debug_lsIssued(enqIndex) := false.B
-        when (enqUop.waitForward) {
-          hasWaitForward := true.B
-        }
-        val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
-        val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
-        when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
-          hasWFI := true.B
-        }
+      val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
+      val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
+      when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
+        hasWFI := true.B
       }
     }
-
   }
 
   for (i <- 0 until RenameWidth) {
@@ -1772,21 +1742,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_exuDebug = Reg(Vec(RobSize, Vec(2, new DebugBundle)))
 
     for (i <- 0 until RenameWidth) {
-      val idxInEntry = !io.enq.req(i).bits.robIdx.isFormer.asUInt
-      if (i == 0) {
-        when(canEnqueue(i)) {
-          val robIdx = allocatePtrVec(i).value
-          dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
-          dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
-          dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
-        }
-      } else {
-        when(canEnqueue(i) || canEnqueue(i-1) && CompressType.isCC(io.enq.req(i-1).bits.compressType)) {
-          val robIdx = Mux(canEnqueue(i), allocatePtrVec(i).value, allocatePtrVec(i-1).value)
-          dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
-          dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
-          dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
-        }
+      when(io.enq.canAccept && io.enq.req(i).valid) {
+        val robIdx = io.enq.req(i).bits.robIdx.value
+        val idxInEntry = !io.enq.req(i).bits.robIdx.isFormer
+        dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
+        dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
+        dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
       }
     }
     for (wb <- exuWBs) {
