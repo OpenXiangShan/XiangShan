@@ -133,7 +133,13 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.msiAck := tile.module.io.msiAck
     io.hartIsInReset := tile.module.io.hartIsInReset
-    io.traceCoreInterface <> tile.module.io.traceCoreInterface
+    withClockAndReset(clock, reset_sync) {
+      tile.module.io.traceCoreInterface.fromEncoder.enable := 
+        AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.enable, 3, 0)
+      tile.module.io.traceCoreInterface.fromEncoder.stall := 
+        AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.stall, 3, 0)
+    }
+    io.traceCoreInterface.toEncoder := tile.module.io.traceCoreInterface.toEncoder
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
