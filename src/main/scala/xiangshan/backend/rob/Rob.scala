@@ -627,7 +627,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
-  val deqNeedFlush = deqPtrEntry.needFlush.asUInt.orR && deqPtrEntry.commit_v && deqPtrEntry.commit_w
+  val deqNeedFlush = (deqPtrEntry.needFlush(0) || deqPtrEntry.needFlush(1) && CompressType.isNotNORMAL(deqPtrEntry.compressType)) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
@@ -970,7 +970,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
   val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush.asUInt.orR)).asUInt.orR || intrBitSetReg
+  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && (x.needFlush(0) || x.needFlush(1) && CompressType.isNotNORMAL(x.compressType)))).asUInt.orR || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   io.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(io.commits.commitValid)))
 
@@ -1249,7 +1249,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     when(robEntries(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === i.U && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
       robEntries(i).uopNum := 0.U
-    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && (needFlush.asUInt.orR || needFlushWriteBack)) {
+    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robEntries(i).compressType)) || needFlushWriteBack)) {
       // exception flush
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
@@ -1323,7 +1323,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // TODO: clear uopNum
     when(needUpdate(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === needUpdateRobIdx(i) && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
       needUpdate(i).uopNum := 0.U
-    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && (needFlush.asUInt.orR || needFlushWriteBack)) {
+    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robBanksRdata(i).compressType)) || needFlushWriteBack)) {
       // exception flush
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
