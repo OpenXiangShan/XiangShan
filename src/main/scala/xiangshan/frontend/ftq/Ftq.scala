@@ -181,12 +181,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
   }
 
-  speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
-
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueResolve(s3BpuPtr) := io.fromBpu.meta.bits
     metaQueueCommit(s3BpuPtr)  := io.fromBpu.meta.bits.ras
+    speculationQueue(s3BpuPtr) := io.fromBpu.speculationMeta.bits
 
     perfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     perfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
