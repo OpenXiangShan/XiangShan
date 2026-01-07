@@ -199,7 +199,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     val index = PopCount(needAlloc.take(i))
     val allocPtr = enqPtrExt(index)
     val entry_match_bits = Cat(valids.zip(entries).zipWithIndex.map {
-      case((v, e), id) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr) && (deqPtr =/= id.U)
+      case((v, e), id) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr) && !(deqPtr === id.U && valids(deqPtr))
     })
     val entry_match = entry_match_bits.orR
     val entry_match_index = OHToUInt(Reverse(entry_match_bits))
@@ -213,7 +213,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     }.foldLeft(0.U)(_ | _)
     needUpdate(i) := req_v && entry_match && !prev_enq_match && io.enable
 
-    needAlloc(i) := req_v && !entry_match && !prev_enq_match && (block_hash_tag(entries(deqPtr).vaddr) =/= block_hash_tag(req.vaddr))
+    needAlloc(i) := req_v && !entry_match && !prev_enq_match && !(block_hash_tag(entries(deqPtr).vaddr) === block_hash_tag(req.vaddr) && valids(deqPtr))
     canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt && io.enable
 
     when(canAlloc(i)) {
@@ -251,6 +251,8 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   when(io.train_req.fire) {
     valids(deqPtr) := false.B
     deqPtrExt := deqPtrExt + 1.U
+  }.elsewhen(deq_merge_access.orR && valids(deqPtr)) {
+    entries(deqPtr).access_vec := entries(deqPtr).access_vec | deq_merge_access
   }
 
   when(RegNext(io.flush)) {
