@@ -69,9 +69,12 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
 }
 
 class PhrMeta(implicit p: Parameters) extends PhrBundle {
-  val phrPtr:         PhrPtr                = new PhrPtr
-  val phrLowBits:     UInt                  = UInt(PathHashHighWidth.W)
-  val predFoldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo) // for debug
+  val phrPtr:     PhrPtr = new PhrPtr
+  val phrLowBits: UInt   = UInt(PathHashHighWidth.W)
+
+  // for debug
+  val predFoldedHist: Option[PhrAllFoldedHistories] =
+    Option.when(!env.FPGAPlatform)(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
 }
 
 // NOTE: Folded history maintenance logic reuse kmh-v2 ghr folded history management logic,

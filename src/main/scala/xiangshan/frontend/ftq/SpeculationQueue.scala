@@ -19,24 +19,24 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SyncDataModuleTemplate
-import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.BpuRedirectMeta
 
 class SpeculationQueue(implicit p: Parameters) extends FtqModule {
 
   class SpeculationQueueIO extends FtqBundle {
-    val ren:   Bool               = Input(Bool())
-    val raddr: UInt               = Input(UInt(log2Up(FtqSize).W))
-    val rdata: BpuSpeculationMeta = Output(new BpuSpeculationMeta)
+    val ren:   Bool            = Input(Bool())
+    val raddr: UInt            = Input(UInt(log2Up(FtqSize).W))
+    val rdata: BpuRedirectMeta = Output(new BpuRedirectMeta)
 
-    val wen:   Bool               = Input(Bool())
-    val waddr: UInt               = Input(UInt(log2Up(FtqSize).W))
-    val wdata: BpuSpeculationMeta = Input(new BpuSpeculationMeta)
+    val wen:   Bool            = Input(Bool())
+    val waddr: UInt            = Input(UInt(log2Up(FtqSize).W))
+    val wdata: BpuRedirectMeta = Input(new BpuRedirectMeta)
   }
 
   val io: SpeculationQueueIO = IO(new SpeculationQueueIO)
 
   private val mem = Module(new SyncDataModuleTemplate(
-    gen = new BpuSpeculationMeta,
+    gen = new BpuRedirectMeta,
     numEntries = FtqSize,
     numRead = 1,
     numWrite = 1,
