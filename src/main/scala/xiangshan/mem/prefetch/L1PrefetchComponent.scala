@@ -192,7 +192,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
   val needUpdate = Wire(Vec(enqLen, Bool()))
-  val merge_access_vec = Wire(Vec(enqLen, UInt(8.W)))
+  val merge_access_vec = Wire(Vec(enqLen, UInt((blockBytes/DCacheWordBytes).W)))
 
   for(i <- (0 until enqLen)) {
     val req = reqs_l(i)
