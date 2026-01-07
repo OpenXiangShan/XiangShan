@@ -20,17 +20,18 @@ case class StreamStrideParams() extends PrefetcherParams{
 // only for region type of prefetch
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
-  val REGION_SIZE = 1024
+  def BLOCK_SIZE = dcacheParameters.blockBytes
+  def BIT_VEC_WITDH = 16
+  val REGION_SIZE = BLOCK_SIZE * BIT_VEC_WITDH
   val PAGE_OFFSET = 12
-  val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
-  val BIT_VEC_WITDH = REGION_SIZE / dcacheParameters.blockBytes
+  val BLOCK_OFFSET = log2Up(BLOCK_SIZE)
   val REGION_BITS = log2Up(BIT_VEC_WITDH)
   val REGION_TAG_OFFSET = BLOCK_OFFSET + REGION_BITS
   val REGION_TAG_BITS = VAddrBits - BLOCK_OFFSET - REGION_BITS
 
   // hash related
   val VADDR_HASH_WIDTH = 5
-  val BLK_ADDR_RAW_WIDTH = 10
+  val BLK_ADDR_RAW_WIDTH = REGION_BITS + BLOCK_OFFSET
   val HASH_TAG_WIDTH = VADDR_HASH_WIDTH + BLK_ADDR_RAW_WIDTH
 
   // capacity related
@@ -961,7 +962,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new TrainFilter(STREAM_FILTER_SIZE, "stream"))
-  val stream_bit_vec_array = Module(new StreamBitVectorArray(CELL_SIZE = 64))
+  val stream_bit_vec_array = Module(new StreamBitVectorArray(train_granularity = dcacheParameters.blockBytes))
   val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
