@@ -7,6 +7,11 @@ on:
         description: Branch or commit to run performance test on
         required: true
         type: string
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: string
+        default: KunminghuV2Config
       benchmark_type:
         required: false
         type: string
@@ -92,6 +97,7 @@ jobs:
             cp $SPEC_DIR/emu $NOOP_HOME/build/emu
           else
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
+              --config "{{ inputs.xs_config }}"                             \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
               --with-dramsim3 --threads 8                                   \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
