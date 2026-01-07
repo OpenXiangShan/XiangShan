@@ -77,10 +77,10 @@ trait Helpers extends HasScParameters with PhrHelper {
         case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
           val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(branchIdx) &&
             (metaData.scPred(branchIdx) =/= writeTaken || !metaData.sumAboveThres(branchIdx))
-          val nextValue = prevCtr.getUpdate(writeTaken)
-          val nextCtr   = WireInit(prevCtr)
-          nextCtr.value := nextValue
-          Mux(needUpdate, nextCtr, prevCtr)
+          prevCtr.getUpdate(
+            writeTaken,
+            needUpdate
+          )
       }
       newEntry.ctr := WireInit(newCtr)
     }

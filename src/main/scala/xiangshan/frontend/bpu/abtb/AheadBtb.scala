@@ -65,7 +65,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val takenCounter = RegInit(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumSets)(
-        VecInit.fill(NumWays)(0.U.asTypeOf(new SaturateCounter(TakenCounterWidth)))
+        VecInit.fill(NumWays)(TakenCounter.Zero)
       )
     )
   )
@@ -293,9 +293,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
           val needDecrease  = updateThisSet && (!t1_trainTaken || t1_trainTaken && before) && isCond
           val needIncrease  = updateThisSet && t1_trainTaken && equal && isCond
 
-          when(needReset)(ctr.resetNeutral())
-            .elsewhen(needDecrease)(ctr.decrease())
-            .elsewhen(needIncrease)(ctr.increase())
+          when(needReset)(ctr.resetWeakPositive())
+            .elsewhen(needDecrease)(ctr.selfDecrease())
+            .elsewhen(needIncrease)(ctr.selfIncrease())
       }
     }
   }

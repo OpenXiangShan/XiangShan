@@ -66,7 +66,7 @@ class TageTable(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumWays)(
         VecInit.fill(NumSets)(
-          0.U.asTypeOf(new SaturateCounter(UsefulCtrWidth))
+          UsefulCounter.Zero
         )
       )
     )
@@ -122,7 +122,7 @@ class TageTable(
       when(io.resetUseful) {
         ctrsPerWay.foreach(_.resetZero())
       }.elsewhen(readPort.fire) {
-        ctrsPerWay(setIdx).value := readPort.bits.usefulCtr.value
+        ctrsPerWay(setIdx) := readPort.bits.usefulCtr
       }
     }
   }

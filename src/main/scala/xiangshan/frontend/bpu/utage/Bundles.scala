@@ -18,7 +18,18 @@ package xiangshan.frontend.bpu.utage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.bpu.SaturateCounterFactory
+
+object TakenCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.utageParameters.TakenCtrWidth
+}
+
+object UsefulCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.utageParameters.UsefulWidth
+}
 
 class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
   val taken:       Bool = Bool()

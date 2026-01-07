@@ -79,8 +79,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val histTableTakenMap       = tables.map(_.resp.bits.taken)
   private val histTableUsefulVec      = VecInit(tables.map(_.resp.bits.useful))
   private val histTableCfiPositionVec = VecInit(tables.map(_.resp.bits.cfiPosition))
-  private val choseTableTakenCtr      = MuxCase(0.U.asTypeOf(new SaturateCounter(TakenCtrWidth)), takenCtrCase)
-  private val choseTableUseful        = MuxCase(0.U.asTypeOf(new SaturateCounter(UsefulWidth)), usefulCase)
+  private val choseTableTakenCtr      = MuxCase(TakenCounter.Zero, takenCtrCase)
+  private val choseTableUseful        = MuxCase(UsefulCounter.Zero, usefulCase)
 
   private val finalPredTaken       = MuxCase(false.B, takenCases)
   private val finalPredCfiPosition = MuxCase(0.U(CfiPositionWidth.W), cfiPositionCases)
