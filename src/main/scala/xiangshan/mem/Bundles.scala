@@ -150,7 +150,7 @@ object Bundles {
       res.miss := this.miss
       res.pfHitStream := isFromStream(this.meta_prefetch)
       // Finer-grained access information
-      res.access_vec := UIntToOH(this.vaddr(DCacheLineOffset-1, DCacheWordOffset))
+      res.accessVec := UIntToOH(this.vaddr(DCacheLineOffset-1, DCacheWordOffset))
       res
     }
 

@@ -201,7 +201,7 @@ class StreamBitVectorArray(val train_granularity: Int)(implicit p: Parameters) e
   val s0_vaddr = io.train_req.bits.vaddr
   val s0_miss  = io.train_req.bits.miss
   val s0_pfHit = io.train_req.bits.pfHitStream
-  val s0_access_vec = io.train_req.bits.access_vec 
+  val s0_access_vec = io.train_req.bits.accessVec 
   val s0_region_bits = get_region_bits(s0_vaddr)
   val s0_region_tag = get_region_tag(s0_vaddr)
   val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
