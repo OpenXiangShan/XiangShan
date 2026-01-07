@@ -606,8 +606,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
   for (i <- 1 until RenameWidth) {
-    val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
-      if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)
+    val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, index) =>
+      if (index == 3) (s === SrcType.vp) || (s === SrcType.v0)
       else false.B
     }
     val vlCond = io.in(i).bits.vlRen
