@@ -204,16 +204,16 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     val entry_match = entry_match_bits.orR
     val entry_match_index = OHToUInt(Reverse(entry_match_bits))
     
-    val isUniqueReq = if(i == enqLen - 1) true.B else !Cat(reqs_l.zip(reqs_vl).drop(i + 1).map {
-      case (back, back_v) => back_v && block_hash_tag(back.vaddr) === block_hash_tag(reqs_l(i).vaddr)
+    val prev_enq_match = if(i == 0) false.B else Cat(reqs_l.zip(reqs_vl).take(i).map {
+      case(pre, pre_v) => pre_v && block_hash_tag(pre.vaddr) === block_hash_tag(req.vaddr)
     }).orR
 
     merge_access_vec(i) := reqs_l.zip(reqs_vl).map {
-      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(reqs_l(i).vaddr), e.access_vec, 0.U)
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr), e.access_vec, 0.U)
     }.foldLeft(0.U)(_ | _)
-    needUpdate(i) := req_v && entry_match && isUniqueReq && io.enable
+    needUpdate(i) := req_v && entry_match && !prev_enq_match && io.enable
 
-    needAlloc(i) := req_v && !entry_match && isUniqueReq
+    needAlloc(i) := req_v && !entry_match && !prev_enq_match && (block_hash_tag(entries(deqPtr).vaddr) =/= block_hash_tag(req.vaddr))
     canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt && io.enable
 
     when(canAlloc(i)) {
@@ -231,6 +231,11 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   enqPtrExt.foreach{case x => when(canAlloc.asUInt.orR) {x := x + allocNum} }
 
   // deq
+
+  val deq_merge_access = reqs_l.zip(reqs_vl).map {
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(entries(deqPtr).vaddr), e.access_vec, 0.U)
+  }.foldLeft(0.U)(_ | _)
+  
   io.train_req.valid := false.B
   io.train_req.bits := DontCare
   valids.zip(entries).zipWithIndex.foreach {
@@ -238,6 +243,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
       when(deqPtr === i.U) {
         io.train_req.valid := valid && io.enable
         io.train_req.bits := entry
+        io.train_req.bits.access_vec := entry.access_vec | deq_merge_access
       }
     }
   }
