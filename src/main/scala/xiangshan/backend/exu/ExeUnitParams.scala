@@ -82,7 +82,7 @@ case class ExeUnitParams(
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
-  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR
+  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR || this.hasVLoadFu
   def needFtqPtrOffset: Boolean = needFtqPtr || this.aluNeedPc
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
