@@ -52,8 +52,65 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   require(WIDTH_BYTES >= dcacheParameters.blockBytes)
 }
 
-class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
-  val tag = UInt(REGION_TAG_BITS.W)
+trait HasStreamPrefetchUnitHelper extends HasStreamPrefetchHelper{
+  // CELL_SIZE: 8 , 16 , 32 , 64
+  val CELL_SIZE : Int
+
+  val CELL_OFFSET = log2Up(CELL_SIZE)
+  val UNIT_BITS = log2Up(BIT_VEC_ARRAY_SIZE)
+  val UNIT_TAG_OFFSET = CELL_OFFSET + UNIT_BITS
+  val UNIT_TAG_BITS = VAddrBits - CELL_OFFSET - UNIT_BITS
+
+  // hash related
+  val CELL_ADDR_RAW_WIDTH = UNIT_TAG_OFFSET
+  val HASH_CELLTAG_WIDTH = VADDR_HASH_WIDTH + CELL_ADDR_RAW_WIDTH
+
+  // vaddr: |       unit tag        |  unit bits  | cell offset |
+  def get_unit_tag(vaddr: UInt) = {
+    require(vaddr.getWidth == VAddrBits)
+    vaddr(vaddr.getWidth - 1, UNIT_TAG_OFFSET)
+  }
+
+  def get_unit_bits(vaddr: UInt) = {
+    require(vaddr.getWidth == VAddrBits)
+    vaddr(UNIT_TAG_OFFSET - 1, CELL_OFFSET)
+  }
+
+  def cell_addr(x: UInt): UInt = {
+    x(x.getWidth - 1, CELL_OFFSET)
+  }
+
+  def pc_hash_celltag(x: UInt): UInt = {
+    val low = x(CELL_ADDR_RAW_WIDTH - 1, 0)
+    val high = x(CELL_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, CELL_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def cell_hash_tag(x: UInt): UInt = {
+    val blk_addr = cell_addr(x)
+    val low = blk_addr(CELL_ADDR_RAW_WIDTH - 1, 0)
+    val high = blk_addr(CELL_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, CELL_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def unit_hash_tag(unit_tag: UInt): UInt = {
+    val low = unit_tag(CELL_ADDR_RAW_WIDTH - 1, 0)
+    val high = unit_tag(CELL_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, CELL_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def unit_to_cell_addr(unit_tag: UInt, unit_bits: UInt): UInt = {
+    Cat(unit_tag, unit_bits)
+  }
+  require(CELL_SIZE == 8 || CELL_SIZE == 16 || CELL_SIZE == 32 || CELL_SIZE == 64, "CELL_SIZE must be 8, 16, 32, or 64")
+  require(BIT_VEC_WITDH == 16, "BIT_VEC_WITDH must be 16")
+}
+
+class StreamBitVectorBundle(val CELL_SIZE: Int)(implicit p: Parameters) extends XSBundle with HasStreamPrefetchUnitHelper {
+  val tag = UInt(UNIT_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val active = Bool()
   // cnt can be optimized
@@ -73,29 +130,24 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   }
 
   def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
-    valid1 && valid2 && region_hash_tag(tag) === region_hash_tag(new_tag)
+    valid1 && valid2 && unit_hash_tag(tag) === unit_hash_tag(new_tag)
   }
 
   def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool, alloc_full_vaddr: UInt) = {
     tag := alloc_tag
     bit_vec := alloc_bit_vec
     active := alloc_active
-    cnt := 1.U
+    cnt := PopCount(alloc_bit_vec)
     trigger_full_va := alloc_full_vaddr
     if(ENABLE_DECR_MODE) {
       decr_mode := alloc_decr_mode
     }else {
       decr_mode := INIT_DEC_MODE.B
     }
-
-
-    assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
   def update(update_bit_vec: UInt, update_active: Bool) = {
-    // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
-    val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
+    val cnt_next = PopCount(bit_vec | update_bit_vec)
 
     bit_vec := bit_vec | update_bit_vec
     cnt := cnt_next
@@ -106,12 +158,11 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
       active := true.B
     }
 
-    assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
     assert(cnt <= BIT_VEC_WITDH.U, "cnt should always less than bit vector size")
   }
 }
 
-class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
+class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper {
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val sink = UInt(SINK_BITS.W)
@@ -163,7 +214,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   }
 }
 
-class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends XSModule with HasStreamPrefetchUnitHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
@@ -179,7 +230,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val stream_lookup_resp = Output(Bool())
   })
 
-  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
+  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle(CELL_SIZE)))
   val valids = RegInit(VecInit(Seq.fill(BIT_VEC_ARRAY_SIZE)(false.B)))
 
   def reset_array(i: Int): Unit = {
@@ -197,10 +248,11 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_vaddr = io.train_req.bits.vaddr
   val s0_miss  = io.train_req.bits.miss
   val s0_pfHit = io.train_req.bits.pfHitStream
-  val s0_region_bits = get_region_bits(s0_vaddr)
-  val s0_region_tag = get_region_tag(s0_vaddr)
-  val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
-  val s0_region_tag_minus_one = get_region_tag(s0_vaddr) - 1.U
+  val s0_access_vec = io.train_req.bits.access_vec 
+  val s0_region_bits = get_unit_bits(s0_vaddr)
+  val s0_region_tag = get_unit_tag(s0_vaddr)
+  val s0_region_tag_plus_one = get_unit_tag(s0_vaddr) + 1.U
+  val s0_region_tag_minus_one = get_unit_tag(s0_vaddr) - 1.U
   val s0_region_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag) }
   val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_plus_one) }
   val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_minus_one) }
@@ -302,6 +354,21 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
                             RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
+  // The granularity of s0_access_vec is 8B, but the granularity of array_bit_vec is CELL_SIZE
+  // So generate the correct bit_vec according to CELL_SIZE to alloc or update array_bit_vec
+  val access_vec = CELL_SIZE match {
+    case 8  => s0_access_vec
+    case 16 => VecInit.tabulate(4) { i => s0_access_vec(2 * i) || s0_access_vec(2 * i + 1) }.asUInt
+    case 32 => VecInit.tabulate(2) { i => s0_access_vec(4 * i) || s0_access_vec(4 * i + 1) || s0_access_vec(4 * i + 2) || s0_access_vec(4 * i + 3) }.asUInt
+    case 64 => s0_access_vec.orR
+  }
+  val offset = CELL_SIZE match {
+    case 8  => s0_region_bits & "b1000".U
+    case 16 => s0_region_bits & "b1100".U
+    case 32 => s0_region_bits & "b1110".U
+    case 64 => s0_region_bits & "b1111".U
+  }
+  val s1_access_vec = RegEnable(access_vec << offset, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
   val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l1_depth, 0.U(BLOCK_OFFSET.W))
@@ -315,15 +382,16 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // If use strict triggering mode, the stream prefetcher will only trigger prefetching
   // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
   val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
-  s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
+  // s1_access_vec may have multiple bits set to 1
+  val s1_can_send_pf = Mux(s1_update, ((~array(s1_index).bit_vec) & s1_access_vec).orR, true.B) && s1_can_trigger
+  s0_can_accept := !(s1_valid && (unit_hash_tag(s1_region_tag) === unit_hash_tag(s0_region_tag)))
 
   when(s1_alloc) {
     // alloc a new entry
     valids(s1_index) := true.B
     array(s1_index).alloc(
       alloc_tag = s1_region_tag,
-      alloc_bit_vec = UIntToOH(s1_region_bits),
+      alloc_bit_vec = s1_access_vec,
       alloc_active = s1_plus_one_hit || s1_minus_one_hit,
       alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid),
       alloc_full_vaddr = RegEnable(s0_vaddr, s0_valid)
@@ -333,7 +401,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
     array(s1_index).update(
-      update_bit_vec = UIntToOH(s1_region_bits),
+      update_bit_vec = s1_access_vec,
       update_active = s1_plus_one_hit || s1_minus_one_hit)
   }
 
@@ -434,7 +502,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // S0: Stride send req
   val s0_lookup_valid = io.stream_lookup_req.valid
   val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
-  val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
+  val s0_lookup_tag = get_unit_tag(s0_lookup_vaddr)
   // S1: match
   val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
   val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
@@ -461,5 +529,5 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   XSPerfHistogram("bit_vector_active", PopCount(VecInit(array.map(_.active)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
   XSPerfHistogram("bit_vector_decr_mode", PopCount(VecInit(array.map(_.decr_mode)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
-  XSPerfAccumulate("hash_conflict", s0_valid && s2_valid && (s0_region_tag =/= s2_region_tag) && (region_hash_tag(s0_region_tag) === region_hash_tag(s2_region_tag)))
+  XSPerfAccumulate("hash_conflict", s0_valid && s2_valid && (s0_region_tag =/= s2_region_tag) && (unit_hash_tag(s0_region_tag) === unit_hash_tag(s2_region_tag)))
 }
