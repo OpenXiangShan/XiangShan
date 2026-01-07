@@ -102,9 +102,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
       when(isFirstInstr) {
         uncacheState := UncacheFsmState.SendReq
       }.otherwise {
-        // FIXME: MMIO blocking will be enabled once FTQ commit support is in place.
-        // uncacheState := Mux(io.mmioCommitRead.mmioLastCommit, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
-        uncacheState := Mux(true.B, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
+        uncacheState := Mux(io.mmioCommitRead.mmioLastCommit, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
       }
     }
 
