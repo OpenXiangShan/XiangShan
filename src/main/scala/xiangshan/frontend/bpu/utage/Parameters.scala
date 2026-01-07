@@ -29,7 +29,7 @@ case class MicroTageParameters(
       new MicroTageInfo(512, 16, 12, 16) // follow Tage.
       // new MicroTageInfo(128, 32, 16, 24)
     ),
-    TakenCtrWidth:       Int = 3,
+    TakenCtrWidth:       Int = 2,
     NumTables:           Int = 2,
     LowTickWidth:        Int = 9,
     HighTickWidth:       Int = 11,

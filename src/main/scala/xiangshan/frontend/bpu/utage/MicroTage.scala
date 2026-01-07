@@ -74,6 +74,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val cfiPositionCases = tables.reverse.map(t => t.resp.valid -> t.resp.bits.cfiPosition)
   private val usefulCase       = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitUseful)
   private val takenCtrCase     = tables.reverse.map(t => t.resp.valid -> t.resp.bits.hitTakenCtr)
+  private val candidateCases   = tables.reverse.map(t => t.resp.valid -> t.resp.bits.candidate)
 
   private val histTableHitMap         = tables.map(_.resp.valid)
   private val histTableTakenMap       = tables.map(_.resp.bits.taken)
@@ -81,6 +82,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val histTableCfiPositionVec = VecInit(tables.map(_.resp.bits.cfiPosition))
   private val choseTableTakenCtr      = MuxCase(0.U.asTypeOf(new SaturateCounter(TakenCtrWidth)), takenCtrCase)
   private val choseTableUseful        = MuxCase(0.U.asTypeOf(new SaturateCounter(UsefulWidth)), usefulCase)
+  private val choseTableCandidate     = MuxCase(false.B, candidateCases)
 
   private val finalPredTaken       = MuxCase(false.B, takenCases)
   private val finalPredCfiPosition = MuxCase(0.U(CfiPositionWidth.W), cfiPositionCases)
@@ -92,10 +94,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // but it's a double-edged sword: with limited capacity, entries may be evicted
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
-  prediction.valid := io.enable && histTableHitMap.reduce(_ || _) &&
-    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
+  prediction.valid := io.enable && histTableHitMap.reduce(_ || _) && choseTableCandidate
   // prediction.valid            := false.B
-  prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
+  prediction.bits.taken       := finalPredTaken
   prediction.bits.cfiPosition := finalPredCfiPosition
 
   predMeta.valid                        := tables.map(_.resp.valid).reduce(_ || _)

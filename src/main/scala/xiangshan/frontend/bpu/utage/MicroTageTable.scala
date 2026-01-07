@@ -43,6 +43,7 @@ class MicroTageTable(
       val useful:      UInt            = UInt(UsefulWidth.W)
       val hitTakenCtr: SaturateCounter = new SaturateCounter(TakenCtrWidth)
       val hitUseful:   SaturateCounter = new SaturateCounter(UsefulWidth)
+      val candidate:   Bool            = Bool()
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
@@ -112,6 +113,20 @@ class MicroTageTable(
   io.resp.bits.useful      := usefulEntry.value
   io.resp.bits.hitTakenCtr := readEntry.takenCtr
   io.resp.bits.hitUseful   := usefulEntry
+// Candidate prediction from this micro-TAGE table.
+// - All tables provide a candidate if they hit.
+// - Exception: low table (tableId=0) only provides a candidate when its
+//   counter is fully saturated (0 or max), to avoid noise from short-history
+//   patterns that flip frequently.
+// Rationale: Low-history tables adapt quickly but are prone to overfitting;
+//            high-history tables are stable and trusted even in weak states.
+  io.resp.bits.candidate := (
+    if (tableId == 0) {
+      readEntry.takenCtr.isSaturatePositive || readEntry.takenCtr.isSaturateNegative
+    } else {
+      true.B
+    }
+  )
 
   // train
   private val (trainIdx, trainTag) =
