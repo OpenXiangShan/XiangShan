@@ -57,13 +57,12 @@ trait HasStreamPrefetchUnitHelper extends HasStreamPrefetchHelper{
   val CELL_SIZE : Int
 
   val CELL_OFFSET = log2Up(CELL_SIZE)
-  val UNIT_BITS = log2Up(BIT_VEC_ARRAY_SIZE)
+  val UNIT_BITS = log2Up(BIT_VEC_WITDH)
   val UNIT_TAG_OFFSET = CELL_OFFSET + UNIT_BITS
   val UNIT_TAG_BITS = VAddrBits - CELL_OFFSET - UNIT_BITS
 
   // hash related
   val CELL_ADDR_RAW_WIDTH = UNIT_TAG_OFFSET
-  val HASH_CELLTAG_WIDTH = VADDR_HASH_WIDTH + CELL_ADDR_RAW_WIDTH
 
   // vaddr: |       unit tag        |  unit bits  | cell offset |
   def get_unit_tag(vaddr: UInt) = {
