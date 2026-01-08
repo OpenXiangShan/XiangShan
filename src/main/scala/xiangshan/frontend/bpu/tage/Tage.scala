@@ -536,13 +536,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       actualTakenMask(wayIdx) := Mux(allocateEn, t2_allocateBranch.bits.taken, updateBranchActualTaken)
     }
 
-    table.io.writeReq.valid           := t2_fire && writeWayMask.reduce(_ || _)
-    table.io.writeReq.bits.setIdx     := t2_setIdx(tableIdx)
-    table.io.writeReq.bits.bankMask   := t2_bankMask
-    table.io.writeReq.bits.wayMask    := writeWayMask.asUInt
-    table.io.writeReq.bits.entries    := writeEntries
-    table.io.writeReq.bits.usefulCtrs := writeUsefulCtrs
-    // table.io.writeReq.bits.actualTakenMask := actualTakenMask // used for writeBuffer
+    table.io.writeReq.valid                := t2_fire && writeWayMask.reduce(_ || _)
+    table.io.writeReq.bits.setIdx          := t2_setIdx(tableIdx)
+    table.io.writeReq.bits.bankMask        := t2_bankMask
+    table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
+    table.io.writeReq.bits.entries         := writeEntries
+    table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
+    table.io.writeReq.bits.actualTakenMask := actualTakenMask
 
     table.io.resetUseful := t2_fire && usefulResetCtr.isSaturatePositive
   }

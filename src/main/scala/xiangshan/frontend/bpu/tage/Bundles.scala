@@ -89,20 +89,20 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
 
 class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle
     with HasTageParameters {
-  val setIdx:         UInt                    = UInt(SetIdxWidth.W)
-  val entry:          TageEntry               = new TageEntry
-  val usefulCtr:      SaturateCounter         = UsefulCounter()
-  override def tag:   Option[UInt]            = Some(entry.tag)
-  override def cnt:   Option[SaturateCounter] = Some(entry.takenCtr)
-  override def taken: Option[Bool]            = Some(entry.takenCtr.isPositive) // FIXME: use actualTaken
+  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
+  val entry:        TageEntry               = new TageEntry
+  val usefulCtr:    SaturateCounter         = UsefulCounter()
+  override def tag: Option[UInt]            = Some(entry.tag)
+  override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
 }
 
 class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val setIdx:     UInt                 = UInt(SetIdxWidth.W)
-  val bankMask:   UInt                 = UInt(NumBanks.W)
-  val wayMask:    UInt                 = UInt(NumWays.W)
-  val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
-  val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
+  val setIdx:          UInt                 = UInt(SetIdxWidth.W)
+  val bankMask:        UInt                 = UInt(NumBanks.W)
+  val wayMask:         UInt                 = UInt(NumWays.W)
+  val actualTakenMask: Vec[Bool]            = Vec(NumWays, Bool())
+  val entries:         Vec[TageEntry]       = Vec(NumWays, new TageEntry)
+  val usefulCtrs:      Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {

@@ -80,7 +80,7 @@ class TageTable(
         new EntrySramWriteReq,
         WriteBufferSize,
         numPorts = NumWays,
-        hasCnt = false, // FIXME: set to true when bug fixed
+        hasCnt = true,
         nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
       )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
     }
@@ -108,6 +108,7 @@ class TageTable(
       writePort.bits.entry     := writeReq.entries(wayIdx)
       writePort.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
     }
+    buffer.io.takenMask.get := writeReq.actualTakenMask
   }
 
   // write to sram from write buffer
