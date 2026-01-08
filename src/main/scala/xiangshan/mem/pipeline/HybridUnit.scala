@@ -355,7 +355,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
-    s0_vaddr         := src.getVaddr()
+    s0_vaddr         := src.vaddr
     s0_mask          := 0.U
     s0_uop           := DontCare
     s0_try_l2l       := false.B
