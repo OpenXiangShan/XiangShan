@@ -13,11 +13,11 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.history.ghr
+package xiangshan.frontend.bpu.history.commonhr
 
 import xiangshan.frontend.bpu.HasBpuParameters
 
-trait HasGhrParameters extends HasBpuParameters {
+trait HasCommonHRParameters extends HasBpuParameters {
   def StallQueueSize:    Int = 2
   def ImliHistoryLength: Int = 8
 }

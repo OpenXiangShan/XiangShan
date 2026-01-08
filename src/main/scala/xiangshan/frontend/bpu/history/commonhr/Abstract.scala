@@ -13,15 +13,11 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.history.ghr
+package xiangshan.frontend.bpu.history.commonhr
 
-import chisel3._
-import chisel3.util._
-import xiangshan.frontend.bpu.HalfAlignHelper
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.BpuBundle
+import xiangshan.frontend.bpu.BpuModule
 
-trait Helpers extends HasGhrParameters with HalfAlignHelper {
-  def getNewGhr(oldGhr: UInt, numLess: UInt, numHit: UInt, taken: Bool)(histLen: Int): UInt = {
-    val numShift = Mux(taken, numLess, numHit - 1.U)
-    Cat(oldGhr << numShift, taken)(histLen - 1, 0)
-  }
-}
+abstract class CommonHRBundle(implicit p: Parameters) extends BpuBundle with HasCommonHRParameters
+abstract class CommonHRModule(implicit p: Parameters) extends BpuModule with HasCommonHRParameters
