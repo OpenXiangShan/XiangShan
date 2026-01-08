@@ -70,7 +70,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val wbq_block_miss_req = Input(Bool())
 
     // write hint from main pipe
-    val writehint = Flipped(Valid(Bits(DCacheBanks.W)))
+    val writehint = Flipped(Valid(UInt(DCacheBanks.W)))
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
