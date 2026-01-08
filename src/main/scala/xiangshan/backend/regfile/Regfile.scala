@@ -114,11 +114,9 @@ class Regfile
     }
   }
   val writePorts = io.writePorts
-  for (i <- writePorts.indices) {
-    if (i < writePorts.size-1) {
-      val hasSameWrite = writePorts.drop(i + 1).map(w => w.wen && w.addr === writePorts(i).addr && writePorts(i).wen).reduce(_ || _)
-      assert(!hasSameWrite, "RegFile two or more writePorts write same addr")
-    }
+  for (i <- 0 until writePorts.size - 1) {
+    val hasSameWrite = writePorts.drop(i + 1).map(w => w.wen && w.addr === writePorts(i).addr && writePorts(i).wen).reduce(_ || _)
+    assert(!hasSameWrite, "RegFile two or more writePorts write same addr")
   }
   for (i <- mem.indices) {
     if (hasZero && i == 0) {
