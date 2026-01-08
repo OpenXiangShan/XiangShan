@@ -862,7 +862,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
       pfIdxArb.io.out.ready := io.l1_req.ready
       io.l1_req.valid := pfIdxArb.io.out.valid
       io.l1_req.bits.paddr := entries(pfIdx).getPrefetchPA
-      io.l1_req.bits.alias := entries(pfIdx).getPrefetchAlias
+      io.l1_req.bits.vaddr := entries(pfIdx).getPrefetchVA
       io.l1_req.bits.confidence := 1.U
       io.l1_req.bits.is_store := false.B
       io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BERTI
