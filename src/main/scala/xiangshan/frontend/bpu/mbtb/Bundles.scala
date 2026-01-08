@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.SaturateCounter
@@ -76,4 +77,16 @@ class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay, new MainBtbMetaEntry))
+}
+
+class MainBtbTrace(implicit p: Parameters) extends MainBtbBundle {
+
+  val startPc:     PrunedAddr      = PrunedAddr(VAddrBits)
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+
+  val setIdx:       UInt = UInt(SetIdxLen.W)
+  val internalIdx:  UInt = UInt(InternalBankIdxLen.W)
+  val alignBankIdx: UInt = UInt(AlignBankIdxLen.W)
+  val wayIdx:       UInt = UInt(NumWay.W)
 }

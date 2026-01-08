@@ -198,6 +198,10 @@ class MainBtbInternalBank(
   counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
   counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters
 
+  private val perf_entryDropWrite = (0 until NumWay).map { i =>
+    writeEntry.req.valid && writeEntry.req.bits.wayMask(i) && !entryWriteBuffer.io.write(i).ready
+  }.reduce(_ || _)
+
   XSPerfAccumulate(
     "multihit_write_conflict",
     writeEntry.req.valid && flush.req.valid && writeEntry.req.bits.setIdx === flush.req.bits.setIdx &&
@@ -207,5 +211,9 @@ class MainBtbInternalBank(
   XSPerfAccumulate(
     "counter_writebuffer_drop_write",
     !counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
+  )
+  XSPerfAccumulate(
+    "entry_writebuffer_drop_write",
+    perf_entryDropWrite
   )
 }

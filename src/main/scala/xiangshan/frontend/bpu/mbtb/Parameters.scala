@@ -33,7 +33,9 @@ case class MainBtbParameters(
     TargetWidth:     Int = 20, // 2B aligned
     WriteBufferSize: Int = 4,
     // Base table
-    TakenCntWidth: Int = 2
+    TakenCntWidth: Int = 2,
+    // Mbtb write trace
+    EnableMainbtbTrace: Boolean = false
 ) {}
 
 // TODO: expose this to Parameters.scala / XSCore.scala
@@ -58,4 +60,6 @@ trait HasMainBtbParameters extends HasBpuParameters {
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
+
+  def EnableMainbtbTrace: Boolean = mbtbParameters.EnableMainbtbTrace
 }
