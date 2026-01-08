@@ -107,6 +107,7 @@ jobs:
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
+            --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
             --run
 
       - name: Report SPEC CPU2006 score
