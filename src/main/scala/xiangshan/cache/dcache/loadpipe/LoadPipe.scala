@@ -138,8 +138,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
-  wr_conflict_check := io.lsu.req.valid && io.writehint.valid && (io.writehint.bits & s0_bank_oh).orR
-  XSPerfAccumulate("wr_conflict_no_ready", wr_conflict_check)
+  wr_conflict_check := io.writehint.valid && (io.writehint.bits & s0_bank_oh).orR
+  XSPerfAccumulate("wr_conflict_no_ready", io.lsu.req.valid && wr_conflict_check)
 
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
