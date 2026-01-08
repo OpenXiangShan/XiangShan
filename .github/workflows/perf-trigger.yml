@@ -15,6 +15,14 @@ on:
         required: false
         type: string
         default: kunminghu-v3
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: choice
+        options:
+          - KunminghuV2Config
+          - DefaultConfig
+        default: KunminghuV2Config
       benchmark_type:
         description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
         required: false
