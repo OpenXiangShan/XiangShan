@@ -39,7 +39,19 @@ SIM_TOP = SimTop
 FPGATOP = top.TopMain
 SIMTOP  = top.XiangShanSim
 
+CHISEL_TARGET ?= systemverilog
+FINAL_TARGET ?= systemverilog
 RTL_SUFFIX ?= sv
+
+ifeq ($(CORVUS),1)
+CHISEL_TARGET = hw
+FINAL_TARGET = systemverilog
+RTL_SUFFIX = sv
+REPCUT_NUM ?= 8
+CORVUS_ARGS = --split-verilog --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none --repcut-num-partitions=$(REPCUT_NUM)
+CORVUS_PATH ?= corvus-compiler
+endif
+
 TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
 JAR = $(BUILD_DIR)/xsgen.jar
@@ -50,7 +62,6 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
-CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
@@ -257,7 +268,7 @@ $(TOP_V): $(SCALA_FILE)
 	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FPGATOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
 		--num-cores $(NUM_CORES) $(TOPMAIN_ARGS)
-ifeq ($(CHISEL_TARGET),systemverilog)
+ifeq ($(FINAL_TARGET),systemverilog)
 	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
@@ -271,7 +282,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
-ifeq ($(CHISEL_TARGET),systemverilog)
+ifeq ($(CORVUS),1)
+	$(CORVUS_PATH) $(@D)/$(SIM_TOP).hw.mlir $(CORVUS_ARGS) -o $(@D)
+endif
+ifeq ($(FINAL_TARGET),systemverilog)
 	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 ifeq ($(PLDM),1)
@@ -323,6 +337,12 @@ emu-mk: sim-verilog
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+corvus-mk: sim-verilog
+	$(MAKE) -C ./difftest corvus NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+corvus: corvus-mk
+	$(MAKE) -C ./difftest corvusitor-emu CORVUSITOR=1 NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
 simv: sim-verilog
