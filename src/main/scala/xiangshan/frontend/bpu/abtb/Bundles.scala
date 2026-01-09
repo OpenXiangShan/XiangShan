@@ -68,6 +68,8 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
 
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
   val valid:           Bool                 = Bool()
+  val setIdx:          UInt                 = UInt(SetIdxWidth.W)
+  val bankMask:        UInt                 = UInt(NumBanks.W)
   val hitMask:         Vec[Bool]            = Vec(NumWays, Bool())
   val attributes:      Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute)
   val positions:       Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
