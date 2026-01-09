@@ -14,10 +14,12 @@ import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 
 trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
+  // region related
+  def ACTIVE_THRESHOLD = BIT_VEC_WITDH - 4
+
   // capacity related
   val STREAM_FILTER_SIZE = 4
   val BIT_VEC_ARRAY_SIZE = 16
-  val ACTIVE_THRESHOLD = BIT_VEC_WITDH - 4
   val INIT_DEC_MODE = false
 
   // bit_vector [StreamBitVectorBundle]:
@@ -52,7 +54,15 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   require(WIDTH_BYTES >= dcacheParameters.blockBytes)
 }
 
-class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
+trait HasStreamPrefetchUnitHelper extends HasStreamPrefetchHelper{
+  // train_granularity: 8 , 16 , 32 , 64
+  val train_granularity : Int
+  override def BLOCK_SIZE = train_granularity
+
+  require(train_granularity == 8 || train_granularity == 16 || train_granularity == 32 || train_granularity == 64, "train_granularity must be 8, 16, 32, or 64")
+}
+
+class StreamBitVectorBundle(val train_granularity: Int)(implicit p: Parameters) extends XSBundle with HasStreamPrefetchUnitHelper {
   val tag = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val active = Bool()
@@ -80,22 +90,17 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     tag := alloc_tag
     bit_vec := alloc_bit_vec
     active := alloc_active
-    cnt := 1.U
+    cnt := PopCount(alloc_bit_vec)
     trigger_full_va := alloc_full_vaddr
     if(ENABLE_DECR_MODE) {
       decr_mode := alloc_decr_mode
     }else {
       decr_mode := INIT_DEC_MODE.B
     }
-
-
-    assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
   def update(update_bit_vec: UInt, update_active: Bool) = {
-    // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
-    val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
+    val cnt_next = PopCount(bit_vec | update_bit_vec)
 
     bit_vec := bit_vec | update_bit_vec
     cnt := cnt_next
@@ -106,7 +111,6 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
       active := true.B
     }
 
-    assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
     assert(cnt <= BIT_VEC_WITDH.U, "cnt should always less than bit vector size")
   }
 }
@@ -163,7 +167,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   }
 }
 
-class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+class StreamBitVectorArray(val train_granularity: Int)(implicit p: Parameters) extends XSModule with HasStreamPrefetchUnitHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
@@ -179,7 +183,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val stream_lookup_resp = Output(Bool())
   })
 
-  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
+  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle(train_granularity)))
   val valids = RegInit(VecInit(Seq.fill(BIT_VEC_ARRAY_SIZE)(false.B)))
 
   def reset_array(i: Int): Unit = {
@@ -197,6 +201,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_vaddr = io.train_req.bits.vaddr
   val s0_miss  = io.train_req.bits.miss
   val s0_pfHit = io.train_req.bits.pfHitStream
+  val s0_access_vec = io.train_req.bits.accessVec 
   val s0_region_bits = get_region_bits(s0_vaddr)
   val s0_region_tag = get_region_tag(s0_vaddr)
   val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
@@ -302,6 +307,21 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
                             RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
+  // The granularity of s0_access_vec is 8B, but the granularity of array_bit_vec is train_granularity
+  // So generate the correct bit_vec according to train_granularity to alloc or update array_bit_vec
+  val access_vec = train_granularity match {
+    case 8  => s0_access_vec
+    case 16 => VecInit.tabulate(4) { i => s0_access_vec(2 * i) || s0_access_vec(2 * i + 1) }.asUInt
+    case 32 => VecInit.tabulate(2) { i => s0_access_vec(4 * i) || s0_access_vec(4 * i + 1) || s0_access_vec(4 * i + 2) || s0_access_vec(4 * i + 3) }.asUInt
+    case 64 => s0_access_vec.orR
+  }
+  val offset = train_granularity match {
+    case 8  => s0_region_bits & "b1000".U
+    case 16 => s0_region_bits & "b1100".U
+    case 32 => s0_region_bits & "b1110".U
+    case 64 => s0_region_bits & "b1111".U
+  }
+  val s1_access_vec = RegEnable(access_vec << offset, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
   val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l1_depth, 0.U(BLOCK_OFFSET.W))
@@ -315,7 +335,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // If use strict triggering mode, the stream prefetcher will only trigger prefetching
   // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
   val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
+  // s1_access_vec may have multiple bits set to 1
+  val s1_can_send_pf = Mux(s1_update, ((~array(s1_index).bit_vec) & s1_access_vec).orR, true.B) && s1_can_trigger
   s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
 
   when(s1_alloc) {
@@ -323,7 +344,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     valids(s1_index) := true.B
     array(s1_index).alloc(
       alloc_tag = s1_region_tag,
-      alloc_bit_vec = UIntToOH(s1_region_bits),
+      alloc_bit_vec = s1_access_vec,
       alloc_active = s1_plus_one_hit || s1_minus_one_hit,
       alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid),
       alloc_full_vaddr = RegEnable(s0_vaddr, s0_valid)
@@ -333,7 +354,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
     array(s1_index).update(
-      update_bit_vec = UIntToOH(s1_region_bits),
+      update_bit_vec = s1_access_vec,
       update_active = s1_plus_one_hit || s1_minus_one_hit)
   }
 
