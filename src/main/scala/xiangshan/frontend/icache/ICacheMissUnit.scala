@@ -96,7 +96,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.memAcquire.bits      := acquireArb.io.out.bits.acquire
   acquireArb.io.out.ready := io.memAcquire.ready
 
-  private val allMshr = (0 until NumAllMshr).map { i =>
+  private val allMshr = (0 until NumFetchMshr + NumPrefetchMshr).map { i =>
     val isFetch = i < NumFetchMshr
     val mshr    = Module(new ICacheMshr(edge, isFetch, i))
     mshr.io.fencei               := io.fencei
@@ -128,8 +128,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     (io.prefetchReq.bits.blkPAddr === io.fetchReq.bits.blkPAddr) &&
       (io.prefetchReq.bits.vSetIdx === io.fetchReq.bits.vSetIdx) &&
       io.fetchReq.valid
-  fetchHit    := allMshr.map(_.io.lookUps(0).resp.hit).reduce(_ || _)
-  prefetchHit := allMshr.map(_.io.lookUps(1).resp.hit).reduce(_ || _) || prefetchHitFetchReq
+  fetchHit    := allMshr.map(mshr => mshr.io.lookUps(0).resp.hit).reduce(_ || _)
+  prefetchHit := allMshr.map(mshr => mshr.io.lookUps(1).resp.hit).reduce(_ || _) || prefetchHitFetchReq
 
   /**
     ******************************************************************************
@@ -203,24 +203,24 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     * invalid mshr when finish transition
     ******************************************************************************
     */
-  (0 until NumAllMshr).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
+  (0 until (NumFetchMshr + NumPrefetchMshr)).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
 
   /* *****************************************************************************
-   * respond to fetch and write SRAM
+   * response fetch and write SRAM
    * ***************************************************************************** */
   // get request information from MSHRs
-  private val allMshrInfo = VecInit(allMshr.map(_.io.info))
-  // select MSHR info 1 cycle before sending response to mainPipe/prefetchPipe for better timing
-  private val mshrInfo =
-    RegEnable(allMshrInfo(io.memGrant.bits.source).bits, 0.U.asTypeOf(allMshrInfo(0).bits), lastFire)
+  private val allMshrResp = VecInit(allMshr.map(mshr => mshr.io.info))
+  // select MSHR response 1 cycle before sending response to mainPipe/prefetchPipe for better timing
+  private val mshrResp =
+    RegEnable(allMshrResp(io.memGrant.bits.source).bits, 0.U.asTypeOf(allMshrResp(0).bits), lastFire)
   // we can latch mshr.io.resp.bits since they are set on req.fire or acquire.fire, and keeps unchanged during response
   // however, we should not latch mshr.io.resp.valid, since io.flush/fencei may clear it at any time
-  private val mshrValid = allMshrInfo(idNext).valid
+  private val mshrValid = allMshrResp(idNext).valid
 
   // get waymask from replacer when acquire fire
   io.victim.req.valid        := acquireArb.io.out.fire
   io.victim.req.bits.vSetIdx := acquireArb.io.out.bits.vSetIdx
-  private val waymask = UIntToOH(mshrInfo.way)
+  private val waymask = UIntToOH(mshrResp.way)
   // maybeRvcMap: whether lower 2 bits of each 2 bytes is not 0b11
   private val maybeRvcMap =
     VecInit(respDataReg.asTypeOf(Vec(MaxInstNumPerBlock, UInt((instBytes * 8).W))).map(_(1, 0) =/= 3.U)).asUInt
@@ -234,15 +234,15 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   // write SRAM
   io.metaWrite.req.bits.generate(
-    phyTag = getPTagFromBlk(mshrInfo.blkPAddr),
+    phyTag = getPTagFromBlk(mshrResp.blkPAddr),
     maybeRvcMap = maybeRvcMap,
-    vSetIdx = mshrInfo.vSetIdx,
+    vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     poison = false.B
   )
   io.dataWrite.req.bits.generate(
     data = respDataReg.asUInt,
-    vSetIdx = mshrInfo.vSetIdx,
+    vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     poison = false.B
   )
@@ -252,8 +252,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   // response fetch
   io.resp.valid            := respValid
-  io.resp.bits.blkPAddr    := mshrInfo.blkPAddr
-  io.resp.bits.vSetIdx     := mshrInfo.vSetIdx
+  io.resp.bits.blkPAddr    := mshrResp.blkPAddr
+  io.resp.bits.vSetIdx     := mshrResp.vSetIdx
   io.resp.bits.waymask     := waymask
   io.resp.bits.data        := respDataReg.asUInt
   io.resp.bits.maybeRvcMap := maybeRvcMap
@@ -263,7 +263,9 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)
 
-  /* *** perf *** */
+  /* *****************************************************************************
+   * perf
+   * ***************************************************************************** */
   // Total requests, duplicate requests will be excluded.
   XSPerfAccumulate("enqFetchReq", fetchDemux.io.in.fire)
   XSPerfAccumulate("enqPrefetchReq", prefetchDemux.io.in.fire)
@@ -289,74 +291,29 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     NumPrefetchMshr
   )
 
-  // missTrace
-  private class FetchTrace extends Bundle {
+  /**
+    ******************************************************************************
+    * ChiselDB: record ICache SRAM write log
+    ******************************************************************************
+    */
+  private class ICacheSramDb(implicit p: Parameters) extends ICacheBundle {
     val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
     val vSetIdx:  UInt = UInt(idxBits.W)
-    val mshr:     UInt = UInt(log2Ceil(NumAllMshr).W)
-    val hitMshr:  Bool = Bool()
+    val waymask:  UInt = UInt(wayBits.W)
   }
 
-  private class PrefetchTrace extends FetchTrace {
-    val hitFetch: Bool = Bool()
-  }
+  private val isWriteICacheSRAMTable =
+    WireInit(Constantin.createRecord("isWriteICacheSRAMTable" + p(XSCoreParamsKey).HartId.toString))
+  private val iCacheSramTable =
+    ChiselDB.createTable("ICacheSRAMTable" + p(XSCoreParamsKey).HartId.toString, new ICacheSramDb)
 
-  private class RespTrace extends Bundle {
-    val mshr:     UInt = UInt(log2Ceil(NumAllMshr).W)
-    val victim:   UInt = UInt(wayBits.W)
-    val latency:  UInt = UInt(16.W) // magic number: latency should less than 65536 cycles
-    val corrupt:  Bool = Bool()
-    val denied:   Bool = Bool()
-    val canceled: Bool = Bool()
-  }
-
-  private val fetchTable    = ChiselDB.createTable("ICacheFetchMissTrace", new FetchTrace, EnableTrace)
-  private val prefetchTable = ChiselDB.createTable("ICachePrefetchMissTrace", new PrefetchTrace, EnableTrace)
-  private val respTable     = ChiselDB.createTable("ICacheMissRespTrace", new RespTrace, EnableTrace)
-
-  private val fetchTrace = Wire(new FetchTrace)
-  fetchTrace.blkPAddr := io.fetchReq.bits.blkPAddr
-  fetchTrace.vSetIdx  := io.fetchReq.bits.vSetIdx
-  fetchTrace.mshr := Mux(
-    fetchHit,
-    PriorityEncoder(allMshr.map(_.io.lookUps(0).resp.hit)),
-    fetchDemux.io.chosen
-  )
-  fetchTrace.hitMshr := fetchHit
-  fetchTable.log(
-    data = fetchTrace,
-    en = io.fetchReq.fire,
-    clock = clock,
-    reset = reset
-  )
-
-  private val prefetchTrace = Wire(new PrefetchTrace)
-  prefetchTrace.blkPAddr := io.prefetchReq.bits.blkPAddr
-  prefetchTrace.vSetIdx  := io.prefetchReq.bits.vSetIdx
-  prefetchTrace.mshr := Mux(
-    prefetchHit,
-    PriorityEncoder(allMshr.map(_.io.lookUps(1).resp.hit)),
-    prefetchDemux.io.chosen
-  )
-  prefetchTrace.hitMshr  := prefetchHit && !prefetchHitFetchReq
-  prefetchTrace.hitFetch := prefetchHitFetchReq
-  prefetchTable.log(
-    data = prefetchTrace,
-    en = io.prefetchReq.fire,
-    clock = clock,
-    reset = reset
-  )
-
-  private val respTrace = Wire(new RespTrace)
-  respTrace.mshr     := idNext
-  respTrace.victim   := mshrInfo.way
-  respTrace.latency  := VecInit(allMshr.map(_.io.perf_latency))(idNext)
-  respTrace.corrupt  := corruptReg
-  respTrace.denied   := deniedReg
-  respTrace.canceled := !mshrValid // fence.i or flushed
-  respTable.log(
-    data = respTrace,
-    en = lastFireNext,
+  private val iCacheSramDbDumpData = Wire(new ICacheSramDb)
+  iCacheSramDbDumpData.blkPAddr := mshrResp.blkPAddr
+  iCacheSramDbDumpData.vSetIdx  := mshrResp.vSetIdx
+  iCacheSramDbDumpData.waymask  := OHToUInt(waymask)
+  iCacheSramTable.log(
+    data = iCacheSramDbDumpData,
+    en = writeSramValid,
     clock = clock,
     reset = reset
   )
@@ -371,7 +328,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     difftest.coreid := io.hartId
     difftest.index  := 0.U
     difftest.valid  := writeSramValid
-    difftest.addr   := Cat(mshrInfo.blkPAddr, 0.U(blockOffBits.W))
+    difftest.addr   := Cat(mshrResp.blkPAddr, 0.U(blockOffBits.W))
     difftest.data   := respDataReg.asTypeOf(difftest.data)
     difftest.mask   := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }

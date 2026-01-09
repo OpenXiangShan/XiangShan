@@ -59,9 +59,7 @@ case class ICacheParameters(
     ctrlUnitParameters: ICacheCtrlUnitParameters = ICacheCtrlUnitParameters(),
     /* *** testing *** */
     ForceMetaEccFail: Boolean = false,
-    ForceDataEccFail: Boolean = false,
-    // icache trace based on ChiselDB
-    EnableTrace: Boolean = false
+    ForceDataEccFail: Boolean = false
 ) extends L1CacheParameters {
   // this is used to prevent magic number in the code, DO NOT CHANGE, it won't work other than 2
   // explanation: we allow concurrent access to consecutive cachelines
@@ -114,7 +112,6 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   // missUnit
   def NumFetchMshr:    Int = icacheParameters.NumFetchMshr
   def NumPrefetchMshr: Int = icacheParameters.NumPrefetchMshr
-  def NumAllMshr:      Int = NumFetchMshr + NumPrefetchMshr
 
   // wayLookup
   def WayLookupSize: Int = icacheParameters.WayLookupSize
@@ -152,7 +149,6 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   // testing
   def ForceMetaEccFail: Boolean = icacheParameters.ForceMetaEccFail
   def ForceDataEccFail: Boolean = icacheParameters.ForceDataEccFail
-  def EnableTrace:      Boolean = icacheParameters.EnableTrace
 }
 
 // For users: these are default ICache parameters set by dev, do not change them here,
