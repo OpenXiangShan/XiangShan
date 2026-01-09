@@ -35,7 +35,7 @@ case class MicroTageParameters(
     HighTickWidth:       Int = 11,
     UsefulWidth:         Int = 2,
     PCHighTagStart:      Int = 7,
-    EnableTraceAndDebug: Boolean = true,
+    EnableTraceAndDebug: Boolean = false,
     BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
 ) {}
 
