@@ -187,7 +187,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
-    val release = Flipped(Valid(new Release))
+    val release = Input(Vec(2, ValidIO(UInt(PAddrBits.W)))) // from L2 release
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncachebuffer
     val rob = Flipped(new RobLsqIO)
