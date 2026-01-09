@@ -197,12 +197,14 @@ class AXI4UART16550(params: UART16550Params)(implicit p: Parameters)
         setLsr(0x20) // THRE only when FIFO/THR empty
         setLsr(0x40) // TEMT when TSR drained
       }
-      when (!thrIPending && lsrReg(5)) { thrIPending := true.B }
     }
 
     // TEMT/THRE maintenance when idle
     val txEmpty = !txBusy && Mux(fifoEnabled, xmitFifo.io.count === 0.U, !thrValid)
     when (!txBusy && txEmpty) { setLsr(0x60) }
+
+    // THRE interrupt only on rising edge of THRE (lsr bit5)
+    when (!thrIPending && !lsrReg(5) && lsrNext(5)) { thrIPending := true.B }
 
     // Timeout counting for CTI
     when (timeoutCnt =/= 0.U) {
