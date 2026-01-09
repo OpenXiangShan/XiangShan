@@ -339,9 +339,6 @@ emu: $(call docker-deps,emu-mk)
 gsim: sim-verilog
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
-gsim-run: gsim
-	./build/emu -b 0 -e 0 -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
-
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)

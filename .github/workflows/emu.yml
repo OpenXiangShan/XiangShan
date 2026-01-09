@@ -220,15 +220,16 @@ jobs:
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-      - name: init
-        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Build GSIM emu
+        run: |
+          make gsim GSIM=1 -j 200 PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin LLVM_PROFDATA=llvm-profdata WITH_DRAMSIM3=1 DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3
       - name: System Test - Linux
         id: linux
         run: |
-          make gsim-run GSIM=1 -j 30 PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin LLVM_PROFDATA=llvm-profdata WITH_DRAMSIM3=1 DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3
+          ./build/emu -b 0 -e 0 -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 
   emu-chi:
     runs-on: bosc
