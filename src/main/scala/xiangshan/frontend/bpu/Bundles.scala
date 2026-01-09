@@ -157,10 +157,12 @@ class BpuPredictionSource extends Bundle {
 }
 
 object BpuPredictionSource {
-  object Stage1 extends EnumUInt(3) {
+  object Stage1 extends EnumUInt(5) {
     def Ubtb:        UInt = 0.U(width.W)
     def Abtb:        UInt = 1.U(width.W)
-    def Fallthrough: UInt = 2.U(width.W)
+    def UbtbUtage:   UInt = 2.U(width.W)
+    def AbtbUtage:   UInt = 3.U(width.W)
+    def Fallthrough: UInt = 4.U(width.W)
   }
   object Stage3 extends EnumUInt(7) {
     def Ras:             UInt = 0.U(width.W)
