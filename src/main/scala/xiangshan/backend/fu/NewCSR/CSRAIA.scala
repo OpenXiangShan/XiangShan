@@ -308,6 +308,7 @@ class AIAToCSRBundle(implicit p: Parameters) extends XSBundle with HasSoCParamet
   })
   val meip    = Bool()
   val seip    = Bool()
+  val notice_pending = Bool()
   val vseip   = UInt(soc.IMSICParams.geilen.W)
   val mtopei  = new TopEIBundle
   val stopei  = new TopEIBundle

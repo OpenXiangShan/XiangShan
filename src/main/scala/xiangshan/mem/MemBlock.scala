@@ -389,6 +389,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val fromTopToBackend = Input(new Bundle {
       val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
+      val teemsiInfo   = Option.when(soc.IMSICParams.HasTEEIMSIC)(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val clintTime = ValidIO(UInt(64.W))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
@@ -399,6 +400,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_power_down_en = Output(Bool())
     val outer_cpu_critical_error = Output(Bool())
     val outer_msi_ack = Output(Bool())
+    val outer_teemsi_ack = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
@@ -1684,6 +1686,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.nmi.nmi_31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0))
     x.externalInterrupt.nmi.nmi_43 := RegNext(outer.nmi_int_sink.in.head._1(1))
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
+    x.teemsiInfo zip io.fromTopToBackend.teemsiInfo foreach { case (x_teemsiInfo, io_teemsiInfo) =>
+      x_teemsiInfo        := DelayNWithValid(io_teemsiInfo, 1)
+    }
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
   }
 
@@ -1698,6 +1703,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
+  io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
+    teemsi_ack := teemsiAck
+  }
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
