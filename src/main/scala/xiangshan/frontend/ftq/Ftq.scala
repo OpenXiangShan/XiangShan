@@ -46,11 +46,11 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.BpuMeta
+import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
-import xiangshan.frontend.bpu.BpuSpeculationMeta
+import xiangshan.frontend.bpu.BpuRedirectMeta
+import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.bpu.ras.RasMeta
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
@@ -96,12 +96,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
 
-  // speculationQueue stores speculation information needed by BPU when redirect happens.
-  private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
+  // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
+  private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
 
   // metaQueue stores information needed to train BPU.
-  private val metaQueueResolve = Reg(Vec(FtqSize, new BpuMeta))
-  private val metaQueueCommit  = Reg(Vec(FtqSize, new RasMeta))
+  private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
+  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
@@ -112,7 +112,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // perfQueue stores information for performance monitoring. These queues should not exist in hardware
   private val perfQueue = Reg(Vec(FtqSize, new PerfMeta))
 
-  private val specTopAddr = speculationQueue(io.fromIfu.wbRedirect.bits.ftqIdx.value).topRetAddr.toUInt
+  private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
   private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
@@ -153,8 +153,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
     distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U &&
     bpTrainStallCnt < BpTrainStallLimit.U
-  io.fromBpu.meta.ready            := true.B
-  io.fromBpu.speculationMeta.ready := true.B
+  io.fromBpu.meta.ready := true.B
 
   private val prediction = io.fromBpu.prediction
 
@@ -183,9 +182,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
-    metaQueueResolve(s3BpuPtr) := io.fromBpu.meta.bits
-    metaQueueCommit(s3BpuPtr)  := io.fromBpu.meta.bits.ras
-    speculationQueue(s3BpuPtr) := io.fromBpu.speculationMeta.bits
+    metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
+    metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
+    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
 
     perfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     perfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
@@ -320,8 +319,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.target    := redirect.bits.target
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
-  io.toBpu.redirect.bits.speculationMeta := speculationQueue(redirect.bits.ftqIdx.value)
-  io.toBpu.redirectFromIFU               := ifuRedirect.valid
+  io.toBpu.redirect.bits.meta      := metaQueueRedirect(redirect.bits.ftqIdx.value)
+  io.toBpu.redirectFromIFU         := ifuRedirect.valid
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
@@ -373,7 +372,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   commitQueue.io.backendCommit := io.fromBackend.callRetCommit
 
   io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
-  io.toBpu.commit.bits.rasMeta              := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
+  io.toBpu.commit.bits.meta                 := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
   io.toBpu.commit.bits.attribute.branchType := DontCare
   io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
 

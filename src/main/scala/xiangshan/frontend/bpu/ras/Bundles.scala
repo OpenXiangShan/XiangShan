@@ -73,14 +73,18 @@ object RasInternalMeta {
   }
 }
 
-class RasMeta(implicit p: Parameters) extends RasBundle {
+class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
+  val topRetAddr: PrunedAddr = PrunedAddr(VAddrBits)
+}
+
+class RasCommitMeta(implicit p: Parameters) extends RasBundle {
   val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
   val tosw: RasPtr = new RasPtr
 }
 
-object RasMeta {
-  def apply(ssp: UInt, tosw: RasPtr)(implicit p: Parameters): RasMeta = {
-    val e = Wire(new RasMeta)
+object RasCommitMeta {
+  def apply(ssp: UInt, tosw: RasPtr)(implicit p: Parameters): RasCommitMeta = {
+    val e = Wire(new RasCommitMeta)
     e.ssp  := ssp
     e.tosw := tosw
     e
@@ -104,16 +108,4 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
   val attribute:   BranchAttribute = new BranchAttribute
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val startPc:     UInt            = UInt(VAddrBits.W)
-}
-
-class RasCommitInfo(implicit p: Parameters) extends RasBundle {
-  val attribute: BranchAttribute = new BranchAttribute
-  val meta:      RasMeta         = new RasMeta
-}
-
-class RasRedirectInfo(implicit p: Parameters) extends RasBundle {
-  val attribute: BranchAttribute = new BranchAttribute
-  val cfiPc:     PrunedAddr      = PrunedAddr(VAddrBits)
-  val meta:      RasInternalMeta = new RasInternalMeta
-  val level:     UInt            = RedirectLevel()
 }

@@ -95,7 +95,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   redirectData.taken   := io.train.redirect.bits.taken
   redirectData.cfiPc   := io.train.redirect.bits.cfiPc
   redirectData.target  := io.train.redirect.bits.target
-  redirectData.phrMeta := io.train.redirect.bits.speculationMeta.phrMeta
+  redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
   s3_override               := io.train.s3_override
   s3_overrideData.valid     := s3_override
@@ -219,15 +219,15 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       computeFoldedHist(predictHist, info.FoldedLength)(info.HistoryLength)
   }
 
-  io.phrMeta.phrPtr         := s1_phrPtr
-  io.phrMeta.phrLowBits     := s1_phrValue(PathHashHighWidth - 1, 0)
-  io.phrMeta.predFoldedHist := s1_foldedPhrReg
-  io.phr                    := phr
-  io.s0_foldedPhr           := s0_foldedPhr
-  io.s1_foldedPhr           := s1_foldedPhrReg
-  io.s2_foldedPhr           := s2_foldedPhrReg
-  io.s3_foldedPhr           := s3_foldedPhrReg
-  io.trainFoldedPhr         := metaPhrFolded
+  io.phrMeta.phrPtr     := s1_phrPtr
+  io.phrMeta.phrLowBits := s1_phrValue(PathHashHighWidth - 1, 0)
+  io.phrMeta.predFoldedHist.foreach(_ := s1_foldedPhrReg)
+  io.phr            := phr
+  io.s0_foldedPhr   := s0_foldedPhr
+  io.s1_foldedPhr   := s1_foldedPhrReg
+  io.s2_foldedPhr   := s2_foldedPhrReg
+  io.s3_foldedPhr   := s3_foldedPhrReg
+  io.trainFoldedPhr := metaPhrFolded
 
   // TODO: Currently unavailable，waiting for ftq commit info
   // commit time phr checker
@@ -295,13 +295,16 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     dontTouch(histFolded_diff_s0Folded)
   }
 
-  require(
-    io.commit.bits.meta.phr.predFoldedHist.hist.length == metaPhrFolded.hist.length,
-    "pred folded hist length mismatch"
-  )
-  private val predictFHist_diff_trainFHist =
-    io.commit.valid && io.commit.bits.meta.phr.predFoldedHist.asUInt =/= metaPhrFolded.asUInt
-  XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
+  if (io.commit.bits.meta.phr.predFoldedHist.isDefined) {
+    val debug_predFoldedHist = io.commit.bits.meta.phr.predFoldedHist.get
+    require(
+      debug_predFoldedHist.hist.length == metaPhrFolded.hist.length,
+      "pred folded hist length mismatch"
+    )
+    val predictFHist_diff_trainFHist = io.commit.valid && debug_predFoldedHist.asUInt =/= metaPhrFolded.asUInt
+    XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
+  }
+
   // TODO: remove dontTouch
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
