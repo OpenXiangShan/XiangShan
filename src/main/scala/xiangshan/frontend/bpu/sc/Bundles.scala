@@ -85,11 +85,13 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // for debug
   val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scImliTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_predPathIdx: Option[Vec[UInt]] =
     Some(Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size).W)))
   val debug_predGlobalIdx: Option[Vec[UInt]] =
     Some(Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size).W)))
+  val debug_predImliIdx: Option[UInt] = Some(UInt(log2Ceil(ImliTableSize).W))
   val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableSize).W))
 }
 

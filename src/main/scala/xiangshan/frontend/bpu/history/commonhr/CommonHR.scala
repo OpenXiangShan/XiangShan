@@ -60,7 +60,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_firstTakenPos = s3_update.position(s3_firstTakenIdx)
   private val s3_cfiPc         = getCfiPcFromPosition(s3_update.startPc, s3_firstTakenPos)
   private val s3_imliTaken =
-    s3_cfiPc.addr > s3_update.target.addr // TODO: IMLI taken calculation may be wrong
+    s3_cfiPc.addr > s3_update.target.addr
   private val s3_lessThanFirstTaken = s3_update.position.zip(s3_hitMask).map {
     case (pos, hit) => hit && (pos < s3_firstTakenPos)
   }
@@ -88,9 +88,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val r0_lessThanPc = r0_oldPositions.zip(r0_oldHits).map {
     case (pos, hit) => hit && (pos < r0_takenPosition)
   } // positions less than redirect branch pc
-  private val r0_numLess = PopCount(r0_lessThanPc)
-  private val r0_numHit  = PopCount(r0_oldHits)
-  // TODO: calculate the new ghr based on redirect info maybe need more cycles
+  private val r0_numLess  = PopCount(r0_lessThanPc)
+  private val r0_numHit   = PopCount(r0_oldHits)
   private val r0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   r0_commonHR.valid := false.B
   r0_commonHR.ghr   := getNewHR(r0_metaGhr, r0_numLess, r0_numHit, r0_taken)(GhrHistoryLength)

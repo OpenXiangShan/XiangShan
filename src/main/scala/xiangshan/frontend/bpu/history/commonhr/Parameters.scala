@@ -17,7 +17,14 @@ package xiangshan.frontend.bpu.history.commonhr
 
 import xiangshan.frontend.bpu.HasBpuParameters
 
+case class CommonHRParameters(
+    StallQueueSize:    Int = 2,
+    ImliHistoryLength: Int = 8
+) {}
+
 trait HasCommonHRParameters extends HasBpuParameters {
-  def StallQueueSize:    Int = 2
-  def ImliHistoryLength: Int = 8
+  def commonHRParameters: CommonHRParameters = bpuParameters.commonHRParameters
+
+  def StallQueueSize:    Int = commonHRParameters.StallQueueSize
+  def ImliHistoryLength: Int = commonHRParameters.ImliHistoryLength
 }

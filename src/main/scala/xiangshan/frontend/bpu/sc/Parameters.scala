@@ -71,7 +71,8 @@ trait HasScParameters extends HasBpuParameters {
   def BiasTableNumWays:    Int = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
   def NumBiasTable:        Int = 1
 
-  def NumImliTable: Int = 1
+  def ImliHistoryLength: Int = bpuParameters.commonHRParameters.ImliHistoryLength
+  def NumImliTable:      Int = 1
 
   def ImliTableSize:   Int = scParameters.ImliTableSize
   def WriteBufferSize: Int = scParameters.WriteBufferSize
