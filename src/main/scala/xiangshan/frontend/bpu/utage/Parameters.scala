@@ -36,7 +36,8 @@ case class MicroTageParameters(
     UsefulWidth:         Int = 2,
     PCHighTagStart:      Int = 7,
     EnableTraceAndDebug: Boolean = true,
-    BaseTableSize:       Int = 512 // TODO: Not necessarily required; currently unused.
+    BaseTableSize:       Int = 512, // TODO: Not necessarily required; currently unused.
+    NumWays:             Int = 2
 ) {}
 
 trait HasMicroTageParameters extends HasBpuParameters {
@@ -49,6 +50,7 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
   def PCHighTagStart:  Int                 = utageParameters.PCHighTagStart
+  def NumWays:         Int                 = utageParameters.NumWays
 
   def MaxNumSets:        Int = 512
   def MaxTagLen:         Int = 16
