@@ -121,12 +121,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_flush = Wire(Bool())
   private val s2_flush = Wire(Bool())
   private val s3_flush = Wire(Bool())
-  private val s4_flush = Wire(Bool()) // only used for abtb fast train
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
-  private val s4_valid = RegInit(false.B) // only used for abtb fast train
 
   private val s3_override = WireDefault(false.B)
 
@@ -145,7 +143,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
   private val s3_startPc = RegEnable(s2_startPc, s2_fire)
-  private val s4_startPc = RegEnable(s3_startPc, s3_fire) // only used for abtb fast train
 
   // abtb meta won't be sent to ftq, used for abtb fast train
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
@@ -196,11 +193,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
-  abtb.io.redirectValid         := redirect.valid
-  abtb.io.overrideValid         := s3_override
-  abtb.io.previousStartPc.valid := s4_valid
-  abtb.io.previousStartPc.bits  := s4_startPc
-  abtb.io.microTagePred         := utage.io.prediction
+  abtb.io.redirectValid := redirect.valid
+  abtb.io.overrideValid := s3_override
+  abtb.io.microTagePred := utage.io.prediction
 
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
   utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
@@ -227,7 +222,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.s3_override         := s3_override
   sc.io.ghr                 := ghr.io.s0_ghist
 
-  s4_flush := redirect.valid
   s3_flush := redirect.valid
   s2_flush := s3_flush || s3_override
   s1_flush := s2_flush
@@ -252,9 +246,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   when(s3_flush)(s3_valid := false.B)
     .elsewhen(s2_fire)(s3_valid := !s2_flush)
     .elsewhen(s3_fire)(s3_valid := false.B)
-
-  when(s4_flush)(s4_valid := false.B)
-    .elsewhen(s3_fire)(s4_valid := !s3_flush)
 
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
@@ -477,10 +468,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** check abtb output *** */
   when(io.toFtq.prediction.fire && abtb.io.prediction.taken) {
     assert(abtb.io.debug_startPc === s1_startPc)
-    assert(
-      (abtb.io.debug_previousStartPc === s2_startPc) || (abtb.io.debug_previousStartPc === s4_startPc),
-      "abtb previousStartPc doesn't match"
-    )
   }
 
   /* *** Debug Meta *** */
