@@ -28,7 +28,8 @@ class StandAlonePLIC (
   baseAddress: BigInt,
   addrWidth: Int,
   dataWidth: Int = 64,
-  hartNum: Int
+  hartNum: Int,
+  extIntrNum: Int
 )(implicit p: Parameters) extends StandAloneDevice(
   useTL, baseAddress, addrWidth, dataWidth, hartNum
 ) with BindingScope {
@@ -41,7 +42,9 @@ class StandAlonePLIC (
 
   // interrupts
   val plicIntNode = IntSinkNode(IntSinkPortSimple(hartNum * 2, 1))
-  plicIntNode :*= IntBuffer() :*= plic.intnode
+  val extIntrNode = IntSourceNode(IntSourcePortSimple(extIntrNum, 1, 1))
+  plicIntNode :*= IntBuffer() :*= plic.intnode := extIntrNode
   val int = InModuleBody(plicIntNode.makeIOs())
+  val extIntrs = InModuleBody(extIntrNode.makeIOs())
 
 }
