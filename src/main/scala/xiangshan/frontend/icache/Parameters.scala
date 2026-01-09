@@ -44,6 +44,8 @@ case class ICacheParameters(
     MetaEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEcc:     String = "parity",  // "none", "identity", "parity", "sec", "secded"
     DataEccUnit: Option[Int] = None, // if None, use blockBytes
+    // try to error-recover automatically by re-fetch data from L2-cache
+    EnableCorruptRefetch: Boolean = false, // disabled due to timing issue (dataArray -> parity check -> response valid)
     // meta array
     // by default, odd and even meta entries are stored in different banks to allow concurrent access
     NumInterleavedBank: Int = 2,
@@ -145,6 +147,9 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def DataEccBitsPerSegment: Int = DataCode.width(DataEccUnit) - DataEccUnit // ecc bits per segment
   def DataEccBits:           Int = DataEccSegments * DataEccBitsPerSegment
   def DataSramWidth:         Int = ICacheDataBits + DataEccBits + DataPaddingBits
+
+  // mainPipe
+  def EnableCorruptRefetch: Boolean = icacheParameters.EnableCorruptRefetch
 
   // submodule enable
   def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit

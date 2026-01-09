@@ -291,6 +291,10 @@ object ExceptionType {
     apply(false.B, false.B, denied, false.B, corrupt && !denied, canAssert)
   }
 
+  // raise hwe according to ecc/parity check
+  def fromEcc(corrupt: Bool, canAssert: Bool = true.B): ExceptionType =
+    apply(false.B, false.B, false.B, false.B, corrupt, canAssert)
+
   // raise ill according to rvc expander
   def fromRvcExpander(ill: Bool, canAssert: Bool = true.B): ExceptionType =
     apply(false.B, false.B, false.B, ill, false.B, canAssert)
