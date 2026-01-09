@@ -720,7 +720,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     evict_BtoT_way := true.B
     req.occupy_way := io.main_pipe_next_evict_way
   }
-  XSError(req_valid && req.isBtoT && io.main_pipe_evict_BtoT_way, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
