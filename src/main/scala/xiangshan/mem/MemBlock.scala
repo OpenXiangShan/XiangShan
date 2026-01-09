@@ -1153,6 +1153,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   oldestRedirect.bits.backendIAF := false.B
   oldestRedirect.bits.backendIPF := false.B
   oldestRedirect.bits.backendIGPF := false.B
+
+  // Clear st-ld violation debug payload unless the selected redirect comes from LSQ nuke rollback (LoadQueueRAW st-ld violation).
+  // This avoids X-propagation from other redirect sources that do not initialize these debug fields.
+  val selectedIsNukeRollback = VecInit(oldestOneHot.takeRight(StorePipelineWidth)).asUInt.orR
+  when(!selectedIsNukeRollback) {
+    oldestRedirect.bits.debug_stldVio_valid := false.B
+    oldestRedirect.bits.debug_stldVio_loadAddr := 0.U
+    oldestRedirect.bits.debug_stldVio_storeAddr := 0.U
+    oldestRedirect.bits.debug_stldVio_loadMask := 0.U
+    oldestRedirect.bits.debug_stldVio_storeMask := 0.U
+    oldestRedirect.bits.debug_stldVio_loadAccessSize := 0.U
+    oldestRedirect.bits.debug_stldVio_storeAccessSize := 0.U
+    oldestRedirect.bits.debug_stldVio_loadRobIdx := 0.U
+    oldestRedirect.bits.debug_stldVio_storeRobIdx := 0.U
+  }
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept

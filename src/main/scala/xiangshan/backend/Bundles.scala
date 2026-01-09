@@ -557,6 +557,7 @@ object Bundles {
     val robIdx = new RobPtr
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
+    val pc = UInt(64.W)
   }
 
   class MemWakeUpBundle(implicit p: Parameters) extends XSBundle {

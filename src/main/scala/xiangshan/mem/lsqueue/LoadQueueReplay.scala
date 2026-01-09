@@ -243,6 +243,41 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val blocking = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val strict = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
 
+  class LoadReplayMAEnqEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val loadPC = UInt(64.W)
+    val loadRobIdx = UInt(64.W)
+    val loadRobIdxFlag = UInt(64.W)
+    val strictWait = UInt(64.W)
+    val waitStoreRobIdx = UInt(64.W)
+    val waitStoreRobIdxFlag = UInt(64.W)
+    val replayIndex = UInt(64.W)
+    val blockSqIdx = UInt(64.W)
+  }
+
+  class LoadReplayMAFireEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val loadPC = UInt(64.W)
+    val loadRobIdx = UInt(64.W)
+    val loadRobIdxFlag = UInt(64.W)
+    val strictWait = UInt(64.W)
+    val waitStoreRobIdx = UInt(64.W)
+    val waitStoreRobIdxFlag = UInt(64.W)
+    val replayIndex = UInt(64.W)
+    val enqTick = UInt(64.W)
+    val waitCycle = UInt(64.W)
+  }
+
+  private val maTick = GTimer()
+  private val hartId = p(XSCoreParamsKey).HartId
+  private val tableMAEnq = ChiselDB.createTable("LoadReplayMAEnq", new LoadReplayMAEnqEntry, basicDB = true)
+  private val tableMAFire = ChiselDB.createTable("LoadReplayMAFire", new LoadReplayMAFireEntry, basicDB = true)
+  private val maEnqTick = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(64.W))))
+
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
   // | 0 | 1 |      ......  | n-2 | n-1 |
@@ -599,6 +634,28 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
+  if (!env.FPGAPlatform) {
+    for (i <- 0 until LoadPipelineWidth) {
+      val fireIdx = Mux(io.replay(i).valid, io.replay(i).bits.schedIndex, 0.U)
+      val fireIsMA = io.replay(i).fire && cause(fireIdx)(LoadReplayCauses.C_MA)
+      val enqTick = maEnqTick(fireIdx)
+      val e = Wire(new LoadReplayMAFireEntry)
+      e.tick := maTick
+      e.cpuId := hartId.U
+      e.threadId := 0.U
+      e.loadPC := uop(fireIdx).pc
+      e.loadRobIdx := uop(fireIdx).robIdx.value
+      e.loadRobIdxFlag := uop(fireIdx).robIdx.flag.asUInt
+      e.strictWait := strict(fireIdx).asUInt
+      e.waitStoreRobIdx := uop(fireIdx).waitForRobIdx.value
+      e.waitStoreRobIdxFlag := uop(fireIdx).waitForRobIdx.flag.asUInt
+      e.replayIndex := fireIdx
+      e.enqTick := enqTick
+      e.waitCycle := maTick - enqTick
+      tableMAFire.log(e, fireIsMA, s"LoadReplayMA_hart${hartId}_fire$i", clock, reset)
+    }
+  }
+
   // XSDebug(io.refill.valid, "miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
 
 
@@ -700,6 +757,23 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       when (replayInfo.cause(LoadReplayCauses.C_MA)) {
         blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
         strict(enqIndex) := enq.bits.uop.loadWaitStrict
+        maEnqTick(enqIndex) := maTick
+        val tableMAEnqEn = needEnqueue(w) && enq.ready && replayInfo.cause(LoadReplayCauses.C_MA)
+        if (!env.FPGAPlatform) {
+          val e = Wire(new LoadReplayMAEnqEntry)
+          e.tick := maTick
+          e.cpuId := hartId.U
+          e.threadId := 0.U
+          e.loadPC := enq.bits.uop.pc
+          e.loadRobIdx := enq.bits.uop.robIdx.value
+          e.loadRobIdxFlag := enq.bits.uop.robIdx.flag.asUInt
+          e.strictWait := enq.bits.uop.loadWaitStrict.asUInt
+          e.waitStoreRobIdx := enq.bits.uop.waitForRobIdx.value
+          e.waitStoreRobIdxFlag := enq.bits.uop.waitForRobIdx.flag.asUInt
+          e.replayIndex := enqIndex
+          e.blockSqIdx := replayInfo.addr_inv_sq_idx.value
+          tableMAEnq.log(e, tableMAEnqEn, s"LoadReplayMA_hart${hartId}_enq$w", clock, reset)
+        }
       }
 
       // special case: data forward fail

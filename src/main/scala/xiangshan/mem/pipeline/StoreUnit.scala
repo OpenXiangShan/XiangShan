@@ -335,6 +335,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.updateLFST.bits.robIdx := RegEnable(s0_stin.robIdx, s0_valid)
   io.updateLFST.bits.ssid := RegEnable(s0_stin.ssid.getOrElse(0.U), s0_valid)
   io.updateLFST.bits.storeSetHit := RegEnable(s0_stin.storeSetHit.getOrElse(false.B), s0_valid)
+  io.updateLFST.bits.pc := RegEnable(s1_in.uop.pc, s1_valid)
 
   // trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))

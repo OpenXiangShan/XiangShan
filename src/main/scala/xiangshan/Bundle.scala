@@ -271,6 +271,18 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val debugIsCtrl = Bool()
   val debugIsMemVio = Bool()
 
+  // Debug payload for st-ld (RAW) violation tracing.
+  // Filled by LSQ/LoadQueueRAW, consumed by CtrlBlock after pcMem reconstructs real PCs.
+  val debug_stldVio_loadAddr = UInt(PAddrBits.W)
+  val debug_stldVio_storeAddr = UInt(PAddrBits.W)
+  val debug_stldVio_loadMask = UInt((VLEN / 8).W)
+  val debug_stldVio_storeMask = UInt((VLEN / 8).W)
+  val debug_stldVio_loadAccessSize = UInt(64.W)
+  val debug_stldVio_storeAccessSize = UInt(64.W)
+  val debug_stldVio_loadRobIdx = UInt(64.W)
+  val debug_stldVio_storeRobIdx = UInt(64.W)
+  val debug_stldVio_valid = Bool()
+
   def flushItself() = RedirectLevel.flushItself(level)
 
   def getPcOffset() = {

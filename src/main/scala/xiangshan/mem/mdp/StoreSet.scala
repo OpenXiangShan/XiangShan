@@ -62,6 +62,33 @@ class SSIT(implicit p: Parameters) extends XSModule {
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
+  class StoreSetViolationEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val loadPC = UInt(64.W)
+    val storePC = UInt(64.W)
+    val validLoadSSID = UInt(64.W)
+    val validStoreSSID = UInt(64.W)
+    val loadSSID = UInt(64.W)
+    val storeSSID = UInt(64.W)
+    val finalLoadSSID = UInt(64.W)
+    val finalStoreSSID = UInt(64.W)
+  }
+
+  class StoreSetClearEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val deltaCycle = UInt(64.W)
+    val clearPeriodThreshold = UInt(64.W)
+  }
+
+  private val tick = GTimer()
+  private val hartId = p(XSCoreParamsKey).HartId
+  private val tableViolation = ChiselDB.createTable("StoreSetViolation", new StoreSetViolationEntry, basicDB = true)
+  private val tableClear = ChiselDB.createTable("StoreSetClear", new StoreSetClearEntry, basicDB = true)
+
   // raddrs are sent to ssit in decode
   // rdata will be send to rename
   require(DecodeWidth == RenameWidth)
@@ -145,9 +172,21 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val s_idle :: s_flush :: Nil = Enum(2)
   val state = RegInit(s_flush)
 
+  val timeoutSel = RegNext(io.csrCtrl.lvpred_timeout)
+  val doClear = state === s_idle && resetCounter(ResetTimeMax2Pow - 1, ResetTimeMin2Pow)(timeoutSel)
+  if (!env.FPGAPlatform) {
+    val e = Wire(new StoreSetClearEntry)
+    e.tick := tick
+    e.cpuId := hartId.U
+    e.threadId := 0.U
+    e.deltaCycle := resetCounter
+    e.clearPeriodThreshold := (1.U(64.W) << (ResetTimeMin2Pow.U + timeoutSel)).asUInt
+    tableClear.log(e, doClear, s"SSIT_hart${hartId}", clock, reset)
+  }
+
   switch (state) {
     is(s_idle) {
-      when(resetCounter(ResetTimeMax2Pow - 1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+      when(doClear) {
         state := s_flush
         resetCounter := 0.U
       }
@@ -244,10 +283,20 @@ class SSIT(implicit p: Parameters) extends XSModule {
   }
 
   when(s2_mempred_update_req_valid){
+    val initValidLoad = s2_loadAssigned
+    val initValidStore = s2_storeAssigned
+    val initLoadSSID = Mux(s2_loadAssigned, s2_loadOldSSID, 0.U)
+    val initStoreSSID = Mux(s2_storeAssigned, s2_storeOldSSID, 0.U)
+    val finalLoadSSID = Wire(UInt(SSIDWidth.W))
+    val finalStoreSSID = Wire(UInt(SSIDWidth.W))
+    finalLoadSSID := s2_allocSsid
+    finalStoreSSID := s2_allocSsid
     switch (Cat(s2_loadAssigned, s2_storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set,
       // two are allocated and assigned to each instruction."
       is ("b00".U(2.W)) {
+        finalLoadSSID := s2_allocSsid
+        finalStoreSSID := s2_allocSsid
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
@@ -264,6 +313,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // 2. "If the load has been assigned a store set, but the store has not,
       // one is allocated and assigned to the store instructions."
       is ("b10".U(2.W)) {
+        finalLoadSSID := s2_loadOldSSID
+        finalStoreSSID := s2_ldSsidAllocate
         update_st_ssit_entry(
           pc = s2_mempred_update_req.stpc,
           valid = true.B,
@@ -274,6 +325,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // 3. "If the store has been assigned a store set, but the load has not,
       // one is allocated and assigned to the load instructions."
       is ("b01".U(2.W)) {
+        finalLoadSSID := s2_stSsidAllocate
+        finalStoreSSID := s2_storeOldSSID
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
@@ -285,6 +338,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
       // one of the two store sets is declared the "winner".
       // The instruction belonging to the loser’s store set is assigned the winner’s store set."
       is ("b11".U(2.W)) {
+        finalLoadSSID := s2_winnerSSID
+        finalStoreSSID := s2_winnerSSID
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
@@ -302,6 +357,21 @@ class SSIT(implicit p: Parameters) extends XSModule {
           debug_strict(s2_mempred_update_req.ldpc) := true.B
         }
       }
+    }
+    if (!env.FPGAPlatform) {
+      val e = Wire(new StoreSetViolationEntry)
+      e.tick := tick
+      e.cpuId := hartId.U
+      e.threadId := 0.U
+      e.loadPC := s2_mempred_update_req.ldpc
+      e.storePC := s2_mempred_update_req.stpc
+      e.validLoadSSID := initValidLoad.asUInt
+      e.validStoreSSID := initValidStore.asUInt
+      e.loadSSID := initLoadSSID
+      e.storeSSID := initStoreSSID
+      e.finalLoadSSID := finalLoadSSID
+      e.finalStoreSSID := finalStoreSSID
+      tableViolation.log(e, s2_mempred_update_req_valid, s"SSIT_hart${hartId}", clock, reset)
     }
   }
 
@@ -339,6 +409,7 @@ class LFSTReq(implicit p: Parameters) extends XSBundle {
   val isstore = Bool()
   val ssid = UInt(SSIDWidth.W) // use ssid to lookup LFST
   val robIdx = new RobPtr
+  val pc = UInt(64.W)
 }
 
 class LFSTResp(implicit p: Parameters) extends XSBundle {
@@ -361,6 +432,53 @@ class LFST(implicit p: Parameters) extends XSModule {
     val storeIssue = Vec(backendParams.StaExuCnt, Flipped(Valid(new StoreUnitToLFST)))
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
+
+  class StoreSetInsertEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val pc = UInt(64.W)
+    val robIdx = UInt(64.W)
+    val robIdxFlag = UInt(64.W)
+    val ssidValid = UInt(64.W)
+    val ssid = UInt(64.W)
+    val victimIdx = UInt(64.W)
+    val victimValid = UInt(64.W)
+  }
+
+  class StoreSetLookupEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val pc = UInt(64.W)
+    val robIdx = UInt(64.W)
+    val robIdxFlag = UInt(64.W)
+    val isStore = UInt(64.W)
+    val ssidValid = UInt(64.W)
+    val ssid = UInt(64.W)
+    val producerCnt = UInt(64.W)
+    val producerRobIdx = UInt(64.W)
+    val producerRobIdxFlag = UInt(64.W)
+    val shouldWait = UInt(64.W)
+  }
+
+  class StoreSetIssueEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val pc = UInt(64.W)
+    val robIdx = UInt(64.W)
+    val robIdxFlag = UInt(64.W)
+    val ssidValid = UInt(64.W)
+    val ssid = UInt(64.W)
+    val clearedIdx = UInt(64.W)
+  }
+
+  private val tick = GTimer()
+  private val hartId = p(XSCoreParamsKey).HartId
+  private val tableInsert = ChiselDB.createTable("StoreSetInsert", new StoreSetInsertEntry, basicDB = true)
+  private val tableLookup = ChiselDB.createTable("StoreSetLookup", new StoreSetLookupEntry, basicDB = true)
+  private val tableIssue = ChiselDB.createTable("StoreSetIssue", new StoreSetIssueEntry, basicDB = true)
 
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
   val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
@@ -399,14 +517,49 @@ class LFST(implicit p: Parameters) extends XSModule {
         }
       )
     }
+
+    if (!env.FPGAPlatform) {
+      val e = Wire(new StoreSetLookupEntry)
+      e.tick := tick
+      e.cpuId := hartId.U
+      e.threadId := 0.U
+      e.pc := io.dispatch.req(i).bits.pc
+      e.robIdx := io.dispatch.req(i).bits.robIdx.value.asUInt
+      e.robIdxFlag := io.dispatch.req(i).bits.robIdx.flag.asUInt
+      e.isStore := io.dispatch.req(i).bits.isstore.asUInt
+      e.ssidValid := io.dispatch.req(i).valid.asUInt
+      e.ssid := io.dispatch.req(i).bits.ssid
+      e.producerCnt := PopCount(validVec(io.dispatch.req(i).bits.ssid))
+      e.producerRobIdx := io.dispatch.resp(i).bits.robIdx.value.asUInt
+      e.producerRobIdxFlag := io.dispatch.resp(i).bits.robIdx.flag.asUInt
+      e.shouldWait := io.dispatch.resp(i).bits.shouldWait.asUInt
+      tableLookup.log(e, io.dispatch.req(i).valid, s"LFST_hart${hartId}_rd$i", clock, reset)
+    }
   }
 
   // when store is issued, mark it as invalid
   (0 until backendParams.StaExuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){
+      val hit = io.storeIssue(i).valid &&
+        io.storeIssue(i).bits.storeSetHit &&
+        validVec(io.storeIssue(i).bits.ssid)(j) &&
+        io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value
+      when(hit){
         validVec(io.storeIssue(i).bits.ssid)(j) := false.B
+      }
+      if (!env.FPGAPlatform) {
+        val e = Wire(new StoreSetIssueEntry)
+        e.tick := tick
+        e.cpuId := hartId.U
+        e.threadId := 0.U
+        e.pc := io.storeIssue(i).bits.pc
+        e.robIdx := io.storeIssue(i).bits.robIdx.value
+        e.robIdxFlag := io.storeIssue(i).bits.robIdx.flag.asUInt
+        e.ssidValid := io.storeIssue(i).bits.storeSetHit.asUInt
+        e.ssid := io.storeIssue(i).bits.ssid
+        e.clearedIdx := j.U
+        tableIssue.log(e, hit, s"LFST_hart${hartId}_issue$i", clock, reset)
       }
     })
   })
@@ -417,11 +570,26 @@ class LFST(implicit p: Parameters) extends XSModule {
     when(io.dispatch.req(i).valid && io.dispatch.req(i).bits.isstore){
       val waddr = io.dispatch.req(i).bits.ssid
       val wptr = allocPtr(waddr)
+      val victimValid = validVec(waddr)(wptr)
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
       robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
       when(validVec(waddr)(wptr)) {
         overflowVec(i) := true.B
+      }
+      if (!env.FPGAPlatform) {
+        val e = Wire(new StoreSetInsertEntry)
+        e.tick := tick
+        e.cpuId := hartId.U
+        e.threadId := 0.U
+        e.pc := io.dispatch.req(i).bits.pc
+        e.robIdx := io.dispatch.req(i).bits.robIdx.value
+        e.robIdxFlag := io.dispatch.req(i).bits.robIdx.flag.asUInt
+        e.ssidValid := io.dispatch.req(i).valid.asUInt
+        e.ssid := waddr
+        e.victimIdx := wptr
+        e.victimValid := victimValid.asUInt
+        tableInsert.log(e, io.dispatch.req(i).valid && io.dispatch.req(i).bits.isstore, s"LFST_hart${hartId}_ins$i", clock, reset)
       }
     }
   })

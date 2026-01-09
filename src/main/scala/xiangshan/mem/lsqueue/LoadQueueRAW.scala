@@ -98,6 +98,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   ))
   maskModule.io := DontCare
   val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val debugPaddr = Reg(Vec(LoadQueueRAWSize, UInt(PAddrBits.W)))
+  val debugMask = Reg(Vec(LoadQueueRAWSize, UInt((VLEN / 8).W)))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -162,6 +164,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       //  Fill info
       uop(enqIndex) := enq.bits.uop
       datavalid(enqIndex) := enq.bits.data_valid
+      debugPaddr(enqIndex) := enq.bits.paddr
+      debugMask(enqIndex) := enq.bits.mask
     }
     val debug_robIdx = enq.bits.uop.robIdx.asUInt
     XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
@@ -290,6 +294,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   val storeIn = io.storeIn
 
+  class LqUopWithIdx extends XSBundleWithMicroOp {
+    val idx = UInt(log2Up(LoadQueueRAWSize).W)
+    val paddr = UInt(PAddrBits.W)
+    val mask = UInt((VLEN / 8).W)
+  }
+
   def detectRollback(i: Int) = {
     paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
     paddrModule.io.violationCheckLine.get(i) := storeIn(i).bits.wlineflag
@@ -303,18 +313,23 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
 
-    val lqViolationSelUopExts = uop.map(uop => {
-      val wrapper = Wire(new XSBundleWithMicroOp)
+    val lqViolationSelUopExts: Seq[LqUopWithIdx] = uop.zipWithIndex.map { case (uop, j) =>
+      val wrapper = Wire(new LqUopWithIdx)
       wrapper.uop := uop
+      wrapper.idx := j.U
+      wrapper.paddr := debugPaddr(j)
+      wrapper.mask := debugMask(j)
       wrapper
-    })
+    }
 
     // select logic
-    val lqSelect: (Seq[Bool], Seq[XSBundleWithMicroOp]) = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
+    val lqSelect: (Seq[Bool], Seq[LqUopWithIdx]) = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 
     // select one inst
     val lqViolation = lqSelect._1(0)
     val lqViolationUop = lqSelect._2(0).uop
+    val lqViolationPaddr = lqSelect._2(0).paddr
+    val lqViolationMask = lqSelect._2(0).mask
 
     XSDebug(
       lqViolation,
@@ -322,13 +337,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       storeIn(i).bits.uop.pc, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
     )
 
-    (lqViolation, lqViolationUop)
+    (lqViolation, lqViolationUop, lqViolationPaddr, lqViolationMask)
   }
 
   // select rollback (part1) and generate rollback request
   // rollback check
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
   val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
+  val rollbackLqPaddr = Wire(Vec(StorePipelineWidth, UInt(PAddrBits.W)))
+  val rollbackLqMask = Wire(Vec(StorePipelineWidth, UInt((VLEN / 8).W)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
   val stIsRVC = Wire(Vec(StorePipelineWidth, Bool()))
@@ -336,6 +353,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
+    rollbackLqPaddr(w) := detectedRollback._3
+    rollbackLqMask(w) := detectedRollback._4
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
     stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
@@ -348,6 +367,16 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // select uop in parallel
 
   val allRedirect = (0 until StorePipelineWidth).map(i => {
+    def accessBytesFromFuOpType(fuOpType: UInt): UInt = {
+      (1.U(8.W) << LSUOpType.size(fuOpType)).asUInt
+    }
+
+    val storeValidS1 = storeIn(i).valid && !storeIn(i).bits.miss
+    val storeRobIdx = DelayNWithValid(storeIn(i).bits.uop.robIdx.value, storeValidS1, TotalSelectCycles)._2
+    val storeAddr = DelayNWithValid(storeIn(i).bits.paddr, storeValidS1, TotalSelectCycles)._2
+    val storeMask = DelayNWithValid(storeIn(i).bits.mask, storeValidS1, TotalSelectCycles)._2
+    val storeFuOpType = DelayNWithValid(storeIn(i).bits.uop.fuOpType, storeValidS1, TotalSelectCycles)._2
+
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := rollbackLqWb(i).valid
     redirect.bits             := DontCare
@@ -362,6 +391,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.level       := RedirectLevel.flush
     redirect.bits.target      := rollbackLqWb(i).bits.pc
     redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
+
+    redirect.bits.debug_stldVio_valid := redirect.valid
+    redirect.bits.debug_stldVio_loadAddr := rollbackLqPaddr(i)
+    redirect.bits.debug_stldVio_storeAddr := storeAddr
+    redirect.bits.debug_stldVio_loadMask := rollbackLqMask(i)
+    redirect.bits.debug_stldVio_storeMask := storeMask
+    redirect.bits.debug_stldVio_loadAccessSize := accessBytesFromFuOpType(rollbackLqWb(i).bits.fuOpType)
+    redirect.bits.debug_stldVio_storeAccessSize := accessBytesFromFuOpType(storeFuOpType)
+    redirect.bits.debug_stldVio_loadRobIdx := rollbackLqWb(i).bits.robIdx.value
+    redirect.bits.debug_stldVio_storeRobIdx := storeRobIdx
+
     redirect
   })
   io.rollback := allRedirect

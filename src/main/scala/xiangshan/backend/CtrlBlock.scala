@@ -225,6 +225,24 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
+  class StoreSetLSQViolationEntry extends Bundle {
+    val tick = UInt(64.W)
+    val cpuId = UInt(64.W)
+    val threadId = UInt(64.W)
+    val loadPC = UInt(64.W)
+    val storePC = UInt(64.W)
+    val loadRobIdx = UInt(64.W)
+    val storeRobIdx = UInt(64.W)
+    val loadAddr = UInt(PAddrBits.W)
+    val storeAddr = UInt(PAddrBits.W)
+    val loadAccessSize = UInt(64.W)
+    val storeAccessSize = UInt(64.W)
+    val loadMask = UInt((VLEN / 8).W)
+    val storeMask = UInt((VLEN / 8).W)
+  }
+  private val storeSetLSQViolationTable = ChiselDB.createTable("StoreSetLSQViolation", new StoreSetLSQViolationEntry, basicDB = true)
+  private val storeSetLSQViolationTick = GTimer()
+
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
   pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := memViolation.valid
@@ -341,6 +359,25 @@ class CtrlBlockImp(
     loadRedirectPcOffset := memViolation.bits.getPcOffset()
   }
   redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead + loadRedirectPcOffset
+
+  // StoreSetLSQViolation trace: log after pcMem reconstructs real PCs (store PC comes from memPred pcMem read).
+  // Payload (addr/mask/size/seqnum) is carried in Redirect debug fields and is cleared for non st-ld redirects in MemBlock.
+  val storeSetLSQViolationEn = loadReplay.valid && loadReplay.bits.debug_stldVio_valid
+  val storeSetLSQViolationEntry = Wire(new StoreSetLSQViolationEntry)
+  storeSetLSQViolationEntry.tick := storeSetLSQViolationTick
+  storeSetLSQViolationEntry.cpuId := io.fromTop.hartId
+  storeSetLSQViolationEntry.threadId := 0.U
+  storeSetLSQViolationEntry.loadPC := redirectGen.io.loadReplay.bits.pc
+  storeSetLSQViolationEntry.storePC := redirectGen.io.memPredPcRead.data
+  storeSetLSQViolationEntry.loadRobIdx := loadReplay.bits.debug_stldVio_loadRobIdx
+  storeSetLSQViolationEntry.storeRobIdx := loadReplay.bits.debug_stldVio_storeRobIdx
+  storeSetLSQViolationEntry.loadAddr := loadReplay.bits.debug_stldVio_loadAddr
+  storeSetLSQViolationEntry.storeAddr := loadReplay.bits.debug_stldVio_storeAddr
+  storeSetLSQViolationEntry.loadAccessSize := loadReplay.bits.debug_stldVio_loadAccessSize
+  storeSetLSQViolationEntry.storeAccessSize := loadReplay.bits.debug_stldVio_storeAccessSize
+  storeSetLSQViolationEntry.loadMask := loadReplay.bits.debug_stldVio_loadMask
+  storeSetLSQViolationEntry.storeMask := loadReplay.bits.debug_stldVio_storeMask
+  storeSetLSQViolationTable.log(storeSetLSQViolationEntry, storeSetLSQViolationEn, s"StoreSetLSQViolation_hart${p(XSCoreParamsKey).HartId}", clock, reset)
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
