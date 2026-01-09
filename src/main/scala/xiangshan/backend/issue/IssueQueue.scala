@@ -1364,7 +1364,7 @@ class IssueQueueVecMemImp(implicit p: Parameters, params: IssueBlockParams)
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.sqIdx)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
     deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
-    if (params.isVecLduIQ) {
+    if (params.VlduCnt > 0) {
       deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr.get
       deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset.get
     }

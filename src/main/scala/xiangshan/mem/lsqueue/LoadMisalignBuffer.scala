@@ -564,8 +564,8 @@ class LoadMisalignBuffer(val param: ExeUnitParams)(implicit p: Parameters) exten
     LduCfg.exceptionOut.foreach(no => excp(no) := (globalUncache || globalException) && exceptionVec(no))
   })
 
-  io.writeBack.bits.flushPipe.get := false.B
-  io.writeBack.bits.replay.get := false.B
+  io.writeBack.bits.flushPipe.foreach(_ := false.B)
+  io.writeBack.bits.replay.foreach(_ := false.B)
   io.writeBack.bits.lqIdx.get := req.uop.lqIdx
   io.writeBack.bits.trigger.get := req.uop.trigger
   io.writeBack.bits.isRVC.get := req.uop.isRVC
