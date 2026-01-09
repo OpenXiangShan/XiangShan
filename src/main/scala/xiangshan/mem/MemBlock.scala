@@ -45,6 +45,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
+import coupledL2.EnableCHI
 
 trait HasMemBlockParameters extends HasXSParameter {
   val intSchdParams = backendParams.intSchdParams.get
@@ -1224,7 +1225,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   //lsq.io.refill         := delayedDcacheRefill
   // lsq.io.release        := dcache.io.lsu.release
-  lsq.io.release        := io.l2_release
+  if (p(EnableCHI)) {
+    lsq.io.release := io.l2_release
+  } else {
+    lsq.io.release(0).valid := dcache.io.lsu.release.valid
+    lsq.io.release(0).bits := dcache.io.lsu.release.bits.paddr
+    lsq.io.release(1).valid := false.B
+    lsq.io.release(1).bits := DontCare
+  }
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
