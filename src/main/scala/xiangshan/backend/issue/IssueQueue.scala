@@ -14,13 +14,6 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 import utility.PerfCCT
 
-class IssueQueueStatusBundle(numEnq: Int, numEntries: Int) extends Bundle {
-  val empty = Output(Bool())
-  val full = Output(Bool())
-  val validCnt = Output(UInt(log2Ceil(numEntries + 1).W))
-  val leftVec = Output(Vec(numEnq + 1, Bool()))
-}
-
 class IssueQueueDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends EntryDeqRespBundle
 
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -54,7 +47,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
 
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
-  val status = Output(new IssueQueueStatusBundle(params.numEnq, params.numEntries))
   val validCntDeqVec = Output(Vec(params.numDeq,UInt(params.numEntries.U.getWidth.W)))
   // perf counter
   val validVec = Output(Vec(params.numEntries, Bool()))
@@ -1043,10 +1035,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   protected val enqValidCntDeq1 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq.last).map { case (a, b) => a && b })
   io.validCntDeqVec.head := RegNext(enqEntryValidCntDeq0 +& othersValidCntDeq0 - io.deqDelay.head.fire) // validCntDeqVec(0)
   io.validCntDeqVec.last := RegNext(enqEntryValidCntDeq1 +& othersValidCntDeq1 - io.deqDelay.last.fire) // validCntDeqVec(1)
-  io.status.leftVec(0) := validVec.drop(params.numEnq).reduce(_ & _)
-  for (i <- 0 until params.numEnq) {
-    io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
-  }
   private val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
   othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
     leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
@@ -1065,9 +1053,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     othersCanotIn := simpCanotIn
   }
   io.enq.foreach(_.ready := (!othersCanotIn || !enqHasValid) && !enqHasIssued)
-  io.status.empty := !Cat(validVec).orR
-  io.status.full := othersCanotIn
-  io.status.validCnt := PopCount(validVec)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux(FuType.isUncertain(fuType),
