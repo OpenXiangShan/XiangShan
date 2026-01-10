@@ -76,13 +76,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   require(params.numComp == 0 || params.numComp >= params.numEnq, "numComp should be 0 or at least not less than numEnq")
   val param: IssueBlockParams = params
   val deqFuCfgs     : Seq[Seq[FuConfig]] = params.exuBlockParams.map(_.fuConfigs)
-  val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
-  val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
-  val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
   val wakeupFuLatencySeqs : Seq[Seq[(FuType.OHType, Int)]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap.toSeq.sortBy(_._2))
 
   println(s"[IssueQueueImp] ${params.getIQName} fuLatencySeqs: ${wakeupFuLatencySeqs}")
-  println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   if (params.hasIQWakeUp) {
     val exuSourcesEncodeString = params.wakeUpSourceExuIdx.map(x => 1 << x).reduce(_ + _).toBinaryString
     println(s"[IssueQueueImp] ${params.getIQName} exuSourcesWidth: ${ExuSource().value.getWidth}, " +
@@ -413,10 +409,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
 
   s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map{ case (enqValid, enq) => enqValid && enq.ready}
-
-  protected val commonAccept: UInt = Cat(fuTypeVec.map(fuType =>
-    FuType.FuTypeOrR(fuType, commonFuCfgs.map(_.fuType))
-  ).reverse)
 
   // if deq port can accept the uop
   protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
