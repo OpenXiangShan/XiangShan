@@ -802,6 +802,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(wakeupFromExu.valid, wakeupFromExu.bits.pdest, deqBeforeDly(i).bits.common.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(wakeupFromExu.valid, FuType.div.U, deqBeforeDly(i).bits.common.fuType)
             wakeUpQueue.io.enq.bits.lat := Mux(wakeupFromExu.valid, 0.U, getDeqLat(i, deqBeforeDly(i).bits.common.fuType))
+            wakeUpQueue.io.enq.bits.uop.is0Lat.foreach(_ := Mux(wakeupFromExu.valid, false.B, getDeqLat(i, deqBeforeDly(i).bits.common.fuType) === 0.U))
             // wakeupFromExu's valid need after flush
             wakeUpQueue.io.enq.bits.uop.robIdx := Mux(wakeupFromExu.valid, 0.U.asTypeOf(wakeUpQueue.io.enq.bits.uop.robIdx), deqBeforeDly(i).bits.common.robIdx)
           }
@@ -818,6 +819,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.common.pdest, wakeupFromExu.bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.common.fuType, FuType.fDivSqrt.U)
             wakeUpQueue.io.enq.bits.lat := Mux(deqBeforeDly(i).valid, getDeqLat(i, deqBeforeDly(i).bits.common.fuType), 0.U)
+            // fp don't have 0 lat fu
             // wakeupFromExu's valid need after flush
             wakeUpQueue.io.enq.bits.uop.robIdx := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.common.robIdx, 0.U.asTypeOf(wakeUpQueue.io.enq.bits.uop.robIdx))
           }
@@ -827,6 +829,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enq.bits.uop :<= deqBeforeDly(i).bits.common
           wakeUpQueue.io.enq.bits.uop.pdestCopy.foreach(_ := 0.U)
           wakeUpQueue.io.enq.bits.lat := getDeqLat(i, deqBeforeDly(i).bits.common.fuType)
+          wakeUpQueue.io.enq.bits.uop.is0Lat.foreach( _ := getDeqLat(i, deqBeforeDly(i).bits.common.fuType) === 0.U)
           // int i2f wakeup fstore from fpRegion, so there is not need fpWen
           if (params.inIntSchd) {
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
@@ -843,6 +846,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromI2F.valid
           wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := wakeupFromI2F.bits.fpWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromI2F.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
         else if (params.exuBlockParams(i).needDataFromF2I) {
@@ -851,6 +855,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromF2I.valid
           wakeUpQueue.io.enqAppend.bits.uop.rfWen.foreach(x => x := wakeupFromF2I.bits.rfWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromF2I.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
         else if (params.exuBlockParams(i).fuConfigs.contains(FuConfig.FdivCfg)) {
@@ -858,6 +863,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromExu.valid
           wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := wakeupFromExu.bits.fpWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromExu.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
     }
@@ -875,6 +881,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     deq.bits.common.fuOpType := deqEntryVec(i).bits.payload.fuOpType
     deq.bits.common.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
+    deq.bits.common.is0Lat.foreach(_ := getDeqLat(i, deq.bits.common.fuType) === 0.U)
     deq.bits.common.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
     deq.bits.common.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
     deq.bits.common.v0Wen.foreach(_ := deqEntryVec(i).bits.payload.v0Wen.get)
@@ -974,7 +981,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
       wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits)
       wakeup.bits.loadDependency := wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))
-      wakeup.bits.is0Lat := getDeqLat(i, wakeUpQueues(i).get.io.deq.bits.fuType) === 0.U
+      wakeup.bits.is0Lat := wakeUpQueues(i).get.io.deq.bits.is0Lat.getOrElse(false.B)
       wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
     } else {
       wakeup.valid := false.B
