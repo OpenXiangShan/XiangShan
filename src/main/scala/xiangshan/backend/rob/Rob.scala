@@ -79,7 +79,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited)
     }
     val rabCommits = Output(new RabCommitIO)
-    val vlCommits = Output(new VlCommitBundle(CommitWidth))
+    val vlCommits = Output(new VlCommitBundle(RabCommitWidth))
     val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
     val diffVlCommits = Option.when(backendParams.basicDebugEn)(new DiffVlCommitBundle(CommitWidth))
     val isVsetFlushPipe = Output(Bool())

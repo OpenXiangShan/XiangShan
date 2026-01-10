@@ -524,3 +524,165 @@ case class BackendParams(
     }
   }
 }
+
+object BackendV2SchdParams {
+
+  def intSchdVlWbPort = 0
+  def vfSchdVlWbPort  = 1
+  def IssueQueueSize  = 20
+  def IssueQueueCompEntrySize = 12
+  def numPregsInt = 224
+  def rfDataWidthInt = 64
+  def numPregsFp = 192
+  def rfDataWidthFp= 64
+  def numPregsVec = 128
+  def rfDataWidthVec = 128
+
+  def intSchdParams = {
+    implicit val schdType: SchedulerType = IntScheduler()
+    SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
+        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(1, 0)), Seq(IntRD(5, 0))), true, 2),
+        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams(
+          "ALU2",
+          Seq(AluCfg, I2fCfg, VSetRiWiCfg, VSetRiWvfCfg, I2vCfg, BkuCfg, MulCfg),
+          Seq(IntWB(port = 2, 0), VfWB(4, 0), V0WB(port = 2, 0), FpWB(port = 0, 1)),
+          Seq(Seq(IntRD(2, 0)), Seq(IntRD(6, 0))),
+          true,
+          2,
+          vlWB = VlWB(port = intSchdVlWbPort, 0),
+        ),
+        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("ALU3", Seq(AluCfg, BkuCfg, MulCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(7, 0))), true, 2)
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(4, 0), FpWB(3, 0)), Seq(Seq(IntRD(8, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(5, 0), FpWB(4, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(5, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(3, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(7, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(4, 2), FpRD(9, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(10, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+    ),
+      numPregs = numPregsInt,
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = rfDataWidthInt,
+    )
+  }
+
+  def fpSchdParams = {
+    implicit val schdType: SchedulerType = FpScheduler()
+    SchdBlockParams(Seq(
+      // FcmpCfg and FcvtCfg must be in the same ExuUnit because they both need to write to the integer register file.
+      IssueBlockParams(Seq(
+        ExeUnitParams("FEX0", Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
+      IssueBlockParams(Seq(
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
+      IssueBlockParams(Seq(
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
+    ),
+      numPregs = numPregsFp,
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = rfDataWidthFp,
+    )
+  }
+
+
+  def vecSchdParams = {
+    implicit val schdType: SchedulerType = VecScheduler()
+    SchdBlockParams(Seq(
+      IssueBlockParams(Seq(
+        ExeUnitParams(
+          "VFEX0",
+          Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
+          Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 7, 0), FpWB(port = 6, 0)),
+          Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
+          vlWB = VlWB(port = vfSchdVlWbPort, 0),
+          vlRD = VlRD(0, 0),
+        ),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams(
+          "VFEX1",
+          Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg),
+          Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
+          Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
+          vlRD = VlRD(1, 0),
+        ),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams(
+          "VLSU0",
+          Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg),
+          Seq(VfWB(2, 0), V0WB(2, 0)),
+          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0))),
+          vlWB = VlWB(port = 2, 0),
+          vlRD = VlRD(2, 0),
+        ),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+      IssueBlockParams(Seq(
+        ExeUnitParams(
+          "VLSU1",
+          Seq(VlduCfg, VstuCfg),
+          Seq(VfWB(3, 0), V0WB(3, 0)),
+          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0))),
+          vlWB = VlWB(port = 3, 0),
+          vlRD = VlRD(3, 0),
+        ),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
+    ),
+      numPregs = numPregsVec,
+      numDeqOutside = 0,
+      schdType = schdType,
+      rfDataWidth = rfDataWidthVec,
+    )
+  }
+
+  def iqWakeUpParams = {
+    Seq(
+      WakeUpConfig(
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2") ->
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1", "BJU0", "BJU1", "BJU2")
+      ),
+      WakeUpConfig(
+        Seq("FEX0", "FEX1", "FEX2") ->
+        Seq("FEX0", "FEX1", "FEX2")
+      ),
+      WakeUpConfig(
+        Seq("LDU0", "LDU1", "LDU2") ->
+        Seq("FEX0", "FEX1", "FEX2")
+      ),
+      WakeUpConfig(
+        Seq("FEX0", "FEX1", "FEX2") ->
+        Seq("STD0", "STD1")
+      ),
+    ).flatten
+  }
+}

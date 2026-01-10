@@ -50,7 +50,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val rabCommits = Input(new RabCommitIO)
-    val vlCommits = Input(new VlCommitBundle(CommitWidth))
+    val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     // from csr
     val singleStep = Input(Bool())
     // from decode
@@ -116,7 +116,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, 31))
   val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, RabCommitWidth, 1))
-  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, CommitWidth, 1))
+  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, RabCommitWidth, 1))
 
 
   intFreeList.io.commit match {
