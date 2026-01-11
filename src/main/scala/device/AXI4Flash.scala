@@ -31,11 +31,11 @@ class AXI4Flash
 
   override lazy val module = new AXI4SlaveModuleImp(this){
     val beatBits = log2Ceil(node.portParams.head.beatBytes)
-    def getOffset(addr: UInt) = Cat(addr(15, beatBits), 0.U(beatBits.W))
+    def getOffset(addr: UInt) = Cat(addr(21, beatBits), 0.U(beatBits.W))
 
     val flash = DifftestFlash()
     flash.en := in.ar.fire
-    flash.addr := Cat(0.U(16.W), getOffset(raddr))
+    flash.addr := Cat(0.U(10.W), getOffset(raddr))
 
     in.r.bits.data := flash.data
   }
