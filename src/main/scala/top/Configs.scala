@@ -321,6 +321,8 @@ case class L2CacheConfig
   inclusive: Boolean = true,
   banks: Int = 1,
   tp: Boolean = true,
+  nl: Boolean = false,        // Next-Line Prefetcher switch
+  enablePC: Boolean = false,  // Enable PC field for L1Param
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
@@ -340,6 +342,7 @@ case class L2CacheConfig
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
+          pcBitOpt = if (enablePC) Some(64) else None,  // 条件启用 PC 字段，64 位宽
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
           vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
@@ -354,6 +357,7 @@ case class L2CacheConfig
         enablePoison = true,
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
+          (if (nl) Seq(NLParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
@@ -523,6 +527,14 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+class DefaultConfigWithNL(n: Int = 1) extends Config(
+  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, nl = true, enablePC = true)
+    ++ WithNKBL1D(64, ways = 4)
+    ++ new BaseConfig(n)
+)
+
+
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
     ++ new DefaultConfig(n)
@@ -539,6 +551,13 @@ class WithCHI extends Config((_, _, _) => {
 
 class KunminghuV2Config(n: Int = 1) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+    ++ new DefaultConfig(n)
+    ++ new WithCHI
+)
+
+//新定义一个config
+class KunminghuV2WithNLConfig(n: Int = 1) extends Config(
+  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false, nl = true, enablePC = true)
     ++ new DefaultConfig(n)
     ++ new WithCHI
 )

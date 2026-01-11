@@ -26,7 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.dataview._
 import chisel3.util._
-import coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, VaddrKey}
+import coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, VaddrKey,PCKey}
 import difftest._
 import freechips.rocketchip.tilelink._
 import huancun.{AliasKey, DirtyKey, PrefetchKey}
@@ -262,6 +262,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
     // pass vaddr to l2
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
+    acquire.user.lift(PCKey).foreach(_ := req.pc) //新定义pc字段
 
     // miss req pipe reg pass keyword to L2, is priority
     acquire.echo.lift(IsKeywordKey).foreach(_ := isKeyword())
@@ -855,6 +856,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
   // pass vaddr to l2
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
+  // pass pc to l2
+  io.mem_acquire.bits.user.lift(PCKey).foreach(_ := req.pc)
   // pass keyword to L2
   io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := isKeyword)
   // trigger prefetch

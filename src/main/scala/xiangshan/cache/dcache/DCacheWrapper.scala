@@ -19,7 +19,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, VaddrField}
+import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, VaddrField,PCKey,PCField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
@@ -52,6 +52,7 @@ case class DCacheParameters
   nMaxPrefetchEntry: Int = 1,
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
+  //pcBitOpt: Option[Int] = Some(64),//添加pc端口
   enableDataEcc: Boolean = false,
   enableTagEcc: Boolean = false,
   cacheCtrlAddressOpt: Option[AddressSet] = None,
@@ -894,6 +895,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     VaddrField(VAddrBits - blockOffBits),
     MemBackTypeMMField(),
     MemPageTypeNCField(),
+    PCField(VAddrBits)  // PC使用虚拟地址位宽 (Sv48x4 = 50位)
   //  IsKeywordField()
   ) ++ cacheParams.aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Seq(
