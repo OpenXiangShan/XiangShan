@@ -89,3 +89,10 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   // target fix, see comment in Parameters.scala
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
 }
+
+class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
+  val taken:        Bool            = Bool()
+  val cfiPosition:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute:    BranchAttribute = new BranchAttribute
+  val isStrongBias: Bool            = Bool()
+}
