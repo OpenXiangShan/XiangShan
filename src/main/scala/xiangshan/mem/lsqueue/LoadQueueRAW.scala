@@ -370,21 +370,30 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   io.rollback := allRedirect
 
-  val oldestOH = Redirect.selectOldestRedirect(allRedirect)
-  io.mdpTrain := Mux1H(oldestOH, allRedirect)
+  val mdpTrainFilter = (0 until StorePipelineWidth).map(i => {
+    val redirect = Wire(Valid(new Redirect))
+    redirect.bits  := allRedirect(i).bits
+    redirect.valid := allRedirect(i).valid && stIsFirstIssue(i)
+    redirect
+  })
+
+  val oldestOH = Redirect.selectOldestRedirect(mdpTrainFilter)
+  io.mdpTrain := Mux1H(oldestOH, mdpTrainFilter)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRAWSize - LoadPipelineWidth).U
   val rollbaclValid = io.rollback.map(_.valid).reduce(_ || _).asUInt
-  val storeFirstIssue = Mux1H(oldestOH, stIsFirstIssue)
+  val storeDelay = allRedirect.zipWithIndex.map{case (redirect, i) =>
+      redirect.valid && !stIsFirstIssue(i)
+    }
 
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
   XSPerfAccumulate("stld_rollback", rollbaclValid)
   // store is tlb miss, and it occure RAW
-  XSPerfAccumulate("stld_rollback_store_delay", !storeFirstIssue && io.mdpTrain.valid)
+  XSPerfAccumulate("stld_rollback_store_delay", PopCount(storeDelay))
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq ", canEnqCount),
     ("stld_rollback", rollbaclValid),
