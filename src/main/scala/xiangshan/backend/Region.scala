@@ -37,11 +37,9 @@ import xiangshan.backend.issue._
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new RegionIO(params))
   val issueQueues = params.issueBlockParams.map { case iqParam => {
-    (if (iqParam.inFpSchd) Module(new IssueQueueFpImp()(p,iqParam))
-    else if (iqParam.inIntSchd && !iqParam.isMemAddrIQ) Module(new IssueQueueIntImp()(p,iqParam))
-    else if (iqParam.inIntSchd && iqParam.isMemAddrIQ) Module(new IssueQueueMemAddrImp()(p,iqParam))
-    else if (iqParam.inVfSchd && !iqParam.isMemAddrIQ) Module(new IssueQueueVfImp()(p,iqParam))
-    else Module(new IssueQueueVecMemImp()(p,iqParam))).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
+    (if (iqParam.inIntSchd && iqParam.isMemAddrIQ) Module(new IssueQueueMemAddrImp()(p,iqParam))
+    else if (iqParam.inVfSchd && iqParam.isMemAddrIQ) Module(new IssueQueueVecMemImp()(p,iqParam))
+    else Module(new IssueQueueImp()(p,iqParam))).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
     }
   }
   issueQueues.map(x =>{

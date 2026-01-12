@@ -919,6 +919,21 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
     deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
+    deq.bits.common.pc.foreach(_ := 0.U)
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
+    // TODO delate payload.uopIdx
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
+    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
+    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
+    deq.bits.common.predictInfo.foreach(x => {
+      // TODO delate predictInfo.target in iq deq, add it to ExuInput
+      x.target := 0.U
+      x.fixedTaken := deqEntryVec(i).bits.payload.fixedTaken.getOrElse(false.B)
+      x.predTaken := deqEntryVec(i).bits.payload.predTaken.getOrElse(false.B)
+    })
+    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx.get)
 
     deq.bits.common.perfDebugInfo.foreach(_ := deqEntryVec(i).bits.payload.debug.get.perfDebugInfo)
     deq.bits.common.debug_seqNum.foreach(_ := deqEntryVec(i).bits.payload.debug.get.debug_seqNum)
@@ -1151,56 +1166,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
     }
   }
-}
-
-class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
-  val fastMatch = UInt(backendParams.LduCnt.W)
-  val fastImm = UInt(12.W)
-}
-
-class IssueQueueIntIO()(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO
-
-class IssueQueueIntImp(implicit p: Parameters, params: IssueBlockParams)  extends IssueQueueImp
-{
-  io.suggestName("none")
-  override lazy val io = IO(new IssueQueueIntIO).suggestName("io")
-
-  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.pc.foreach(_ := DontCare)
-    deq.bits.common.isRVC.foreach(_ := deqEntryVec(i).bits.payload.isRVC.getOrElse(false.B))
-    deq.bits.common.rasAction.foreach(_ := deqEntryVec(i).bits.payload.rasAction.getOrElse(0.U))
-    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
-    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
-    deq.bits.common.predictInfo.foreach(x => {
-      x.target := DontCare
-      x.fixedTaken := deqEntryVec(i).bits.payload.fixedTaken.getOrElse(false.B)
-      x.predTaken  := deqEntryVec(i).bits.payload.predTaken.getOrElse(false.B)
-    })
-    // for std
-    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx.get)
-    // for i2f
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
-  }}
-}
-
-class IssueQueueVfImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
-{
-  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
-    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
-    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
-    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
-  }}
-}
-
-class IssueQueueFpImp(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueImp
-{
-  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu.get)
-    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu.get)
-    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx.get)
-    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop.get)
-  }}
 }
 
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
