@@ -193,6 +193,9 @@ ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend
 endif
 
+ifeq ($(GSIM), 1)
+override SIM_ARGS += --difftest-config G
+endif
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
@@ -333,6 +336,9 @@ emu-mk: sim-verilog
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
+gsim: sim-verilog
+	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -361,4 +367,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
