@@ -71,6 +71,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.traceCoreInterface.foreach(_.fromEncoder.stall  := false.B)
 
   // soc.io.rtc_clock is a div100 of soc.io.clock
+  /*
   val rtcClockDiv = 100
   val rtcTickCycle = rtcClockDiv / 2
   val rtcCounter = RegInit(0.U(log2Ceil(rtcTickCycle + 1).W))
@@ -79,7 +80,8 @@ class SimTop(implicit p: Parameters) extends Module {
   when (rtcCounter === 0.U) {
     rtcClock := ~rtcClock
   }
-  soc.io.rtc_clock := rtcClock
+  */
+  // soc.io.rtc_clock := rtcClock
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay = 3)(p))
@@ -97,6 +99,7 @@ class SimTop(implicit p: Parameters) extends Module {
     val dse_max_epoch = Output(UInt(64.W))
     val dse_epoch = Output(UInt(64.W))
     val dse_max_instr = Output(UInt(64.W))
+    val perf_out = soc.perf_out.cloneType
   })
 
   val difftest = DifftestModule.finish("XiangShan")
@@ -111,6 +114,7 @@ class SimTop(implicit p: Parameters) extends Module {
   io.dse_max_epoch := soc.io.dse_max_epoch
   io.dse_epoch := soc.io.dse_epoch
   io.dse_max_instr := soc.io.dse_max_instr
+  io.perf_out := soc.perf_out
 
   val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
   val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
@@ -120,14 +124,11 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
-  lazy val io_perf = HardenXSPerfAccumulate.reclaim()
-
   // XSLog.collect(timer, logEnable, clean, dump)
   dontTouch(timer)
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
-  dontTouch(io_perf)
 }
 
 object SimTop extends App {

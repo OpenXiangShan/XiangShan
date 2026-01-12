@@ -286,7 +286,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
-      val rtc_clock = Input(Bool())
+      // val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_critical_error = Output(Vec(NumCores, Bool()))
@@ -336,7 +336,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock
-    childReset := true_reset_sync
+    childReset := `true_reset_sync`
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
@@ -348,11 +348,18 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     io.dse_epoch := dseCtrl.module.io.epoch
     io.dse_max_instr := dseCtrl.module.io.max_instr_cnt
 
+    lazy val (io_perf, nr_perf) = HardenXSPerfAccumulate.reclaim()
+    val perf_out = IO(Output(new IOPerfOutput(nr_perf * (new PerfEventBundle).getWidth)))
+    withClockAndReset(io.clock, true_reset_sync) {
+      perf_out.data := Cat(io_perf.asUInt)
+    }
+
     // input
     dontTouch(io)
     dontTouch(memory)
+    dontTouch(perf_out)
     misc.module.ext_intrs := io.extIntrs
-    misc.module.rtc_clock := io.rtc_clock
+    // misc.module.rtc_clock := io.rtc_clock
     misc.module.pll0_lock := io.pll0_lock
     misc.module.cacheable_check <> io.cacheable_check
 

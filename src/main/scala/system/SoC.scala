@@ -536,7 +536,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(new debugModule.DebugModuleIO)
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    val rtc_clock = IO(Input(Bool()))
+    // val rtc_clock = IO(Input(Bool()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
@@ -560,9 +560,16 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       axi4memencrpty.get.module.io.random_data := cnt(0).asBool
     }
     // positive edge sampling of the lower-speed rtc_clock
+    /*
     val rtcTick = RegInit(0.U(3.W))
     rtcTick := Cat(rtcTick(1, 0), rtc_clock)
     clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
+    */
+    val freq = 100
+    val cnt = RegInit((freq - 1).U)
+    val tick = cnt === 0.U
+    cnt := Mux(tick, (freq - 1).U, cnt - 1.U)
+    clint.module.io.rtcTick := tick
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
