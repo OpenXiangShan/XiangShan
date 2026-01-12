@@ -801,6 +801,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     if(StoreSetEnable) {
       fromRenameUpdate(i).bits.loadWaitBit := io.lfst.resp(i).bits.shouldWait
       fromRenameUpdate(i).bits.waitForRobIdx := io.lfst.resp(i).bits.robIdx
+      fromRenameUpdate(i).bits.loadWaitStrict := fromRename(i).bits.loadWaitStrict && io.lfst.resp(i).bits.shouldWait
     } else {
       fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
