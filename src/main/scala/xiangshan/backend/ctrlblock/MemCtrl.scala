@@ -12,24 +12,21 @@ class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemCtrlIO(params))
 
   private val ssit = Module(new SSIT)
-  private val waittable = Module(new WaitTable)
   private val lfst = Module(new LFST)
   ssit.io.update <> RegNext(io.memPredUpdate)
-  waittable.io.update <> RegNext(io.memPredUpdate)
   ssit.io.csrCtrl := RegNext(io.csrCtrl)
-  waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
   for (i <- 0 until RenameWidth) {
     ssit.io.ren(i) := io.mdpFoldPcVecVld(i)
     ssit.io.raddr(i) := io.mdpFlodPcVec(i)
-    waittable.io.raddr(i) := io.mdpFlodPcVec(i)
   }
   lfst.io.redirect <> RegNext(io.redirect)
   lfst.io.storeIssue <> RegNext(io.stIn)
   lfst.io.csrCtrl <> RegNext(io.csrCtrl)
   lfst.io.dispatch <> io.dispatchLFSTio
 
-  io.waitTable2Rename := waittable.io.rdata
+//  io.waitTable2Rename := waittable.io.rdata
+  io.waitTable2Rename := DontCare
   io.ssit2Rename := ssit.io.rdata
 }
 
