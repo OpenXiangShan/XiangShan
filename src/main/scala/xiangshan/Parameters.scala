@@ -795,7 +795,7 @@ trait HasXSParameter {
 
   // load violation predict
   def ResetTimeMax2Pow = 20 //1078576
-  def ResetTimeMin2Pow = 10 //1024
+  def ResetTimeMin2Pow = 14 //1024
   // wait table parameters
   def WaitTableSize = 1024
   def MemPredPCWidth = log2Up(WaitTableSize)
