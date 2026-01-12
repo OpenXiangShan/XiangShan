@@ -657,9 +657,9 @@ class CtrlBlockImp(
   }
   rename.io.ssit := memCtrl.io.ssit2Rename
   // disble mdp
-  dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
-  rename.io.waittable := 0.U.asTypeOf(rename.io.waittable)
-  rename.io.ssit := 0.U.asTypeOf(rename.io.ssit)
+  // dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
+  // rename.io.waittable := 0.U.asTypeOf(rename.io.waittable)
+  // rename.io.ssit := 0.U.asTypeOf(rename.io.ssit)
   rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))

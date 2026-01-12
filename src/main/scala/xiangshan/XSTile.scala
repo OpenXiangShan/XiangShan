@@ -63,8 +63,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // L1 to l1_xbar
   coreParams.dcacheParametersOpt.map { _ =>
     l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcache_port :=
-      memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
+      memBlock.dcache.clientNode
   }
+  // memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {

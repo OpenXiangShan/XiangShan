@@ -91,7 +91,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform && !enableCHI, stat_latency = true)
-  val xbar_l2_buffer = TLBuffer()
+  // val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", enbale_tllog)
@@ -134,7 +134,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   // l2 to l2_binder, then to memory_port
   l2cache match {
     case Some(l2) =>
-      l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
+      // l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
+      l2_binder.get :*= l2.node :*= l1_xbar :=* misc_l2_pmu
       l2 match {
         case l2: TL2TLCoupledL2 =>
           memory_port.get := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* l2_binder.get
