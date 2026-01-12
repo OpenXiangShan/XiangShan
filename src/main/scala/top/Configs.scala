@@ -575,9 +575,16 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new KunminghuV2Config(1)
 )
 
+// class DefaultConfig(n: Int = 1) extends Config(
+//   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+//     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+//     ++ WithNKBL1D(64, ways = 4)
+//     ++ new BaseConfig(n)
+// )
+
 class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ L2CacheConfig("2MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
@@ -596,8 +603,14 @@ class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
+// class KunminghuV2Config(n: Int = 1) extends Config(
+//   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+//     ++ new DefaultConfig(n)
+//     ++ new WithCHI
+// )
+
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ new DefaultConfig(n)
     ++ new WithCHI
 )

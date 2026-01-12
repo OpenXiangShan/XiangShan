@@ -317,7 +317,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
-  val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
+  // val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
   val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
   val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
@@ -541,7 +541,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
-  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.module
+  // private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.module
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -953,7 +953,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // load replay
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
-    val l2_hint = RegNext(io.l2_hint)
+    val l2_hint = io.l2_hint
 
     // L2 Hint for DCache
     dcache.io.l2_hint <> l2_hint
@@ -1742,7 +1742,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(sbuffer),
         ModuleNode(dtlb_ld_tlb_ld),
         ModuleNode(dcache),
-        ModuleNode(l1d_to_l2_buffer),
+        // ModuleNode(l1d_to_l2_buffer),
         CellNode(io.reset_backend)
       )
     )
