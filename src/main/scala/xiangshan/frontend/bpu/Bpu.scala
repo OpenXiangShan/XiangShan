@@ -148,9 +148,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
-  private val s1_utageMeta = Wire(new MicroTageMeta)
-  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
-  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+  private val s1_utageMeta     = Wire(new MicroTageMeta)
+  private val s2_utageMeta     = RegEnable(s1_utageMeta, s1_fire)
+  private val s2_realUtageMeta = Wire(new MicroTageMeta)
+  private val s3_utageMeta     = RegEnable(s2_realUtageMeta, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -197,8 +198,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.overrideValid := s3_override
 
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
-  utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
-  utage.io.abtbPrediction         := abtb.io.prediction
+  utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  utage.io.abtbPrediction         := abtb.io.abtbResult
 
   ras.io.redirect                := redirect
   ras.io.commit                  := commit
@@ -301,10 +302,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_prediction       := Mux(s1_taken, s1_firstTakenBranch.bits, fallThrough.io.prediction)
   s1_prediction.taken := s1_taken
 
-  private val debug_s1UseUbtb      = s1_taken && s1_firstTakenBranchOH(0) && !s1_utageHitMask(0)
-  private val debug_s1UseUbtbUtage = s1_taken && s1_firstTakenBranchOH(0) && s1_utageHitMask(0)
-  private val debug_s1UseAbtb      = s1_taken && !s1_firstTakenBranchOH(0) && !s1_utageHitMask.drop(1).reduce(_ || _)
-  private val debug_s1UseAbtbUtage = s1_taken && !s1_firstTakenBranchOH(0) && s1_utageHitMask.drop(1).reduce(_ || _)
+  private val useMicroTageVec = VecInit(s1_btbPrediction.zip(s1_utageHitMask).map { case (e, microTageHit) =>
+    e.valid && microTageHit
+  })
+  private val debug_s1UseUbtb      = s1_taken && s1_firstTakenBranchOH(0) && !useMicroTageVec(0)
+  private val debug_s1UseUbtbUtage = s1_taken && s1_firstTakenBranchOH(0) && useMicroTageVec(0)
+  private val debug_s1UseAbtb      = s1_taken && !s1_firstTakenBranchOH(0) && !useMicroTageVec.drop(1).reduce(_ || _)
+  private val debug_s1UseAbtbUtage = s1_taken && !s1_firstTakenBranchOH(0) && useMicroTageVec.drop(1).reduce(_ || _)
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -366,6 +370,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
   private val s3_s1Prediction = RegEnable(s2_s1Prediction, s2_fire)
+  s2_realUtageMeta := s2_utageMeta
+  s2_realUtageMeta.abtbResult.zipWithIndex.map {
+    case (result, idx) =>
+      result.valid := s2_utageMeta.abtbResult(idx).valid &&
+        (s2_utageMeta.abtbResult(idx).cfiPosition <= s2_s1Prediction.cfiPosition)
+  }
 
   s3_override := s3_valid && !(s3_prediction === s3_s1Prediction)
 
