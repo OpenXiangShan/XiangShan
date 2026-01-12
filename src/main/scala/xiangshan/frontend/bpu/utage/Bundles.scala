@@ -42,23 +42,6 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val abtbResult: Vec[AbtbResult] = Vec(NumAheadBtbPredictionEntries, new AbtbResult)
 }
 
-class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
-  val startVAddr:  UInt = UInt(VAddrBits.W)
-  val branchPc:    UInt = UInt(VAddrBits.W)
-  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
-  val hit:         Bool = Bool()
-  val misPred:     Bool = Bool()
-  val actualTaken: Bool = Bool()
-  val tableId:     UInt = UInt(log2Ceil(NumTables).W)
-  val setIdx:      UInt = UInt(log2Ceil(MaxNumSets).W)
-  val multiHit:    Bool = Bool()
-  val oldUseful:   UInt = UInt(UsefulWidth.W)
-  val oldTakenCtr: UInt = UInt(TakenCtrWidth.W)
-  val needUpdate:  Bool = Bool()
-  val needAlloc:   Bool = Bool()
-  val allocFailed: Bool = Bool()
-}
-
 class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
   val debug_idx:      UInt = UInt(log2Ceil(MaxNumSets).W)
   val debug_tag:      UInt = UInt(MaxTagLen.W)
@@ -68,15 +51,50 @@ class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
 }
 
 class AbtbResult(implicit p: Parameters) extends MicroTageBundle {
-  val valid:       Bool = Bool()
-  val baseTaken:   Bool = Bool()
-  val hit:         Bool = Bool()
-  val taken:       Bool = Bool()
-  val tableId:     UInt = UInt(log2Ceil(NumTables).W)
-  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+  val valid:            Bool = Bool()
+  val baseTaken:        Bool = Bool()
+  val baseIsStrongBias: Bool = Bool()
+  val hit:              Bool = Bool()
+  val predTaken:        Bool = Bool()
+  val tableId:          UInt = UInt(log2Ceil(NumTables).W)
+  val wayId:            UInt = UInt(log2Ceil(NumWays).W)
+  val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
 }
 
 class MicroTageTablePred(implicit p: Parameters) extends MicroTageBundle {
   val taken:       Bool = Bool()
   val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+}
+
+class MicroTageTrainResult(implicit p: Parameters) extends MicroTageBundle {
+  val valid:            Bool = Bool()
+  val hit:              Bool = Bool()
+  val baseTaken:        Bool = Bool()
+  val actualTaken:      Bool = Bool()
+  val predTaken:        Bool = Bool()
+  val baseIsStrongBias: Bool = Bool()
+  val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
+  val tableId:          UInt = UInt(log2Ceil(NumTables).W)
+  val wayId:            UInt = UInt(log2Ceil(NumWays).W)
+}
+
+class TraceBranch(implicit p: Parameters) extends MicroTageBundle {
+  val valid:            Bool = Bool()
+  val misPred:          Bool = Bool()
+  val hit:              Bool = Bool()
+  val baseTaken:        Bool = Bool()
+  val actualTaken:      Bool = Bool()
+  val predTaken:        Bool = Bool()
+  val baseIsStrongBias: Bool = Bool()
+  val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
+  val tableId:          UInt = UInt(log2Ceil(NumTables).W)
+  val wayId:            UInt = UInt(log2Ceil(NumWays).W)
+}
+
+class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
+  val startVAddr:     UInt             = UInt(VAddrBits.W)
+  val hasHitMisPred:  Bool             = Bool()
+  val missHitMisPred: Bool             = Bool()
+  val branches:       Vec[TraceBranch] = Vec(NumAheadBtbPredictionEntries, new TraceBranch)
+  val setIdx:         Vec[UInt]        = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
 }
