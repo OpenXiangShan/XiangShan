@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.abtb.AheadBtbResult
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
@@ -42,7 +43,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val prediction:             MicroTagePrediction   = Output(new MicroTagePrediction)
     val meta:                   Valid[MicroTageMeta]  = Output(Valid(new MicroTageMeta))
     // val ubtbPrediction:         Valid[Prediction]      = Input(Valid(new Prediction))
-    val abtbPrediction: Vec[Valid[Prediction]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
+    val abtbPrediction: Vec[Valid[AheadBtbResult]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
   }
   val io: MicroTageIO = IO(new MicroTageIO)
   io.resetDone  := true.B
@@ -81,29 +82,32 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val s1_abtbHitVec     = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val s1_abtbTakenVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val s1_abtbUseTableId = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumTables).W)))
+  private val s1_abtbUseWayId   = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumWays).W)))
   private val s1_tableIdVec     = VecInit.tabulate(NumTables)(i => i.U)
+
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    val tableHitVec         = Wire(Vec(NumWays, Bool()))
+    val tableHitVec         = Wire(Vec(NumTables, Bool()))
     val tableCfiPositionVec = Wire(Vec(NumTables, UInt(CfiPositionWidth.W)))
     val tableTakenVec       = Wire(Vec(NumTables, Bool()))
+    val tableWayIdVec       = Wire(Vec(NumTables, UInt(log2Ceil(NumWays).W)))
     for (j <- 0 until NumTables) {
       val wayHitVec = Wire(Vec(NumWays, Bool()))
       for (k <- 0 until NumWays) {
-        wayHitVec(k) := s1_predRead(j)(k).valid && s1_predRead(j)(k).bits.cfiPosition === io.abtbPrediction(
-          i
-        ).bits.cfiPosition
+        wayHitVec(k) := s1_predRead(j)(k).valid &&
+          s1_predRead(j)(k).bits.cfiPosition === io.abtbPrediction(i).bits.cfiPosition
       }
       tableHitVec(j) := wayHitVec.asUInt.orR
       val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
       tableCfiPositionVec(j) := Mux1H(priorityWayHitVec, s1_predRead(j).map(_.bits.cfiPosition))
       tableTakenVec(j)       := Mux1H(priorityWayHitVec, s1_predRead(j).map(_.bits.taken))
+      tableWayIdVec(j)       := PriorityEncoder(wayHitVec)
     }
     s1_abtbHitVec(i) := tableHitVec.asUInt.orR
     // Find the hit result from the highest-priority table
     val priorityTableHitVec = PriorityEncoderOH(tableHitVec.reverse)
     s1_abtbTakenVec(i)   := Mux1H(priorityTableHitVec, tableTakenVec.reverse)
     s1_abtbUseTableId(i) := Mux1H(priorityTableHitVec, s1_tableIdVec.reverse)
-    // (NumTables - 1.U) - PriorityEncoder(tableHitVec.reverse)
+    s1_abtbUseWayId(i)   := Mux1H(priorityTableHitVec, tableWayIdVec.reverse)
   }
 
   private val s1_predMeta = Wire(Valid(new MicroTageMeta))
@@ -113,12 +117,15 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     new AbtbResult
   )) // no use, only for placeholder.
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    s1_predMeta.bits.abtbResult(i).valid       := io.abtbPrediction(i).valid
-    s1_predMeta.bits.abtbResult(i).baseTaken   := io.abtbPrediction(i).bits.taken
-    s1_predMeta.bits.abtbResult(i).hit         := s1_abtbHitVec(i) && io.abtbPrediction(i).valid
-    s1_predMeta.bits.abtbResult(i).taken       := s1_abtbTakenVec(i)
-    s1_predMeta.bits.abtbResult(i).tableId     := s1_abtbUseTableId(i)
-    s1_predMeta.bits.abtbResult(i).cfiPosition := io.abtbPrediction(i).bits.cfiPosition
+    s1_predMeta.bits.abtbResult(i).valid :=
+      io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional
+    s1_predMeta.bits.abtbResult(i).baseTaken        := io.abtbPrediction(i).bits.taken
+    s1_predMeta.bits.abtbResult(i).hit              := s1_abtbHitVec(i) && io.abtbPrediction(i).valid
+    s1_predMeta.bits.abtbResult(i).predTaken        := s1_abtbTakenVec(i)
+    s1_predMeta.bits.abtbResult(i).tableId          := s1_abtbUseTableId(i)
+    s1_predMeta.bits.abtbResult(i).wayId            := s1_abtbUseWayId(i)
+    s1_predMeta.bits.abtbResult(i).cfiPosition      := io.abtbPrediction(i).bits.cfiPosition
+    s1_predMeta.bits.abtbResult(i).baseIsStrongBias := io.abtbPrediction(i).bits.isStrongBias
   }
 
   io.prediction.takenVec := s1_abtbTakenVec
@@ -128,120 +135,161 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   io.meta              := s1_predMeta
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
-  private val t0_fire          = io.fastTrain.get.valid && io.enable
-  private val t0_trainMeta     = io.fastTrain.get.bits.utageMeta
-  private val t0_trainData     = io.fastTrain.get.bits.finalPrediction
-  private val t0_trainStartPc  = io.fastTrain.get.bits.startPc
-  private val t0_trainOverride = io.fastTrain.get.bits.hasOverride
-  private val t0_trainRead     = tables.map(_.train.read)
+  private val t0_fire                = io.stageCtrl.t0_fire && io.enable
+  private val t0_trainMeta           = io.train.meta.debug_utage.get
+  private val t0_trainData           = io.train
+  private val t0_trainBranch         = io.train.branches
+  private val t0_abtbResult          = t0_trainMeta.abtbResult
+  private val t0_trainRead           = VecInit(tables.map(_.train.read))
+  private val t0_trainBranchTakenVec = t0_trainBranch.map(x => x.bits.taken)
 
-  private val t0_abtbResult = Wire(Vec(NumAheadBtbPredictionEntries, new AbtbResult))
-  t0_abtbResult := t0_trainMeta.abtbResult
+  private val t0_hasHitMisPredVec  = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  private val t0_missHitMisPredVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  private val t0_trainResult       = Wire(Vec(NumAheadBtbPredictionEntries, new MicroTageTrainResult))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    t0_abtbResult(i).valid := t0_trainMeta.abtbResult(i).valid && (t0_abtbResult(
-      i
-    ).cfiPosition <= t0_trainData.cfiPosition)
+    val hitMisPredVec = t0_trainBranch.map(x =>
+      x.valid && t0_abtbResult(i).valid && t0_abtbResult(i).hit &&
+        (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition) && (x.bits.taken =/= t0_abtbResult(i).predTaken)
+    )
+    t0_hasHitMisPredVec(i) := hitMisPredVec.reduce(_ || _)
+    val missHitMisPredVec = t0_trainBranch.map(x =>
+      x.valid && t0_abtbResult(i).valid && !t0_abtbResult(i).hit &&
+        (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition) && (x.bits.taken =/= t0_abtbResult(i).baseTaken)
+    )
+    t0_missHitMisPredVec(i) := missHitMisPredVec.reduce(_ || _)
+    val trainHasAbtbBranch = t0_trainBranch.map(x =>
+      x.valid && t0_abtbResult(i).valid && (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition)
+    )
+    t0_trainResult(i).valid            := trainHasAbtbBranch.reduce(_ || _)
+    t0_trainResult(i).hit              := t0_abtbResult(i).hit
+    t0_trainResult(i).baseTaken        := t0_abtbResult(i).baseTaken
+    t0_trainResult(i).actualTaken      := Mux1H(trainHasAbtbBranch, t0_trainBranchTakenVec)
+    t0_trainResult(i).predTaken        := t0_abtbResult(i).predTaken
+    t0_trainResult(i).baseIsStrongBias := t0_abtbResult(i).baseIsStrongBias
+    t0_trainResult(i).cfiPosition      := t0_abtbResult(i).cfiPosition
+    t0_trainResult(i).tableId          := t0_abtbResult(i).tableId
+    t0_trainResult(i).wayId            := t0_abtbResult(i).wayId
   }
-  private val trainHitMispredVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  for (i <- 0 until NumAheadBtbPredictionEntries) {
-    val brTakenDiff =
-      (t0_abtbResult(i).taken =/= t0_trainData.taken) && t0_trainData.attribute.isConditional &&
-        (t0_trainData.cfiPosition === t0_abtbResult(i).cfiPosition)
-    val brNoTakenDiff = t0_abtbResult(i).taken && !t0_trainData.attribute.isConditional
-    trainHitMispredVec(i) := t0_abtbResult(i).hit && (brTakenDiff || brNoTakenDiff) && t0_abtbResult(i).valid
-  }
-  // Update useful and takenCtr based on misprediction when there's a hit
+  private val t0_trainMisPredVec = VecInit(t0_hasHitMisPredVec.zip(t0_missHitMisPredVec).map {
+    case (hasHitMisPred, missHitMisPred) => hasHitMisPred || missHitMisPred
+  })
   private val t0_abtbPosition      = VecInit(t0_abtbResult.map(_.cfiPosition))
   private val t0_compareMatrix     = CompareMatrix(t0_abtbPosition)
-  private val t0_firstHitMisPredOH = t0_compareMatrix.getLeastElementOH(trainHitMispredVec)
+  private val t0_firstHitMisPredOH = t0_compareMatrix.getLeastElementOH(t0_trainMisPredVec)
   private val t0_misPredAbtbEntry  = Mux1H(t0_firstHitMisPredOH, t0_abtbResult)
-  // Get the TableId used in the misprediction
-  private val t0_misPredProviderOH  = UIntToOH(t0_misPredAbtbEntry.tableId)
-  private val t0_misPredTaken       = t0_misPredAbtbEntry.taken
-  private val t0_misPredCfiPosition = t0_misPredAbtbEntry.cfiPosition
-  private val t0_hasHitMisPred      = trainHitMispredVec.asUInt.orR
-  // This may also need to consider cases where microTage misses but baseTable hits.
-  // It's complex; will revisit later.
-  private val t0_missHitMisPred =
-    !t0_hasHitMisPred && t0_trainData.attribute.isConditional && t0_trainData.taken && t0_trainOverride
-  private val t0_needAlloc = t0_missHitMisPred || t0_hasHitMisPred
   private val t0_allocTaken =
-    Mux(t0_hasHitMisPred, !t0_misPredTaken, t0_trainData.taken && t0_trainData.attribute.isConditional)
-  private val t0_allocCfiPosition =
-    Mux(
-      t0_hasHitMisPred,
-      t0_misPredCfiPosition,
-      t0_trainData.cfiPosition
-    ) // Need to reconsider cfiPosition when there's no hit—e.g., what if baseTable predicted Taken earlier?
+    Mux(t0_misPredAbtbEntry.valid, !t0_misPredAbtbEntry.predTaken, !t0_misPredAbtbEntry.baseTaken)
+  private val t0_hasMisPred        = t0_trainMisPredVec.reduce(_ || _)
+  private val t0_misPredProviderOH = Mux(t0_misPredAbtbEntry.hit, UIntToOH(t0_misPredAbtbEntry.tableId), 0.U)
+
+  private val t1_fire                   = RegNext(t0_fire, false.B)
+  private val t1_foldedPathHistForTrain = RegEnable(io.foldedPathHistForTrain, t0_fire)
+  private val t1_trainRead              = RegEnable(t0_trainRead, t0_fire)
+  private val t1_trainResult            = RegEnable(t0_trainResult, t0_fire)
+  private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, t0_fire)
+  private val t1_needAlloc              = RegEnable(t0_hasMisPred, t0_fire)
+  private val t1_allocTaken             = RegEnable(t0_allocTaken, t0_fire)
+  private val t1_allocCfiPosition       = RegEnable(t0_misPredAbtbEntry.cfiPosition, t0_fire)
   // Select entries eligible for allocation
-  private val t0_noAllocMask = Wire(Vec(NumTables, Bool()))
+  private val t1_keepUseMask = Wire(Vec(NumTables, Bool()))
   for (i <- 0 until NumTables) {
-    t0_noAllocMask(i) := t0_trainRead(i).map(x => x.valid && x.bits.useful =/= 0.U).reduce(_ && _)
+    t1_keepUseMask(i) := t1_trainRead(i).map(x => x.valid && x.bits.useful =/= 0.U).reduce(_ && _)
   }
-  private val lowerFillMask =
-    Mux(t0_misPredProviderOH === 0.U, 0.U, t0_misPredProviderOH | (t0_misPredProviderOH - 1.U))
-  private val allocCandidateMask = ~(lowerFillMask | t0_noAllocMask.asUInt)
-  private val normalAllocMask    = PriorityEncoderOH(allocCandidateMask)
-
+  private val t1_lowerFillMask =
+    Mux(t1_misPredProviderOH === 0.U, 0.U, t1_misPredProviderOH | (t1_misPredProviderOH - 1.U))
+  private val t1_allocCandidateMask = ~(t1_lowerFillMask | t1_keepUseMask.asUInt)
+  private val t1_normalAllocMask    = PriorityEncoderOH(t1_allocCandidateMask)
+  private val t1_trainStartPc       = RegEnable(t0_trainData.startPc, t0_fire)
   for (i <- 0 until NumTables) {
-    tables(i).train.startPc                := t0_trainStartPc
-    tables(i).train.foldedPathHistForTrain := io.foldedPathHistForTrain
+    tables(i).train.startPc                := t1_trainStartPc
+    tables(i).train.foldedPathHistForTrain := t1_foldedPathHistForTrain
     for (j <- 0 until NumWays) {
-      val predTaken         = t0_trainRead(i)(j).bits.taken
-      val predCfiPosition   = t0_trainRead(i)(j).bits.cfiPosition
-      val entryHitVec       = t0_abtbResult.map(x => x.valid && x.tableId === i.U && x.cfiPosition === predCfiPosition)
-      val entryBaseTakenVec = t0_abtbResult.map(_.baseTaken)
-      val select            = entryHitVec.reduce(_ || _)
-      val entryHitOH        = PriorityEncoderOH(entryHitVec)
-      val baseTaken         = Mux1H(entryHitOH, entryBaseTakenVec)
-      val updateTaken       = t0_trainData.attribute.isConditional && t0_trainData.taken
-      val usefulValid       = (predTaken ^ updateTaken) || ((baseTaken ^ predTaken) && (predTaken === updateTaken))
+      val predCfiPosition = t1_trainRead(i)(j).bits.cfiPosition
+      // Use cfiPosition as an additional check to ensure the entry being updated
+      // hasn't been evicted or overwritten during the update window.
+      val entryHitVec = t1_trainResult.map(x =>
+        x.valid && x.hit && (x.tableId === i.U) && (x.wayId === j.U) && (x.cfiPosition === predCfiPosition)
+      )
+      val entryBaseTakenVec   = t1_trainResult.map(_.baseTaken)
+      val entryStrongBiasVec  = t1_trainResult.map(_.baseIsStrongBias)
+      val entryPredTakenVec   = t1_trainResult.map(_.predTaken)
+      val entryActualTakenVec = t1_trainResult.map(_.actualTaken)
+      val select              = entryHitVec.reduce(_ || _)
+      val entryHitOH          = PriorityEncoderOH(entryHitVec)
+      val predTaken           = Mux1H(entryHitOH, entryPredTakenVec)
+      val baseTaken           = Mux1H(entryHitOH, entryBaseTakenVec)
+      val baseIsStrongBias    = Mux1H(entryHitOH, entryStrongBiasVec)
+      val updateTaken         = Mux1H(entryHitOH, entryActualTakenVec)
+      val usefulValid = (predTaken ^ updateTaken) || // the prediction is not equal actual.
+        ((baseTaken ^ predTaken) && (predTaken === updateTaken)) // ||
+      // ((baseTaken === updateTaken) && baseIsStrongBias) // baseTaken can predict good.
 
-      tables(i).train.update(j).valid              := select && t0_fire
-      tables(i).train.update(j).bits.updateValid   := select
-      tables(i).train.update(j).bits.updateTaken   := updateTaken
-      tables(i).train.update(j).bits.usefulValid   := usefulValid
-      tables(i).train.update(j).bits.usefulCorrect := (predTaken === updateTaken)
+      tables(i).train.update(j).valid            := select && t1_fire
+      tables(i).train.update(j).bits.updateValid := select
+      tables(i).train.update(j).bits.updateTaken := updateTaken
+      tables(i).train.update(j).bits.usefulValid := usefulValid
+      tables(i).train.update(j).bits.needUseful  := ((predTaken === updateTaken) && (baseTaken ^ predTaken))
     }
-    val canAllocWay = VecInit(t0_trainRead(i).map(x => !x.valid || (x.bits.useful === 0.U)))
-    tables(i).train.alloc.valid            := normalAllocMask(i) && t0_needAlloc && t0_fire
-    tables(i).train.alloc.bits.taken       := t0_allocTaken
+    val canAllocWay = VecInit(t1_trainRead(i).map(x => !x.valid || (x.bits.useful === 0.U)))
+    tables(i).train.alloc.valid            := t1_needAlloc && t1_fire && t1_normalAllocMask(i)
+    tables(i).train.alloc.bits.taken       := t1_allocTaken
     tables(i).train.alloc.bits.wayMask     := PriorityEncoderOH(canAllocWay).asUInt
-    tables(i).train.alloc.bits.cfiPosition := t0_allocCfiPosition
+    tables(i).train.alloc.bits.cfiPosition := t1_allocCfiPosition
   }
 
   when(lowTickCounter(LowTickWidth)) {
     lowTickCounter := 0.U
-  }.elsewhen((normalAllocMask === 0.U) && t0_needAlloc && t0_fire) {
+  }.elsewhen((t1_normalAllocMask === 0.U) && t1_needAlloc && t1_fire) {
     lowTickCounter := lowTickCounter + 1.U
   }
 
   when(highTickCounter(HighTickWidth)) {
     highTickCounter := 0.U
-  }.elsewhen((normalAllocMask === 0.U) && t0_needAlloc && t0_fire) {
+  }.elsewhen((t1_normalAllocMask === 0.U) && t1_needAlloc && t1_fire) {
     highTickCounter := highTickCounter + 1.U
   }
 
   // ==========================================================================
   // === PERF === Performance Counters Section
   // ==========================================================================
-  val trainHitImportantConditionBranchVec     = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  val trainHitImportantConditioanMispredVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  val trainMissHitImportantConditionBranchVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  private val t1_hasHitMisPredVec  = RegEnable(t0_hasHitMisPredVec, t0_fire)
+  private val t1_missHitMisPredVec = RegEnable(t0_missHitMisPredVec, t0_fire)
+  private val t1_useMicroTage      = t1_trainResult.map(x => x.valid && x.hit).reduce(_ || _)
+  XSPerfAccumulate("use_microtage", t1_useMicroTage && t1_fire)
+  XSPerfAccumulate("train_hit_mispred", (t1_hasHitMisPredVec.asUInt.orR) && t1_fire)
+  XSPerfAccumulate("train_miss_hit_mispred", (t1_missHitMisPredVec.asUInt.orR) && t1_fire)
+
+  private val traceBranches = Wire(Vec(NumAheadBtbPredictionEntries, new TraceBranch))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    trainHitImportantConditionBranchVec(i) := t0_abtbResult(i).hit && t0_trainData.attribute.isConditional &&
-      (t0_trainData.cfiPosition === t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).valid
-    trainHitImportantConditioanMispredVec(i) := trainHitImportantConditionBranchVec(i) &&
-      (t0_abtbResult(i).taken =/= t0_trainData.taken)
-    trainMissHitImportantConditionBranchVec(
-      i
-    ) := t0_trainData.attribute.isConditional && t0_trainData.taken && t0_trainOverride &&
-      (t0_trainData.cfiPosition === t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).valid && !t0_abtbResult(i).hit
+    traceBranches(i).valid := t1_trainResult(i).valid
+    traceBranches(i).misPred := Mux(
+      t1_trainResult(i).hit,
+      t1_trainResult(i).actualTaken ^ t1_trainResult(i).predTaken,
+      t1_trainResult(i).actualTaken ^ t1_trainResult(i).baseTaken
+    )
+    traceBranches(i).hit              := t1_trainResult(i).hit
+    traceBranches(i).baseTaken        := t1_trainResult(i).baseTaken
+    traceBranches(i).actualTaken      := t1_trainResult(i).actualTaken
+    traceBranches(i).predTaken        := t1_trainResult(i).predTaken
+    traceBranches(i).baseIsStrongBias := t1_trainResult(i).baseIsStrongBias
+    traceBranches(i).cfiPosition      := t1_trainResult(i).cfiPosition
+    traceBranches(i).tableId          := t1_trainResult(i).tableId
+    traceBranches(i).wayId            := t1_trainResult(i).wayId
   }
-  // Missed important conditional branch
-  XSPerfAccumulate("not_hit_important_condition_branch", trainMissHitImportantConditionBranchVec.reduce(_ || _))
-  // Hit important conditional branch
-  XSPerfAccumulate("hit_important_condition_branch", trainHitImportantConditionBranchVec.reduce(_ || _))
-  // Hit important conditional branch but mispredicted
-  XSPerfAccumulate("hit_important_condition_branch_mispred", trainHitImportantConditioanMispredVec.reduce(_ || _))
+
+  private val utageTrace = Wire(Valid(new MicroTageTrace))
+  utageTrace.valid               := t1_fire && t1_useMicroTage
+  utageTrace.bits.startVAddr     := t1_trainStartPc.toUInt
+  utageTrace.bits.hasHitMisPred  := (t1_hasHitMisPredVec.asUInt.orR)
+  utageTrace.bits.missHitMisPred := (t1_missHitMisPredVec.asUInt.orR)
+  utageTrace.bits.branches       := traceBranches
+  utageTrace.bits.setIdx         := tables.map(_.debugIdx)
+
+  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTraceAndDebug)
+  utageTraceDBTables.log(
+    data = utageTrace.bits,
+    en = t1_fire && utageTrace.valid,
+    clock = clock,
+    reset = reset
+  )
 }
