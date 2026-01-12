@@ -96,14 +96,24 @@ case class XSCoreParameters
   V0_IDX: Int = 0,
   Vl_IDX: Int = 0,
   NRPhyRegs: Int = 192,
-  VirtualLoadQueueSize: Int = 72,
-  LoadQueueRARSize: Int = 72,
-  LoadQueueRAWSize: Int = 32, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+
+  // VirtualLoadQueueSize: Int = 72,
+  // LoadQueueRARSize: Int = 72,
+  // LoadQueueRAWSize: Int = 32, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  // RollbackGroupSize: Int = 8,
+  // LoadQueueReplaySize: Int = 72,
+  // LoadUncacheBufferSize: Int = 4,
+  // LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
+  // StoreQueueSize: Int = 56,
+  VirtualLoadQueueSize: Int = 120,
+  LoadQueueRARSize: Int = 96,
+  LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
-  LoadQueueReplaySize: Int = 72,
-  LoadUncacheBufferSize: Int = 16,
+  LoadQueueReplaySize: Int = 120,
+  LoadUncacheBufferSize: Int = 4,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
-  StoreQueueSize: Int = 56,
+  StoreQueueSize: Int = 64,
+
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
