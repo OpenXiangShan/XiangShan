@@ -58,6 +58,7 @@ class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1Prefet
 
 class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
   val alias = UInt(2.W)
   val confidence = UInt(1.W)
   val is_store = Bool()
@@ -65,7 +66,8 @@ class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParam
 
   // only index bit is used, do not use tag
   def getVaddr(): UInt = {
-    Cat(alias, paddr(DCacheSameVPAddrLength-1, 0))
+    // Cat(alias, paddr(DCacheSameVPAddrLength-1, 0))
+    vaddr
   }
 
   // when l1 cache prefetch req arrives at load unit:
