@@ -153,7 +153,7 @@ trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
 
 // get prefetch train reqs from `exuParameters.LduCnt` load pipelines (up to `exuParameters.LduCnt`/cycle)
 // filter by cache line address, send out train req to stride (up to 1 req/cycle)
-class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSModule with HasL1PrefetchHelper with HasTrainFilterHelper {
+class TrainFilter(size: Int, name: String, fltr: Boolean = true)(implicit p: Parameters) extends XSModule with HasL1PrefetchHelper with HasTrainFilterHelper {
   val io = IO(new Bundle() {
     val enable = Input(Bool())
     val flush = Input(Bool())
@@ -203,7 +203,12 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
       case(pre, pre_v) => pre_v && block_hash_tag(pre.vaddr) === block_hash_tag(req.vaddr)
     }).orR
 
-    needAlloc(i) := req_v && !entry_match && !prev_enq_match
+    if (fltr) {
+      // filter by cache line address
+      needAlloc(i) := req_v && !entry_match && !prev_enq_match
+    } else {
+      needAlloc(i) := req_v
+    }
     canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt && io.enable
 
     when(canAlloc(i)) {
@@ -803,6 +808,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val evict = s1_l1_alloc && (s1_l1_index === i.U)
     l1_pf_req_arb.io.in(i).valid := l1_array(i).can_send_pf(l1_valids(i)) && l1_array(i).sink === SINK_L1 && !evict
     l1_pf_req_arb.io.in(i).bits.req.paddr := l1_array(i).get_pf_addr()
+    l1_pf_req_arb.io.in(i).bits.req.vaddr := l1_array(i).get_pf_debug_vaddr()
     l1_pf_req_arb.io.in(i).bits.req.alias := l1_array(i).alias
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
@@ -936,7 +942,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val l2PfqBusy = IO(Input(Bool()))
   val strideEnable = IO(Input(Bool()))
 
-  val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
+  val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride", false))
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new TrainFilter(STREAM_FILTER_SIZE, "stream"))
   val stream_bit_vec_array = Module(new StreamBitVectorArray)
