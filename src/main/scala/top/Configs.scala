@@ -595,7 +595,7 @@ class FuzzConfig(dummy: Int = 0) extends CHIFuzzConfig(dummy) with DeprecatedCon
 
 class TLConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ L2CacheConfig("2MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
@@ -616,6 +616,12 @@ class CVMTestConfig(n: Int = 1) extends TLCVMTestConfig(n) with DeprecatedConfig
 class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
+
+// class KunminghuV2Config(n: Int = 1) extends Config(
+//   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+//     ++ new DefaultConfig(n)
+//     ++ new WithCHI
+// )
 
 class CHIConfig(n: Int = 1) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
