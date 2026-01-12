@@ -31,13 +31,13 @@ case class MicroTageParameters(
     ),
     TakenCtrWidth:       Int = 3,
     NumTables:           Int = 2,
-    LowTickWidth:        Int = 9,
-    HighTickWidth:       Int = 11,
+    LowTickWidth:        Int = 8,
+    HighTickWidth:       Int = 9,
     UsefulWidth:         Int = 2,
     PCHighTagStart:      Int = 7,
-    EnableTraceAndDebug: Boolean = true,
+    EnableTraceAndDebug: Boolean = false,
     BaseTableSize:       Int = 512, // TODO: Not necessarily required; currently unused.
-    NumWays:             Int = 2
+    NumWays:             Int = 1
 ) {}
 
 trait HasMicroTageParameters extends HasBpuParameters {
@@ -58,7 +58,7 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def DebugPredTagWidth: Int = TableInfos(0).TagWidth
 
   // utage can only be fast-trained, we don't have continous predict block on resolve
-  def EnableFastTrain:     Boolean = true
+  def EnableFastTrain:     Boolean = false
   def EnableTraceAndDebug: Boolean = utageParameters.EnableTraceAndDebug
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
