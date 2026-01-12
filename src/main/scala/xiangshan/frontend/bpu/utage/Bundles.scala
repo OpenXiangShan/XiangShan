@@ -68,12 +68,13 @@ class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
 }
 
 class AbtbResult(implicit p: Parameters) extends MicroTageBundle {
-  val valid:       Bool = Bool()
-  val baseTaken:   Bool = Bool()
-  val hit:         Bool = Bool()
-  val taken:       Bool = Bool()
-  val tableId:     UInt = UInt(log2Ceil(NumTables).W)
-  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+  val valid:            Bool = Bool()
+  val baseTaken:        Bool = Bool()
+  val baseIsStrongBias: Bool = Bool()
+  val hit:              Bool = Bool()
+  val taken:            Bool = Bool()
+  val tableId:          UInt = UInt(log2Ceil(NumTables).W)
+  val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
 }
 
 class MicroTageTablePred(implicit p: Parameters) extends MicroTageBundle {

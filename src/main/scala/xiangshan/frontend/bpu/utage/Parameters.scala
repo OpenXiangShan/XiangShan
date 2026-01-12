@@ -37,7 +37,7 @@ case class MicroTageParameters(
     PCHighTagStart:      Int = 7,
     EnableTraceAndDebug: Boolean = true,
     BaseTableSize:       Int = 512, // TODO: Not necessarily required; currently unused.
-    NumWays:             Int = 2
+    NumWays:             Int = 1
 ) {}
 
 trait HasMicroTageParameters extends HasBpuParameters {

@@ -45,10 +45,10 @@ class MicroTageTable(
       val useful:      UInt = UInt(UsefulWidth.W)
     }
     class MicroTageUpdateInfo extends Bundle {
-      val updateValid:   Bool = Bool()
-      val updateTaken:   Bool = Bool()
-      val usefulValid:   Bool = Bool()
-      val usefulCorrect: Bool = Bool()
+      val updateValid: Bool = Bool()
+      val updateTaken: Bool = Bool()
+      val usefulValid: Bool = Bool()
+      val needUseful:  Bool = Bool()
     }
     class MicroTageAllocInfo extends Bundle {
       val taken:       Bool = Bool()
@@ -156,7 +156,7 @@ class MicroTageTable(
       if (tableId == 0) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
       Mux(
         io.train.update(way).bits.usefulValid,
-        oldUseful.getUpdate(io.train.update(way).bits.usefulCorrect),
+        oldUseful.getUpdate(io.train.update(way).bits.needUseful),
         oldUseful
       )
     )
