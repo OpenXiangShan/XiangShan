@@ -33,7 +33,7 @@ case class ScParameters(
     ImliTableSize:       Int = 128,
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = false,
-    ImliEnable:          Boolean = false,
+    ImliEnable:          Boolean = true,
     BiasEnable:          Boolean = true,
     CtrWidth:            Int = 6,
     ThresholdWidth:      Int = 12,
