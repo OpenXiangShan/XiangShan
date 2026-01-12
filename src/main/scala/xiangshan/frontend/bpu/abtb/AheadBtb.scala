@@ -30,11 +30,12 @@ import xiangshan.frontend.bpu.Prediction
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid: Bool                   = Input(Bool())
-    val overrideValid: Bool                   = Input(Bool())
-    val prediction:    Vec[Valid[Prediction]] = Output(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
-    val meta:          AheadBtbMeta           = Output(new AheadBtbMeta)
-    val debug_startPc: PrunedAddr             = Output(PrunedAddr(VAddrBits))
+    val redirectValid: Bool                       = Input(Bool())
+    val overrideValid: Bool                       = Input(Bool())
+    val prediction:    Vec[Valid[Prediction]]     = Output(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
+    val abtbResult:    Vec[Valid[AheadBtbResult]] = Output(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
+    val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
+    val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -159,7 +160,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     s3_startPc  := s2_startPc
   }
 
-  private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
+  private val s2_ctrResult  = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
+  private val s2_strongBias = takenCounter(s2_bankIdx)(s2_setIdx).map(x => x.isSaturatePositive || x.isSaturateNegative)
 
   private val s2_tag = getTag(s2_startPc)
   dontTouch(s2_tag)
@@ -175,6 +177,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     pred.bits.cfiPosition := s2_entries(i).position
     pred.bits.attribute   := s2_entries(i).attribute
     pred.bits.target      := getFullTarget(s2_startPc, s2_entries(i).targetLowerBits, s2_entries(i).targetCarry)
+  }
+  io.abtbResult.zipWithIndex.foreach { case (pred, i) =>
+    pred.valid             := s2_valid && s2_hitMask(i)
+    pred.bits.taken        := s2_ctrResult(i)
+    pred.bits.cfiPosition  := s2_entries(i).position
+    pred.bits.attribute    := s2_entries(i).attribute
+    pred.bits.isStrongBias := s2_strongBias(i)
   }
 
   io.meta.valid    := s2_valid
