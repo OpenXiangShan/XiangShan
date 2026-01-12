@@ -118,4 +118,13 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   val scWrongTageCorrect:   Bool = Bool()
   val scCorrectTageCorrect: Bool = Bool()
   val scWrongTageWrong:     Bool = Bool()
+
+  val scPathCorrect:   Bool = Bool()
+  val scPathWrong:     Bool = Bool()
+  val scGlobalCorrect: Bool = Bool()
+  val scGlobalWrong:   Bool = Bool()
+  val scImliCorrect:   Bool = Bool()
+  val scImliWrong:     Bool = Bool()
+  val scBiasCorrect:   Bool = Bool()
+  val scBiasWrong:     Bool = Bool()
 }

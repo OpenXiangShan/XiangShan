@@ -710,16 +710,19 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     t1_writeValid && (t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
       case (predIdx, trainIdx) => predIdx =/= trainIdx
     }.reduce(_ || _))
+  private val sc_imli_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predImliIdx.get =/= t1_imliSetIdx)
   private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
 
   dontTouch(sc_path_predIdx_diff_trainIdx)
   dontTouch(sc_global_predIdx_diff_trainIdx)
+  dontTouch(sc_imli_predIdx_diff_trainIdx)
   dontTouch(sc_bias_predIdx_diff_trainIdx)
 
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_commonHR.valid)
   XSPerfAccumulate("sc_global_table_valid", s0_fire && s0_commonHR.valid)
   XSPerfAccumulate("sc_path_predIdx_diff_trainIdx", sc_path_predIdx_diff_trainIdx)
   XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", sc_global_predIdx_diff_trainIdx)
+  XSPerfAccumulate("sc_imli_predIdx_diff_trainIdx", sc_imli_predIdx_diff_trainIdx)
   XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
   /* *** Sc Trace *** */
@@ -747,6 +750,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     trace.bits.scWrongTageCorrect   := scWrongVec(predWayIdx) && tageCorrectVec(predWayIdx)
     trace.bits.scCorrectTageCorrect := scCorrectVec(predWayIdx) && tageCorrectVec(predWayIdx)
     trace.bits.scWrongTageWrong     := scWrongVec(predWayIdx) && tageWrongVec(predWayIdx)
+
+    trace.bits.scPathCorrect   := scPathCorrectVec(predWayIdx)
+    trace.bits.scPathWrong     := scPathWrongVec(predWayIdx)
+    trace.bits.scGlobalCorrect := scGlobalCorrectVec(predWayIdx)
+    trace.bits.scGlobalWrong   := scGlobalWrongVec(predWayIdx)
+    trace.bits.scImliCorrect   := scImliCorrectVec(predWayIdx)
+    trace.bits.scImliWrong     := scImliWrongVec(predWayIdx)
+    trace.bits.scBiasCorrect   := scBiasCorrectVec(predWayIdx)
+    trace.bits.scBiasWrong     := scBiasWrongVec(predWayIdx)
   }
 
   private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
