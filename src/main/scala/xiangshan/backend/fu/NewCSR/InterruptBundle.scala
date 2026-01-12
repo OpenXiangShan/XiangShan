@@ -148,7 +148,7 @@ class InterruptPendingBundle extends CSRBundle {
   val LC45IP   = RO(45)
   val LC46IP   = RO(46)
   val LC47IP   = RO(47)
-  val LC48IP   = RO(48)
+  val LC48IP   = RO(48) //Another safe-mode(TEE/REE) notice-pending interrupt
   val LC49IP   = RO(49)
   val LC50IP   = RO(50)
   val LC51IP   = RO(51)
@@ -241,7 +241,7 @@ class InterruptEnableBundle extends CSRBundle {
   val LC45IE   = RO(45)
   val LC46IE   = RO(46)
   val LC47IE   = RO(47)
-  val LC48IE   = RO(48)
+  val LC48IE   = RO(48) //Another safe-mode(TEE/REE) notice-pending interrupt
   val LC49IE   = RO(49)
   val LC50IE   = RO(50)
   val LC51IE   = RO(51)
@@ -327,6 +327,8 @@ object InterruptNO {
   final val COI = 13
   final val LPRASEI = 35
   final val HPRASEI = 43
+  //Another safe-mode(TEE/REE) notice-pending interrupt
+  final val ASNI = 48
 
   val privArchGroup = Seq(
     MEI, MSI, MTI,
@@ -367,7 +369,7 @@ object InterruptNO {
 
   val customLowestGroup = Seq(
     51, 25, 50,
-    49, 24, 48,
+    49, 24, ASNI,
   )
 
   val interruptDefaultPrio = customHighestGroup ++
