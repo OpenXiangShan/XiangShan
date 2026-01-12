@@ -24,6 +24,7 @@ import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import difftest._
 import utility.AXI4Error
 import system.{HasPeripheralRanges, HasSoCParameter}
@@ -65,6 +66,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   val illegalRange = (onChipPeripheralRanges.values ++ Seq(
     soc.UARTLiteRange,
+    soc.UART16550Range,
     flashRange,
     sdRange,
     dmacRange,
@@ -73,7 +75,9 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
-  val uart = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
+  val uartLite = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
+  private val uart16550Params = UART16550Params(address = soc.UART16550Range.base)
+  val uart16550 = LazyModule(new AXI4UART16550(uart16550Params))
   // val vga = LazyModule(new AXI4VGA(
   //   sim = false,
   //   fbAddress = Seq(AddressSet(0x50000000L, 0x3fffffL)),
@@ -85,10 +89,14 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val error = LazyModule(new AXI4Error(illegalRange))
   val error_tl = LazyModule(new TLError(DevNullParams(Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)), maxAtomic = 1, maxTransfer = 8),beatBytes = 8))
 
+  private val uartIntSink = IntSinkNode(IntSinkPortSimple())
+  uartIntSink := uart16550.intXing()
+
   val axiBus = AXI4Xbar()
   val tlBus = TLXbar()
 
-  uart.node := axiBus
+  uartLite.node := axiBus
+  uart16550.controlXing() := axiBus
   // vga.node :*= axiBus
   flash.node := axiBus
   sd.node := axiBus
@@ -135,8 +143,26 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
       val uart = new UARTIO
       val interrupt = new IntrGenIO
     })
-    io.uart <> uart.module.io.extra.get
-    io.interrupt <> intrGen.module.io.extra.get
+
+    // FIXME: char will be lost if both devices send or receive char in the same cycle
+    io.uart.in.valid := uartLite.module.io.extra.get.in.valid | uart16550.module.io.uart.in.valid
+    uartLite.module.io.extra.get.in.ch := io.uart.in.ch
+    uart16550.module.io.uart.in.ch := io.uart.in.ch
+
+    io.uart.out.valid := uartLite.module.io.extra.get.out.valid | uart16550.module.io.uart.out.valid
+    io.uart.out.ch := Mux(uartLite.module.io.extra.get.out.valid,
+      uartLite.module.io.extra.get.out.ch,
+      uart16550.module.io.uart.out.ch
+    )
+
+    val uart16550Int = uartIntSink.makeIOs()
+    private val uart16550IntNum = 0xa;
+    io.interrupt.intrVec := intrGen.module.io.extra.get.intrVec | uart16550Int.elts.head.head << (uart16550IntNum - 1)
+
+    // TODO: rx not supported yet
+    uart16550.module.io.tx.ready := true.B
+    uart16550.module.io.rx.valid := false.B
+    uart16550.module.io.rx.bits := 0.U
   }
 
   lazy val module = new SimMMIOImp(this){

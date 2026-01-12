@@ -140,6 +140,7 @@ case class SoCParameters
   // on chip network configurations
   val L3OuterBusWidth = 256
   val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
+  val UART16550Range = AddressSet(0x310b0000L, 0x1f)
 }
 
 trait HasSoCParameter {
@@ -217,7 +218,8 @@ trait HasPeripheralRanges {
     "BEU"   -> soc.BEURange,
     "PLIC"  -> soc.PLICRange,
     "PLL"   -> soc.PLLRange,
-    "UART"  -> soc.UARTLiteRange,
+    "UARTLITE" -> soc.UARTLiteRange,
+    "UART16550" -> soc.UART16550Range,
     "DEBUG" -> dm.get.address,
     "MMPMA" -> AddressSet(mmpma.address, mmpma.mask)
   ) ++ (
@@ -371,13 +373,21 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
-  val uartParams = AXI4SlaveParameters(
+  val uartLiteDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
+  val uartLiteParams = AXI4SlaveParameters(
     address = Seq(soc.UARTLiteRange),
     regionType = RegionType.UNCACHED,
     supportsRead = TransferSizes(1, 32),
     supportsWrite = TransferSizes(1, 32),
-    resources = uartDevice.reg
+    resources = uartLiteDevice.reg
+  )
+  val uart16550Device = new SimpleDevice("serial", Seq("ns16550a"))
+  val uart16550Params = AXI4SlaveParameters(
+    address = Seq(soc.UART16550Range),
+    regionType = RegionType.UNCACHED,
+    supportsRead = TransferSizes(1, 32),
+    supportsWrite = TransferSizes(1, 32),
+    resources = uart16550Device.reg
   )
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
@@ -386,7 +396,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       supportsRead = TransferSizes(1, 32),
       supportsWrite = TransferSizes(1, 32),
       interleavedId = Some(0)
-    ), uartParams),
+    ), uartLiteParams, uart16550Params),
     beatBytes = 8
   )))
 
@@ -643,4 +653,3 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
 class SoCMisc()(implicit p: Parameters) extends MemMisc
   with HaveSlaveAXI4Port
-
