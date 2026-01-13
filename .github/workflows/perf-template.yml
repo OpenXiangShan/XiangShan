@@ -1,35 +1,50 @@
 name: Performance Regression Template (Unified)
 
 on:
-  #run it manually when the workflow is in the default branch
   workflow_call:
     inputs:
       test_branch:
-        description: 'Branch to run the workflow on'
+        description: Branch or commit to run performance test on
         required: true
         type: string
-      test_commit:
-        description: 'Commit SHA to run the workflow on'
+      recompile:
+        description: Recompile the emu
         required: false
         type: string
-        default: ''
+        default: false
+      emulator:
+        description: emulator to use
+        required: false
+        type: string
+        default: gsim
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: string
+        default: KunminghuV2Config
       benchmark_type:
-        required: true
+        required: false
         type: string
-        description: "Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c"
-      all_spec_dir:
-        required: true
-        type: string
-        description: "Directory for all spec reports"
+        description: Benchmark type
+        default: spec06-1.0c
       benchmarks:
-        description: "Specific benchmarks to run (comma-separated), leave empty to run all"
+        description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
         type: string
         default: ''
+      servers:
+        description: Servers to run emulation on, leave empty to let the script select
+        required: false
+        type: string
+        default: ''
+      perf_report_dir:
+        description: Directory for all spec reports
+        required: true
+        type: string
 
 jobs:
   run:
-    runs-on: perf
+    runs-on: node
     continue-on-error: false
     #At most 2 days to finish
     timeout-minutes: 2880
@@ -47,22 +62,13 @@ jobs:
             "spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               ;;
-            *)
-              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c"
-              exit 1
-              ;;
           esac
 
       - name: Set test branch or commit
         id: set_test
         run: |
-          if [ "${{ inputs.test_commit }}" = "" ]; then
-            echo "Using specified branch: ${{ inputs.test_branch }}"
-            echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
-          else
-            echo "Using specified commit: ${{ inputs.test_commit }}"
-            echo "commit_sha=${{ inputs.test_commit }}" >> $GITHUB_OUTPUT
-          fi
+          echo "Using specified branch: ${{ inputs.test_branch }}"
+          echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
 
       - name: Checkout code at specific commit
         uses: actions/checkout@v4
@@ -75,13 +81,9 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          source /nfs/home/ci-runner/.ci_env
-          echo "NODE_SERVER_LIST=$NODE_SERVER_LIST" >> $GITHUB_ENV
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
-          echo "SPEC_DIR=${{ inputs.all_spec_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
+          echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
+          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
 
       - name: Initialize submodules
@@ -93,40 +95,41 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
-          if [ -e "$SPEC_DIR/emu" ]; then
-            mkdir -p $NOOP_HOME/build
-            cp $SPEC_DIR/emu $NOOP_HOME/build/emu
-          else
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
-              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-              --with-dramsim3 --threads 8                                   \
+          if [ ! -e "$SPEC_DIR/emu" ] || [ "${{ inputs.recompile }}" = "true" ]; then
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+              --config "${{ inputs.xs_config }}" \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
+              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata --trace-fst
+              --llvm-profdata llvm-profdata --trace-fst \
+              --emulator ${{ inputs.emulator }}
             mkdir -p $SPEC_DIR
-            cp $NOOP_HOME/build/emu $SPEC_DIR/emu
+            cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
+          fi
+          if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
+            cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
           fi
 
       - name: Run SPEC CPU2006 checkpoints
         run: |
-          cd $PERF_HOME
-          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-            --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 8 --dir $SPEC_DIR --resume \
-            -L "$NODE_SERVER_LIST"
-          find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
-          find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
+          cd $SCRIPTS_HOME/perf_trigger
+          python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
+            --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
+            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+            --benchmarks "${{ inputs.benchmarks }}" \
+            --server-list "$SERVER_LIST" \
+            --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
+            --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
+            --run
 
       - name: Report SPEC CPU2006 score
         if: always()
         run: |
-          cd $PERF_HOME
+          cd $SCRIPTS_HOME/perf
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-            --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
+            --benchmarks "${{ inputs.benchmarks }}" \
+            --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
-          # mkdir $GITHUB_WORKSPACE/result
-          # cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
-          # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
       - name: Summary result
         if: always()
@@ -146,9 +149,3 @@ jobs:
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
-
-      # - name: Upload result
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: result
-      #     path: result
