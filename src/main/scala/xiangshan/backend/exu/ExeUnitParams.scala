@@ -9,6 +9,7 @@ import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
+import xiangshan.backend.decode.Imm
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig.{BrhCfg, JmpCfg, needUncertainWakeupFuConfigs}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchedulerType, VecScheduler}
@@ -340,7 +341,7 @@ case class ExeUnitParams(
     fuConfigs.map(_.getSrcDataType(srcIdx)).reduce(_ ++ _)
   }
 
-  def immType: Set[UInt] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
+  def immType: Set[Imm] = fuConfigs.map(x => x.immType).reduce(_ ++ _)
 
   def getWBSource: SchedulerType = {
     schdType

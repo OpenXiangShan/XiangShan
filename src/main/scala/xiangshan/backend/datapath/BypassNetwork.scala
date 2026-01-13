@@ -148,7 +148,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       immInfo(exuIdx).imm,
       immInfo(exuIdx).immType,
       exuInput.bits.params.destDataBitsMax,
-      exuInput.bits.params.immType.map(_.litValue)
+      exuInput.bits.params.immType,
     )
     val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(immInfo(exuIdx).imm(immInfo(exuIdx).imm.getWidth - 1, ImmUnion.I.len)), XLEN)
     val exuParm = exuInput.bits.params

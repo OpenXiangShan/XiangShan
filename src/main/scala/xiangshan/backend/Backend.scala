@@ -107,7 +107,7 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
       (if (exuCfg.hasLoadFu || exuCfg.hasHyldaFu) s"LdExuIdx(${backendParams.getLdExuIdx(exuCfg)})" else "") +
       s"${fuConfigs.map(_.name).mkString("fu(s): {", ",", "}")}, " +
       s"${wbPortConfigs.mkString("wb: {", ",", "}")}, " +
-      s"${immType.map(SelImm.mkString(_)).mkString("imm: {", ",", "}")}, " +
+      s"${immType.mkString("imm: {", ",", "}")}, " +
       s"latMax(${exuCfg.latencyValMax}), ${exuCfg.fuLatancySet.mkString("lat: {", ",", "}")}, " +
       s"srcReg(${exuCfg.numRegSrc})"
     )

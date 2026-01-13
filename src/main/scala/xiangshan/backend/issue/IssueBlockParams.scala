@@ -12,6 +12,7 @@ import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
+import xiangshan.backend.decode.Imm
 import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
 import xiangshan.backend.fu.FuConfig._
 
@@ -341,10 +342,10 @@ case class IssueBlockParams(
 
   def deqFuDiff: Boolean = (numDeq == 2) && deqFuInterSect.length == 0
 
-  def deqImmTypes: Seq[UInt] = getFuCfgs.flatMap(_.immType).distinct
+  def deqImmTypes: Seq[Imm] = getFuCfgs.flatMap(_.immType).distinct
 
   // set load imm to 32-bit for fused_lui_load
-  def deqImmTypesMaxLen: Int = if (isLdAddrIQ || isHyAddrIQ) 32 else deqImmTypes.map(SelImm.getImmUnion(_)).maxBy(_.len).len
+  def deqImmTypesMaxLen: Int = if (isLdAddrIQ || isHyAddrIQ) 32 else deqImmTypes.map(x => x).maxBy(_.len).len
 
   def needImm: Boolean = deqImmTypes.nonEmpty
 
