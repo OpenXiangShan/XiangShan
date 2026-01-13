@@ -61,6 +61,9 @@ jobs:
     uses: ./.github/workflows/perf-template.yml
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
+        recompile: ${{ github.event.inputs.recompile }}
+        emulator: ${{ github.event.inputs.emulator }}
+        xs_config: ${{ github.event.inputs.xs_config }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         servers: ${{ github.event.inputs.servers }}
