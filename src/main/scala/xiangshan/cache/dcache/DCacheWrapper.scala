@@ -630,68 +630,6 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp)
 }
 
-// TODO: remove this
-// forward tilelink channel D's data to ldu
-class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
-  val valid = Bool()
-  val data = UInt(l1BusDataWidth.W)
-  val mshrid = UInt(log2Up(cfg.nMissEntries).W)
-  val last = Bool()
-  val denied = Bool()
-  val corrupt = Bool()
-
-  def apply(d: DecoupledIO[TLBundleD], edge: TLEdgeOut) = {
-    val isKeyword = d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
-    val (_, _, done, _) = edge.count(d)
-    valid := d.valid
-    data := d.bits.data
-    mshrid := d.bits.source
-    last := isKeyword ^ done
-    denied := d.bits.denied
-    corrupt := d.bits.corrupt
-  }
-
-  def dontCare() = {
-    valid := false.B
-    data := DontCare
-    mshrid := DontCare
-    last := DontCare
-    denied := false.B
-    corrupt := false.B
-  }
-
-  def forward(req_valid : Bool, req_mshr_id : UInt, req_paddr : UInt) = {
-    val all_match = req_valid && valid &&
-                req_mshr_id === mshrid &&
-                req_paddr(log2Up(refillBytes)) === last
-    val forward_D = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
-    val forwardDenied = RegInit(false.B)
-    val forwardCorrupt = RegInit(false.B)
-
-    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
-    val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
-    (0 until l1BusDataWidth / 64).map(i => {
-      block_data(i) := data(64 * i + 63, 64 * i)
-    })
-    val selected_data = Wire(UInt(128.W))
-    selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
-
-    forward_D := all_match
-    for (i <- 0 until VLEN/8) {
-      when (all_match) {
-        forwardData(i) := selected_data(8 * i + 7, 8 * i)
-      }
-    }
-    when (all_match) {
-      forwardDenied := denied
-      forwardCorrupt := corrupt
-    }
-
-    (forward_D, forwardData, forwardDenied, forwardCorrupt)
-  }
-}
-
 class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool()
   val paddr = UInt(PAddrBits.W)
@@ -740,7 +678,6 @@ class DCacheForwardReqS1(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
   val matchInvalid = Bool()
-  val forwardMask = Vec((VLEN/8), Bool()) // useless, remove this
   val forwardData = Vec((VLEN/8), UInt(8.W))
   // denied and corrupt are only valid when forwarding matches
   val denied = Bool()
@@ -752,6 +689,10 @@ class DCacheForward(implicit p: Parameters) extends DCacheBundle {
   val s1Req = Output(new DCacheForwardReqS1)
   val s1Kill = Output(Bool())
   val s2Resp = Flipped(ValidIO(new DCacheForwardResp))
+}
+
+class DCacheLoadWakeup(implicit p: Parameters) extends DCacheBundle {
+  val mshrId = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 // forward mshr's data to ldu
@@ -793,13 +734,12 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
-  //val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
-  val tl_d_channel = Output(new DcacheToLduForwardIO)
+  val loadWakeup = ValidIO(new DCacheLoadWakeup())
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
-  val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
-  val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+  val forward_D = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+  val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
 }
 
 class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
@@ -947,7 +887,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents with HasL1PrefetchSourceParameter {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents with
+  HasL1PrefetchSourceParameter {
 
   val io = IO(new DCacheIO)
 
@@ -994,8 +935,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val errorArray = Module(new L1ErrorMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
-  val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
-  val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)))
+  val prefetchArray = Module(new L1PrefetchSourceArray(
+    readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth
+  )) // prefetch flag array
+  val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(
+    readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth
+  )))
+
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
@@ -1009,7 +955,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
   // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
   // higher priority is given to lower indices
-  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
+  val MissReqPortCount = if (StorePrefetchL1Enabled) {
+    1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt
+  } else {
+    1 + backendParams.LduCnt + backendParams.HyuCnt
+  }
   val MainPipeMissReqPort = 0
   val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
 
@@ -1093,9 +1043,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val HybridStoreMetaReadPort = HybridStoreReadBase + i
 
     hybrid_meta_read_ports(i).valid := ldu(HybridLoadMetaReadPort).io.meta_read.valid ||
-                                       (stu(HybridStoreMetaReadPort).io.meta_read.valid && StorePrefetchL1Enabled.B)
-    hybrid_meta_read_ports(i).bits := Mux(ldu(HybridLoadMetaReadPort).io.meta_read.valid, ldu(HybridLoadMetaReadPort).io.meta_read.bits,
-                                          stu(HybridStoreMetaReadPort).io.meta_read.bits)
+      stu(HybridStoreMetaReadPort).io.meta_read.valid && StorePrefetchL1Enabled.B
+    hybrid_meta_read_ports(i).bits := Mux(
+      ldu(HybridLoadMetaReadPort).io.meta_read.valid,
+      ldu(HybridLoadMetaReadPort).io.meta_read.bits,
+      stu(HybridStoreMetaReadPort).io.meta_read.bits
+    )
 
     ldu(HybridLoadMetaReadPort).io.meta_read.ready := hybrid_meta_read_ports(i).ready
     stu(HybridStoreMetaReadPort).io.meta_read.ready := hybrid_meta_read_ports(i).ready && StorePrefetchL1Enabled.B
@@ -1188,7 +1141,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     accessArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
 
     val extra_flag_valid = RegNext(mainPipe.io.prefetch_flag_write.valid)
-    val extra_flag_way_en = RegEnable(mainPipe.io.prefetch_flag_write.bits.way_en, mainPipe.io.prefetch_flag_write.valid)
+    val extra_flag_way_en = RegEnable(
+      mainPipe.io.prefetch_flag_write.bits.way_en,
+      mainPipe.io.prefetch_flag_write.valid
+    )
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
@@ -1342,19 +1298,34 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
 
-  (0 until LoadPipelineWidth).map(i => {
-    when(bus.d.bits.opcode === TLMessages.GrantData) {
-      io.lsu.forward_D(i).apply(bus.d, edge)
-    }.otherwise {
-      io.lsu.forward_D(i).dontCare()
-    }
-  })
-  // tl D channel wakeup
-  when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
-    io.lsu.tl_d_channel.apply(bus.d, edge)
-  } .otherwise {
-    io.lsu.tl_d_channel.dontCare()
+  io.lsu.forward_D.zipWithIndex.foreach { case (forward, i) =>
+    val s0ReqValid = forward.s0Req.valid
+    val s0Req = forward.s0Req.bits
+    val s1ReqValid = RegNext(s0ReqValid)
+    val s1Req = RegEnable(s0Req, s0ReqValid)
+    val mshrId = s1Req.mshrId
+    val paddr = forward.s1Req.paddr
+
+    val (_, _, done, _) = edge.count(bus.d)
+    val mshrMatch = mshrId === bus.d.bits.source
+    val beatMatch = (bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B) ^ done) === paddr(log2Up(refillBytes))
+    val s1RespValid = s1ReqValid && bus.d.valid && bus.d.bits.opcode === TLMessages.GrantData &&
+      mshrMatch && beatMatch
+    val s1RespForwardData = VecInit.tabulate(l1BusDataWidth / VLEN) { i =>
+      bus.d.bits.data((i + 1) * VLEN - 1, i * VLEN)
+    }(paddr(log2Up(VLEN / 8)))
+
+    val s2Resp = forward.s2Resp
+    s2Resp.valid := RegNext(s1RespValid)
+    s2Resp.bits.matchInvalid := false.B
+    s2Resp.bits.forwardData := RegEnable(s1RespForwardData.asTypeOf(s2Resp.bits.forwardData), s1ReqValid)
+    s2Resp.bits.denied := RegEnable(bus.d.bits.denied, s1ReqValid)
+    s2Resp.bits.corrupt := RegEnable(bus.d.bits.corrupt, s1ReqValid)
   }
+  // tl D channel wakeup
+  io.lsu.loadWakeup.valid := (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) &&
+    bus.d.valid
+  io.lsu.loadWakeup.bits.mshrId := bus.d.bits.source
   mainPipe.io.force_write <> io.force_write
 
   /** dwpu */
@@ -1553,7 +1524,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
 
   // forward missqueue
-  (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
+  missQueue.io.forward <> io.lsu.forward_mshr
 
   // refill to load queue
  // io.lsu.lsq <> missQueue.io.refill_to_ldq

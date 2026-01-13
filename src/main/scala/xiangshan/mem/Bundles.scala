@@ -142,8 +142,8 @@ object Bundles {
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
       // output.debug := this.debug
-      output.debugInfo := this.uop.debugInfo
-      output.debug_seqNum := this.uop.debug_seqNum
+      output.perfDebugInfo.foreach(_ := this.uop.perfDebugInfo)
+      output.debug_seqNum.foreach(_ := this.uop.debug_seqNum)
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)
       output.isRVC.foreach(_ := this.uop.isRVC)
@@ -402,11 +402,14 @@ object Bundles {
     val paddr = UInt(PAddrBits.W)
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
+    val dataValid = Bool()
     val nc = Bool() // always mark a writebacked NC load as released in RAR
     val mask = UInt((VLEN/8).W)
     val isRVC = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val pc = UInt(VAddrBits.W)
+    val debugInfo = new PerfDebugInfo
   }
 
   class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {

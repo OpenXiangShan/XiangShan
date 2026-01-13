@@ -28,7 +28,6 @@ import xiangshan.backend.fu.util.HasCSRConst
 import xiangshan.backend.decode.isa.CSRs
 import utility._
 import xiangshan.cache.mmu.TlbCmd
-import freechips.rocketchip.rocket.CSRs
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes

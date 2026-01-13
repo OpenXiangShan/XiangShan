@@ -37,7 +37,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val redirect = Flipped(Valid(new Redirect))
 
     // violation query
-    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadRARNukeQuery()))
 
     // release cacheline
     val release = Flipped(Valid(new Release))
@@ -94,8 +94,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released.
+  class UopEntry(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr()
+    val lqIdx = new LqPtr()
+  }
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
+  val uop = Reg(Vec(LoadQueueRARSize, new UopEntry))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PartialPAddrBits.W),
     numEntries = LoadQueueRARSize,
@@ -137,8 +141,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // There are still not completed load instructions before the current load instruction.
   // (e.g. "not completed" means that load instruction get the data or exception).
   val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
-  val hasNotWritebackedLoad = io.query.map(_.req.bits.uop.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
+  val cancelEnqueue = io.query.map(_.req.bits.robIdx.needFlush(io.redirect))
+  val hasNotWritebackedLoad = io.query.map(_.req.bits.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
   val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
 
   // Allocate logic
@@ -172,18 +176,19 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
 
       //  Fill info
-      uop(enqIndex) := enq.bits.uop
+      uop(enqIndex).robIdx := enq.bits.robIdx
+      uop(enqIndex).lqIdx := enq.bits.lqIdx
       //  NC is uncachable and will not be explicitly released.
       //  So NC requests are not allowed to have RAR
-      released(enqIndex) := enq.bits.is_nc || (
-        enq.bits.data_valid &&
+      released(enqIndex) := enq.bits.nc || (
+        enq.bits.dataValid &&
         (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
       )
     }
-    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    val debug_robIdx = enq.bits.robIdx.asUInt
     XSError(
       needEnqueue(w) && enq.ready && allocated(enqIndex),
       p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
@@ -209,15 +214,23 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // if need replay revoke entry
   val lastCanAccept = GatedRegNext(acceptedVec)
-  val lastAllocIndex = GatedRegNext(enqIndexVec)
+  val lastAllocIndex = enqIndexVec.zip(acceptedVec).map(x => RegEnable(x._1, x._2))
+  val lastLastCanAccept = RegNext(lastCanAccept)
+  val lastLastAllocIndex = lastAllocIndex.zip(lastCanAccept).map(x => RegEnable(x._1, x._2))
 
-  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && lastCanAccept(w)
-    val revokeIndex = lastAllocIndex(w)
+  for ((query, w) <- io.query.zipWithIndex) {
+    val revokeLastCycle = query.revokeLastCycle && lastCanAccept(w)
+    val revokeLastLastCycle = query.revokeLastLastCycle && lastLastCanAccept(w)
+    val revokeLastIndex = lastAllocIndex(w)
+    val revokeLastLastIndex = lastLastAllocIndex(w)
 
-    when (allocated(revokeIndex) && revokeValid) {
-      allocated(revokeIndex) := false.B
-      freeMaskVec(revokeIndex) := true.B
+    when (allocated(revokeLastIndex) && revokeLastCycle) {
+      allocated(revokeLastIndex) := false.B
+      freeMaskVec(revokeLastIndex) := true.B
+    }
+    when (allocated(revokeLastLastIndex) && revokeLastLastCycle) {
+      allocated(revokeLastLastIndex) := false.B
+      freeMaskVec(revokeLastLastIndex) := true.B
     }
   }
 
@@ -228,15 +241,13 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // 1. Physical address match by CAM port.
   // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
-  val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
   //val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
-    ldLdViolation(w) := false.B
     paddrModule.io.releaseViolationMdata(w) := genPartialPAddr(query.req.bits.paddr)
 
     query.resp.valid := RegNext(query.req.valid)
     // Generate real violation mask
-    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
+    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.robIdx)))
     val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
     for(i <- 0 until LoadQueueRARSize) {
       matchMaskReg(i) := (allocated(i) &
@@ -248,13 +259,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     //  Load-to-Load violation check result
     val ldLdViolationMask = matchMask
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.rep_frm_fetch := ParallelORR(ldLdViolationMask)
+    query.resp.bits.nuke := ParallelORR(ldLdViolationMask)
   }
 
 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
-  val releaseVioMask = Reg(Vec(LoadQueueRARSize, Bool()))
   when (release1Cycle.valid) {
     paddrModule.io.releaseMdata.takeRight(1)(0) := genPartialPAddr(release1Cycle.bits.paddr)
   }
@@ -274,7 +284,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
-  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.rep_frm_fetch))
+  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.nuke))
 
   QueuePerf(LoadQueueRARSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enq", canEnqCount)

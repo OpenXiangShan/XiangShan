@@ -75,9 +75,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val ldvecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
-        val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+      val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
+      val rarNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRARNukeQuery()))
+      val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
@@ -89,11 +89,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
-    val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
-    val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
+    val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
     val sbuffer = new SbufferWriteIO
     val forward = Flipped(Vec(LoadPipelineWidth, new SQForward))
     val rob = Flipped(new RobLsqIO)
@@ -102,8 +99,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     // mdp train io
     val mdpTrain        = ValidIO(new Redirect)
     val release = Flipped(Valid(new Release))
-   // val refill = Flipped(Valid(new Refill))
-    val tl_d_channel  = Input(new DcacheToLduForwardIO)
+    val loadWakeup = Flipped(ValidIO(new DCacheLoadWakeup()))
     val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
@@ -125,8 +121,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val sqCommitPtr = Output(new SqPtr)
     val sqCommitUopIdx = Output(UopIdx())
     val sqCommitRobIdx = Output(new RobPtr)
-    val loadMisalignFull = Input(Bool())
-    val misalignAllowSpec = Input(Bool())
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -228,19 +222,13 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.redirect            <> io.brqRedirect
   loadQueue.io.vecFeedback           <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
-  loadQueue.io.ldout               <> io.ldout
-  loadQueue.io.ld_raw_data         <> io.ld_raw_data
-  loadQueue.io.ncOut               <> io.ncOut
   loadQueue.io.rob                 <> io.rob
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
- // loadQueue.io.refill              <> io.refill
-  loadQueue.io.tl_d_channel        <> io.tl_d_channel
+  loadQueue.io.loadWakeup          <> io.loadWakeup
   loadQueue.io.release             <> io.release
   loadQueue.io.exceptionInfo       <> io.ldExceptionInfo
-  loadQueue.io.loadMisalignFull    := io.loadMisalignFull
-  loadQueue.io.misalignAllowSpec   := io.misalignAllowSpec
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.toLoadQueue.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.toLoadQueue.stAddrReadyVec
