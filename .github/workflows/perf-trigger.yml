@@ -51,7 +51,7 @@ on:
         type: string
         default: ''
       servers:
-        description: Servers to run emulation on
+        description: Servers to run emulation on, uses 5 random servers by default
         required: false
         type: string
         default: ''
