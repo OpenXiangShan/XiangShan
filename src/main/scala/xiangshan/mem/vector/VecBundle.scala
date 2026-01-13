@@ -153,6 +153,31 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
   val elemIdxInsideVd     = UInt(elemIdxBits.W) // only use in unit-stride
+
+  // TODO: remove this after unifying interface with vssplit
+  def toVectorLoadIn(): VectorLoadIn = {
+    require(!isVStore)
+    val out = Wire(new VectorLoadIn())
+    out.entrance := LoadEntrance.vectorIssue.U
+    out.accessType.instrType := InstrType.vector.U
+    out.accessType.pftType := DontCare
+    out.accessType.pftCoh := DontCare
+    out.uop := uop
+    out.vaddr := vaddr
+    out.fullva := DontCare
+    out.size := alignedType
+    out.mask := mask
+    out.elemIdx.get := elemIdx
+    out.mbIndex.get := mBIndex
+    out.regOffset.get := reg_offset
+    out.elemIdxInsideVd.get := elemIdxInsideVd
+    out.vecBaseVaddr.get := DontCare
+    out.vecVaddrOffset.get := DontCare
+    out.vecTriggerMask.get := DontCare
+    out.hasROBEntry := true.B
+    out.missDbUpdated := false.B
+    out
+  }
 }
 
 object VecFeedbacks {
