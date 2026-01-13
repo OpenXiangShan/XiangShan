@@ -195,7 +195,7 @@ class Sbuffer(implicit p: Parameters)
     val hartId = Input(UInt(hartIdLen.W))
     val in = Flipped(new SbufferWriteIO)  //Todo: store logic only support Width == 2 now
     val dcache = Flipped(new DCacheToSbufferIO)
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new SbufferForward))
     val sqempty = Input(Bool())
     val sbempty = Output(Bool())
     val flush = Flipped(new SbufferFlushBundle)
@@ -779,11 +779,18 @@ class Sbuffer(implicit p: Parameters)
   val mismatch = Wire(Vec(LoadPipelineWidth, Bool()))
   XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))
   for ((forward, i) <- io.forward.zipWithIndex) {
-    val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
+    val s0ReqValid = forward.s0Req.valid
+    val s0Req = forward.s0Req.bits
+    val s1ReqValid = RegNext(s0ReqValid)
+    val s1Req = RegEnable(s0Req, s0ReqValid)
+    val s1Paddr = forward.s1Req.paddr
+    val s2RespValid = forward.s2Resp.valid
+    val s2Resp = forward.s2Resp.bits
+    val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(s1Req.vaddr)))
     // ptag_matches uses paddr from dtlb, which is far from sbuffer
-    val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), forward.valid) === RegEnable(getPTag(forward.paddr), forward.valid)))
+    val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), s1ReqValid) === RegEnable(getPTag(s1Paddr), s1ReqValid)))
     val tag_matches = vtag_matches
-    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
+    val tag_mismatch = RegNext(s1ReqValid) && VecInit(widthMap(w =>
       GatedValidRegNext(vtag_matches(w)) =/= ptag_matches(w) && GatedValidRegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
@@ -795,22 +802,22 @@ class Sbuffer(implicit p: Parameters)
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
       RegNext(ptag_matches.asUInt),
       RegNext(vtag_matches.asUInt),
-      RegNext(forward.vaddr),
-      RegNext(forward.paddr)
+      RegNext(s1Req.vaddr),
+      RegNext(s1Paddr)
     )
     val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
-    val line_offset_mask = UIntToOH(getVWordOffset(forward.paddr))
+    val line_offset_mask = UIntToOH(getVWordOffset(s1Paddr))
 
-    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, forward.valid))
-    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, forward.valid))
+    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, s1ReqValid))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, s1ReqValid))
     val forward_mask_candidate_reg = RegEnable(
-      VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr)))),
-      forward.valid
+      VecInit(mask.map(entry => entry(getVWordOffset(s1Paddr)))),
+      s1ReqValid
     )
     val forward_data_candidate_reg = RegEnable(
-      VecInit(data.map(entry => entry(getVWordOffset(forward.paddr)))),
-      forward.valid
+      VecInit(data.map(entry => entry(getVWordOffset(s1Paddr)))),
+      s1ReqValid
     )
 
     val selectedValidMask = Mux1H(valid_tag_match_reg, forward_mask_candidate_reg)
@@ -827,25 +834,22 @@ class Sbuffer(implicit p: Parameters)
     val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
     val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
 
-    forward.dataInvalid := false.B // data in store line merge buffer is always ready
-    forward.matchInvalid := tag_mismatch // paddr / vaddr cam result does not match
+    s2Resp.matchInvalid := tag_mismatch // paddr / vaddr cam result does not match
     for (j <- 0 until VDataBytes) {
-      forward.forwardMask(j) := false.B
-      forward.forwardData(j) := DontCare
+      s2Resp.forwardMask(j) := false.B
+      s2Resp.forwardData(j) := DontCare
 
       // valid entries have higher priority than inflight entries
       when(selectedInflightMask(j)) {
-        forward.forwardMask(j) := true.B
-        forward.forwardData(j) := selectedInflightData(j)
+        s2Resp.forwardMask(j) := true.B
+        s2Resp.forwardData(j) := selectedInflightData(j)
       }
       when(selectedValidMask(j)) {
-        forward.forwardMask(j) := true.B
-        forward.forwardData(j) := selectedValidData(j)
+        s2Resp.forwardMask(j) := true.B
+        s2Resp.forwardData(j) := selectedValidData(j)
       }
-
-      forward.forwardMaskFast(j) := selectedInflightMaskFast(j) || selectedValidMaskFast(j)
     }
-    forward.addrInvalid := DontCare
+    s2RespValid := Cat(s2Resp.forwardMask).orR
   }
 
   for (i <- 0 until StoreBufferSize) {

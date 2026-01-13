@@ -50,11 +50,11 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     // from ldu
     val req = Flipped(Valid(new LqWriteBundle))
     // to ldu: mmio, data
-    val mmioWakeup = ValidIO(new LqPtr)
+    val mmioWakeup = DecoupledIO(new LqPtr)
     val mmioOut = DecoupledIO(new MemExuOutput)
     val mmioRawData = Output(new LoadDataFromLQBundle)
     // to ldu: nc with data
-    val ncWakeup = ValidIO(new LqPtr)
+    val ncWakeup = DecoupledIO(new LqPtr)
     val ncOut = DecoupledIO(new LsPipelineBundle)
     // <=> uncache
     val uncache = new UncacheWordIO
@@ -67,7 +67,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val slaveAccept = RegInit(false.B)
   val slaveId = Reg(UInt(UncacheBufferIndexWidth.W))
 
-  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_wakeup :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
@@ -147,8 +147,16 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
           uncacheState := s_idle
           flush := true.B
         }.otherwise{
-          uncacheState := s_wait
+          uncacheState := s_wakeup
         }
+      }
+    }
+    is (s_wakeup) {
+      when (needFlush || needFlushReg) {
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen (io.mmioWakeup.fire || io.ncWakeup.fire) {
+        uncacheState := s_wait
       }
     }
     is (s_wait) {
@@ -228,9 +236,9 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
   }
-  io.ncWakeup.valid := io.uncache.resp.fire && req.nc
+  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlush && !needFlushReg
   io.ncWakeup.bits := req.uop.lqIdx
-  io.mmioWakeup.valid := io.uncache.resp.fire && req.mmio
+  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlush && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
   io.exception.valid := writeback
@@ -279,11 +287,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     val req = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
     // writeback: mmio to ldu s0, s3
     val mmioWakeup = ValidIO(new LqPtr)
-    val mmioOut = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
-    val mmioRawData = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     // writeback: nc to ldu s0--s3
     val ncWakeup = ValidIO(new LqPtr)
-    val ncOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     // <=>uncache
     val uncache = new UncacheWordIO
     // to ldu: mmio/nc data
@@ -325,14 +330,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   io.uncache.req.valid := false.B
   io.uncache.req.bits := DontCare
   io.uncache.resp.ready := false.B
-  for (w <- 0 until LoadPipelineWidth) {
-    io.mmioOut(w).valid := false.B
-    io.mmioOut(w).bits := DontCare
-    io.mmioRawData(w) := DontCare
-    io.ncOut(w).valid := false.B
-    io.ncOut(w).bits := DontCare
-  }
-
 
   /******************************************************************
    * Enqueue
@@ -400,9 +397,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   // TODO lyq: It's best to choose in robIdx order / the order in which they enter
   val ncReqArb = Module(new RRArbiterInit(io.uncache.req.bits.cloneType, LoadUncacheBufferSize))
 
-  val mmioOut = Wire(DecoupledIO(io.mmioOut(0).bits.cloneType))
-  val mmioRawData = Wire(io.mmioRawData(0).cloneType)
-  val ncOut = Wire(chiselTypeOf(io.ncOut))
   val ncOutValidVec = VecInit(entries.map(e => e.io.ncOut.valid))
   val ncOutValidVecRem = SubVec.getMaskRem(ncOutValidVec, NC_WB_MOD)
 
@@ -411,16 +405,9 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   uncacheReq.bits  := DontCare
   mmioReq.valid := false.B
   mmioReq.bits := DontCare
-  mmioOut.valid := false.B
-  mmioOut.bits := DontCare
-  mmioRawData := DontCare
   for (i <- 0 until LoadUncacheBufferSize) {
     ncReqArb.io.in(i).valid := false.B
     ncReqArb.io.in(i).bits := DontCare
-  }
-  for (i <- 0 until LoadPipelineWidth) {
-    ncOut(i).valid := false.B
-    ncOut(i).bits := DontCare
   }
 
   entries.zipWithIndex.foreach {
@@ -442,27 +429,10 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
         mmioReq.valid := e.io.uncache.req.valid
         mmioReq.bits := e.io.uncache.req.bits
         e.io.uncache.req.ready := mmioReq.ready
-
-        e.io.mmioOut.ready := mmioOut.ready
-        mmioOut.valid := e.io.mmioOut.valid
-        mmioOut.bits := e.io.mmioOut.bits
-        mmioRawData := e.io.mmioRawData
-
       }.otherwise{
         ncReqArb.io.in(i).valid := e.io.uncache.req.valid
         ncReqArb.io.in(i).bits := e.io.uncache.req.bits
         e.io.uncache.req.ready := ncReqArb.io.in(i).ready
-
-        (0 until NC_WB_MOD).map { w =>
-          val (idx, ncOutValid) = PriorityEncoderWithFlag(ncOutValidVecRem(w))
-          val port = NCWBPorts(w)
-          when((i.U === idx) && ncOutValid) {
-            ncOut(port).valid := ncOutValid
-            ncOut(port).bits := e.io.ncOut.bits
-            e.io.ncOut.ready := ncOut(port).ready
-          }
-        }
-
       }
 
       // uncache idResp
@@ -489,16 +459,16 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   AddPipelineReg(uncacheReq, io.uncache.req, false.B)
 
   // uncache Wakeup & Writeback
-  io.mmioWakeup.valid := Cat(entries.map(_.io.mmioWakeup.valid)).orR
-  io.mmioWakeup.bits := Mux1H(entries.map(e => (e.io.mmioWakeup.valid, e.io.mmioWakeup.bits)))
-  io.ncWakeup.valid := Cat(entries.map(_.io.ncWakeup.valid)).orR
-  io.ncWakeup.bits := Mux1H(entries.map(e => (e.io.ncWakeup.valid, e.io.ncWakeup.bits)))
-
-  AddPipelineReg(mmioOut, io.mmioOut(UncacheWBPort), false.B)
-  io.mmioRawData(UncacheWBPort) := RegEnable(mmioRawData, mmioOut.fire)
-
-  (0 until LoadPipelineWidth).foreach { i => AddPipelineReg(ncOut(i), io.ncOut(i), false.B) }
-
+  val mmioWakeup = Wire(DecoupledIO(new LqPtr()))
+  val ncWakeup = Wire(DecoupledIO(new LqPtr()))
+  io.mmioWakeup.valid := mmioWakeup.valid
+  io.mmioWakeup.bits := mmioWakeup.bits
+  mmioWakeup.ready := true.B
+  io.ncWakeup.valid := ncWakeup.valid
+  io.ncWakeup.bits := ncWakeup.bits
+  ncWakeup.ready := true.B
+  arbiter(entries.map(_.io.mmioWakeup), mmioWakeup, Some("mmioWakeup"))
+  arbiter(entries.map(_.io.ncWakeup), ncWakeup, Some("ncWakeup"))
   // uncache exception
   val exceptionEntry = ParallelPriorityMux(entries.map(e =>
     (e.io.exception.valid, e.io.exception.bits)
@@ -527,61 +497,64 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    * s1 response paddr, s2 response forwardData
    ******************************************************************/
 
+  val ncMatch = Wire(Vec(LoadPipelineWidth, Vec(LoadUncacheBufferSize, Bool())))
+  val mmioMatch = Wire(Vec(LoadPipelineWidth, Vec(LoadUncacheBufferSize, Bool())))
   for (w <- 0 until LoadPipelineWidth) {
     val matchedPaddr = WireInit(0.U(PAddrBits.W))
     val matchedData = WireInit(0.U(XLEN.W))
     val matchednderr = WireInit(false.B)
     val matchedderr = WireInit(false.B)
     val matchedAddrOffset = WireInit(0.U(3.W))
-    val hasMatch = WireInit(false.B)
-
-    entries.foreach { e =>
-      e.io.ncOut.ready := false.B
-      e.io.mmioOut.ready := false.B
-    }
 
     entries.zipWithIndex.foreach {
       case (e, i) =>
-        val ncMatch = e.io.ncOut.valid &&
+        // TODO: use the same lqIdx for ncOut and mmioOut
+        ncMatch(w)(i) := e.io.ncOut.valid &&
           io.bypass(w).s0Req.valid && io.bypass(w).s0Req.bits.isNCReplay &&
           e.io.ncOut.bits.uop.lqIdx === io.bypass(w).s0Req.bits.lqIdx
 
-        val mmioMatch = e.io.mmioOut.valid &&
+        mmioMatch(w)(i) := e.io.mmioOut.valid &&
           io.bypass(w).s0Req.valid && io.bypass(w).s0Req.bits.isMMIOReplay &&
           e.io.mmioOut.bits.uop.lqIdx === io.bypass(w).s0Req.bits.lqIdx
-        
-        val entryMatch = ncMatch || mmioMatch
-
-        when (entryMatch) {
-          hasMatch := true.B
-          when (ncMatch) {
-            matchedPaddr := e.io.ncOut.bits.paddr
-            matchedData := e.io.ncOut.bits.data
-            matchednderr := e.io.ncOut.bits.uop.exceptionVec(loadAccessFault)
-            matchedderr := e.io.ncOut.bits.uop.exceptionVec(hardwareError)
-            e.io.ncOut.ready := true.B
-          }.otherwise { // mmioMatch
-            matchedPaddr := e.io.mmioOut.bits.debug.paddr
-            matchedData := e.io.mmioRawData.lqData
-            matchednderr := e.io.mmioOut.bits.uop.exceptionVec(loadAccessFault)
-            matchedderr := e.io.mmioOut.bits.uop.exceptionVec(hardwareError)
-            matchedAddrOffset := e.io.mmioRawData.addrOffset
-            e.io.mmioOut.ready := true.B
-          }
-        }
     }
 
-    val s1RespValid = RegNext(hasMatch)
-    val s1RespData = RegEnable(matchedData, hasMatch)
-    val s1RespNderr = RegEnable(matchednderr, hasMatch)
-    val s1RespDerr = RegEnable(matchedderr, hasMatch)
+    val respNCMatch = ncMatch(w).asUInt.orR
+    val respMMIOMatch = mmioMatch(w).asUInt.orR
+    val respMatch = respNCMatch || respMMIOMatch
+    val respMatchNCOut = ParallelPriorityMux(ncMatch(w), entries.map(_.io.ncOut.bits))
+    val respMatchMMIOOut = ParallelPriorityMux(mmioMatch(w), entries.map(_.io.mmioOut.bits))
+    val respMatchMMIOData = ParallelPriorityMux(mmioMatch(w), entries.map(_.io.mmioRawData))
+
+    when (respNCMatch) {
+      matchedPaddr := respMatchNCOut.paddr
+      matchedData := respMatchNCOut.data
+      matchednderr := respMatchNCOut.uop.exceptionVec(loadAccessFault)
+      matchedderr := respMatchNCOut.uop.exceptionVec(hardwareError)
+    }.elsewhen (respMMIOMatch) {
+      matchedPaddr := respMatchMMIOOut.debug.paddr
+      matchedData := respMatchMMIOData.lqData
+      matchednderr := respMatchMMIOOut.uop.exceptionVec(loadAccessFault)
+      matchedderr := respMatchMMIOOut.uop.exceptionVec(hardwareError)
+      matchedAddrOffset := respMatchMMIOData.addrOffset
+    }
+
+    val s1RespValid = RegNext(respMatch)
+    val s1RespData = RegEnable(matchedData, respMatch)
+    val s1RespNderr = RegEnable(matchednderr, respMatch)
+    val s1RespDerr = RegEnable(matchedderr, respMatch)
     val s2RespValid = RegNext(s1RespValid)
     io.bypass(w).s1Resp.valid := s1RespValid
-    io.bypass(w).s1Resp.bits.paddr := RegEnable(matchedPaddr, hasMatch)
+    io.bypass(w).s1Resp.bits.paddr := RegEnable(matchedPaddr, respMatch)
     io.bypass(w).s2Resp.valid := s2RespValid
-    io.bypass(w).s2Resp.bits.data := RegEnable(s1RespData, s1RespValid)
+    io.bypass(w).s2Resp.bits.data := RegEnable(Fill(VLEN / XLEN, s1RespData), s1RespValid)
     io.bypass(w).s2Resp.bits.nderr := RegEnable(s1RespNderr, s1RespValid)
     io.bypass(w).s2Resp.bits.derr := RegEnable(s1RespDerr, s1RespValid)
+  }
+
+  entries.zipWithIndex.foreach {
+    case (e, i) =>
+      e.io.ncOut.ready := Cat(ncMatch.map(_(i))).orR
+      e.io.mmioOut.ready := Cat(mmioMatch.map(_(i))).orR
   }
 
   /******************************************************************
@@ -677,20 +650,16 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   QueuePerf(LoadUncacheBufferSize, validCount, !allowEnqueue)
 
   XSPerfAccumulate("mmio_uncache_req", io.uncache.req.fire && !io.uncache.req.bits.nc)
-  XSPerfAccumulate("mmio_writeback_success", io.mmioOut(0).fire)
-  XSPerfAccumulate("mmio_writeback_blocked", io.mmioOut(0).valid && !io.mmioOut(0).ready)
+  XSPerfAccumulate("mmio_bypass", PopCount(io.bypass.map(x => x.s0Req.valid && x.s0Req.bits.isMMIOReplay)))
   XSPerfAccumulate("nc_uncache_req", io.uncache.req.fire && io.uncache.req.bits.nc)
-  XSPerfAccumulate("nc_writeback_success", io.ncOut(0).fire)
-  XSPerfAccumulate("nc_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready)
+  XSPerfAccumulate("nc_bypass", PopCount(io.bypass.map(x => x.s0Req.valid && x.s0Req.bits.isNCReplay)))
   XSPerfAccumulate("uncache_full_rollback", io.rollback.valid)
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("mmio_uncache_req", io.uncache.req.fire && !io.uncache.req.bits.nc),
-    ("mmio_writeback_success", io.mmioOut(0).fire),
-    ("mmio_writeback_blocked", io.mmioOut(0).valid && !io.mmioOut(0).ready),
+    ("mmio_bypass", PopCount(io.bypass.map(x => x.s0Req.valid && x.s0Req.bits.isMMIOReplay))),
     ("nc_uncache_req", io.uncache.req.fire && io.uncache.req.bits.nc),
-    ("nc_writeback_success", io.ncOut(0).fire),
-    ("nc_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready),
+    ("nc_bypass", PopCount(io.bypass.map(x => x.s0Req.valid && x.s0Req.bits.isNCReplay))),
     ("uncache_full_rollback", io.rollback.valid)
   )
   // end
