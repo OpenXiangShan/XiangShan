@@ -33,7 +33,7 @@ on:
         type: string
         default: ''
       servers:
-        description: Servers to run emulation on, uses 5 random servers by default
+        description: Servers to run emulation on, leave empty to let the script select
         required: false
         type: string
         default: ''
