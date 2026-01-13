@@ -912,8 +912,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       io.writeBack.bits.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
       io.writeBack.bits.debug.vaddr   := dataEntries.head.debugVaddr.get
       io.writeBack.bits.debug.paddr   := dataEntries.head.debugPaddr.get
-      io.writeBack.bits.debug_seqNum  := dataEntries.head.debugUop.get.debug_seqNum
-      io.writeBack.bits.debugInfo     := dataEntries.head.debugUop.get.debugInfo
+      io.writeBack.bits.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
+      io.writeBack.bits.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
     }
 
     io.exceptionInfo.valid             := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
