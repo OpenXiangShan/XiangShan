@@ -7,6 +7,16 @@ on:
         description: Branch or commit to run performance test on
         required: true
         type: string
+      recompile:
+        description: Recompile the emu
+        required: false
+        type: boolean
+        default: false
+      emulator:
+        description: emulator to use
+        required: false
+        type: string
+        default: gsim
       xs_config:
         description: Config for XiangShan core
         required: false
@@ -85,13 +95,14 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
-          if [ ! -e "$SPEC_DIR/emu" ]; then
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
-              --config "${{ inputs.xs_config }}"                             \
-              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-              --with-dramsim3 --threads 8                                   \
+          if [ ! -e "$SPEC_DIR/emu" ] || [ "${{ inputs.recompile }}" = "true" ]; then
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+              --config "${{ inputs.xs_config }}" \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
+              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata --trace-fst
+              --llvm-profdata llvm-profdata --trace-fst \
+              --emulator ${{ inputs.emulator }}
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
           fi
@@ -104,6 +115,7 @@ jobs:
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
             --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
+            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8)
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
@@ -115,7 +127,7 @@ jobs:
         run: |
           cd $SCRIPTS_HOME/perf
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-            --benchmarks "${{ inputs.benchmarks }}"\
+            --benchmarks "${{ inputs.benchmarks }}" \
             --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
 
