@@ -35,6 +35,7 @@ on:
         options:
           - KunminghuV2Config
           - DefaultConfig
+          - BackendV2Config
         default: KunminghuV2Config
       benchmark_type:
         description: Benchmark type
