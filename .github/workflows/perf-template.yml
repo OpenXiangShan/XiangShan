@@ -115,7 +115,7 @@ jobs:
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
             --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
-            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8)
+            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
