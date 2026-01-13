@@ -1,18 +1,18 @@
 "module: frontend":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/xiangshan/frontend/**
 
 "module: backend":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/xiangshan/backend/**
     - fudian/**
     - yunsuan/**
 
 "module: memory":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/xiangshan/cache/**
     - src/main/scala/xiangshan/mem/**
     - coupledL2/**
@@ -21,7 +21,7 @@
 
 "module: top":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/xiangshan/*
     - src/main/scala/top/**
     - src/main/scala/system/**
@@ -29,14 +29,14 @@
 
 "module: utility":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/utils/**
     - macros/**
     - utility/**
 
 "module: tool":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/resources/*
     - src/test/**
     - .github/**
@@ -53,14 +53,14 @@
 
 "module: other":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - src/main/scala/device/**
     - ChiselAIA/**
     - rocket-chip/**
 
 "module: documentation":
 - changed-files:
-  - any-glob-to-any-files:
+  - any-glob-to-any-file:
     - images/**
     - "**.md"
     - LICENSE
