@@ -21,7 +21,7 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
     val target = Output(UInt(XLEN.W))
     val nextPcOffset = Input(UInt((FetchBlockInstOffsetWidth + 2).W))
   })
-  val immMinWidth = FuConfig.BrhCfg.immType.map(x => SelImm.getImmUnion(x).len).max
+  val immMinWidth = FuConfig.BrhCfg.immType.map(x => x.len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
     io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),

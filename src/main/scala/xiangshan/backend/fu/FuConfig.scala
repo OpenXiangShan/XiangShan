@@ -1,14 +1,13 @@
 package xiangshan.backend.fu
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import utils.EnumUtils.OHEnumeration
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.ExceptionNO._
-import xiangshan.SelImm
-import xiangshan.backend.fu.fpu.{IntToFP, IntFPToVec}
-import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.decode._
+import xiangshan.backend.fu.fpu.{IntFPToVec, IntToFP}
+import xiangshan.backend.fu.wrapper._
 import xiangshan.mem.Std
 
 /**
@@ -72,7 +71,7 @@ case class FuConfig (
   needSrcFrm    : Boolean = false,
   needSrcVxrm   : Boolean = false,
   writeVType    : Boolean = false,
-  immType       : Set[UInt] = Set(),
+  immType       : Set[Imm] = Set(),
   vlWakeUp      : Boolean = false,
   maskWakeUp    : Boolean = false,
   readVl        : Boolean = false,
@@ -230,7 +229,7 @@ object FuConfig {
       Seq(IntData()), // jal
     ),
     piped = true,
-    immType = Set(SelImm.IMM_I, SelImm.IMM_UJ, SelImm.IMM_U),
+    immType = Set(Imm_I(), Imm_J(), Imm_U()),
   )
 
   val BrhCfg: FuConfig = FuConfig (
@@ -241,7 +240,7 @@ object FuConfig {
       Seq(IntData(), IntData()),
     ),
     piped = true,
-    immType = Set(SelImm.IMM_SB),
+    immType = Set(Imm_B()),
   )
 
   val I2fCfg: FuConfig = FuConfig (
@@ -285,7 +284,7 @@ object FuConfig {
     latency = CertainLatency(0, extraValue = 3),
     destDataBits = 128,
     srcDataBits = Some(64),
-    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
+    immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
   )
 
   val F2vCfg: FuConfig = FuConfig (
@@ -328,7 +327,7 @@ object FuConfig {
     ),
     piped = true,
     writeIntRf = true,
-    immType = Set(SelImm.IMM_I, SelImm.IMM_UJ, SelImm.IMM_U, SelImm.IMM_LUI32),
+    immType = Set(Imm_I(), Imm_J(), Imm_U(), Imm_LUI32()),
   )
 
   val MulCfg: FuConfig = FuConfig (
@@ -394,7 +393,7 @@ object FuConfig {
     writeVType = true,
     writeIntRf = true,
     latency = CertainLatency(0),
-    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+    immType = Set(Imm_VSETVLI(), Imm_VSETIVLI()),
     readVl = true,
   )
 
@@ -409,7 +408,7 @@ object FuConfig {
     writeVlRf = true,
     writeVType = true,
     latency = CertainLatency(0),
-    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+    immType = Set(Imm_VSETVLI(), Imm_VSETIVLI()),
   )
 
   val VSetRiWiCfg: FuConfig = FuConfig(
@@ -422,7 +421,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     latency = CertainLatency(0),
-    immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+    immType = Set(Imm_VSETVLI(), Imm_VSETIVLI()),
   )
 
   val LduCfg: FuConfig = FuConfig (
@@ -441,7 +440,7 @@ object FuConfig {
     replayInst = false,
     hasLoadError = true,
     trigger = true,
-    immType = Set(SelImm.IMM_I),
+    immType = Set(Imm_I()),
   )
 
   val StaCfg: FuConfig = FuConfig (
@@ -456,7 +455,7 @@ object FuConfig {
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint, hardwareError),
     flushPipe = false,
     trigger = true,
-    immType = Set(SelImm.IMM_S),
+    immType = Set(Imm_S()),
   )
 
   val StdCfg: FuConfig = FuConfig (
@@ -486,7 +485,7 @@ object FuConfig {
     flushPipe = false,
     replayInst = false,
     hasLoadError = true,
-    immType = Set(SelImm.IMM_I),
+    immType = Set(Imm_I()),
   )
 
   val HystaCfg = FuConfig (
@@ -499,7 +498,7 @@ object FuConfig {
     piped = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint, hardwareError),
-    immType = Set(SelImm.IMM_S),
+    immType = Set(Imm_S()),
   )
 
   val FakeHystaCfg = FuConfig (
