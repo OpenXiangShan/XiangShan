@@ -1,0 +1,91 @@
+"module: frontend":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/xiangshan/frontend/**
+
+"module: backend":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/xiangshan/backend/**
+    - fudian/**
+    - yunsuan/**
+
+"module: memory":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/xiangshan/cache/**
+    - src/main/scala/xiangshan/mem/**
+    - coupledL2/**
+    - huancun/**
+    - openLLC/**
+
+"module: top":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/xiangshan/*
+    - src/main/scala/top/**
+    - src/main/scala/system/**
+    - src/main/resources/config/**
+
+"module: utility":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/utils/**
+    - macros/**
+    - utility/**
+
+"module: tool":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/resources/*
+    - src/test/**
+    - .github/**
+    - difftest/**
+    - ready-to-run/**
+    - scripts/**
+    - .mill-version
+    - .scalafmt.conf
+    - Makefile
+    - Dockerfile
+    - build.mill
+    - scalastyle-config.xml
+    - scalastyle-test-config.xml
+
+"module: other":
+- changed-files:
+  - any-glob-to-any-files:
+    - src/main/scala/device/**
+    - ChiselAIA/**
+    - rocket-chip/**
+
+"module: documentation":
+- changed-files:
+  - any-glob-to-any-files:
+    - images/**
+    - "**.md"
+    - LICENSE
+
+"topic: functionality":
+- head-branch:
+  - "^feat"
+  - "^fix"
+
+"topic: performance":
+- head-branch:
+  - "^perf"
+
+"topic: code quality":
+- head-branch:
+  - "^refactor"
+
+"topic: power":
+- head-branch:
+  - "^power"
+
+"topic: area":
+- head-branch:
+  - "^area"
+
+"topic: timing":
+- head-branch:
+  - "^timing"
