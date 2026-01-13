@@ -7,17 +7,17 @@
 - changed-files:
   - any-glob-to-any-file:
     - src/main/scala/xiangshan/backend/**
-    - fudian/**
-    - yunsuan/**
+    - fudian
+    - yunsuan
 
 "module: memory":
 - changed-files:
   - any-glob-to-any-file:
     - src/main/scala/xiangshan/cache/**
     - src/main/scala/xiangshan/mem/**
-    - coupledL2/**
-    - huancun/**
-    - openLLC/**
+    - coupledL2
+    - huancun
+    - openLLC
 
 "module: top":
 - changed-files:
@@ -32,7 +32,7 @@
   - any-glob-to-any-file:
     - src/main/scala/utils/**
     - macros/**
-    - utility/**
+    - utility
 
 "module: tool":
 - changed-files:
@@ -40,8 +40,8 @@
     - src/main/resources/*
     - src/test/**
     - .github/**
-    - difftest/**
-    - ready-to-run/**
+    - difftest
+    - ready-to-run
     - scripts/**
     - .mill-version
     - .scalafmt.conf
@@ -55,8 +55,8 @@
 - changed-files:
   - any-glob-to-any-file:
     - src/main/scala/device/**
-    - ChiselAIA/**
-    - rocket-chip/**
+    - ChiselAIA
+    - rocket-chip
 
 "module: documentation":
 - changed-files:
