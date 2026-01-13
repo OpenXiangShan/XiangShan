@@ -27,7 +27,7 @@ import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, UopIdx, 
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
@@ -40,7 +40,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,
   override implicit val s: LoadStage = LoadS0()
 ) extends LoadUnitStage(param)
-  with HasL1PrefetchSourceParameter {
+  with HasL1PrefetchSourceParameter
+  with HasPerfEvents {
   val io = IO(new Bundle() {
     /**
       * Request sources
@@ -126,7 +127,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   replay.noQuery.get := io.replay.bits.uncacheReplay.get
   replay.DontCarePAddr()
   replay.DontCareUnalign() // assign later in sink
-  val replayIsHiPrio = io.replay.bits.forwardDChannel.get // TODO: consider uncache replay
+  val replayIsHiPrio = io.replay.bits.forwardDChannel.get || io.replay.bits.isUncacheReplay()
   replayHiPrio.valid := io.replay.valid && replayIsHiPrio
   replayHiPrio.bits := replay
   replayHiPrio.bits.entrance := LoadEntrance.replayHiPrio.U
@@ -141,11 +142,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 3. low-priority replay from LRQ
   val replayStall = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
     io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
-  val replayIsLoPrio = !io.replay.bits.forwardDChannel.get && !replayStall
+  val replayIsLoPrio = !io.replay.bits.forwardDChannel.get && !io.replay.bits.isUncacheReplay() && !replayStall
   replayLoPrio.valid := io.replay.valid && replayIsLoPrio
   replayLoPrio.bits := replay
   replayLoPrio.bits.entrance := LoadEntrance.replayLoPrio.U
-  
+
   // 4. high-confidence prefetch
   val prefetch = Wire(new LoadStageIO)
   val prefetchIsHiConf = io.prefetchReq.bits.confidence > 0.U
@@ -373,7 +374,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   // Option 2
   // val needWakeupSources = sources
   // val needWakeupValids = needWakeupSources.map(s => s.valid && sink.ready && s.bits.accessType.isScalar())
-  val wakeupValid = Cat(needWakeupValids).orR
+  val wakeupValid = Cat(needWakeupValids).orR && !sink.bits.unalignHead.get
   val wakeupSource = ParallelPriorityMux(needWakeupValids, needWakeupSources.map(_.bits))
   val wakeup = Wire(new MemWakeUpBundle)
   connectSamePort(wakeup, wakeupSource.uop)
@@ -394,7 +395,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io_pipeOut.get.bits := pipeOutBits
 
   assert(!sink.ready || unalignTail.ready, "unalignTail should always be ready")
-  io.replay.ready := Mux(replayIsHiPrio, replayHiPrio.ready, replayLoPrio.ready)
+  io.replay.ready := replayIsHiPrio && replayHiPrio.ready || replayIsLoPrio && replayLoPrio.ready
   io.fastReplay.ready := fastReplay.ready
   io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready)
   io.vecldin.ready := vectorIssue.ready
@@ -454,6 +455,14 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   io.debugInfo.pc := uop.pc
 
+  /**
+    *  Perf counters
+    */
+  val perfEvents = Seq(
+    ("s0_in_fire", pipeIn.fire),
+    ("s0_stall_dcache", sink.valid && !io.dcacheReq.ready)
+  )
+  generatePerfEvent()
 }
 
 class LoadUnitS1(param: ExeUnitParams)(
@@ -461,7 +470,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   override implicit val s: LoadStage = LoadS1()
 ) extends LoadUnitStage(param)
   with HasVLSUParameters 
-  with HasNukePAddrMatch {
+  with HasNukePAddrMatch
+  with HasPerfEvents {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
@@ -500,6 +510,9 @@ class LoadUnitS1(param: ExeUnitParams)(
     // Nuke check with StoreUnit
     val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
 
+    // prefetch train hint
+    val prefetchTrainHint = Output(Bool())
+
     // Software instruction prefetch
     val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
 
@@ -511,6 +524,7 @@ class LoadUnitS1(param: ExeUnitParams)(
       val isTlbFirstMiss = Bool()
       val isLoadToLoadForward = Bool()
       val robIdx = UInt(log2Ceil(RobSize).W)
+      val hasROBEntry = Bool()
       val vaddr = ValidIO(UInt(VAddrBits.W))
       val pc = Output(UInt(VAddrBits.W))
     })
@@ -634,10 +648,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.uop.exceptionVec(loadPageFault) := pf
   stageInfo.uop.exceptionVec(loadAccessFault) := af
   stageInfo.uop.exceptionVec(loadGuestPageFault) := gpf
-  stageInfo.uop.debugInfo.tlbRespTime := Mux(
+  stageInfo.uop.perfDebugInfo.tlbRespTime := Mux(
     pipeIn.valid && paddrEffective,
     GTimer(),
-    Mux(pipeIn.valid && tlbMiss, uop.debugInfo.tlbFirstReqTime, uop.debugInfo.tlbRespTime)
+    Mux(pipeIn.valid && tlbMiss, uop.perfDebugInfo.tlbFirstReqTime, uop.perfDebugInfo.tlbRespTime)
   )
   // update tlb response
   stageInfo.fullva := tlbResp.bits.fullva
@@ -696,24 +710,37 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.unalignTail.bits := unalignTail
   assert(!io.unalignTail.valid || io.unalignTail.ready)
 
+  io.prefetchTrainHint := pipeIn.valid && !kill && in.isFirstIssue()
+
   io.swInstrPrefetch.valid := pipeIn.valid && isSwInstrPrefetch
   io.swInstrPrefetch.bits.vaddr := vaddr
 
-  io.debugInfo.isTlbFirstMiss := pipeIn.valid && tlbMiss && in.isFirstIssue()
+  io.debugInfo.isTlbFirstMiss := pipeIn.valid && !kill && tlbMiss && in.isFirstIssue()
   io.debugInfo.isLoadToLoadForward := false.B
   io.debugInfo.robIdx := robIdx.value
-  io.debugInfo.vaddr.valid := pipeIn.valid
+  io.debugInfo.hasROBEntry := in.hasROBEntry
+  io.debugInfo.vaddr.valid := pipeIn.valid && !kill
   io.debugInfo.vaddr.bits := vaddr
   io.debugInfo.pc := uop.pc
 
   assert(!(pipeIn.valid && in.isUncacheReplay()) || io.uncacheBypassResp.valid, "uncache bypass should always success")
+
+  /**
+   *  Perf counters
+   */
+  val perfEvents = Seq(
+    ("s1_in_fire", pipeIn.fire),
+    ("s1_tlb_miss", pipeIn.fire && io.tlbResp.bits.miss)
+  )
+  generatePerfEvent()
 }
 
 class LoadUnitS2(param: ExeUnitParams)(
   implicit p: Parameters,
   override implicit val s: LoadStage = LoadS2()
 ) extends LoadUnitStage(param)
-  with HasNukePAddrMatch {
+  with HasNukePAddrMatch
+  with HasPerfEvents {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
@@ -760,9 +787,12 @@ class LoadUnitS2(param: ExeUnitParams)(
     val debugInfo = Output(new Bundle() {
       val isBankConflict = Bool()
       val isDCacheMiss = Bool()
-      val isDCacheFirstMiss = Bool()
+      val isDCacheFirstMiss = Bool() // ?
+      val isDCacheRealMiss = Bool() // ?
       val isForwardFail = Bool()
+      val isTlbNotMiss = Bool()
       val robIdx = UInt(log2Ceil(RobSize).W)
+      val hasROBEntry = Bool()
       val paddr = ValidIO(UInt(PAddrBits.W))
       val pc = Output(UInt(VAddrBits.W))
     })
@@ -781,13 +811,14 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isNCReplay = in.isNCReplay()
   val isUncacheReplay = in.isUncacheReplay()
   val isPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = accessType.isHwPrefetch()
   val isUnalignHead = in.unalignHead.get
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
 
   /**
     * Redirect
-    * 
+    *
     * Some terminology explanations:
     * Both **kill** and **endPipe** indicate that a request should terminate at the current stage without proceeding to
     * the next pipeline stage. However their difference lies in:
@@ -868,7 +899,8 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   val dcacheFullForward = io.mshrForwardResp.valid || io.tldForwardResp.valid
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
-  val needDCacheAccess = !dcacheFullForward && !storeFullForward && !isUncache
+  val fullForward = storeFullForward || dcacheFullForward
+  val needDCacheAccess = !fullForward && !isUncache
 
   // Uncache bypass
   afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.nderr
@@ -896,7 +928,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   /**
     * Preliminary assessment of the load exit
-    * 
+    *
     * We categorize the request exit into one of the following 3 categories:
     * 1. Trouble maker: loads that may need replay and may require RAR / RAW violation check, including exits:
     *   1.1 writeback: no need to replay or fast replay, but need to do violation check
@@ -930,7 +962,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   /**
     * Nuke query to LQRAR / LQRAW
-    * 
+    *
     * For timing considerations, violation check requests issued in s2 do not need to be accurate. But MUST ensure that
     * accurate `revoke` signals are given in s3 to withdraw requests that do not require violation check.
     */
@@ -940,11 +972,14 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.paddr := paddr
   nukeQueryReq.lqIdx := uop.lqIdx
   nukeQueryReq.sqIdx := uop.sqIdx
+  nukeQueryReq.dataValid := fullForward || isNCReplay || needDCacheAccess && !dcacheMiss && !bankConflict
   nukeQueryReq.nc := isNCReplay
   nukeQueryReq.mask := in.mask
   nukeQueryReq.isRVC := uop.isRVC
   nukeQueryReq.ftqPtr := uop.ftqPtr
   nukeQueryReq.ftqOffset := uop.ftqOffset
+  nukeQueryReq.pc := uop.pc
+  nukeQueryReq.debugInfo := uop.perfDebugInfo
 
   val rarNack = io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
   val rawNack = io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
@@ -1055,11 +1090,25 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
   io.debugInfo.isDCacheMiss := pipeIn.valid && !kill && cause(C_DM)
   io.debugInfo.isDCacheFirstMiss := pipeIn.valid && !kill && cause(C_DM) && in.isFirstIssue()
+  io.debugInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.real_miss
   io.debugInfo.isForwardFail := pipeIn.valid && !kill && cause(C_FF)
+  io.debugInfo.isTlbNotMiss := pipeIn.valid && !kill && tlbNotMiss
   io.debugInfo.robIdx := robIdx.value
-  io.debugInfo.paddr.valid := pipeIn.valid
+  io.debugInfo.hasROBEntry := in.hasROBEntry
+  io.debugInfo.paddr.valid := pipeIn.valid && !kill
   io.debugInfo.paddr.bits := paddr
   io.debugInfo.pc := uop.pc
+
+  /**
+   *  Perf counters
+   */
+  val perfEvents = Seq(
+    ("s2_in_fire", pipeIn.fire),
+    ("s2_dcache_miss", pipeIn.fire && !kill && cause(C_DM)),
+    ("s2_hw_pf_access", pipeIn.fire && isHwPrefetch),
+    ("s2_hw_pf_miss", pipeIn.fire && isHwPrefetch && !kill && cause(C_DM))
+  )
+  generatePerfEvent()
 }
 
 class LoadUnitS3(param: ExeUnitParams)(
@@ -1257,8 +1306,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.intWen.get := uop.rfWen
   ldout.fpWen.get := uop.fpWen
   ldout.exceptionVec.get := exceptionVec
-  ldout.flushPipe.get := uop.flushPipe
-  ldout.replay.get := uop.replayInst
   ldout.lqIdx.get := uop.lqIdx
   ldout.trigger.get := uop.trigger
   ldout.isRVC.get := uop.isRVC
@@ -1268,8 +1315,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.debug.isPerfCnt := false.B
   ldout.debug.paddr := in.paddr.get
   ldout.debug.vaddr := in.vaddr
-  ldout.debugInfo := uop.debugInfo
-  ldout.debug_seqNum := uop.debug_seqNum
+  ldout.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
+  ldout.debug_seqNum.foreach(_ := uop.debug_seqNum)
 
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
@@ -1292,7 +1339,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.tlbMiss := TlbAccessResult.isMiss(in.tlbAccessResult.get)// TODO: remove this
   lqWrite.ptwBack := false.B // TODO: remove this
   lqWrite.af := exceptionVec(loadAccessFault) // TODO: remove this
-  lqWrite.nc := in.nc.get || isNCR
+  lqWrite.nc := in.nc.get || in.isNCReplay()
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
   lqWrite.hasException := false.B // ?
@@ -1348,7 +1395,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.rep_carry := DontCare
   lqWrite.rep_info.last_beat := in.paddr.get(log2Up(refillBytes))
   lqWrite.rep_info.cause := lqWriteCauseOH
-  lqWrite.rep_info.debug := uop.debugInfo
+  lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
   lqWrite.nc_with_data := in.isNCReplay()
@@ -1433,7 +1480,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.vecldout.valid := vecldoutValid
   io.vecldout.bits := vecldout
 
-  io.fastReplay.valid := shouldFastReplay
+  io.fastReplay.valid := pipeIn.valid && shouldFastReplay
   io.fastReplay.bits := fastReplay
 
   io.revokeLastCycle := revokeLastCycle
@@ -1447,17 +1494,17 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
   io.rollback.bits.target := uop.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id
+  io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid
   io.exceptionInfo.bits := exceptionInfo
 
   io.cancel := cancel
 
-  io.debugInfo.isReplayFast := pipeIn.valid && doFastReplay
+  io.debugInfo.isReplayFast := pipeIn.valid && !kill && doFastReplay
   io.debugInfo.isReplaySlow := lqWriteValid && cause.asUInt.orR
   io.debugInfo.isReplayRS := false.B // load never replays from RS
-  io.debugInfo.isReplay := pipeIn.valid && cause.asUInt.orR
+  io.debugInfo.isReplay := pipeIn.valid && !kill && cause.asUInt.orR
   io.debugInfo.replayCause := cause
   io.debugInfo.replayCnt := 1.U
   io.debugInfo.robIdx := robIdx.value
@@ -1610,6 +1657,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
   val cancel = Output(Bool())
+  // Exception info
+  val exceptionInfo = ValidIO(new MemExceptionInfo)
   // Data forwarding and bypass
   val sqForward = new SQForward
   val sbufferForward = new SbufferForward
@@ -1624,17 +1673,20 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val rawNukeQuery = new LoadRAWNukeQuery
   val rollback = ValidIO(new Redirect)
   // Prefetch Train
+  val prefetchTrainHintS1 = Output(Bool())
+  val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new LsPrefetchTrainBundle)
   // Software instruction prefetch
   val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
   // CSR control signals and load trigger
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val csrTrigger = Input(new CsrTriggerBundle)
-  // Debug info
+  // Debug info and top-down info
   val debugInfo = Output(new DebugLsInfoBundle)
+  val topDownInfo = Output(new LsTopdownInfo)
 }
 
-class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
+class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new LoadUnitIO(param))
 
   val s0 = Module(new LoadUnitS0(param))
@@ -1643,6 +1695,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val s3 = Module(new LoadUnitS3(param))
   val s4 = Module(new LoadUnitS4(param))
   val dataPath = Module(new LoadUnitDataPath(param))
+  val stages = Seq(s0, s1, s2, s3, s4)
 
   // Internal wiring
   s1 <> s0
@@ -1697,6 +1750,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.tldForward.s1Kill := s1.io.tldForwardKill
   s1.io.uncacheBypassResp := io.uncacheBypass.s1Resp
   s1.io.staNukeQueryReq := io.staNukeQueryReq
+  io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
   io.swInstrPrefetch := s1.io.swInstrPrefetch
   s1.io.csrTrigger := io.csrTrigger
 
@@ -1717,6 +1771,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.staNukeQueryReq := io.staNukeQueryReq
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq
   io.rawNukeQuery.req <> s2.io.rawNukeQueryReq
+  io.prefetchTrainHintS2 := s2.io.prefetchTrain.valid
   io.prefetchTrain.valid := GatedValidRegNext(s2.io.prefetchTrain.valid)
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)
   s2.io.csrCtrl := io.csrCtrl
@@ -1734,6 +1789,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
+  io.exceptionInfo := s3.io.exceptionInfo
   s3.io.csrCtrl := io.csrCtrl
 
   // Data path
@@ -1764,9 +1820,25 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.debugInfo.s2_robIdx := s2.io.debugInfo.robIdx
   io.debugInfo.s3_robIdx := s3.io.debugInfo.robIdx
 
+  io.topDownInfo.s1.robIdx := s1.io.debugInfo.robIdx
+  io.topDownInfo.s1.vaddr_valid := s1.io.debugInfo.hasROBEntry && s1.io.debugInfo.vaddr.valid
+  io.topDownInfo.s1.vaddr_bits := s1.io.debugInfo.vaddr.bits
+  io.topDownInfo.s2.robIdx := s2.io.debugInfo.robIdx
+  io.topDownInfo.s2.paddr_valid := s2.io.debugInfo.hasROBEntry && s2.io.debugInfo.paddr.valid &&
+    s2.io.debugInfo.isTlbNotMiss
+  io.topDownInfo.s2.paddr_bits := s2.io.debugInfo.paddr.bits
+  io.topDownInfo.s2.first_real_miss := s2.io.debugInfo.isDCacheRealMiss
+  io.topDownInfo.s2.cache_miss_en := s2.io.debugInfo.hasROBEntry && s2.io.debugInfo.paddr.valid &&
+    s2.io.debugInfo.isTlbNotMiss // missDbUpdated is always DontCare
+
   io.dcache.s0_pc := s0.io.debugInfo.pc
   io.dcache.s1_pc := s1.io.debugInfo.pc
   io.dcache.s2_pc := s2.io.debugInfo.pc
+
+  val perfEvents = stages.collect { case stage if stage.isInstanceOf[HasPerfEvents] =>
+    stage.asInstanceOf[HasPerfEvents]
+  }.map(_.getPerfEvents).flatten
+  generatePerfEvent()
 }
 
 abstract class LoadUnitStage(val param: ExeUnitParams)(
@@ -1844,7 +1916,6 @@ trait HadNewLoadHelper { this: XSModule =>
   val num = types.length
   def genRdataOH(fuOpType: UInt, fpWen: Bool): Vec[Bool] = VecInit(types.map(_.selFu(fuOpType, fpWen)))
   def genRdata(sel: Vec[Bool], data: UInt): UInt = {
-    XSError(PopCount(sel) > 1.U, "data selector must be One-Hot!")
     Mux1H(sel, types.map(_.dataFu(data)))
   }
 }
