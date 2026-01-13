@@ -623,7 +623,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   // In/Out // Todo: split it into one-direction bundle
   val lsqEnqIO = Flipped(new LsqEnqIO)
   val robLsqIO = new RobLsqIO
-  val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
+  val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO)) // not used
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val hyuIqFeedback = Vec(params.HyuCnt, Flipped(new MemRSFeedbackIO))
   val vstuIqFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
