@@ -66,14 +66,18 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
   val victimWayIdx:  UInt = Output(UInt(WayIdxWidth.W))
 }
 
+class AheadBtbMetaEntry(implicit p: Parameters) extends AheadBtbBundle {
+  val hit:             Bool            = Bool()
+  val attribute:       BranchAttribute = new BranchAttribute
+  val position:        UInt            = UInt(CfiPositionWidth.W)
+  val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
+}
+
 class AheadBtbMeta(implicit p: Parameters) extends AheadBtbBundle {
-  val valid:           Bool                 = Bool()
-  val hitMask:         Vec[Bool]            = Vec(NumWays, Bool())
-  val attributes:      Vec[BranchAttribute] = Vec(NumWays, new BranchAttribute)
-  val positions:       Vec[UInt]            = Vec(NumWays, UInt(CfiPositionWidth.W))
-  val taken:           Bool                 = Bool()
-  val takenMaskOH:     Vec[Bool]            = Vec(NumWays, Bool())
-  val targetLowerBits: UInt                 = UInt(TargetLowerBitsWidth.W)
+  val valid:    Bool                   = Bool()
+  val setIdx:   UInt                   = UInt(SetIdxWidth.W)
+  val bankMask: UInt                   = UInt(NumBanks.W)
+  val entries:  Vec[AheadBtbMetaEntry] = Vec(NumWays, new AheadBtbMetaEntry())
 }
 
 class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
@@ -84,4 +88,11 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
   // target fix, see comment in Parameters.scala
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
+}
+
+class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
+  val taken:        Bool            = Bool()
+  val cfiPosition:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute:    BranchAttribute = new BranchAttribute
+  val isStrongBias: Bool            = Bool()
 }

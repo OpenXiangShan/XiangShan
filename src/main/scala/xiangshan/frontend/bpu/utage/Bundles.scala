@@ -32,23 +32,14 @@ object UsefulCounter extends SaturateCounterFactory {
 }
 
 class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
-  val taken:       Bool = Bool()
-  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+  // val ubtbHit:   Bool = Bool()
+  // val ubtbTaken: Bool = Bool()
+  val takenVec: Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
+  val hitVec:   Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
 }
 
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
-  val histTableHitMap:         Vec[Bool] = Vec(NumTables, Bool())
-  val histTableTakenMap:       Vec[Bool] = Vec(NumTables, Bool())
-  val histTableUsefulVec:      Vec[UInt] = Vec(NumTables, UInt(UsefulWidth.W))
-  val histTableCfiPositionVec: Vec[UInt] = Vec(NumTables, UInt(CfiPositionWidth.W))
-  val baseTaken:               Bool      = Bool()
-  val baseCfiPosition:         UInt      = UInt(CfiPositionWidth.W)
-
-  // only for test and debug
-  val debug_startVAddr:   Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(VAddrBits.W))
-  val debug_useMicroTage: Option[Bool] = Option.when(EnableTraceAndDebug)(Bool())
-  val debug_predIdx0:     Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(DebugPredIdxWidth.W))
-  val debug_predTag0:     Option[UInt] = Option.when(EnableTraceAndDebug)(UInt(DebugPredTagWidth.W))
+  val abtbResult: Vec[AbtbResult] = Vec(NumAheadBtbPredictionEntries, new AbtbResult)
 }
 
 class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
@@ -74,4 +65,19 @@ class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
   val debug_tableId:  UInt = UInt(log2Ceil(NumTables).W)
   val debug_useful:   UInt = UInt(UsefulWidth.W)
   val debug_takenCtr: UInt = UInt(TakenCtrWidth.W)
+}
+
+class AbtbResult(implicit p: Parameters) extends MicroTageBundle {
+  val valid:            Bool = Bool()
+  val baseTaken:        Bool = Bool()
+  val baseIsStrongBias: Bool = Bool()
+  val hit:              Bool = Bool()
+  val taken:            Bool = Bool()
+  val tableId:          UInt = UInt(log2Ceil(NumTables).W)
+  val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
+}
+
+class MicroTageTablePred(implicit p: Parameters) extends MicroTageBundle {
+  val taken:       Bool = Bool()
+  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
 }
