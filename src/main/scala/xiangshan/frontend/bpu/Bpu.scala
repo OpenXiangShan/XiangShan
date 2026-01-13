@@ -262,7 +262,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       fallThrough.io.prediction,
       Seq(
         (s1_realUbtbTaken && abtb.io.prediction.taken) -> Mux(
-          ubtb.io.prediction.cfiPosition <= abtb.io.prediction.cfiPosition,
+          ubtb.io.prediction.cfiPosition < abtb.io.prediction.cfiPosition,
           ubtb.io.prediction,
           abtb.io.prediction
         ),
