@@ -30,9 +30,9 @@ case class MainBtbParameters(
     // When using align banking, the BTB can provide at most banks - 1 / banks * predict width wide prediction
     NumAlignBanks:   Int = 2,
     TagWidth:        Int = 16,
-    TargetWidth:     Int = 20,        // 2B aligned
+    TargetWidth:     Int = 20,       // 2B aligned
     WriteBufferSize: Int = 4,
-    Replacer:        String = "Plru", // "Lru" or "Plru"
+    Replacer:        String = "Lru", // "Lru" or "Plru"
     // Base table
     TakenCntWidth: Int = 2,
     // Mbtb write trace
