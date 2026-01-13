@@ -18,7 +18,10 @@ on:
       recompile:
         description: Recompile the emu
         required: false
-        type: boolean
+        type: choice
+        options:
+          - true
+          - false
         default: false
       emulator:
         description: emulator to use
@@ -62,7 +65,7 @@ jobs:
     uses: ./.github/workflows/perf-template.yml
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
-        recompile: ${{ toJSON(github.event.inputs.recompile) }}
+        recompile: ${{ github.event.inputs.recompile }}
         emulator: ${{ github.event.inputs.emulator }}
         xs_config: ${{ github.event.inputs.xs_config }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}

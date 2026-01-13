@@ -10,7 +10,7 @@ on:
       recompile:
         description: Recompile the emu
         required: false
-        type: boolean
+        type: string
         default: false
       emulator:
         description: emulator to use
