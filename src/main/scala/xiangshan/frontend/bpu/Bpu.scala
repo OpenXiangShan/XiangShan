@@ -361,10 +361,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
-  s3_commonHRMeta.ghr      := commonHR.io.commonHR.ghr
-  s3_commonHRMeta.bw       := commonHR.io.commonHR.bw
-  s3_commonHRMeta.hitMask  := VecInit(s3_mbtbResult.map(_.valid))
-  s3_commonHRMeta.position := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  s3_commonHRMeta.ghr       := commonHR.io.commonHR.ghr
+  s3_commonHRMeta.bw        := commonHR.io.commonHR.bw
+  s3_commonHRMeta.hitMask   := VecInit(s3_mbtbResult.map(_.valid))
+  s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))
+  s3_commonHRMeta.position  := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
 
   private val s3_redirectMeta = Wire(new BpuRedirectMeta)
   s3_redirectMeta.phr          := s3_phrMeta
@@ -453,10 +454,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.update.firstTakenOH := s3_firstTakenBranchOH
   commonHR.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   commonHR.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
+  commonHR.io.update.attribute    := VecInit(s3_mbtbResult.map(_.bits.attribute))
   commonHR.io.redirect.valid      := redirect.valid
   commonHR.io.redirect.cfiPc      := redirect.bits.cfiPc
   commonHR.io.redirect.target     := redirect.bits.target
   commonHR.io.redirect.taken      := redirect.bits.taken
+  commonHR.io.redirect.attribute  := redirect.bits.attribute
   commonHR.io.redirect.meta       := redirect.bits.meta.commonHRMeta
   private val s0_commonHR   = commonHR.io.s0_commonHR
   private val commonHRValue = commonHR.io.commonHR
