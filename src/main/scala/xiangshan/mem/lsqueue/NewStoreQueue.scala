@@ -1778,17 +1778,18 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val ptr = cmtPtrExt(i).value
     val ctrlEntry = ctrlEntries(ptr)
     val dataEntry = dataEntries(ptr)
+    val ptrNoRotate = cmtPtrExt(i) >= deqPtrExt.head // prevent pointer rotation
     //TODO:
     /*
     * Currently three commit situation:
-    * [1]. normal Scalar Store Commit:      allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
-    * [2]. activate Vector Store Commit:    allocated && noFlush && isRobHead && noException && allValid && [vecMbcommit] --> move cmtPtr, set committed
-    * [3]. inactivate Vector Store Commit:  allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
+    * [1]. normal Scalar Store Commit:      ptrNoRotate && allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [2]. activate Vector Store Commit:    ptrNoRotate && allocated && noFlush && isRobHead && noException && allValid && [vecMbcommit] --> move cmtPtr, set committed
+    * [3]. inactivate Vector Store Commit:  ptrNoRotate && allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
     *
     * Future three commit situation:
-    * [1]. normal Scalar Store Commit:      allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
-    * [2]. activate Vector Store Commit:    allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
-    * [3]. inactivate Vector Store Commit:  allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
+    * [1]. normal Scalar Store Commit:      ptrNoRotate && allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [2]. activate Vector Store Commit:    ptrNoRotate && allocated && noFlush && isRobHead && noException && allValid --> move cmtPtr, set committed
+    * [3]. inactivate Vector Store Commit:  ptrNoRotate && allocated && noFlush && vecInactive  --> move cmtPtr, not set committed
     * */
     when(ctrlEntries(ptr).allocated && !needCancel(ptr) &&
       (isNotAfter(dataEntries(ptr).uop.robIdx, GatedRegNext(io.fromRob.pendingPtr)) &&
@@ -1802,7 +1803,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       }
     } // commitVec default is false.B
     //TODO: vecMbCommit will be remove in the future
-    ctrlEntries(ptr).committed   := commitVec(i) && !ctrlEntries(ptr).vecInactive && !(ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).allValid)
+    ctrlEntries(ptr).committed   := Mux(ptrNoRotate,
+      commitVec(i) && !ctrlEntries(ptr).vecInactive && !(ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).allValid),
+      ctrlEntries(ptr).committed)
     XSError(!ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed, "commit not allocated entry!\n")
     XSError(ctrlEntries(ptr).allocated && ctrlEntries(ptr).vecInactive && !ctrlEntries(ptr).isVec, "inactive entry must be vector!\n")
     XSError(ctrlEntries(ptr).allocated && ctrlEntries(ptr).vecMbCommit && !ctrlEntries(ptr).isVec, "vecMbCommit entry must be vector!\n")
