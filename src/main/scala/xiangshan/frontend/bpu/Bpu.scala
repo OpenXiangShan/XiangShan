@@ -197,8 +197,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.overrideValid := s3_override
   abtb.io.microTagePred := utage.io.prediction
 
-  utage.io.foldedPathHist         := phr.io.s0_foldedPhr
-  utage.io.foldedPathHistForTrain := phr.io.s3_foldedPhr
+  private val s4_foldedPhr =
+    RegEnable(phr.io.s3_foldedPhr, 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)), s3_fire)
+  // Currently, MicroTage's prediction is tightly coupled with Abtb,
+  // so the redirect signal does not need to be considered for now.
+  // Whether to assist uBTB prediction needs further consideration regarding timing and design.
+  utage.io.foldedPathHist         := Mux(s3_override, phr.io.s3_foldedPhr, phr.io.s1_foldedPhr)
+  utage.io.foldedPathHistForTrain := s4_foldedPhr
 
   ras.io.redirect                := redirect
   ras.io.commit                  := commit
