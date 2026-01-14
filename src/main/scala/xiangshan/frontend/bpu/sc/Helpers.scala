@@ -49,8 +49,8 @@ trait Helpers extends HasScParameters with PhrHelper {
   }
 
   // get pc ^ foldedBW for index
-  def getBWTableIdx(pc: PrunedAddr, bw: UInt, numSets: Int): UInt = {
-    val foldedBW = computeFoldedHist(bw, log2Ceil(numSets))(BWHistoryLength)
+  def getBWTableIdx(pc: PrunedAddr, bw: UInt, numSets: Int, bwLen: Int): UInt = {
+    val foldedBW = computeFoldedHist(bw, log2Ceil(numSets))(bwLen)
     ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
   }
 
