@@ -28,6 +28,7 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasFastTrainIO
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -36,10 +37,11 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
  */
 class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageParameters with Helpers {
   class MicroTageIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val foldedPathHist:         PhrAllFoldedHistories      = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val foldedPathHistForTrain: PhrAllFoldedHistories      = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val prediction:             Valid[MicroTagePrediction] = Output(Valid(new MicroTagePrediction))
-    val meta:                   Valid[MicroTageMeta]       = Output(Valid(new MicroTageMeta))
+    val foldedPathHist:         PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val foldedPathHistForTrain: PhrAllFoldedHistories  = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val abtbPrediction:         Vec[Valid[Prediction]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
+    val prediction: Valid[MicroTagePrediction] = Output(Valid(new MicroTagePrediction))
+    val meta:       Valid[MicroTageMeta]       = Output(Valid(new MicroTageMeta))
   }
   val io: MicroTageIO = IO(new MicroTageIO)
   io.resetDone  := true.B
@@ -105,8 +107,21 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   predMeta.bits.histTableCfiPositionVec := histTableCfiPositionVec
   predMeta.bits.baseTaken               := false.B // no use, only for placeholder.
   predMeta.bits.baseCfiPosition         := 0.U     // no use, only for placeholder.
+
+  private val s1_abtbCondTakenMask = VecInit(io.abtbPrediction.map { pred =>
+    pred.valid && pred.bits.taken && pred.bits.attribute.isConditional
+  })
+  private val s1_abtbCondTaken          = s1_abtbCondTakenMask.reduce(_ || _)
+  private val s1_abtbCompareMatrix      = CompareMatrix(VecInit(io.abtbPrediction.map(_.bits.cfiPosition)))
+  private val s1_abtbFirstTakenBranchOH = s1_abtbCompareMatrix.getLeastElementOH(s1_abtbCondTakenMask)
+  private val s1_abtbFirstTakenBranch   = Mux1H(s1_abtbFirstTakenBranchOH, io.abtbPrediction)
+
+  private val s1_meta = RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
+  s1_meta.bits.baseTaken       := s1_abtbCondTaken
+  s1_meta.bits.baseCfiPosition := s1_abtbFirstTakenBranch.bits.cfiPosition
+
   io.prediction := RegEnable(prediction, 0.U.asTypeOf(Valid(new MicroTagePrediction)), io.stageCtrl.s0_fire)
-  io.meta       := RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
+  io.meta       := s1_meta
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_fire                    = io.fastTrain.get.valid && io.enable

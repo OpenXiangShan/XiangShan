@@ -30,7 +30,7 @@ import xiangshan.frontend.bpu.Prediction
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
-    val prediction: Prediction = Output(new Prediction)
+    val prediction: Valid[Prediction] = Output(Valid(new Prediction))
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -76,10 +76,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_hitEntry = entries(s1_hitIdx)
 
   // we do always-taken prediction in ubtb
-  io.prediction.taken       := s1_hit
-  io.prediction.cfiPosition := s1_hitEntry.slot1.position
-  io.prediction.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
-  io.prediction.attribute   := s1_hitEntry.slot1.attribute
+  io.prediction.valid            := s1_hit
+  io.prediction.bits.taken       := s1_hit
+  io.prediction.bits.cfiPosition := s1_hitEntry.slot1.position
+  io.prediction.bits.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
+  io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire
