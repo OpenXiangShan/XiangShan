@@ -110,7 +110,7 @@ xs_fine_grain_rename_map = {
     'total_cycles': 'Cycles',
 }
 
-XS_CORE_PREFIX = r'\[PERF \]\[time=\s+\d+\] SimTop\.l_soc\.core_with_l2\.core'
+XS_CORE_PREFIX = r'\[PERF \]\[time=\s+\d+\] SimTop\.cpu\.l_soc\.core_with_l2\.core'
 
 targets = {
     'NoStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: NoStall,\s+(\d+)',
@@ -160,8 +160,8 @@ targets = {
     'FlushedInsts': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FlushedInsts,\s+(\d+)',
     'OtherCoreStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: OtherCoreStall,\s+(\d+)',
 
-    "commitInstr": r"\[PERF \]\[time=\s+\d+\] SimTop.l_soc.core_with_l2.core.backend.inner\.ctrlBlock.rob: commitInstr,\s+(\d+)",
-    "total_cycles": r"\[PERF \]\[time=\s+\d+\] SimTop.l_soc.core_with_l2.core.backend.inner\.ctrlBlock.rob: clock_cycle,\s+(\d+)",
+    "commitInstr": fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock.rob: commitInstr,\s+(\d+)',
+    "total_cycles": fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock.rob: clock_cycle,\s+(\d+)',
 }
 
 
