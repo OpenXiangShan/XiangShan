@@ -57,7 +57,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid
+      redirect.valid := io.out.valid && (isMisPred || redirect.bits.hasBackendFault)
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.level := RedirectLevel.flushAfter
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
