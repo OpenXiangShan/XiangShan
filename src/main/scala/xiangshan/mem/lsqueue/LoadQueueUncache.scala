@@ -483,61 +483,64 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    * s1 response paddr, s2 response forwardData
    ******************************************************************/
 
+  val ncMatch = Wire(Vec(LoadPipelineWidth, Vec(LoadUncacheBufferSize, Bool())))
+  val mmioMatch = Wire(Vec(LoadPipelineWidth, Vec(LoadUncacheBufferSize, Bool())))
   for (w <- 0 until LoadPipelineWidth) {
     val matchedPaddr = WireInit(0.U(PAddrBits.W))
     val matchedData = WireInit(0.U(XLEN.W))
     val matchednderr = WireInit(false.B)
     val matchedderr = WireInit(false.B)
     val matchedAddrOffset = WireInit(0.U(3.W))
-    val hasMatch = WireInit(false.B)
-
-    entries.foreach { e =>
-      e.io.ncOut.ready := false.B
-      e.io.mmioOut.ready := false.B
-    }
 
     entries.zipWithIndex.foreach {
       case (e, i) =>
-        val ncMatch = e.io.ncOut.valid &&
+        // TODO: use the same lqIdx for ncOut and mmioOut
+        ncMatch(w)(i) := e.io.ncOut.valid &&
           io.bypass(w).s0Req.valid && io.bypass(w).s0Req.bits.isNCReplay &&
           e.io.ncOut.bits.uop.lqIdx === io.bypass(w).s0Req.bits.lqIdx
 
-        val mmioMatch = e.io.mmioOut.valid &&
+        mmioMatch(w)(i) := e.io.mmioOut.valid &&
           io.bypass(w).s0Req.valid && io.bypass(w).s0Req.bits.isMMIOReplay &&
           e.io.mmioOut.bits.uop.lqIdx === io.bypass(w).s0Req.bits.lqIdx
-        
-        val entryMatch = ncMatch || mmioMatch
-
-        when (entryMatch) {
-          hasMatch := true.B
-          when (ncMatch) {
-            matchedPaddr := e.io.ncOut.bits.paddr
-            matchedData := e.io.ncOut.bits.data
-            matchednderr := e.io.ncOut.bits.uop.exceptionVec(loadAccessFault)
-            matchedderr := e.io.ncOut.bits.uop.exceptionVec(hardwareError)
-            e.io.ncOut.ready := true.B
-          }.otherwise { // mmioMatch
-            matchedPaddr := e.io.mmioOut.bits.debug.paddr
-            matchedData := e.io.mmioRawData.lqData
-            matchednderr := e.io.mmioOut.bits.uop.exceptionVec(loadAccessFault)
-            matchedderr := e.io.mmioOut.bits.uop.exceptionVec(hardwareError)
-            matchedAddrOffset := e.io.mmioRawData.addrOffset
-            e.io.mmioOut.ready := true.B
-          }
-        }
     }
 
-    val s1RespValid = RegNext(hasMatch)
-    val s1RespData = RegEnable(matchedData, hasMatch)
-    val s1RespNderr = RegEnable(matchednderr, hasMatch)
-    val s1RespDerr = RegEnable(matchedderr, hasMatch)
+    val respNCMatch = ncMatch(w).asUInt.orR
+    val respMMIOMatch = mmioMatch(w).asUInt.orR
+    val respMatch = respNCMatch || respMMIOMatch
+    val respMatchNCOut = ParallelPriorityMux(ncMatch(w), entries.map(_.io.ncOut.bits))
+    val respMatchMMIOOut = ParallelPriorityMux(mmioMatch(w), entries.map(_.io.mmioOut.bits))
+    val respMatchMMIOData = ParallelPriorityMux(mmioMatch(w), entries.map(_.io.mmioRawData))
+
+    when (respNCMatch) {
+      matchedPaddr := respMatchNCOut.paddr
+      matchedData := respMatchNCOut.data
+      matchednderr := respMatchNCOut.uop.exceptionVec(loadAccessFault)
+      matchedderr := respMatchNCOut.uop.exceptionVec(hardwareError)
+    }.elsewhen (respMMIOMatch) {
+      matchedPaddr := respMatchMMIOOut.debug.paddr
+      matchedData := respMatchMMIOData.lqData
+      matchednderr := respMatchMMIOOut.uop.exceptionVec(loadAccessFault)
+      matchedderr := respMatchMMIOOut.uop.exceptionVec(hardwareError)
+      matchedAddrOffset := respMatchMMIOData.addrOffset
+    }
+
+    val s1RespValid = RegNext(respMatch)
+    val s1RespData = RegEnable(matchedData, respMatch)
+    val s1RespNderr = RegEnable(matchednderr, respMatch)
+    val s1RespDerr = RegEnable(matchedderr, respMatch)
     val s2RespValid = RegNext(s1RespValid)
     io.bypass(w).s1Resp.valid := s1RespValid
-    io.bypass(w).s1Resp.bits.paddr := RegEnable(matchedPaddr, hasMatch)
+    io.bypass(w).s1Resp.bits.paddr := RegEnable(matchedPaddr, respMatch)
     io.bypass(w).s2Resp.valid := s2RespValid
     io.bypass(w).s2Resp.bits.data := RegEnable(s1RespData, s1RespValid)
     io.bypass(w).s2Resp.bits.nderr := RegEnable(s1RespNderr, s1RespValid)
     io.bypass(w).s2Resp.bits.derr := RegEnable(s1RespDerr, s1RespValid)
+  }
+
+  entries.zipWithIndex.foreach {
+    case (e, i) =>
+      e.io.ncOut.ready := Cat(ncMatch.map(_(i))).orR
+      e.io.mmioOut.ready := Cat(mmioMatch.map(_(i))).orR
   }
 
   /******************************************************************
