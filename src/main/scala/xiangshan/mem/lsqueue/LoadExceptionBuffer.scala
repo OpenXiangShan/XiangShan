@@ -75,7 +75,8 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
         res(i).bits := bits(i)
       }
       val oldest = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.lqIdx, bits(1).uop.lqIdx), res(1), res(0)),
+        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
+          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
