@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 
 trait Helpers extends HasGhrParameters with HalfAlignHelper {
   def getNewGhr(oldGhr: UInt, numLess: UInt, numHit: UInt, taken: Bool): UInt = {
-    val numShift = Mux(taken, numLess, numHit - 1.U)
+    val numShift = Mux(taken, numLess, Mux(numHit === 0.U, 0.U, numHit - 1.U))
     Cat(oldGhr << numShift, taken)(GhrHistoryLength - 1, 0)
   }
 }
