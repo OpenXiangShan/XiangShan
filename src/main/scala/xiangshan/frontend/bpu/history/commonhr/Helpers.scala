@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 
 trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
   def getNewHR(oldHR: UInt, numLess: UInt, numHit: UInt, taken: Bool)(histLen: Int): UInt = {
-    val numShift = Mux(taken, numLess, numHit - 1.U)
+    val numShift = Mux(taken, numLess, Mux(numHit === 0.U, numHit, numHit - 1.U))
     Cat(oldHR << numShift, taken)(histLen - 1, 0)
   }
 }
