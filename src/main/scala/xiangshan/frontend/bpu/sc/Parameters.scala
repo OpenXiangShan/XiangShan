@@ -28,9 +28,12 @@ case class ScParameters(
       new ScTableInfo(128, 8),
       new ScTableInfo(128, 16)
     ),
+    BackwardTableInfos: Seq[ScTableInfo] = Seq(
+      new ScTableInfo(128, 4),
+      new ScTableInfo(128, 8)
+    ),
     BiasTableSize:       Int = 128,
     BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
-    BWTableSize:         Int = 128,
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = false,
     BWEnable:            Boolean = false,
@@ -71,10 +74,9 @@ trait HasScParameters extends HasBpuParameters {
   def BiasTableNumWays:    Int = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
   def NumBiasTable:        Int = 1
 
-  def BWHistoryLength: Int = bpuParameters.commonHRParameters.BWHistoryLength
-  def NumBWTable:      Int = 1
+  def BackwardTableInfos: Seq[ScTableInfo] = scParameters.BackwardTableInfos
+  def NumBWTables:        Int              = BackwardTableInfos.length
 
-  def BWTableSize:     Int = scParameters.BWTableSize
   def WriteBufferSize: Int = scParameters.WriteBufferSize
   def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2
   def EnableScTrace: Boolean = scParameters.EnableScTrace
