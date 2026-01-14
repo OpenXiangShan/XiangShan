@@ -404,6 +404,7 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = fpPreg.dataCfg.dataWidth,
+      loadDelayWakeUp = true,
     )
   }
 

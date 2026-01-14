@@ -298,9 +298,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.valid := source.valid
     sink.bits := source.bits
   }
+  val loadDelayWakeUpToFp = params.fpSchdParams.get.loadDelayWakeUp
   intRegion.io.wakeUpFromFp.foreach(x => x := fpRegion.io.wakeUpToDispatch)
   intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
-  fpRegion.io.wakeUpFromInt.foreach(x => x := intRegion.io.wakeUpToDispatch)
+  fpRegion.io.wakeUpFromInt.foreach(x =>
+    x := (if (loadDelayWakeUpToFp) RegNext(intRegion.io.wakeUpToDispatch) else intRegion.io.wakeUpToDispatch)
+  )
   fpRegion.io.I2FWakeupIn.foreach(x => x := intRegion.io.I2FWakeupOut.get)
   fpRegion.io.wakeupFromI2F.foreach(x => x := intRegion.io.I2FWakeupOut.get)
   intRegion.io.F2IWakeupIn.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
@@ -334,7 +337,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
     sink.bits.srcLoadDependency.zip(source.bits.srcLoadDependency).map(x => x._1 := x._2)
   }
-  fpRegion.io.ldCancel := io.mem.ldCancel
+  fpRegion.io.ldCancel := (if(loadDelayWakeUpToFp) RegNext(io.mem.ldCancel) else io.mem.ldCancel)
   fpRegion.io.vlWriteBackInfoIn := 0.U.asTypeOf(intRegion.io.vlWriteBackInfoIn)
 
   vecRegion.io.hartId := io.fromTop.hartId
