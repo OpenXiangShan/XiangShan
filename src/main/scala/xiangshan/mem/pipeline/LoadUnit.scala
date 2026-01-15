@@ -953,6 +953,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                        s1_nuke_paddr_match(w) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
+  val s1_nuke_first =  VecInit((0 until StorePipelineWidth).map(w => {
+                          s1_in.uop.waitForRobIdx === io.stld_nuke_query(w).bits.robIdx || !s1_in.uop.loadWaitBit
+                        })).asUInt.orR
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
@@ -968,6 +971,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.delayedLoadError  := s1_dly_err
   s1_out.nc := (s1_nc || Pbmt.isNC(s1_pbmt)) && !s1_prf
+  s1_out.nuke_first        := s1_nuke_first
   s1_out.mmio := Pbmt.isIO(s1_pbmt)
 
   when (!s1_dly_err) {
@@ -1193,6 +1197,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                           (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                         })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.nuke
 
+  val s2_nuke_first    = VecInit((0 until StorePipelineWidth).map(w => {
+                          s2_in.uop.waitForRobIdx === io.stld_nuke_query(w).bits.robIdx || !s2_in.uop.loadWaitBit
+                        })).asUInt.orR || s2_in.nuke_first
   val s2_cache_handled   = io.dcache.resp.bits.handled
 
   //if it is NC with data, it should handle the replayed situation.
@@ -1215,10 +1222,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                            s2_nuke
 
   val s2_fast_rep = !s2_in.isFastReplay &&
-                    !s2_mem_amb &&
                     !s2_tlb_miss &&
                     !s2_fwd_fail &&
-                    (s2_dcache_fast_rep || s2_nuke_fast_rep) &&
+                    (!s2_mem_amb && s2_dcache_fast_rep || s2_nuke_fast_rep && s2_nuke_first) &&
                     s2_troublem
 
   // need allocate new entry
