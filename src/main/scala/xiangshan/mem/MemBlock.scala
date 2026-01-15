@@ -45,6 +45,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
+import coupledL2.L2ParamKey
 
 trait HasMemBlockParameters extends HasXSParameter {
   val intSchdParams = backendParams.intSchdParams.get
@@ -379,6 +380,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
     val l2_flush_done = Input(Bool())
+    val wpuRead = Option.when(p(L2ParamKey).enableWayPred) (ValidIO(UInt(PAddrBits.W)))
 
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -1781,6 +1783,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       traceFromBackend.toEncoder.groups(i).valid
     ) << instOffsetBits)
   }
+
+  // l2 way prediction
+  (io.wpuRead zip dcache.io.wpuRead).foreach(x => x._1 := x._2)
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

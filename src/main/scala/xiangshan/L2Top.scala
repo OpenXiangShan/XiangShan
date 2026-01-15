@@ -231,6 +231,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
       val dft_out = Option.when(hasDFT)(Output(new SramBroadcastBundle))
       val dft_reset_out = Option.when(hasMbist)(Output(new DFTResetSignals()))
+      val wpuRead = Option.when(p(L2ParamKey).enableWayPred) (Input(Valid(UInt(PAddrBits.W))))
       // val reset_core = IO(Output(Reset()))
     })
     io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
@@ -340,6 +341,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.l2_tlb_req.pmp_resp.instr := io.l2_pmp_resp.instr
       l2.io.l2_tlb_req.pmp_resp.mmio := io.l2_pmp_resp.mmio
       l2.io.l2_tlb_req.pmp_resp.atomic := io.l2_pmp_resp.atomic
+      l2.io.wpuRead.zip(io.wpuRead).foreach(x => require(x._1.bits.getWidth == x._2.bits.getWidth))
+      l2.io.wpuRead.zip(io.wpuRead).foreach(x => x._1 := x._2)
       l2cache.get match {
         case l2cache: TL2CHICoupledL2 =>
           val l2 = l2cache.module

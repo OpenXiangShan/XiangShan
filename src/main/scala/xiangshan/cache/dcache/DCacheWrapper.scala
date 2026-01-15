@@ -32,6 +32,8 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
+import freechips.rocketchip.tilelink.TLMessages.AcquireBlock
+import coupledL2.L2ParamKey
 
 // DCache specific parameters
 case class DCacheParameters
@@ -797,6 +799,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
+  val wpuRead = Option.when(p(L2ParamKey).enableWayPred) (ValidIO(UInt(PAddrBits.W)))
 }
 
 private object ArbiterCtrl {
@@ -1007,6 +1010,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
+  io.wpuRead.foreach { x =>
+    x.valid := missQueue.io.mem_acquire.fire && missQueue.io.mem_acquire.bits.opcode === AcquireBlock
+    x.bits := missQueue.io.mem_acquire.bits.address
+  }
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {
