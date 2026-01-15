@@ -825,8 +825,8 @@ object Bundles {
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
     val issueQueueParams = this.params
-    val og0resp = Valid(new EntryDeqRespBundle)
-    val og1resp = Valid(new EntryDeqRespBundle)
+    val og0resp = new IssueQueueRespBundle
+    val og1resp = new IssueQueueRespBundle
   }
 
   class WbFuBusyTableWriteBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {

@@ -31,19 +31,19 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
   private val latMappedFuTypeSet: Map[Int, Set[FuType.OHType]] = MapUtils.groupByValueUnique(fuLatencyMap)
 
   private val deqRespSuccess = deqResp.valid
-  private val og0RespFail = og0Resp.valid
-  private val og1RespFail = og1Resp.valid && RespType.isBlocked(og1Resp.bits.resp)
+  private val og0RespFail = og0Resp.failed
+  private val og1RespFail = og1Resp.failed
 
-  private val deqRespMatchVec = getMatchVecFromResp(deqResp)
+  private val deqRespMatchVec = getMatchVecFromResp(deqResp.bits)
   private val og0RespMatchVec = getMatchVecFromResp(og0Resp)
   private val og1RespMatchVec = getMatchVecFromResp(og1Resp)
 
-  def getMatchVecFromResp(resp: Valid[IssueQueueDeqRespBundle]) : Vec[Bool] = {
+  def getMatchVecFromResp(resp: IssueQueueDeqRespBundle) : Vec[Bool] = {
     VecInit((0 until tableSize).map {
       lat =>
         Cat(
           latMappedFuTypeSet.getOrElse(lat, Set()).toSeq.sorted.map(
-            fuType => resp.bits.fuType(fuType.id)
+            fuType => resp.fuType(fuType.id)
           ).toSeq
         ).orR
     })
@@ -63,9 +63,10 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
 class FuBusyTableWriteIO(latencyValMax: Int)(implicit p: Parameters, iqParams: IssueBlockParams) extends XSBundle {
   private val tableSize = latencyValMax + 1
   val in = new Bundle {
+    // TODO: change deqResp logic
     val deqResp =  Flipped(ValidIO(new IssueQueueDeqRespBundle))
-    val og0Resp = Flipped(ValidIO(new IssueQueueDeqRespBundle))
-    val og1Resp = Flipped(ValidIO(new IssueQueueDeqRespBundle))
+    val og0Resp = Flipped(new IssueQueueDeqRespBundle)
+    val og1Resp = Flipped(new IssueQueueDeqRespBundle)
   }
   val out = new Bundle {
     val fuBusyTable = Output(UInt(tableSize.W))

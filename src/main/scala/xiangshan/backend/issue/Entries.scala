@@ -27,42 +27,20 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   private val OthersEntryNum      = params.numEntries - params.numEnq
   private val SimpEntryNum        = params.numSimp
   private val CompEntryNum        = params.numComp
+  private val RespNum             = params.issueTimerMaxValue + 1
   val io = IO(new EntriesIO)
 
-  // only memAddrIQ use it
-  val memEtyResps: Seq[ValidIO[EntryDeqRespBundle]] = {
-    val resps =
-      if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
-        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp)
-      else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
-        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
-      else if (params.isStAddrIQ)                                                                     //STU
-        Seq(io.fromMem.get.slowResp)
-      else if (params.isVecLduIQ && params.isVecStuIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
-        Seq(io.vecLdIn.get.resp, io.fromMem.get.slowResp, io.vecLdIn.get.finalIssueResp)
-      else Seq()
-    if (params.isMemAddrIQ) {
-      println(s"[${this.desiredName}] resp: {" +
-        s"og0Resp: ${resps.contains(io.og0Resp)}, " +
-        s"og1Resp: ${resps.contains(io.og1Resp)}, " +
-        s"finalResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.finalIssueResp)}, " +
-        s"loadBorderResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.memAddrIssueResp)}, " +
-        s"memFastResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.fastResp)}, " +
-        s"memSlowResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.slowResp)}, " +
-        s"vecLoadBorderResp: ${io.vecLdIn.nonEmpty && resps.contains(io.vecLdIn.get.resp)}, " +
-        s"}"
-      )
-    }
-    resps.flatten
-  }
-
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = Wire(Vec(4, chiselTypeOf(io.og0Resp)))
-
-  if (params.needOg2Resp)
-    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, WireDefault(0.U.asTypeOf(io.og0Resp)))
+  val resps: Vec[Vec[IssueQueueRespBundle]] = Wire(Vec(RespNum, chiselTypeOf(io.og0Resp)))
+  if (params.isVecStuIQ)
+    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, io.s0Resp.get, io.snResp.get)
+  else if (params.isStAddrIQ)
+    resps := Seq(io.og0Resp, io.og1Resp, io.s0Resp.get, 0.U.asTypeOf(io.og0Resp), io.s2Resp.get)
+  else if (params.isLdAddrIQ || params.isStdIQ)
+    resps := Seq(io.og0Resp, io.og1Resp, io.s0Resp.get)
+  else if (params.needOg2Resp)
+    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get)
   else
-    resps := Seq(io.og0Resp, io.og1Resp, WireDefault(0.U.asTypeOf(io.og0Resp)), WireDefault(0.U.asTypeOf(io.og0Resp)))
-
+    resps := Seq(io.og0Resp, io.og1Resp)
 
 
   //Module
@@ -86,7 +64,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val rfWenVec            = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
-  val issueTimerVec       = Wire(Vec(params.numEntries, UInt(2.W)))
+  val issueTimerVec       = Wire(Vec(params.numEntries, UInt(params.issueTimerWidth.W)))
   val sqIdxVec            = OptionWrapper(params.needFeedBackSqIdx, Wire(Vec(params.numEntries, new SqPtr())))
   val lqIdxVec            = OptionWrapper(params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new LqPtr())))
   //src status
@@ -95,7 +73,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val exuSourceVec        = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuSource()))))
   //deq sel
   val deqSelVec           = Wire(Vec(params.numEntries, Bool()))
-  val issueRespVec        = Wire(Vec(params.numEntries, ValidIO(new EntryDeqRespBundle)))
+  val issueRespVec        = Wire(Vec(params.numEntries, new IssueQueueRespBundle))
   val deqPortIdxWriteVec  = Wire(Vec(params.numEntries, UInt(1.W)))
   val deqPortIdxReadVec   = Wire(Vec(params.numEntries, UInt(1.W)))
   //trans sel
@@ -270,30 +248,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     dontTouch(othersEntryEnqVec)
   }
 
-  //issueRespVec
-  if (params.needFeedBackSqIdx || params.needFeedBackLqIdx) {
-    issueRespVec.lazyZip(issueTimerVec).lazyZip(deqPortIdxReadVec).zipWithIndex.foreach { case ((issueResp, issueTimer, deqPortIdx), i) =>
-      val respInDatapath = if (!params.isVecMemIQ) resps(issueTimer(0))(deqPortIdx)
-      else resps(issueTimer)(deqPortIdx)
-      val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
-      val hitRespsVec = VecInit(memEtyResps.map(x =>
-        x.valid &&
-          (if (params.needFeedBackSqIdx) x.bits.sqIdx.get === sqIdxVec.get(i) else true.B) &&
-          (if (params.needFeedBackLqIdx) x.bits.lqIdx.get === lqIdxVec.get(i) else true.B)
-      ).toSeq)
-      respAfterDatapath.valid := hitRespsVec.reduce(_ | _)
-      respAfterDatapath.bits := (if (memEtyResps.size == 1) memEtyResps.head.bits
-      else Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq))
-      issueResp := (if (!params.isVecMemIQ) Mux(issueTimer(1), respAfterDatapath, respInDatapath)
-      else Mux(issueTimer === "b11".U, respAfterDatapath, respInDatapath))
-    }
-  }
-  else {
     issueRespVec.lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (issueTimer, deqPortIdx)) =>
       val Resp = resps(issueTimer)(deqPortIdx)
       issueResp := Resp
     }
-  }
 
   //deq
   val enqEntryOldest          = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
@@ -441,10 +399,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.deqSel                   := deqSelVec(entryIdx)
     in.deqPortIdxWrite          := deqPortIdxWriteVec(entryIdx)
     in.issueResp                := issueRespVec(entryIdx)
-    if (params.isVecMemIQ) {
-      in.fromLsq.get.sqDeqPtr   := io.vecMemIn.get.sqDeqPtr
-      in.fromLsq.get.lqDeqPtr   := io.vecMemIn.get.lqDeqPtr
-    }
+    in.vecMemIn.foreach(_       := io.vecMemIn.get)
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
@@ -472,8 +427,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       perfWakeupByIQVec.get(entryIdx) := out.perfWakeupByIQ.get
     }
   }
-
-  io.vecLdIn.foreach(dontTouch(_))
 
   // entries perf counter
   // enq
@@ -545,9 +498,12 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val flush               = Flipped(ValidIO(new Redirect))
   //enq
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
-  val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  val og2Resp             = OptionWrapper(params.needOg2Resp, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
+  val og0Resp             = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
+  val og1Resp             = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
+  val og2Resp             = OptionWrapper(params.needOg2Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val s0Resp              = OptionWrapper(params.needS0Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val s2Resp              = OptionWrapper(params.needS2Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val snResp              = OptionWrapper(params.needSnResp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
@@ -585,24 +541,10 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
   val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
 
-  // load/hybird only
-  val fromLoad = OptionWrapper(params.isLdAddrIQ || params.isHyAddrIQ, new Bundle {
-    val finalIssueResp    = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-    val memAddrIssueResp  = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  })
-  // mem only
-  val fromMem = OptionWrapper(params.isMemAddrIQ, new Bundle {
-    val slowResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-    val fastResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  })
   // vec mem only
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
     val sqDeqPtr          = Input(new SqPtr)
     val lqDeqPtr          = Input(new LqPtr)
-  })
-  val vecLdIn = OptionWrapper(params.isVecLduIQ, new Bundle {
-    val finalIssueResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-    val resp              = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   })
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
 
