@@ -136,16 +136,32 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledCopySrcBundle))
   }
 
+  def genNewExuInputCopySrcBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genNewExuInputDecoupledCopySrcBundle))
+  }
+
   def genExuInputCopySrcBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genExuInputDecoupledCopySrcBundle))
+  }
+
+  def genNewExuInputCopySrcBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = {
+    MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genNewExuInputDecoupledCopySrcBundle))
   }
 
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
   }
 
+  def genNewExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genNewExuOutputDecoupledBundle))
+  }
+
   def genExuOutputDecoupledBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genNewExuOutputDecoupledBundleMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = {
+    MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genNewExuOutputDecoupledBundle))
   }
 
   def genExuOutputDecoupledBundleLoad(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
@@ -156,12 +172,28 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuInputDecoupledCopySrcBundle))
   }
 
+  def genNewExuInputCopySrcBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = {
+    MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genNewExuInputDecoupledCopySrcBundle))
+  }
+
   def genExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
+  }
+  
+  def genNewExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = {
+    MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genNewExuOutputDecoupledBundle))
   }
 
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputValidBundle))
+  }
+
+  def genNewExuOutputValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[NewExuOutput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genNewExuOutputValidBundle))
+  }
+
+  def genWriteBackRobValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[WriteBackRobBundle]]] = {
+    MixedVec(this.issueBlockParams.map(_.genWriteBackRobValidBundle))
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = {
