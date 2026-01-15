@@ -76,8 +76,11 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   // compose touch way vec
   private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
   trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := OHToUInt(io.victim.wayMask) // MainBtbAlignBank ensures this is one-hot
-  assert(!io.trainTouch.valid || PopCount(io.victim.wayMask) <= 1.U, "victim wayMask should be at-most-one-hot")
+  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
+  assert(
+    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
+    "victim wayMask should be at-most-one-hot"
+  )
 
   // generate next state
   trainStateGen.io.stateIn   := trainState
