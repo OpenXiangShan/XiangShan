@@ -1216,10 +1216,9 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
                            s2_nuke
 
   val s2_fast_rep = !s2_in.isFastReplay &&
-                    !s2_mem_amb &&
                     !s2_tlb_miss &&
                     !s2_fwd_fail &&
-                    (s2_dcache_fast_rep || s2_nuke_fast_rep) &&
+                    (!s2_mem_amb && s2_dcache_fast_rep || s2_nuke_fast_rep) &&
                     s2_troublem
 
   // need allocate new entry
