@@ -40,4 +40,21 @@ trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
     val numShift = getNumShift(numLess, numHit, taken, isCond)
     Cat(oldBW << numShift, taken && isCond && isBW)(histLen - 1, 0)
   }
+
+  def dedupHitPositions(hitMask: Vec[Bool], posVec: Vec[UInt]): Vec[Bool] = {
+    require(hitMask.length == posVec.length, "hitMask and posVec must have the same length")
+    val numLen = hitMask.length
+    val keep   = Wire(Vec(numLen, Bool()))
+
+    for (i <- 0 until numLen) {
+      val isDup = WireInit(false.B)
+      for (j <- 0 until i) {
+        when(hitMask(j) && (posVec(j) === posVec(i))) {
+          isDup := true.B
+        }
+      }
+      keep(i) := hitMask(i) && !isDup
+    }
+    keep
+  }
 }
