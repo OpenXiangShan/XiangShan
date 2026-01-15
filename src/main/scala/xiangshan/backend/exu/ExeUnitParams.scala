@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, NewExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
@@ -15,6 +15,8 @@ import xiangshan.backend.fu.FuConfig.{BrhCfg, JmpCfg, needUncertainWakeupFuConfi
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchedulerType, VecScheduler}
 
 import scala.collection.mutable
+import xiangshan.backend.Bundles.NewExuOutput
+import xiangshan.backend.Bundles.WriteBackRobBundle
 
 case class ExeUnitParams(
   name          : String,
@@ -487,8 +489,20 @@ case class ExeUnitParams(
     new ExuInput(this, hasCopySrc = true)
   }
 
+  def genNewExuInputCopySrcBundle(implicit p: Parameters): NewExuInput = {
+    new NewExuInput(this, hasCopySrc = true)
+  }
+
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {
     new ExuOutput(this)
+  }
+
+  def genNewExuOutputBundle(implicit p: Parameters): NewExuOutput = {
+    new NewExuOutput(this)
+  }
+
+  def genWriteBackRobBundle(implicit p: Parameters): WriteBackRobBundle = {
+    new WriteBackRobBundle(this, backendParam)
   }
 
   def genExuBypassBundle(implicit p: Parameters): ExuBypassBundle = {

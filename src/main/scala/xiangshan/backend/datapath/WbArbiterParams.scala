@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.Output
 import chisel3.util.{DecoupledIO, MixedVec, ValidIO, log2Up}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.WriteBackBundle
+import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.regfile.PregParams
@@ -36,6 +36,10 @@ case class WbArbiterParams(
     MixedVec(wbCfgs.map(x => DecoupledIO(new WriteBackBundle(x, backendParams))))
   }
 
+  def genNewInput(implicit p: Parameters) = {
+    MixedVec(wbCfgs.map(x => DecoupledIO(new WriteBackRFBundle(x, backendParams))))
+  }
+
   def genOutput(implicit p: Parameters): MixedVec[ValidIO[WriteBackBundle]] = {
     Output(MixedVec(Seq.tabulate(numOut) {
       x =>
@@ -54,5 +58,21 @@ case class WbArbiterParams(
     }
     )
     )
+  }
+
+  def genNewOutput(implicit p: Parameters): MixedVec[ValidIO[WriteBackRFBundle]] = {
+    Output(MixedVec(Seq.tabulate(numOut) { x =>
+      ValidIO(new WriteBackRFBundle(
+        wbCfgs.head.dataCfg match {
+          case IntData() => IntWB(port = x)
+          case FpData()  => FpWB(port = x)
+          case VecData() => VfWB(port = x)
+          case V0Data()  => V0WB(port = x)
+          case VlData()  => VlWB(port = x)
+          case _ => ???
+        },
+        backendParams
+      ))
+    }))
   }
 }

@@ -35,7 +35,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.{BackendParams, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
@@ -69,8 +69,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val flushOut = ValidIO(new Redirect)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
-    val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
-    val exuWriteback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
+    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
+    val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
     val commits = Output(new RobCommitIO)
@@ -139,8 +139,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
   })
 
-  val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback
-  val vldWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
+  val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
+  val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
@@ -564,7 +564,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wbIdx = wb.bits.robIdx.value
     val debug_Uop = debug_microOp(wbIdx)
     when(wb.valid) {
-      debug_exuData(wbIdx) := wb.bits.data(0)
+      debug_exuData(wbIdx) := wb.bits.data
       debug_exuDebug(wbIdx) := wb.bits.debug
       wb.bits.perfDebugInfo.foreach { x =>
         debug_microOp(wbIdx).perfDebugInfo.enqRsTime := x.enqRsTime

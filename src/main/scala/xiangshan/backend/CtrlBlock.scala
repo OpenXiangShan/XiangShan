@@ -135,7 +135,7 @@ class CtrlBlockImp(
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
-    val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
+    val delayed = Wire(Valid(new WriteBackRobBundle(x.bits.params, backendParams)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
@@ -938,7 +938,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val trapInstInfo = Output(ValidIO(new TrapInstInfo))
   }
   val fromWB = new Bundle {
-    val wbData = Flipped(MixedVec(params.genWrite2CtrlBundles))
+    val wbData = Flipped(MixedVec(params.genWrite2RobBundles))
     val delayedOldestExuRedirect = Flipped(ValidIO(new Redirect)) 
   }
   val redirect = ValidIO(new Redirect)
