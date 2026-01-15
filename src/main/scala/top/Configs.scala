@@ -468,18 +468,27 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
       frontendParameters = p.frontendParameters.copy(
         bpuParameters = p.frontendParameters.bpuParameters.copy(
           EnableBpTrace = true,
+          utageParameters = p.frontendParameters.bpuParameters.utageParameters.copy(
+            EnableTraceAndDebug = true,
+          ),
+          mbtbParameters = p.frontendParameters.bpuParameters.mbtbParameters.copy(
+            EnableMainbtbTrace = true,
+          ),
           tageParameters = p.frontendParameters.bpuParameters.tageParameters.copy(
             EnableTageTrace = true,
-          )
+          ),
+          scParameters = p.frontendParameters.bpuParameters.scParameters.copy(
+            EnableScTrace = true,
+          ),
+        ),
+        icacheParameters = p.frontendParameters.icacheParameters.copy(
+          EnableTrace = true,
         ),
       )
     )}
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       EnableChiselDB = true,
-      EnableRollingDB = true,
       EnableConstantin = true,
-      EnableDebug = true,
-      EnablePerfDebug = true,
     )
   })
 )
