@@ -38,26 +38,28 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s2_fire = io.stageCtrl.s2_fire
   private val s3_fire = io.stageCtrl.s3_fire
 
-  // global history
+  // common history register
   private val s0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHR    = RegInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHRBuffer =
     Module(new Queue(new CommonHREntry, StallQueueSize, pipe = true, flow = true, hasFlush = true))
 
   /*
-   * GHR train from redirect/s3_prediction
+   * CommonHR train from redirect/s3_prediction
    */
   io.s0_commonHR := s0_commonHR
   io.commonHR    := commonHR
 
   /*
-   * s3_fire update GHR
+   * s3_fire update CommonHR
    */
   private val s3_update = io.update // bp pipeline s3 level update
   private val s3_taken  = s3_update.taken
-  private val s3_hitMask = VecInit(s3_update.hitMask.zip(s3_update.attribute).map { case (hit, attr) =>
+  private val s3_condHitMask = VecInit(s3_update.hitMask.zip(s3_update.attribute).map { case (hit, attr) =>
     hit && attr.isConditional
   })
+  // deduplicate hit positions
+  private val s3_hitMask          = dedupHitPositions(s3_condHitMask, s3_update.position)
   private val s3_firstTakenIdx    = OHToUInt(s3_update.firstTakenOH)
   private val s3_firstTakenPos    = s3_update.position(s3_firstTakenIdx)
   private val s3_firstTakenIsCond = s3_update.attribute(s3_firstTakenIdx).isConditional
@@ -67,7 +69,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_lessThanFirstTaken = s3_update.position.zip(s3_hitMask).map {
     case (pos, hit) => hit && (pos < s3_firstTakenPos)
   }
-  // NOTE: GhrShamt is NumBtbResultEntries, but numLess may be 1 larger than GhrShamt
+  // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
   private val s3_numLess = PopCount(s3_lessThanFirstTaken)
   private val s3_numHit  = PopCount(s3_hitMask)
 
@@ -77,20 +79,20 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   s3_commonHR.bw := getNewBW(commonHR.bw, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond, s3_bwTaken)(
     BWHistoryLength
   )
-  require(isPow2(GhrShamt), "GhrShamt must be pow2")
 
   /*
-   * redirect recovery GHR
+   * redirect recovery CommonHR
    */
   private val r0_valid        = io.redirect.valid
   private val r0_metaGhr      = io.redirect.meta.ghr
   private val r0_metaBW       = io.redirect.meta.bw
   private val r0_oldPositions = io.redirect.meta.position
-  private val r0_oldHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
+  private val r0_oldCondHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
     case (hit, attr) => hit && attr.isConditional
   })
-  private val r0_taken  = io.redirect.taken
-  private val r0_isCond = io.redirect.attribute.isConditional
+  private val r0_oldHits = dedupHitPositions(r0_oldCondHits, r0_oldPositions)
+  private val r0_taken   = io.redirect.taken
+  private val r0_isCond  = io.redirect.attribute.isConditional
   private val r0_bwTaken =
     io.redirect.cfiPc.addr > io.redirect.target.addr
   private val r0_takenPosition = getAlignedInstOffset(io.redirect.cfiPc)

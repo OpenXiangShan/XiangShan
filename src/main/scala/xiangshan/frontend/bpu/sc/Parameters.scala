@@ -40,7 +40,7 @@ case class ScParameters(
     BiasEnable:          Boolean = true,
     CtrWidth:            Int = 6,
     ThresholdWidth:      Int = 12,
-    ThresholdInit:       Int = 520,
+    ThresholdInit:       Int = 720,
     NumTables:           Int = 2,
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
