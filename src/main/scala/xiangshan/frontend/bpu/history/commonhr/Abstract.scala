@@ -13,11 +13,11 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.history.ghr
+package xiangshan.frontend.bpu.history.commonhr
 
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-abstract class GhrBundle(implicit p: Parameters) extends BpuBundle with HasGhrParameters
-abstract class GhrModule(implicit p: Parameters) extends BpuModule with HasGhrParameters
+abstract class CommonHRBundle(implicit p: Parameters) extends BpuBundle with HasCommonHRParameters
+abstract class CommonHRModule(implicit p: Parameters) extends BpuModule with HasCommonHRParameters

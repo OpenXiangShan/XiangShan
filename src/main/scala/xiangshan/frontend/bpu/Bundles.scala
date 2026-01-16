@@ -23,7 +23,7 @@ import xiangshan.Resolve
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
-import xiangshan.frontend.bpu.history.ghr.GhrMeta
+import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.phr.PhrMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
@@ -269,9 +269,9 @@ class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuRedirectMeta(implicit p: Parameters) extends BpuBundle {
-  val phr: PhrMeta         = new PhrMeta
-  val ghr: GhrMeta         = new GhrMeta
-  val ras: RasRedirectMeta = new RasRedirectMeta
+  val phr:          PhrMeta         = new PhrMeta
+  val commonHRMeta: CommonHRMeta    = new CommonHRMeta
+  val ras:          RasRedirectMeta = new RasRedirectMeta
 }
 
 // metadata for resolve training (e.g. tage, mainBtb)
