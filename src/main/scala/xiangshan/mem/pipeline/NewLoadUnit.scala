@@ -159,7 +159,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.fullva := io.prefetchReq.bits.getVaddr()
   prefetch.size := DontCare
   prefetch.mask := 0.U
-  prefetch.DontCarePAddr()
+  prefetch.paddr.get := io.prefetchReq.bits.paddr
   prefetch.noQuery.get := true.B
   prefetch.DontCareUnalign() // assign later in sink
   prefetch.DontCareReplayFromLRQFields()
