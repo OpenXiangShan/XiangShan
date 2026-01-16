@@ -35,8 +35,8 @@ class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
   val taken:            Bool              = Bool()
   val s3Override:       Bool              = Bool()
   val condHitMask:      Vec[Bool]         = Vec(NumBtbResultEntries, Bool())
-  val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
   val position:         Vec[UInt]         = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
   val startPc:          PrunedAddr        = PrunedAddr(VAddrBits)
   val target:           PrunedAddr        = PrunedAddr(VAddrBits)
 }
@@ -44,6 +44,7 @@ class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
 class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:       UInt                 = UInt(GhrHistoryLength.W)
   val bw:        UInt                 = UInt(BWHistoryLength.W)
+  val imli:      UInt                 = UInt(ImliWidth.W)
   val hitMask:   Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
   val attribute: Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
   val position:  Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))

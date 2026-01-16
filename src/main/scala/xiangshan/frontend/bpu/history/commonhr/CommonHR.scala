@@ -28,11 +28,14 @@ import xiangshan.frontend.bpu.StageCtrl
 
 class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
   class CommonHRIO extends CommonHRBundle {
-    val stageCtrl:   StageCtrl        = Input(new StageCtrl)
-    val update:      CommonHRUpdate   = Input(new CommonHRUpdate)
-    val redirect:    CommonHRRedirect = Input(new CommonHRRedirect)
-    val s0_commonHR: CommonHREntry    = Output(new CommonHREntry)
-    val commonHR:    CommonHREntry    = Output(new CommonHREntry)
+    val stageCtrl:    StageCtrl        = Input(new StageCtrl)
+    val s1_imliTaken: Bool             = Input(Bool())
+    val update:       CommonHRUpdate   = Input(new CommonHRUpdate)
+    val redirect:     CommonHRRedirect = Input(new CommonHRRedirect)
+    val s0_imli:      UInt             = Output(UInt(ImliWidth.W))
+    val s3_imli:      UInt             = Output(UInt(ImliWidth.W))
+    val s0_commonHR:  CommonHREntry    = Output(new CommonHREntry)
+    val commonHR:     CommonHREntry    = Output(new CommonHREntry)
 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
   }
@@ -40,12 +43,18 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   // stage ctrl
   private val s0_fire = io.stageCtrl.s0_fire
+  private val s1_fire = io.stageCtrl.s1_fire
   private val s2_fire = io.stageCtrl.s2_fire
   private val s3_fire = io.stageCtrl.s3_fire
 
   private val s3_override = io.update.s3Override
 
   // common history register
+  private val s0_imli     = WireInit(0.U(ImliWidth.W))
+  private val s1_imli     = RegEnable(s0_imli, s0_fire)
+  private val s2_imli     = RegEnable(s1_imli, s1_fire)
+  private val s3_imli     = RegEnable(s2_imli, s2_fire)
+  private val imli        = RegInit(0.U(ImliWidth.W))
   private val s0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHR    = RegInit(0.U.asTypeOf(new CommonHREntry))
 
@@ -58,14 +67,18 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   /*
    * CommonHR train from redirect/s3_prediction
    */
+  io.s0_imli     := s0_imli
+  io.s3_imli     := s3_imli
   io.s0_commonHR := s0_commonHR
   io.commonHR    := commonHR
 
   /*
    * s3_fire update CommonHR
    */
-  private val s3_update = io.update // bp pipeline s3 level update
-  private val s3_taken  = s3_update.taken
+  private val s3_update   = io.update // bp pipeline s3 level update
+  private val s3_taken    = s3_update.taken
+  private val s3_override = s3_update.s3override
+
   // deduplicate hit positions
   private val s3_hitMask          = dedupHitPositions(s3_update.condHitMask, s3_update.position)
   private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
@@ -129,6 +142,23 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     commonHR := s3_commonHR
   }
 
+  // imli update
+  when(r0_valid) {
+    val r0_newImli = Mux(r0_taken && r0_bwTaken && r0_isCond, io.redirect.meta.imli + 1.U, 0.U)
+    imli    := r0_newImli
+    s0_imli := r0_newImli
+  }.elsewhen(s3_override) {
+    val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, s3_imli + 1.U, 0.U)
+    imli    := s3_newImli
+    s0_imli := s3_newImli
+  }.elsewhen(s1_fire) {
+    val s1_newImli = Mux(io.s1_imliTaken, s1_imli + 1.U, 0.U)
+    imli    := s1_newImli
+    s0_imli := s1_newImli
+  }.otherwise {
+    s0_imli := imli
+  }
+
   /*
    * NOTE:Only applicable to the current predicted flow structure
    * if s3_override,  the current s0 should use s2,
@@ -177,6 +207,23 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc.get,
     "update history maybe mismatched!"
   )
+
+  // imli update
+  when(r0_valid) {
+    val r0_newImli = Mux(r0_taken && r0_bwTaken && r0_isCond, io.redirect.meta.imli + 1.U, 0.U)
+    imli    := r0_newImli
+    s0_imli := r0_newImli
+  }.elsewhen(s3_override) {
+    val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, s3_imli + 1.U, 0.U)
+    imli    := s3_newImli
+    s0_imli := s3_newImli
+  }.elsewhen(s1_fire) {
+    val s1_newImli = Mux(io.s1_imliTaken, s1_imli + 1.U, 0.U)
+    imli    := s1_newImli
+    s0_imli := s1_newImli
+  }.otherwise {
+    s0_imli := imli
+  }
 
   s0_commonHR := MuxCase(
     0.U.asTypeOf(new CommonHREntry),
