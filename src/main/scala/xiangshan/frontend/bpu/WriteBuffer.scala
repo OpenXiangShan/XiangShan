@@ -40,12 +40,13 @@ import xiangshan.XSModule
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    hasCnt:     Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:          T,
+    numEntries:   Int = 1,
+    numPorts:     Int = 1,
+    hasCnt:       Boolean = false,
+    hasFlush:     Boolean = false,
+    lifeCntWidth: Int = 6,
+    nameSuffix:   String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -66,6 +67,9 @@ class WriteBuffer[T <: WriteReqBundle](
   private val needWrite = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val entries = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))))
   private val valids  = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
+  private val lifeCnt =
+    RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U(lifeCntWidth.W))))))
+  private val lifeCntFullVec = WireInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))
@@ -164,6 +168,7 @@ class WriteBuffer[T <: WriteReqBundle](
         entries(portIdx)(victim)     := io.write(portIdx).bits
         valids(portIdx)(victim)      := true.B
         needWrite(portIdx)(victim)   := true.B
+        lifeCnt(rowIdx)(hitIdx)      := 0.U
         writeTouchVec(portIdx).valid := true.B
         writeTouchVec(portIdx).bits  := victim
       }
@@ -175,12 +180,26 @@ class WriteBuffer[T <: WriteReqBundle](
         when(hitNotWritten) {
           entries(rowIdx)(hitIdx) := io.write(portIdx).bits
           valids(rowIdx)(hitIdx)  := true.B
+          lifeCnt(rowIdx)(hitIdx) := 0.U
         }.elsewhen(hitWritten) {
+          // TODO: delete entryChange logic for timing
           val entryChange = entries(rowIdx)(hitIdx).asUInt =/= io.write(portIdx).bits.asUInt
           when(entryChange) {
             needWrite(rowIdx)(hitIdx) := true.B
             entries(rowIdx)(hitIdx)   := io.write(portIdx).bits
             valids(rowIdx)(hitIdx)    := true.B
+            lifeCnt(rowIdx)(hitIdx)   := 0.U
+          }.otherwise {
+            // NOTE: The current full value of lifeCnt is a power of 2
+            lifeCntFullVec(rowIdx)(hitIdx) := (lifeCnt(rowIdx)(hitIdx) + 1.U).asBools.reduce(_ && _)
+            when(lifeCntFullVec(rowIdx)(hitIdx)) {
+              needWrite(rowIdx)(hitIdx) := true.B
+              entries(rowIdx)(hitIdx)   := io.write(portIdx).bits
+              valids(rowIdx)(hitIdx)    := true.B
+              lifeCnt(rowIdx)(hitIdx)   := 0.U
+            }.otherwise {
+              lifeCnt(rowIdx)(hitIdx) := lifeCnt(rowIdx)(hitIdx) + 1.U
+            }
           }
         }
       }
@@ -197,6 +216,7 @@ class WriteBuffer[T <: WriteReqBundle](
           temporarily.cnt.get     := updateCnt.asTypeOf(temporarily.cnt.get)
           entries(rowIdx)(hitIdx) := temporarily
           valids(rowIdx)(hitIdx)  := true.B
+          lifeCnt(rowIdx)(hitIdx) := 0.U
           // If the write port hit a written entry, update the needWrite
           needWrite(rowIdx)(hitIdx) := true.B
         }
@@ -210,36 +230,41 @@ class WriteBuffer[T <: WriteReqBundle](
   }
 
   //  read buffer entry
-  for (nRows <- 0 until numPorts) {
+  for (rowIdx <- 0 until numPorts) {
     val replacer = ReplacementPolicy.fromString("plru", numEntries)
-    readReadyVec(nRows) := io.read(nRows).ready
-    readValidVec(nRows) := needWrite(nRows)
-    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
-    fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
-    val readIdx = PriorityEncoder(readValidVec(nRows))
+    readReadyVec(rowIdx) := io.read(rowIdx).ready
+    readValidVec(rowIdx) := needWrite(rowIdx)
+    emptyVec(rowIdx)     := !readValidVec(rowIdx).reduce(_ || _)
+    fullVec(rowIdx)      := readValidVec(rowIdx).reduce(_ && _)
+    val readIdx = PriorityEncoder(readValidVec(rowIdx))
 
-    io.write(nRows).ready := !fullVec(nRows)
-    io.read(nRows).valid  := !emptyVec(nRows)
-    io.read(nRows).bits   := DontCare
+    io.write(rowIdx).ready := !fullVec(rowIdx)
+    io.read(rowIdx).valid  := !emptyVec(rowIdx)
+    io.read(rowIdx).bits   := DontCare
 
-    when(readReadyVec(nRows) && !emptyVec(nRows)) {
-      io.read(nRows).bits       := entries(nRows)(readIdx)
-      needWrite(nRows)(readIdx) := false.B
+    when(readReadyVec(rowIdx) && !emptyVec(rowIdx)) {
+      io.read(rowIdx).bits       := entries(rowIdx)(readIdx)
+      needWrite(rowIdx)(readIdx) := false.B
     }
-    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
-    replacerWay(nRows) := replacer.way
+    val touchWays = Seq(writeTouchVec(rowIdx)) ++ hitTouchVec(rowIdx).filter(_.valid == true.B).take(numPorts)
+    replacerWay(rowIdx) := replacer.way
     replacer.access(touchWays)
     when(flush) {
       // Reset the write buffer needWrite when flush is true
       for (i <- 0 until numEntries) {
-        needWrite(nRows)(i) := false.B
+        needWrite(rowIdx)(i) := false.B
       }
     }
-    XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
+
+    XSPerfAccumulate(
+      f"${namePrefix}_port${rowIdx}_lifeCnt_full",
+      writePortValid(rowIdx) && lifeCntFullVec(rowIdx).reduce(_ || _)
+    )
+    XSPerfAccumulate(f"${namePrefix}_port${rowIdx}_is_full", writePortValid(rowIdx) && fullVec(rowIdx))
     XSPerfHistogram(
-      f"${namePrefix}_port${nRows}_useful",
-      PopCount(readValidVec(nRows)),
-      readReadyVec(nRows),
+      f"${namePrefix}_port${rowIdx}_useful",
+      PopCount(readValidVec(rowIdx)),
+      readReadyVec(rowIdx),
       0,
       numEntries
     )
