@@ -31,6 +31,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     // prediction specific bundle
     val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
     val meta:   MainBtbMeta            = Output(new MainBtbMeta)
+
+    // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
+    val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -48,13 +51,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.trainReady := true.B
 
-  private val s0_fire, s1_fire, s2_fire = Wire(Bool())
+  private val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
   alignBanks.foreach { b =>
     b.io.stageCtrl.s0_fire := s0_fire
     b.io.stageCtrl.s1_fire := s1_fire
     b.io.stageCtrl.s2_fire := s2_fire
-    b.io.stageCtrl.s3_fire := false.B // we don't have a s3 stage in mainBtb
-    b.io.stageCtrl.t0_fire := false.B // dont care, alignBank is using t1
+    b.io.stageCtrl.s3_fire := s3_fire
+    // alignBank does not care t0, it's using t1 only
+    b.io.stageCtrl.t0_fire := false.B
   }
 
   /* *** s0 ***
@@ -104,6 +108,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
+
+  /* *** s3 ***
+   * touch replacer using final takenMask (mbtb + tage + sc)
+   */
+  s3_fire := io.enable && io.stageCtrl.s3_fire
+  // io.result is flattened, so is s3_takenMask from Bpu top, here we need to slice it back to alignBank structure
+  alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.s3_takenMask := io.s3_takenMask.slice(i * NumWay, (i + 1) * NumWay)
+  }
 
   /* *** t0 ***
    * receive training data and latch
