@@ -118,11 +118,18 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     }
     val exitco = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !sync_chi_syscoack),3, 0)}
-    val QACTIVE = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg(io_power.QACTIVE,3, 0)}
-    val QACCEPTn = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg(io_power.QACCEPTn,3, 0)}
-    io_power.QREQ := exitco //io_power is CHIAsyncBridgeSink bundle for power
+    val QACTIVE = io_power.map { bundle =>
+      withClockAndReset(clock, cpuReset_sync) {
+        AsyncResetSynchronizerShiftReg(bundle.QACTIVE, 3, 0)
+      }
+    }.getOrElse(false.B)
+    val QACCEPTn = io_power.map { bundle =>
+      withClockAndReset(clock, cpuReset_sync) {
+        AsyncResetSynchronizerShiftReg(bundle.QACCEPTn, 3, 0)
+      }
+    }.getOrElse(true.B)
+    io_power.foreach { power => power.QREQ := exitco }
+
     cpu_no_op := lpState === sPOFFREQ
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
     io.lp.foreach { lp => lp.o_cpu_no_op := cpu_no_op} // inform SoC core+l2 want to power off
@@ -270,12 +277,13 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   this: BaseXSSocImp with HasAsyncClockImp =>
 
   val io_chi = IO(new PortIO)
-  val io_power = Wire(new Bundle {
-    val QACTIVE = Output(Bool())
-    val QACCEPTn = Output(Bool())
-    val QREQ = Input(Bool())
-  })
-
+  val io_power = socParams.EnableCHIAsyncBridge.map { _ =>
+    Wire(new Bundle {
+      val QACTIVE = Output(Bool())
+      val QACCEPTn = Output(Bool())
+      val QREQ = Input(Bool())
+    })
+  }
   require(socParams.enableCHI)
 
   socParams.EnableCHIAsyncBridge match {
@@ -285,10 +293,11 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
         time_sink.io.async <> core_with_l2.module.io.chi
         io_chi <> time_sink.io.deq
         /*power handshake*/
-        io_power.QACTIVE := time_sink.io.powerAck.QACTIVE
-        io_power.QACCEPTn := time_sink.io.powerAck.QACCEPTn
+        val powerBundle = io_power.get
+        powerBundle.QACTIVE := time_sink.io.powerAck.QACTIVE
+        powerBundle.QACCEPTn := time_sink.io.powerAck.QACCEPTn
         val QREQ = withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-          AsyncResetSynchronizerShiftReg(time_sink.io.powerAck.QREQ, 3, 0)
+          AsyncResetSynchronizerShiftReg(powerBundle.QREQ, 3, 0)
         }
         time_sink.io.powerAck.QREQ := QREQ
         /*power handshake */
