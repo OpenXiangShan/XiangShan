@@ -55,14 +55,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
    */
   private val s3_update = io.update // bp pipeline s3 level update
   private val s3_taken  = s3_update.taken
-  private val s3_condHitMask = VecInit(s3_update.hitMask.zip(s3_update.attribute).map { case (hit, attr) =>
-    hit && attr.isConditional
-  })
   // deduplicate hit positions
-  private val s3_hitMask          = dedupHitPositions(s3_condHitMask, s3_update.position)
-  private val s3_firstTakenIdx    = OHToUInt(s3_update.firstTakenOH)
-  private val s3_firstTakenPos    = s3_update.position(s3_firstTakenIdx)
-  private val s3_firstTakenIsCond = s3_update.attribute(s3_firstTakenIdx).isConditional
+  private val s3_hitMask          = dedupHitPositions(s3_update.condHitMask, s3_update.position)
+  private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
+  private val s3_firstTakenIsCond = s3_update.firstTakenBranch.bits.attribute.isConditional
   private val s3_cfiPc            = getCfiPcFromPosition(s3_update.startPc, s3_firstTakenPos)
   private val s3_bwTaken =
     s3_cfiPc.addr > s3_update.target.addr
