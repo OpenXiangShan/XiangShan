@@ -928,36 +928,84 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val decodeReason = RegNextN(io.stallReason.reason, 2)
   val renameReason = RegNext(io.stallReason.reason)
+  
+  temp = 0
+  val dispatchPolicyStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
+    val result = uopSelIQMatrix.map(_(iqidx)).map(x => x > issue.numEnq.U)
+    temp = temp + issue.numEnq
+    result
+  }}.transpose
+  val dispatchPolicyStall = dispatchPolicyStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
+    // TODO: explain
+    val block1 = blockList.reduce(_ || _)
+    val block2 = !fromRename(0).valid && !uop.valid
+    (uop.valid && block1) || block2
+  }
+
+  temp = 0
+  val issueQueueStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
+    val result = uopSelIQMatrix.map(_(iqidx)).map(x => !io.toIssueQueues(temp).ready && x.orR && x <= issue.numEnq.U)
+    temp = temp + issue.numEnq
+    result
+  }}.transpose
+  val issueQueueStall = issueQueueStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
+    val block = blockList.reduce(_ || _)
+    uop.valid && block
+  }
+
+
 
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
   val firedVec = fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).foreach { case ((((update, in), fire), idx), fused) =>
     val headIsInt = FuType.isInt(io.robHeadFuType)  && io.robHeadNotReady
     val headIsFp  = FuType.isFArith(io.robHeadFuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHeadFuType) && io.robHeadNotReady
     val headIsLd  = io.robHeadFuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
     val headIsSt  = io.robHeadFuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
-    val headIsAmo = io.robHeadFuType === FuType.mou.U && io.robHeadNotReady
+    val headIsAmo = io.robHead.getDebugFuType === FuType.mou.U && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
     val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
+    val dispatchStallIsLoad    = FuType.isLoad(fromRenameUpdate(idx).bits.fuType) && dispatchPolicyStall(idx)
+    val dispatchStallIsStore   = FuType.isStore(fromRenameUpdate(idx).bits.fuType) && dispatchPolicyStall(idx)
+
+    val issueQueueStallIsAlu   = FuType.isAlu(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsBrh   = FuType.isBJU(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsInt   = FuType.isInt(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsFp    = FuType.isFArith(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsVec   = FuType.isVArithMem(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsLoad  = FuType.isLoad(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsStore = FuType.isStore(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
 
     import TopDownCounters._
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
-      (fire || fused                                     ) -> NoStall.id.U          ,
+      (fire || fused                                     ) -> NoStall.id.U                  ,
       // dispatch not stall / core stall from decode or rename
-      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                    ,
+      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                            ,
+      // dispatch stall
+      // dispatch policy stall
+      (dispatchStallIsLoad                               ) -> LoadDispatchPolicyStall.id.U  ,
+      (dispatchStallIsStore                              ) -> StoreDispatchPolicyStall.id.U ,
+      // issuequeue stall dispatch
+      (issueQueueStallIsAlu                              ) -> IntIQFullStallAlu.id.U        ,
+      (issueQueueStallIsBrh                              ) -> IntIQFullStallBrh.id.U        ,
+      (issueQueueStallIsInt                              ) -> IntIQFullStall.id.U           ,
+      (issueQueueStallIsFp                               ) -> FpIQFullStall.id.U            ,
+      (issueQueueStallIsVec                              ) -> VecIQFullStall.id.U           ,
+      (issueQueueStallIsLoad                             ) -> LoadIQFullStall.id.U          ,
+      (issueQueueStallIsStore                            ) -> StoreIQFullStall.id.U         ,
       // rob stall
-      (headIsAmo                                         ) -> AtomicStall.id.U      ,
-      (headIsSt                                          ) -> StoreStall.id.U       ,
-      (headIsLd                                          ) -> ldReason              ,
-      (headIsDiv                                         ) -> DivStall.id.U         ,
-      (headIsInt                                         ) -> IntNotReadyStall.id.U ,
-      (headIsFp                                          ) -> FPNotReadyStall.id.U  ,
-      (renameReason(idx) =/= NoStall.id.U                ) -> renameReason(idx)     ,
-      (decodeReason(idx) =/= NoStall.id.U                ) -> decodeReason(idx)     ,
+      (headIsAmo                                         ) -> AtomicStall.id.U              ,
+      (headIsSt                                          ) -> StoreStall.id.U               ,
+      (headIsLd                                          ) -> ldReason                      ,
+      (headIsDiv                                         ) -> DivStall.id.U                 ,
+      (headIsInt                                         ) -> IntNotReadyStall.id.U         ,
+      (headIsFp                                          ) -> FPNotReadyStall.id.U          ,
+      (renameReason(idx) =/= NoStall.id.U                ) -> renameReason(idx)             ,
+      (decodeReason(idx) =/= NoStall.id.U                ) -> decodeReason(idx)             ,
     ))
   }
 
