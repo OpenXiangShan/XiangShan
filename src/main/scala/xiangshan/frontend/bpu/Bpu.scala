@@ -368,8 +368,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_commonHR     = RegEnable(commonHR.io.commonHR, s1_fire)
   private val s3_commonHR     = RegEnable(s2_commonHR, s2_fire)
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
-  s3_commonHRMeta.ghr       := s3_commonHR.ghr
-  s3_commonHRMeta.bw        := s3_commonHR.bw
+  s3_commonHRMeta.ghr  := s3_commonHR.ghr
+  s3_commonHRMeta.bw   := s3_commonHR.bw
+  s3_commonHRMeta.imli := commonHR.io.s3_imli
+
   s3_commonHRMeta.hitMask   := VecInit(s3_mbtbResult.map(_.valid))
   s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))
   s3_commonHRMeta.position  := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
@@ -454,10 +456,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(phrBits)
 
   // ghr update
+  private val s1_cfiPc = getCfiPcFromPosition(s1_startPc, s1_prediction.cfiPosition)
+  private val s1_imliTaken =
+    s1_prediction.taken && s1_prediction.attribute.isConditional && (s1_cfiPc.addr > s1_prediction.target.addr)
+
   commonHR.io.stageCtrl               := stageCtrl
+  commonHR.io.s1_imliTaken            := s1_imliTaken
   commonHR.io.update.startPc          := s3_startPc
   commonHR.io.update.target           := s3_prediction.target
   commonHR.io.update.taken            := s3_taken
+  commonHR.io.update.s3override       := s3_override
   commonHR.io.update.firstTakenBranch := s3_firstTakenBranch
   commonHR.io.update.position         := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   commonHR.io.update.condHitMask      := s3_condHitMask
@@ -467,6 +475,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.redirect.taken          := redirect.bits.taken
   commonHR.io.redirect.attribute      := redirect.bits.attribute
   commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
+  private val s0_imli     = commonHR.io.s0_imli
+  private val s3_imli     = commonHR.io.s3_imli
   private val s0_commonHR = commonHR.io.s0_commonHR
   dontTouch(s0_commonHR)
 
