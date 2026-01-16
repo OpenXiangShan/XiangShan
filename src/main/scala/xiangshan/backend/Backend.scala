@@ -292,21 +292,26 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }}
   println(s"[Backend] intRegion.io.memWriteback.size = ${intRegion.io.memWriteback.size}")
 
-  intRegion.io.memWriteback <> io.mem.intWriteback
+  intRegion.io.memWriteback.zip(io.mem.intWriteback).foreach { case (sinkWriteback, sourceWriteback) =>
+    sinkWriteback.zip(sourceWriteback).foreach { case (sink, source) =>
+      connectMemNewExuOutput(sink, source)
+    }
+  }
+  // intRegion.io.memWriteback <> io.mem.intWriteback
   val lduWriteback = io.mem.intWriteback.flatten.filter(_.bits.params.hasLoadFu)
   fpRegion.io.lduWriteback.get.flatten.zip(lduWriteback).map { case (sink, source) =>
     sink.valid := source.valid
     sink.bits := source.bits
   }
-  intRegion.io.wakeUpFromFp.foreach(x => x := fpRegion.io.wakeUpToDispatch)
-  intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
-  fpRegion.io.wakeUpFromInt.foreach(x => x := intRegion.io.wakeUpToDispatch)
-  fpRegion.io.I2FWakeupIn.foreach(x => x := intRegion.io.I2FWakeupOut.get)
-  fpRegion.io.wakeupFromI2F.foreach(x => x := intRegion.io.I2FWakeupOut.get)
-  intRegion.io.F2IWakeupIn.foreach(x => x := fpRegion.io.F2IWakeupOut.get)
+  intRegion.io.wakeUpFromFp. foreach(x => x := fpRegion.io.wakeUpToDispatch)
+  intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
+  fpRegion.io.wakeUpFromInt. foreach(x => x := intRegion.io.wakeUpToDispatch)
+  fpRegion.io.I2FWakeupIn.   foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
+  fpRegion.io.wakeupFromI2F. foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
+  intRegion.io.F2IWakeupIn.  foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
-  intRegion.io.staFeedback.foreach(x => x := io.mem.staIqFeedback)
-  vecRegion.io.vstuFeedback.foreach(x => x := io.mem.vstuIqFeedback)
+  intRegion.io.staFeedback.  foreach(x => x := io.mem.staIqFeedback)
+  vecRegion.io.vstuFeedback. foreach(x => x := io.mem.vstuIqFeedback)
   intRegion.io.ldCancel := io.mem.ldCancel
   intRegion.io.vlWriteBackInfoIn := 0.U.asTypeOf(intRegion.io.vlWriteBackInfoIn)
   val regions = Seq(intRegion, fpRegion, vecRegion)
@@ -347,7 +352,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.psrcVl.get := source.bits.psrcVl
     sink.bits.pdestVl.foreach(_ := source.bits.pdestVl)
   }
-  vecRegion.io.memWriteback <> io.mem.vecWriteback
+  vecRegion.io.memWriteback.zip(io.mem.vecWriteback).foreach { case (sinkWriteback, sourceWriteback) =>
+    sinkWriteback.zip(sourceWriteback).foreach { case (sink, source) =>
+      connectMemNewExuOutput(sink, source)
+    }
+  }
   vecRegion.io.ldCancel := io.mem.ldCancel
   vecRegion.io.vlWriteBackInfoIn.vlFromIntIsZero := vlFromIntIsZero
   vecRegion.io.vlWriteBackInfoIn.vlFromIntIsVlmax := vlFromIntIsVlmax
@@ -436,8 +445,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val fenceio = intRegion.io.fenceio.get
   io.fenceio <> fenceio
 
-  fpRegion.io.I2FDataIn.get := intRegion.io.I2FDataOut.get
-  intRegion.io.F2IDataIn.get := fpRegion.io.F2IDataOut.get
+  fpRegion.io.cross.I2FDataIn.get  := intRegion.io.cross.I2FDataOut.get
+  intRegion.io.cross.F2IDataIn.get := fpRegion.io.cross.F2IDataOut.get
 
   intRegion.io.frm := csrio.fpu.frm
   intRegion.io.vxrm := csrio.vpu.vxrm
@@ -454,9 +463,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.mem.redirect := ctrlBlock.io.redirect
   issue.flatten.zip(toMem.flatten).foreach { case (sink, source) =>
-    sink <> source
+    connectExuInput(sink, source)
     val enableMdp = Constantin.createRecord("EnableMdp", true)
-    sink.bits.pc.foreach(_ := source.bits.pc.getOrElse(0.U) + (source.bits.ftqOffset.getOrElse(0.U) << instOffsetBits))
+    sink.bits.pc.foreach(_ := source.bits.data.pc.getOrElse(0.U) + (source.bits.ctrl.ftqOffset.getOrElse(0.U) << instOffsetBits))
     sink.bits.loadWaitBit.foreach(_ := Mux(enableMdp, source.bits.loadWaitBit.getOrElse(false.B), false.B))
     sink.bits.waitForRobIdx.foreach(_ := Mux(enableMdp, source.bits.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr)), 0.U.asTypeOf(new RobPtr)))
     sink.bits.storeSetHit.foreach(_ := Mux(enableMdp, source.bits.storeSetHit.getOrElse(false.B), false.B))

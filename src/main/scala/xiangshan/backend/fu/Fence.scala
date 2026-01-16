@@ -83,6 +83,7 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := state === s_idle
   io.out.valid := state =/= s_idle && state =/= s_wait
   io.out.bits.res.data := 0.U
+  io.out.bits.ctrl.toRobValid := uop.ctrl.toRobValid
   io.out.bits.ctrl.robIdx := uop.ctrl.robIdx
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get

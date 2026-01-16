@@ -12,10 +12,11 @@ import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
 import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.{CSRFileIO, FuType}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, SchedulerType}
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, SchdBlockParams, SchedulerType}
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{IntPregParams, RfReadPortWithConfig, RfWritePortBundle}
 import xiangshan.backend.rob.RobPtr
@@ -54,6 +55,178 @@ object Bundles {
       }
     }
   }
+
+  def connectNewExuInput(sinkBundle: DecoupledIO[NewExuInput], sourceBundle: DecoupledIO[ExuInput]) = {
+    sinkBundle.valid := sourceBundle.valid
+    sourceBundle.ready := sinkBundle.ready
+    val sourceValid = sourceBundle.valid
+    val sink = sinkBundle.bits
+    val source = sourceBundle.bits
+    sink.ctrl.fuType                       := source.fuType
+    sink.ctrl.fuOpType                     := source.fuOpType
+    sink.ctrl.rfWen.             foreach(_ := source.rfWen.get)
+    sink.ctrl.fpWen.             foreach(_ := source.fpWen.get)
+    sink.ctrl.vecWen.            foreach(_ := source.vecWen.get)
+    sink.ctrl.v0Wen.             foreach(_ := source.v0Wen.get)
+    sink.ctrl.vlWen.             foreach(_ := source.vlWen.get)
+    sink.ctrl.fpu.               foreach(_ := source.fpu.get)
+    sink.ctrl.vpu.               foreach(_ := source.vpu.get)
+    sink.ctrl.flushPipe.         foreach(_ := source.flushPipe.get)
+    sink.ctrl.rasAction.         foreach(_ := source.rasAction.get)
+    sink.ctrl.isRVC.             foreach(_ := source.isRVC.get)
+    sink.ctrl.ftqIdx.            foreach(_ := source.ftqIdx.get)
+    sink.ctrl.ftqOffset.         foreach(_ := source.ftqOffset.get)
+    sink.ctrl.predictInfo.       foreach(_ := source.predictInfo.get)
+    sink.ctrl.dataSources                  := source.dataSources
+    sink.ctrl.exuSources.        foreach(_ := source.exuSources.get)
+    sink.ctrl.srcTimer.          foreach(_ := source.srcTimer.get)
+    sink.ctrl.loadDependency.    foreach(_ := source.loadDependency.get)
+    sink.data.src                          := source.src
+    sink.data.vl.                foreach(_ := source.vl.get)
+    sink.data.imm                          := source.imm
+    sink.data.nextPcOffset.      foreach(_ := source.nextPcOffset.get)
+    sink.data.pc.                foreach(_ := source.pc.get)
+    sink.robIdx.valid                      := sourceValid
+    sink.robIdx.bits                       := source.robIdx
+    sink.toRF.pdest                        := source.pdest
+    sink.toRF.pdestVl.           foreach(_ := source.pdestVl.get)
+    sink.copy.copySrc.           foreach(_ := source.copySrc.get)
+    sink.copy.pdestCopy.         foreach(_ := source.pdestCopy.get)
+    sink.copy.rfWenCopy.         foreach(_ := source.rfWenCopy.get)
+    sink.copy.fpWenCopy.         foreach(_ := source.fpWenCopy.get)
+    sink.copy.vecWenCopy.        foreach(_ := source.vecWenCopy.get)
+    sink.copy.v0WenCopy.         foreach(_ := source.v0WenCopy.get)
+    sink.copy.vlWenCopy.         foreach(_ := source.vlWenCopy.get)
+    sink.copy.loadDependencyCopy.foreach(_ := source.loadDependencyCopy.get)
+    sink.iqIdx                             := source.iqIdx
+    sink.isFirstIssue                      := source.isFirstIssue
+    sink.loadWaitBit.            foreach(_ := source.loadWaitBit.get)
+    sink.waitForRobIdx.          foreach(_ := source.waitForRobIdx.get)
+    sink.storeSetHit.            foreach(_ := source.storeSetHit.get)
+    sink.loadWaitStrict.         foreach(_ := source.loadWaitStrict.get)
+    sink.ssid.                   foreach(_ := source.ssid.get)
+    sink.numLsElem.              foreach(_ := source.numLsElem.get)
+    sink.lqIdx.                  foreach(_ := source.lqIdx.get)
+    sink.sqIdx.                  foreach(_ := source.sqIdx.get)
+    sink.perfDebugInfo.          foreach(_ := source.perfDebugInfo.get)
+    sink.debug_seqNum.           foreach(_ := source.debug_seqNum.get)
+  }
+
+  def connectExuInput(sinkBundle: DecoupledIO[ExuInput], sourceBundle: DecoupledIO[NewExuInput]) = {
+    sinkBundle.valid := sourceBundle.valid
+    sourceBundle.ready := sinkBundle.ready
+    val sourceValid = sourceBundle.valid
+    val sink = sinkBundle.bits
+    val source = sourceBundle.bits
+    sink.fuType   := source.ctrl.fuType
+    sink.fuOpType := source.ctrl.fuOpType
+    sink.rfWen.             foreach(_ := source.ctrl.rfWen.get)
+    sink.fpWen.             foreach(_ := source.ctrl.fpWen.get)
+    sink.vecWen.            foreach(_ := source.ctrl.vecWen.get)
+    sink.v0Wen.             foreach(_ := source.ctrl.v0Wen.get)
+    sink.vlWen.             foreach(_ := source.ctrl.vlWen.get)
+    sink.fpu.               foreach(_ := source.ctrl.fpu.get)
+    sink.vpu.               foreach(_ := source.ctrl.vpu.get)
+    sink.flushPipe.         foreach(_ := source.ctrl.flushPipe.get)
+    sink.rasAction.         foreach(_ := source.ctrl.rasAction.get)
+    sink.isRVC.             foreach(_ := source.ctrl.isRVC.get)
+    sink.ftqIdx.            foreach(_ := source.ctrl.ftqIdx.get)
+    sink.ftqOffset.         foreach(_ := source.ctrl.ftqOffset.get)
+    sink.predictInfo.       foreach(_ := source.ctrl.predictInfo.get)
+    sink.dataSources                  := source.ctrl.dataSources
+    sink.exuSources.        foreach(_ := source.ctrl.exuSources.get)
+    sink.srcTimer.          foreach(_ := source.ctrl.srcTimer.get)
+    sink.loadDependency.    foreach(_ := source.ctrl.loadDependency.get)
+    sink.src                          := source.data.src
+    sink.vl.                foreach(_ := source.data.vl.get)
+    sink.imm                          := source.data.imm
+    sink.nextPcOffset.      foreach(_ := source.data.nextPcOffset.get)
+    sink.pc.                foreach(_ := source.data.pc.get)
+    sink.robIdx                       := source.robIdx.bits
+    sink.pdest                        := source.toRF.pdest
+    sink.pdestVl.           foreach(_ := source.toRF.pdestVl.get)
+    sink.copySrc.           foreach(_ := source.copy.copySrc.get)
+    sink.pdestCopy.         foreach(_ := source.copy.pdestCopy.get)
+    sink.rfWenCopy.         foreach(_ := source.copy.rfWenCopy.get)
+    sink.fpWenCopy.         foreach(_ := source.copy.fpWenCopy.get)
+    sink.vecWenCopy.        foreach(_ := source.copy.vecWenCopy.get)
+    sink.v0WenCopy.         foreach(_ := source.copy.v0WenCopy.get)
+    sink.vlWenCopy.         foreach(_ := source.copy.vlWenCopy.get)
+    sink.loadDependencyCopy.foreach(_ := source.copy.loadDependencyCopy.get)
+    sink.iqIdx                        := source.iqIdx
+    sink.isFirstIssue                 := source.isFirstIssue
+    sink.loadWaitBit.       foreach(_ := source.loadWaitBit.get)
+    sink.waitForRobIdx.     foreach(_ := source.waitForRobIdx.get)
+    sink.storeSetHit.       foreach(_ := source.storeSetHit.get)
+    sink.loadWaitStrict.    foreach(_ := source.loadWaitStrict.get)
+    sink.ssid.              foreach(_ := source.ssid.get)
+    sink.numLsElem.         foreach(_ := source.numLsElem.get)
+    sink.lqIdx.             foreach(_ := source.lqIdx.get)
+    sink.sqIdx.             foreach(_ := source.sqIdx.get)
+    sink.perfDebugInfo.     foreach(_ := source.perfDebugInfo.get)
+    sink.debug_seqNum.      foreach(_ := source.debug_seqNum.get)
+  }
+
+  def connectMemNewExuOutput(sinkBundle: DecoupledIO[NewExuOutput], sourceBundle: DecoupledIO[ExuOutput]) = {
+    sinkBundle.valid := sourceBundle.valid
+    sourceBundle.ready := sinkBundle.ready
+    val sourceValid = sourceBundle.valid
+    val sink = sinkBundle.bits
+    val source = sourceBundle.bits
+    sink.toRob.valid                       := sourceValid
+    sink.toRob.bits.robIdx                 := source.robIdx
+    sink.toRob.bits.fflags.      foreach(_ := source.fflags.get)
+    sink.toRob.bits.wflags.      foreach(_ := source.wflags.get)
+    sink.toRob.bits.vxsat.       foreach(_ := source.vxsat.get)
+    sink.toRob.bits.exceptionVec.foreach(_ := source.exceptionVec.get)
+    sink.toRob.bits.flushPipe.   foreach(_ := source.flushPipe.get)
+    sink.toRob.bits.trigger.     foreach(_ := source.trigger.get)
+    sink.toRob.bits.isRVC.       foreach(_ := source.isRVC.get)
+    sink.toRob.bits.replay.      foreach(_ := source.replay.get)
+    sink.toRob.bits.lqIdx.       foreach(_ := source.lqIdx.get)
+    sink.toRob.bits.sqIdx.       foreach(_ := source.sqIdx.get)
+    sink.toRob.bits.vls.         foreach(_ <> source.vls.get)
+    sink.pdest                             := source.pdest
+    sink.pdestVl.                foreach(_ := source.pdestVl.get)
+    sink.toIntRf.          foreach(_.valid := source.intWen.get)
+    sink.toIntRf.          foreach(_.bits  := source.data(0))
+    sink.toFpRf.           foreach(_.valid := source.fpWen.get)
+    sink.toFpRf.           foreach(_.bits  := source.data(0))
+    sink.toVecRf.          foreach(_.valid := source.vecWen.get)
+    sink.toVecRf.          foreach(_.bits  := source.data(0))
+    sink.toV0Rf.           foreach(_.valid := source.v0Wen.get)
+    sink.toV0Rf.           foreach(_.bits  := source.data(0))
+    sink.toVlRf.           foreach(_.valid := source.vlWen.get)
+    sink.toVlRf.           foreach(_.bits  := source.data(0))
+    sink.redirect.               foreach(_ <> source.redirect.get)
+    sink.isFromLoadUnit.         foreach(_ := source.isFromLoadUnit.get)
+    sink.debug                             <> source.debug
+    sink.perfDebugInfo.          foreach(_ := source.perfDebugInfo.get)
+    sink.debug_seqNum.           foreach(_ := source.debug_seqNum.get)
+  }
+
+  def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
+    sink.robIdx                  := source.toRob.bits.robIdx
+    sink.flushPipe.    foreach(_ := source.toRob.bits.flushPipe.get)
+    sink.replay.       foreach(_ := source.toRob.bits.replay.get)
+    sink.redirect.     foreach(_ := source.redirect.get)
+    sink.fflags.       foreach(_ := source.toRob.bits.fflags.get)
+    sink.wflags.       foreach(_ := source.toRob.bits.wflags.get)
+    sink.vxsat.        foreach(_ := source.toRob.bits.vxsat.get)
+    sink.exceptionVec. foreach(_ := source.toRob.bits.exceptionVec.get)
+    sink.lqIdx.        foreach(_ := source.toRob.bits.lqIdx.get)    // for debug
+    sink.sqIdx.        foreach(_ := source.toRob.bits.sqIdx.get)
+    sink.trigger.      foreach(_ := source.toRob.bits.trigger.get)
+    sink.vls.          foreach(_ <> source.toRob.bits.vls.get)
+    sink.data                    := source.toIntRf.map(_.bits).getOrElse(0.U(64.W))
+    sink.pdest                   := source.pdest
+    sink.vecWen.       foreach(_ := source.toVecRf.map(_.valid).getOrElse(false.B))
+    sink.v0Wen.        foreach(_ := source.toV0Rf.map(_.valid).getOrElse(false.B))
+    sink.debug                   := source.debug
+    sink.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
+    sink.debug_seqNum. foreach(_ := source.debug_seqNum.get)
+  }
+
   // Frontend --[CtrlBlock]--> DecodeInUop
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
@@ -1038,6 +1211,88 @@ object Bundles {
     }
   }
 
+  class PredictInfo(implicit p: Parameters) extends XSBundle {
+    val target = UInt(VAddrData().dataWidth.W)
+    val fixedTaken = Bool()
+    val predTaken = Bool()
+  }
+
+  class ExuInputCtrlBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val fuType         = FuType()
+    val fuOpType       = FuOpType()
+    val rfWen          = OptionWrapper(params.needIntWen, Bool())
+    val fpWen          = OptionWrapper(params.needFpWen,  Bool())
+    val vecWen         = OptionWrapper(params.needVecWen, Bool())
+    val v0Wen          = OptionWrapper(params.needV0Wen,  Bool())
+    val vlWen          = OptionWrapper(params.needVlWen,  Bool())
+    val fpu            = OptionWrapper(params.writeFflags, new FPUCtrlSignals)
+    val vpu            = OptionWrapper(params.needVPUCtrl, new VPUCtrlSignals)
+    val flushPipe      = OptionWrapper(params.flushPipe, Bool())
+    val rasAction      = OptionWrapper(params.hasRasAction, BranchAttribute.RasAction())
+    val isRVC          = OptionWrapper(params.hasIsRVC || params.aluNeedPc, Bool())
+    val ftqIdx         = OptionWrapper(params.needFtqPtr, new FtqPtr)
+    val ftqOffset      = OptionWrapper(params.needFtqPtrOffset, UInt(FetchBlockInstOffsetWidth.W))
+    val predictInfo    = OptionWrapper(params.needPdInfo, new PredictInfo)
+    val dataSources    = Vec(params.numRegSrc, DataSource())
+    val exuSources     = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
+    val srcTimer       = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
+    val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+  }
+
+  class ExuInputDataBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val src = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val vl  = OptionWrapper(params.readVlRf, Vl())
+    val imm = UInt(64.W)
+    val pc  = OptionWrapper(params.needPc || params.aluNeedPc, UInt(VAddrData().dataWidth.W))
+    val nextPcOffset = OptionWrapper(params.hasBrhFu, UInt((FetchBlockInstOffsetWidth + 2).W))
+  }
+
+  class ExuInputToRegFileBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+    val pdest   = UInt(params.wbPregIdxWidth.W)
+    val pdestVl = OptionWrapper(params.writeVlRf, UInt(VlPhyRegIdxWidth.W))
+  }
+
+  class ExuCopyBundle(val params: ExeUnitParams, copyWakeupOut: Boolean, copyNum: Int, hasCopySrc: Boolean)(implicit p: Parameters) extends XSBundle {
+    val copySrc    = OptionWrapper(hasCopySrc, Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W))))
+    val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
+    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
+    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
+    val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
+    val v0WenCopy  = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
+    val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
+    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+  }
+
+  class NewExuInput(val params: ExeUnitParams, copyWakeupOut: Boolean = false, copyNum: Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
+    val ctrl           = new ExuInputCtrlBundle(params)
+    val data           = new ExuInputDataBundle(params)
+    val robIdx         = ValidIO(new RobPtr)
+    val toRF           = new ExuInputToRegFileBundle(params)
+    val copy           = new ExuCopyBundle(params, copyWakeupOut, copyNum, hasCopySrc)
+    val iqIdx          = UInt(log2Up(MemIQSizeMax).W)  // Only used by store yet
+    val isFirstIssue   = Bool()                        // Only used by store yet
+    val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
+    val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
+    val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool())     // inst has been allocated an store set
+    val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool())     // load inst will not be executed until ALL former store addr calcuated
+    val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
+    val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
+    val lqIdx          = OptionWrapper(params.hasLoadExu || params.hasVecLsFu, new LqPtr)
+    val sqIdx          = OptionWrapper(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu, new SqPtr)
+    val perfDebugInfo  = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum   = OptionWrapper(backendParams.debugEn, InstSeqNum())
+  }
+
+
+  class ExuCrossDoMain(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {
+    val I2FWakeupOut = OptionWrapper(params.isIntSchd, ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
+    val I2FDataOut   = OptionWrapper(params.isIntSchd, ValidIO(UInt(XLEN.W)))
+    val I2FDataIn    = OptionWrapper(params.isFpSchd, Flipped(ValidIO(UInt(XLEN.W))))
+    val F2IWakeupOut = OptionWrapper(params.isFpSchd, ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
+    val F2IDataOut   = OptionWrapper(params.isFpSchd, ValidIO(UInt(XLEN.W)))
+    val F2IDataIn    = OptionWrapper(params.isIntSchd, Flipped(ValidIO(UInt(XLEN.W))))
+  }
+
   // ExuInput --[FuncUnit]--> ExuOutput
   class ExuOutput(
     val params: ExeUnitParams,
@@ -1085,6 +1340,52 @@ object Bundles {
     val debug = new DebugBundle
     val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
     val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
+  }
+
+class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) extends Bundle with HasXSParameter {
+    val vpu          = new VPUCtrlSignals
+    val oldVdPsrc    = UInt(PhyRegIdxWidth.W)
+    val vdIdx        = UInt(3.W)
+    val vdIdxInField = UInt(3.W)
+    val isIndexed    = Bool()
+    val isMasked     = Bool()
+    val isStrided    = Bool()
+    val isWhole      = Bool()
+    val isVecLoad    = Bool()
+    val isVlm        = Bool()
+  }
+  class ExuOutputToRob(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
+    val robIdx         = new RobPtr
+    val fflags         = OptionWrapper(params.writeFflags, UInt(5.W))
+    val wflags         = OptionWrapper(params.writeFflags, Bool())
+    val vxsat          = OptionWrapper(params.writeVxsat, Bool())
+    val exceptionVec   = OptionWrapper(params.exceptionOut.nonEmpty, ExceptionVec())
+    val flushPipe      = OptionWrapper(params.flushPipe, Bool())
+    val trigger        = OptionWrapper(params.trigger, TriggerAction())
+    val isRVC          = OptionWrapper(params.hasIsRVC, Bool())
+    val replay         = OptionWrapper(params.replayInst, Bool())
+    val lqIdx          = OptionWrapper(params.hasLoadFu, new LqPtr())
+    val sqIdx          = OptionWrapper(params.hasStoreAddrFu || params.hasStdFu, new SqPtr())
+    val vls            = OptionWrapper(params.hasVLoadFu, new ExuOutputVLoad(params))
+  }
+  class NewExuOutput(
+    val params: ExeUnitParams,
+  )(implicit
+    val p: Parameters
+  ) extends Bundle with BundleSource with HasXSParameter {
+    val toRob          = ValidIO(new ExuOutputToRob(params))
+    val pdest          = UInt(params.wbPregIdxWidth.W)
+    val pdestVl        = OptionWrapper(params.writeVlRf, UInt(VlPhyRegIdxWidth.W))
+    val toIntRf        = OptionWrapper(params.writeIntRf, ValidIO(UInt(params.destDataBitsMax.W)))
+    val toFpRf         = OptionWrapper(params.writeFpRf,  ValidIO(UInt(params.destDataBitsMax.W)))
+    val toVecRf        = OptionWrapper(params.writeVecRf, ValidIO(UInt(params.destDataBitsMax.W)))
+    val toV0Rf         = OptionWrapper(params.writeV0Rf,  ValidIO(UInt(params.destDataBitsMax.W)))
+    val toVlRf         = OptionWrapper(params.writeVlRf,  ValidIO(UInt(params.destDataBitsMax.W)))
+    val redirect       = OptionWrapper(params.hasRedirect, ValidIO(new Redirect))
+    val isFromLoadUnit = OptionWrapper(params.hasLoadFu, Bool())
+    val debug          = new DebugBundle
+    val perfDebugInfo  = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum   = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
@@ -1180,6 +1481,104 @@ object Bundles {
       rfWrite.vlWen := this.vlWen
       rfWrite
     }
+  }
+
+  class WriteBackRFBundle(val params: PregWB, backendParams: BackendParams)(implicit val p: Parameters) extends Bundle with BundleSource with HasXSParameter {
+    val rfWen  = Bool()
+    val fpWen  = Bool()
+    val vecWen = Bool()
+    val v0Wen  = Bool()
+    val vlWen  = Bool()
+    val pdest  = UInt(params.pregIdxWidth(backendParams).W)
+    val data   = UInt(params.dataWidth.W)
+
+    this.wakeupSource = s"WB(${params.toString()})"
+
+    def fromExuOutput(source: NewExuOutput, wbType: String) = {
+      this.rfWen  := source.toIntRf.map(_.valid).getOrElse(false.B)
+      this.fpWen  := source.toFpRf.map(_.valid).getOrElse(false.B)
+      this.vecWen := source.toVecRf.map(_.valid).getOrElse(false.B)
+      this.v0Wen  := source.toV0Rf.map(_.valid).getOrElse(false.B)
+      this.vlWen  := source.toVlRf.map(_.valid).getOrElse(false.B)
+      this.pdest  := (if (wbType == "vl") { source.pdestVl.getOrElse(0.U(VlPhyRegIdxWidth.W)) } else { source.pdest })
+      this.data   := (if (wbType == "int") { source.toIntRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
+                      else if (wbType == "fp") { source.toFpRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
+                      else if (wbType == "vf") { source.toVecRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) } 
+                      else if (wbType == "v0") { source.toV0Rf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
+                      else                     { source.toVlRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) })
+    }
+
+    def asIntRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.intPregParams))
+      rfWrite       := 0.U.asTypeOf(rfWrite)
+      rfWrite.wen   := this.rfWen && fire
+      rfWrite.pdest := this.pdest
+      rfWrite.data  := this.data
+      rfWrite.rfWen := this.rfWen
+      rfWrite
+    }
+
+    def asFpRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.fpPregParams))
+      rfWrite       := 0.U.asTypeOf(rfWrite)
+      rfWrite.wen   := this.fpWen && fire
+      rfWrite.pdest := this.pdest
+      rfWrite.data  := this.data
+      rfWrite.fpWen := this.fpWen
+      rfWrite
+    }
+
+    def asVfRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.vfPregParams))
+      rfWrite        := 0.U.asTypeOf(rfWrite)
+      rfWrite.wen    := this.vecWen && fire
+      rfWrite.pdest  := this.pdest
+      rfWrite.data   := this.data
+      rfWrite.vecWen := this.vecWen
+      rfWrite
+    }
+
+    def asV0RfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.v0PregParams))
+      rfWrite       := 0.U.asTypeOf(rfWrite)
+      rfWrite.wen   := this.v0Wen && fire
+      rfWrite.pdest := this.pdest
+      rfWrite.data  := this.data
+      rfWrite.v0Wen := this.v0Wen
+      rfWrite
+    }
+
+    def asVlRfWriteBundle(fire: Bool): RfWritePortBundle = {
+      val rfWrite = Wire(new RfWritePortBundle(backendParams.vlPregParams))
+      rfWrite       := 0.U.asTypeOf(rfWrite)
+      rfWrite.wen   := this.vlWen && fire
+      rfWrite.pdest := this.pdest
+      rfWrite.data  := this.data
+      rfWrite.vlWen := this.vlWen
+      rfWrite
+    }
+  }
+
+  class WriteBackRobBundle(val params: ExeUnitParams, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
+    val robIdx        = new RobPtr()(p)
+    val flushPipe     = OptionWrapper(params.flushPipe, Bool())
+    val replay        = OptionWrapper(params.replayInst, Bool())
+    val redirect      = OptionWrapper(params.hasRedirect, ValidIO(new Redirect))
+    val fflags        = OptionWrapper(params.writeFflags, UInt(5.W))
+    val wflags        = OptionWrapper(params.writeFflags, Bool())
+    val vxsat         = OptionWrapper(params.writeVxsat, Bool())
+    val exceptionVec  = OptionWrapper(params.exceptionOut.nonEmpty, ExceptionVec())
+    val lqIdx         = OptionWrapper(params.hasLoadFu, new LqPtr())
+    val sqIdx         = OptionWrapper(params.hasStoreAddrFu || params.hasStdFu, new SqPtr())
+    val trigger       = OptionWrapper(params.trigger, TriggerAction())
+    val vls           = OptionWrapper(params.hasVLoadFu, new ExuOutputVLoad(params))
+    val data          = UInt(params.destDataBitsMax.W)
+    val pdest         = UInt(params.wbPregIdxWidth.W)
+    val vecWen        = OptionWrapper(params.writeVecRf, Bool())
+    val v0Wen         = OptionWrapper(params.writeV0Rf, Bool())
+    val debug         = new DebugBundle
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
   // ExuOutput --> ExuBypassBundle --[DataPath]-->ExuInput
