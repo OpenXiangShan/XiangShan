@@ -569,7 +569,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   bwTable.zip(t1_bwSetIdx).zip(t1_writeBWEntryVec).zip(t1_writeBWEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t1_writeValid && t1_meta.scCommonHR.valid && GlobalEnable.B
+      table.io.update.valid    := t1_writeValid && t1_meta.scCommonHR.valid && BWEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t1_bankMask
       table.io.update.wayMask  := writeWayMask
