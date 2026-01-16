@@ -146,7 +146,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
-  val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
+  val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
   if (backendParams.debugEn){
@@ -1645,13 +1645,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       port.pc := debug_microOp(port.robidx.value).pc
     }
   }
-
-  val brhMispred = PopCount(branchWBs.map(wb => wb.valid & wb.bits.redirect.get.valid))
-  val jmpMispred = PopCount(jmpWBs.map(wb => wb.valid && wb.bits.redirect.get.valid))
-  val brhJump    = PopCount((branchWBs ++ jmpWBs).map(wb => wb.valid))
-  val misPred = brhMispred +& jmpMispred
+ 
+  val misPred = io.redirect.valid && io.redirect.bits.isMisPred
+  val brhJump = PopCount(isBrhOrJmpWBs.map(wb => wb.valid))
 
   XSPerfAccumulate("br_mis_pred", misPred)
+  XSPerfAccumulate("total_flush", io.redirect.valid)
 
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
@@ -1675,7 +1674,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
     ("BRANCH_JUMP            ", brhJump),
     ("BR_MIS_PRED            ", misPred),
-    ("TOTAL_FLUSH            ", io.flushOut.valid)
+    ("TOTAL_FLUSH            ", io.redirect.valid)
   )
   generatePerfEvent()
 
