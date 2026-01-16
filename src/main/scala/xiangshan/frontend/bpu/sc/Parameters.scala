@@ -32,11 +32,13 @@ case class ScParameters(
       new ScTableInfo(128, 4),
       new ScTableInfo(128, 8)
     ),
+    ImliTableSize:       Int = 128,
     BiasTableSize:       Int = 128,
     BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = false,
     BWEnable:            Boolean = false,
+    ImliEnable:          Boolean = true,
     BiasEnable:          Boolean = true,
     CtrWidth:            Int = 6,
     ThresholdWidth:      Int = 13,
@@ -47,7 +49,7 @@ case class ScParameters(
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
     TagWidth:            Int = 12,
-    EnableScTrace:       Boolean = false
+    EnableScTrace:       Boolean = true
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
@@ -56,6 +58,7 @@ trait HasScParameters extends HasBpuParameters {
   def PathEnable:   Boolean = scParameters.PathEnable
   def GlobalEnable: Boolean = scParameters.GlobalEnable
   def BWEnable:     Boolean = scParameters.BWEnable
+  def ImliEnable:   Boolean = scParameters.ImliEnable
   def BiasEnable:   Boolean = scParameters.BiasEnable
 
   def TageTakenCtrWidth: Int = bpuParameters.tageParameters.TakenCtrWidth
@@ -72,6 +75,10 @@ trait HasScParameters extends HasBpuParameters {
 
   def GlobalTableInfos: Seq[ScTableInfo] = scParameters.GlobalTableInfos
   def NumGlobalTables:  Int              = GlobalTableInfos.length
+
+  def ImliTableSize: Int = scParameters.ImliTableSize
+  def ImliWidth:     Int = bpuParameters.commonHRParameters.ImliWidth
+  def NumImliTable:  Int = 1
 
   def BiasTableSize:       Int = scParameters.BiasTableSize
   def BiasUseTageBitWidth: Int = scParameters.BiasUseTageBitWidth

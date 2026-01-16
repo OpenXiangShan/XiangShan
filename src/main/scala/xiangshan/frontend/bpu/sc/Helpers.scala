@@ -54,6 +54,12 @@ trait Helpers extends HasScParameters with PhrHelper {
     ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
   }
 
+  // get pc ^ foldedImli index
+  def getImliTableIdx(pc: PrunedAddr, imli: UInt, numSets: Int, imliLen: Int): UInt = {
+    val foldedImli = computeFoldedHist(imli, log2Ceil(numSets))(imliLen)
+    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedImli)(log2Ceil(numSets) - 1, 0)
+  }
+
   // get bias index
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
     (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
