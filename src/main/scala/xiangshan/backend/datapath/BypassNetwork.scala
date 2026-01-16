@@ -13,7 +13,9 @@ import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.regcache._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu.vector.Utils.{SplitMask, VecDataToMaskDataVec}
+import yunsuan.VialuFixType
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   // params
@@ -157,6 +159,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     val fuOpType = exuInput.bits.fuOpType
     val fuType = exuInput.bits.fuType
     val isAlu = FuType.isAlu(fuType)
+    val isViAlu = FuType.isVIAluF(fuType)
 
     exuInput.bits.src.zipWithIndex.foreach { case (src, srcIdx) =>
       val dataSource = exuInput.bits.dataSources(srcIdx)
@@ -276,6 +279,63 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     exuInput.bits.copySrc.get.map( copysrc =>
       copysrc.zip(exuInput.bits.src).foreach{ case(copy, src) => copy := src}
     )
+
+    if (exuParm.needVPUCtrl) {
+      val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
+      val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
+      val srcMask = Wire(UInt(VLEN.W))
+      val vpu = exuInput.bits.vpu.get
+      val vsew = vpu.vsew
+      val vuopIdx = vpu.vuopIdx
+      srcMask := vpu.vmask
+      if (exuParm.hasMaskWakeUp) {
+        val maskWakeUpFus = exuParm.fuConfigs.distinct.filter(_.maskWakeUp).map(x => x.fuType.U)
+        val maskWakeUpFu = maskWakeUpFus.map(_ === fuType).reduce(_ || _)
+        when (maskWakeUpFu) {
+          val maskIn = exuInput.bits.src(3)
+          val vm = vpu.vm
+          val needClearMask = isViAlu & VialuFixType.needClearMask(fuOpType)
+          srcMask := MuxCase(maskIn, Seq(
+            needClearMask -> allMaskFalse,
+            vm -> allMaskTrue,
+          ))
+        }
+      }
+      val maskDataVec = VecDataToMaskDataVec(srcMask, vsew)
+      val maskVec = Wire(UInt((VLEN / 8).W))
+      maskVec := SplitMask(maskDataVec(vuopIdx), vsew).asUInt
+
+      val sew8  = !vsew(1) & !vsew(0)
+      val sew16 = !vsew(1) &  vsew(0)
+      val sew32 =  vsew(1) & !vsew(0)
+      val sew64 =  vsew(1) &  vsew(0)
+
+      vpu.maskVecGen := maskVec
+      vpu.sew8  := sew8
+      vpu.sew16 := sew16
+      vpu.sew32 := sew32
+      vpu.sew64 := sew64
+    }
+
+    if (exuParm.hasVIAluFu) {
+      when (isViAlu) {
+        val isExt = exuInput.bits.vpu.get.isExt
+        val vialuCtrl = exuInput.bits.vialuCtrl.get
+        val widenVs2 = VialuFixType.fmtIsVVW(fuOpType) & VialuFixType.isAddSub(fuOpType)
+        val widen = (VialuFixType.fmtIsWVW(fuOpType) | VialuFixType.fmtIsVVW(fuOpType)) & VialuFixType.isAddSub(fuOpType)
+        val isVf2 = VialuFixType.fmtIsVF2(fuOpType) & isExt
+        val isVf4 = VialuFixType.fmtIsVF4(fuOpType) & isExt
+        val isVf8 = VialuFixType.fmtIsVF8(fuOpType) & isExt
+        val isAddCarry = VialuFixType.isAddCarry(fuOpType)
+
+        vialuCtrl.widenVs2 := widenVs2
+        vialuCtrl.widen := widen
+        vialuCtrl.isVf2 := isVf2
+        vialuCtrl.isVf4 := isVf4
+        vialuCtrl.isVf8 := isVf8
+        vialuCtrl.isAddCarry := isAddCarry
+      }
+    }
   }
 
   // to reg cache
