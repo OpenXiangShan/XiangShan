@@ -401,15 +401,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       // Two-step selection to handle circular queue segments
       val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
-      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
-        vaddrMatchVec
+      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & vaddrMatchVec
 
       // find youngest entry, which is one-hot
       // Find youngest store (highest index = most recent)
       //   Reverse vector so we can find leftmost 1 (highest index)
-      val (maskLowOH, multiMatchLow)   = findYoungest(Reverse(canForwardLow))
-      val (maskHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
-      val selectOH                     = Reverse(maskLowOH | maskHighOH) // index higher, mean it younger
+      val (selectLowOH, multiMatchLow)    = findYoungest(Reverse(canForwardLow))
+      val (forwardHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
+      val selectHighOH                 = forwardHighOH & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt
+      val selectOH                     = Reverse(selectLowOH | selectHighOH) // index higher, mean it younger
       val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
       val selectCtrlEntry              = Mux1H(selectOH, io.ctrlEntriesIn)
       val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
@@ -433,7 +433,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val addrInvalidSqIdx   = Wire(new SqPtr)
 
       dataInvalidSqIdx.value := OHToUInt(selectOH)
-      dataInvalidSqIdx.flag  := Mux(maskLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
+      dataInvalidSqIdx.flag  := Mux(selectLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
       addrInvalidSqIdx.value := OHToUInt(addrInvSelectOH)
       addrInvalidSqIdx.flag  := Mux(addrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
@@ -523,9 +523,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(ageMaskHigh)
         dontTouch(canForwardLow)
         dontTouch(canForwardHigh)
-        dontTouch(maskLowOH)
         dontTouch(multiMatchLow)
-        dontTouch(maskHighOH)
         dontTouch(multiMatchHigh)
         dontTouch(addrInvLowOH)
         dontTouch(addrInvHighOH)
