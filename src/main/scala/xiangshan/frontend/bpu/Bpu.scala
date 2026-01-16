@@ -235,8 +235,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.mbtbResult          := mbtb.io.result
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
+  sc.io.imli                := commonHR.io.s0_imli
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
-  sc.io.s3_override         := s3_override
   sc.io.commonHR            := commonHR.io.s0_commonHR
 
   s3_flush := redirect.valid
@@ -383,6 +383,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
   s3_commonHRMeta.ghr       := s3_commonHR.ghr
   s3_commonHRMeta.bw        := s3_commonHR.bw
+  s3_commonHRMeta.imli      := commonHR.io.s3_imli
   s3_commonHRMeta.hitMask   := VecInit(s3_mbtbResult.map(_.valid))
   s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))
   s3_commonHRMeta.position  := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
@@ -393,11 +394,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_redirectMeta.ras          := ras.io.redirectMeta
 
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
-  s3_resolveMeta.mbtb   := RegEnable(mbtb.io.meta, s2_fire)
-  s3_resolveMeta.tage   := RegEnable(tage.io.meta, s2_fire)
-  s3_resolveMeta.sc     := sc.io.meta
-  s3_resolveMeta.ittage := ittage.io.meta
-  s3_resolveMeta.phr    := s3_phrMeta
+  s3_resolveMeta.mbtb      := RegEnable(mbtb.io.meta, s2_fire)
+  s3_resolveMeta.tage      := RegEnable(tage.io.meta, s2_fire)
+  s3_resolveMeta.sc        := sc.io.meta
+  s3_resolveMeta.sc.scImli := commonHR.io.s3_imli
+  s3_resolveMeta.ittage    := ittage.io.meta
+  s3_resolveMeta.phr       := s3_phrMeta
   // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
   s3_resolveMeta.utage := s3_utageMeta
 
@@ -468,8 +470,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(phrBits)
 
   // ghr update
+  private val s1_cfiPc = getCfiPcFromPosition(s1_startPc, s1_prediction.cfiPosition)
+  private val s1_imliTaken =
+    s1_prediction.taken && s1_prediction.attribute.isConditional && (s1_cfiPc.addr > s1_prediction.target.addr)
+
   commonHR.io.stageCtrl               := stageCtrl
   commonHR.io.s0_startPc.get          := s0_startPc
+  commonHR.io.s1_imliTaken            := s1_imliTaken
   commonHR.io.update.startPc          := s3_startPc
   commonHR.io.update.target           := s3_prediction.target
   commonHR.io.update.taken            := s3_taken
@@ -483,6 +490,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.redirect.taken          := redirect.bits.taken
   commonHR.io.redirect.attribute      := redirect.bits.attribute
   commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
+  private val s0_imli     = commonHR.io.s0_imli
+  private val s3_imli     = commonHR.io.s3_imli
   private val s0_commonHR = commonHR.io.s0_commonHR
   dontTouch(s0_commonHR)
 
