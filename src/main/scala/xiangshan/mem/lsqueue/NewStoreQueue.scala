@@ -401,18 +401,19 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       // Two-step selection to handle circular queue segments
       val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
-      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt &
-        vaddrMatchVec
+      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & vaddrMatchVec
 
       // find youngest entry, which is one-hot
       // Find youngest store (highest index = most recent)
       //   Reverse vector so we can find leftmost 1 (highest index)
-      val (maskLowOH, multiMatchLow)   = findYoungest(Reverse(canForwardLow))
-      val (maskHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
-      val selectOH                     = Reverse(maskLowOH | maskHighOH) // index higher, mean it younger
+      val (selectLowOH, _)             = findYoungest(Reverse(canForwardLow))
+      val (forwardHighOH, _)           = findYoungest(Reverse(canForwardHigh))
+      val selectHighOH                 = forwardHighOH & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt
+      val selectOH                     = Reverse(selectLowOH | selectHighOH) // index higher, mean it younger
       val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
+      val selectCtrlEntry              = Mux1H(selectOH, io.ctrlEntriesIn)
       val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
-      val multiMatch                   = multiMatchLow | multiMatchHigh
+      val (_, multiMatch)              = findYoungest(canForwardLow | canForwardHigh) // don't care
 
       // select offset generate
       val byteSelectOffset   = s1LoadStart - selectDataEntry.byteStart
@@ -432,7 +433,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val addrInvalidSqIdx   = Wire(new SqPtr)
 
       dataInvalidSqIdx.value := OHToUInt(selectOH)
-      dataInvalidSqIdx.flag  := Mux(maskLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
+      dataInvalidSqIdx.flag  := Mux(selectLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
       addrInvalidSqIdx.value := OHToUInt(addrInvSelectOH)
       addrInvalidSqIdx.flag  := Mux(addrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
@@ -440,6 +441,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val forwardValid       = s1Valid && selectOH.orR // indicate whether forward is valid.
       val s2ByteSelectOffset = RegEnable(byteSelectOffset, s1Valid)
       val s2SelectDataEntry  = RegEnable(selectDataEntry, s1Valid)
+      val s2SelectCtrlEntry  = RegEnable(selectCtrlEntry, s1Valid)
       val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(HasAddrInvalid, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLEN/8), s1Valid)
@@ -450,7 +452,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid) // TODO: remove in the tuture
       val s2Valid            = RegNext(forwardValid)
       // debug
-      val selectCtrlEntry    = Mux1H(selectOH, io.ctrlEntriesIn)
       XSError(selectOH.orR && !selectCtrlEntry.allocated && s1Valid, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
 
@@ -472,7 +473,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //                                  Load needs this byte (0x77)
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val selectIsCboZero     = selectCtrlEntry.isCbo && isCboZero(selectDataEntry.cboType)
+      val selectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
       // !Paddrmatch
       val paddrNoMatch       = !(
         (s2SelectDataEntry.paddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s2LoadPaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || selectIsCboZero) &&
@@ -522,10 +523,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(ageMaskHigh)
         dontTouch(canForwardLow)
         dontTouch(canForwardHigh)
-        dontTouch(maskLowOH)
-        dontTouch(multiMatchLow)
-        dontTouch(maskHighOH)
-        dontTouch(multiMatchHigh)
+        dontTouch(multiMatch)
         dontTouch(addrInvLowOH)
         dontTouch(addrInvHighOH)
         dontTouch(selectOH)
