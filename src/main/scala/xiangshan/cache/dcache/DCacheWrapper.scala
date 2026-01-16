@@ -32,6 +32,7 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
+import freechips.rocketchip.tilelink.TLMessages.GrantData
 
 // DCache specific parameters
 case class DCacheParameters
@@ -1728,6 +1729,44 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //     })
   // }
   // XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
+  val grant_data_fire = {
+    val (first, last, done, count) = edge.count(bus.d)
+    bus.d.fire && first && bus.d.bits.opcode === GrantData
+  }
+  XSPerfAccumulate("grant_data_fire", grant_data_fire)
+
+  val hint_source = io.l2_hint.bits.sourceId
+
+  val grant_data_source = bus.d.bits.source
+
+  val hintPipe2 = Module(new Pipeline(UInt(32.W), 3))
+  hintPipe2.io.in.valid := io.l2_hint.valid
+  hintPipe2.io.in.bits := hint_source
+  hintPipe2.io.out.ready := true.B
+
+  val hintPipe1 = Module(new Pipeline(UInt(32.W), 2))
+  hintPipe1.io.in.valid := io.l2_hint.valid
+  hintPipe1.io.in.bits := hint_source
+  hintPipe1.io.out.ready := true.B
+
+  val accurateHint = grant_data_fire && hintPipe2.io.out.valid && hintPipe2.io.out.bits === grant_data_source
+  XSPerfAccumulate("accurate3Hints", accurateHint)
+
+  val okHint = grant_data_fire && hintPipe1.io.out.valid && hintPipe1.io.out.bits === grant_data_source
+  XSPerfAccumulate("ok2Hints", okHint)
+  // assert
+  // val hint_latch_valid = hintPipe2.io.out.valid || RegNext(hintPipe2.io.out.valid)
+  // val hint_latch_source = Mux(RegNext(hintPipe2.io.out.valid), RegNext(hintPipe2.io.out.bits), hintPipe2.io.out.bits)
+  val hint_without_grant = hintPipe2.io.out.valid && !grant_data_fire
+  val grant_without_hint = !hintPipe2.io.out.valid && grant_data_fire
+  val hint_grant_unmatch = hintPipe2.io.out.valid && grant_data_fire && (hintPipe2.io.out.bits =/= grant_data_source)
+  XSPerfAccumulate("hint_without_grant", hint_without_grant)
+  XSPerfAccumulate("grant_without_hint", grant_without_hint)
+  XSPerfAccumulate("hint_grant_unmatch", hint_grant_unmatch)
+//   assert(!hint_without_grant, "hint_without_grant")
+//   assert(!grant_without_hint, "grant_without_hint")
+//   assert(!hint_grant_unmatch, "hint_grant_unmatch")
+
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()
