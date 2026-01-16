@@ -19,7 +19,7 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class CommonHRParameters(
     StallQueueSize: Int = 2,
-    ImliWidth:      Int = 2
+    ImliWidth:      Int = 8
 ) {}
 
 trait HasCommonHRParameters extends HasBpuParameters {

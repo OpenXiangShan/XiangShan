@@ -218,6 +218,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.mbtbResult          := mbtb.io.result
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
+  sc.io.imli                := commonHR.io.s0_imli
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.s3_override         := s3_override
   sc.io.commonHR            := commonHR.io.s0_commonHR
@@ -376,11 +377,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_redirectMeta.ras          := ras.io.redirectMeta
 
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
-  s3_resolveMeta.mbtb   := RegEnable(mbtb.io.meta, s2_fire)
-  s3_resolveMeta.tage   := RegEnable(tage.io.meta, s2_fire)
-  s3_resolveMeta.sc     := sc.io.meta
-  s3_resolveMeta.ittage := ittage.io.meta
-  s3_resolveMeta.phr    := s3_phrMeta
+  s3_resolveMeta.mbtb      := RegEnable(mbtb.io.meta, s2_fire)
+  s3_resolveMeta.tage      := RegEnable(tage.io.meta, s2_fire)
+  s3_resolveMeta.sc        := sc.io.meta
+  s3_resolveMeta.sc.scImli := commonHR.io.s3_imli
+  s3_resolveMeta.ittage    := ittage.io.meta
+  s3_resolveMeta.phr       := s3_phrMeta
   s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
