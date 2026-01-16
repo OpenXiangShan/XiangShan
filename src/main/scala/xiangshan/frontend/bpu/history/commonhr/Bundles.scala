@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.Prediction
 
 class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val valid: Bool = Bool()
@@ -28,13 +29,12 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val bw:    UInt = UInt(BWHistoryLength.W)
 }
 class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
-  val taken:        Bool                 = Bool()
-  val hitMask:      Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
-  val attribute:    Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
-  val position:     Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val firstTakenOH: Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
-  val startPc:      PrunedAddr           = PrunedAddr(VAddrBits)
-  val target:       PrunedAddr           = PrunedAddr(VAddrBits)
+  val taken:            Bool              = Bool()
+  val condHitMask:      Vec[Bool]         = Vec(NumBtbResultEntries, Bool())
+  val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
+  val position:         Vec[UInt]         = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val startPc:          PrunedAddr        = PrunedAddr(VAddrBits)
+  val target:           PrunedAddr        = PrunedAddr(VAddrBits)
 }
 
 class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {

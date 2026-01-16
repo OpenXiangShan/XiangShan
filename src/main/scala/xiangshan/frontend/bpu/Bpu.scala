@@ -300,6 +300,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_utageMeta.debug_useMicroTage.foreach(_ := s1_utageHitMask.reduce(_ || _))
 
   private val s2_mbtbResult  = mbtb.io.result
+  private val s2_condHitMask = VecInit(s2_mbtbResult.map(e => e.valid && e.bits.attribute.isConditional))
   private val s2_scUsed      = sc.io.scUsed
   private val s2_scTakenMask = sc.io.scTakenMask
   private val s2_scFlipTage = VecInit((tage.io.prediction zip s2_scUsed zip s2_scTakenMask).map {
@@ -330,6 +331,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** s3 prediction selection *** */
   private val s3_taken              = RegEnable(s2_taken, s2_fire)
+  private val s3_condHitMask        = RegEnable(s2_condHitMask, s2_fire)
   private val s3_mbtbResult         = RegEnable(s2_mbtbResult, s2_fire)
   private val s3_firstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
@@ -450,20 +452,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   dontTouch(phrBits)
 
   // ghr update
-  commonHR.io.stageCtrl           := stageCtrl
-  commonHR.io.update.startPc      := s3_startPc
-  commonHR.io.update.target       := s3_prediction.target
-  commonHR.io.update.taken        := s3_taken
-  commonHR.io.update.firstTakenOH := s3_firstTakenBranchOH
-  commonHR.io.update.position     := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
-  commonHR.io.update.hitMask      := VecInit(s3_mbtbResult.map(_.valid))
-  commonHR.io.update.attribute    := VecInit(s3_mbtbResult.map(_.bits.attribute))
-  commonHR.io.redirect.valid      := redirect.valid
-  commonHR.io.redirect.cfiPc      := redirect.bits.cfiPc
-  commonHR.io.redirect.target     := redirect.bits.target
-  commonHR.io.redirect.taken      := redirect.bits.taken
-  commonHR.io.redirect.attribute  := redirect.bits.attribute
-  commonHR.io.redirect.meta       := redirect.bits.meta.commonHRMeta
+  commonHR.io.stageCtrl               := stageCtrl
+  commonHR.io.update.startPc          := s3_startPc
+  commonHR.io.update.target           := s3_prediction.target
+  commonHR.io.update.taken            := s3_taken
+  commonHR.io.update.firstTakenBranch := s3_firstTakenBranch
+  commonHR.io.update.position         := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  commonHR.io.update.condHitMask      := s3_condHitMask
+  commonHR.io.redirect.valid          := redirect.valid
+  commonHR.io.redirect.cfiPc          := redirect.bits.cfiPc
+  commonHR.io.redirect.target         := redirect.bits.target
+  commonHR.io.redirect.taken          := redirect.bits.taken
+  commonHR.io.redirect.attribute      := redirect.bits.attribute
+  commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
   private val s0_commonHR   = commonHR.io.s0_commonHR
   private val commonHRValue = commonHR.io.commonHR
   dontTouch(s0_commonHR)
