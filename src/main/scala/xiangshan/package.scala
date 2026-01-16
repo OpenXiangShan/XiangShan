@@ -986,6 +986,19 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
+    // dispatch stall
+    // dispatch stall for dispatch policy
+    // TODO: explain only load store exist
+    val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall")
+    val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall")
+    // dispatch stall for issuequeue full
+    val IntIQFullStallAlu = Value("IntIQFullStallAlu")
+    val IntIQFullStallBrh = Value("IntIQFullStallBrh")
+    val IntIQFullStall = Value("IntIQFullStall")
+    val FpIQFullStall = Value("FpIQFullStall")
+    val VecIQFullStall = Value("VecIQFullStall")
+    val LoadIQFullStall = Value("LoadIQFullStall")
+    val StoreIQFullStall = Value("StoreIQFullStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
