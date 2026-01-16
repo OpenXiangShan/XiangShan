@@ -276,6 +276,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.allocPregs := a
   }}
 
+  val loadDelayWakeUpToFp = backendParams.fpSchdParams.get.loadDelayWakeUp
+  fpBusyTable.io.ldCancel := (if(loadDelayWakeUpToFp) RegNext(io.ldCancel) else io.ldCancel)
+
   vlBusyTable.io match {
     case in =>
       in.wakeUpInt := 0.U.asTypeOf(in.wakeUpInt)

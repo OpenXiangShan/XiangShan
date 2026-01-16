@@ -97,6 +97,16 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))),
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))))
     }
+    else if (params.inFpSchd && params.readFpRf && params.hasWakeupFromMem && params.backendParam.fpSchdParams.get.loadDelayWakeUp) {
+      val wakeupByLoad = enqDelay1WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+      enqDelayDataSources(i).value := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool,
+        Mux(wakeupByLoad, DataSource.reg, DataSource.bypass),
+        entryReg.status.srcStatus(i).dataSources.value
+      )
+      if (params.hasIQWakeUp) {
+        enqDelayExuSources.get(i).value       := ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))))
+      }
+    }
     else {
       enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, DataSource.bypass, entryReg.status.srcStatus(i).dataSources.value)
       if (params.hasIQWakeUp) {

@@ -987,11 +987,20 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       wakeup.bits := 0.U.asTypeOf(wakeup.bits)
     }
     if (wakeUpQueues(i).nonEmpty) {
-      wakeup.bits.rfWen  := (if (wakeUpQueues(i).get.io.deq.bits.rfWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.rfWen .get else false.B)
-      wakeup.bits.fpWen  := (if (wakeUpQueues(i).get.io.deq.bits.fpWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.fpWen .get else false.B)
-      wakeup.bits.vecWen := (if (wakeUpQueues(i).get.io.deq.bits.vecWen.nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.vecWen.get else false.B)
-      wakeup.bits.v0Wen  := (if (wakeUpQueues(i).get.io.deq.bits.v0Wen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.v0Wen.get else false.B)
-      wakeup.bits.vlWen  := (if (wakeUpQueues(i).get.io.deq.bits.vlWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.vlWen.get else false.B)
+      val rfWen  = (if (wakeUpQueues(i).get.io.deq.bits.rfWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.rfWen .get else false.B)
+      val fpWen  = (if (wakeUpQueues(i).get.io.deq.bits.fpWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.fpWen .get else false.B)
+      val vecWen = (if (wakeUpQueues(i).get.io.deq.bits.vecWen.nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.vecWen.get else false.B)
+      val v0Wen  = (if (wakeUpQueues(i).get.io.deq.bits.v0Wen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.v0Wen.get else false.B)
+      val vlWen  = (if (wakeUpQueues(i).get.io.deq.bits.vlWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.vlWen.get else false.B)
+      val needLoadCancelThenWakeup = params.schdType.isInstanceOf[FpScheduler] && params.hasWakeupFromMem && params.backendParam.fpSchdParams.get.loadDelayWakeUp
+      // if needLoadCancelThenWakeup, we consider loadCancel at wakeup and no 0 latency fu which read fp and write fp, so don't need propagate loadDependency
+      if (needLoadCancelThenWakeup) wakeup.bits.loadDependency := 0.U.asTypeOf(wakeup.bits.loadDependency)
+      val loadCancel = LoadShouldCancel(Some(wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))), io.ldCancel)
+      wakeup.bits.rfWen  := (if (needLoadCancelThenWakeup) rfWen  && !loadCancel else rfWen)
+      wakeup.bits.fpWen  := (if (needLoadCancelThenWakeup) fpWen  && !loadCancel else fpWen)
+      wakeup.bits.vecWen := (if (needLoadCancelThenWakeup) vecWen && !loadCancel else vecWen)
+      wakeup.bits.v0Wen  := (if (needLoadCancelThenWakeup) v0Wen  && !loadCancel else v0Wen)
+      wakeup.bits.vlWen  := (if (needLoadCancelThenWakeup) vlWen  && !loadCancel else vlWen)
     }
 
     if(wakeUpQueues(i).nonEmpty && wakeup.bits.pdestCopy.nonEmpty){

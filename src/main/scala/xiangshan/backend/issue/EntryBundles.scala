@@ -284,6 +284,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         case ((dep, originalDep), deqPortIdx) =>
           if (params.backendParam.getLdExuIdx(params.backendParam.allExuParams.find(_.name == name).get) == deqPortIdx)
             dep := 1.U
+          else if (params.inIntSchd && (params.isLdAddrIQ || params.isHyAddrIQ) && params.backendParam.fpSchdParams.get.loadDelayWakeUp && params.backendParam.allExuParams.find(_.name == name).get.isFpExeUnit)
+            dep := originalDep << 0
           else
             dep := originalDep << 1
       }
@@ -356,8 +358,15 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                               srcStatus.dataSources.readBypass  -> DataSource.bypass2,
                                                               srcStatus.dataSources.readBypass2 -> DataSource.reg,
                                                             ))
-                                                          }
-                                                          else {
+                                                          } else if (params.inFpSchd && params.hasIQWakeUp && params.backendParam.fpSchdParams.get.loadDelayWakeUp) {
+                                                            // Mem -> Fp Delay Wakeup
+                                                            val isWakeupByMemIQ = wakeupByIQOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+                                                            MuxCase(srcStatus.dataSources.value, Seq(
+                                                              (wakeupByIQ && !isWakeupByMemIQ) -> DataSource.bypass,
+                                                              (wakeupByIQ && isWakeupByMemIQ) -> DataSource.reg,
+                                                              srcStatus.dataSources.readBypass -> DataSource.reg,
+                                                            ))
+                                                          } else {
                                                             MuxCase(srcStatus.dataSources.value, Seq(
                                                               ignoreOldVd                        -> DataSource.imm,
                                                               wakeupByIQ                         -> DataSource.bypass,
@@ -432,6 +441,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                               MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
                                                                 (wakeupByIQWithoutCancel && !isWakeupByMemIQ)  -> DataSource.forward,
                                                                 (wakeupByIQWithoutCancel && isWakeupByMemIQ)   -> DataSource.bypass,
+                                                              ))
+                                                            } else if (params.inFpSchd && params.hasWakeupFromMem && params.backendParam.fpSchdParams.get.loadDelayWakeUp) {
+                                                              MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
+                                                                (wakeupByIQWithoutCancel && !isWakeupByMemIQ) -> DataSource.forward,
+                                                                (wakeupByIQWithoutCancel && isWakeupByMemIQ) -> DataSource.bypass,
                                                               ))
                                                             } else {
                                                               MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
