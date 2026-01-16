@@ -900,7 +900,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val dcacheFullForward = io.mshrForwardResp.valid || io.tldForwardResp.valid
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
-  val needDCacheAccess = !fullForward && !isUncache
+  val needDCacheAccess = !fullForward && !isUncache && !isUncacheReplay
 
   // Uncache bypass
   afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.nderr
@@ -1067,7 +1067,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io_pipeOut.get.bits := pipeOutBits
   io_pipeIn.get.ready := !pipeOutValid || kill || endPipe || pipeOut.ready
 
-  io.dcacheKill := kill || exception || isUncache
+  io.dcacheKill := kill || exception || isUncache || isUncacheReplay
   io.dcacheResp.ready := true.B
 
   io.rarNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
@@ -1075,7 +1075,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.rawNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
   io.rawNukeQueryReq.bits := nukeQueryReq
 
-  io.prefetchTrain.valid := pipeIn.valid && !exception && !isUncache && in.isFirstIssue()
+  io.prefetchTrain.valid := pipeIn.valid && !exception && !isUncache && !isUncacheReplay && in.isFirstIssue()
   io.prefetchTrain.bits := DontCare
   io.prefetchTrain.bits.uop := uop
   io.prefetchTrain.bits.vaddr := in.vaddr
