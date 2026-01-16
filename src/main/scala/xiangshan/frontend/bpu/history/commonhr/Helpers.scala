@@ -33,12 +33,12 @@ trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
   }
   def getNewGhr(oldGhr: UInt, numLess: UInt, numHit: UInt, taken: Bool, isCond: Bool)(histLen: Int): UInt = {
     val numShift = getNumShift(numLess, numHit, taken, isCond)
-    Cat(oldGhr << numShift, taken && isCond)(histLen - 1, 0)
+    Mux(isCond, Cat(oldGhr << numShift, taken)(histLen - 1, 0), oldGhr(histLen - 1, 0))
   }
 
   def getNewBW(oldBW: UInt, numLess: UInt, numHit: UInt, taken: Bool, isCond: Bool, isBW: Bool)(histLen: Int): UInt = {
     val numShift = getNumShift(numLess, numHit, taken, isCond)
-    Cat(oldBW << numShift, taken && isCond && isBW)(histLen - 1, 0)
+    Mux(isCond, Cat(oldBW << numShift, taken && isBW)(histLen - 1, 0), oldBW(histLen - 1, 0))
   }
 
   def dedupHitPositions(hitMask: Vec[Bool], posVec: Vec[UInt]): Vec[Bool] = {
