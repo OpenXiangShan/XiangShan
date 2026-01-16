@@ -37,6 +37,7 @@ import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
 import scala.collection.mutable.ListBuffer
+import coupledL2.L2ParamKey
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -115,6 +116,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     })
     val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
+    val wpuRead = Option.when(p(L2ParamKey).enableWayPred) (ValidIO(UInt(PAddrBits.W)))
   })
 
   dontTouch(io.l2_flush_done)
@@ -247,6 +249,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.uncache <> memBlock.io.uncacheError
   io.beu_errors.l2 <> DontCare
   io.l2PfCtrl := memBlock.io.outer_l2PfCtrl
+  (io.wpuRead zip memBlock.io.wpuRead).foreach(x => x._1 := x._2)
 
   memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
