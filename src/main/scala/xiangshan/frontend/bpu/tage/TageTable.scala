@@ -97,7 +97,7 @@ class TageTable(
   }
 
   // delay one cycle for better timing
-  private val writeReqValid = RegNext(io.writeReq.valid, false.B)
+  private val writeReqValid = RegNext(io.writeReq.valid, init = false.B)
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
   // write to write buffer
