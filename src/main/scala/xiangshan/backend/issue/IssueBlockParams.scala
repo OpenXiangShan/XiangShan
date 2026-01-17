@@ -13,7 +13,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
 import xiangshan.backend.decode.Imm
-import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
+import xiangshan.backend.issue.EntryBundles.IssueQueueRespBundle
 import xiangshan.backend.fu.FuConfig._
 
 case class IssueBlockParams(
@@ -67,9 +67,9 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
-  def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
+  def needFeedBackSqIdx: Boolean = isVecStuIQ
 
-  def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
+  def needFeedBackLqIdx: Boolean = false
 
   def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
@@ -238,6 +238,23 @@ case class IssueBlockParams(
   def needVlWen: Boolean = exuBlockParams.map(_.needVlWen).reduce(_ || _)
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
+
+  def needS0Resp = this.isLdAddrIQ || this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ
+
+  def needS2Resp = this.isStAddrIQ
+
+  def needSnResp = this.isVecStuIQ
+
+  def issueTimerMaxValue: Int = (
+    if (this.isVecStuIQ) 4 // sn
+    else if (this.isStAddrIQ) 4 // s2
+    else if (this.isLdAddrIQ || this.isStdIQ) 2 // s0
+    else if (this.needOg2Resp) 2 // og2
+    else 1 // og1
+  )
+
+  def issueTimerWidth = issueTimerMaxValue.U.getWidth
+
 
   def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
 
@@ -447,7 +464,7 @@ case class IssueBlockParams(
 
   def genOG2RespBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
-    MixedVec(exuBlockParams.map(_ => new Valid(new EntryDeqRespBundle)))
+    MixedVec(exuBlockParams.map(_ => new IssueQueueRespBundle))
   }
 
   def genWbFuBusyTableWriteBundle(implicit p: Parameters) = {
