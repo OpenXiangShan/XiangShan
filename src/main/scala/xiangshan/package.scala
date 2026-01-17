@@ -994,7 +994,7 @@ package object xiangshan {
     // dispatch stall for issuequeue full
     val IntIQFullStallAlu = Value("IntIQFullStallAlu")
     val IntIQFullStallBrh = Value("IntIQFullStallBrh")
-    val IntIQFullStall = Value("IntIQFullStall")
+    val IntIQFullStallOther = Value("IntIQFullStallOther")
     val FpIQFullStall = Value("FpIQFullStall")
     val VecIQFullStall = Value("VecIQFullStall")
     val LoadIQFullStall = Value("LoadIQFullStall")
