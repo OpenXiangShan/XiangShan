@@ -942,7 +942,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val dispatchPolicyStall = dispatchPolicyStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
     // TODO: explain
     val block1 = blockList.reduce(_ || _)
-    val block2 = !fromRename(0).valid && !uop.valid
+    val block2 = !fromRename(0).valid && fromRename.map(_.valid).reduce(_ || _) && !uop.valid
     (uop.valid && block1) || block2
   }
 
@@ -984,6 +984,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val issueQueueStallIsStore = FuType.isStore(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
 
     import TopDownCounters._
+    // TODO: temporarily fix miss frontend bubble
+    val frontendMissBubble     = !fromRename.map(_.valid).reduce(_ || _) && (decodeReason(idx) === NoStall.id.U)
+
+
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
       (fire || fused                                     ) -> NoStall.id.U                  ,
@@ -996,7 +1000,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       // issuequeue stall dispatch
       (issueQueueStallIsAlu                              ) -> IntIQFullStallAlu.id.U        ,
       (issueQueueStallIsBrh                              ) -> IntIQFullStallBrh.id.U        ,
-      (issueQueueStallIsInt                              ) -> IntIQFullStall.id.U           ,
+      (issueQueueStallIsInt                              ) -> IntIQFullStallOther.id.U      ,
       (issueQueueStallIsFp                               ) -> FpIQFullStall.id.U            ,
       (issueQueueStallIsVec                              ) -> VecIQFullStall.id.U           ,
       (issueQueueStallIsLoad                             ) -> LoadIQFullStall.id.U          ,
@@ -1010,6 +1014,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       (headIsFp                                          ) -> FPNotReadyStall.id.U          ,
       (renameReason(idx) =/= NoStall.id.U                ) -> renameReason(idx)             ,
       (decodeReason(idx) =/= NoStall.id.U                ) -> decodeReason(idx)             ,
+      (frontendMissBubble                                ) -> ICacheMissBubble.id.U         ,
     ))
   }
 
