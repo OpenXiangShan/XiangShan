@@ -935,12 +935,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     temp = temp + issue.numEnq
     result
   }}.transpose
-  val dispatchPolicyStall = dispatchPolicyStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
+  val dispatchPolicyStallReason1 = dispatchPolicyStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
     // TODO: explain
-    val block1 = blockList.reduce(_ || _)
-    val block2 = !fromRename(0).valid && fromRename.map(_.valid).reduce(_ || _) && !uop.valid
-    (uop.valid && block1) || block2
+    val block = blockList.reduce(_ || _)
+    uop.valid && block
   }
+  val dispatchPolicyStallReason2 = fromRename.map(uop =>
+    !fromRename(0).valid && fromRename.map(_.valid).reduce(_ || _) && !uop.valid)
 
   temp = 0
   val issueQueueStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
@@ -958,6 +959,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
   val firedVec = fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
+  // TODO : rob不可接收直接归到other core?
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).foreach { case ((((update, in), fire), idx), fused) =>
     val headIsInt = FuType.isInt(io.robHeadFuType)  && io.robHeadNotReady
@@ -968,16 +970,20 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val headIsAmo = io.robHead.getDebugFuType === FuType.mou.U && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
     val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
-    val dispatchStallIsLoad    = FuType.isLoad(fromRenameUpdate(idx).bits.fuType) && dispatchPolicyStall(idx)
-    val dispatchStallIsStore   = FuType.isStore(fromRenameUpdate(idx).bits.fuType) && dispatchPolicyStall(idx)
+    val dispatchStallIsLoad    = (FuType.isLoad(fromRename(idx).bits.fuType) && dispatchPolicyStallReason1(idx)) ||
+      (FuType.isLoad(fromRename(renameWidth - 1).bits.fuType) && dispatchPolicyStallReason2(idx))
+    val dispatchStallIsStore   = (FuType.isStore(fromRename(idx).bits.fuType) && dispatchPolicyStallReason1(idx)) ||
+      (FuType.isStore(fromRename(renameWidth - 1).bits.fuType) && dispatchPolicyStallReason2(idx))
+    val dispatchStall          = dispatchPolicyStallReason1(idx) || dispatchPolicyStallReason2(idx)
+    val lsqStallDispatch       = fromRename(idx).valid && !lsqCanAccept
 
-    val issueQueueStallIsAlu   = FuType.isAlu(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsBrh   = FuType.isBJU(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsInt   = FuType.isInt(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsFp    = FuType.isFArith(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsVec   = FuType.isVArithMem(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsLoad  = FuType.isLoad(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
-    val issueQueueStallIsStore = FuType.isStore(fromRenameUpdate(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsAlu   = FuType.isAlu(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsBrh   = FuType.isBJU(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsInt   = FuType.isInt(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsFp    = FuType.isFArith(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsVec   = FuType.isVArithMem(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsLoad  = FuType.isLoad(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
+    val issueQueueStallIsStore = FuType.isStore(fromRename(idx).bits.fuType) && issueQueueStall(idx) && !robLsFull
 
     import TopDownCounters._
     // TODO: temporarily fix miss frontend bubble
@@ -987,12 +993,16 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
       (fire || fused                                     ) -> NoStall.id.U                  ,
-      // dispatch not stall / core stall from decode or rename
-      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                            ,
       // dispatch stall
       // dispatch policy stall
       (dispatchStallIsLoad                               ) -> LoadDispatchPolicyStall.id.U  ,
       (dispatchStallIsStore                              ) -> StoreDispatchPolicyStall.id.U ,
+      (dispatchStall                                     ) -> OtherDispatchPolicyStall.id.U ,
+      // loadstore queue stall dispatch
+      (lsqStallDispatch                                  ) -> LoadStoreStallDispatch.id.U   ,
+
+      // dispatch not stall / core stall from decode or rename
+      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                            ,
       // issuequeue stall dispatch
       (issueQueueStallIsAlu                              ) -> IntIQFullStallAlu.id.U        ,
       (issueQueueStallIsBrh                              ) -> IntIQFullStallBrh.id.U        ,
