@@ -1,0 +1,74 @@
+name: Performance Regression Trigger
+
+run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.test_branch }} - ${{ github.event.inputs.benchmark_type }} - ${{ github.event.inputs.xs_config }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: Test note, will be displayed in the title
+        required: false
+        type: string
+        default: Performance Regression
+      test_branch:
+        description: Branch or commit to run performance test on
+        required: false
+        type: string
+        default: kunminghu-v3
+      recompile:
+        description: Recompile the emu
+        required: false
+        type: choice
+        options:
+          - false
+          - true
+        default: false
+      emulator:
+        description: emulator to use
+        required: false
+        type: choice
+        options:
+          - gsim
+          - verilator
+        default: gsim
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: choice
+        options:
+          - KunminghuV2Config
+          - DefaultConfig
+          - BackendV2Config
+        default: KunminghuV2Config
+      benchmark_type:
+        description: Benchmark type
+        required: false
+        type: choice
+        options:
+          - spec06-0.3c
+          - spec06-0.8c
+          - spec06-1.0c
+        default: spec06-1.0c
+      benchmarks:
+        description: Specific benchmarks to run (comma-separated), leave empty to run all
+        required: false
+        type: string
+        default: ''
+      servers:
+        description: Servers to run emulation on, leave empty to let the script select
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  performance-test:
+    uses: ./.github/workflows/perf-template.yml
+    with:
+        test_branch: ${{ github.event.inputs.test_branch }}
+        recompile: ${{ github.event.inputs.recompile }}
+        emulator: ${{ github.event.inputs.emulator }}
+        xs_config: ${{ github.event.inputs.xs_config }}
+        benchmark_type: ${{ github.event.inputs.benchmark_type }}
+        benchmarks: ${{ github.event.inputs.benchmarks }}
+        servers: ${{ github.event.inputs.servers }}
+        perf_report_dir: /nfs/home/cirunner/perf-report-custom

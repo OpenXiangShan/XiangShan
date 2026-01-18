@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: init
-        run: make init
+      - name: Initialize submodules 
+        run: make init-force
 
       - uses: docker/metadata-action@v5
         id: metadata
@@ -44,3 +44,46 @@ jobs:
           push: ${{ github.ref == 'refs/heads/master' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+  build-xspdb:
+    runs-on: [self-hosted, xspdb]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: set env
+        run: |
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
+          FILE_TIME=$(date +%Y%m)
+          FILE_SHA=$(git rev-parse --short HEAD)
+          FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
+          echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
+      - name: submodule init
+        run: make init
+      - name: check picker availability
+        run: |
+          echo "Checking picker command..."
+          picker --check || echo "picker not exist"
+      - name: build XSPdb 
+        run: |
+          source /nfs/share/unitychip/activate
+          make pdb
+          make package-pdb
+          mv ${{ env.PDB_HOME}}/XSPdb.tar.bz2 "${{ env.PDB_HOME }}/${{ env.FILE_NAME }}"
+      - name: test run pdb (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          source /nfs/share/unitychip/activate
+          cd build/xspdb
+          tar -xjf "${FILE_NAME}"
+          cd XSPdb
+          make pdb-run
+      - name: upload compressed XSPdb package (pr merge only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE_NAME }}
+          path: build/xspdb/${{ env.FILE_NAME }}
+
