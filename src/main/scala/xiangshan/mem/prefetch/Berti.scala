@@ -368,7 +368,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 3)      // ((1 << DtCntWidth) * 0.65).toInt
   val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 3)      // ((1 << DtCntWidth) * 0.5).toInt
   val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 3)    // ((1 << DtCntWidth) * 0.35).toInt
-  val l2DepthRatio = Constantin.createRecord(s"${_name}_l2DepthRatio", 2)
+  val l2DepthRatio = Constantin.createRecord(s"${_name}_l2DepthRatio", 0)
   def getPcTag(pc: UInt): UInt = {
     val res = getPCHash(pc)
     res(DtPcTagWidth - 1, 0)
@@ -877,7 +877,7 @@ extends DCacheModule {
   l1PfIdxArb.io.out.ready := io.l1_req.ready
   io.l1_req.valid := l1PfIdxArb.io.out.valid && entries(l1PfIdxGlobal).target === PrefetchTarget.L1.id.U
   io.l1_req.bits.paddr := entries(l1PfIdxGlobal).getPrefetchPA
-  io.l1_req.bits.alias := entries(l1PfIdxGlobal).getPrefetchAlias
+  io.l1_req.bits.vaddr := entries(l1PfIdxGlobal).getPrefetchVA
   io.l1_req.bits.confidence := 1.U
   io.l1_req.bits.is_store := false.B
   io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BERTI
