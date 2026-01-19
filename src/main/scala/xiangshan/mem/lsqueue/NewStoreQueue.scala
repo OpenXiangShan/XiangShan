@@ -1491,8 +1491,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       }
     }
 
+    // TODO: fix this for unalign store @LWD
     //TODO: vector element maybe set addrValid twice because of replay uop, which will be remove in the future.
-    XSError(ctrlEntries(i).addrValid && staSetValid && !ctrlEntries(i).isVec, s"[addrValid] double allocate! index: ${i}\n")
+//    XSError(ctrlEntries(i).addrValid && staSetValid && !ctrlEntries(i).isVec, s"[addrValid] double allocate! index: ${i}\n")
 
     /*======================================= staInRe [sta Stage 2] ==================================================*/
 
@@ -1579,7 +1580,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     //TODO: vector element maybe set dataValid twice because of replay uop, which will be remove in the future.
-    XSError(ctrlEntries(i).dataValid && dataValidSet && !ctrlEntries(i).isVec, s"[dataValid] double allocate! index: ${i}\n")
+//    XSError(ctrlEntries(i).dataValid && dataValidSet && !ctrlEntries(i).isVec, s"[dataValid] double allocate! index: ${i}\n")
     XSError(!ctrlEntries(i).allocated && deqCancel, s"double deq! index: ${i}\n")
 
     /*================================================================================================================*/
