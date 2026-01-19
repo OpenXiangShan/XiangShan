@@ -363,9 +363,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
+  private val s2_commonHR     = RegEnable(commonHR.io.commonHR, s1_fire)
+  private val s3_commonHR     = RegEnable(s2_commonHR, s2_fire)
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
-  s3_commonHRMeta.ghr       := commonHR.io.s3_commonHR.ghr
-  s3_commonHRMeta.bw        := commonHR.io.s3_commonHR.bw
+  s3_commonHRMeta.ghr       := s3_commonHR.ghr
+  s3_commonHRMeta.bw        := s3_commonHR.bw
   s3_commonHRMeta.imli      := commonHR.io.s3_imli
   s3_commonHRMeta.hitMask   := VecInit(s3_mbtbResult.map(_.valid))
   s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))

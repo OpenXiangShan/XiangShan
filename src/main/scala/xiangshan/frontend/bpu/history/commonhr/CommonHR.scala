@@ -32,7 +32,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
     val s0_imli:      UInt             = Output(UInt(ImliWidth.W))
     val s3_imli:      UInt             = Output(UInt(ImliWidth.W))
     val s0_commonHR:  CommonHREntry    = Output(new CommonHREntry)
-    val s3_commonHR:  CommonHREntry    = Output(new CommonHREntry)
+    val commonHR:     CommonHREntry    = Output(new CommonHREntry)
   }
   val io = IO(new CommonHRIO)
 
@@ -49,7 +49,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_imli     = RegEnable(s2_imli, s2_fire)
   private val imli        = RegInit(0.U(ImliWidth.W))
   private val s0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
-  private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHR    = RegInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHRBuffer =
     Module(new Queue(new CommonHREntry, StallQueueSize, pipe = true, flow = true, hasFlush = true))
@@ -60,7 +59,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   io.s0_imli     := s0_imli
   io.s3_imli     := s3_imli
   io.s0_commonHR := s0_commonHR
-  io.s3_commonHR := s3_commonHR
+  io.commonHR    := commonHR
 
   /*
    * s3_fire update CommonHR
@@ -80,8 +79,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
     case (pos, hit) => hit && (pos < s3_firstTakenPos)
   }
   // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
-  private val s3_numLess = PopCount(s3_lessThanFirstTaken)
-  private val s3_numHit  = PopCount(s3_hitMask)
+  private val s3_numLess  = PopCount(s3_lessThanFirstTaken)
+  private val s3_numHit   = PopCount(s3_hitMask)
+  private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
   s3_commonHR.valid := true.B
   s3_commonHR.ghr   := getNewGhr(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
