@@ -93,6 +93,7 @@ class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
   val debugInfo       = Option.when(debugEn)(new PerfDebugInfo)
   val debug_seqNum    = Option.when(debugEn)(InstSeqNum())
 }
+// TODO: distinguish storeAddrIn and storeAddrInRe
 class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   val uop             = new StaUopInfo
   val tlbMiss         = Bool()

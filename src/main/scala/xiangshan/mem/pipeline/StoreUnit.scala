@@ -554,6 +554,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.toLsqRe.isLastRequest := true.B // will be use in unalign
   io.toLsqRe.af := s2_out.af && s2_valid && !s2_kill
   io.toLsqRe.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  io.toLsqRe.nc := s2_out.nc
 
   // prefetch related
   io.toLsqRe.cacheMiss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
