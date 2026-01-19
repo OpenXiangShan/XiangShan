@@ -182,10 +182,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val sqEmpty          = Input(Bool())
       val sqDeqPtr         = Input(new SqPtr)
     }
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
-    val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val forward = Vec(LoadPipelineWidth, new ForwardQueryIO)
-    val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
+    val bypass = Vec(LoadPipelineWidth, Flipped(new UncacheBypass))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
@@ -266,10 +263,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * Load uncache buffer
    */
   uncacheBuffer.io.redirect <> io.redirect
-  uncacheBuffer.io.mmioOut <> io.ldout
-  uncacheBuffer.io.ncOut <> io.ncOut
-  uncacheBuffer.io.mmioRawData <> io.ld_raw_data
-  uncacheBuffer.io.forward <> io.forward
+  uncacheBuffer.io.bypass <> io.bypass
   uncacheBuffer.io.rob <> io.rob
   uncacheBuffer.io.uncache <> io.uncache
 
@@ -278,7 +272,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3
     val ldinBits = io.ldu.ldin(w).bits
-    buff.valid := io.ldu.ldin(w).valid && !ldinBits.nc_with_data
+    buff.valid := io.ldu.ldin(w).valid && (!ldinBits.nc_with_data || ldinBits.nc_with_data && io.ldu.ldin(w).bits.rep_info.mmioOrNc)
     buff.bits := ldinBits
   }
 
@@ -312,13 +306,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+  loadQueueReplay.io.uncacheReplay := uncacheBuffer.io.uncacheReplay
 
-  for(i <- 0 until LoadPipelineWidth) {
-    loadQueueReplay.io.mmioOut(i).valid := uncacheBuffer.io.mmioOut(i).valid
-    loadQueueReplay.io.mmioOut(i).bits := uncacheBuffer.io.mmioOut(i).bits
-    loadQueueReplay.io.ncOut(i).valid := uncacheBuffer.io.ncOut(i).valid
-    loadQueueReplay.io.ncOut(i).bits := uncacheBuffer.io.ncOut(i).bits
-  }
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 

@@ -207,38 +207,48 @@ class ForwardQueryIO(implicit p: Parameters) extends MemBlockBundle {
     val forwardData      = Vec((VLEN/8), UInt(8.W)) // resp to load_s2
   }
 
-  class ReqS0LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val lqIdx            = new LqPtr
-    val isnc             = Bool()
-  }
-  class RespS1LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val paddr  = UInt(PAddrBits.W) // resp to load_s1
-  }
-  class RespS2LqInfoBundle(implicit p: Parameters) extends MemBlockBundle {
-    val forwardData      = UInt((VLEN+1).W) // resp to load_s2
-    val addrOffset = UInt(3.W) // only mmio
-    val nderr = Bool()
-  }
-
   class ReqIO(implicit p: Parameters) extends MemBlockBundle {
     // query storeQueue for load s0
     val lduStage0ToSq    = ValidIO(new ReqS0InfoBundle)
     // send info for forward check
     val lduStage1ToSq    = Output(new ReqS1InfoBundle)
-
-    val lduStage0ToLq    = ValidIO(new ReqS0LqInfoBundle)
   }
 
   class RespIO(implicit p: Parameters) extends MemBlockBundle {
     val sqToLduStage1    = ValidIO(new RespS1InfoBundle)
     val sqToLduStage2    = ValidIO(new RespS2InfoBundle)
-
-    val lqToLduStage1    = ValidIO(new RespS1LqInfoBundle)
-    val lqToLduStage2    = ValidIO(new RespS2LqInfoBundle)
   }
 
   val req                = Flipped(new ReqIO)
   val resp               = new RespIO
+}
+
+class UncacheBypassReqS0(implicit p: Parameters) extends XSBundle {
+  val lqIdx = new LqPtr
+  val isNCReplay = Bool()
+  // val isMMIOReplay = Bool()
+}
+
+class UncacheBypassRespS1(implicit p: Parameters) extends XSBundle {
+  val paddr = UInt(PAddrBits.W)
+}
+
+class UncacheBypassRespS2(implicit p: Parameters) extends XSBundle {
+  val data = UInt((VLEN+1).W)
+  val addrOffset = UInt(3.W) // only mmio
+  val nderr = Bool()
+  // val denied = Bool()
+  // val corrupt = Bool()
+}
+
+class UncacheBypass(implicit p: Parameters) extends XSBundle {
+  val s0Req = ValidIO(new UncacheBypassReqS0)
+  val s1Resp = Flipped(ValidIO(new UncacheBypassRespS1))
+  val s2Resp = Flipped(ValidIO(new UncacheBypassRespS2))
+}
+
+class UncacheReplay(implicit p: Parameters) extends MemBlockBundle{
+  val lqIdx = new LqPtr
 }
 
 class FromRobIO(implicit p: Parameters) extends XSBundle {

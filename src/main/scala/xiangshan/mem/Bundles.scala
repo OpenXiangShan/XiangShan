@@ -127,6 +127,8 @@ object Bundles {
     val misalignWith16Byte = Bool()
     val misalignNeedWakeUp = Bool()
     val updateAddrValid = Bool()
+    val debug = new DebugBundle
+    val isFromLoadUnit = Bool()
 
     def isSWPrefetch: Bool = isPrefetch && !isHWPrefetch
     def toExuOutput(param: ExeUnitParams): ExuOutput = {
@@ -142,7 +144,7 @@ object Bundles {
       output.exceptionVec.foreach(_ := this.uop.exceptionVec)
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
-      // output.debug := this.debug
+      output.debug := this.debug
       output.debugInfo := this.uop.debugInfo
       output.debug_seqNum := this.uop.debug_seqNum
       output.lqIdx.foreach(_ := this.uop.lqIdx)
@@ -160,7 +162,7 @@ object Bundles {
         x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
         x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
       })
-      // output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
+      output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
       output.trigger.foreach(_ := this.uop.trigger)
       output
     }

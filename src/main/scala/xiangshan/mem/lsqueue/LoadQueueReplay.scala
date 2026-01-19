@@ -206,8 +206,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val sqDeqPtr         = Input(new SqPtr)
 
     // from LoadQueueUncache
-    val mmioOut = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new MemExuOutput)))
-    val ncOut = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
+    val uncacheReplay = Vec(LoadUncacheBufferSize, Flipped(Valid(new UncacheReplay)))
     //
     val sqEmpty = Input(Bool())
     val lqFull  = Output(Bool())
@@ -343,17 +342,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   (0 until LoadQueueReplaySize).map(i => {
     stDataDeqVec(i) := allocated(i) && storeDataValidVec(i)
   })
-
   // mmio/nc issue check
-  val lqIdxMatchMmio = VecInit((0 until LoadQueueReplaySize).map { i =>
-    VecInit((0 until LoadPipelineWidth).map { j =>
-      io.mmioOut(j).valid && io.mmioOut(j).bits.uop.lqIdx === uop(i).lqIdx
-    }).reduce(_ || _)
-  })
-
-  val lqIdxMatchNc = VecInit((0 until LoadQueueReplaySize).map { i =>
-    VecInit((0 until LoadPipelineWidth).map { j =>
-      io.ncOut(j).valid && io.ncOut(j).bits.uop.lqIdx === uop(i).lqIdx
+  val uncacheMatch = VecInit((0 until LoadQueueReplaySize).map { i =>
+    VecInit((0 until LoadUncacheBufferSize).map {j =>
+      io.uncacheReplay(j).valid && io.uncacheReplay(j).bits.lqIdx === uop(i).lqIdx
     }).reduce(_ || _)
   })
   // update blocking condition
@@ -390,7 +382,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_UNCACHE
     when (cause(i)(LoadReplayCauses.C_UNCACHE)) {
-      blocking(i) := Mux(lqIdxMatchMmio(i) || lqIdxMatchNc(i), false.B, blocking(i))
+      blocking(i) := Mux(uncacheMatch(i), false.B, blocking(i))
     }
     // casue C_SMF
     when (cause(i)(LoadReplayCauses.C_SMF)) {
@@ -793,10 +785,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   freeList.io.free := freeMaskVec.asUInt
 
   io.lqFull := lqFull
-  for(i <- 0 until LoadPipelineWidth) {
-    io.mmioOut(i).ready := false.B
-    io.ncOut(i).ready := false.B
-  }
 
   // Topdown
   val robHeadVaddr = io.debugTopDown.robHeadVaddr

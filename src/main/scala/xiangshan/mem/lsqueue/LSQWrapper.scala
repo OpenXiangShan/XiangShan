@@ -89,12 +89,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
-    val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = new SbufferWriteIO
     val forward = Vec(LoadPipelineWidth, new ForwardQueryIO)
+    val bypass = Vec(LoadPipelineWidth, Flipped(new UncacheBypass))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
@@ -223,9 +221,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.redirect            <> io.brqRedirect
   loadQueue.io.vecFeedback           <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
-  loadQueue.io.ldout               <> io.ldout
-  loadQueue.io.ld_raw_data         <> io.ld_raw_data
-  loadQueue.io.ncOut               <> io.ncOut
   loadQueue.io.rob                 <> io.rob
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
@@ -248,7 +243,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
-  loadQueue.io.forward             <> io.forward
+  loadQueue.io.bypass              <> io.bypass
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint

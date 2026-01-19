@@ -923,6 +923,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       dcache.io.lsu.load(0).is128Req               := loadUnits(0).io.dcache.is128Req
     }
 
+    // LDU bypass nc/mmio data from LoadQueueUncache
+    loadUnits(i).io.lsq.uncacheBypass <> lsq.io.bypass(i)
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
@@ -970,16 +972,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
-    if (i == UncacheWBPort) {
-      lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
-      lsq.io.ldout(i).ready := loadUnits.take(LduCnt).map(_.io.lsq.uncache.ready).reduce(_||_)
-    } else {
-      lsq.io.ldout(i).ready := true.B
-      loadUnits(i).io.lsq.uncache.valid := lsq.io.replay(i).valid && lsq.io.replay(i).bits.isMmioOrNc && !lsq.io.replay(i).bits.nc
-      loadUnits(i).io.lsq.uncache.bits := lsq.io.ldout(2).bits
-    }
-    lsq.io.ld_raw_data(2) <> loadUnits(i).io.lsq.ld_raw_data
-    lsq.io.ncOut(i) <> loadUnits(i).io.lsq.nc_ldin
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
     lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword
