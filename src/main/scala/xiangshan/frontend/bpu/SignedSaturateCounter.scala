@@ -60,7 +60,7 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
     // hold if already saturated on the direction
     Mux(!en || shouldHold(positive), value, Mux(positive, value + 1.S, value - 1.S))
 
-  private def getIncreasedValue(step: SInt, en: Bool): SInt =
+  private def getIncreasedValue(step: UInt, en: Bool): SInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturatePositive, value, value + 1.S)
     } else {
@@ -68,14 +68,14 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
         !en,
         value,
         Mux(
-          value +& step >= SignedSaturateCounter.Value.SaturatePositive(width).S,
+          value +& step.zext >= SignedSaturateCounter.Value.SaturatePositive(width).S,
           SignedSaturateCounter.Value.SaturatePositive(width).S,
-          value + step
+          value + step.zext
         )
       )
     }
 
-  private def getDecreasedValue(step: SInt, en: Bool): SInt =
+  private def getDecreasedValue(step: UInt, en: Bool): SInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturateNegative, value, value - 1.S)
     } else {
@@ -83,9 +83,9 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
         !en,
         value,
         Mux(
-          value -& step <= SignedSaturateCounter.Value.SaturateNegative(width).S,
+          value -& step.zext <= SignedSaturateCounter.Value.SaturateNegative(width).S,
           SignedSaturateCounter.Value.SaturateNegative(width).S,
-          value - step
+          value - step.zext
         )
       )
     }
@@ -94,20 +94,20 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
   def getUpdate(increase: Bool, en: Bool = true.B): SignedSaturateCounter =
     SignedSaturateCounterInit(this.width, getUpdatedValue(increase, en))
 
-  def getIncrease(step: SInt = 1.S, en: Bool = true.B): SignedSaturateCounter =
+  def getIncrease(step: UInt = 1.U, en: Bool = true.B): SignedSaturateCounter =
     SignedSaturateCounterInit(this.width, getIncreasedValue(step, en))
 
-  def getDecrease(step: SInt = 1.S, en: Bool = true.B): SignedSaturateCounter =
+  def getDecrease(step: UInt = 1.U, en: Bool = true.B): SignedSaturateCounter =
     SignedSaturateCounterInit(this.width, getDecreasedValue(step, en))
 
   /* *** update method for regs *** */
   def selfUpdate(increase: Bool, en: Bool = true.B): Unit =
     value := getUpdatedValue(increase, en)
 
-  def selfIncrease(step: SInt = 1.S, en: Bool = true.B): Unit =
+  def selfIncrease(step: UInt = 1.U, en: Bool = true.B): Unit =
     value := getIncreasedValue(step, en)
 
-  def selfDecrease(step: SInt = 1.S, en: Bool = true.B): Unit =
+  def selfDecrease(step: UInt = 1.U, en: Bool = true.B): Unit =
     value := getDecreasedValue(step, en)
 
   /* *** reset method for regs *** */
