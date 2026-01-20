@@ -17,7 +17,7 @@ on:
         default: kunminghu-v3
       recompile:
         description: Recompile the emu
-        required: false
+        required: true
         type: choice
         options:
           - false
