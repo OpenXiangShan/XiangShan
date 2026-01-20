@@ -36,11 +36,8 @@ import xiangshan.backend.issue._
 
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new RegionIO(params))
-  val issueQueues = params.issueBlockParams.map { case iqParam => {
-    (if (iqParam.inIntSchd && iqParam.isMemAddrIQ) Module(new IssueQueueMemAddrImp()(p,iqParam))
-    else if (iqParam.inVfSchd && iqParam.isMemAddrIQ) Module(new IssueQueueVecMemImp()(p,iqParam))
-    else Module(new IssueQueueImp()(p,iqParam))).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
-    }
+  val issueQueues = params.issueBlockParams.map { case iqParam =>
+     Module(new IssueQueueImp()(p,iqParam)).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
   }
   issueQueues.map(x =>{
     println(s"[Region] iqParam.getIQName = ${x.param.getIQName}")
@@ -175,40 +172,28 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   }
   // 1 iq has 1 ldu, 1sta, 1vstu
   val ldAddrIQs = issueQueues.filter(iq => iq.param.LduCnt > 0)
-  ldAddrIQs.zipWithIndex.foreach {
-    case (imp: IssueQueueMemAddrImp, i) =>
-      imp.io.memIO.get.feedbackIO := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO)
-      imp.io.memIO.get.checkWait := 0.U.asTypeOf(imp.io.memIO.get.checkWait)
-      imp.io.memIO.get.loadWakeUp.head := io.wakeupFromLDU.get(i)
-    case _ =>
+  ldAddrIQs.zipWithIndex.foreach { case(imp, i) =>
+    imp.io.memIO.get.loadWakeUp.head := io.wakeupFromLDU.get(i)
   }
   val stAddrIQs = issueQueues.filter(iq => iq.param.StaCnt > 0)
-  stAddrIQs.zipWithIndex.foreach {
-    case (imp: IssueQueueMemAddrImp, i) =>
-      imp.io.memIO.get.feedbackIO.head := io.staFeedback.get(i)
-      imp.io.memIO.get.checkWait := 0.U.asTypeOf(imp.io.memIO.get.checkWait)
-      val feedBack = io.staFeedback.get(i).feedbackSlow
-      imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
-      imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
-      imp.io.s2Resp.get.head.fuType := 0.U
-      imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
-      imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
-    case _ =>
+  stAddrIQs.zipWithIndex.foreach { case(imp, i) =>
+    val feedBack = io.staFeedback.get(i).feedbackSlow
+    imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+    imp.io.s2Resp.get.head.fuType := 0.U
+    imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+    imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
   val vecStuIQs = issueQueues.filter(iq => iq.param.VstuCnt > 0)
-  vecStuIQs.zipWithIndex.foreach {
-    case (imp: IssueQueueVecMemImp, i) =>
-      imp.io.memIO.get.feedbackIO.head := io.vstuFeedback.get(i)
-      imp.io.memIO.get.checkWait := 0.U.asTypeOf(imp.io.memIO.get.checkWait)
-      imp.io.memIO.get.lqDeqPtr.get := io.lqDeqPtr.get
-      imp.io.memIO.get.sqDeqPtr.get := io.sqDeqPtr.get
-      val feedBack = io.vstuFeedback.get(i).feedbackSlow
-      imp.io.snResp.get.head.failed := feedBack.valid && !feedBack.bits.hit
-      imp.io.snResp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
-      imp.io.snResp.get.head.fuType := 0.U
-      imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
-      imp.io.snResp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
-    case _ =>
+  vecStuIQs.zipWithIndex.foreach { case(imp, i) =>
+    imp.io.memIO.get.lqDeqPtr.get := io.lqDeqPtr.get
+    imp.io.memIO.get.sqDeqPtr.get := io.sqDeqPtr.get
+    val feedBack = io.vstuFeedback.get(i).feedbackSlow
+    imp.io.snResp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.snResp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+    imp.io.snResp.get.head.fuType := 0.U
+    imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+    imp.io.snResp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
   // other wakeup, int vec need WB wakeup
   def connectWakeupWB(sink: ValidIO[IssueQueueWBWakeUpBundle], source: RfWritePortBundle): Unit = {

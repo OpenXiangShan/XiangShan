@@ -7,7 +7,7 @@ import utils.MapUtils
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils
-import xiangshan.backend.issue.EntryBundles.RespType
+import xiangshan.backend.issue.EntryBundles.IssueQueueRespBundle
 
 class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
   private val latencyValMax: Int = fuLatencyMap.values.fold(0)(_ max _)
@@ -38,7 +38,7 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
   private val og0RespMatchVec = getMatchVecFromResp(og0Resp)
   private val og1RespMatchVec = getMatchVecFromResp(og1Resp)
 
-  def getMatchVecFromResp(resp: IssueQueueDeqRespBundle) : Vec[Bool] = {
+  def getMatchVecFromResp(resp: IssueQueueRespBundle) : Vec[Bool] = {
     VecInit((0 until tableSize).map {
       lat =>
         Cat(
@@ -64,9 +64,9 @@ class FuBusyTableWriteIO(latencyValMax: Int)(implicit p: Parameters, iqParams: I
   private val tableSize = latencyValMax + 1
   val in = new Bundle {
     // TODO: change deqResp logic
-    val deqResp =  Flipped(ValidIO(new IssueQueueDeqRespBundle))
-    val og0Resp = Flipped(new IssueQueueDeqRespBundle)
-    val og1Resp = Flipped(new IssueQueueDeqRespBundle)
+    val deqResp =  Flipped(ValidIO(new IssueQueueRespBundle))
+    val og0Resp = Flipped(new IssueQueueRespBundle)
+    val og1Resp = Flipped(new IssueQueueRespBundle)
   }
   val out = new Bundle {
     val fuBusyTable = Output(UInt(tableSize.W))

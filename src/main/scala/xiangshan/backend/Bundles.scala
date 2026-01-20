@@ -15,17 +15,15 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, SchedulerType}
+import xiangshan.backend.issue.{IssueBlockParams, SchedulerType}
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.regfile.{IntPregParams, RfReadPortWithConfig, RfWritePortBundle}
+import xiangshan.backend.regfile._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.trace._
-import xiangshan.frontend._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
-import yunsuan.vector.VIFuParam
 
 import utility._
 
@@ -692,8 +690,10 @@ object Bundles {
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.v0Wen := exuInput.v0Wen.getOrElse(false.B)
       this.vlWen := exuInput.vlWen.getOrElse(false.B)
-      this.pdest := exuInput.pdest
+      this.loadDependency := exuInput.loadDependency.getOrElse(0.U.asTypeOf(this.loadDependency))
+      this.is0Lat := exuInput.is0Lat.getOrElse(false.B)
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
+      connectSamePort(this, exuInput)
     }
   }
 
