@@ -95,6 +95,7 @@ class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
   val startVAddr:     UInt             = UInt(VAddrBits.W)
   val hasHitMisPred:  Bool             = Bool()
   val missHitMisPred: Bool             = Bool()
-  val branches:       Vec[TraceBranch] = Vec(NumAheadBtbPredictionEntries, new TraceBranch)
+  val hasHitMisPredBr: MicroTageTrainResult      = new MicroTageTrainResult
+  val missHitMisPredBr: MicroTageTrainResult     = new MicroTageTrainResult
   val setIdx:         Vec[UInt]        = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
 }
