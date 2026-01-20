@@ -317,7 +317,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   io.scTakenMask := s2_scPred
-  io.scUsed      := s2_useScPred
+  // io.scUsed      := s2_useScPred
+  dontTouch(s2_useScPred)
+  io.scUsed := 0.U.asTypeOf(io.scUsed)
 
   s2_useScPred.zip(s2_providerValid).foreach { case (use, valid) =>
     XSError(s2_fire && use && !valid, "SC useScPred is true but tage provider is invalid!\n")
