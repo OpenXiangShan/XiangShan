@@ -348,6 +348,15 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s1_active_plus_one_hit", s1_valid && s1_plus_one_hit)
   XSPerfAccumulate("s1_active_minus_one_hit", s1_valid && s1_minus_one_hit)
 
+  val stream_array_table = ChiselDB.createTable("StreamArrayTable" + p(XSCoreParamsKey).HartId.toString, new StreamBitVectorBundle, basicDB = false)
+  stream_array_table.log(
+    data = array(s1_index),
+    en = s1_alloc && valids(s1_index),
+    site = "StreamArrayTable",
+    clock = clock,
+    reset = reset
+  )
+
   // s2: trigger prefetch if hit active bit vector, compute meta of prefetch req
   val s2_valid = GatedValidRegNext(s1_valid)
   val s2_index = RegEnable(s1_index, s1_valid)
