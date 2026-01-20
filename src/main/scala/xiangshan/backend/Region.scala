@@ -187,15 +187,27 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     case (imp: IssueQueueMemAddrImp, i) =>
       imp.io.memIO.get.feedbackIO.head := io.staFeedback.get(i)
       imp.io.memIO.get.checkWait := 0.U.asTypeOf(imp.io.memIO.get.checkWait)
+      val feedBack = io.staFeedback.get(i).feedbackSlow
+      imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+      imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+      imp.io.s2Resp.get.head.fuType := 0.U
+      imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+      imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
     case _ =>
   }
-  val vecMemIQs = issueQueues.filter(iq => iq.param.VlduCnt > 0)
-  vecMemIQs.zipWithIndex.foreach {
+  val vecStuIQs = issueQueues.filter(iq => iq.param.VstuCnt > 0)
+  vecStuIQs.zipWithIndex.foreach {
     case (imp: IssueQueueVecMemImp, i) =>
       imp.io.memIO.get.feedbackIO.head := io.vstuFeedback.get(i)
       imp.io.memIO.get.checkWait := 0.U.asTypeOf(imp.io.memIO.get.checkWait)
       imp.io.memIO.get.lqDeqPtr.get := io.lqDeqPtr.get
       imp.io.memIO.get.sqDeqPtr.get := io.sqDeqPtr.get
+      val feedBack = io.vstuFeedback.get(i).feedbackSlow
+      imp.io.snResp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+      imp.io.snResp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+      imp.io.snResp.get.head.fuType := 0.U
+      imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+      imp.io.snResp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
     case _ =>
   }
   // other wakeup, int vec need WB wakeup
@@ -472,39 +484,16 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.int(firstMemExu + i)(j)
         val shouldLdCancel = LoadShouldCancel(toMemExuInput.bits.loadDependency, io.ldCancel)
-        val needIssueTimeout = toMemExuInput.bits.params.hasLoadExu
-        val issueTimeout =
-          if (needIssueTimeout)
-            Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, toMemExuInput.fire)._2
-          else
-            false.B
-
-        NewPipelineConnect(
-          toMemExuInput, toMem(i)(j), toMem(i)(j).fire,
-          Mux(
-            toMemExuInput.fire,
-            toMemExuInput.bits.robIdx.needFlush(flushCopyReg2) || shouldLdCancel,
-            toMem(i)(j).bits.robIdx.needFlush(flushCopyReg2) || issueTimeout
-          ),
-          Option(s"pipeTo${toMemExuInput.bits.params.name}")
-        )
+        toMemExuInput.ready := true.B
+        toMem(i)(j).valid := RegNext(toMemExuInput.valid && !(toMemExuInput.bits.robIdx.needFlush(flushCopyReg2) || shouldLdCancel))
+        toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
-        if (needIssueTimeout) {
-          thisIQ.io.finalIssueResp.get(j).valid := issueTimeout
-          thisIQ.io.finalIssueResp.get(j).bits.fuType := toMem(i)(j).bits.fuType
-          thisIQ.io.finalIssueResp.get(j).bits.resp := RespType.block
-          thisIQ.io.finalIssueResp.get(j).bits.robIdx := toMem(i)(j).bits.robIdx
-          thisIQ.io.finalIssueResp.get(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
-          thisIQ.io.finalIssueResp.get(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
-          thisIQ.io.finalIssueResp.get(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
-        }
-        if (thisIQ.io.memAddrIssueResp.nonEmpty) {
-          thisIQ.io.memAddrIssueResp.get(j).valid := toMem(i)(j).fire && FuType.isLoad(toMem(i)(j).bits.fuType)
-          thisIQ.io.memAddrIssueResp.get(j).bits.fuType := toMem(i)(j).bits.fuType
-          thisIQ.io.memAddrIssueResp.get(j).bits.robIdx := toMem(i)(j).bits.robIdx
-          thisIQ.io.memAddrIssueResp.get(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
-          thisIQ.io.memAddrIssueResp.get(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
-          thisIQ.io.memAddrIssueResp.get(j).bits.resp := RespType.success // for load inst, firing at toMem means issuing successfully
+        if (thisIQ.io.s0Resp.nonEmpty) {
+          thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
+          thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.fuType
+          thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
+          thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
         }
       }
     }
@@ -666,46 +655,22 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val toMem = Wire(io.toMemExu.get.cloneType)
     io.toMemExu.get <> toMem
     val firstMemExu = bypassNetwork.io.toExus.vf.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
-    println(s"[Regin_int] firstMemExu = $firstMemExu")
+    println(s"[Regin_vec] firstMemExu = $firstMemExu")
     for (i <- toMem.indices) {
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.vf(firstMemExu + i)(j)
-        val needIssueTimeout = toMemExuInput.bits.params.hasVLoadFu
-        val issueTimeout =
-          if (needIssueTimeout)
-            Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, toMemExuInput.fire)._2
-          else
-            false.B
-
-        NewPipelineConnect(
-          toMemExuInput, toMem(i)(j), toMem(i)(j).fire,
-          Mux(
-            toMemExuInput.fire,
-            toMemExuInput.bits.robIdx.needFlush(flushCopyReg2),
-            toMem(i)(j).bits.robIdx.needFlush(flushCopyReg2) || issueTimeout
-          ),
-          Option(s"pipeTo${toMemExuInput.bits.params.name}")
-        )
+        toMemExuInput.ready := true.B
+        toMem(i)(j).valid := RegNext(toMemExuInput.valid && !toMemExuInput.bits.robIdx.needFlush(flushCopyReg2))
+        toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
-        if (needIssueTimeout) {
-          thisIQ.io.finalIssueResp.get(j).valid := issueTimeout
-          thisIQ.io.finalIssueResp.get(j).bits.fuType := toMem(i)(j).bits.fuType
-          thisIQ.io.finalIssueResp.get(j).bits.resp := RespType.block
-          thisIQ.io.finalIssueResp.get(j).bits.robIdx := toMem(i)(j).bits.robIdx
-          thisIQ.io.finalIssueResp.get(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
-          thisIQ.io.finalIssueResp.get(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
-          thisIQ.io.finalIssueResp.get(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
-        }
-        if (thisIQ.io.vecLoadIssueResp.nonEmpty) {
-          thisIQ.io.vecLoadIssueResp.get(j) match {
+        if (thisIQ.io.s0Resp.nonEmpty) {
+          thisIQ.io.s0Resp.get(j) match {
             case resp =>
-              resp.valid := toMem(i)(j).fire && VlduType.isVecLd(toMem(i)(j).bits.fuOpType)
-              resp.bits.fuType := toMem(i)(j).bits.fuType
-              resp.bits.robIdx := toMem(i)(j).bits.robIdx
-              resp.bits.uopIdx.get := toMem(i)(j).bits.vpu.get.vuopIdx
-              resp.bits.sqIdx.get := toMem(i)(j).bits.sqIdx.get
-              resp.bits.lqIdx.get := toMem(i)(j).bits.lqIdx.get
-              resp.bits.resp := RespType.success
+              resp.failed := toMem(i)(j).valid && !toMem(i)(j).ready
+              resp.finalSuccess := toMem(i)(j).fire && FuType.isVLoad(toMem(i)(j).bits.fuType)
+              resp.fuType := toMem(i)(j).bits.fuType
+              resp.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
+              resp.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
           }
         }
       }

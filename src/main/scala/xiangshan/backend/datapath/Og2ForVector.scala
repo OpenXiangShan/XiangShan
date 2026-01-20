@@ -7,7 +7,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
-import xiangshan.backend.issue.EntryBundles.{EntryDeqRespBundle, RespType}
+import xiangshan.backend.issue.EntryBundles.{IssueQueueRespBundle, RespType}
 import xiangshan.backend.issue._
 import xiangshan.mem.{SqPtr, LqPtr}
 
@@ -55,18 +55,17 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
       toIQ.zipWithIndex.foreach {
         case (og2Resp, exuId) =>
           val og2Failed = s2_toExuValid(iqId)(exuId) && !toExuReady(iqId)(exuId)
-          og2Resp.valid := s2_toExuValid(iqId)(exuId)
-          og2Resp.bits.robIdx := s2_toExuData(iqId)(exuId).robIdx
-          og2Resp.bits.uopIdx.foreach(_ := s2_toExuData(iqId)(exuId).vpu.get.vuopIdx)
-          og2Resp.bits.resp := Mux(og2Failed, RespType.block, 
-            if (og2Resp.bits.params match { case x => x.isVecMemIQ })
-              RespType.uncertain
+          // VecMem need oldest uop, otherwise s0 will be not ready
+          og2Resp.failed := (if (og2Resp.params.isVecMemIQ) false.B else og2Failed)
+          og2Resp.finalSuccess := (
+            if (og2Resp.params match { case x => x.isVecMemIQ })
+              false.B
             else
-              RespType.success
+              s2_toExuValid(iqId)(exuId) && toExuReady(iqId)(exuId)
           )
-          og2Resp.bits.fuType := s2_toExuData(iqId)(exuId).fuType
-          og2Resp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
-          og2Resp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+          og2Resp.fuType := s2_toExuData(iqId)(exuId).fuType
+          og2Resp.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
+          og2Resp.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
       }
   }
   io.toBypassNetworkImmInfo := io.fromOg1ImmInfo.zip(s1_validVec2.flatten).map{
