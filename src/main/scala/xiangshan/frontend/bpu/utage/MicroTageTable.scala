@@ -58,6 +58,8 @@ class MicroTageTable(
     class MicroTageTrain extends Bundle {
       val startPc:                PrunedAddr                = Input(new PrunedAddr(VAddrBits))
       val foldedPathHistForTrain: PhrAllFoldedHistories     = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      val readStartPc:            PrunedAddr                = Input(new PrunedAddr(VAddrBits))
+      val readFoldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
       val read:                   Vec[Valid[MicroTageRead]] = Output(Vec(numWay, Valid(new MicroTageRead)))
       val update: Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
       val alloc:  Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo))
@@ -120,10 +122,14 @@ class MicroTageTable(
   private val (trainIdx, trainTag) = computeHash(io.train.startPc, io.train.foldedPathHistForTrain, tableId)
   private val trainReadEntries     = entries(trainIdx)
   private val trainReadUseful      = usefulEntries(trainIdx)
+
+  private val (t0_readTrainIdx, t0_readTrainTag) = computeHash(io.train.readStartPc, io.train.readFoldedPathHistForTrain, tableId)
+  private val t0_trainReadEntries = entries(t0_readTrainIdx)
+  private val t0_trainReadUseful  = usefulEntries(t0_readTrainIdx)
   for (way <- 0 until numWay) {
-    val entry  = trainReadEntries(way)
-    val useful = trainReadUseful(way)
-    val hit    = entry.valid && (entry.startPcTag === s0_tag)
+    val entry  = t0_trainReadEntries(way)
+    val useful = t0_trainReadUseful(way)
+    val hit    = entry.valid && (entry.startPcTag === t0_readTrainTag)
     io.train.read(way).valid            := hit
     io.train.read(way).bits.taken       := entry.takenCtr.isPositive
     io.train.read(way).bits.cfiPosition := entry.posTag
