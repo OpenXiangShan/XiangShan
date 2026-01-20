@@ -407,14 +407,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // find youngest entry, which is one-hot
       // Find youngest store (highest index = most recent)
       //   Reverse vector so we can find leftmost 1 (highest index)
-      val (selectLowOH, multiMatchLow)    = findYoungest(Reverse(canForwardLow))
-      val (forwardHighOH, multiMatchHigh) = findYoungest(Reverse(canForwardHigh))
+      val (selectLowOH, _)             = findYoungest(Reverse(canForwardLow))
+      val (forwardHighOH, _)           = findYoungest(Reverse(canForwardHigh))
       val selectHighOH                 = forwardHighOH & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt
       val selectOH                     = Reverse(selectLowOH | selectHighOH) // index higher, mean it younger
       val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
       val selectCtrlEntry              = Mux1H(selectOH, io.ctrlEntriesIn)
       val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
-      val multiMatch                   = multiMatchLow | multiMatchHigh
+      val (_, multiMatch)              = findYoungest(canForwardLow | canForwardHigh) // don't care
 
       // select offset generate
       val byteSelectOffset   = s1LoadStart - selectDataEntry.byteStart
@@ -524,8 +524,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(ageMaskHigh)
         dontTouch(canForwardLow)
         dontTouch(canForwardHigh)
-        dontTouch(multiMatchLow)
-        dontTouch(multiMatchHigh)
+        dontTouch(multiMatch)
         dontTouch(addrInvLowOH)
         dontTouch(addrInvHighOH)
         dontTouch(selectOH)
