@@ -532,7 +532,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     io.bypass(w).s1Resp.valid := s1RespValid
     io.bypass(w).s1Resp.bits.paddr := RegEnable(matchedPaddr, respMatch)
     io.bypass(w).s2Resp.valid := s2RespValid
-    io.bypass(w).s2Resp.bits.data := RegEnable(s1RespData, s1RespValid)
+    io.bypass(w).s2Resp.bits.data := RegEnable(Fill(VLEN / XLEN, s1RespData), s1RespValid)
     io.bypass(w).s2Resp.bits.nderr := RegEnable(s1RespNderr, s1RespValid)
     io.bypass(w).s2Resp.bits.derr := RegEnable(s1RespDerr, s1RespValid)
   }
