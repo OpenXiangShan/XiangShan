@@ -282,7 +282,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   val noAlignCheck = Cat(noAlignCheckSources.map(_.fire)).orR || isPrefetch // unalign tail, hardware & software prefetch
   val needAlignCheck = !noAlignCheck
 
-  val alignCheckResults = needAlignCheckSources.map(s => alignCheck(s.bits.bankOffset(), s.bits.size)).unzip3
+  val alignCheckResults = needAlignCheckSources.map(s => alignCheck(s.bits.bankOffset(), s.bits.size, s.valid)).unzip3
   val _align = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._1)
   val _crossWordInsideBank = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._2)
   val _crossBank = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._3)
@@ -295,7 +295,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   sink.bits.unalignHead.get := crossBank
   sink.bits.readWholeBank.get := readWholeBank
 
-  def alignCheck(bankOffset: UInt, size: UInt): (Bool, Bool, Bool) = {
+  def alignCheck(bankOffset: UInt, size: UInt, valid: Bool): (Bool, Bool, Bool) = {
     require(bankOffset.getWidth == DCacheVWordOffset)
     require(size.getWidth == MemorySize.Size.width)
     // 1.1 Align check
@@ -305,7 +305,7 @@ class LoadUnitS0(param: ExeUnitParams)(
       "b10".U -> (bankOffset.take(2) === 0.U),
       "b11".U -> (bankOffset.take(3) === 0.U)
     ))
-    assert(size =/= MemorySize.Q.U || bankOffset === 0.U)
+    assert(size =/= MemorySize.Q.U || bankOffset === 0.U || !valid)
     // 1.2 Bank bound check
     // 1.3 Word bound check
     val upBoundBankOffset = LookupTree(size, List(
