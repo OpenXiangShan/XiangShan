@@ -112,10 +112,7 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    // NOTE: if crossPage, we need to drop the entries to satisfy Ifu/ICache's requirement,
-    //       so we also can drop read req to save power.
-    // FIXME: but this might be timing critical, need to be verified.
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i) && !s0_crossPage
+    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
     b.io.read.req.bits.setIdx := s0_setIdx
   }
 
