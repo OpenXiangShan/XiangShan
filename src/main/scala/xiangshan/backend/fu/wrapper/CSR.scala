@@ -385,7 +385,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.instrAddrTransType := csrMod.io.status.instrAddrTransType
   csrOut.criticalErrorState := csrMod.io.status.criticalErrorState
 
-  csrToDecode := csrMod.io.toDecode
+  csrToDecode := RegNext(csrMod.io.toDecode)
 }
 
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
