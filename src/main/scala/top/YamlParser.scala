@@ -97,7 +97,7 @@ object YamlParser {
     yamlConfig.EnableCHIAsyncBridge.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(
-          EnableCHIAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 16, sync = 3, safe = false))
+          EnableCHIAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 16, sync = 3, safe = true))
         )
       })
     }
