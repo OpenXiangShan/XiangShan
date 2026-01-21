@@ -112,12 +112,9 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   * */
   val wlineflag          = Bool() // store write the whole cache line.
 
-  // vector
-  val isvec              = Bool() // indicate vector request.
-
   // misalign
   val isUnsalign         = Bool()
-  val unalignWith16Byte  = Bool()
+  val unalignWithin16Byte = Bool()
 
   // ctrl signal
   val isLastRequest      = Bool() /* It's last request to write to storeQueue. if is normal request, it will be true,

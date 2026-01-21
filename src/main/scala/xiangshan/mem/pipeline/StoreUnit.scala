@@ -412,25 +412,36 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // scalar store and scalar load nuke check, and also other purposes
   //A 128-bit aligned unaligned memory access requires changing the unaligned flag bit in sq
   //TODO: FIX this connect!!
-  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch
-  io.toLsq.bits           := DontCare
+  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch && (!s1_out.isMisalign || s1_frm_mabuf)
   io.toLsq.bits.paddr     := s1_out.paddr
   io.toLsq.bits.vaddr     := s1_out.vaddr
   io.toLsq.bits.cacheMiss := false.B // will be set in stage 2
   io.toLsq.bits.tlbMiss   := s1_out.tlbMiss
   io.toLsq.bits.wlineflag := s1_out.wlineflag
   io.toLsq.bits.mask      := s1_out.mask
-  io.toLsq.bits.size          := s1_out.alignedType
-  connectSamePort(io.toLsq.bits.uop, s1_out.uop)
+  io.toLsq.bits.size      := s1_out.alignedType
+  io.toLsq.bits.uop.sqIdx     := s1_out.uop.sqIdx
+  io.toLsq.bits.uop.robIdx    := s1_out.uop.robIdx
+  io.toLsq.bits.uop.fuOpType  := s1_out.uop.fuOpType
+  io.toLsq.bits.uop.ftqPtr    := s1_out.uop.ftqPtr
+  io.toLsq.bits.uop.ftqOffset := s1_out.uop.ftqOffset
+  io.toLsq.bits.nc            := DontCare // will be set in stage 2
+  io.toLsq.bits.mmio          := DontCare // will be set in stage 2
+  io.toLsq.bits.memBackTypeMM := DontCare // will be set in stage 2
+  io.toLsq.bits.hasException  := DontCare // will be set in stage 2
+  io.toLsq.bits.af            := DontCare // will be set in stage 2
+  io.toLsq.bits.uop.pc.foreach(_ := s1_out.uop.pc)
+  io.toLsq.bits.uop.debugInfo.foreach(_  := s1_out.uop.perfDebugInfo)
+  io.toLsq.bits.uop.debug_seqNum.foreach(_ := s1_out.uop.debug_seqNum)
 
 
   //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
   // if it was unalign splited, first request will be false, second will be true.
   // Currently, it will be always true. After implement new unaligned process logic, it will be assign.
-  io.toLsq.bits.isLastRequest     := true.B
-  io.toLsq.bits.cross4KPage       := false.B
-  io.toLsq.bits.unalignWith16Byte := false.B
-  io.toLsq.bits.isUnsalign        := false.B
+  io.toLsq.bits.isLastRequest       := true.B //TODO: support cross page unalign feature!
+  io.toLsq.bits.cross4KPage         := false.B
+  io.toLsq.bits.unalignWithin16Byte := s1_out.misalignWith16Byte
+  io.toLsq.bits.isUnsalign          := s1_out.isMisalign
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_out.nc || s1_in.uop.robIdx.needFlush(io.redirect))
@@ -522,12 +533,12 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
   val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
   //TODO: when implement new Unalign, it need to assign
-  io.toStoreUnalignQueue.valid              := false.B
+  io.toStoreUnalignQueue.valid              := false.B //TODO: support cross page unalign feature!
   io.toStoreUnalignQueue.bits.sqIdx         := s2_out.uop.sqIdx
   io.toStoreUnalignQueue.bits.paddr         := s2_out.paddr
   io.toStoreUnalignQueue.bits.robIdx        := s2_out.uop.robIdx
-  io.toStoreUnalignQueue.bits.isLastRequest := true.B  // will be assign later
   io.toStoreUnalignQueue.bits.cross4KPage   := false.B
+  io.toStoreUnalignQueue.bits.isLastRequest := s2_frm_mabuf && s1_out.isFinalSplit || !s2_out.isMisalign
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -549,18 +560,25 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
 
   // mmio and exception TODO:
-  io.toLsqRe := DontCare // I don't Care rest signal
-  connectSamePort(io.toLsqRe, s2_out)
-  connectSamePort(io.toLsqRe, s2_out.uop)
-  io.toLsqRe.isLastRequest := true.B // will be use in unalign
-  io.toLsqRe.af := s2_out.af && s2_valid && !s2_kill
-  io.toLsqRe.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
-  io.toLsqRe.nc := s2_out.nc
-
+  io.toLsqRe.memBackTypeMM   := s2_out.memBackTypeMM
+  io.toLsqRe.isLastRequest   := true.B //TODO: support cross page unalign feature!
+  io.toLsqRe.af              := s2_out.af && s2_valid && !s2_kill
+  io.toLsqRe.mmio            := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  io.toLsqRe.nc              := s2_out.nc
   // prefetch related
-  io.toLsqRe.cacheMiss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
-  io.toLsqRe.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
+  io.toLsqRe.cacheMiss       := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+  io.toLsqRe.hasException    := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
     TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill
+  io.toLsqRe.paddr               := DontCare
+  io.toLsqRe.vaddr               := DontCare
+  io.toLsqRe.tlbMiss             := DontCare
+  io.toLsqRe.wlineflag           := DontCare
+  io.toLsqRe.mask                := DontCare
+  io.toLsqRe.size                := DontCare
+  io.toLsqRe.uop                 := DontCare
+  io.toLsqRe.cross4KPage         := false.B
+  io.toLsqRe.unalignWithin16Byte := s2_out.misalignWith16Byte
+  io.toLsqRe.isUnsalign          := s2_out.isMisalign
 
 
   // RegNext prefetch train for better timing
