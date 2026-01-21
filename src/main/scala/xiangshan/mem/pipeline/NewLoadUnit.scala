@@ -1081,7 +1081,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.rawNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
   io.rawNukeQueryReq.bits := nukeQueryReq
 
-  io.prefetchTrain.valid := pipeIn.valid && !exception && !isUncache && !isUncacheReplay && in.isFirstIssue()
+  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay && in.isFirstIssue()
   io.prefetchTrain.bits := DontCare
   io.prefetchTrain.bits.uop := uop
   io.prefetchTrain.bits.vaddr := in.vaddr
