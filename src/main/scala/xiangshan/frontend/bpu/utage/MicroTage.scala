@@ -63,8 +63,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Predict
   tables.zipWithIndex.foreach {
     case (t, idx) =>
-      t.req.startPc        := io.startPc
-      t.req.foldedPathHist := io.foldedPathHist
+      t.req.startPc        := RegEnable(io.startPc, io.stageCtrl.s0_fire)
+      t.req.foldedPathHist := RegEnable(io.foldedPathHist, io.stageCtrl.s0_fire)
       idx match {
         case 0 => t.usefulReset := lowTickCounter(LowTickWidth)
         case 1 => t.usefulReset := highTickCounter(HighTickWidth)
@@ -94,7 +94,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
   prediction.valid := io.enable && histTableHitMap.reduce(_ || _) &&
-    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
+    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative) && io.stageCtrl.s1_fire
   // prediction.valid            := false.B
   prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
   prediction.bits.cfiPosition := finalPredCfiPosition
@@ -106,8 +106,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   predMeta.bits.histTableCfiPositionVec := histTableCfiPositionVec
   predMeta.bits.baseTaken               := false.B // no use, only for placeholder.
   predMeta.bits.baseCfiPosition         := 0.U     // no use, only for placeholder.
-  io.prediction := RegEnable(prediction, 0.U.asTypeOf(Valid(new MicroTagePrediction)), io.stageCtrl.s0_fire)
-  io.meta       := RegEnable(predMeta, 0.U.asTypeOf(Valid(new MicroTageMeta)), io.stageCtrl.s0_fire)
+  io.prediction                         := prediction
+  io.meta                               := predMeta
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_fire                    = io.fastTrain.get.valid && io.enable
