@@ -521,7 +521,13 @@ class XiangShan(object):
         ]
         zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return zcb_test
-
+    def __get_ci_iopmptest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/iopmp"
+        workloads = [
+            "iopmp-riscv64-xs.bin"
+        ]
+        iopmp_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return iopmp_test
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -606,7 +612,8 @@ class XiangShan(object):
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
-            "zcb-test": self.__get_ci_zcbtest
+            "zcb-test": self.__get_ci_zcbtest,
+            "iopmp-test": self.__get_ci_iopmptest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -636,7 +643,8 @@ class XiangShan(object):
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
-            "zcb-test": self.__get_ci_zcbtest
+            "zcb-test": self.__get_ci_zcbtest,
+            "iopmp-test": self.__get_ci_iopmptest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
