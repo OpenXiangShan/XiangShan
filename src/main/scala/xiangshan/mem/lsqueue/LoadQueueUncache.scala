@@ -228,9 +228,9 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
   }
-  io.ncWakeup.valid := io.uncache.resp.fire && req.nc
+  io.ncWakeup.valid := io.uncache.resp.fire && req.nc && !needFlush && !needFlushReg
   io.ncWakeup.bits := req.uop.lqIdx
-  io.mmioWakeup.valid := io.uncache.resp.fire && req.mmio
+  io.mmioWakeup.valid := io.uncache.resp.fire && req.mmio && !needFlush && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
   io.exception.valid := writeback
