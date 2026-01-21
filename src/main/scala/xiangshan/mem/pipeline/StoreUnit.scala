@@ -76,6 +76,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val sqCommitRobIdx = Input(new RobPtr)
 
     val s0_s1_s2_valid = Output(Bool())
+    val vecMisalignBlockScalaIssue = Input(Bool())
+
   })
 
   PerfCCT.updateInstPos(io.stin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
@@ -87,7 +89,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // stage 0
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
-  val s0_iss_valid        = io.stin.valid
+  val s0_iss_valid        = io.stin.valid && !io.vecMisalignBlockScalaIssue
   val s0_prf_valid        = io.prefetch_req.valid && io.dcache.req.ready
   val s0_vec_valid        = io.vecstin.valid
   val s0_ma_st_valid      = io.misalign_stin.valid
