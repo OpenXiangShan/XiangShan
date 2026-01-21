@@ -418,7 +418,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_resolveMeta.sc     := sc.io.meta
   s3_resolveMeta.ittage := ittage.io.meta
   s3_resolveMeta.phr    := s3_phrMeta
-  s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
+  // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
+  s3_resolveMeta.utage := s3_utageMeta
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
   s3_commitMeta.ras := ras.io.commitMeta

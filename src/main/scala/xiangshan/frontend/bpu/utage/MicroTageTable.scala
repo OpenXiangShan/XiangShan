@@ -56,13 +56,11 @@ class MicroTageTable(
       val cfiPosition: UInt = UInt(CfiPositionWidth.W)
     }
     class MicroTageTrain extends Bundle {
-      val startPc:                PrunedAddr                = Input(new PrunedAddr(VAddrBits))
-      val foldedPathHistForTrain: PhrAllFoldedHistories     = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-      val readStartPc:            PrunedAddr                = Input(new PrunedAddr(VAddrBits))
-      val readFoldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-      val read:                   Vec[Valid[MicroTageRead]] = Output(Vec(numWay, Valid(new MicroTageRead)))
-      val update: Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
-      val alloc:  Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo))
+      val t0_startPc:                PrunedAddr                = Input(new PrunedAddr(VAddrBits))
+      val t0_foldedPathHistForTrain: PhrAllFoldedHistories     = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      val t0_read:                   Vec[Valid[MicroTageRead]] = Output(Vec(numWay, Valid(new MicroTageRead)))
+      val t1_update: Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
+      val t1_alloc:  Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo))
     }
     val req:         MicroTageReq                   = Input(new MicroTageReq)
     val resps:       Vec[Valid[MicroTageTablePred]] = Output(Vec(numWay, Valid(new MicroTageTablePred)))
@@ -119,42 +117,42 @@ class MicroTageTable(
   }
 
   // train / write logic
-  private val (trainIdx, trainTag) = computeHash(io.train.startPc, io.train.foldedPathHistForTrain, tableId)
-  private val trainReadEntries     = entries(trainIdx)
-  private val trainReadUseful      = usefulEntries(trainIdx)
-
-  private val (t0_readTrainIdx, t0_readTrainTag) = computeHash(io.train.readStartPc, io.train.readFoldedPathHistForTrain, tableId)
-  private val t0_trainReadEntries = entries(t0_readTrainIdx)
-  private val t0_trainReadUseful  = usefulEntries(t0_readTrainIdx)
+  private val (t0_trainIdx, t0_trainTag) = computeHash(io.train.t0_startPc, io.train.t0_foldedPathHistForTrain, tableId)
+  private val t0_trainReadEntries        = entries(t0_trainIdx)
+  private val t0_trainReadUseful         = usefulEntries(t0_trainIdx)
   for (way <- 0 until numWay) {
     val entry  = t0_trainReadEntries(way)
     val useful = t0_trainReadUseful(way)
-    val hit    = entry.valid && (entry.startPcTag === t0_readTrainTag)
-    io.train.read(way).valid            := hit
-    io.train.read(way).bits.taken       := entry.takenCtr.isPositive
-    io.train.read(way).bits.cfiPosition := entry.posTag
-    io.train.read(way).bits.useful      := useful.value
+    val hit    = entry.valid && (entry.startPcTag === t0_trainTag)
+    io.train.t0_read(way).valid            := hit
+    io.train.t0_read(way).bits.taken       := entry.takenCtr.isPositive
+    io.train.t0_read(way).bits.cfiPosition := entry.posTag
+    io.train.t0_read(way).bits.useful      := useful.value
   }
 
+  private val t1_trainIdx         = RegNext(t0_trainIdx)
+  private val t1_trainTag         = RegNext(t0_trainTag)
+  private val t1_trainReadEntries = entries(t1_trainIdx)
+  private val t1_trainReadUseful  = usefulEntries(t1_trainIdx)
   // For each way, prepare updated entry and useful counter
   for (way <- 0 until numWay) {
-    val oldEntry    = trainReadEntries(way)
+    val oldEntry    = t1_trainReadEntries(way)
     val oldTakenCtr = oldEntry.takenCtr
-    val oldUseful   = trainReadUseful(way)
+    val oldUseful   = t1_trainReadUseful(way)
 
     // Update logic: either alloc or update
-    val doAlloc  = io.train.alloc.valid && io.train.alloc.bits.wayMask(way)
-    val doUpdate = io.train.update(way).valid && io.train.update(way).bits.updateValid
+    val doAlloc  = io.train.t1_alloc.valid && io.train.t1_alloc.bits.wayMask(way)
+    val doUpdate = io.train.t1_update(way).valid && io.train.t1_update(way).bits.updateValid
 
     // New entry values
     val newEntry = Wire(new MicroTageEntry)
     newEntry.valid      := true.B
-    newEntry.startPcTag := trainTag
-    newEntry.posTag     := Mux(doAlloc, io.train.alloc.bits.cfiPosition, oldEntry.posTag)
+    newEntry.startPcTag := t1_trainTag
+    newEntry.posTag     := Mux(doAlloc, io.train.t1_alloc.bits.cfiPosition, oldEntry.posTag)
     newEntry.takenCtr := Mux(
       doAlloc,
-      Mux(io.train.alloc.bits.taken, TakenCounter.WeakPositive, TakenCounter.WeakNegative),
-      oldTakenCtr.getUpdate(io.train.update(way).bits.updateTaken)
+      Mux(io.train.t1_alloc.bits.taken, TakenCounter.WeakPositive, TakenCounter.WeakNegative),
+      oldTakenCtr.getUpdate(io.train.t1_update(way).bits.updateTaken)
     )
 
     // Useful counter update
@@ -162,17 +160,17 @@ class MicroTageTable(
       doAlloc,
       if (tableId == 0) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
       Mux(
-        io.train.update(way).bits.usefulValid,
-        oldUseful.getUpdate(io.train.update(way).bits.needUseful),
+        io.train.t1_update(way).bits.usefulValid,
+        oldUseful.getUpdate(io.train.t1_update(way).bits.needUseful),
         oldUseful
       )
     )
 
     when(doAlloc || doUpdate) {
-      trainReadEntries(way) := newEntry
+      t1_trainReadEntries(way) := newEntry
     }
-    when(doAlloc || (io.train.update(way).bits.usefulValid && io.train.update(way).valid)) {
-      trainReadUseful(way) := newUseful
+    when(doAlloc || (io.train.t1_update(way).valid && io.train.t1_update(way).bits.usefulValid)) {
+      t1_trainReadUseful(way) := newUseful
     }
   }
 
@@ -190,5 +188,5 @@ class MicroTageTable(
     }
   }
 
-  io.debugIdx := trainIdx.pad(log2Ceil(MaxNumSets))
+  io.debugIdx := t1_trainIdx.pad(log2Ceil(MaxNumSets))
 }
