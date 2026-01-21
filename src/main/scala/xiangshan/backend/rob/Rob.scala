@@ -1140,8 +1140,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       needUpdate(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
-  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(8))
-  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(8))
+  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(bankNum))
+  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(bankNum))
   // end update robBanksRdata
 
   // interrupt_safe

@@ -692,8 +692,6 @@ object Bundles {
       this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.loadDependency := exuInput.loadDependency.getOrElse(0.U.asTypeOf(this.loadDependency))
       this.is0Lat := exuInput.is0Lat.getOrElse(false.B)
-//      this.pdest := exuInput.pdest // width may be diffrent in MinimalConfig
-//      println(s"this.pdest.getWidth = ${this.pdest.getWidth} exuInput.pdest.getWidth = ${exuInput.pdest.getWidth}")
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
       connectSamePort(this, exuInput)
     }
