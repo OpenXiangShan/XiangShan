@@ -320,7 +320,11 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
   val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
   val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
-  s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
+  // Check s0 s1 same region, avoid duplicate alloc
+  val s1_s0_same_region = region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)
+  // s1 replace the s0 region entry
+  val s1_s0_harzard = s1_index === OHToUInt(array zip valids map { case (e, v) => e.tag_match(v, true.B, s0_region_tag) })
+  s0_can_accept := !(s1_valid && s1_alloc && (s1_s0_same_region || s1_s0_harzard))
 
   when(s1_alloc) {
     // alloc a new entry
