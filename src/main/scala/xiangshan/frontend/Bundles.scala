@@ -381,7 +381,7 @@ object BlameBpuSource {
         // If cond before, TAGE mispredicts
         // If cond after, should trigger assertion, TODO
         blame := TAGE
-      }.elsewhen(attr.isReturn) {
+      }.elsewhen(attr.isReturn && pred.cfiPosition === branch.cfiPosition) {
         blame := RAS
       }.otherwise {
         // Other branch type mismatch

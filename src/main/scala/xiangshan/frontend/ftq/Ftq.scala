@@ -477,6 +477,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
     )
   )
+
+  XSPerfAccumulate(
+    "commit_branch_mispredicts_s1_mispred_s1_source",
+    commit && commitPerfMeta.mispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
+    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
+  )
   XSPerfAccumulate(
     "commit_branch_mispredicts_s1_source",
     commit && commitPerfMeta.mispredict,
