@@ -71,10 +71,15 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
   s3_commonHR.valid := true.B
-  s3_commonHR.ghr   := getNewGhr(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
-  s3_commonHR.bw := getNewBW(commonHR.bw, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond, s3_bwTaken)(
-    BWHistoryLength
-  )
+  s3_commonHR.ghr   := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
+  s3_commonHR.bw := getNewHR(
+    commonHR.bw,
+    s3_numLess,
+    s3_numHit,
+    s3_taken,
+    s3_firstTakenIsCond,
+    Option(s3_taken && s3_bwTaken)
+  )(BWHistoryLength)
 
   /*
    * redirect recovery CommonHR
@@ -99,8 +104,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val r0_numHit   = PopCount(r0_oldHits)
   private val r0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   r0_commonHR.valid := false.B
-  r0_commonHR.ghr   := getNewGhr(r0_metaGhr, r0_numLess, r0_numHit, r0_taken, r0_isCond)(GhrHistoryLength)
-  r0_commonHR.bw    := getNewBW(r0_metaBW, r0_numLess, r0_numHit, r0_taken, r0_isCond, r0_bwTaken)(BWHistoryLength)
+  r0_commonHR.ghr   := getNewHR(r0_metaGhr, r0_numLess, r0_numHit, r0_taken, r0_isCond)(GhrHistoryLength)
+  r0_commonHR.bw := getNewHR(r0_metaBW, r0_numLess, r0_numHit, r0_taken, r0_isCond, Option(r0_bwTaken && r0_taken))(
+    BWHistoryLength
+  )
 
   // update from redirect or update
   when(r0_valid) {
