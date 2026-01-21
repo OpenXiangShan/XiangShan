@@ -211,7 +211,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_fire  = RegNext(t0_fire)
+  private val t1_fire  = RegNext(t0_fire, init = false.B)
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_meta = t1_train.abtbMeta

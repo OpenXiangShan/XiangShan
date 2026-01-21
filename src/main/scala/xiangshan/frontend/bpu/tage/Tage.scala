@@ -267,7 +267,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute temp tag
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_fire     = RegNext(t0_fire)
+  private val t1_fire     = RegNext(t0_fire, init = false.B)
   private val t1_startPc  = RegEnable(t0_startPc, t0_fire)
   private val t1_branches = RegEnable(t0_branches, t0_fire)
 
@@ -292,7 +292,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - allocate a new entry when mispredict
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t2_fire     = RegNext(t1_fire)
+  private val t2_fire     = RegNext(t1_fire, init = false.B)
   private val t2_branches = RegEnable(t1_branches, t1_fire)
   private val t2_startPc  = RegEnable(t1_startPc, t1_fire)
   dontTouch(t2_startPc)

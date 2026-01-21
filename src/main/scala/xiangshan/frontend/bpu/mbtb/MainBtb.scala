@@ -127,7 +127,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_fire  = RegNext(t0_fire) && io.enable
+  private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_startPc = t1_train.startPc
