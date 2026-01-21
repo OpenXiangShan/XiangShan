@@ -38,6 +38,7 @@ sealed trait HasLoadPipeBundleParam {
   def replayToLRQ: Boolean = false
   def replayFromLRQ: Boolean = false
   def hasVector: Boolean = false
+  def hasS2PreProcess: Boolean = false
   def hasS3PreProcess: Boolean = false
   def hasS4PreProcess: Boolean = false
   def hasWritebacked: Boolean = false
@@ -112,9 +113,10 @@ class LoadPipeBundle(
   val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
 
   // To optimize timing, part of the combinational logic is precomputed in advance
+  // S1 -> S2
+  val shouldFastReplay = Option.when(param.hasS2PreProcess)(Bool())
   // S2 -> S3
   val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
-  val shouldFastReplay = Option.when(param.hasS3PreProcess)(Bool())
   val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())
@@ -189,6 +191,7 @@ case class LoadStageIOParam()(
   override val replayToLRQ: Boolean = afterS2
   override val replayFromLRQ: Boolean = true
   override val hasVector: Boolean = true
+  override val hasS2PreProcess: Boolean = afterS1
   override val hasS3PreProcess: Boolean = afterS2
   override val hasS4PreProcess: Boolean = afterS3
   // override val hasWritebacked: Boolean =

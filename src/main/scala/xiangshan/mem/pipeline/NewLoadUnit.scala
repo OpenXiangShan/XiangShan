@@ -620,6 +620,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   unalignTail.unalignHead.get := false.B
   unalignTail.readWholeBank.get := true.B
 
+  val unalignTailNack = unalignTailInjectValid && !io.unalignTail.ready
+
   /**
     * Nuke check with StoreUnit
     */
@@ -671,6 +673,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
+  stageInfo.shouldFastReplay.get := unalignTailNack
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -708,7 +711,6 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   io.unalignTail.valid := unalignTailInjectValid
   io.unalignTail.bits := unalignTail
-  assert(!io.unalignTail.valid || io.unalignTail.ready)
 
   io.prefetchTrainHint := pipeIn.valid && !kill && in.isFirstIssue()
 
@@ -745,6 +747,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
+    val unalignTailValid = Output(Bool())
 
     // PMP result
     val pmp = Flipped(new PMPRespBundle)
@@ -988,7 +991,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   /**
     * Load replay
     */
-  val shouldReplay = cause.asUInt.orR // including fast replay
+  val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get // including fast replay
   cause(C_UNCACHE) := troubleMaker && Mux(
     isUncacheReplay,
     isNCReplay && (sqDataInvalid || rarNack || rawNack || nuke || forwardInvalid),
@@ -1054,7 +1057,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.tlbFull.get := io.tlbHint.full
   // Pre-process for s3
   stageInfo.troubleMaker.get := troubleMaker
-  stageInfo.shouldFastReplay.get := fastReplay
+  stageInfo.shouldFastReplay.get := in.shouldFastReplay.get || fastReplay
   stageInfo.matchInvalid.get := matchInvalid && troubleMaker
   stageInfo.shouldWakeup.get := shouldWakeup
   stageInfo.shouldWriteback.get := shouldWriteback
@@ -1067,6 +1070,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   io_pipeOut.get.valid := pipeOutValid
   io_pipeOut.get.bits := pipeOutBits
   io_pipeIn.get.ready := !pipeOutValid || kill || endPipe || pipeOut.ready
+
+  io.unalignTailValid := pipeIn.valid && isUnalignTail
 
   io.dcacheKill := kill || exception || isUncache || isUncacheReplay
   io.dcacheResp.ready := true.B
@@ -1119,6 +1124,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
+    val unalignTailValid = Input(Bool())
 
     // DCache response
     val dcacheError = Input(Bool())
@@ -1180,7 +1186,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val troubleMaker = in.troubleMaker.get
   val cause = in.cause.get
-  val shouldReplay = cause.asUInt.orR
+  val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get
 
   assert(!pipeIn.valid || !accessType.isPrefetch(), "Prefetch should be killed in S2")
   assert(!io.ldout.valid || io.ldout.ready, "Writeback to Backend should always be ready")
@@ -1191,7 +1197,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val redirect = io.redirect
   val kill = io.kill || robIdx.needFlush(redirect)
-  val endPipe = !isUnalignHead // unalign head will flow to next stage
+  val endPipe = !(isUnalignHead && io.unalignTailValid) // unalign head will flow to next stage
 
   /**
     * Unalign concatenation
@@ -1206,6 +1212,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadValid = io.unalignConcat.valid
   val s4Head = io.unalignConcat.bits
   val s4HeadExceptionVec = s4Head.uop.exceptionVec
+  val s4HeadVAddr = s4Head.vaddr
+  val s4HeadMask = s4Head.mask
+  val s4HeadPAddr = s4Head.paddr.get
   val s4HeadReplayCause = s4Head.cause.get
   val s4HeadMatchInvalid = s4Head.matchInvalid.get
   val s4HeadShouldWakeup = s4Head.shouldWakeup.get
@@ -1215,6 +1224,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
   val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
 
+  val vaddr = Mux(s4HeadValid, s4HeadVAddr, in.vaddr)
+  val paddr = Mux(s4HeadValid, s4HeadPAddr, in.paddr.get)
+  val mask = Mux(s4HeadValid, s4HeadMask, in.mask)
   /**
     * DCache error handling & exception handling
     * 
@@ -1314,8 +1326,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.debug.isMMIO := in.isMMIOReplay()
   ldout.debug.isNCIO := in.isNCReplay() && in.pmp.get.mmio
   ldout.debug.isPerfCnt := false.B
-  ldout.debug.paddr := in.paddr.get
-  ldout.debug.vaddr := in.vaddr
+  ldout.debug.paddr := paddr
+  ldout.debug.vaddr := vaddr
   ldout.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
   ldout.debug_seqNum.foreach(_ := uop.debug_seqNum)
 
@@ -1328,12 +1340,12 @@ class LoadUnitS3(param: ExeUnitParams)(
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec := exceptionVec
-  lqWrite.vaddr := in.vaddr
+  lqWrite.vaddr := vaddr
   lqWrite.fullva := exceptionFullva
   lqWrite.vaNeedExt := exceptionVaNeedExt
-  lqWrite.paddr := in.paddr.get
+  lqWrite.paddr := paddr
   lqWrite.gpaddr := exceptionGpaddr
-  lqWrite.mask := in.mask
+  lqWrite.mask := mask
   lqWrite.data := DontCare // TODO: remove this
   lqWrite.wlineflag := false.B // TODO: remove this
   lqWrite.miss := cause(C_DM) // TODO: remove this
@@ -1394,7 +1406,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.data_inv_sq_idx := in.dataInvalidSqIdx.get
   lqWrite.rep_info.addr_inv_sq_idx := in.addrInvalidSqIdx.get
   lqWrite.rep_info.rep_carry := DontCare
-  lqWrite.rep_info.last_beat := in.paddr.get(log2Up(refillBytes))
+  lqWrite.rep_info.last_beat := paddr(log2Up(refillBytes))
   lqWrite.rep_info.cause := lqWriteCauseOH
   lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
@@ -1705,6 +1717,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s4 <> s3
   s0.io.unalignTail <> s1.io.unalignTail
   s0.io.fastReplay <> s3.io.fastReplay
+  s3.io.unalignTailValid := s2.io.unalignTailValid
   s3.io.unalignConcat <> s4.io.unalignConcat
   s1.io.kill := false.B
   s2.io.kill := false.B
