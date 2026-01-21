@@ -103,13 +103,20 @@ class SignedSaturateCounterTest extends AnyFlatSpec {
   def isSaturateNegative(value: Int)(implicit width: Int): Boolean = value == minValue
   def isSaturate(value: Int)(implicit width: Int): Boolean = isSaturatePositive(value) || isSaturateNegative(value)
 
+  def isWeakPositive(value: Int)(implicit width: Int): Boolean = value == thres
+  def isWeakNegative(value: Int)(implicit width: Int): Boolean = value == thres - 1
+  def isWeak(value: Int)(implicit width: Int): Boolean = isWeakPositive(value) || isWeakNegative(value)
+
+  def isMid(value: Int)(implicit width: Int): Boolean = !isSaturate(value) && !isWeak(value)
+
   def forceInRange(value: Int)(implicit width: Int): Int = value.max(minValue).min(maxValue)
 
   private val opString = Seq("Inc", "Dec", "Upd")
   private def flagString(value: Int)(implicit width: Int): String = {
     val ret = new StringBuilder()
     if (isSaturate(value)) ret.append("S")
-    else ret.append("-")
+    else if (isWeak(value)) ret.append("W")
+    else ret.append("M")
     if (isPositive(value)) ret.append("P")
     else ret.append("N")
     ret.toString()
@@ -137,15 +144,12 @@ class SignedSaturateCounterTest extends AnyFlatSpec {
           dut.clock.step(1)
 
           val old = value
-          if (op == 0) {
-            value = value + step
-          } else if (op == 1) {
-            value = value - step
-          } else {
-            if (inc) value += 1
-            else value -= 1
-          }
-          value = forceInRange(value)
+          value = forceInRange(
+            if (op == 0) value + step
+            else if (op == 1) value - step
+            else if (inc) value + 1 // op == 2
+            else value - 1 // op == 2 && !inc
+          )
 
           print(
             f"op=${opString(op)} " +(
@@ -159,7 +163,10 @@ class SignedSaturateCounterTest extends AnyFlatSpec {
           dut.res.isSaturatePositive.expect(isSaturatePositive(value).B)
           dut.res.isSaturateNegative.expect(isSaturateNegative(value).B)
           dut.res.isSaturate.expect((isSaturatePositive(value) || isSaturateNegative(value)).B)
-          // TODO: weak/mid test?
+          dut.res.isWeakPositive.foreach(_.expect(isWeakPositive(value).B))
+          dut.res.isWeakNegative.foreach(_.expect(isWeakNegative(value).B))
+          dut.res.isWeak.foreach(_.expect(isWeak(value).B))
+          dut.res.isMid.foreach(_.expect(isMid(value).B))
           print("pass\n")
         }
       }
