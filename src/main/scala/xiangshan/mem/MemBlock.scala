@@ -45,6 +45,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
+import coupledL2.EnableCHI
 
 trait HasMemBlockParameters extends HasXSParameter {
   val intSchdParams = backendParams.intSchdParams.get
@@ -377,6 +378,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_release = Input(Vec(2, ValidIO(UInt(PAddrBits.W))))
     val l2_pmp_resp = new PMPRespBundle
     val l2_flush_done = Input(Bool())
 
@@ -1222,7 +1224,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   AddPipelineReg(uncache.io.lsq.resp, uncacheResp, false.B)
 
   //lsq.io.refill         := delayedDcacheRefill
-  lsq.io.release        := dcache.io.lsu.release
+  // lsq.io.release        := dcache.io.lsu.release
+  if (p(EnableCHI)) {
+    lsq.io.release := io.l2_release
+  } else {
+    lsq.io.release(0).valid := dcache.io.lsu.release.valid
+    lsq.io.release(0).bits := dcache.io.lsu.release.bits.paddr
+    lsq.io.release(1).valid := false.B
+    lsq.io.release(1).bits := DontCare
+  }
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
