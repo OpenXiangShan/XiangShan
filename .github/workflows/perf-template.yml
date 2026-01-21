@@ -37,6 +37,16 @@ on:
         required: false
         type: string
         default: ''
+      checkpoint_path:
+        description: Directory for SPEC06 checkpoints
+        required: false
+        type: string
+        default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
+      json_path:
+        description: JSON file path for SPEC06 checkpoints
+        required: false
+        type: string
+        default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json
       perf_report_dir:
         description: Directory for all spec reports
         required: true
@@ -50,27 +60,13 @@ jobs:
     timeout-minutes: 2880
     name: Checkpoints
     steps:
-      - name: Set benchmark configuration
-        run: |
-          case "${{ inputs.benchmark_type }}" in
-            "spec06-0.3c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
-              ;;
-            "spec06-0.8c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
-              ;;
-            "spec06-1.0c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
-              ;;
-          esac
-
       - name: Set test branch or commit
         id: set_test
         run: |
           echo "Using specified branch: ${{ inputs.test_branch }}"
           echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
 
-      - name: Checkout code at specific commit
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
@@ -84,7 +80,27 @@ jobs:
           echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
-          echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+
+          case "${{ inputs.benchmark_type }}" in
+            "spec06-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              ;;
+            "spec06-0.8c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              ;;
+            "spec06-1.0c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            "custom")
+              echo "CKPT_JSON_PATH=${{ inputs.json_path }}" >> $GITHUB_ENV
+              ;;
+          esac
+
+          if [ "${{ inputs.benchmark_type }}" = "custom" ]; then
+            echo "CKPT_HOME=${{ inputs.checkpoint_path }}" >> $GITHUB_ENV
+          else
+            echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+          fi
 
       - name: Initialize submodules
         run: make init-force
