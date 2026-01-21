@@ -342,7 +342,7 @@ case class L2CacheConfig
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
-          pcBitOpt = if (enablePC) Some(64) else None,  // 条件启用 PC 字段，64 位宽
+          pcBitOpt = if (enablePC) Some(64) else None,  // Enable PC field if needed
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
           vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
@@ -555,7 +555,6 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new WithCHI
 )
 
-//新定义一个config
 class KunminghuV2WithNLConfig(n: Int = 1) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false, nl = true, enablePC = true)
     ++ new DefaultConfig(n)

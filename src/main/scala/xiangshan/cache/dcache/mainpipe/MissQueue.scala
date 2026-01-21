@@ -262,7 +262,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
     // pass vaddr to l2
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
-    acquire.user.lift(PCKey).foreach(_ := req.pc) //新定义pc字段
+    // pass pc to l2
+    acquire.user.lift(PCKey).foreach(_ := req.pc) 
 
     // miss req pipe reg pass keyword to L2, is priority
     acquire.echo.lift(IsKeywordKey).foreach(_ := isKeyword())
