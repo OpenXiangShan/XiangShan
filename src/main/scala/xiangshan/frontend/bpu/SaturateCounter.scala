@@ -29,6 +29,11 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
   def >=(that:  SaturateCounter): Bool = this.value >= that.value
 
   /* *** state methods *** */
+  /* example: 3bit
+   *  0  1  2  3  4  5  6  7
+   * SN MN MN WN WP MP MP SP
+   * S for Saturate, M for Mid, W for Weak, N for Negative, P for Positive
+   */
   // direction
   def isPositive: Bool = value(width - 1)  // value >= (1 << (width - 1)).U
   def isNegative: Bool = !value(width - 1) // value < (1 << (width - 1)).U

@@ -29,6 +29,11 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
   def >=(that:  SignedSaturateCounter): Bool = this.value >= that.value
 
   /* *** state methods *** */
+  /* example: 3bit
+   * -4 -3 -2 -1  0  1  2  3
+   * SN MN MN WN WP MP MP SP
+   * S for Saturate, M for Mid, W for Weak, N for Negative, P for Positive
+   */
   // direction
   def isPositive: Bool = value >= 0.S
   def isNegative: Bool = value < 0.S
@@ -40,9 +45,9 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
     isSaturatePositive && positive || isSaturateNegative && !positive
 
   // weak
-  def isWeakPositive: Bool = { // value === 1.S
+  def isWeakPositive: Bool = { // value === 0.S
     require(width >= 2, "SignedSaturateCounter width must be at least 2 to have weak states")
-    value === 1.S
+    value === 0.S
   }
   def isWeakNegative: Bool = { // value === -1.S
     require(width >= 2, "SignedSaturateCounter width must be at least 2 to have weak states")
