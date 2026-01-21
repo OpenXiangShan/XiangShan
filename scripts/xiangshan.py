@@ -506,6 +506,15 @@ class XiangShan(object):
         zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return zcb_test
 
+    def __get_ci_cvmtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/bitmap-ci-workload"
+        workloads = [
+            "HS_bitmap_af.bin",
+            "VS_bitmap_af.bin"
+        ]
+        cvm_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return cvm_test
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -581,7 +590,8 @@ class XiangShan(object):
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
-            "zcb-test": self.__get_ci_zcbtest
+            "zcb-test": self.__get_ci_zcbtest,
+            "cvm-test": self.__get_ci_cvmtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)

@@ -464,12 +464,12 @@ class DefaultConfig(n: Int = 1) extends Config(
 
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
-    ++ new DefaultConfig(n)
+    ++ new KunminghuV2Config(n)
 )
 
 class CVMTestConfig(n: Int = 1) extends Config(
   new CVMTestCompile
-    ++ new DefaultConfig(n)
+    ++ new KunminghuV2Config(n)
 )
 
 class WithCHI extends Config((_, _, _) => {
