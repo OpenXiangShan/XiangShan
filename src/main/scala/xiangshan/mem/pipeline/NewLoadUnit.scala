@@ -723,7 +723,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.debugInfo.vaddr.bits := vaddr
   io.debugInfo.pc := uop.pc
 
-  assert(!(pipeIn.valid && in.isUncacheReplay()) || io.uncacheBypassResp.valid, "uncache bypass should always success")
+  assert(!(pipeIn.valid && in.isUncacheReplay()) || kill || io.uncacheBypassResp.valid,
+    "uncache bypass should always success")
 
   /**
    *  Perf counters
