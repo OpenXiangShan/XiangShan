@@ -671,7 +671,7 @@ object Bundles {
     backendParams: BackendParams,
     copyWakeupOut: Boolean = false,
     copyNum: Int = 0
-  )(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
+  )(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.allExuParams(exuIdx).wbPregIdxWidth, Seq(exuIdx)) {
     val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
@@ -692,6 +692,8 @@ object Bundles {
       this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.loadDependency := exuInput.loadDependency.getOrElse(0.U.asTypeOf(this.loadDependency))
       this.is0Lat := exuInput.is0Lat.getOrElse(false.B)
+//      this.pdest := exuInput.pdest // width may be diffrent in MinimalConfig
+//      println(s"this.pdest.getWidth = ${this.pdest.getWidth} exuInput.pdest.getWidth = ${exuInput.pdest.getWidth}")
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
       connectSamePort(this, exuInput)
     }
