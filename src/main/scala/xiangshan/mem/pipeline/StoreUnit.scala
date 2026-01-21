@@ -412,7 +412,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // scalar store and scalar load nuke check, and also other purposes
   //A 128-bit aligned unaligned memory access requires changing the unaligned flag bit in sq
   //TODO: FIX this connect!!
-  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch && (!s1_out.isMisalign || s1_frm_mabuf)
+  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch
   io.toLsq.bits.paddr     := s1_out.paddr
   io.toLsq.bits.vaddr     := s1_out.vaddr
   io.toLsq.bits.cacheMiss := false.B // will be set in stage 2
