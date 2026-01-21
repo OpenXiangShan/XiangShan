@@ -20,17 +20,18 @@ case class StreamStrideParams() extends PrefetcherParams{
 // only for region type of prefetch
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
-  val REGION_SIZE = 1024
+  def BLOCK_SIZE = dcacheParameters.blockBytes
+  def BIT_VEC_WITDH = 16
+  val REGION_SIZE = BLOCK_SIZE * BIT_VEC_WITDH
   val PAGE_OFFSET = 12
-  val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
-  val BIT_VEC_WITDH = REGION_SIZE / dcacheParameters.blockBytes
+  val BLOCK_OFFSET = log2Up(BLOCK_SIZE)
   val REGION_BITS = log2Up(BIT_VEC_WITDH)
   val REGION_TAG_OFFSET = BLOCK_OFFSET + REGION_BITS
   val REGION_TAG_BITS = VAddrBits - BLOCK_OFFSET - REGION_BITS
 
   // hash related
   val VADDR_HASH_WIDTH = 5
-  val BLK_ADDR_RAW_WIDTH = 10
+  val BLK_ADDR_RAW_WIDTH = REGION_BITS + BLOCK_OFFSET
   val HASH_TAG_WIDTH = VADDR_HASH_WIDTH + BLK_ADDR_RAW_WIDTH
 
   // capacity related
@@ -190,25 +191,39 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val reqs_vl = ld_in_reordered.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
+  val needUpdate = Wire(Vec(enqLen, Bool()))
+  val merge_access_vec = Wire(Vec(enqLen, UInt((blockBytes/DCacheWordBytes).W)))
 
   for(i <- (0 until enqLen)) {
     val req = reqs_l(i)
     val req_v = reqs_vl(i)
     val index = PopCount(needAlloc.take(i))
     val allocPtr = enqPtrExt(index)
-    val entry_match = Cat(entries.zip(valids).map {
-      case(e, v) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr)
-    }).orR
+    val entry_match_bits = Cat(valids.zip(entries).zipWithIndex.map {
+      case((v, e), id) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr) && !(deqPtr === id.U && valids(deqPtr))
+    })
+    val entry_match = entry_match_bits.orR
+    val entry_match_index = OHToUInt(Reverse(entry_match_bits))
+    
     val prev_enq_match = if(i == 0) false.B else Cat(reqs_l.zip(reqs_vl).take(i).map {
       case(pre, pre_v) => pre_v && block_hash_tag(pre.vaddr) === block_hash_tag(req.vaddr)
     }).orR
 
-    needAlloc(i) := req_v && !entry_match && !prev_enq_match
+    merge_access_vec(i) := reqs_l.zip(reqs_vl).map {
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr), e.accessVec, 0.U)
+    }.foldLeft(0.U)(_ | _)
+    needUpdate(i) := req_v && entry_match && !prev_enq_match && io.enable
+
+    needAlloc(i) := req_v && !entry_match && !prev_enq_match && !(block_hash_tag(entries(deqPtr).vaddr) === block_hash_tag(req.vaddr) && valids(deqPtr))
     canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt && io.enable
 
     when(canAlloc(i)) {
       valids(allocPtr.value) := true.B
       entries(allocPtr.value) := req
+      entries(allocPtr.value).accessVec := merge_access_vec(i)
+    }.elsewhen(needUpdate(i)) {
+      // Update
+      entries(entry_match_index).accessVec := entries(entry_match_index).accessVec | merge_access_vec(i)
     }
   }
   val allocNum = PopCount(canAlloc)
@@ -216,6 +231,11 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   enqPtrExt.foreach{case x => when(canAlloc.asUInt.orR) {x := x + allocNum} }
 
   // deq
+
+  val deq_merge_access = reqs_l.zip(reqs_vl).map {
+      case(e, v) => Mux(v && block_hash_tag(e.vaddr) === block_hash_tag(entries(deqPtr).vaddr), e.accessVec, 0.U)
+  }.foldLeft(0.U)(_ | _)
+  
   io.train_req.valid := false.B
   io.train_req.bits := DontCare
   valids.zip(entries).zipWithIndex.foreach {
@@ -223,6 +243,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
       when(deqPtr === i.U) {
         io.train_req.valid := valid && io.enable
         io.train_req.bits := entry
+        io.train_req.bits.accessVec := entry.accessVec | deq_merge_access
       }
     }
   }
@@ -230,6 +251,8 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   when(io.train_req.fire) {
     valids(deqPtr) := false.B
     deqPtrExt := deqPtrExt + 1.U
+  }.elsewhen(deq_merge_access.orR && valids(deqPtr)) {
+    entries(deqPtr).accessVec := entries(deqPtr).accessVec | deq_merge_access
   }
 
   when(RegNext(io.flush)) {
@@ -939,7 +962,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new TrainFilter(STREAM_FILTER_SIZE, "stream"))
-  val stream_bit_vec_array = Module(new StreamBitVectorArray)
+  val stream_bit_vec_array = Module(new StreamBitVectorArray(train_granularity = dcacheParameters.blockBytes))
   val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
