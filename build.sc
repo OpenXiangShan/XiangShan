@@ -35,7 +35,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import scala.util.matching.Regex
 
-val defaultScalaVersion = "2.13.15"
+val defaultScalaVersion = "2.13.16"
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
 def defaultVersions = Map(
