@@ -61,12 +61,12 @@ on:
         type: string
         default: ''
       checkpoint_path:
-        description: Base directory for SPEC06 checkpoints
+        description: Directory for SPEC06 checkpoints, only valid when benchmark_type is set to custom
         required: false
         type: string
         default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
       json_path:
-        description: JSON file path for SPEC06 checkpoints (used when benchmark_type=custom)
+        description: JSON file path for SPEC06 checkpoints, only valid when benchmark_type is set to custom
         required: false
         type: string
         default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json
