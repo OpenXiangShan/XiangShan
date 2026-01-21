@@ -266,6 +266,10 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
+      - name: run KunminghuV2Config - Iopmp
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --no-diff --ci iopmp-test 2> perf.log
+          cat perf.log | sort
 
   docker-build:
     name: Docker Build
