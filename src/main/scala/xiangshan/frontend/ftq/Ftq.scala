@@ -35,7 +35,6 @@ import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BlameBpuSource
-import xiangshan.frontend.BpuPerfInfo
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.ExceptionType
@@ -70,8 +69,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
-
-    val bpuInfo: BpuPerfInfo = Output(new BpuPerfInfo)
 
     // for perf
     val bpuTopDownInfo: BpuTopDownInfo = Output(new BpuTopDownInfo)
@@ -387,7 +384,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
-  io.bpuInfo := DontCare
   // io.toIfu.req.bits.topdownInfo is assigned above
   io.toIfu.topdownRedirect := backendRedirect
 

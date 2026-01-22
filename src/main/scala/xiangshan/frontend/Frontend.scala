@@ -87,7 +87,6 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val resetInFrontend: Bool = Output(Bool())
 
   // perf
-  val frontendInfo: FrontendPerfInfo         = Output(new FrontendPerfInfo)
   val debugTopDown: FrontendDebugTopDownInfo = Flipped(new FrontendDebugTopDownInfo)
 
   // mbist
@@ -244,7 +243,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend
   io.backend.fromIfu := ifu.io.toBackend
-  io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   ibuffer.io.flush           := needFlush
   ibuffer.io.controlRedirect := flushControlRedirect
@@ -266,7 +264,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 
-  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
   io.resetInFrontend       := reset.asBool
 
   // PFEvent
