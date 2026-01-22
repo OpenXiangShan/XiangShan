@@ -1309,8 +1309,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val (_, _, done, _) = edge.count(bus.d)
     val mshrMatch = mshrId === bus.d.bits.source
     val beatMatch = (bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B) ^ done) === paddr(log2Up(refillBytes))
+    val paddrMatch = missQueue.io.forwardS1PAddrMatch(i)
     val s1RespValid = s1ReqValid && bus.d.valid && bus.d.bits.opcode === TLMessages.GrantData &&
-      mshrMatch && beatMatch
+      mshrMatch && beatMatch && paddrMatch
     val s1RespForwardData = VecInit.tabulate(l1BusDataWidth / VLEN) { i =>
       bus.d.bits.data((i + 1) * VLEN - 1, i * VLEN)
     }(paddr(log2Up(VLEN / 8)))

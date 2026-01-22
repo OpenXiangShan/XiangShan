@@ -1061,6 +1061,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // forward missqueue
     val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+    val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
@@ -1173,6 +1174,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     forward.s2Resp.bits.forwardData := RegEnable(s1RespData.asTypeOf(forward.s2Resp.bits.forwardData), s1ReqValid)
     forward.s2Resp.bits.denied := RegEnable(mshrForwardInfo.denied, s1ReqValid)
     forward.s2Resp.bits.corrupt := RegEnable(mshrForwardInfo.corrupt, s1ReqValid)
+    io.forwardS1PAddrMatch(i) := s1ReqValid && mshrForwardInfo.inflight && paddrMatch
   }
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
