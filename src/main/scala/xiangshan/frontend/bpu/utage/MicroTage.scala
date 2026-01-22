@@ -131,7 +131,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   io.prediction.takenVec := s1_abtbTakenVec
   // May be a false hit; needs to be combined with abtbEntry's valid signal for correctness.
   // Done here for timing/layout reasons.
-  io.prediction.hitVec := 0.U.asTypeOf(Vec(NumAheadBtbPredictionEntries, false.B)) // s1_abtbHitVec
+  io.prediction.hitVec := 0.U.asTypeOf(Vec(NumAheadBtbPredictionEntries, Bool())) // s1_abtbHitVec
   io.meta              := s1_predMeta
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
