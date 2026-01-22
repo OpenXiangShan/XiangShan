@@ -1313,6 +1313,26 @@ class NewCSR(implicit val p: Parameters) extends Module
       m.lcofiReq := lcofiReq
     case _ =>
   }
+  // Smcntrpmf extension
+  mcycle match {
+    case m: SmcntrpmfBundle =>
+      m.countingEn := (privState.isModeM && !mcyclecfg.regOut.MINH) ||
+        (privState.isModeHS && !mcyclecfg.regOut.SINH)  ||
+        (privState.isModeHU && !mcyclecfg.regOut.UINH)  ||
+        (privState.isModeVS && !mcyclecfg.regOut.VSINH) ||
+        (privState.isModeVU && !mcyclecfg.regOut.VUINH)
+    case _ =>
+  }
+
+  minstret match {
+    case m: SmcntrpmfBundle =>
+      m.countingEn := (privState.isModeM && !minstretcfg.regOut.MINH) ||
+        (privState.isModeHS && !minstretcfg.regOut.SINH)  ||
+        (privState.isModeHU && !minstretcfg.regOut.UINH)  ||
+        (privState.isModeVS && !minstretcfg.regOut.VSINH) ||
+        (privState.isModeVU && !minstretcfg.regOut.VUINH)
+    case _ =>
+  }
   /**
    * perf_end
    */
