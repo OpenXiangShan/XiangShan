@@ -644,7 +644,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   )
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
-  XSPerfAccumulate("read_conflict", debug_readBankConflict)
+  XSPerfAccumulate("read_conflict", t0_readBankConflict)
   XSPerfAccumulate("reset_useful", t2_fire && usefulResetCtr.isSaturatePositive)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
