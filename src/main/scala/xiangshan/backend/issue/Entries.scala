@@ -27,21 +27,19 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   private val OthersEntryNum      = params.numEntries - params.numEnq
   private val SimpEntryNum        = params.numSimp
   private val CompEntryNum        = params.numComp
-  private val RespNum             = params.issueTimerMaxValue + 1
   val io = IO(new EntriesIO)
 
-  val resps: Vec[Vec[IssueQueueRespBundle]] = Wire(Vec(RespNum, chiselTypeOf(io.og0Resp)))
-  if (params.isVecStuIQ)
-    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, io.s0Resp.get, io.snResp.get)
-  else if (params.isStAddrIQ)
-    resps := Seq(io.og0Resp, io.og1Resp, io.s0Resp.get, 0.U.asTypeOf(io.og0Resp), io.s2Resp.get)
-  else if (params.isLdAddrIQ || params.isStdIQ)
-    resps := Seq(io.og0Resp, io.og1Resp, io.s0Resp.get)
-  else if (params.needOg2Resp)
-    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get)
-  else
-    resps := Seq(io.og0Resp, io.og1Resp)
-
+  val fakeS1Resp = Option.when(params.needFakeS1Resp)(0.U.asTypeOf(io.og0Resp))
+  val allResps = Seq(
+    Some(io.og0Resp),
+    Some(io.og1Resp),
+    io.og2Resp.orElse(io.s0Resp),
+    if (io.og2Resp.nonEmpty) io.s0Resp else fakeS1Resp,
+    io.s2Resp.orElse(io.snResp)
+  ).filter(_.nonEmpty).map(_.get)
+  assert(allResps.length == params.issueTimerMaxValue + 1, "allResps.length == params.issueTimerMaxValue + 1")
+  val resps = Wire(Vec(allResps.length, chiselTypeOf(io.og0Resp)))
+  resps := allResps
 
   //Module
   val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
