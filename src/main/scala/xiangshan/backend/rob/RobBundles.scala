@@ -26,11 +26,10 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType}
@@ -137,7 +136,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val dirtyVs = Bool()
   }
 
-  def connectEnq(robEntry: RobEntryBundle, robEnq: DynInst): Unit = {
+  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
     robEntry.wflags := robEnq.wfflags
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
@@ -154,23 +153,22 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.crossFtqCommit := robEnq.crossFtqCommit
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
-    robEntry.debug_pc.foreach(_ := robEnq.pc)
-    robEntry.debug_instr.foreach(_ := robEnq.instr)
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
     robEntry.debug_pdest.foreach(_ := robEnq.pdest)
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
-    robEntry.debug_fusionNum.foreach(_ := robEnq.fusionNum)
-
     robEntry.debug_fuOpType.foreach(_ := robEnq.fuOpType)
-    robEntry.perfDebugInfo.foreach(_ := robEnq.perfDebugInfo)
-    robEntry.debug_lqIdx.foreach(_ := robEnq.lqIdx)
-    robEntry.debug_sqIdx.foreach(_ := robEnq.sqIdx)
     robEntry.debug_rfWen.foreach(_ := robEnq.rfWen)
-    robEntry.debug_seqNum.foreach(_ := robEnq.debug_seqNum)
-    robEntry.debug_sim_trig.foreach(_ := robEnq.debug_sim_trig.getOrElse(0.B))
     robEntry.debug_vecWen.foreach(_ := robEnq.vecWen)
     robEntry.debug_v0Wen.foreach(_ := robEnq.v0Wen)
     robEntry.debug_commitType.foreach(_ := robEnq.commitType)
+    robEnq.debug.foreach { debug =>
+      robEntry.debug_pc.foreach(_ := debug.pc)
+      robEntry.debug_seqNum.foreach(_ := debug.debug_seqNum)
+      robEntry.debug_instr.foreach(_ := debug.instr)
+      robEntry.debug_fusionNum.foreach(_ := debug.fusionNum)
+      robEntry.perfDebugInfo.foreach(_ := debug.perfDebugInfo)
+      robEntry.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
+    }
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
@@ -275,7 +273,7 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val isEmpty = Output(Bool())
   // valid vector, for robIdx gen and walk
   val needAlloc = Vec(RenameWidth, Input(Bool()))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
+  val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 

@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort, EnqRobUop}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -776,7 +776,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val isBlockBackward  = VecInit(fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(fromRename.map(x => x.valid && x.bits.waitForward))
 
-  val updatedUop = Wire(Vec(RenameWidth, new DynInst))
+  val updatedUop = Wire(Vec(RenameWidth, new RenameOutUop))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     fromRename(i).fire
@@ -785,8 +785,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   for (i <- 0 until RenameWidth) {
 
-    updatedUop(i).connectRenameOutUop(fromRename(i).bits)
-    updatedUop(i).perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove
+    updatedUop(i) := fromRename(i).bits
+    updatedUop(i).debug.foreach { debug => debug.perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove}
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
@@ -880,7 +880,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     // needAlloc no use, need deleted
     io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
-    io.enqRob.req(i).bits := updatedUop(i)
+    io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
     io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
     io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
     io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles.EnqRobUop
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan._
@@ -32,7 +32,7 @@ class VTypeBufferEntry(implicit p: Parameters) extends XSBundle {
 class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
   val redirect = Input(ValidIO(new Bundle{}))
 
-  val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
+  val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
 
   val fromRob = new Bundle {
     val walkSize = Input(UInt(log2Up(size).W))

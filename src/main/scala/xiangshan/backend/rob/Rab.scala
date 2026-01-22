@@ -7,7 +7,7 @@ import xiangshan._
 import utils._
 import utility._
 import utility.OneHot.UIntToOHSeq
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles.EnqRobUop
 import xiangshan.backend.{RabToVecExcpMod, RegWriteFromRab}
 import xiangshan.backend.decode.VectorConstants
 import xiangshan.backend.rename.SnapshotGenerator
@@ -36,7 +36,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val redirect = Input(ValidIO(new Bundle {
     }))
 
-    val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
+    val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
     val fromRob = new Bundle {
       val walkSize = Input(UInt(log2Up(size).W))
       val walkEnd = Input(Bool())

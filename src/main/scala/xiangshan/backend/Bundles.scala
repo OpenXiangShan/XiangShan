@@ -263,6 +263,7 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
+    val numUops = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -303,6 +304,23 @@ object Bundles {
     val fusionNum = UInt(2.W)
     val perfDebugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
+  }
+
+  class EnqRobUop(implicit p: Parameters) extends RenameOutUop {
+    val stdwriteNeed      = Bool()
+    val isXSTrap          = Bool()
+    val replayInst        = Bool()
+
+    def isWFI: Bool       = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
+    def needEnqRab: Bool  = rfWen || fpWen || vecWen || v0Wen
+    def isHls: Bool = {
+      fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
+    }
+    
+    def connectEnqRobUop(source: RenameOutUop): Unit = {
+      this := 0.U.asTypeOf(this)
+      connectSamePort(this, source)
+    }
   }
 
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
