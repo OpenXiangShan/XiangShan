@@ -331,9 +331,9 @@ case class XSCoreParameters
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     replacer = Some("setplru"),
-    nMissEntries = 16,
+    nMissEntries = 32,
     nProbeEntries = 8,
-    nReleaseEntries = 18,
+    nReleaseEntries = 36,
     nMaxPrefetchEntry = 6,
     enableTagEcc = true,
     enableDataEcc = true
