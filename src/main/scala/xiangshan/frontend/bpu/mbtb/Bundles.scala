@@ -22,12 +22,12 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
-import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounterFactory
 
-object TakenCounter extends SaturateCounterFactory {
+object TakenCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.TakenCntWidth
 }
@@ -63,14 +63,14 @@ class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle wi
 class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
   val setIdx:   UInt                 = UInt(SetIdxLen.W)
   val wayMask:  UInt                 = UInt(NumWay.W)
-  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+  val counters: Vec[UnsignedSaturateCounter] = Vec(NumWay, TakenCounter())
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
   val rawHit:    Bool            = Bool()
   val position:  UInt            = UInt(CfiPositionWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
-  val counter:   SaturateCounter = TakenCounter()
+  val counter:   UnsignedSaturateCounter = TakenCounter()
 
   def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
 }

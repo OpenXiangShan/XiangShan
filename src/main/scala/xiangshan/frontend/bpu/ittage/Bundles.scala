@@ -20,21 +20,21 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounterFactory
 
-object ConfidenceCounter extends SaturateCounterFactory {
+object ConfidenceCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.ittageParameters.ConfidenceCntWidth
 }
 
-object UsefulCounter extends SaturateCounterFactory {
+object UsefulCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.ittageParameters.UsefulCntWidth
 }
 
-object TickCounter extends SaturateCounterFactory {
+object TickCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.ittageParameters.TickWidth
 }
@@ -42,9 +42,9 @@ object TickCounter extends SaturateCounterFactory {
 class IttageEntry(tagLen: Int)(implicit p: Parameters) extends IttageBundle {
   val valid:         Bool            = Bool()
   val tag:           UInt            = UInt(tagLen.W)
-  val confidenceCnt: SaturateCounter = ConfidenceCounter()
+  val confidenceCnt: UnsignedSaturateCounter = ConfidenceCounter()
   val targetOffset:  IttageOffset    = new IttageOffset()
-  val usefulCnt:  SaturateCounter = UsefulCounter() // Due to the bitMask the useful bit needs to be at the lowest bit
+  val usefulCnt:  UnsignedSaturateCounter = UsefulCounter() // Due to the bitMask the useful bit needs to be at the lowest bit
   val paddingBit: UInt            = UInt(1.W)
 }
 
@@ -65,9 +65,9 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   val provider:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
   val altProvider:       Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
   val altDiffers:        Bool            = Bool()
-  val providerUsefulCnt: SaturateCounter = UsefulCounter()
-  val providerCnt:       SaturateCounter = ConfidenceCounter()
-  val altProviderCnt:    SaturateCounter = ConfidenceCounter()
+  val providerUsefulCnt: UnsignedSaturateCounter = UsefulCounter()
+  val providerCnt:       UnsignedSaturateCounter = ConfidenceCounter()
+  val altProviderCnt:    UnsignedSaturateCounter = ConfidenceCounter()
   val allocate:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
   val providerTarget:    PrunedAddr      = PrunedAddr(VAddrBits)
   val altProviderTarget: PrunedAddr      = PrunedAddr(VAddrBits)

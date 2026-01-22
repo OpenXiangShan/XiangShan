@@ -13,20 +13,13 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.bpu.counter
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 
-class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.of.methods
+class SignedSaturateCounter(width: Int) extends SaturateCounter[SInt](width) {
   val value: SInt = SInt(width.W)
-
-  def ===(that: SignedSaturateCounter): Bool = this.value === that.value
-  def =/=(that: SignedSaturateCounter): Bool = this.value =/= that.value // scalastyle:ignore method.name
-  def <(that:   SignedSaturateCounter): Bool = this.value < that.value
-  def <=(that:  SignedSaturateCounter): Bool = this.value <= that.value
-  def >(that:   SignedSaturateCounter): Bool = this.value > that.value
-  def >=(that:  SignedSaturateCounter): Bool = this.value >= that.value
 
   /* *** state methods *** */
   /* example: 3bit
@@ -40,10 +33,6 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
   // saturated
   def isSaturatePositive: Bool = value === ((1 << (width - 1)) - 1).S
   def isSaturateNegative: Bool = value === (-(1 << (width - 1))).S
-  def isSaturate:         Bool = isSaturatePositive || isSaturateNegative
-  def shouldHold(positive: Bool): Bool =
-    isSaturatePositive && positive || isSaturateNegative && !positive
-
   // weak
   def isWeakPositive: Bool = { // value === 0.S
     require(width >= 2, "SignedSaturateCounter width must be at least 2 to have weak states")
@@ -53,19 +42,13 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
     require(width >= 2, "SignedSaturateCounter width must be at least 2 to have weak states")
     value === -1.S
   }
-  def isWeak: Bool = isWeakPositive || isWeakNegative
-  // medium
-  def isMid: Bool = {
-    require(width >= 3, "SaturateCounter width must be at least 3 to have mid states")
-    !isSaturate && !isWeak
-  }
 
   /* *** private update methods *** */
-  private def getUpdatedValue(positive: Bool, en: Bool): SInt =
+  protected def getUpdatedValue(positive: Bool, en: Bool): SInt =
     // hold if already saturated on the direction
     Mux(!en || shouldHold(positive), value, Mux(positive, value + 1.S, value - 1.S))
 
-  private def getIncreasedValue(step: UInt, en: Bool): SInt =
+  protected def getIncreasedValue(step: UInt, en: Bool): SInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturatePositive, value, value + 1.S)
     } else {
@@ -80,7 +63,7 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
       )
     }
 
-  private def getDecreasedValue(step: UInt, en: Bool): SInt =
+  protected def getDecreasedValue(step: UInt, en: Bool): SInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturateNegative, value, value - 1.S)
     } else {
@@ -105,19 +88,9 @@ class SignedSaturateCounter(width: Int) extends Bundle { // scalastyle:ignore nu
   def getDecrease(step: UInt = 1.U, en: Bool = true.B): SignedSaturateCounter =
     SignedSaturateCounterInit(this.width, getDecreasedValue(step, en))
 
-  /* *** update method for regs *** */
-  def selfUpdate(increase: Bool, en: Bool = true.B): Unit =
-    value := getUpdatedValue(increase, en)
-
-  def selfIncrease(step: UInt = 1.U, en: Bool = true.B): Unit =
-    value := getIncreasedValue(step, en)
-
-  def selfDecrease(step: UInt = 1.U, en: Bool = true.B): Unit =
-    value := getDecreasedValue(step, en)
-
   /* *** reset method for regs *** */
   def resetZero(): Unit =
-    value := 0.U
+    value := 0.S
 
   def resetSaturatePositive(): Unit =
     value := SignedSaturateCounter.Value.SaturatePositive(this.width).S

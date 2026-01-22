@@ -26,8 +26,8 @@ import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class IttageTable(
@@ -43,8 +43,8 @@ class IttageTable(
     }
 
     class Resp extends Bundle {
-      val cnt:          SaturateCounter = ConfidenceCounter()
-      val usefulCnt:    SaturateCounter = UsefulCounter()
+      val cnt:          UnsignedSaturateCounter = ConfidenceCounter()
+      val usefulCnt:    UnsignedSaturateCounter = UsefulCounter()
       val targetOffset: IttageOffset    = new IttageOffset()
     }
 
@@ -55,10 +55,10 @@ class IttageTable(
       val valid:   Bool            = Bool()
       val correct: Bool            = Bool()
       val alloc:   Bool            = Bool()
-      val oldCnt:  SaturateCounter = ConfidenceCounter()
+      val oldCnt:  UnsignedSaturateCounter = ConfidenceCounter()
       // update useful
       val usefulCntValid: Bool            = Bool()
-      val usefulCnt:      SaturateCounter = UsefulCounter()
+      val usefulCnt:      UnsignedSaturateCounter = UsefulCounter()
       val resetUsefulCnt: Bool            = Bool()
       // target
       val targetOffset:    IttageOffset = new IttageOffset

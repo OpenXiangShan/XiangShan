@@ -27,7 +27,7 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.Prediction
-import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.ghr.GhrEntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.tage.{TakenCounter => TageTakenCounter}
@@ -39,7 +39,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult: Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
-    val providerTakenCtrs: Vec[Valid[SaturateCounter]] =
+    val providerTakenCtrs: Vec[Valid[UnsignedSaturateCounter]] =
       Input(Vec(NumBtbResultEntries, Valid(TageTakenCounter()))) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s3_override:         Bool                  = Input(Bool())

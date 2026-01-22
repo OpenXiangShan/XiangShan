@@ -29,7 +29,7 @@ import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
-import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**

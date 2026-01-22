@@ -19,14 +19,14 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
-import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 
 class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
   class MicroBtbReplacerIO extends Bundle {
     val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
     val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
 
-    val usefulCnt: Vec[SaturateCounter] = Input(Vec(NumEntries, UsefulCounter()))
+    val usefulCnt: Vec[UnsignedSaturateCounter] = Input(Vec(NumEntries, UsefulCounter()))
 
     val victim: UInt = Output(UInt(log2Up(NumEntries).W))
 

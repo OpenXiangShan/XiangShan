@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSBundle
 import xiangshan.XSModule
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 
 abstract class BpuBundle(implicit p: Parameters) extends XSBundle with HasBpuParameters
 
@@ -54,6 +55,6 @@ trait HasFastTrainIO extends BasePredictorIO {
 abstract class WriteReqBundle(implicit p: Parameters) extends BpuBundle {
   val setIdx: UInt
   def tag:   Option[UInt]            = None
-  def cnt:   Option[SaturateCounter] = None
+  def cnt:   Option[UnsignedSaturateCounter] = None
   def taken: Option[Bool]            = None
 }

@@ -19,8 +19,8 @@ import chisel3._
 import chisel3.util._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TageTableInfo
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait TopHelper extends HasTageParameters {

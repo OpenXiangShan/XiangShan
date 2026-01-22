@@ -22,7 +22,7 @@ import scala.math.min
 import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
-import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class MicroTageTable(
@@ -41,8 +41,8 @@ class MicroTageTable(
       val taken:       Bool            = Bool()
       val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
       val useful:      UInt            = UInt(UsefulWidth.W)
-      val hitTakenCtr: SaturateCounter = TakenCounter()
-      val hitUseful:   SaturateCounter = UsefulCounter()
+      val hitTakenCtr: UnsignedSaturateCounter = TakenCounter()
+      val hitUseful:   UnsignedSaturateCounter = UsefulCounter()
     }
     class MicroTageUpdate extends Bundle {
       val startPc:                PrunedAddr            = new PrunedAddr(VAddrBits)
@@ -68,7 +68,7 @@ class MicroTageTable(
   class MicroTageEntry() extends MicroTageBundle {
     val valid:       Bool            = Bool()
     val tag:         UInt            = UInt(tagLen.W)
-    val takenCtr:    SaturateCounter = TakenCounter()
+    val takenCtr:    UnsignedSaturateCounter = TakenCounter()
     val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
     // val useful:      SaturateCounter = UsefulCounter()
   }

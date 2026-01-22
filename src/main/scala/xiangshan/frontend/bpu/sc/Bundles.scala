@@ -20,24 +20,24 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.SaturateCounterFactory
-import xiangshan.frontend.bpu.SaturateCounterInit
-import xiangshan.frontend.bpu.SignedSaturateCounter
-import xiangshan.frontend.bpu.SignedSaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounterFactory
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounterInit
+import xiangshan.frontend.bpu.counter.SignedSaturateCounter
+import xiangshan.frontend.bpu.counter.SignedSaturateCounterFactory
 
 object Counter extends SignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.CtrWidth
 }
 
-object ThresholdCounter extends SaturateCounterFactory {
+object ThresholdCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.ThresholdWidth
 
-  def Init(implicit p: Parameters): SaturateCounter =
-    SaturateCounterInit(width, p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.ThresholdInit)
+  def Init(implicit p: Parameters): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, p(XSCoreParamsKey).frontendParameters.bpuParameters.scParameters.ThresholdInit)
 }
 
 class ScEntry(implicit p: Parameters) extends ScBundle {

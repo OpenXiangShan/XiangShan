@@ -13,20 +13,13 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.bpu.counter
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 
-class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.of.methods
+class UnsignedSaturateCounter(width: Int) extends SaturateCounter[UInt](width) {
   val value: UInt = UInt(width.W)
-
-  def ===(that: SaturateCounter): Bool = this.value === that.value
-  def =/=(that: SaturateCounter): Bool = this.value =/= that.value // scalastyle:ignore method.name
-  def <(that:   SaturateCounter): Bool = this.value < that.value
-  def <=(that:  SaturateCounter): Bool = this.value <= that.value
-  def >(that:   SaturateCounter): Bool = this.value > that.value
-  def >=(that:  SaturateCounter): Bool = this.value >= that.value
 
   /* *** state methods *** */
   /* example: 3bit
@@ -40,9 +33,6 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
   // saturated
   def isSaturatePositive: Bool = value.andR // value === ((1 << width) - 1).U
   def isSaturateNegative: Bool = !value.orR // value === 0.U
-  def isSaturate:         Bool = isSaturatePositive || isSaturateNegative
-  def shouldHold(increase: Bool): Bool =
-    isSaturatePositive && increase || isSaturateNegative && !increase
   // weak
   def isWeakPositive: Bool = { // value === (1 << (width - 1))
     require(width >= 2, "SaturateCounter width must be at least 2 to have weak states")
@@ -52,19 +42,13 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
     require(width >= 2, "SaturateCounter width must be at least 2 to have weak states")
     isNegative && value(width - 2, 0).andR
   }
-  def isWeak: Bool = isWeakPositive || isWeakNegative
-  // medium
-  def isMid: Bool = {
-    require(width >= 3, "SaturateCounter width must be at least 3 to have mid states")
-    !isSaturate && !isWeak
-  }
 
   /* *** private update methods *** */
-  private def getUpdatedValue(increase: Bool, en: Bool): UInt =
+  protected def getUpdatedValue(increase: Bool, en: Bool): UInt =
     // hold if not enabled or already saturated on the direction
     Mux(!en || shouldHold(increase), value, Mux(increase, value + 1.U, value - 1.U))
 
-  private def getIncreasedValue(step: UInt, en: Bool): UInt =
+  protected def getIncreasedValue(step: UInt, en: Bool): UInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturatePositive, value, value + 1.U)
     } else {
@@ -72,14 +56,14 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
         !en,
         value,
         Mux(
-          value +& step >= SaturateCounter.Value.SaturatePositive(width).U,
-          SaturateCounter.Value.SaturatePositive(width).U,
+          value +& step >= UnsignedSaturateCounter.Value.SaturatePositive(width).U,
+          UnsignedSaturateCounter.Value.SaturatePositive(width).U,
           value + step
         )
       )
     }
 
-  private def getDecreasedValue(step: UInt, en: Bool): UInt =
+  protected def getDecreasedValue(step: UInt, en: Bool): UInt =
     if (step.isLit && step.litValue == 1) {
       Mux(!en || isSaturateNegative, value, value - 1.U)
     } else {
@@ -95,43 +79,33 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
     }
 
   /* *** update method for wires *** */
-  def getUpdate(increase: Bool, en: Bool = true.B): SaturateCounter =
-    SaturateCounterInit(this.width, getUpdatedValue(increase, en))
+  def getUpdate(increase: Bool, en: Bool = true.B): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(this.width, getUpdatedValue(increase, en))
 
-  def getIncrease(step: UInt = 1.U, en: Bool = true.B): SaturateCounter =
-    SaturateCounterInit(this.width, getIncreasedValue(step, en))
+  def getIncrease(step: UInt = 1.U, en: Bool = true.B): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(this.width, getIncreasedValue(step, en))
 
-  def getDecrease(step: UInt = 1.U, en: Bool = true.B): SaturateCounter =
-    SaturateCounterInit(this.width, getDecreasedValue(step, en))
-
-  /* *** update method for regs *** */
-  def selfUpdate(increase: Bool, en: Bool = true.B): Unit =
-    value := getUpdatedValue(increase, en)
-
-  def selfIncrease(step: UInt = 1.U, en: Bool = true.B): Unit =
-    value := getIncreasedValue(step, en)
-
-  def selfDecrease(step: UInt = 1.U, en: Bool = true.B): Unit =
-    value := getDecreasedValue(step, en)
+  def getDecrease(step: UInt = 1.U, en: Bool = true.B): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(this.width, getDecreasedValue(step, en))
 
   /* *** reset method for regs *** */
   def resetZero(): Unit =
     value := 0.U
 
   def resetSaturatePositive(): Unit =
-    value := SaturateCounter.Value.SaturatePositive(this.width).U
+    value := UnsignedSaturateCounter.Value.SaturatePositive(this.width).U
 
   def resetSaturateNegative(): Unit =
-    value := SaturateCounter.Value.SaturateNegative(this.width).U
+    value := UnsignedSaturateCounter.Value.SaturateNegative(this.width).U
 
   def resetWeakPositive(): Unit =
-    value := SaturateCounter.Value.WeakPositive(this.width).U
+    value := UnsignedSaturateCounter.Value.WeakPositive(this.width).U
 
   def resetWeakNegative(): Unit =
-    value := SaturateCounter.Value.WeakNegative(this.width).U
+    value := UnsignedSaturateCounter.Value.WeakNegative(this.width).U
 }
 
-object SaturateCounter {
+object UnsignedSaturateCounter {
   object Value {
     def SaturatePositive(width: Int): Int = (1 << width) - 1
     def SaturateNegative(width: Int): Int = 0
@@ -145,39 +119,39 @@ object SaturateCounter {
     }
   }
 
-  def SaturatePositive(width: Int): SaturateCounter =
-    SaturateCounterInit(width, Value.SaturatePositive(width))
+  def SaturatePositive(width: Int): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, Value.SaturatePositive(width))
 
-  def SaturateNegative(width: Int): SaturateCounter =
-    SaturateCounterInit(width, Value.SaturateNegative(width))
+  def SaturateNegative(width: Int): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, Value.SaturateNegative(width))
 
-  def WeakPositive(width: Int): SaturateCounter =
-    SaturateCounterInit(width, Value.WeakPositive(width))
+  def WeakPositive(width: Int): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, Value.WeakPositive(width))
 
-  def WeakNegative(width: Int): SaturateCounter =
-    SaturateCounterInit(width, Value.WeakNegative(width))
+  def WeakNegative(width: Int): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, Value.WeakNegative(width))
 
   // replace `0.U.asTypeOf(SaturateCounter(width))` with `SaturateCounter.Zero(width)`
-  def Zero(width: Int): SaturateCounter =
-    SaturateCounterInit(width, 0)
+  def Zero(width: Int): UnsignedSaturateCounter =
+    UnsignedSaturateCounterInit(width, 0)
 }
 
-object SaturateCounterInit {
-  def apply(width: Int, init: Int): SaturateCounter = {
-    val counter = Wire(new SaturateCounter(width))
+object UnsignedSaturateCounterInit {
+  def apply(width: Int, init: Int): UnsignedSaturateCounter = {
+    val counter = Wire(new UnsignedSaturateCounter(width))
     counter.value := init.U
     counter
   }
 
-  def apply(width: Int, init: UInt): SaturateCounter = {
-    val counter = Wire(new SaturateCounter(width))
+  def apply(width: Int, init: UInt): UnsignedSaturateCounter = {
+    val counter = Wire(new UnsignedSaturateCounter(width))
     counter.value := init
     counter
   }
 }
 
 /**
- * trait to generate SaturateCounter objects with width from Parameters
+ * trait to generate UnsignedSaturateCounter objects with width from Parameters
  *
  * @example {{{
  *   object TageTakenCounter extends SaturateCounterFactory {
@@ -193,16 +167,16 @@ object SaturateCounterInit {
  *   }
  * }}}
  */
-trait SaturateCounterFactory {
+trait UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int
 
-  def SaturatePositive(implicit p: Parameters): SaturateCounter = SaturateCounter.SaturatePositive(width)
-  def SaturateNegative(implicit p: Parameters): SaturateCounter = SaturateCounter.SaturateNegative(width)
+  def SaturatePositive(implicit p: Parameters): UnsignedSaturateCounter = UnsignedSaturateCounter.SaturatePositive(width)
+  def SaturateNegative(implicit p: Parameters): UnsignedSaturateCounter = UnsignedSaturateCounter.SaturateNegative(width)
 
-  def WeakPositive(implicit p: Parameters): SaturateCounter = SaturateCounter.WeakPositive(width)
-  def WeakNegative(implicit p: Parameters): SaturateCounter = SaturateCounter.WeakNegative(width)
+  def WeakPositive(implicit p: Parameters): UnsignedSaturateCounter = UnsignedSaturateCounter.WeakPositive(width)
+  def WeakNegative(implicit p: Parameters): UnsignedSaturateCounter = UnsignedSaturateCounter.WeakNegative(width)
 
-  def Zero(implicit p: Parameters): SaturateCounter = SaturateCounter.Zero(width)
+  def Zero(implicit p: Parameters): UnsignedSaturateCounter = UnsignedSaturateCounter.Zero(width)
 
-  def apply()(implicit p: Parameters): SaturateCounter = new SaturateCounter(width)
+  def apply()(implicit p: Parameters): UnsignedSaturateCounter = new UnsignedSaturateCounter(width)
 }

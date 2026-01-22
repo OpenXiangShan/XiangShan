@@ -37,8 +37,8 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuTrain
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParameters with Helpers {
@@ -195,8 +195,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // access tag tables and output meta info
   class IttageTableInfo extends Bundle {
-    val cnt:          SaturateCounter = ConfidenceCounter()
-    val usefulCnt:    SaturateCounter = UsefulCounter()
+    val cnt:          UnsignedSaturateCounter = ConfidenceCounter()
+    val usefulCnt:    UnsignedSaturateCounter = UsefulCounter()
     val targetOffset: IttageOffset    = new IttageOffset
     val tableIdx:     UInt            = UInt(log2Ceil(NumTables).W)
     val maskTarget:   Vec[UInt]       = Vec(NumTables, UInt(VAddrBits.W))

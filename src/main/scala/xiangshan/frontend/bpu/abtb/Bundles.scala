@@ -21,11 +21,11 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounterFactory
 
-object TakenCounter extends SaturateCounterFactory {
+object TakenCounter extends UnsignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.abtbParameters.TakenCounterWidth
 }

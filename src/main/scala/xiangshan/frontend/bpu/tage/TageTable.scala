@@ -20,9 +20,9 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 
 class TageTable(
     tableIdx:          Int,

@@ -20,8 +20,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.counter.UnsignedSaturateCounter
 
 class MainBtbInternalBank(
     alignIdx: Int,
@@ -34,7 +34,7 @@ class MainBtbInternalBank(
       }
       class Resp extends Bundle {
         val entries:  Vec[MainBtbEntry]    = Vec(NumWay, new MainBtbEntry)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val counters: Vec[UnsignedSaturateCounter] = Vec(NumWay, TakenCounter())
       }
 
       val req:  Valid[Req] = Flipped(Valid(new Req))
@@ -55,7 +55,7 @@ class MainBtbInternalBank(
       class Req extends Bundle {
         val setIdx:   UInt                 = UInt(SetIdxLen.W)
         val wayMask:  UInt                 = UInt(NumWay.W)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val counters: Vec[UnsignedSaturateCounter] = Vec(NumWay, TakenCounter())
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))

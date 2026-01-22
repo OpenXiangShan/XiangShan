@@ -13,17 +13,17 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.bpu.counter
 
 import chisel3._
-import chisel3.util._
 import chisel3.simulator.EphemeralSimulator._ // scalastyle:ignore
 import org.scalatest.flatspec.AnyFlatSpec
 import utils.EnumUInt
-import scala.util.Random
-import scala.math.pow
 
-class SaturateCounterTest extends AnyFlatSpec {
+import scala.math.pow
+import scala.util.Random
+
+class SignedSaturateCounterTest extends AnyFlatSpec {
   object OP extends EnumUInt(3) {
     def Inc: UInt = 0.U(width.W)
     def Dec: UInt = 1.U(width.W)
@@ -48,7 +48,7 @@ class SaturateCounterTest extends AnyFlatSpec {
     val query: QueryIO = IO(new QueryIO)
 
     class ResultIO extends Bundle {
-      val value: UInt = Output(UInt(width.W))
+      val value: SInt = Output(SInt(width.W))
       // direction
       val isPositive: Bool = Output(Bool())
       val isNegative: Bool = Output(Bool())
@@ -66,7 +66,7 @@ class SaturateCounterTest extends AnyFlatSpec {
     }
     val res: ResultIO = IO(new ResultIO)
 
-    private val cnt = RegInit(SaturateCounter.Zero(width))
+    private val cnt = RegInit(SignedSaturateCounter.Zero(width))
 
     when(ctrl.op === OP.Inc) {
       cnt.selfIncrease(step = ctrl.step, en = ctrl.en)
@@ -93,9 +93,9 @@ class SaturateCounterTest extends AnyFlatSpec {
     }
   }
 
-  def maxValue(implicit width: Int): Int = pow(2, width).toInt - 1
-  def minValue(implicit width: Int): Int = 0
-  def thres(implicit width: Int): Int = pow(2, width - 1).toInt
+  def maxValue(implicit width: Int): Int = pow(2, width - 1).toInt - 1
+  def minValue(implicit width: Int): Int = -pow(2, width - 1).toInt
+  def thres(implicit width: Int): Int = 0
 
   def isPositive(value: Int)(implicit width: Int): Boolean = value >= thres
   def isNegative(value: Int)(implicit width: Int): Boolean = value < thres
@@ -122,10 +122,10 @@ class SaturateCounterTest extends AnyFlatSpec {
     ret.toString()
   }
 
-  behavior of "SaturateCounter"
+  behavior of "SignedSaturateCounter"
   it should "work" in {
     def test(implicit width: Int): Unit = {
-      print(f"===== test SaturateCounter width=${width} =====\n")
+      print(f"===== test SignedSaturateCounter width=${width} =====\n")
       var value = 0
       simulate(new TestModule(width)) { dut =>
         dut.reset.poke(true.B)
@@ -134,7 +134,7 @@ class SaturateCounterTest extends AnyFlatSpec {
         dut.clock.step(10)
         for (_ <- 0 until 1000) {
           val op = Random.nextInt(3)
-          val step = Random.nextInt(pow(2, width).toInt - 1)
+          val step = Random.nextInt(pow(2, width - 1).toInt - 1)
           val inc = Random.nextInt(2) == 1
 
           dut.ctrl.en.poke(true.B)
@@ -155,9 +155,9 @@ class SaturateCounterTest extends AnyFlatSpec {
             f"op=${opString(op)} " +(
               if (op == 0 || op == 1) f"step=${step}%03d           "
               else f"         inc=${inc}%5s ") +
-              f"value=${old}%03d(${flagString(old)})->${value}%03d(${flagString(value)}) ... "
+              f"value=${old}%04d(${flagString(old)})->${value}%04d(${flagString(value)}) ... "
           )
-          dut.res.value.expect(value.U)
+          dut.res.value.expect(value.S)
           dut.res.isPositive.expect(isPositive(value).B)
           dut.res.isNegative.expect(isNegative(value).B)
           dut.res.isSaturatePositive.expect(isSaturatePositive(value).B)
@@ -172,7 +172,7 @@ class SaturateCounterTest extends AnyFlatSpec {
       }
     }
 
-    for (width <- 1 until 10) {
+    for (width <- 2 until 10) {
       test(width)
     }
   }
