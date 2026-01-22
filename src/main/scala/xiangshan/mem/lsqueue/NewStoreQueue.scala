@@ -907,12 +907,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.writeBack.bits.exceptionVec.foreach(_(hardwareError) := hasHardwareError)// override
     // for difftest, ref will skip mmio store
     if(debugEn) {
-      io.writeBack.bits.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
-      io.writeBack.bits.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
       io.writeBack.bits.debug.vaddr   := dataEntries.head.debugVaddr.get
       io.writeBack.bits.debug.paddr   := dataEntries.head.debugPaddr.get
       io.writeBack.bits.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
       io.writeBack.bits.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
+    }
+    if(basicDebugEn) {
+      io.writeBack.bits.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
+      io.writeBack.bits.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
     }
 
     io.exceptionInfo.valid             := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
