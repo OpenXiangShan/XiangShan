@@ -42,7 +42,6 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
-
   class RobEntryBundle(implicit p: Parameters) extends XSBundle {
 
     // data begin
@@ -83,6 +82,17 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
+
+    val debug_fuOpType        = OptionWrapper(backendParams.debugEn, FuOpType())
+    val perfDebugInfo   =  OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
+    val debug_lqIdx =  OptionWrapper(backendParams.debugEn, new LqPtr )
+    val debug_sqIdx =  OptionWrapper(backendParams.debugEn, new SqPtr )
+    val debug_rfWen           = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_seqNum    = OptionWrapper(backendParams.debugEn, InstSeqNum() )
+    val debug_sim_trig  = OptionWrapper(backendParams.debugEn, Bool() )//Option.when(backendParams.debugEn)(Bool())
+    val debug_vecWen          = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_v0Wen           = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_commitType      = OptionWrapper(backendParams.debugEn, CommitType() )
     // debug_end
 
     def isWritebacked: Bool = !uopNum.orR
@@ -150,6 +160,17 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.debug_pdest.foreach(_ := robEnq.pdest)
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
     robEntry.debug_fusionNum.foreach(_ := robEnq.fusionNum)
+
+    robEntry.debug_fuOpType.foreach(_ := robEnq.fuOpType)
+    robEntry.perfDebugInfo.foreach(_ := robEnq.perfDebugInfo)
+    robEntry.debug_lqIdx.foreach(_ := robEnq.lqIdx)
+    robEntry.debug_sqIdx.foreach(_ := robEnq.sqIdx)
+    robEntry.debug_rfWen.foreach(_ := robEnq.rfWen)
+    robEntry.debug_seqNum.foreach(_ := robEnq.debug_seqNum)
+    robEntry.debug_sim_trig.foreach(_ := robEnq.debug_sim_trig.getOrElse(0.B))
+    robEntry.debug_vecWen.foreach(_ := robEnq.vecWen)
+    robEntry.debug_v0Wen.foreach(_ := robEnq.v0Wen)
+    robEntry.debug_commitType.foreach(_ := robEnq.commitType)
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
