@@ -945,7 +945,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.debugInfo.tlbRespTime := GTimer()
   }
 
-  io.tlb.req_kill   := s1_kill || s1_dly_err
+  io.tlb.req_kill   := s1_valid && (s1_kill || s1_dly_err)
   io.tlb.req.bits.pmp_addr := s1_in.paddr
   io.tlb.resp.ready := true.B
 
