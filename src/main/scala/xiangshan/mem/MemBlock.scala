@@ -84,6 +84,7 @@ trait HasMemBlockParameters extends HasXSParameter {
   val NCWBPorts: Seq[Int] = 0 until LoadPipelineWidth // TODO: remove this
 
   def debugEn: Boolean = p(DebugOptionsKey).EnableDifftest
+  def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
   def pageOffset: Int      = PageOffsetWidth
 
   def arbiter[T <: Bundle](
