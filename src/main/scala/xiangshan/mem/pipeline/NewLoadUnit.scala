@@ -1279,7 +1279,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     * RAR / RAW revoke
     */
   val s3RevokeException = s3Exception
-  val s3RevokeReplay = in.cause.get.asUInt.orR
+  val s3RevokeReplay = cause.asUInt.orR
   val s3Revoke = s3RevokeException || s3RevokeReplay
   val s4HeadRevoke = s4HeadHasException || s4HeadShouldReplay
   val revokeLastCycle = s3Revoke || s4HeadValid && s4HeadRevoke
@@ -1334,7 +1334,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
-  val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, in.cause.get)
+  val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, cause)
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
   // TODO: remove useless fields after old LoadUnit is removed
@@ -1411,7 +1411,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
-  lqWrite.nc_with_data := in.isNCReplay()
+  lqWrite.nc_with_data := in.isNCReplay() && !cause(C_UNCACHE)
   lqWrite.data_wen_dup := DontCare // TODO: remove this
 
   // Writeback to VLMergeBuffer
