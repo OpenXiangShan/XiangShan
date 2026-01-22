@@ -744,7 +744,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
-  s0_out.vaddr         := Mux(s0_nc_with_data, s0_sel_src.vaddr, s0_dcache_vaddr)
+  s0_out.vaddr         := s0_dcache_vaddr
   s0_out.fullva        := Mux(s0_sel_src.frm_mabuf, s0_out.vaddr, s0_tlb_fullva)
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
@@ -1093,13 +1093,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   }
   s2_mmio_req.valid := io.lsq.uncacheBypass.s2Resp.valid && !s2_nc_with_data
 
-  val s2_nc_fwd_valid = io.lsq.uncacheBypass.s2Resp.valid && s2_nc_with_data
-  val s2_nc_data = io.lsq.uncacheBypass.s2Resp.bits.data
-  s2_in.data := Mux(s2_nc_fwd_valid, s2_nc_data, s2_in.data)
-  s2_in.uop.exceptionVec(hardwareError) := Mux(s2_nc_fwd_valid,
-                                       io.lsq.uncacheBypass.s2Resp.bits.nderr,
-                                       s2_in.uop.exceptionVec(hardwareError))
-
   val s3_misalign_wakeup_req = Wire(Valid(new LqWriteBundle))
   val s3_misalign_wakeup_req_bits = WireInit(0.U.asTypeOf(new LqWriteBundle))
   connectSamePort(s3_misalign_wakeup_req_bits, io.misalign_ldin.bits)
@@ -1318,6 +1311,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   )
 
   val s2_nc_with_data_need_rep = s2_nc_with_data && (s2_fwd_fail || s2_rar_nack || s2_raw_nack || s2_nuke) && s2_troublem
+  val s2_nc_fwd_valid = io.lsq.uncacheBypass.s2Resp.valid && s2_nc_with_data
+  val s2_nc_data = io.lsq.uncacheBypass.s2Resp.bits.data
   //
   s2_out                     := s2_in
   s2_out.uop.fpWen           := s2_in.uop.fpWen
@@ -1333,7 +1328,8 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   s2_out.miss                := s2_dcache_miss && s2_troublem
   s2_out.feedbacked          := false.B
   s2_out.uop.vpu.vstart      := Mux(s2_in.isLoadReplay || s2_in.isFastReplay, s2_in.uop.vpu.vstart, s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew)
-
+  s2_out.data                := Mux(s2_nc_fwd_valid, io.lsq.uncacheBypass.s2Resp.bits.data, s2_in.data)
+  s2_out.uop.exceptionVec(hardwareError) := Mux(s2_nc_fwd_valid, io.lsq.uncacheBypass.s2Resp.bits.nderr, s2_in.uop.exceptionVec(hardwareError))
   // Generate replay signal caused by:
   // * st-ld violation check
   // * tlb miss
