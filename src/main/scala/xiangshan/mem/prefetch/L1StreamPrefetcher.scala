@@ -306,8 +306,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
                             RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
-  val s1_alloc = s1_valid && !s1_hit
-  val s1_update = s1_valid && s1_hit
+  val s1_alloc = s1_valid && !s1_hit && (s1_miss || s1_pfHit)
+  val s1_update = s1_valid && s1_hit && (s1_miss || s1_pfHit)
   val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l1_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l1_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l2_depth, 0.U(BLOCK_OFFSET.W))
