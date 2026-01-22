@@ -50,11 +50,11 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     // from ldu
     val req = Flipped(Valid(new LqWriteBundle))
     // to ldu: mmio, data
-    val mmioWakeup = ValidIO(new LqPtr)
+    val mmioWakeup = DecoupledIO(new LqPtr)
     val mmioOut = DecoupledIO(new MemExuOutput)
     val mmioRawData = Output(new LoadDataFromLQBundle)
     // to ldu: nc with data
-    val ncWakeup = ValidIO(new LqPtr)
+    val ncWakeup = DecoupledIO(new LqPtr)
     val ncOut = DecoupledIO(new LsPipelineBundle)
     // <=> uncache
     val uncache = new UncacheWordIO
@@ -67,7 +67,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val slaveAccept = RegInit(false.B)
   val slaveId = Reg(UInt(UncacheBufferIndexWidth.W))
 
-  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_wakeup :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
@@ -147,8 +147,16 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
           uncacheState := s_idle
           flush := true.B
         }.otherwise{
-          uncacheState := s_wait
+          uncacheState := s_wakeup
         }
+      }
+    }
+    is (s_wakeup) {
+      when (needFlush || needFlushReg) {
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen (io.mmioWakeup.fire || io.ncWakeup.fire) {
+        uncacheState := s_wait
       }
     }
     is (s_wait) {
@@ -228,9 +236,9 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
   }
-  io.ncWakeup.valid := io.uncache.resp.fire && req.nc && !needFlush && !needFlushReg
+  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlush && !needFlushReg
   io.ncWakeup.bits := req.uop.lqIdx
-  io.mmioWakeup.valid := io.uncache.resp.fire && req.mmio && !needFlush && !needFlushReg
+  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlush && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
   io.exception.valid := writeback
@@ -451,10 +459,16 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   AddPipelineReg(uncacheReq, io.uncache.req, false.B)
 
   // uncache Wakeup & Writeback
-  io.mmioWakeup.valid := Cat(entries.map(_.io.mmioWakeup.valid)).orR
-  io.mmioWakeup.bits := Mux1H(entries.map(e => (e.io.mmioWakeup.valid, e.io.mmioWakeup.bits)))
-  io.ncWakeup.valid := Cat(entries.map(_.io.ncWakeup.valid)).orR
-  io.ncWakeup.bits := Mux1H(entries.map(e => (e.io.ncWakeup.valid, e.io.ncWakeup.bits)))
+  val mmioWakeup = Wire(DecoupledIO(new LqPtr()))
+  val ncWakeup = Wire(DecoupledIO(new LqPtr()))
+  io.mmioWakeup.valid := mmioWakeup.valid
+  io.mmioWakeup.bits := mmioWakeup.bits
+  mmioWakeup.ready := true.B
+  io.ncWakeup.valid := ncWakeup.valid
+  io.ncWakeup.bits := ncWakeup.bits
+  ncWakeup.ready := true.B
+  arbiter(entries.map(_.io.mmioWakeup), mmioWakeup, Some("mmioWakeup"))
+  arbiter(entries.map(_.io.ncWakeup), ncWakeup, Some("ncWakeup"))
   // uncache exception
   val exceptionEntry = ParallelPriorityMux(entries.map(e =>
     (e.io.exception.valid, e.io.exception.bits)
