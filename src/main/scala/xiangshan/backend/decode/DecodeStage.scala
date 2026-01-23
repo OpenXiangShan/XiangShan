@@ -213,10 +213,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
    * to be sent to complex decoder, with complex decoder ready for new input.
    */
   io.in.zipWithIndex.foreach { case (in, i) =>
-    in.ready := !io.redirect && (
+    in.ready := !io.redirect && ((
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
-    ) && !io.fromRob.isResumeVType
+    ) || !io.in(0).valid) && !io.fromRob.isResumeVType
   }
 
   /** final instruction decoding result */
