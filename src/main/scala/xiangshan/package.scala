@@ -1002,6 +1002,8 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
+    // fusion bubble
+    val FusionBubble = Value("FusionBubble")
     // dispatch stall
     // dispatch stall for dispatch policy
     // TODO: explain only load store exist
