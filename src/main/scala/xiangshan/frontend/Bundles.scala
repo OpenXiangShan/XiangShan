@@ -38,6 +38,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.ibuffer.IBufPtr
+import xiangshan.frontend.icache.BtbPrefetchBundle
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheRespBundle
@@ -122,6 +123,9 @@ class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
   val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
   val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
   val fetchReady: Bool                    = Output(Bool())
+}
+class ICacheToBpuIO(implicit p: Parameters) extends FrontendBundle {
+  val btbPrefetchResp: Valid[BtbPrefetchBundle] = ValidIO(new BtbPrefetchBundle)
 }
 
 class IfuToICacheIO(implicit p: Parameters) extends FrontendBundle {

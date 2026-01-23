@@ -27,6 +27,7 @@ import utility.XSPerfHistogram
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
+import xiangshan.frontend.ICacheToBpuIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
@@ -42,13 +43,15 @@ import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
+import xiangshan.frontend.icache.BtbPrefetchBundle
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class BpuIO extends Bundle {
-    val ctrl:        BpuCtrl    = Input(new BpuCtrl)
-    val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
-    val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
-    val toFtq:       BpuToFtqIO = new BpuToFtqIO
+    val ctrl:        BpuCtrl       = Input(new BpuCtrl)
+    val resetVector: PrunedAddr    = Input(PrunedAddr(PAddrBits))
+    val fromFtq:     FtqToBpuIO    = Flipped(new FtqToBpuIO)
+    val toFtq:       BpuToFtqIO    = new BpuToFtqIO
+    val fromICache:  ICacheToBpuIO = Flipped(new ICacheToBpuIO)
   }
 
   val io: BpuIO = IO(new BpuIO)
