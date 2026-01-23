@@ -374,6 +374,9 @@ simulator_out.txt
 *.err
 cr*/
 
+# external dependence
+NEMU/
+nexus-am
 # Bug report files
 bug-report/
 bug-report.tar.gz
@@ -381,3 +384,4 @@ bug-report.tar.gz
 # Python virtual environment
 .venv/
 venv/
+

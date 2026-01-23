@@ -1,0 +1,32 @@
+# scripts/Makefile.dependence
+
+# 1. 自动推导并定义路径变量
+# NOOP_HOME 将是项目根目录的绝对路径
+NOOP_HOME ?= $(CURDIR)
+NEMU_HOME ?= $(NOOP_HOME)/NEMU
+AM_HOME   ?= $(NOOP_HOME)/nexus-am
+
+# 2. 将这些变量导出，使其在子 Makefile (如 difftest/Makefile) 中可见
+export NOOP_HOME NEMU_HOME AM_HOME
+
+# 3. 定义一个伪目标 `deps`，用于触发依赖检查和下载
+.PHONY: deps
+
+# 4. 当 `make deps` 执行或任何目标依赖 `deps` 时，
+#    make 会检查下面的目标是否存在。
+#    如果 $(NEMU_HOME) 目录不存在，则会执行 git clone。
+$(NEMU_HOME):
+	@echo "Cloning NEMU repository..."
+	git clone https://github.com/OpenXiangShan/NEMU.git $@
+	@echo "Initializing NEMU submodules..."
+	@cd $@ && git submodule update --init --recursive
+
+#    同理，检查 $(AM_HOME) 目录。
+$(AM_HOME):
+	@echo "Cloning nexus-am repository..."
+	git clone https://github.com/OpenXiangShan/nexus-am.git $@
+	@echo "Initializing nexus-am submodules..."
+	@cd $@ && git submodule update --init --recursive
+
+# `deps` 依赖于这两个仓库目录，从而自动触发检查和下载
+deps: $(NEMU_HOME) $(AM_HOME)
