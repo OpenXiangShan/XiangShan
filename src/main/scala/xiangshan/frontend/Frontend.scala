@@ -137,9 +137,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val ibuffer      = Module(new IBuffer)
   private val ftq          = Module(new Ftq)
 
-  private val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
-  private val flushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
-  private val flushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
+  private val needFlush = RegNext(io.backend.toFtq.redirect.valid)
 
   private val tlbCsr  = DelayN(io.tlbCsr, TlbCsrPortDelay)
   private val csrCtrl = DelayN(io.csrCtrl, CsrCtrlPortDelay)
@@ -245,10 +243,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.backend.fromIfu := ifu.io.toBackend
 
   ibuffer.io.flush           := needFlush
-  ibuffer.io.controlRedirect := flushControlRedirect
-  ibuffer.io.memVioRedirect  := flushMemVioRedirect
-  ibuffer.io.bpuTopDownInfo  := ftq.io.bpuTopDownInfo
   ibuffer.io.decodeCanAccept := io.backend.canAccept
+
+  // Topdown analysis
+  ifu.io.backendRedirectTopdown     := ftq.io.backendRedirectTopdown
+  ibuffer.io.backendRedirectTopdown := ftq.io.backendRedirectTopdown
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
@@ -264,7 +263,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 
-  io.resetInFrontend       := reset.asBool
+  io.resetInFrontend := reset.asBool
 
   // PFEvent
   private val pfevent = Module(new PFEvent)
