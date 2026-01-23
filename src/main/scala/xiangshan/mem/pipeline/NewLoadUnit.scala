@@ -853,6 +853,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
   val isUncache = isNC || isMMIO
+  val isVector  = accessType.isVector()
 
   // load access fault
   val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
@@ -1081,7 +1082,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.rawNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
   io.rawNukeQueryReq.bits := nukeQueryReq
 
-  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay && in.isFirstIssue()
+  // TODO: Currently, we don't train prefetcher on vector request, because vector instruction PC is incorrect.
+  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay &&
+    in.isFirstIssue() && !isVector
   io.prefetchTrain.bits := DontCare
   io.prefetchTrain.bits.uop := uop
   io.prefetchTrain.bits.vaddr := in.vaddr
