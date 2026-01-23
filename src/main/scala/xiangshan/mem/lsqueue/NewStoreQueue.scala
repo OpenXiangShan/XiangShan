@@ -130,7 +130,7 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val hasException       = Bool()
   val committed          = Bool()
   val allocated          = Bool()
-  val uncacheFinish      = Bool() // this signal is for deqPtr move, true.B indicate uncache request can deq
+  val handleFinish       = Bool() // this signal is for deqPtr move, true.B indicate NC/MMIO/cbo request can deq
 
   val isCbo              = Bool() // Indicate if is cbo request, true is cbo request
   val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
@@ -1114,7 +1114,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       else v && (deqPtrVectorInactiveValid(i - 1) || sbufferFireNum(i - 1).asBool)
     })
 
-    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.allocated && x.uncacheFinish && x.committed)).asUInt
+    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.allocated && x.handleFinish && x.committed)).asUInt
 
     // sbufferFireNum need to RegNext, because write to sbuffer need 2 cycle, storeQueue need to forward 1 more cycle
     val deqCount = Cat(sbufferFireNum, deqPtrVectorInactiveMove, uncacheMove) // timing is ok ?
@@ -1417,9 +1417,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ptr.value === i.U && sqDeqCnt > j.U
     }).asUInt.orR
 
-    val rdataMoveSet = VecInit(rdataPtrExt.zipWithIndex.map{case (ptr, j) =>
-      ptr.value === i.U && rdataMoveCnt > j.U && !isCacheable(dataEntries(i).memoryType)
-    }).asUInt.orR
+    val handleFinishSet = rdataPtrExt.head.value === i.U && io.writeBack.fire
 
     when (entryCanEnq) {
       connectSamePort(dataEntries(i).uop, selectBits.uop) //TODO: will be remove in the future.
@@ -1439,9 +1437,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     when(entryCanEnq) {
-      ctrlEntries(i).uncacheFinish := false.B
-    }.elsewhen(rdataMoveSet) {
-      ctrlEntries(i).uncacheFinish := true.B
+      ctrlEntries(i).handleFinish := false.B
+    }.elsewhen(handleFinishSet) {
+      ctrlEntries(i).handleFinish := true.B
     }
 
     XSError(ctrlEntries(i).allocated && entryCanEnq, s"entry double allocate! index: ${i}\n")
