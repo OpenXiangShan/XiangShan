@@ -263,20 +263,30 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
   // * *** s1 prediction selection *** */
-  private val s1_btbPrediction = VecInit(ubtb.io.prediction) ++ abtb.io.prediction
-  private val s1_utageHitMask = VecInit(s1_btbPrediction.map { pred =>
-    pred.valid && utage.io.prediction.valid && utage.io.prediction.bits.cfiPosition === pred.bits.cfiPosition
-  })
+  // private val s1_btbPrediction = VecInit(ubtb.io.prediction) ++ abtb.io.prediction
+  // private val s1_utageHitMask = VecInit(s1_btbPrediction.map { pred =>
+  //   pred.valid && utage.io.prediction.valid && utage.io.prediction.bits.cfiPosition === pred.bits.cfiPosition
+  // })
+  // private val s1_takenMask = VecInit(s1_btbPrediction.zipWithIndex.map { case (pred, i) =>
+  //   val utageHit   = s1_utageHitMask(i)
+  //   val utageTaken = utage.io.prediction.bits.taken
+  //   pred.valid && (
+  //     pred.bits.attribute.isDirect ||
+  //       pred.bits.attribute.isIndirect ||
+  //       pred.bits.attribute.isConditional && Mux(utageHit, utageTaken, pred.bits.taken)
+  //   )
+  // })
+
+  private val s1_btbPrediction  = VecInit(ubtb.io.prediction) ++ abtb.io.prediction
+  private val s1_utageHitMask   = VecInit(false.B) ++ utage.io.prediction.hitVec
+  private val s1_utageTakenMask = VecInit(false.B) ++ utage.io.prediction.takenVec
   private val s1_takenMask = VecInit(s1_btbPrediction.zipWithIndex.map { case (pred, i) =>
-    val utageHit   = s1_utageHitMask(i)
-    val utageTaken = utage.io.prediction.bits.taken
     pred.valid && (
       pred.bits.attribute.isDirect ||
         pred.bits.attribute.isIndirect ||
-        pred.bits.attribute.isConditional && Mux(utageHit, utageTaken, pred.bits.taken)
+        pred.bits.attribute.isConditional && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken)
     )
   })
-
   // the old way to get taken mask
 //  private val s1_baseTakenMask = VecInit(s1_btbPrediction.map { pred =>
 //    pred.valid && (
@@ -314,7 +324,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val debug_s1UseAbtbUtage = s1_taken && !s1_firstTakenBranchOH(0) && s1_utageHitMask.drop(1).reduce(_ || _)
 
   s1_utageMeta := utage.io.meta.bits
-  s1_utageMeta.debug_useMicroTage.foreach(_ := s1_utageHitMask.reduce(_ || _))
 
   private val s2_mbtbResult  = mbtb.io.result
   private val s2_condHitMask = VecInit(s2_mbtbResult.map(e => e.valid && e.bits.attribute.isConditional))
