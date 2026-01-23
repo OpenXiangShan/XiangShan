@@ -458,11 +458,37 @@ class LoadUnitS0(param: ExeUnitParams)(
   /**
     *  Perf counters
     */
+  XSPerfAccumulate("ldin_valid", io.ldin.valid)
+  XSPerfAccumulate("ldin_block", io.ldin.valid && !io.ldin.ready)
+  XSPerfAccumulate("ldin_fire_first_issue", io.ldin.fire && firstIssue)
+  XSPerfAccumulate("vecldin_valid", io.vecldin.valid)
+  XSPerfAccumulate("vecldin_block", io.vecldin.valid && !io.vecldin.ready)
+  XSPerfAccumulate("first_issue", firstIssue)
+  XSPerfAccumulate("replay_fire", io.replay.fire)
+  XSPerfAccumulate("replay_fire_vector", io.replay.fire && io.replay.bits.accessType.isVector())
+  XSPerfAccumulate("fast_replay_fire", io.fastReplay.fire)
+  XSPerfAccumulate("fast_replay_fire_vector", io.fastReplay.fire && io.fastReplay.bits.accessType.isVector())
+  XSPerfAccumulate("stall_out", sink.valid && !sink.ready)
+  XSPerfAccumulate("stall_dcache", sink.valid && !io.dcacheReq.ready)
+  XSPerfAccumulate("vector_addr_vlen_align", io.vecldin.fire && io.vecldin.bits.bankOffset() === 0.U)
+  XSPerfAccumulate("vector_addr_vlen_unalign", io.vecldin.fire && io.vecldin.bits.bankOffset() =/= 0.U)
+  XSPerfAccumulate("forward_tld_channel", io.replay.fire && io.replay.bits.forwardDChannel.get)
+  XSPerfAccumulate("hardware_prefetch_fire", io.prefetchReq.fire)
+  XSPerfAccumulate("software_prefetch_fire", io.ldin.fire && LSUOpType.isPrefetch(io.ldin.bits.fuOpType))
+  XSPerfAccumulate("hardware_prefetch_block", io.prefetchReq.valid && !io.prefetchReq.ready)
+  XSPerfAccumulate("hardware_prefetch_total", io.prefetchReq.valid)
   val perfEvents = Seq(
     ("s0_in_fire", pipeIn.fire),
     ("s0_stall_dcache", sink.valid && !io.dcacheReq.ready)
   )
   generatePerfEvent()
+
+  /**
+   * PerfCCT
+   */
+  io.ldin.bits.debug_seqNum.foreach(x =>
+    PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
+  )
 }
 
 class LoadUnitS1(param: ExeUnitParams)(
@@ -731,6 +757,13 @@ class LoadUnitS1(param: ExeUnitParams)(
   /**
    *  Perf counters
    */
+  val fire = pipeIn.fire && !kill
+  XSPerfAccumulate("valid", pipeIn.valid)
+  XSPerfAccumulate("fire", fire)
+  XSPerfAccumulate("fire_first_issue", fire && in.isFirstIssue())
+  XSPerfAccumulate("tlb_miss", fire && tlbMiss)
+  XSPerfAccumulate("tlb_miss_first_issue", fire && tlbMiss && in.isFirstIssue())
+
   val perfEvents = Seq(
     ("s1_in_fire", pipeIn.fire),
     ("s1_tlb_miss", pipeIn.fire && io.tlbResp.bits.miss)
@@ -903,6 +936,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   hweForwardCorrupt := mshrForwardCorrupt || tldForwardCorrupt
 
   val dcacheFullForward = io.mshrForwardResp.valid || io.tldForwardResp.valid
+  val uncacheFullForward = (~io.uncacheForwardResp.bits.forwardMask.asUInt & in.mask) === 0.U && !sqDataInvalid
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
   val needDCacheAccess = !fullForward && !isUncache && !isUncacheReplay
@@ -1111,6 +1145,33 @@ class LoadUnitS2(param: ExeUnitParams)(
   /**
    *  Perf counters
    */
+  val fire = pipeIn.fire && !kill
+  XSPerfAccumulate("valid", pipeIn.valid)
+  XSPerfAccumulate("fire", fire)
+  XSPerfAccumulate("fire_first_issue", fire && in.isFirstIssue())
+  XSPerfAccumulate("dcache_miss", fire && io.dcacheResp.bits.miss)
+  XSPerfAccumulate("dcache_miss_first_issue", fire && io.dcacheResp.bits.miss && in.isFirstIssue())
+  XSPerfAccumulate("store_full_forward", fire && storeFullForward)
+  XSPerfAccumulate("nc_store_full_forward", fire && uncacheFullForward)
+  XSPerfAccumulate("mshr_full_forward", fire && io.mshrForwardResp.valid)
+  XSPerfAccumulate("tld_full_forward", fire && io.tldForwardResp.valid)
+  XSPerfAccumulate("full_forward", fire && fullForward)
+  XSPerfAccumulate("prefetch", fire && isPrefetch)
+  XSPerfAccumulate("prefetch_ignore", fire && isPrefetch && io.dcacheMSHRNack)
+  XSPerfAccumulate("prefetch_miss", fire && isPrefetch && io.dcacheResp.bits.miss)
+  XSPerfAccumulate("prefetch_hit", fire && isPrefetch && !io.dcacheResp.bits.miss)
+  XSPerfAccumulate("prefetch_accept", fire && isPrefetch && io.dcacheResp.bits.miss && !io.dcacheMSHRNack)
+  XSPerfAccumulate("forward_tld_replay", fire && in.forwardDChannel.get)
+  XSPerfAccumulate("forward_tld_replay_succeed_mshr", fire && in.forwardDChannel.get && io.mshrForwardResp.valid)
+  XSPerfAccumulate("forward_tld_replay_succeed_tld", fire && in.forwardDChannel.get && io.tldForwardResp.valid)
+  XSPerfAccumulate("nc_replay", fire && isNCReplay)
+  XSPerfAccumulate("mmio_replay", fire && isMMIOReplay)
+  XSPerfAccumulate("nc_raw_violation", fire && isNCReplay && cause(C_NK))
+  XSPerfAccumulate("nc_rar_nack", fire && isNCReplay && cause(C_RAR))
+  XSPerfAccumulate("nc_raw_nack", fire && isNCReplay && cause(C_RAW))
+  XSPerfAccumulate("nc_forward_not_ready", fire && isNCReplay && (cause(C_MA) || cause(C_FF)))
+  XSPerfAccumulate("nc_forward_match_invalid", fire && isNCReplay && matchInvalid)
+
   val perfEvents = Seq(
     ("s2_in_fire", pipeIn.fire),
     ("s2_dcache_miss", pipeIn.fire && !kill && cause(C_DM)),
@@ -1524,6 +1585,40 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.debugInfo.replayCause := cause
   io.debugInfo.replayCnt := 1.U
   io.debugInfo.robIdx := robIdx.value
+
+  /**
+    * Perf counters
+    */
+  XSPerfAccumulate("rollback_total", rollbackValid)
+  XSPerfAccumulate("rollback_rar_violation", rollbackValid && rarViolation)
+  XSPerfAccumulate("rollback_match_invalid", rollbackValid && matchInvalid)
+  XSPerfAccumulate("nc_writeback", io.ldout.fire && (in.isNCReplay() || in.nc.get))
+  XSPerfAccumulate("nc_exception", io.ldout.fire && (in.isNCReplay() || in.nc.get) && exception)
+  XSPerfAccumulate("nc_rar_violation", pipeIn.valid && in.isNCReplay() && rarViolation)
+
+  /**
+   * PerfCCT
+   */
+  val perfCCTReplayEn = pipeIn.valid && !kill && endPipe && lqWriteCause.asUInt.orR
+  val perfCCTReplayCause = ParallelPriorityMux(Seq(
+    lqWriteCause(C_TM) -> PerfCCT.ReplayReason.TLBMiss.id.U,
+    lqWriteCause(C_DM) -> PerfCCT.ReplayReason.CacheMiss.id.U,
+    lqWriteCause(C_RAR) -> PerfCCT.ReplayReason.RARReplay.id.U,
+    lqWriteCause(C_RAW) -> PerfCCT.ReplayReason.RAWReplay.id.U,
+    lqWriteCause(C_BC) -> PerfCCT.ReplayReason.BankConflict.id.U,
+    lqWriteCause(C_SMF) -> PerfCCT.ReplayReason.STDForwardFail.id.U, // TODO
+    lqWriteCause(C_FF) -> PerfCCT.ReplayReason.STDForwardFail.id.U,
+    lqWriteCause(C_DR) -> PerfCCT.ReplayReason.DcacheStall.id.U,
+    true.B -> PerfCCT.ReplayReason.OtherReplay.id.U
+  ))
+  val perfCCTRecordAddrEn = io.ldout.fire && !kill
+  val timer = GTimer()
+  PerfCCT.updateInstMeta(
+    uop.debug_seqNum, PerfCCT.InstDetail.ReplayStr.id.U, perfCCTReplayCause, perfCCTReplayEn, clock, reset
+  )
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.LastReplay.id.U, timer, perfCCTReplayEn, clock, reset)
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.VAddress.id.U, vaddr, perfCCTRecordAddrEn, clock, reset)
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.PAddress.id.U, paddr, perfCCTRecordAddrEn, clock, reset)
 }
 
 class LoadUnitS4(param: ExeUnitParams)(
@@ -1548,7 +1643,7 @@ class LoadUnitDataPathMeta(implicit p: Parameters) extends XSBundle with HasDCac
   val isUnalignHead = Bool()
 }
 
-class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule with HadNewLoadHelper {
+class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule with HasNewLoadHelper {
   val io = IO(new Bundle() {
     val s1Meta = Flipped(ValidIO(new LoadUnitDataPathMeta))
     val s2SqForwardResp = Flipped(ValidIO(new SQForwardRespS2))
@@ -1891,7 +1986,7 @@ case class RdataType(
   dataFu: UInt => UInt
 )
 
-trait HadNewLoadHelper { this: XSModule =>
+trait HasNewLoadHelper { this: XSModule =>
   val LBU = RdataType(
     selFu = (fuOpType, fpWen) => fuOpType === LSUOpType.lbu || fuOpType === LSUOpType.hlvbu,
     dataFu = data => ZeroExt(data(7, 0), XLEN)
