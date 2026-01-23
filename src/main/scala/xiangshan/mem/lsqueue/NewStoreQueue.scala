@@ -130,7 +130,7 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val hasException       = Bool()
   val committed          = Bool()
   val allocated          = Bool()
-  val uncacheFinish      = Bool() // this signal is for deqPtr move, true.B indicate uncache request can deq
+  val handleFinish       = Bool() // this signal is for deqPtr move, true.B indicate NC/MMIO/cbo request can deq
 
   val isCbo              = Bool() // Indicate if is cbo request, true is cbo request
   val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
@@ -1036,7 +1036,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val ctrlEntry = ctrlEntries(i)
       if(i == 0) {
         toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && (!headCross16B || dataQueue.io.empty) &&
-          !unalignStall(i) && ctrlEntry.committed
+          !unalignStall(i) && ctrlEntry.committed &&
+          !(ctrlEntry.vecMbCommit && !ctrlEntry.allValid || ctrlEntry.vecInactive) //TODO: vecMbCommit will be remove in the future
         // [NOTE1]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
         // [NOTE2]: here I use dataQueue.io.empty because EnsbufferWifth == 2, if EnsbufferWifth > 2, need to modify.
 
@@ -1047,6 +1048,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         //  1. Port 0 write a unaligned request cross 16 bytes, preempting port 1's write port.
         //  2. Port 0 is ready, and the Sbuffer can process two write requests simultaneously.
         toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && ctrlEntry.committed &&
+          !(ctrlEntry.vecMbCommit && !ctrlEntry.allValid || ctrlEntry.vecInactive) && //TODO: vecMbCommit will be remove in the future
           toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0)) && !unalignStall(i)
         // [NOTE]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
 
@@ -1054,6 +1056,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
       else {
         toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && !unalignStall(i) && ctrlEntry.committed &&
+          !(ctrlEntry.vecMbCommit && !ctrlEntry.allValid || ctrlEntry.vecInactive) && //TODO: vecMbCommit will be remove in the future
           toSbufferValid(i - 1)
         // [NOTE]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
 
@@ -1111,7 +1114,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       else v && (deqPtrVectorInactiveValid(i - 1) || sbufferFireNum(i - 1).asBool)
     })
 
-    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.allocated && x.uncacheFinish && x.committed)).asUInt
+    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.allocated && x.handleFinish && x.committed)).asUInt
 
     // sbufferFireNum need to RegNext, because write to sbuffer need 2 cycle, storeQueue need to forward 1 more cycle
     val deqCount = Cat(sbufferFireNum, deqPtrVectorInactiveMove, uncacheMove) // timing is ok ?
@@ -1130,7 +1133,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val rdataPtrVectorInactiveValid = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
 
     ctrlEntries.zip(dataEntries).zipWithIndex.map{case ((ctrl, data), i) =>
-      rdataPtrVectorInactiveValid(i) := ctrl.allocated && ctrl.committed &&
+      rdataPtrVectorInactiveValid(i) := ctrl.allocated && ctrl.committed && dataQueue.io.empty &&
       (ctrl.vecMbCommit && !ctrl.allValid || ctrl.vecInactive) //TODO: vecMbCommit will be remove in the future
     }
 
@@ -1146,16 +1149,18 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /*============================================ other connection ==================================================*/
     io.perfMmioBusy := uncacheState =/= UncacheState.idle
 
-    // [NOTE]: low 4 bit of addr/vaddr will be omitted in the sbuffer, but it will be used for difftest.
-    for(i <- 0 until EnsbufferWidth){
-      io.pmaStore.foreach { case sink =>
-        sink(i).valid          := writeSbufferWire(i).fire
-        sink(i).bits.addr      := writeSbufferWire(i).bits.addr
-        sink(i).bits.data      := writeSbufferWire(i).bits.data
-        sink(i).bits.mask      := writeSbufferWire(i).bits.mask
-        sink(i).bits.wline     := writeSbufferWire(i).bits.wline
-        sink(i).bits.vecValid  := writeSbufferWire(i).bits.vecValid
-        sink(i).bits.diffIsHighPart := diffIsHighPart(i)  // indicate whether valid data in high 64-bit, only for scalar store event!
+    if(debugEn) {
+      // [NOTE]: low 4 bit of addr/vaddr will be omitted in the sbuffer, but it will be used for difftest.
+      for (i <- 0 until EnsbufferWidth) {
+        io.pmaStore.foreach { case sink =>
+          sink(i).valid := writeSbufferWire(i).fire
+          sink(i).bits.addr := writeSbufferWire(i).bits.addr
+          sink(i).bits.data := writeSbufferWire(i).bits.data
+          sink(i).bits.mask := writeSbufferWire(i).bits.mask
+          sink(i).bits.wline := writeSbufferWire(i).bits.wline
+          sink(i).bits.vecValid := writeSbufferWire(i).bits.vecValid
+          sink(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
+        }
       }
     }
 
@@ -1412,9 +1417,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ptr.value === i.U && sqDeqCnt > j.U
     }).asUInt.orR
 
-    val rdataMoveSet = VecInit(rdataPtrExt.zipWithIndex.map{case (ptr, j) =>
-      ptr.value === i.U && rdataMoveCnt > j.U && !isCacheable(dataEntries(i).memoryType)
-    }).asUInt.orR
+    val handleFinishSet = rdataPtrExt.head.value === i.U && io.writeBack.fire
 
     when (entryCanEnq) {
       connectSamePort(dataEntries(i).uop, selectBits.uop) //TODO: will be remove in the future.
@@ -1434,9 +1437,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     }
 
     when(entryCanEnq) {
-      ctrlEntries(i).uncacheFinish := false.B
-    }.elsewhen(rdataMoveSet) {
-      ctrlEntries(i).uncacheFinish := true.B
+      ctrlEntries(i).handleFinish := false.B
+    }.elsewhen(handleFinishSet) {
+      ctrlEntries(i).handleFinish := true.B
     }
 
     XSError(ctrlEntries(i).allocated && entryCanEnq, s"entry double allocate! index: ${i}\n")
@@ -1731,7 +1734,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   })
 
   // deqPtr logic
-  deqPtrExt := deqPtrExt.map(_ + sqDeqCnt)
+  deqPtrExt := deqPtrExtNext
   rdataPtrExt := rdataPtrExt.map(_ + rdataMoveCnt)
 
   XSError(deqPtrExt(0) > rdataPtrExt(0), "Why deqPtr > rdataPtr? something error!")
