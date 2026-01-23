@@ -324,7 +324,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.status.firstIssue                                := false.B
       enq.bits.status.issueTimer                                := 0.U
       enq.bits.status.deqPortIdx                                := 0.U
-      enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm.get)
       enq.bits.payload                                          := s0_enqBits(enqIdx)
     }
     entriesIO.og0Resp                                           := io.og0Resp
@@ -908,7 +907,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       sink := source
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm.getOrElse(0.U.asTypeOf(deq.bits.immType))
-    deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
+    deq.bits.common.imm := deqEntryVec(i).bits.payload.imm.getOrElse(0.U)
     deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
     deq.bits.common.pc.foreach(_ := 0.U)
