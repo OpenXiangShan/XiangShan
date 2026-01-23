@@ -25,6 +25,7 @@ import utility.MemReqSource
 import utility.ReqSourceKey
 import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
+import xiangshan.frontend.ftq.FtqPtr
 
 class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheMshrIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
@@ -66,6 +67,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   private val blkPAddr = RegInit(0.U((PAddrBits - blockOffBits).W))
   private val vSetIdx  = RegInit(0.U(idxBits.W))
   private val way      = RegInit(0.U(wayBits.W))
+  private val ftqIdx   = RegInit(0.U.asTypeOf(new FtqPtr))
   // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
   // vSetIdx is vAddr(untagBits, blockOffBits), aliasTag should be vAddr(untagBits, pgIdxBits)
   // and, AliasTagBits = untagBits - pgIdxBits, so we actually need AliasTagBits-most-significant bits of vSetIdx
@@ -102,6 +104,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     fencei   := false.B
     blkPAddr := io.req.bits.blkPAddr
     vSetIdx  := io.req.bits.vSetIdx
+    ftqIdx   := io.req.bits.ftqIdx
   }
 
   // send request to L2
@@ -139,6 +142,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   io.info.bits.blkPAddr := blkPAddr
   io.info.bits.vSetIdx  := vSetIdx
   io.info.bits.way      := way
+  io.info.bits.ftqIdx   := ftqIdx
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := !(valid && issue)

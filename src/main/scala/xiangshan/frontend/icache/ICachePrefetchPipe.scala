@@ -391,6 +391,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s2_valid = ValidHold(s1_realFire, s2_fire, s2_flush)
 
   private val s2_vAddr          = RegEnable(s1_vAddr, 0.U.asTypeOf(s1_vAddr), s1_realFire)
+  private val s2_ftqIdx         = RegEnable(s1_ftqIdx, 0.U.asTypeOf(s1_ftqIdx), s1_realFire)
   private val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_realFire)
   private val s2_doubleline     = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_realFire)
   private val s2_pTag           = RegEnable(s1_pTag, 0.U.asTypeOf(s1_pTag), s1_realFire)
@@ -447,6 +448,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     toMissArbiter.io.in(i).valid         := s2_valid && s2_miss(i) && !s2_hasSend(i)
     toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
     toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
+    toMissArbiter.io.in(i).bits.ftqIdx   := s2_ftqIdx
   }
 
   toMiss <> toMissArbiter.io.out
