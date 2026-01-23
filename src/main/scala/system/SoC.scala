@@ -120,8 +120,8 @@ case class SoCParameters
     HasTEEIMSIC = false
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = true)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
-  SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = true)),
+  SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = true)),
   // when UsePrivateClint is true, private clint is used, Timer will be instanced and mtip is generated inside XSTileWrap
   // when UsePrivateClint is false, mtip is from soc.
   UsePrivateClint: Boolean = false,
