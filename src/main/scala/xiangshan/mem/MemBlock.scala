@@ -764,29 +764,29 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // belong to the replay channel, whose priority is higher than prefetch channel in loadunit.
   // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
   // val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch)
-  val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch)
-  val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
-    Mux(l1_pf_req.bits.confidence === 1.U, false.B, canAcceptLowConfPrefetch(i))
+  // val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch)
+  // val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
+    // Mux(l1_pf_req.bits.confidence === 1.U, false.B, canAcceptLowConfPrefetch(i))
     /* // if it needs to distinguish ldu0 with others, use the code below
     if (LduCnt > 1 && i == 0) {
       Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
     } else {
       canAcceptLowConfPrefetch(i)
     } */
-  }
-  l1_pf_req.ready := canAcceptPrefetch.reduce(_ || _) || (dcache.io.prefetch_req.ready && l1_pf_req.bits.confidence === 1.U)
+  // }
+  l1_pf_req.ready := dcache.io.prefetch_req.ready
 
-  val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
-    if(i==0) l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U
-    else l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U && !canAcceptPrefetch.take(i).reduce(_ || _)
-  }
+  // val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
+  //   if(i==0) l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U
+  //   else l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U && !canAcceptPrefetch.take(i).reduce(_ || _)
+  // }
   loadUnits.zipWithIndex.foreach { case(u, i) => {
-    u.io.prefetch_req.valid <> toPrefetchValidVec(i)
-    u.io.prefetch_req.bits <> l1_pf_req.bits
+    u.io.prefetch_req.valid <> false.B
+    u.io.prefetch_req.bits <> DontCare
   }}
 
-  // move high confidence prefetch to mainpipe
-  dcache.io.prefetch_req.valid <> (l1_pf_req.valid && l1_pf_req.bits.confidence === 1.U)
+  // move all confidence prefetch to mainpipe
+  dcache.io.prefetch_req.valid <> l1_pf_req.valid
   dcache.io.prefetch_req.bits <> l1_pf_req.bits
 
   /** l1 pf fuzzer interface */
@@ -799,8 +799,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // override load_unit prefetch_req
     loadUnits.foreach(load_unit => {
-      load_unit.io.prefetch_req.valid <> fuzzer.io.req.valid
-      load_unit.io.prefetch_req.bits <> fuzzer.io.req.bits
+      load_unit.io.prefetch_req.valid <> false.B
+      load_unit.io.prefetch_req.bits <> DontCare
     })
 
     // move high confidence prefetch to mainpipe
