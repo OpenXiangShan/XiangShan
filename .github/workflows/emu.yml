@@ -570,7 +570,7 @@ jobs:
       - name: check difftest
         run: cd difftest && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check ready-to-run
-        run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+        run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v2
       - name: check huancun
         run: cd huancun && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check fudian
