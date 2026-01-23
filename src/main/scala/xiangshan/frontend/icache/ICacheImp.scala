@@ -216,7 +216,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // TO BPU:ONLY USED BY SKIA
-  io.toBpu.btbPrefetchResp := missUnit.io.resp
+  io.toBpu.btbPrefetchResp := missUnit.io.btbPrefetchResp
   // notify IFU that Icache pipeline is available
   io.toIfu.fetchReady := mainPipe.io.req.ready
 

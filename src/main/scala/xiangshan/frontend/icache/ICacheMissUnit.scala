@@ -266,6 +266,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.btbPrefetchResp.valid            := respValid
   io.btbPrefetchResp.bits.maybeRvcMap := maybeRvcMap
   io.btbPrefetchResp.bits.data        := respDataReg.asUInt
+  io.btbPrefetchResp.bits.ftqIdx      := mshrInfo.ftqIdx
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)
 
