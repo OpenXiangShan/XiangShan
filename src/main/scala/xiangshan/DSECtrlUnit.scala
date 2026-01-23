@@ -233,7 +233,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
 
     // core reset generation
     val coreResetReg = RegInit(false.B)
-    val resetVectorReg = RegInit(0.U(PAddrBits.W))
+    val resetVectorReg = RegInit(0x10000000L.U(PAddrBits.W))
 
     // driver -> workload reset
     val ctrlSelDelayed = RegNext(ctrlSel)

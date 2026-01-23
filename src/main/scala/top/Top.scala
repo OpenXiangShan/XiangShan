@@ -369,8 +369,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val true_reset_vector = withClock(io.clock) {
       // RegNext(RegNext(Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)))
-      Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)
-      // RegNextN(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector), 20)
+      // Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector)
+      RegNextN(Mux(reset_sync.asBool, io.riscv_rst_vec(0), dseCtrl.module.io.reset_vector), 20)
     }
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
