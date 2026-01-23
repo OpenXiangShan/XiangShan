@@ -907,13 +907,9 @@ class Sbuffer(implicit p: Parameters)
     //  For 'unit-store' and 'whole' vector store instr, we re-split here,
     //  and for the res, we do nothing.
     for (i <- 0 until EnsbufferWidth) {
+      diffStoreEventCount += 1
 
       val uop              = io.diffStore.diffInfo(i).uop
-
-      val unaligned_start       = io.diffStore.diffInfo(i).start
-      val unaligned_offset      = io.diffStore.diffInfo(i).offset
-      val unaligned_start_bits  = (io.diffStore.diffInfo(i).start << 3.U).asUInt
-      val unaligned_offset_bits = (io.diffStore.diffInfo(i).offset << 3.U).asUInt
 
       val isVse           = isVStore(uop.fuType) && LSUOpType.isUStride(uop.fuOpType)
       val isVsm           = isVStore(uop.fuType) && VstuType.isMasked(uop.fuOpType)
@@ -939,104 +935,47 @@ class Sbuffer(implicit p: Parameters)
                             )
 
       val rawData         = io.diffStore.pmaStore(i).bits.data
-      val rawMask         = io.diffStore.pmaStore(i).bits.mask
       val rawAddr         = io.diffStore.pmaStore(i).bits.addr
+      val rawMask         = io.diffStore.pmaStore(i).bits.mask
 
       // A common difftest interface for scalar and vector instr
       val difftestCommon = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
-      diffStoreEventCount += 1
+
+      val storeCommitValid = io.diffStore.pmaStore(i).fire && rawMask.orR && io.diffStore.pmaStore(i).bits.vecValid
+      difftestCommon.coreid       := io.hartId
+      difftestCommon.index        := i.U
+      difftestCommon.valid        := storeCommitValid
+
+      difftestCommon.wLine        := isWline
+      difftestCommon.vecNeedSplit := isVSLine
+      difftestCommon.eew          := EEB
+      difftestCommon.offset       := io.diffStore.diffInfo(i).offset
+
+      difftestCommon.pc           := io.diffStore.diffInfo(i).uop.pc
+      difftestCommon.robidx       := io.diffStore.diffInfo(i).uop.robIdx.value
+
+      // Except for normal scalar stores, all other address and data operations are handled within difftest.
       when (isVSLine) {
-        val upper             = Mux(unaligned_start === 0.U && unaligned_offset =/= 0.U, unaligned_offset, EEB - 1.U + unaligned_offset) // unit-stride second write request
-        val upperBits         = Mux(unaligned_start === 0.U && unaligned_offset =/= 0.U,
-                                   (unaligned_offset << 3.U).asUInt - 1.U,
-                                   ((EEB + unaligned_offset) << 3.U).asUInt - 1.U)// unit-stride second write request
-        val splitMask         = UIntSlice(rawMask, upper, unaligned_start)(7,0)  // Byte
-        val splitData         = UIntSlice(rawData, upperBits, unaligned_start_bits)(63,0) // Double word
-        val storeCommit       = io.diffStore.pmaStore(i).fire && splitMask.orR && io.diffStore.pmaStore(i).bits.vecValid
-        // align with ref
-        val waddr             = Mux(unaligned_offset =/= 0.U && rawAddr(3), ZeroExt(Cat(rawAddr(PAddrBits - 1, 3), 0.U(3.W)), 64), rawAddr)
-        val wmask             = Mux(unaligned_offset =/= 0.U && rawAddr(3), 0.U, splitMask << unaligned_offset)
-        val wdata             = Mux(unaligned_offset =/= 0.U && rawAddr(3), 0.U, (splitData & MaskExpand(splitMask)) << unaligned_offset_bits)
-
-        difftestCommon.coreid := io.hartId
-        difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
-        difftestCommon.valid  := storeCommit
-        difftestCommon.addr   := waddr
-        difftestCommon.data   := wdata
-        difftestCommon.mask   := wmask
-        difftestCommon.robidx := io.diffStore.diffInfo(i).uop.robIdx.value
-        difftestCommon.pc     := io.diffStore.diffInfo(i).uop.pc
-
-      } .elsewhen (!isWline) {
-        val storeCommit       = io.diffStore.pmaStore(i).fire
-        val waddr             = ZeroExt(Cat(io.diffStore.pmaStore(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-        val sbufferMask       = shiftMaskToLow(io.diffStore.pmaStore(i).bits.addr, io.diffStore.pmaStore(i).bits.mask)
-        val sbufferData       = shiftDataToLow(io.diffStore.pmaStore(i).bits.addr, io.diffStore.pmaStore(i).bits.data)
-        val wmask             = sbufferMask
-        val wdata             = sbufferData & MaskExpand(sbufferMask)
-
-        difftestCommon.coreid := io.hartId
-        difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
-        difftestCommon.valid  := storeCommit && io.diffStore.pmaStore(i).bits.vecValid
-        difftestCommon.addr   := waddr
-        difftestCommon.data   := wdata
-        difftestCommon.mask   := wmask
-        difftestCommon.robidx := io.diffStore.diffInfo(i).uop.robIdx.value
-        difftestCommon.pc     := io.diffStore.diffInfo(i).uop.pc
-      }
-
-      for (index <- 0 until WlineMaxNumber) {
-        val difftest = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
-        diffStoreEventCount += 1
-
-        val storeCommit = io.diffStore.pmaStore(i).fire && io.diffStore.pmaStore(i).bits.vecValid
-        val blockAddr = get_block_addr(io.diffStore.pmaStore(i).bits.addr)
-
-        when (isWline) {
-          difftest.coreid := io.hartId
-          difftest.index  := (i*VecMemFLOWMaxNumber + index).U
-          difftest.valid  := storeCommit
-          difftest.addr   := blockAddr + (index.U << wordOffBits)
-          difftest.data   := io.diffStore.pmaStore(i).bits.data
-          difftest.mask   := ((1 << wordBytes) - 1).U
-          difftest.robidx := io.diffStore.diffInfo(i).uop.robIdx.value
-          difftest.pc     := io.diffStore.diffInfo(i).uop.pc
-
-          assert(!storeCommit || (io.diffStore.pmaStore(i).bits.data === 0.U), "wline only supports whole zero write now")
-        }
-      }
-
-      // Only the interface used by the 'unit-store' and 'whole' vector store instr
-      for (index <- 1 until VecMemFLOWMaxNumber) {
-        val difftest = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
-        diffStoreEventCount += 1
-
-        // I've already done something process with 'mask' outside:
-        //  Different cases of 'vm' have been considered:
-        //    Any valid store will definitely not have all 0 masks,
-        //    and the extra part due to unaligned access must have a mask of 0
-        when (index.U < flow && isVSLine) {
-          // Make NEMU-difftest happy
-          val shiftIndex  = EEB*index.U
-          val shiftFlag   = shiftIndex(2,0).orR // Double word Flag
-          val shiftBytes  = Mux(shiftFlag, shiftIndex(2,0), 0.U)
-          val shiftBits   = shiftBytes << 3.U
-          val splitMask   = UIntSlice(rawMask, (EEB*(index+1).U - 1.U) + unaligned_offset, EEB*index.U + unaligned_offset)(7,0)  // Byte
-          val splitData   = UIntSlice(rawData, (EEWBits*(index+1).U - 1.U) + unaligned_offset_bits, EEWBits*index.U + unaligned_offset_bits)(63,0) // Double word
-          val storeCommit = io.diffStore.pmaStore(i).fire && splitMask.orR  && io.diffStore.pmaStore(i).bits.vecValid
-          val waddr       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), Cat(rawAddr(PAddrBits - 1, 4),  0.U(4.W)),Cat(rawAddr(PAddrBits - 1, 4), Cat(shiftIndex(3), 0.U(3.W))))
-          val wmask       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), 0.U,splitMask << (shiftBytes + unaligned_offset))
-          val wdata       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), 0.U,(splitData & MaskExpand(splitMask)) << (shiftBits.asUInt + unaligned_offset_bits))
-
-          difftest.coreid := io.hartId
-          difftest.index  := (i*VecMemFLOWMaxNumber+index).U
-          difftest.valid  := storeCommit
-          difftest.addr   := waddr
-          difftest.data   := wdata
-          difftest.mask   := wmask
-          difftest.robidx := io.diffStore.diffInfo(i).uop.robIdx.value
-          difftest.pc     := io.diffStore.diffInfo(i).uop.pc
-        }
+        difftestCommon.addr     := rawAddr
+        difftestCommon.data  := rawData(63, 0)
+        difftestCommon.highData := rawData(127, 64)
+        difftestCommon.mask     := rawMask
+      }.elsewhen (isWline) {
+        difftestCommon.addr     := rawAddr
+        difftestCommon.data  := rawData(63, 0)
+        difftestCommon.highData := rawData(127, 64)
+        difftestCommon.mask     := rawMask
+        assert(!storeCommitValid || rawData === 0.U, "wline only supports whole zero write now")
+      }.otherwise { // Normal scalar store
+        val waddr = ZeroExt(Cat(rawAddr(PAddrBits - 1, 3), 0.U(3.W)), 64)
+        val sbufferMask = shiftMaskToLow(rawAddr, rawMask)
+        val sbufferData = shiftDataToLow(rawAddr, rawData)
+        val wmask = sbufferMask
+        val wdata = sbufferData & MaskExpand(sbufferMask)
+        difftestCommon.addr     := waddr
+        difftestCommon.data  := wdata
+        difftestCommon.highData := 0.U
+        difftestCommon.mask     := wmask
       }
     }
     println("PMA Store: diffStoreEventCount = " + diffStoreEventCount)
@@ -1049,7 +988,12 @@ class Sbuffer(implicit p: Parameters)
     ncmmStoreEvent.valid := io.diffStore.ncStore.valid && io.diffStore.ncStore.bits.memBackTypeMM
     ncmmStoreEvent.addr := Cat(io.diffStore.ncStore.bits.addr(PAddrBits - 1, DCacheWordOffset), 0.U(DCacheWordOffset.W)) // aligned to 8 bytes
     ncmmStoreEvent.data := io.diffStore.ncStore.bits.data & dataMask // data align
+    ncmmStoreEvent.highData := 0.U
     ncmmStoreEvent.mask := io.diffStore.ncStore.bits.mask
+    ncmmStoreEvent.wLine := 0.U
+    ncmmStoreEvent.vecNeedSplit := 0.U
+    ncmmStoreEvent.eew := 0.U
+    ncmmStoreEvent.offset := 0.U
     ncmmStoreEvent.pc := io.diffStore.diffInfo(0).uop.pc
     ncmmStoreEvent.robidx := io.diffStore.diffInfo(0).uop.robIdx.value
   }
