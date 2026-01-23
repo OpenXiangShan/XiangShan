@@ -627,6 +627,8 @@ class CtrlBlockImp(
       rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
       rename.io.fusionCross2FtqVec(i) := cross2Ftq
+      // Topdown fusion bubble
+      rename.io.stallReason.in.reason(i + 1) := TopDownCounters.FusionBubble.id.U
     }
   }
 
