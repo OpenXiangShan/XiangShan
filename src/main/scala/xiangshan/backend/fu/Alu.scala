@@ -181,6 +181,35 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   })
   val (src1, src2, func, pc) = (io.src(0), io.src(1), io.func, io.pc)
 
+  val isAddw       = ALUOpType.isAddw(func)
+  val isOddaddw    = ALUOpType.isOddaddw(func)
+  val isSubw       = ALUOpType.isSubw(func)
+  val isLui32addw  = ALUOpType.isLui32addw(func)
+  val isAddwOrSubw = ALUOpType.isAddwOrSubw(func)
+
+  val isSr29add = ALUOpType.isSr29add(func)
+  val isSr30add = ALUOpType.isSr30add(func)
+  val isSr31add = ALUOpType.isSr31add(func)
+  val isSr32add = ALUOpType.isSr32add(func)
+  val isSh1add  = ALUOpType.isSh1add(func)
+  val isSh2add  = ALUOpType.isSh2add(func)
+  val isSh3add  = ALUOpType.isSh3add(func)
+  val isSh4add  = ALUOpType.isSh4add(func)
+
+  val adduwSrc     = ZeroExt(src1(31, 0), XLEN)
+  val oddaddSrc    = ZeroExt(src1(0), XLEN)
+  val lui32addSrc1 = SignExt(src2(11, 0), XLEN)
+  val lui32addSrc2 = Cat(src2(63, 12), 0.U(12.W))
+  val sr29addSrc = ZeroExt(src1(63, 29), XLEN)
+  val sr30addSrc = ZeroExt(src1(63, 30), XLEN)
+  val sr31addSrc = ZeroExt(src1(63, 31), XLEN)
+  val sr32addSrc = ZeroExt(src1(63, 32), XLEN)
+  val shaddSrc   = Cat(Fill(32, func(0)), Fill(32, 1.U)) & src1
+  val sh1addSrc  = Cat(shaddSrc(62, 0), 0.U(1.W))
+  val sh2addSrc  = Cat(shaddSrc(61, 0), 0.U(2.W))
+  val sh3addSrc  = Cat(shaddSrc(60, 0), 0.U(3.W))
+  val sh4addSrc  = Cat(src1(59, 0), 0.U(4.W))
+
   val shamt = src2(5, 0)
 
   // slliuw, sll
@@ -216,17 +245,24 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   rotateRightModule.io.rorSrc := src1
 
   // addw
-  val addwModule = Module(new AddWModule)
-  addwModule.io.srcw := src1(31, 0)
-  addwModule.io.src  := src2(31, 0)
-  val addwResultAll = VecInit(Seq(
-    ZeroExt(addwModule.io.addw(0), XLEN),
-    ZeroExt(addwModule.io.addw(7, 0), XLEN),
-    ZeroExt(addwModule.io.addw(15, 0), XLEN),
-    SignExt(addwModule.io.addw(15, 0), XLEN)
+  val addwSrc1 = Mux1H(Seq(
+    isAddwOrSubw -> src1,
+    isOddaddw    -> oddaddSrc,
+    isLui32addw  -> lui32addSrc1,
   ))
+  val addwSrc2 = Mux(isLui32addw, lui32addSrc2, src2)
+
+  val addwModule = Module(new AddWModule)
+  addwModule.io.srcw := addwSrc1(31, 0)
+  addwModule.io.src  := addwSrc2(31, 0)
   val addw = Wire(UInt((XLEN / 2).W))
-  addw := Mux(func(2), addwResultAll(func(1, 0)), addwModule.io.addw)
+  addw := Mux1H(Seq(
+    (func(2) & !func(1) & !func(0)) -> ZeroExt(addwModule.io.addw(0),     XLEN / 2),
+    (func(2) & !func(1) &  func(0)) -> ZeroExt(addwModule.io.addw(7, 0),  XLEN / 2),
+    (func(2) &  func(1) & !func(0)) -> ZeroExt(addwModule.io.addw(15, 0), XLEN / 2),
+    (func(2) &  func(1) &  func(0)) -> SignExt(addwModule.io.addw(15, 0), XLEN / 2),
+    !func(2) -> addwModule.io.addw,
+  ))
 
   // subw
   val subModule = Module(new SubModule)
@@ -260,10 +296,39 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   rotateRightShiftWordModule.io.rorwSrc := src1
 
   // add
+  val addSrc1 = Mux1H(Seq(
+    isAddw      -> adduwSrc,
+    isOddaddw   -> oddaddSrc,
+    isSubw      -> src1,
+    isLui32addw -> lui32addSrc1,
+  ))
+  val addSrc2 = Mux(isLui32addw, lui32addSrc2, src2)
   val addModule = Module(new AddModule)
-  addModule.io.src(0) := src1
-  addModule.io.src(1) := src2
+  addModule.io.src(0) := addSrc1
+  addModule.io.src(1) := addSrc2
   val add = addModule.io.add
+
+  val sraddSrc1 = Mux1H(Seq(
+    isSr29add -> sr29addSrc,
+    isSr30add -> sr30addSrc,
+    isSr31add -> sr31addSrc,
+    isSr32add -> sr32addSrc,
+  ))
+  val sraddModule = Module(new AddModule)
+  sraddModule.io.src(0) := sraddSrc1
+  sraddModule.io.src(1) := src2
+  val sradd = sraddModule.io.add
+
+  val shaddSrc1 = Mux1H(Seq(
+    isSh1add -> sh1addSrc,
+    isSh2add -> sh2addSrc,
+    isSh3add -> sh3addSrc,
+    isSh4add -> sh4addSrc,
+  ))
+  val shaddModule = Module(new AddModule)
+  shaddModule.io.src(0) := shaddSrc1
+  shaddModule.io.src(1) := src2
+  val shadd = shaddModule.io.add
 
   // sub
   val sub  = subModule.io.sub
@@ -321,61 +386,62 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   jmpModule.io.src(1) := src2
   val jmpRes = jmpModule.io.add
 
-  val isAdd = !func(6) & func(5) & !func(4)
-  val isCompare = !func(6) & func(5) & func(4)
-  val isMaxMin  = isCompare & func(2) & func(1)
-  val isMaxMinU = isCompare & func(2) & !func(1)
-  val isSlt  = isCompare & !func(2) & func(1)
-  val isSltu = isCompare & !func(2) & !func(1) & func(0)
-  val isSub  = isCompare & !func(2) & !func(1) & !func(0)
-  val isShift = !func(6) & !func(5) & !func(4)
-  val isSll  = isShift & !func(3) & !func(2) & !func(1)
-  val isBclr = isShift & !func(3) & !func(2) &  func(1) & !func(0)
-  val isBset = isShift & !func(3) & !func(2) &  func(1) &  func(0)
-  val isBinv = isShift & !func(3) &  func(2) & !func(1) & !func(0)
-  val isSrl  = isShift & !func(3) &  func(2) & !func(1) &  func(0)
-  val isBext = isShift & !func(3) &  func(2) &  func(1) & !func(0)
-  val isSra  = isShift & !func(3) &  func(2) &  func(1) &  func(0)
-  val isRol  = isShift & func(3) & !func(1)
-  val isRor  = isShift & func(3) &  func(1)
-  val isMisc  =  func(6) & (!func(5) | !func(4))
-  val isWiden = !func(6) & !func(5) &  func(4)
-  val isAddw = isWiden & (!func(3) & !func(2) & (!func(1) | func(0)) | !func(3) & func(2))
-  val isSubw = isWiden & !func(3) & !func(2) &  func(1) & !func(0)
-  val isSllw = isWiden &  func(3) & !func(2) & !func(1) & !func(0)
-  val isSrlw = isWiden &  func(3) & !func(2) &  func(0)
-  val isSraw = isWiden &  func(3) & !func(2) &  func(1)
-  val isRolw = isWiden &  func(3) &  func(2) & !func(0)
-  val isRorw = isWiden &  func(3) &  func(2) &  func(0)
+  val isAdd     = ALUOpType.isAdd(func)
+  val isSradd   = ALUOpType.isSradd(func)
+  val isShadd   = ALUOpType.isShadd(func)
+  val isMaxMin  = ALUOpType.isMaxMin(func)
+  val isMaxMinU = ALUOpType.isMaxMinU(func)
+  val isSlt   = ALUOpType.isSlt(func)
+  val isSltu  = ALUOpType.isSltu(func)
+  val isSub   = ALUOpType.isSub(func)
+  val isSll   = ALUOpType.isSll(func)
+  val isBclr  = ALUOpType.isBclr(func)
+  val isBset  = ALUOpType.isBset(func)
+  val isBinv  = ALUOpType.isBinv(func)
+  val isSrl   = ALUOpType.isSrl(func)
+  val isBext  = ALUOpType.isBext(func)
+  val isSra   = ALUOpType.isSra(func)
+  val isRol   = ALUOpType.isRol(func)
+  val isRor   = ALUOpType.isRor(func)
+  val isMisc  = ALUOpType.isMisc(func)
+  val isAddwOp = ALUOpType.isAddwOp(func)
+  val isSubwOp = ALUOpType.isSubwOp(func)
+  val isSllw = ALUOpType.isSllw(func)
+  val isSrlw = ALUOpType.isSrlw(func)
+  val isSraw = ALUOpType.isSraw(func)
+  val isRolw = ALUOpType.isRolw(func)
+  val isRorw = ALUOpType.isRorw(func)
   val isZicond = ALUOpType.isZicond(func)
   val isJmp = if (aluNeedPc) ALUOpType.isJmp(func) else false.B
 
   val aluRes = Mux1H(Seq(
-    isAdd -> add,
+    isAdd     -> add,
+    isSradd   -> sradd,
+    isShadd   -> shadd,
     isMaxMin  -> maxMin,
     isMaxMinU -> maxMinU,
-    isSlt -> slt,
-    isSltu -> sltu,
-    isSub -> sub,
-    isSll  -> sll,
-    isBclr -> bclr,
-    isBset -> bset,
-    isBinv -> binv,
-    isSrl  -> srl,
-    isBext -> bext,
-    isSra -> sra,
-    isRol -> rol,
-    isRor -> ror,
-    isMisc -> miscRes,
-    isAddw -> SignExt(addw, XLEN),
-    isSubw -> SignExt(subw, XLEN),
-    isSllw -> SignExt(sllw, XLEN),
-    isSrlw -> SignExt(srlw, XLEN),
-    isSraw -> SignExt(sraw, XLEN),
-    isRolw -> SignExt(rolw, XLEN),
-    isRorw -> SignExt(rorw, XLEN),
-    isZicond -> condRes,
-    isJmp -> jmpRes,
+    isSlt     -> slt,
+    isSltu    -> sltu,
+    isSub     -> sub,
+    isSll     -> sll,
+    isBclr    -> bclr,
+    isBset    -> bset,
+    isBinv    -> binv,
+    isSrl     -> srl,
+    isBext    -> bext,
+    isSra     -> sra,
+    isRol     -> rol,
+    isRor     -> ror,
+    isMisc    -> miscRes,
+    isAddwOp  -> SignExt(addw, XLEN),
+    isSubwOp  -> SignExt(subw, XLEN),
+    isSllw    -> SignExt(sllw, XLEN),
+    isSrlw    -> SignExt(srlw, XLEN),
+    isSraw    -> SignExt(sraw, XLEN),
+    isRolw    -> SignExt(rolw, XLEN),
+    isRorw    -> SignExt(rorw, XLEN),
+    isZicond  -> condRes,
+    isJmp     -> jmpRes,
   ))
 
   io.result := aluRes

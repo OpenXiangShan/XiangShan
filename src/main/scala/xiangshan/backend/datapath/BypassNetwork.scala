@@ -202,67 +202,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         )
       )
       src := originSrc
-
-      if (exuParm.hasAluFu && srcIdx == 0) {
-        when(isAlu) {
-          val isAdduw = ALUOpType.isAdduw(fuOpType)
-          val isOddadd = ALUOpType.isOddadd(fuOpType)
-          val isSradd = ALUOpType.isSradd(fuOpType)
-          val isSr29add = isSradd && ALUOpType.isSr29add(fuOpType)
-          val isSr30add = isSradd && ALUOpType.isSr30add(fuOpType)
-          val isSr31add = isSradd && ALUOpType.isSr31add(fuOpType)
-          val isSr32add = isSradd && ALUOpType.isSr32add(fuOpType)
-          val isShadd = ALUOpType.isShadd(fuOpType)
-          val isSh1add = isShadd && ALUOpType.isSh1add(fuOpType)
-          val isSh2add = isShadd && ALUOpType.isSh2add(fuOpType)
-          val isSh3add = isShadd && ALUOpType.isSh3add(fuOpType)
-          val isSh4add = isShadd && ALUOpType.isSh4add(fuOpType)
-
-          val adduwSrc = ZeroExt(originSrc(31, 0), XLEN)
-          val oddAddSrc = ZeroExt(originSrc(0), XLEN)
-          val sr29addSrc = ZeroExt(originSrc(63, 29), XLEN)
-          val sr30addSrc = ZeroExt(originSrc(63, 30), XLEN)
-          val sr31addSrc = ZeroExt(originSrc(63, 31), XLEN)
-          val sr32addSrc = ZeroExt(originSrc(63, 32), XLEN)
-          val shaddSrc = Cat(Fill(32, fuOpType(0)), Fill(32, 1.U)) & originSrc
-          val sh1addSrc = Cat(shaddSrc(62, 0), 0.U(1.W))
-          val sh2addSrc = Cat(shaddSrc(61, 0), 0.U(2.W))
-          val sh3addSrc = Cat(shaddSrc(60, 0), 0.U(3.W))
-          val sh4addSrc = Cat(originSrc(59, 0), 0.U(4.W))
-
-          val aluSrc0 = Wire(UInt(XLEN.W))
-          dontTouch(aluSrc0)
-          aluSrc0 := MuxCase(originSrc, Seq(
-            isAdduw -> adduwSrc,
-            isOddadd -> oddAddSrc,
-            isSr29add -> sr29addSrc,
-            isSr30add -> sr30addSrc,
-            isSr31add -> sr31addSrc,
-            isSr32add -> sr32addSrc,
-            isSh1add -> sh1addSrc,
-            isSh2add -> sh2addSrc,
-            isSh3add -> sh3addSrc,
-            isSh4add -> sh4addSrc,
-          ))
-          src := aluSrc0
-        }
-      }
     }
     exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
-
-    if (exuParm.hasAluFu) {
-      when(isAlu) {
-        val isLui32add = ALUOpType.isLui32add(fuOpType)
-        val lui32addSrc = Wire(Vec(2, UInt(XLEN.W)))
-        lui32addSrc(0) := SignExt(imm(11, 0), XLEN)
-        lui32addSrc(1) := Cat(imm(63, 12), 0.U(12.W))
-        exuInput.bits.src.zip(lui32addSrc).foreach { case (src, lui32Src) =>
-          when(isLui32add) {
-            src := lui32Src
-          }
-        }
-      }
-    }
 
     if (exuParm.hasBrhFu) {
       val thisPcOffset = exuInput.bits.getPcOffset()

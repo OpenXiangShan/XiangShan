@@ -380,26 +380,56 @@ package object xiangshan {
     // for xstrap
     def xstrap     = "b111_1111".U
 
-    def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
-    def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
     def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
     def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
 
-    def isLui32add(func: UInt): Bool = func(6, 4) === "b001".U && !func(2) && func(1) && func(0) || func === lui32add
-    def isOddadd(func: UInt): Bool = (func(6, 4) === "b001".U || func(6, 4) === "b010".U) && func(3, 0) === "b0001".U
-    def isAdduw(func: UInt): Bool = func(6, 4) === "b010".U && !func(3, 0).orR
-    def isSradd(func: UInt): Bool = func(6, 4) === "b010".U && !func(3) && func(2)
-    def isSr29add(func: UInt): Bool = !func(1) && !func(0)
-    def isSr30add(func: UInt): Bool = !func(1) &&  func(0)
-    def isSr31add(func: UInt): Bool =  func(1) && !func(0)
-    def isSr32add(func: UInt): Bool =  func(1) &&  func(0)
-    def isShadd(func: UInt): Bool = func(6, 4) === "b010".U && func(3)
-    def isSh1add(func: UInt): Bool = !func(2) && !func(1)
-    def isSh2add(func: UInt): Bool = !func(2) &&  func(1)
-    def isSh3add(func: UInt): Bool =  func(2) && !func(1)
-    def isSh4add(func: UInt): Bool =  func(2) &&  func(1)
-    def isZicond(func: UInt): Bool = func(6, 4).andR && !func(3)
-    def isJmp(func: UInt): Bool = func(6, 3).andR & !func(2)
+    def isShift(func: UInt): Bool      = func(6, 4) === "b000".U
+    def isWiden(func: UInt): Bool      = func(6, 4) === "b001".U
+    def isAddOp(func: UInt): Bool      = func(6, 4) === "b010".U
+    def isCompare(func: UInt): Bool    = func(6, 4) === "b011".U
+    def isMisc(func: UInt): Bool       = func(6) & (!func(5) | !func(4))
+
+    def isAddw(func: UInt): Bool       = func(3, 0) === "b0000".U
+    def isOddaddw(func: UInt): Bool    = func(3, 0) === "b0001".U
+    def isSubw(func: UInt): Bool       = func(3, 0) === "b0010".U
+    def isLui32addw(func: UInt): Bool  = func(3, 0) === "b0011".U
+    def isAddwOrSubw(func: UInt): Bool = !func(3) && !func(2) && !func(0) || func(2)
+    def isSr29add(func: UInt): Bool    = func(1, 0) === "b00".U
+    def isSr30add(func: UInt): Bool    = func(1, 0) === "b01".U
+    def isSr31add(func: UInt): Bool    = func(1, 0) === "b10".U
+    def isSr32add(func: UInt): Bool    = func(1, 0) === "b11".U
+    def isSh1add(func: UInt): Bool     = func(2, 1) === "b00".U
+    def isSh2add(func: UInt): Bool     = func(2, 1) === "b01".U
+    def isSh3add(func: UInt): Bool     = func(2, 1) === "b10".U
+    def isSh4add(func: UInt): Bool     = func(2, 1) === "b11".U
+
+    def isAdd(func: UInt): Bool     = isAddOp(func) && func(3, 2) === "b00".U
+    def isSradd(func: UInt): Bool   = isAddOp(func) && func(3, 2) === "b01".U
+    def isShadd(func: UInt): Bool   = isAddOp(func) && func(3)
+    def isMaxMin(func: UInt): Bool  = isCompare(func) && func(2, 1) === "b11".U
+    def isMaxMinU(func: UInt): Bool = isCompare(func) && func(2, 1) === "b10".U
+    def isSlt(func: UInt): Bool     = isCompare(func) && func(2, 1) === "b01".U
+    def isSltu(func: UInt): Bool    = isCompare(func) && func(2, 0) === "b001".U
+    def isSub(func: UInt): Bool     = isCompare(func) && func(2, 0) === "b000".U
+    def isSll(func: UInt): Bool     = isShift(func) && func(3, 1) === "b000".U
+    def isBclr(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0010".U
+    def isBset(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0011".U
+    def isBinv(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0100".U
+    def isSrl(func: UInt): Bool     = isShift(func) && func(3, 0) === "b0101".U
+    def isBext(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0110".U
+    def isSra(func: UInt): Bool     = isShift(func) && func(3, 0) === "b0111".U
+    def isRol(func: UInt): Bool     = isShift(func) && func(3) && !func(1)
+    def isRor(func: UInt): Bool     = isShift(func) && func(3) &&  func(1)
+    def isAddwOp(func: UInt): Bool  = isWiden(func) && (!func(3) & !func(2) & (!func(1) | func(0)) | !func(3) & func(2))
+    def isSubwOp(func: UInt): Bool  = isWiden(func) && func(3, 0) === "b0010".U
+    def isSllw(func: UInt): Bool    = isWiden(func) && func(3, 0) === "b1000".U
+    def isSrlw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b10".U && func(0)
+    def isSraw(func: UInt): Bool    = isWiden(func) && func(3, 1) === "b101".U
+    def isRolw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U && !func(0)
+    def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
+
+    def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
+    def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
 
     def apply() = UInt(FuOpTypeWidth.W)
   }
