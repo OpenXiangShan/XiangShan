@@ -28,6 +28,7 @@ import utility.XORFold
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
@@ -76,6 +77,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     // Backend: csr control
     val csrFsIsOff: Bool = Input(Bool())
+
+    // Topdown analysis
+    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -809,9 +813,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu(0) || s1_flushFromBpu(0) // FIXME
   perfAnalyzer.io.ifuPerfCtrl.fromICacheBubble := s1_valid && !s1_iCacheRespValid
 
-  perfAnalyzer.io.topdownIn.icacheTopdown   := io.fromICache.topdown
-  perfAnalyzer.io.topdownIn.ftqTopdown      := fromFtq.req.bits.topdownInfo
-  perfAnalyzer.io.topdownIn.topdownRedirect := fromFtq.topdownRedirect
+  perfAnalyzer.io.topdownIn.icacheTopdown          := io.fromICache.topdown
+  perfAnalyzer.io.topdownIn.ftqTopdown             := io.fromFtq.req.bits.topdownInfo
+  perfAnalyzer.io.topdownIn.backendRedirectTopdown := io.backendRedirectTopdown
 
   perfAnalyzer.io.perfInfo.icachePerfInfo                 := s3_icachePerfInfo
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(0)         := wbValid && wbFirstValid

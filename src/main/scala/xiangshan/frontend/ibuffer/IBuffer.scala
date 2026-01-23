@@ -29,7 +29,7 @@ import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
-import xiangshan.frontend.BpuTopDownInfo
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 
@@ -42,10 +42,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val decodeCanAccept: Bool                        = Input(Bool())
 
     // top-down
-    val bpuTopDownInfo:  BpuTopDownInfo = Input(new BpuTopDownInfo)
-    val controlRedirect: Bool           = Input(Bool())
-    val memVioRedirect:  Bool           = Input(Bool())
-    val stallReason:     StallReasonIO  = new StallReasonIO(DecodeWidth)
+    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -369,25 +367,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   topdownStage := io.in.bits.topdownInfo
-  when(io.flush) {
-    when(io.controlRedirect) {
-      when(io.bpuTopDownInfo.btbMissBubble) {
-        topdownStage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.tageMissBubble) {
-        topdownStage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.scMissBubble) {
-        topdownStage.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.ittageMissBubble) {
-        topdownStage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.rasMissBubble) {
-        topdownStage.reasons(TopDownCounters.RASMissBubble.id) := true.B
-      }
-    }.elsewhen(io.memVioRedirect) {
-      topdownStage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    }.otherwise {
-      topdownStage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-    }
-  }
+  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
 
   private val matchBubble   = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
   private val deqValidCount = PopCount(validVec.asBools)
