@@ -364,7 +364,12 @@ class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
   val iCacheMissBubble: Bool = Output(Bool())
   val itlbMissBubble:   Bool = Output(Bool())
 }
-
+// to Bpu:Skia prefetch
+class BtbPrefetchBundle(implicit p: Parameters) extends ICacheBundle {
+  val data:        UInt = UInt(blockBits.W)
+  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+//  val ftqPtr
+}
 // inner MainPipe -> top
 class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val rawHits:     Vec[Bool] = Vec(PortNumber, Bool())

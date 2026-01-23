@@ -35,6 +35,7 @@ import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO
+import xiangshan.frontend.ICacheToBpuIO
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToICacheIO
 
@@ -49,6 +50,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // IFU
     val toIfu:   ICacheToIfuIO = new ICacheToIfuIO
     val fromIfu: IfuToICacheIO = Flipped(new IfuToICacheIO)
+    // BPU
+    val toBpu: ICacheToBpuIO = new ICacheToBpuIO()
     // PMP: magic number 2: mainPipe & prefetchPipe both need a Pmp check
     val pmp: Vec[PmpCheckBundle] = Vec(2, new PmpCheckBundle)
     // iTLB
@@ -212,6 +215,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlb <> prefetcher.io.itlb
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
+  // TO BPU:ONLY USED BY SKIA
+  io.toBpu.btbPrefetchResp := missUnit.io.resp
   // notify IFU that Icache pipeline is available
   io.toIfu.fetchReady := mainPipe.io.req.ready
 

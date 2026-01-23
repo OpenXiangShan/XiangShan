@@ -44,6 +44,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     val prefetchReq: DecoupledIO[MissReqBundle] = Flipped(DecoupledIO(new MissReqBundle))
     // response to mainPipe / prefetchPipe / waylookup
     val resp: Valid[MissRespBundle] = ValidIO(new MissRespBundle)
+    // response to btb
+    val btbPrefetchResp: Valid[BtbPrefetchBundle] = ValidIO(new BtbPrefetchBundle)
     // SRAM Write
     val metaWrite: MetaWriteBundle = new MetaWriteBundle
     val dataWrite: DataWriteBundle = new DataWriteBundle
@@ -260,6 +262,10 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.resp.bits.corrupt     := corruptReg
   io.resp.bits.denied      := deniedReg
 
+  // response btb prefetch
+  io.btbPrefetchResp.valid            := respValid
+  io.btbPrefetchResp.bits.maybeRvcMap := maybeRvcMap
+  io.btbPrefetchResp.bits.data        := respDataReg.asUInt
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)
 
