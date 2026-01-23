@@ -330,31 +330,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     io.toWakeupQueueRCIdx := regCache.io.toWakeupQueueRCIdx
     io.toBypassNetworkRCData := s1_RCReadData
     regCache.io.writePorts := io.fromBypassNetwork
-    // perf counter
-    val int_regcache_size = 48
-    val int_regcache_tag = RegInit(VecInit(Seq.fill(int_regcache_size)(0.U(intSchdParams.pregIdxWidth.W))))
-    val int_regcache_enqPtr = RegInit(0.U(log2Up(int_regcache_size).W))
-    int_regcache_enqPtr := int_regcache_enqPtr + PopCount(intRfWen)
-    for (i <- intRfWen.indices) {
-      when(intRfWen(i)) {
-        int_regcache_tag(int_regcache_enqPtr + PopCount(intRfWen.take(i))) := intRfWaddr(i)
-      }
-    }
-    val int_regcache_part32 = (1 until 33).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-    val int_regcache_part24 = (1 until 24).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-    val int_regcache_part16 = (1 until 17).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-    val int_regcache_part8 = (1 until 9).map(i => int_regcache_tag(int_regcache_enqPtr - i.U))
-    val int_regcache_48_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_tag.map(_ === x.bits.addr).reduce(_ || _))
-    val int_regcache_8_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part8.map(_ === x.bits.addr).reduce(_ || _))
-    val int_regcache_16_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part16.map(_ === x.bits.addr).reduce(_ || _))
-    val int_regcache_24_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part24.map(_ === x.bits.addr).reduce(_ || _))
-    val int_regcache_32_hit_vec = intRFReadArbiter.io.in.flatten.flatten.map(x => x.valid && int_regcache_part32.map(_ === x.bits.addr).reduce(_ || _))
-    XSPerfAccumulate("IntRegCache48Hit", PopCount(int_regcache_48_hit_vec))
-    XSPerfAccumulate("IntRegCache8Hit", PopCount(int_regcache_8_hit_vec))
-    XSPerfAccumulate("IntRegCache16Hit", PopCount(int_regcache_16_hit_vec))
-    XSPerfAccumulate("IntRegCache24Hit", PopCount(int_regcache_24_hit_vec))
-    XSPerfAccumulate("IntRegCache32Hit", PopCount(int_regcache_32_hit_vec))
-    XSPerfHistogram("IntRegCache48Hit_hist", PopCount(int_regcache_48_hit_vec), true.B, 0, 16, 2)
+
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       // Delay of PhyRegFile should be same as RenameTable
       val difftest = DifftestModule(new DiffPhyIntRegState(intSchdParams.numPregs), delay = 2)
