@@ -373,3 +373,7 @@ simulator_out.txt
 *.log
 *.err
 cr*/
+
+# external dependence
+NEMU/
+nexus-am

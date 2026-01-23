@@ -18,6 +18,9 @@
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
 
+# import dependencies support
+include scripts/Makefile.dependence
+
 # import docker support
 include scripts/Makefile.docker
 
@@ -44,8 +47,8 @@ TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
 JAR = $(BUILD_DIR)/xsgen.jar
 
-SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
-TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
+SCALA_FILE = $(shell find ./src/main/scala -name '*.scala' | sort)
+TEST_FILE = $(shell find ./src/test/scala -name '*.scala' | sort)
 
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
@@ -291,7 +294,7 @@ endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 
-sim-verilog: $(call docker-deps,$(SIM_TOP_V))
+sim-verilog: deps $(call docker-deps,$(SIM_TOP_V))
 
 clean:
 	$(MAKE) -C ./difftest clean

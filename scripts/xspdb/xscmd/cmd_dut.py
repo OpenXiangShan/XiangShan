@@ -14,9 +14,7 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-
 import os
-import time
 from . import info, error, message, warn, get_completions
 
 class CmdDut:
@@ -24,111 +22,7 @@ class CmdDut:
     def __init__(self):
         assert hasattr(self, "dut"), "this class must be used in XSPdb, canot be used alone"
         self.interrupt = False
-        self.xdut_signal_breaks = {}
         self.api_dut_reset()
-
-    def api_xbreak(self, signal_name, condition, value, callback=None, callback_once=False):
-        """Set a breakpoint on a signal
-
-        Args:
-            signal_name (string): Name of the signal
-            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch
-            value (int/string): Value for the breakpoint
-            callback (function): Callback function to be called when the breakpoint is hit, args:
-                cb(self, checker, k, clk, sig.value, target.value)
-            callback_once (bool): Whether to call the callback function only once and remove the breakpoint
-        """
-        checker = self.xdut_signal_breaks.get("checker")
-        checker_key = "xdut_signal_break"
-        if not checker:
-            checker = self.xsp.ComUseCondCheck(self.dut.xclock)
-            self.dut.xclock.RemoveStepRisCbByDesc(checker_key)
-            self.dut.xclock.StepRis(checker.GetCb(), checker.CSelf(), checker_key)
-            self.xdut_signal_breaks["checker"] = checker
-        xbreak_key = "xbreak-%s-%s-%s"%(signal_name, condition, value)
-        if xbreak_key in checker.ListCondition():
-            error(f"signal {xbreak_key} already set")
-            return
-        sig = self.dut.GetInternalSignal(signal_name)
-        if not sig:
-            error(f"first signal {signal_name} not found")
-            return
-        if isinstance(value, str):
-            val = self.dut.GetInternalSignal(value)
-            if not val:
-                error(f"second signal {value} not found")
-                return
-        else:
-            val = self.xsp.XData(sig.W(), self.xsp.XData.InOut)
-            val.value = value
-        condition_map = {
-            "eq": self.xsp.ComUseCondCmp_EQ,
-            "ne": self.xsp.ComUseCondCmp_NE,
-            "gt": self.xsp.ComUseCondCmp_GT,
-            "lt": self.xsp.ComUseCondCmp_LT,
-            "ge": self.xsp.ComUseCondCmp_GE,
-            "le": self.xsp.ComUseCondCmp_LE,
-            "ch": self.xsp.ComUseCondCmp_NE,
-        }
-        cmp = condition_map.get(condition.lower(), None)
-        if cmp is None:
-            error(f"condition '{condition}' not supported")
-            return
-        checker.SetCondition(xbreak_key, sig, val, cmp)
-        self.xdut_signal_breaks[xbreak_key] = {"sig": sig, "val": val, "cmp": condition.lower(), "cb": callback, "cb_once": callback_once}
-        return xbreak_key
-
-    def api_xbreak_list(self):
-        """List all breakpoints"""
-        ret = []
-        checker = self.xdut_signal_breaks.get("checker")
-        if not checker:
-            return ret
-        checked = {k: v for (k, v) in checker.ListCondition().items()}
-        for k, v in self.xdut_signal_breaks.items():
-            if not k.startswith("xbreak-"):
-                continue
-            ret.append((k, v["sig"].value, v["cmp"], v["val"].value, checked[k]))
-        ret.sort(key=lambda x: x[0])
-        return ret
-
-    def call_break_callbacks(self):
-        checker = self.xdut_signal_breaks.get("checker")
-        cb_count = 0
-        if not checker:
-            return cb_count
-        callbacks = {}
-        for k, v in self.xdut_signal_breaks.items():
-            if not k.startswith("xbreak-"):
-                continue
-            if not callable(v["cb"]):
-                continue
-            callbacks[k] = (v["cb"], v["cb_once"])
-        if not callbacks:
-            return cb_count
-        checked = {k: v for (k, v) in checker.ListCondition().items() if v}
-        for k, (cb, once) in callbacks.items():
-            if k not in checked:
-                continue
-            cb(self, checker, k, self.dut.xclock.clk, self.xdut_signal_breaks[k]["sig"].value, self.xdut_signal_breaks[k]["val"].value)
-            if once:
-                checker.RemoveCondition(k)
-                info(f"remove signal {k} break, because callback_once is True")
-                del self.xdut_signal_breaks[k]
-            cb_count += 1
-        if not {k: v for (k, v) in checker.ListCondition().items()}:
-            checker.ClearCondition()
-            self.dut.xclock.RemoveStepRisCbByDesc("xdut_signal_break")
-            assert "xdut_signal_break" not in self.dut.xclock.ListSteRisCbDesc()
-            self.xdut_signal_breaks.clear()
-        return cb_count
-
-    def api_is_xbreak_on(self):
-        """Check if the breakpoint is on"""
-        checker = self.xdut_signal_breaks.get("checker")
-        if checker:
-            return True
-        return False
 
     def api_dut_is_step_exit(self):
         """Check if the step is exit"""
@@ -136,19 +30,6 @@ class CmdDut:
                     self.api_is_hit_good_trap(show_log=False),
                     self.api_is_hit_good_loop(show_log=False),
                     ])
-
-    def api_get_breaked_names(self):
-        """Get the names of the breaked names"""
-        names = []
-        # api_xbreak_list
-        names += [v[0] for v in self.api_xbreak_list() if v[4]]
-        # instrunct_istep
-        if self.api_break_is_instruction_commit():
-            names.append("Inst commit")
-        # watch_commit_pc
-        if self.api_break_is_watch_commit_pc():
-            names.append("Target commit")
-        return ",".join(names)
 
     def api_dut_step_ready(self):
         """Prepare the DUT for stepping"""
@@ -171,10 +52,12 @@ class CmdDut:
                     self.api_get_breaked_names(),
                     self.dut.xclock.clk - c_count,
                     self.dut.xclock.clk, hex(self.dut.xclock.clk)))
+                self._fork_backup_on_break_any()
                 return True
             fc = getattr(self, "on_update_tstep", None)
             if fc:
                 fc()
+            self._fork_backup_tick()
             if self.api_is_difftest_diff_exit(show_log=True):
                 return True
             elif self.api_is_hit_good_trap(show_log=True):
@@ -256,6 +139,25 @@ class CmdDut:
         if sig:
             self.info_watch_list[arb] = sig
 
+    def do_xunwatch(self, arg):
+        """Remove a watch variable
+
+        Args:
+            arg (string): Variable name
+        """
+        key = arg.strip()
+        if key in self.info_watch_list:
+            del self.info_watch_list[key]
+        else:
+            error(f"watch {key} not found")
+
+    def complete_xwatch(self, text, line, begidx, endidx):
+        cmp = get_completions(self.get_dut_tree(), text)
+        return cmp
+
+    def complete_xunwatch(self, text, line, begidx, endidx):
+        return [k for k in self.info_watch_list.keys() if k.startswith(text)]
+
     def do_xset(self, arg):
         """Set the value of an internal signal
 
@@ -317,4 +219,3 @@ class CmdDut:
     def complete_xprint(self, text, line, begidx, endidx):
         cmp = get_completions(self.get_dut_tree(), text)
         return cmp
-
