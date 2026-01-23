@@ -23,6 +23,7 @@ import chisel3.util.experimental.decode.TruthTable
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
@@ -768,39 +769,53 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("control_recovery_stall", ctrlRecStall)
   XSPerfAccumulate("mem_violation_recovery_stall", mvioRecStall)
   XSPerfAccumulate("other_recovery_stall", otherRecStall)
-  // freelist stall
+  // freelist stall (we temporarily make the priority: int > fp > vec > v0 > vl)
   val notRecStall = !io.out.head.valid && !recStall
-  val intFlStall = notRecStall && inHeadValid && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !intFreeList.io.canAllocate
-  val fpFlStall = notRecStall && inHeadValid && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !fpFreeList.io.canAllocate
-  val vecFlStall = notRecStall && inHeadValid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !vecFreeList.io.canAllocate
-  val v0FlStall = notRecStall && inHeadValid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !v0FreeList.io.canAllocate
-  val vlFlStall = notRecStall && inHeadValid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && !vlFreeList.io.canAllocate
-  val multiFlStall = notRecStall && inHeadValid && (PopCount(Cat(
+  val intFlStall  = !intFreeList.io.canAllocate
+  val fpFlStall   = !fpFreeList.io.canAllocate
+  val vecFlStall  = !vecFreeList.io.canAllocate
+  val v0FlStall   = !v0FreeList.io.canAllocate
+  val vlFlStall   = !vlFreeList.io.canAllocate
+  val multiFlStall = PopCount(Cat(
     !intFreeList.io.canAllocate,
     !fpFreeList.io.canAllocate,
     !vecFreeList.io.canAllocate,
     !v0FreeList.io.canAllocate,
     !vlFreeList.io.canAllocate,
-  )) > 1.U)
+  )) > 1.U
   // other stall
-  val otherStall = notRecStall && !intFlStall && !fpFlStall && !vecFlStall && !v0FlStall && !vlFlStall && !multiFlStall
+  val otherStall = notRecStall && !intFlStall && !fpFlStall && !vecFlStall && !v0FlStall && !vlFlStall
 
-  io.stallReason.in.backReason.valid := io.stallReason.out.backReason.valid || !io.in.head.ready
-  io.stallReason.in.backReason.bits := Mux(io.stallReason.out.backReason.valid, io.stallReason.out.backReason.bits,
-    MuxCase(TopDownCounters.OtherCoreStall.id.U, Seq(
-      ctrlRecStall  -> TopDownCounters.ControlRecoveryStall.id.U,
-      mvioRecStall  -> TopDownCounters.MemVioRecoveryStall.id.U,
-      otherRecStall -> TopDownCounters.OtherRecoveryStall.id.U,
-      intFlStall    -> TopDownCounters.IntFlStall.id.U,
-      fpFlStall     -> TopDownCounters.FpFlStall.id.U,
-      vecFlStall    -> TopDownCounters.VecFlStall.id.U,
-      v0FlStall     -> TopDownCounters.V0FlStall.id.U,
-      vlFlStall     -> TopDownCounters.VlFlStall.id.U,
-      multiFlStall  -> TopDownCounters.MultiFlStall.id.U,
-    )
-  ))
-  io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
-    out := Mux(io.stallReason.in.backReason.valid, io.stallReason.in.backReason.bits, in)
+
+  val inValidVec = io.in.map(_.valid)
+  val outValidVec = io.out.map(_.valid)
+  io.stallReason.out.reason.zipWithIndex.foreach{ case (stallReason, idx) =>
+    val inValid = inValidVec(idx)
+    val outValid = outValidVec(idx)
+    val inReason = io.stallReason.in.reason(idx)
+    // TopDown collect pre pipe reason
+    val prePipeStall = !inValid
+    val prePipeStallReason = inReason
+    // TopDown count current stage stall
+    val renameStall = inValid && !outValid
+    val renameStallReason = MuxCase(OtherCoreStall.id.U, Seq(
+      ctrlRecStall  -> ControlRecoveryStall.id.U,
+      mvioRecStall  -> MemVioRecoveryStall.id.U,
+      otherRecStall -> OtherRecoveryStall.id.U,
+      multiFlStall  -> multiFlStall.id.U,
+      intFlStall    -> IntFlStall.id.U,
+      fpFlStall     -> FpFlStall.id.U,
+      vecFlStall    -> VecFlStall.id.U,
+      v0FlStall     -> V0FlStall.id.U,
+      vlFlStall     -> VlFlStall.id.U,
+    ))
+    // other reason like out.ready will be collect by next stage dispatch
+    if (backendParams.debugEn) {
+      assert((!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
+        "[TopDown]: Rename has no instruction in ,but reason is null")
+    }
+    stallReason := Mux(prePipeStall, prePipeStallReason,
+      Mux(renameStall, renameStallReason, NoStall.id.U))
   }
 
   XSDebug(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
