@@ -1,0 +1,53 @@
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package xiangshan.frontend.bpu.history.commonhr
+
+import chisel3._
+import chisel3.util._
+import freechips.rocketchip.tilelink.TLMessages.isC
+import xiangshan.frontend.bpu.HalfAlignHelper
+
+trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
+
+  def getNewHR(
+      oldGhr:  UInt,
+      numLess: UInt,
+      numHit:  UInt,
+      taken:   Bool,
+      isCond:  Bool,
+      histBit: Option[Bool] = None
+  )(histLen: Int): UInt = {
+    val numShift = Mux(taken, numLess, numHit)
+    Mux(isCond && taken, Cat(oldGhr << numShift, histBit.getOrElse(taken)), oldGhr << numShift)(histLen - 1, 0)
+  }
+
+  def dedupHitPositions(hitMask: Vec[Bool], posVec: Vec[UInt]): Vec[Bool] = {
+    require(hitMask.length == posVec.length, "hitMask and posVec must have the same length")
+    val numLen = hitMask.length
+    val keep   = Wire(Vec(numLen, Bool()))
+
+    for (i <- 0 until numLen) {
+      val isDup = WireInit(false.B)
+      for (j <- 0 until i) {
+        when(hitMask(j) && (posVec(j) === posVec(i))) {
+          isDup := true.B
+        }
+      }
+      keep(i) := hitMask(i) && !isDup
+    }
+    keep
+  }
+}

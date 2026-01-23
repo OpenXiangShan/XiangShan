@@ -26,6 +26,7 @@ import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.SignedSaturateCounter
 import xiangshan.frontend.bpu.SignedSaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
+import xiangshan.frontend.bpu.history.commonhr.CommonHREntry
 
 object Counter extends SignedSaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -71,9 +72,10 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   private def ScEntryWidth = (new ScEntry).getWidth
   val scPathResp:      Vec[Vec[UInt]] = Vec(NumPathTables, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scGlobalResp:    Vec[Vec[UInt]] = Vec(NumGlobalTables, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
+  val scBWResp:        Vec[Vec[UInt]] = Vec(NumBWTables, Vec(NumWays, UInt(ScEntryWidth.W)))
   val scBiasResp:      Vec[UInt]      = Vec(BiasTableNumWays, UInt(ScEntryWidth.W))
-  val scGhr:           UInt           = UInt(GhrHistoryLength.W)
+  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
+  val scCommonHR:      CommonHREntry  = new CommonHREntry
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
@@ -83,11 +85,14 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // for debug
   val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scBWTakenVec:     Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_predPathIdx: Option[Vec[UInt]] =
     Some(Vec(NumPathTables, UInt(log2Ceil(scParameters.PathTableInfos(0).Size).W)))
   val debug_predGlobalIdx: Option[Vec[UInt]] =
     Some(Vec(NumGlobalTables, UInt(log2Ceil(scParameters.GlobalTableInfos(0).Size).W)))
+  val debug_predBWIdx: Option[Vec[UInt]] =
+    Some(Vec(NumBWTables, UInt(log2Ceil(scParameters.BackwardTableInfos(0).Size).W)))
   val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableSize).W))
 }
 

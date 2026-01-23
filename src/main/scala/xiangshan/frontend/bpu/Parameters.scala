@@ -18,6 +18,8 @@ package xiangshan.frontend.bpu
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
+import xiangshan.frontend.bpu.history.commonhr.CommonHR
+import xiangshan.frontend.bpu.history.commonhr.CommonHRParameters
 import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
@@ -35,7 +37,8 @@ case class BpuParameters(
     // debug
     EnableBpTrace: Boolean = false,
     // history
-    phrParameters: PhrParameters = PhrParameters(),
+    phrParameters:      PhrParameters = PhrParameters(),
+    commonHRParameters: CommonHRParameters = CommonHRParameters(),
     // sub predictors
     ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
     abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
@@ -66,6 +69,7 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def GhrShamt:         Int = NumBtbResultEntries
   def GhrHistoryLength: Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
+  def BWHistoryLength:  Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
