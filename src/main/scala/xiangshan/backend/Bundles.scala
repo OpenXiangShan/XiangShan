@@ -434,7 +434,7 @@ object Bundles {
     val v0Wen    = Option.when(params.needV0Wen )(Bool())
     val vlWen    = Option.when(params.needVlWen )(Bool())
     val selImm   = Option.when(params.needImm)(SelImm())
-    val imm      = Option.when(params.needImm)(UInt(32.W))
+    val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
     val wfflags  = Option.when(params.writeFflags)(Bool())
