@@ -95,7 +95,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 // before reaching saturation—making their unsaturated states potentially useless.
 // This trade-off needs empirical validation.
   prediction.valid := io.enable && histTableHitMap.reduce(_ || _) &&
-    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative) && false.B
+    (choseTableTakenCtr.isSaturatePositive || choseTableTakenCtr.isSaturateNegative)
   // prediction.valid            := false.B
   prediction.bits.taken       := finalPredTaken && choseTableTakenCtr.isSaturatePositive
   prediction.bits.cfiPosition := finalPredCfiPosition
