@@ -238,7 +238,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   /**
     * Tlb access
-    * 
+    *
     * It should be noted that when sending a request to TLB, `req.valid` does not need to be a strict valid signal. We
     * only need to ensure that `req.valid` is HIGH in all cases requiring TLB translation. Meanwhile the strict signal
     * over whether addr translation is actually performed is controled by `noQuery`.
@@ -259,7 +259,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   /**
     * Unalign handling
-    * 
+    *
     * 1. For requests that are not unalign tail or prefetch
     *   1.1 Align check: check if the address is aligned, which is used to detect misalign exception in later stages
     *   1.2 Bank bound check: simultaneously check whether this address crosses an aligned 16B bank boundary, which is
@@ -268,7 +268,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     *     read the whole 16B bank when accessing DCache
     * 2. For requests that are unalign tail
     *   Do nothing
-    * 
+    *
     * Some terminology explanations:
     * - **align** indicates whether the addr is aligned with the operation size. `!align` does not necessary mean
     *   splitting is required, but is only used for determining exception in subsequent stages.
@@ -324,7 +324,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   /**
     * DCache access
-    * 
+    *
     * Access to an aligned 16B bank is required in the following 2 cases:
     * 1. Unalign tail: For simplicity, we do not calculate the exact # of bytes that an unalignTail needs to access,
     *   but directly access the entire bank
@@ -495,7 +495,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   implicit p: Parameters,
   override implicit val s: LoadStage = LoadS1()
 ) extends LoadUnitStage(param)
-  with HasVLSUParameters 
+  with HasVLSUParameters
   with HasNukePAddrMatch
   with HasPerfEvents {
   val io = IO(new Bundle() {
@@ -524,7 +524,7 @@ class LoadUnitS1(param: ExeUnitParams)(
     val tldForwardKill = Output(Bool())
     // early reponse from SQ, unused for now
     val sqForwardResp = Flipped(ValidIO(new SQForwardRespS1))
-    
+
     val uncacheBypassResp = Flipped(ValidIO(new UncacheBypassRespS1))
 
     // Data path
@@ -645,6 +645,9 @@ class LoadUnitS1(param: ExeUnitParams)(
   unalignTail.align.get := false.B
   unalignTail.unalignHead.get := false.B
   unalignTail.readWholeBank.get := true.B
+  // TODO: only cross page unalign need to query tlb, but timing will be worse,
+  // this let unalignTail always query tlb, even if it come from fastReplay/replay.
+  unalignTail.noQuery.get := false.B // unalignTail always need to query tlb
 
   val unalignTailNack = unalignTailInjectValid && !io.unalignTail.ready
 
@@ -699,7 +702,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
-  stageInfo.shouldFastReplay.get := unalignTailNack
+  stageInfo.shouldFastReplay.get := unalignTailNack && !tlbMiss
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -709,7 +712,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io_pipeOut.get.valid := pipeOutValid
   io_pipeOut.get.bits := pipeOutBits
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
- 
+
   io.tlbResp.ready := true.B
   io.tlbReqKill := kill
   io.tlbPAddr := noQueryPAddr
@@ -997,7 +1000,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val fastReplayNuke = cause(C_NK) && !hasHigherPriorityCauses(cause, C_RAR) // TODO: use C_RAR or C_NK?
   val fastReplay = !LoadEntrance.isFastReplay(entrance) && // 1.3.1
     (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke) && // 1.3.2
-    !isUnalign // 1.3.3
+    !isUnalign && !tlbMiss // 1.3.3, if tlb miss, should not to fast replay
 
   /**
     * Nuke query to LQRAR / LQRAW
@@ -1293,7 +1296,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val mask = Mux(s4HeadValid, s4HeadMask, in.mask)
   /**
     * DCache error handling & exception handling
-    * 
+    *
     * Noted that exception can affect control signals for wakeup and writeback
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
