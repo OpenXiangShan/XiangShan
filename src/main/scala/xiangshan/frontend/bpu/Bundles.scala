@@ -290,6 +290,7 @@ class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val startPc:      PrunedAddr          = new PrunedAddr(VAddrBits)
   val s1Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction
+  val mbtbMeta:     MainBtbMeta         = new MainBtbMeta
   val bpSource:     BpuPredictionSource = new BpuPredictionSource
 
   def bpPred: Prediction = Mux(bpSource.s3Override, s3Prediction, s1Prediction)
