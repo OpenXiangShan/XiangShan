@@ -2,6 +2,58 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import xiangshan.TopDownCounters._
+
+class PipelineStallReason(reasonW: Int) extends Module {
+  val io = IO(new Bundle{
+    val prePipeStall = Input(Bool())
+    val prePipeStallReason = Input(UInt(reasonW.W))
+    val prePipeBubble = Input(Bool())
+    val redirect = Input(Bool())
+    val redirectReason = Input(UInt(reasonW.W))
+    val currentPipeStall = Input(Bool())
+    val currentPipeStallReason = Input(UInt(reasonW.W))
+    val pastPipeFire = Input(Bool())
+    val outReason = Output(UInt(reasonW.W))
+  })
+
+  val NoStallReason = NoStall.id.U
+  val reasonReg = RegInit(NoStallReason)
+  val holdBubbleReason = RegInit(false.B)
+
+  val bubbleConsumed = holdBubbleReason && io.pastPipeFire
+  val canUpdate      = (!holdBubbleReason) || bubbleConsumed
+
+  val reasonNext = WireDefault(reasonReg)
+  val holdNext   = WireDefault(holdBubbleReason)
+
+  when (io.redirect) {
+    reasonNext := io.redirectReason
+    holdNext   := false.B
+  } .elsewhen (canUpdate) {
+    when (io.prePipeStall) {
+      reasonNext := io.prePipeStallReason
+      holdNext   := false.B
+    } .elsewhen (io.prePipeBubble) {
+      reasonNext := io.prePipeStallReason
+      holdNext   := true.B
+    } .elsewhen (io.currentPipeStall) {
+      reasonNext := io.currentPipeStallReason
+      holdNext   := false.B
+    } .otherwise {
+      reasonNext := NoStallReason
+      holdNext   := false.B
+    }
+  } .otherwise {
+    reasonNext := reasonReg
+    holdNext   := holdBubbleReason
+  }
+
+  reasonReg := reasonNext
+  holdBubbleReason := holdNext
+
+  io.outReason := reasonReg
+}
 
 class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
   val io = IO(new Bundle {

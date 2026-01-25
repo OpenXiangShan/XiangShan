@@ -27,6 +27,7 @@ import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.PipelineStallReason
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
 import xiangshan.mem.mdp._
@@ -759,16 +760,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       assert(x.bits.ldest =/= 0.U, "rfWen cannot be 1 when Int regfile ldest is 0")
     }
   }
+
+  // bad speculation (redirect)
+  val redirectStall      = io.redirect.valid
+  val ctrlRedirectStall  = io.redirect.bits.debugIsCtrl
+  val mvioRedirectStall  = io.redirect.bits.debugIsMemVio
+  val otherRedirectStall = redirectStall && !(ctrlRedirectStall || mvioRedirectStall)
+
+  // bad pseculation  (rabwalk)
   val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
-  // bad speculation
-  val recStall = io.redirect.valid || io.rabCommits.isWalk
-  val ctrlRecStall = Mux(io.redirect.valid, io.redirect.bits.debugIsCtrl, io.rabCommits.isWalk && debugRedirect.debugIsCtrl)
-  val mvioRecStall = Mux(io.redirect.valid, io.redirect.bits.debugIsMemVio, io.rabCommits.isWalk && debugRedirect.debugIsMemVio)
+  val recStall      = io.rabCommits.isWalk
+  val ctrlRecStall  = debugRedirect.debugIsCtrl
+  val mvioRecStall  = debugRedirect.debugIsMemVio
   val otherRecStall = recStall && !(ctrlRecStall || mvioRecStall)
   XSPerfAccumulate("recovery_stall", recStall)
-  XSPerfAccumulate("control_recovery_stall", ctrlRecStall)
-  XSPerfAccumulate("mem_violation_recovery_stall", mvioRecStall)
-  XSPerfAccumulate("other_recovery_stall", otherRecStall)
+  XSPerfAccumulate("control_recovery_stall", ctrlRecStall && recStall)
+  XSPerfAccumulate("mem_violation_recovery_stall", mvioRecStall && recStall)
+  XSPerfAccumulate("other_recovery_stall", otherRecStall && recStall)
   // freelist stall (we temporarily make the priority: int > fp > vec > v0 > vl)
   val notRecStall = !io.out.head.valid && !recStall
   val intFlStall  = !intFreeList.io.canAllocate
@@ -785,37 +793,58 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   )) > 1.U
   // other stall
   val otherStall = notRecStall && !intFlStall && !fpFlStall && !vecFlStall && !v0FlStall && !vlFlStall
-
-
+  //TODO :delete?
+  io.stallReason.in.backReason := 0.U.asTypeOf(io.stallReason.in.backReason)
   val inValidVec = io.in.map(_.valid)
   val outValidVec = io.out.map(_.valid)
+  val outFireVec = io.out.map(_.fire)
+  val decodeReason = io.stallReason.in.reason
   io.stallReason.out.reason.zipWithIndex.foreach{ case (stallReason, idx) =>
     val inValid = inValidVec(idx)
     val outValid = outValidVec(idx)
-    val inReason = io.stallReason.in.reason(idx)
+    val inReason = decodeReason(idx)
     // TopDown collect pre pipe reason
-    val prePipeStall = !inValid
+    val prePipeStall = !inValidVec.reduce(_||_)
+    val prePipeBubble = !inValid && (inReason =/= NoStall.id.U)
     val prePipeStallReason = inReason
+    // other reason like out.ready will be collect by next stage dispatch
+    //    if (backendParams.debugEn) {
+    //      assert(!reset.asBool && (!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
+    //        "[TopDown]: Rename has no instruction in ,but reason is null")
+    //    }
     // TopDown count current stage stall
+    val redirect = redirectStall
+    val redirectReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+      ctrlRedirectStall  -> ControlRedirectStall.id.U,
+      mvioRedirectStall  -> MemVioRedirectStall.id.U,
+      otherRedirectStall -> OtherRedirectStall.id.U,
+    ))
+
     val renameStall = inValid && !outValid
-    val renameStallReason = MuxCase(OtherCoreStall.id.U, Seq(
+    val renameStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
       ctrlRecStall  -> ControlRecoveryStall.id.U,
       mvioRecStall  -> MemVioRecoveryStall.id.U,
       otherRecStall -> OtherRecoveryStall.id.U,
-      multiFlStall  -> multiFlStall.id.U,
+      multiFlStall  -> MultiFlStall.id.U,
       intFlStall    -> IntFlStall.id.U,
       fpFlStall     -> FpFlStall.id.U,
       vecFlStall    -> VecFlStall.id.U,
       v0FlStall     -> V0FlStall.id.U,
       vlFlStall     -> VlFlStall.id.U,
     ))
-    // other reason like out.ready will be collect by next stage dispatch
-    if (backendParams.debugEn) {
-      assert((!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
-        "[TopDown]: Rename has no instruction in ,but reason is null")
-    }
-    stallReason := Mux(prePipeStall, prePipeStallReason,
-      Mux(renameStall, renameStallReason, NoStall.id.U))
+    val dispatchFire = outFireVec.reduce(_||_)
+
+    val stallReasonPipe = Module(new PipelineStallReason(log2Ceil(TopDownCounters.NumStallReasons.id)))
+    stallReasonPipe.io.prePipeStall := prePipeStall
+    stallReasonPipe.io.prePipeStallReason := prePipeStallReason
+    stallReasonPipe.io.prePipeBubble := prePipeBubble
+    stallReasonPipe.io.redirect := redirect
+    stallReasonPipe.io.redirectReason := redirectReason
+    stallReasonPipe.io.currentPipeStall := renameStall
+    stallReasonPipe.io.currentPipeStallReason := renameStallReason
+    stallReasonPipe.io.pastPipeFire := dispatchFire
+
+    stallReason := stallReasonPipe.io.outReason
   }
 
   XSDebug(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
