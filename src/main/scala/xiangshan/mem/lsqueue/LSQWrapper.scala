@@ -348,6 +348,9 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val lqFreeCount = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqFreeCount = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val enqLsq = Flipped(new LsqEnqIO)
+    // for topdown
+    val lqStall = OptionWrapper(backendParams.debugEn, Output(Bool()))
+    val sqStall = OptionWrapper(backendParams.debugEn, Output(Bool()))
   })
 
   val lqPtr = RegInit(0.U.asTypeOf(new LqPtr))
@@ -409,6 +412,10 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   // after the last redirect, new instructions may enter but previously redirect has not been resolved (updated according to the cancel count from LSQ).
   // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
   io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
+  // for Topdown
+  io.lqStall.foreach(_ := !ldCanAccept || t2_update)
+  io.sqStall.foreach(_ := !sqCanAccept || t2_update)
+
   val lqOffset = Wire(Vec(io.enq.resp.length, UInt(lqPtr.value.getWidth.W)))
   val sqOffset = Wire(Vec(io.enq.resp.length, UInt(sqPtr.value.getWidth.W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {

@@ -420,7 +420,8 @@ class CtrlBlockImp(
   decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
   decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
-  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.io.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.io.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
 
   // add decode Buf for in.ready better timing
   /**
@@ -485,7 +486,7 @@ class CtrlBlockImp(
    */
   for (i <- 0 until DecodeWidth) {
     // decodeBufValid update
-    when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+    when(decode.io.redirect.valid || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := false.B
     }.elsewhen(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := Mux(decodeBufAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeBufValid(i.U + decodeBufAcceptNum))
@@ -519,7 +520,7 @@ class CtrlBlockImp(
    */
   decode.io.in.zipWithIndex.foreach { case (decodeIn, i) =>
     decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
-    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect.valid
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
@@ -627,8 +628,6 @@ class CtrlBlockImp(
       rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
       rename.io.fusionCross2FtqVec(i) := cross2Ftq
-      // Topdown fusion bubble
-      rename.io.stallReason.in.reason(i + 1) := TopDownCounters.FusionBubble.id.U
     }
   }
 
@@ -698,6 +697,13 @@ class CtrlBlockImp(
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
+
+  for (i <- 0 until RenameWidth - 1) {
+    when (fusionDecoder.io.out(i).valid) {
+      // Topdown fusion bubble
+      rename.io.stallReason.in.reason(i + 1) := TopDownCounters.FusionBubble.id.U
+    }
+  }
 
   val renameOut = Wire(chiselTypeOf(dispatch.io.fromRename))
   renameOut.zip(rename.io.out).map{ case (sink, source) => {
