@@ -22,10 +22,12 @@ import chisel3.util._
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.TopDownCounters._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.PipelineStallReason
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
@@ -40,7 +42,7 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
 
-  val redirect = Input(Bool())
+  val redirect = Flipped(ValidIO(new Redirect))
   val canAccept = Output(Bool())
   // from Ibuffer
   val in = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
@@ -163,15 +165,15 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     inst.valid := in.valid
     inst.bits := in.bits.instr
   }
-  // when io.redirect is True, never update vtype
-  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset && !io.redirect
+  // when io.redirect.valid is True, never update vtype
+  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset && !io.redirect.valid
   vtypeGen.io.walkToArchVType := io.fromRob.walkToArchVType
   vtypeGen.io.commitVType := io.fromRob.commitVType
   vtypeGen.io.walkVType := io.fromRob.walkVType
   vtypeGen.io.vsetvlVType := io.vsetvlVType
 
   //Comp 1
-  decoderComp.io.redirect := io.redirect
+  decoderComp.io.redirect := io.redirect.valid
   decoderComp.io.csrCtrl := io.csrCtrl
   decoderComp.io.vtypeBypass := vtypeGen.io.vtype
   // The input inst of decoderComp is latched last cycle.
@@ -199,7 +201,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
 
   /** condition of acceptation: no redirection, ready from rename/complex decoder, no resumeVType */
-  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
+  canAccept := !io.redirect.valid && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
 
   io.canAccept := canAccept
 
@@ -213,7 +215,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
    * to be sent to complex decoder, with complex decoder ready for new input.
    */
   io.in.zipWithIndex.foreach { case (in, i) =>
-    in.ready := !io.redirect && ((
+    in.ready := !io.redirect.valid && ((
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
     ) || !io.in(0).valid) && !io.fromRob.isResumeVType
@@ -296,14 +298,75 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
 
-  // we assume that decode stage doesnot have bubble/stall
-  io.stallReason.out.reason := io.stallReason.in.reason
+  // bad speculation (redirect)
+  val redirectStall      = io.redirect.valid
+  val ctrlRedirectStall  = io.redirect.bits.debugIsCtrl
+  val mvioRedirectStall  = io.redirect.bits.debugIsMemVio
+  val otherRedirectStall = redirectStall && !(ctrlRedirectStall || mvioRedirectStall)
 
-  io.toCSR.trapInstInfo.valid := RegNext(hasIllegalInst && !io.redirect)
+  // bad pseculation  (rabwalk)
+  val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
+  val recStall      = io.fromRob.isResumeVType
+  val ctrlRecStall  = debugRedirect.debugIsCtrl
+  val mvioRecStall  = debugRedirect.debugIsMemVio
+  val otherRecStall = recStall && !(ctrlRecStall || mvioRecStall)
+
+
+  // Topdown
+  val inValidVec = io.in.map(_.valid)
+  val outValidVec = io.out.map(_.valid)
+  val outFireVec = io.out.map(_.fire)
+
+  io.stallReason.out.reason.zipWithIndex.foreach{ case (stallReason, idx) =>
+    val inValid = inValidVec(idx)
+    val outValid = outValidVec(idx)
+    val inReason = io.stallReason.in.reason(idx)
+    // TopDown collect pre pipe reason
+    val prePipeStall = !inValidVec.reduce(_||_)
+    val prePipeBubble = !inValid
+    // TODO
+    val prePipeStallReason = Mux(inReason === NoStall.id.U, FrontendOtherCoreStall.id.U, inReason)
+    // other reason like out.ready will be collect by next stage dispatch
+    //    if (backendParams.debugEn) {
+    //      assert(!reset.asBool && (!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
+    //        "[TopDown]: Rename has no instruction in ,but reason is null")
+    //    }
+    // TopDown count current stage stall
+    val decodeStall = inValid && !outValid
+    val decodeStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+      ctrlRecStall  -> ControlRecoveryStall.id.U,
+      mvioRecStall  -> MemVioRecoveryStall.id.U,
+      otherRecStall -> OtherRecoveryStall.id.U,
+    ))
+    val redirect = redirectStall
+    val redirectReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+      ctrlRedirectStall  -> ControlRedirectStall.id.U,
+      mvioRedirectStall  -> MemVioRedirectStall.id.U,
+      otherRedirectStall -> OtherRedirectStall.id.U,
+    ))
+
+    val renameFire = outFireVec.reduce(_||_)
+
+    val stallReasonPipe = Module(new PipelineStallReason(log2Ceil(TopDownCounters.NumStallReasons.id)))
+    stallReasonPipe.io.prePipeStall := prePipeStall
+    stallReasonPipe.io.prePipeStallReason := prePipeStallReason
+    stallReasonPipe.io.prePipeBubble := prePipeBubble
+    stallReasonPipe.io.redirect := redirect
+    stallReasonPipe.io.redirectReason := redirectReason
+    stallReasonPipe.io.currentPipeStall := decodeStall
+    stallReasonPipe.io.currentPipeStallReason := decodeStallReason
+    stallReasonPipe.io.pastPipeFire := renameFire
+
+    stallReason := stallReasonPipe.io.outReason
+  }
+
+  io.stallReason.in.backReason := 0.U.asTypeOf(io.stallReason.in.backReason)
+
+  io.toCSR.trapInstInfo.valid := RegNext(hasIllegalInst && !io.redirect.valid)
   io.toCSR.trapInstInfo.bits.fromDecodedInst(RegNext(illegalInst))
 
   val recoveryFlag = RegInit(false.B)
-  when(io.redirect) {
+  when(io.redirect.valid) {
     recoveryFlag := true.B
   }.elsewhen(io.in.map(_.fire).reduce(_ || _)) {
     recoveryFlag := false.B
