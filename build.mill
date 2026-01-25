@@ -227,7 +227,7 @@ object xiangshan extends ChiselModule {
   object test extends SbtTests with TestModule.ScalaTest {
     def moduleDeps: Seq[JavaModule] = super.moduleDeps ++ Seq(xiangshan, difftest.test)
 
-    def forkArgs: T[Seq[String]] = super.forkArgs
+    def forkArgs: T[Seq[String]] = xiangshan.forkArgs
 
     def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Seq("-deprecation", "-feature")
 
