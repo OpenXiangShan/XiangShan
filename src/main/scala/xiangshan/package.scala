@@ -988,6 +988,7 @@ package object xiangshan {
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
     val FetchFragBubble = Value("FetchFragBubble")
+    val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")
 
     // backend
     // long inst stall at rob head
@@ -995,6 +996,7 @@ package object xiangshan {
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
     val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    val RobStall = Value("RobStall")
     // freelist full
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
@@ -1018,6 +1020,7 @@ package object xiangshan {
     val VecIQFullStall = Value("VecIQFullStall")
     val LoadIQFullStall = Value("LoadIQFullStall")
     val StoreIQFullStall = Value("StoreIQFullStall")
+    val MultiIssueStall = Value("MultiIssueStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
@@ -1033,13 +1036,17 @@ package object xiangshan {
     val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
 
     // bad speculation
+    val ControlRedirectStall = Value("ControlRedirectStall")
+    val MemVioRedirectStall = Value("MemVioRedirectStall")
+    val OtherRedirectStall = Value("OtherRedirectStall")
     val ControlRecoveryStall = Value("ControlRecoveryStall")
     val MemVioRecoveryStall = Value("MemVioRecoveryStall")
     val OtherRecoveryStall = Value("OtherRecoveryStall")
 
     val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
+    val SpecialInsts = Value("SpecialInsts")
 
-    val OtherCoreStall = Value("OtherCoreStall")
+    val BackendOtherCoreStall = Value("BackendOtherCoreStall")
 
     val NumStallReasons = Value("NumStallReasons")
   }
