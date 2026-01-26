@@ -268,8 +268,12 @@ object Bundles {
     }
     
     def connectEnqRobUop(source: RenameOutUop): Unit = {
-      this := 0.U.asTypeOf(this)
       connectSamePort(this, source)
+      this.hasException := source.hasException || source.singleStep
+      this.numWB        := Mux(source.singleStep, 0.U, source.numWB)
+      this.stdwriteNeed := FuType.isStore(source.fuType)
+      this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
+      this.replayInst   := false.B
     }
   }
 
