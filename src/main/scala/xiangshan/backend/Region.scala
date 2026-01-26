@@ -424,6 +424,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         source.io.deqDelay(i).ready := s.ready && iqOut(i).ready
       }
     }
+    dataPath.io.fromIntIQDeqOg1Payload.get.zip(issueQueues).zip(io.intIQOut.get).map { case ((sink, source), iqOut) =>
+      sink.zipWithIndex.map { case (s, i) =>
+        s := source.io.deqOg1Payload(i)
+      }
+    }
     // for write int regfile and resp
     dataPath.io.fromFpIQ.zip(io.fromFpIQ.get).map { case (sink, source) =>
       sink <> source

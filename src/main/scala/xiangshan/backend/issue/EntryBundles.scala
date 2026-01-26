@@ -457,6 +457,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     if(isEnq) {
       commonOut.entry.bits.status                     := status
     }
+    if (isEnq || !isComp) {
+      // Enq and Simp can back to back trans
+      commonOut.entry.bits.payload.og1Payload         := RegNext(entryReg.payload.og1Payload)
+    }
     commonOut.issueTimerRead                          := status.issueTimer
     commonOut.deqPortIdxRead                          := status.deqPortIdx
 
