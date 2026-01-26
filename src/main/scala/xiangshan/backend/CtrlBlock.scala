@@ -719,7 +719,7 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
-  dispatch.io.robHead := rob.io.debugRobHead
+  dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.lqCanAccept := io.lqCanAccept
   dispatch.io.sqCanAccept := io.sqCanAccept

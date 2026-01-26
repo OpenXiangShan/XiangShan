@@ -75,23 +75,22 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // status end
 
     // debug_begin
-    val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-    val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
-    val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
-    val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
-
-    val debug_fuOpType        = OptionWrapper(backendParams.debugEn, FuOpType())
-    val perfDebugInfo   =  OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
-    val debug_lqIdx =  OptionWrapper(backendParams.debugEn, new LqPtr )
-    val debug_sqIdx =  OptionWrapper(backendParams.debugEn, new SqPtr )
-    val debug_rfWen           = OptionWrapper(backendParams.debugEn, Bool() )
-    val debug_seqNum    = OptionWrapper(backendParams.debugEn, InstSeqNum() )
-    val debug_sim_trig  = OptionWrapper(backendParams.debugEn, Bool() )//Option.when(backendParams.debugEn)(Bool())
-    val debug_vecWen          = OptionWrapper(backendParams.debugEn, Bool() )
-    val debug_v0Wen           = OptionWrapper(backendParams.debugEn, Bool() )
-    val debug_commitType      = OptionWrapper(backendParams.debugEn, CommitType() )
+    val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+    val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
+    val debug_ldest      = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
+    val debug_pdest      = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(2.W))
+    val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
+    val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
+    val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr )
+    val debug_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr )
+    val debug_rfWen      = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum() )
+    val debug_sim_trig   = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool() )
+    val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType() )
     // debug_end
 
     def isWritebacked: Bool = !uopNum.orR
