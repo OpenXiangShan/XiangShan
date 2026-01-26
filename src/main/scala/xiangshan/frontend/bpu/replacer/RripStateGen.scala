@@ -31,7 +31,7 @@ import xiangshan.frontend.bpu.CompareMatrix
 class RripStateGen(
     NumWays:              Int,
     AccessSize:           Int = 1,
-    UseFrequencyPriority: Boolean = false
+    UseFrequencyPriority: Boolean = true
 ) extends ReplacerStateGen(NumWays, AccessSize) {
   def RrpvWidth:  Int = log2Ceil(NumWays)
   def StateWidth: Int = NumWays * RrpvWidth
@@ -94,8 +94,10 @@ class RripStateGen(
     val rripState    = genRripState(state)
     val victimMatrix = CompareMatrix(rripState, order = (a: UInt, b: UInt) => a > b)
     val victimWayOH  = victimMatrix.getLeastElementOH(VecInit.fill(NumWays)(true.B))
-    val hasVictimWay = victimWayOH.reduce(_ || _)
+    // if all rrip states are equal, victimWay will be NumWay-1
+    // so in this case we choose a random way as victim
+    val isStateSame = rripState.map(_ === rripState.head).reduce(_ && _)
 
-    Mux(hasVictimWay, OHToUInt(victimWayOH), random(log2Ceil(NumWays) - 1, 0))
+    Mux(!isStateSame, OHToUInt(victimWayOH), random(log2Ceil(NumWays) - 1, 0))
   }
 }
