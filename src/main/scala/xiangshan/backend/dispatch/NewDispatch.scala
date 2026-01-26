@@ -25,7 +25,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort, EnqRobUop}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.rename.BusyTableReadIO
@@ -880,10 +880,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
     io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
-    io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
-    io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
-    io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
-    io.enqRob.req(i).bits.stdwriteNeed := FuType.isStore(updatedUop(i).fuType)
   }
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
