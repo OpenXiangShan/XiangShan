@@ -961,9 +961,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val dispatchlsqBubbleVec = allowDispatch.map(!_)
 
-
-
-
   // TODO delete it
   io.stallReason.backReason := 0.U.asTypeOf(io.stallReason.backReason)
 
@@ -977,6 +974,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
 
   val robHeadFutype = io.robHead.debug_fuType.getOrElse(0.U)
+
   val robStall = !isWaitForwardOrBlockBackward && !io.enqRob.canAccept
   val lsqStall = !lsqCanAccept
   val roblsqStall = robStall ||  lsqStall
@@ -992,8 +990,33 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     (robStall)                                                               -> RobStall.id.U             ,
   ))
 
-  dispatchStallReason := MuxCase(NoStall.id.U, Seq(
-    roblsqStall        -> roblsqStallReason        ,
+  val issueQueueStall = issueQueueStallVec.reduce(_ && _)
+  val issueQueueStallFutype = PriorityMux(issueQueueStallVec, fuTypes)
+  val issueQueueStallReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U        ,
+    FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U        ,
+    FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U      ,
+    FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U            ,
+    FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U           ,
+    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U          ,
+    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U         ,
+  ))
+
+  val dispatchlsqStall = dispatchlsqBubbleVec.reduce(_ && _)
+  val dispatchlsqStallFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
+  val dispatchlsqStallReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isLoadVload(dispatchlsqStallFutype)   -> LoadIQFullStall.id.U  ,
+    FuType.isStoreVstore(dispatchlsqStallFutype) -> StoreIQFullStall.id.U ,
+  ))
+
+  val specialInstructionStall = isWaitForwardOrBlockBackward
+  val specialInstructionStallReason = SpecialInsts.id.U
+
+  dispatchStallReason := MuxCase(BackendOtherCoreStall.id.U, Seq(
+    roblsqStall             -> roblsqStallReason             ,
+    issueQueueStall         -> issueQueueStallReason         ,
+    dispatchlsqStall        -> dispatchlsqStallReason        ,
+    specialInstructionStall -> specialInstructionStallReason ,
   ))
 
   // current bubble
@@ -1004,6 +1027,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val issueQueueBubble = issueQueueStallVec.reduce(_ || _)
   val issueQueueBubbleFutype = PriorityMux(issueQueueStallVec, fuTypes)
+
   val issueQueueBubbleReason = MuxCase(NoStall.id.U, Seq(
     FuType.isAlu(issueQueueBubbleFutype)         -> IntIQFullStallAlu.id.U        ,
     FuType.isBJU(issueQueueBubbleFutype)         -> IntIQFullStallBrh.id.U        ,
@@ -1036,8 +1060,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     issueQueueBubble          -> issueQueueBubbleReason         ,
     dispatchPolicyBubble      -> dispatchPolicyBubbleReason     ,
     dispatchlsqBubble         -> dispatchlsqBubbleReason        ,
-    dispatchBubble            -> BackendOtherCoreStall.id.U     ,
     specialInstructionBubble  -> specialInstructionBubbleReason ,
+    dispatchBubble            -> BackendOtherCoreStall.id.U     ,
   ))
 
   // store bubble reason
