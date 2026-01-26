@@ -37,7 +37,7 @@ case class ScParameters(
     BiasTableSize:       Int = 128,
     BiasUseTageBitWidth: Int = 2,    // use tage_taken as index bits
     PathEnable:          Boolean = true,
-    GlobalEnable:        Boolean = false,
+    GlobalEnable:        Boolean = true,
     BWEnable:            Boolean = false,
     ImliEnable:          Boolean = true,
     BiasEnable:          Boolean = true,
@@ -46,7 +46,7 @@ case class ScParameters(
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
-    EnableScTrace:       Boolean = false
+    EnableScTrace:       Boolean = true
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
