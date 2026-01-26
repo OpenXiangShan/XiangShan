@@ -210,8 +210,8 @@ class MainBtbAlignBank(
   private val t1_hitMask = PriorityEncoderOH(VecInit(t1_meta.map(_.hit(t1_mispredictInfo.bits))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
-  // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_mispredictInfo.valid && (
+  // Write entry only when there's a mispredict and is actually taken, and if:
+  private val t1_entryNeedWrite = t1_mispredictInfo.valid && t1_mispredictInfo.bits.taken && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
