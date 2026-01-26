@@ -147,7 +147,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val lfst = new DispatchLFSTIO
 
     // perf only
-    val robHead = Input(FuType())
+    val robHeadFuType = Input(FuType())
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
     val lqCanAccept = Input(Bool())
     val sqCanAccept = Input(Bool())
@@ -933,12 +933,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
-    val headIsInt = FuType.isInt(io.robHead)  && io.robHeadNotReady
-    val headIsFp  = FuType.isFArith(io.robHead)   && io.robHeadNotReady
-    val headIsDiv = FuType.isDivSqrt(io.robHead) && io.robHeadNotReady
-    val headIsLd  = io.robHead === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
-    val headIsSt  = io.robHead === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
-    val headIsAmo = io.robHead === FuType.mou.U && io.robHeadNotReady
+    val headIsInt = FuType.isInt(io.robHeadFuType)  && io.robHeadNotReady
+    val headIsFp  = FuType.isFArith(io.robHeadFuType)   && io.robHeadNotReady
+    val headIsDiv = FuType.isDivSqrt(io.robHeadFuType) && io.robHeadNotReady
+    val headIsLd  = io.robHeadFuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
+    val headIsSt  = io.robHeadFuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
+    val headIsAmo = io.robHeadFuType === FuType.mou.U && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
     val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
 
