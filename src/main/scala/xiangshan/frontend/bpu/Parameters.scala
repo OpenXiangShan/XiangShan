@@ -23,6 +23,7 @@ import xiangshan.frontend.bpu.history.commonhr.CommonHRParameters
 import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
@@ -40,14 +41,15 @@ case class BpuParameters(
     phrParameters:      PhrParameters = PhrParameters(),
     commonHRParameters: CommonHRParameters = CommonHRParameters(),
     // sub predictors
-    ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
-    abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
-    utageParameters:  MicroTageParameters = MicroTageParameters(),
-    mbtbParameters:   MainBtbParameters = MainBtbParameters(),
-    tageParameters:   TageParameters = TageParameters(),
-    scParameters:     ScParameters = ScParameters(),
-    ittageParameters: IttageParameters = IttageParameters(),
-    rasParameters:    RasParameters = RasParameters()
+    ubtbParameters:        MicroBtbParameters = MicroBtbParameters(),
+    abtbParameters:        AheadBtbParameters = AheadBtbParameters(),
+    utageParameters:       MicroTageParameters = MicroTageParameters(),
+    mbtbParameters:        MainBtbParameters = MainBtbParameters(),
+    prefetchBtbParameters: PrefetchBtbParameters = PrefetchBtbParameters(),
+    tageParameters:        TageParameters = TageParameters(),
+    scParameters:          ScParameters = ScParameters(),
+    ittageParameters:      IttageParameters = IttageParameters(),
+    rasParameters:         RasParameters = RasParameters()
 ) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
