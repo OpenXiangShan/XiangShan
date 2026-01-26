@@ -366,8 +366,41 @@ object Bundles {
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
+  class Og1Payload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
+    def numSrc = params.numSrc
+
+    // from frontend
+    val isRVC      = Option.when(params.needIsRVC)(Bool())
+    val fixedTaken = Option.when(params.needTaken)(Bool())
+    val predTaken  = Option.when(params.needTaken)(Bool())
+    // from decode
+    val fuOpType = FuOpType()
+    val selImm   = Option.when(params.needImm)(SelImm())
+    val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
+    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
+    val lastUop  = Option.when(params.inVfSchd)(Bool())
+    // from rename
+    val pdest     = UInt(PhyRegIdxWidth.W)
+    val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
+    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
+    val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
+    // for mdp
+    val storeSetHit    = Option.when(params.isLdAddrIQ)(Bool())
+    val waitForRobIdx  = Option.when(params.isLdAddrIQ)(new RobPtr)
+    val loadWaitBit    = Option.when(params.isLdAddrIQ)(Bool())
+    val loadWaitStrict = Option.when(params.isLdAddrIQ)(Bool())
+    val ssid           = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
+    // from dispatch
+    val lqIdx = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
+    val sqIdx = Option.when(params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ || params.isLdAddrIQ)(new SqPtr) // load unit need sqIdx
+  }
+
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
+    val og1Payload = new Og1Payload(params)
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
     val fixedTaken = Option.when(params.needTaken)(Bool())
@@ -1018,6 +1051,27 @@ object Bundles {
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
       this.vialuCtrl     .foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
+    }
+
+    def fromIssueOg1PayloadBundle(source: Og1Payload): Unit = {
+      this.isRVC         .foreach(_ := source.isRVC.get)
+      this.predictInfo.foreach(_.fixedTaken := source.fixedTaken.get)
+      this.predictInfo.foreach(_.predTaken  := source.predTaken.get)
+      this.fuOpType                 := source.fuOpType
+      this.imm                      := source.imm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
+      this.fpu           .foreach(_ := source.fpu.get)
+      this.vpu           .foreach(_ := source.vpu.get)
+      this.pdest                    := source.pdest
+      this.pdestVl       .foreach(_ := source.pdestVl.get)
+      this.numLsElem     .foreach(_ := source.numLsElem.get)
+      this.rasAction     .foreach(_ := source.rasAction.get)
+      this.storeSetHit   .foreach(_ := source.storeSetHit.get)
+      this.waitForRobIdx .foreach(_ := source.waitForRobIdx.get)
+      this.loadWaitBit   .foreach(_ := source.loadWaitBit.get)
+      this.loadWaitStrict.foreach(_ := source.loadWaitStrict.get)
+      this.ssid          .foreach(_ := source.ssid.get)
+      this.lqIdx         .foreach(_ := source.lqIdx.get)
+      this.sqIdx         .foreach(_ := source.sqIdx.get)
     }
 
     def toDynInst(): DynInst = {
