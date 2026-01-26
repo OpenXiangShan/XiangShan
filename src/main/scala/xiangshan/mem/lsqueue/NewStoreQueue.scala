@@ -1617,7 +1617,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         dataEntries(i).uop.robIdx === fbk(j).bits.robidx && dataEntries(i).uop.uopIdx === fbk(j).bits.uopidx
     }
     // vector feedback may occur with deqCancel/needCancel at the same time
-    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
 
     when (vecCommit(i)) {
       ctrlEntries(i).vecMbCommit := true.B
