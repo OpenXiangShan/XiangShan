@@ -745,6 +745,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   XSPerfAccumulate(s"total_sc_correct", scCorrectVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_wrong", scWrongVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_tage_correct", tageCorrectVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_tage_wrong", tageWrongVec.reduce(_ || _))
 
   XSPerfAccumulate(s"total_sc_path_correct", scPathCorrectVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_path_wrong", scPathWrongVec.reduce(_ || _))
