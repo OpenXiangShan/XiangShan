@@ -1203,7 +1203,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   private class UnalignQueue(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val redirect       = Flipped(ValidIO(new Redirect))
-      val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
+      val fromStaS2      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
       }
@@ -1212,7 +1212,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         val sqIdx        = new SqPtr
       })
     })
-    private val enqWidth: Int  = io.fromStaS1.length
+    private val enqWidth: Int  = io.fromStaS2.length
     private val queueSize: Int = SQUnalignQueueSize
 
     private val entries    = Reg(Vec(queueSize, new UnalignBufferEntry())) // no need to reset!
@@ -1227,9 +1227,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val full       = enqPtr.value === deqPtr.value && enqPtr.flag =/= deqPtr.flag
 
     // enq
-    private val canEnq     = io.fromStaS1.map{case port => port.fire} // one-hot, only second request of the unaligned need to enter.
+    private val canEnq     = io.fromStaS2.map{case port => port.fire} // one-hot, only second request of the unaligned need to enter.
     private val doEnq      = canEnq.reduce(_ || _)
-    private val doEnqReq   = Mux1H(canEnq, io.fromStaS1.map(_.bits))
+    private val doEnqReq   = Mux1H(canEnq, io.fromStaS2.map(_.bits))
 
     when(doEnq) {
       entries(enqPtr.value).robIdx     := doEnqReq.robIdx
@@ -1270,7 +1270,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toDeqModule.bits.sqIdx := headEntry.sqIdx
     io.toDeqModule.valid      := !empty
 
-    io.fromStaS1.map{case sink =>
+    io.fromStaS2.map{case sink =>
       sink.ready := !full && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
     }
 
@@ -1376,7 +1376,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   // unalignQueue connection
   unalignQueue.io.redirect            := io.redirect
   unalignQueue.io.fromSQ.addrReadyPtr := addrReadyPtrExt
-  unalignQueue.io.fromStaS1.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
+  unalignQueue.io.fromStaS2.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
     sink <> source
   }
 

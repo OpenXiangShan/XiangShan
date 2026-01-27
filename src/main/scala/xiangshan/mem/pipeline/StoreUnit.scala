@@ -536,7 +536,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
   val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
   //TODO: when implement new Unalign, it need to assign, cross page second request paddr.
-  io.toStoreUnalignQueue.valid              := s2_frm_mabuf && s2_out.isFinalSplit//TODO: support cross page unalign feature!
+  io.toStoreUnalignQueue.valid              := s2_frm_mabuf && s2_out.isFinalSplit && s2_valid//TODO: support cross page unalign feature!
   io.toStoreUnalignQueue.bits.sqIdx         := s2_out.uop.sqIdx
   io.toStoreUnalignQueue.bits.paddr         := s2_out.paddr
   io.toStoreUnalignQueue.bits.robIdx        := s2_out.uop.robIdx
