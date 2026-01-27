@@ -217,7 +217,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val strideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   strideOpt.foreach(pf => {
-    val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
+    val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_stride, 2, Some(false.B))
