@@ -730,7 +730,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.mshrForwardKill := killDCache
   io.tldForwardKill := killDCache
 
-  io.dataPathMeta.valid := pipeIn.valid
+  io.dataPathMeta.valid := pipeIn.valid && !kill
   io.dataPathMeta.bits.bankOffset := paddr.take(DCacheVWordOffset)
   io.dataPathMeta.bits.fuOpType := fuOpType
   io.dataPathMeta.bits.fpWen := uop.fpWen
@@ -1041,7 +1041,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
   cause(C_WF) := false.B
-  cause(C_BC) := troubleMaker && needDCacheAccess && bankConflict
+  cause(C_BC) := troubleMaker && (needDCacheAccess && bankConflict || isUnalignHead && in.shouldFastReplay.get)
   cause(C_RAR) := troubleMaker && rarNack
   cause(C_RAW) := troubleMaker && rawNack
   cause(C_NK) := troubleMaker && nuke
@@ -1290,6 +1290,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadHasException = s4Head.hasException.get
   val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
   val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
+  val s4HeadIsReplay = LoadEntrance.isReplay(s4Head.entrance)
+  val s4HeadCacheMiss = s4Head.cause.get(C_DM)
+  val s4HeadMshrId    = s4Head.mshrId.get
 
   val vaddr = Mux(s4HeadValid, s4HeadVAddr, in.vaddr)
   val paddr = Mux(s4HeadValid, s4HeadPAddr, in.paddr.get)
@@ -1404,6 +1407,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, cause)
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
+  val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec := exceptionVec
@@ -1445,7 +1449,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.vecVaddrOffset := DontCare
   lqWrite.vecTriggerMask := DontCare
   lqWrite.vecActive := true.B // TODO: remove this
-  lqWrite.isLoadReplay := LoadEntrance.isReplay(entrance)
+  lqWrite.isLoadReplay := LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
   lqWrite.isFastPath := DontCare // TODO: remove this
   lqWrite.isFastReplay := DontCare // TODO: remove this
   lqWrite.replayCarry := DontCare // TODO: remove this
@@ -1468,7 +1472,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.misalignWith16Byte := DontCare // TODO: remove this
   lqWrite.misalignNeedWakeUp := DontCare // TODO: remove this
   lqWrite.updateAddrValid := ldoutValid
-  lqWrite.rep_info.mshr_id := in.mshrId.get
+  lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
   lqWrite.rep_info.data_inv_sq_idx := in.dataInvalidSqIdx.get
   lqWrite.rep_info.addr_inv_sq_idx := in.addrInvalidSqIdx.get
