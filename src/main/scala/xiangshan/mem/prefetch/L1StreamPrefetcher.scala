@@ -16,7 +16,7 @@ import xiangshan.cache.mmu._
 trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   // capacity related
   val STREAM_FILTER_SIZE = 4
-  val BIT_VEC_ARRAY_SIZE = 16
+  val BIT_VEC_ARRAY_SIZE = 32
   val ACTIVE_THRESHOLD = BIT_VEC_WITDH - 4
   val INIT_DEC_MODE = false
 
