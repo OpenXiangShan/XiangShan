@@ -1491,7 +1491,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
     }.reduce(_ || _)
     val cross16ByteSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      port.bits.isUnsalign && !port.bits.unalignWithin16Byte && staValidSetVec(j)
+      port.bits.isUnalign && !port.bits.unalignWithin16Byte && staValidSetVec(j)
     }.reduce(_ || _)
     val cboSetVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
       LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
@@ -1525,7 +1525,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
     if(debugEn) {
       val unalignWithin16BSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-        port.bits.isUnsalign && port.bits.unalignWithin16Byte && staValidSetVec(j)
+        port.bits.isUnalign && port.bits.unalignWithin16Byte && staValidSetVec(j)
       }.reduce(_ || _)
       when(staSetValid) {
         ctrlEntries(i).unalignWithin16Byte.foreach(_ := unalignWithin16BSet)

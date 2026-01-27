@@ -439,11 +439,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
   // if it was unalign splited, first request will be false, second will be true.
-  // Currently, it will be always true. After implement new unaligned process logic, it will be assign.
-  io.toLsq.bits.isLastRequest       := s1_frm_mabuf && s1_out.isFinalSplit || !s1_cross4KPage //TODO: support cross page unalign feature!
+  io.toLsq.bits.isLastRequest       := s1_frm_mabuf && s1_out.isFinalSplit || !s1_cross4KPage && !s1_frm_mabuf //TODO: support cross page unalign feature!
   io.toLsq.bits.cross4KPage         := s1_frm_mabuf //TODO: support cross page unalign feature!
-  io.toLsq.bits.unalignWithin16Byte := s1_out.misalignWith16Byte
-  io.toLsq.bits.isUnsalign          := s1_out.isMisalign
+  io.toLsq.bits.unalignWithin16Byte := s1_out.misalignWith16Byte && !s1_frm_mabuf
+  io.toLsq.bits.isUnalign           := s1_out.isMisalign || s1_frm_mabuf
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_out.nc || s1_in.uop.robIdx.needFlush(io.redirect))
@@ -562,7 +561,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   // mmio and exception TODO:
   io.toLsqRe.memBackTypeMM   := s2_out.memBackTypeMM
-  io.toLsqRe.isLastRequest   := s2_frm_mabuf && s2_out.isFinalSplit || !s2_cross4KPage //TODO: support cross page unalign feature!
+  io.toLsqRe.isLastRequest   := s2_frm_mabuf && s2_out.isFinalSplit || !s2_cross4KPage && !s2_frm_mabuf //TODO: support cross page unalign feature!
   io.toLsqRe.af              := s2_out.af && s2_valid && !s2_kill
   io.toLsqRe.mmio            := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
   io.toLsqRe.nc              := s2_out.nc
@@ -579,8 +578,8 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.toLsqRe.size                := DontCare
   io.toLsqRe.uop                 := DontCare
   io.toLsqRe.cross4KPage         := false.B
-  io.toLsqRe.unalignWithin16Byte := s2_out.misalignWith16Byte
-  io.toLsqRe.isUnsalign          := s2_out.isMisalign
+  io.toLsqRe.unalignWithin16Byte := s2_out.misalignWith16Byte && !s2_frm_mabuf
+  io.toLsqRe.isUnalign          := s2_out.isMisalign || s2_frm_mabuf
 
 
   // RegNext prefetch train for better timing

@@ -111,7 +111,7 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   val wlineflag          = Bool() // store write the whole cache line.
 
   // misalign
-  val isUnsalign         = Bool()
+  val isUnalign           = Bool()
   val unalignWithin16Byte = Bool()
 
   // ctrl signal
