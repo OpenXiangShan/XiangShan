@@ -851,6 +851,7 @@ class DCacheMEQueryIOBundle(implicit p: Parameters) extends DCacheBundle
   val primary_ready    = Input(Bool())
   val secondary_ready  = Input(Bool())
   val secondary_reject = Input(Bool())
+  val block_match      = Input(Bool())
 }
 
 class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
