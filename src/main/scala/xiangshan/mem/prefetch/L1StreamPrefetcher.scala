@@ -43,7 +43,7 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
   val ENABLE_DECR_MODE = true
-  val ENABLE_STRICT_ACTIVE_DETECTION = true
+  val ENABLE_STRICT_ACTIVE_DETECTION = false
   val USE_STREAM_FIXED_DEPTH = true
 
   // constraints
