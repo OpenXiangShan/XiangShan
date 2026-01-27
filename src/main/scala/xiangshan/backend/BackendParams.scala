@@ -164,6 +164,10 @@ case class BackendParams(
     MixedVec(allSchdParams.map(_.genExuOutputValidBundle.flatten).flatten)
   }
 
+  def genWrite2RobBundles(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
+    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle.flatten).flatten)
+  }
+
   def getIntWbArbiterParams: WbArbiterParams = {
     val intWbCfgs: Seq[IntWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(_.writeInt)).map(_.asInstanceOf[IntWB])
     datapath.WbArbiterParams(intWbCfgs, intPregParams, this)
