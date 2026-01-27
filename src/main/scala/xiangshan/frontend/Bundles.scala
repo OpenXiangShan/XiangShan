@@ -18,6 +18,7 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
+import ftq.FtqEntry
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
@@ -52,21 +53,24 @@ class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
-  val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
-  val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
-
+  val prediction:        DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
+  val meta:              DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
+  val s3FtqPtr:          FtqPtr                     = Output(new FtqPtr)
+  val prefetchBtbFtqPtr: ValidIO[FtqPtr]            = Valid(new FtqPtr)
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
   val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:        Valid[BpuRedirect]    = Valid(new BpuRedirect)
-  val train:           DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
-  val commit:          Valid[BpuCommit]      = Valid(new BpuCommit)
-  val bpuPtr:          FtqPtr                = Output(new FtqPtr)
-  val redirectFromIFU: Bool                  = Output(Bool())
+  val redirect: Valid[BpuRedirect]    = Valid(new BpuRedirect)
+  val train:    DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
+  val commit:   Valid[BpuCommit]      = Valid(new BpuCommit)
+
+  val ftqEntry:        FtqEntry = Output(new FtqEntry())
+  val ifuPtr:          FtqPtr   = Output(new FtqPtr)
+  val bpuPtr:          FtqPtr   = Output(new FtqPtr)
+  val redirectFromIFU: Bool     = Output(Bool())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)

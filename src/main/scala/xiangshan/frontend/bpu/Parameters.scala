@@ -55,8 +55,8 @@ case class BpuParameters(
 trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
 
-  def EnableBpTrace: Boolean = bpuParameters.EnableBpTrace
-
+  def EnableBpTrace:   Boolean = bpuParameters.EnableBpTrace
+  def ICacheLineBytes: Int     = frontendParameters.icacheParameters.blockBytes
   // general
   def FetchBlockSizeWidth:    Int = log2Ceil(FetchBlockSize)
   def FetchBlockAlignSize:    Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)

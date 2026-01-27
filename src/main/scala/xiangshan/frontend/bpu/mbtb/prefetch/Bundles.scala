@@ -28,9 +28,44 @@ class PrefetchBtbEntry(implicit p: Parameters) extends PrefetchBtbBundle {
   val sramData: PrefetchBtbSramEntry = new PrefetchBtbSramEntry
 }
 class PrefetchBtbSramEntry(implicit p: Parameters) extends PrefetchBtbBundle {
-  val tag:       UInt            = UInt(TagWidth.W)
+  val tag: UInt = UInt(TagWidth.W)
+  val target = UInt(TargetWidth.W)
   val attribute: BranchAttribute = new BranchAttribute
   val position:  UInt            = UInt(CfiPositionWidth.W)
+}
+class PrefetchBtbMetaEntry(implicit p: Parameters) extends PrefetchBtbBundle {
+  val rawHit:    Bool            = Bool()
+  val position:  UInt            = UInt(CfiPositionWidth.W)
+  val attribute: BranchAttribute = new BranchAttribute
+
+  def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
+}
+
+class PrefetchBtbMeta(implicit p: Parameters) extends PrefetchBtbBundle {
+  val entries: Vec[PrefetchBtbMetaEntry] = Vec(NumWay, new PrefetchBtbMetaEntry)
+}
+//Prefetch pipe write at most 4 entry
+class PrefetchWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
+  val setIdx:  UInt                           = UInt(SetIdxLen.W)
+  val bankIdx: UInt                           = UInt(BankIdxLen.W)
+  val entries: Vec[ValidIO[PrefetchBtbEntry]] = Vec(NumWay, Valid(new PrefetchBtbEntry()))
+}
+//Victim pipe only write one entry
+class VictimWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
+  val setIdx:  UInt             = UInt(SetIdxLen.W)
+  val bankIdx: UInt             = UInt(BankIdxLen.W)
+  val entries: PrefetchBtbEntry = new PrefetchBtbEntry()
+}
+class PredReadReq(implicit p: Parameters) extends PrefetchBtbBundle {
+  val setIdx:  UInt = UInt(SetIdxLen.W)
+  val bankIdx: UInt = UInt(BankIdxLen.W)
+}
+class PredReadResp(implicit p: Parameters) extends PrefetchBtbBundle {
+  val entries: Vec[PrefetchBtbEntry] = Vec(NumWay, new PrefetchBtbEntry())
+}
+class TrainWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
+  val setIdx:      UInt      = UInt(SetIdxLen.W)
+  val needInvalid: Vec[Bool] = Vec(NumWay, Bool())
 }
 
 class BankReadReq(implicit p: Parameters) extends PrefetchBtbBundle {
@@ -42,21 +77,12 @@ class BankReadResp(implicit p: Parameters) extends PrefetchBtbBundle {
 }
 
 class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
+  val setIdx:  UInt                  = UInt(SetIdxLen.W)
+  val wayMask: UInt                  = UInt(NumWay.W)
+  val entry:   Vec[PrefetchBtbEntry] = Vec(NumWay, new PrefetchBtbEntry())
+}
+class WbufWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
   val setIdx:  UInt             = UInt(SetIdxLen.W)
   val wayMask: UInt             = UInt(NumWay.W)
-  val entry:   PrefetchBtbEntry = new PrefetchBtbEntry
-
+  val entry:   PrefetchBtbEntry = new PrefetchBtbEntry()
 }
-
-//class MainBtbMetaEntry(implicit p: Parameters) extends PrefetchBtbBundle {
-//  val rawHit:    Bool            = Bool()
-//  val position:  UInt            = UInt(CfiPositionWidth.W)
-//  val attribute: BranchAttribute = new BranchAttribute
-//  val counter:   SaturateCounter = TakenCounter()
-//
-//  def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
-//}
-//
-//class MainBtbMeta(implicit p: Parameters) extends PrefetchBtbBundle {
-//  val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay, new MainBtbMetaEntry))
-//}
