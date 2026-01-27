@@ -150,6 +150,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   // TODO: Don't use for now, will be remove in the feature
   io.vecmmioStout := DontCare
   io.maControl := DontCare
+  io.maControl.toStoreMisalignBuffer.doDeq := true.B // always true, cross page unalign handled by store queue.
   io.cboZeroStout := DontCare
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
