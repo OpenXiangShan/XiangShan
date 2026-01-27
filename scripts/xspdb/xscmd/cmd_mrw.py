@@ -312,7 +312,7 @@ class CmdMRW:
         if not self.mem_inited:
             error("mem not inited, please load a bin file")
             return None
-        sp = self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, self.iregs_mapk["sp"])
+        sp = self.xsp.GetFromU64Array(self.difftest_stat.regs.xrf.value, self.iregs_mapk["sp"])
         pc = self.api_info_get_last_commit_pc()
         return self.api_get_call_stack(sp, pc, max_depth)
 
@@ -334,7 +334,7 @@ class CmdMRW:
                 sp = args[1]
         try:
             if sp is None:
-                sp = self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, self.iregs_mapk["sp"])
+                sp = self.xsp.GetFromU64Array(self.difftest_stat.regs.xrf.value, self.iregs_mapk["sp"])
             else:
                 sp = int(sp, 0)
             if pc is None:

@@ -33,7 +33,7 @@ class CmdBreak:
 
         Args:
             signal_name (string): Name of the signal
-            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch
+            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch (or ==, !=, >, <, >=, <=)
             value (int/string): Value for the breakpoint
             callback (function): Callback function to be called when the breakpoint is hit, args:
                 cb(self, checker, k, clk, sig.value, target.value)
@@ -64,11 +64,17 @@ class CmdBreak:
             val.value = value
         condition_map = {
             "eq": self.xsp.ComUseCondCmp_EQ,
+            "==": self.xsp.ComUseCondCmp_EQ,
             "ne": self.xsp.ComUseCondCmp_NE,
+            "!=": self.xsp.ComUseCondCmp_NE,
             "gt": self.xsp.ComUseCondCmp_GT,
+            ">": self.xsp.ComUseCondCmp_GT,
             "lt": self.xsp.ComUseCondCmp_LT,
+            "<": self.xsp.ComUseCondCmp_LT,
             "ge": self.xsp.ComUseCondCmp_GE,
+            ">=": self.xsp.ComUseCondCmp_GE,
             "le": self.xsp.ComUseCondCmp_LE,
+            "<=": self.xsp.ComUseCondCmp_LE,
             "ch": self.xsp.ComUseCondCmp_NE,
         }
         cmp = condition_map.get(condition.lower(), None)
@@ -190,10 +196,12 @@ class CmdBreak:
         if not checker:
             warn("expr checker not found, please set a breakpoint first")
             return
+        if key not in self.xdut_expr_breaks:
+            warn(f"expr breakpoint {key} not found")
+            return
         checker.RemoveExpr(key)
-        if key in self.xdut_expr_breaks:
-            del self.xdut_expr_breaks[key]
-        if not checker.ListExpr():
+        del self.xdut_expr_breaks[key]
+        if not self.xdut_expr_breaks:
             self.dut.xclock.RemoveStepRisCbByDesc("xdut_expr_break")
             assert "xdut_expr_break" not in self.dut.xclock.ListSteRisCbDesc()
             self._xdut_expr_checker = None
@@ -203,17 +211,25 @@ class CmdBreak:
     def api_xbreak_expr_list(self):
         """List expression breakpoints"""
         checker = self._xdut_expr_checker
-        if not checker:
+        if not checker or not self.xdut_expr_breaks:
             return []
         status = checker.ListExpr()
         ret = []
         for k in sorted(self.xdut_expr_breaks.keys()):
-            ret.append((k, status.get(k, False), self.xdut_expr_breaks[k]["expr"]))
+            hit = False
+            if hasattr(status, "get"):
+                hit = status.get(k, False)
+            else:
+                try:
+                    hit = status[k]
+                except Exception:
+                    hit = False
+            ret.append((k, hit, self.xdut_expr_breaks[k]["expr"]))
         return ret
 
     def api_is_xbreak_expr_on(self):
         """Check if expression breakpoint is on"""
-        return self._xdut_expr_checker is not None
+        return self._xdut_expr_checker is not None and bool(self.xdut_expr_breaks)
 
     def api_xbreak_fsm(self, program_text, name=""):
         """Load an FSM trigger program
@@ -347,7 +363,7 @@ class CmdBreak:
 
         Args:
             signal_name (string): Name of the signal
-            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch, default is eq
+            condition (string): Condition for the breakpoint: eq, ne, gt, lt, ge, le, ch (or ==, !=, >, <, >=, <=), default is eq
             value (int): Value for the breakpoint, default is 0
         """
         args = arg.strip().split()
@@ -364,9 +380,6 @@ class CmdBreak:
             if len(args) < 1:
                 message("usage: xbreak signal_name [condition] [value]")
                 return
-            if not condition in ["eq", "ne", "gt", "lt", "ge", "le", "ch"]:
-                message("condition must be eq, ne, gt, lt, ge, le, ch")
-                return
             signal_name = args[0]
             self.api_xbreak(signal_name, condition, value)
         except Exception as e:
@@ -377,7 +390,7 @@ class CmdBreak:
         cmd = text.strip()
         cmd_list = [c for c in line.strip().split() if c]
         if (len(cmd_list) == 2 and line.endswith(" ")) or (len(cmd_list) == 3 and not line.endswith(" ")):
-                return [k for k in ["eq", "ne", "gt", "lt", "ge", "le", "ch"] if k.startswith(cmd)]
+                return [k for k in ["eq", "ne", "gt", "lt", "ge", "le", "ch", "==", "!=", ">", "<", ">=", "<="] if k.startswith(cmd)]
         return get_completions(self.get_dut_tree(), text)
 
     def do_xbreak_expr(self, arg):

@@ -15,6 +15,7 @@
 #***************************************************************************************
 
 import os
+import time
 from . import info, error, message, warn, get_completions
 
 class CmdDut:
@@ -68,18 +69,33 @@ class CmdDut:
                 return True
             return False
         self.api_dut_step_ready()
+        fb_child = getattr(self, "_fork_backup_is_child", False)
         batch, offset = cycle//batch_cycle, cycle % batch_cycle
         c_count = self.dut.xclock.clk
         need_break = False
         for i in range(batch):
             if self.interrupt:
                 break
+            if fb_child:
+                t0 = time.time()
+                self._fork_backup_log(f"fork backup child: step enter batch_cycle={batch_cycle} i={i}")
             self.dut.Step(batch_cycle)
+            if fb_child:
+                dt = time.time() - t0
+                if dt >= 1.0:
+                    self._fork_backup_log(f"fork backup child: step exit batch_cycle={batch_cycle} i={i} dt={dt:.3f}s")
             if check_break():
                 need_break = True
                 break
         if not self.interrupt and not need_break:
+            if fb_child:
+                t0 = time.time()
+                self._fork_backup_log(f"fork backup child: step enter offset={offset}")
             self.dut.Step(offset)
+            if fb_child:
+                dt = time.time() - t0
+                if dt >= 1.0:
+                    self._fork_backup_log(f"fork backup child: step exit offset={offset} dt={dt:.3f}s")
             check_break()
         if self.dut.xclock.IsDisable():
             self.call_break_callbacks()
