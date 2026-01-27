@@ -136,6 +136,7 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
 
   //debug information
+  val unalignWithin16Byte = Option.when(debugEn)(Bool())
 
   def allValid: Bool     = dataValid && addrValid
 }
@@ -210,6 +211,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val param = staParams.head
   param.bindBackendParam(backendParams)
 
+//  val DCacheVWordBytes  = VLEN / 8
+//  val DCacheVWordOffset = log2Up(DCacheVWordBytes)
+  val DCacheLineBytes   = CacheLineSize / 8
+  val DCacheLineVWords  = DCacheLineBytes / DCacheVWordBytes
+  val DCacheLineVWordsOffset = log2Up(DCacheLineVWords)
+  val VWordOffset            = log2Up(VLENB)
+
   private class ForwardModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val query           = Flipped(Vec(LoadPipelineWidth, new SQForward))
@@ -273,12 +281,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //     1. Extract correct bytes from store data
       //     2. Generate final forwarded data and mask
 
-      // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
-      // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
-      val CrossPageVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-        io.dataEntriesIn(j).byteEnd(log2Ceil(VLEN / 8)) && io.dataEntriesIn(j).vaddr(pageOffset - 1, log2Ceil(VLEN / 8)).andR)))
-      val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-        io.ctrlEntriesIn(j).addrValid && !CrossPageVec(j))))
+      val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => io.ctrlEntriesIn(j).addrValid)))
       // if is cbo zero, it can forward; other cbo type's data is invalid.
       val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).dataValid && (isCboZero(io.dataEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
@@ -325,7 +328,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val differentFlag    = io.ctrlInfo.deqPtr.flag =/= s0Req.bits.sqIdx.flag
       val forwardMask      = UIntToMask(s0Req.bits.sqIdx.value, StoreQueueSize)
       // generate load byte start and end
-      val loadStart        = s0Req.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
+      val loadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
       val byteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
       val loadEnd          = loadStart + byteOffset
 
@@ -342,7 +345,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
 
       val s1ForwardMask  = RegEnable(forwardMask, s0Valid)
-      val s1LoadVaddr    = RegEnable(s0Req.bits.vaddr(VAddrBits - 1, log2Ceil(VLENB)), s0Valid)
+      val s1LoadVaddr    = RegEnable(s0Req.bits.vaddr(VAddrBits - 1, VWordOffset), s0Valid)
       val s1deqMask      = RegEnable(deqMask, s0Valid)
       val s1LoadStart    = RegEnable(loadStart, s0Valid)
       val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
@@ -378,24 +381,32 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //     findYoungest(Reverse(0b1001)) -> selects store 3 (index 3)
 
       val s1Req = io.query(i).s1Req
-      val s1QueryPaddr = s1Req.paddr(PAddrBits - 1, log2Ceil(VLENB))
+      val s1QueryPaddr = s1Req.paddr(PAddrBits - 1, VWordOffset)
       // prevent X-state
       // Virtual address match (high bits only, ignore byte offset)
       val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         val storeIsCboZero = ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+        val isCross16B     = ctrlEntry.cross16Byte
         // vaddr two part match:
-        // [1]: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline), The high bits of vaddr, must match.
-        // [2]: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)], The bits within cacheline, if store is cboZero, it can be ignored.
+        // [1]: not cross 16B: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline) or
+        //      cross 16B: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] + 1.U addr(maxLen -> cacheline) [next cacheline]
+        // [2]: not cross 16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] or
+        //      cross 16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] + 1.U [next 16B] or
+        //      The bits within cacheline, if store is cboZero, it can be ignored.
         //
-        ((dataEntry.vaddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s1LoadVaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || storeIsCboZero) &&
-          dataEntry.vaddr(VAddrBits - 1, log2Ceil(CacheLineSize / 8)) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB))) &&
-          ctrlEntry.addrValid
+        ((dataEntry.vaddr(DCacheLineOffset - 1, VWordOffset) === s1LoadVaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
+          isCross16B && (dataEntry.vaddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s1LoadVaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
+          storeIsCboZero) &&
+        (dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, DCacheLineOffset - VWordOffset) ||
+          isCross16B && (dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) + 1.U) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, DCacheLineOffset - VWordOffset))) &&
+        ctrlEntry.addrValid
       }).asUInt
 
       // Byte overlap check: store covers any part of load's range
       //   Example: store [2,5] and load [3,3] -> overlap (2<=3 && 5>=3)
       val s1OverlapMask  = VecInit((0 until StoreQueueSize).map(j =>
-        io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart
+        io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart ||
+        io.ctrlEntriesIn(j).cross16Byte && io.dataEntriesIn(j).byteEnd(VWordOffset - 1, 0) <= s1LoadEnd // next 16B, store start always 0.
       )).asUInt
 
       XSError((s1LoadEnd < s1LoadStart) && s1Valid, "ByteStart > ByteEnd!\n")
@@ -445,7 +456,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2SelectCtrlEntry  = RegEnable(selectCtrlEntry, s1Valid)
       val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(HasAddrInvalid, s1Valid)
-      val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLEN/8), s1Valid)
+      val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(dataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
       val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
@@ -475,23 +486,31 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
       val selectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
+      val selectIsCross16B    = s2SelectCtrlEntry.cross16Byte
       // !Paddrmatch
       val paddrNoMatch       = !(
-        (s2SelectDataEntry.paddr(log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)) === s2LoadPaddr(log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB) - 1, 0) || selectIsCboZero) &&
-        s2SelectDataEntry.paddr(PAddrBits - 1, log2Ceil(CacheLineSize / 8)) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, log2Ceil(CacheLineSize / 8) - log2Ceil(VLENB))
+        (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
+          selectIsCross16B && (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
+          selectIsCboZero) &&
+        (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
+          selectIsCross16B && (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
+        s2SelectDataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
         ) && s2Valid
 
-      val selectData         = (0 until VLEN/8).map(j =>
+      val selectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
       )
       val outData            = ParallelLookUp(s2ByteSelectOffset, selectData)
 
-      val selectMask         = (0 until VLEN/8).map(j =>
+      val selectMask         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.byteMask, j)
       )
       val outMask            = ParallelLookUp(s2ByteSelectOffset, selectMask) & s2LoadMaskEnd
 
       val fullOverlap        = (s2SelectDataEntry.byteMask & s2LoadMaskEnd) === s2LoadMaskEnd
+      // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
+      // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
+      val cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR
       val safeForward        = !s2MultiMatch || fullOverlap
 
       //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
@@ -514,8 +533,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
-      s2Resp.bits.forwardInvalid   := !safeForward
-      s2Resp.bits.matchInvalid     := paddrNoMatch
+      s2Resp.bits.forwardInvalid   := !safeForward || cross4KPage // do not support cross page forward.
+      s2Resp.bits.matchInvalid     := paddrNoMatch && !cross4KPage // if cross Page, let load replay.
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
@@ -751,17 +770,17 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /**/
 
     private val outData        = Wire(Vec(EnsbufferWidth , UInt(VLEN.W)))
-    private val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLEN/8).W)))
+    private val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLENB).W)))
 
 
     for (i <- 0 until EnsbufferWidth) {
       val selectOffset       = 0.U - dataEntries(i).vaddr(3, 0) // need to generate 0 align data and mask
-      val selectData         = (0 until VLEN/8).map(j => // generate circular right shift byte data.
+      val selectData         = (0 until VLENB).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
       val byteMask           = dataEntries(i).byteMask
-      val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
+      val selectMsk          = (0 until VLENB).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
 
@@ -891,7 +910,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.req.bits.vaddr         := headDataEntry.vaddr
     io.toUncacheBuffer.req.bits.addr          := headDataEntry.paddr
     io.toUncacheBuffer.req.bits.data          := Mux(headDataEntry.vaddr(3), outData.head(VLEN - 1, 64), outData.head(63,0))
-    io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLEN/8 - 1 , 8), outMask.head(7,0))
+    io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLENB - 1 , 8), outMask.head(7,0))
     io.toUncacheBuffer.req.bits.robIdx        := headDataEntry.uop.robIdx
     io.toUncacheBuffer.req.bits.memBackTypeMM := isNC
     io.toUncacheBuffer.req.bits.nc            := isNC //TODO: remove it, why not use memBackTypeMM ?!
@@ -953,14 +972,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     */
     /*----------------------------------------------------------------------------------------------------------------*/
 
-    private val unalignMask       = Wire(Vec(EnsbufferWidth , UInt((VLEN/8).W))) // select active bytes of split request
+    private val unalignMask       = Wire(Vec(EnsbufferWidth , UInt((VLENB).W))) // select active bytes of split request
     private val writeSbufferData  = Wire(Vec(EnsbufferWidth , UInt(VLEN.W)))
-    private val writeSbufferMask  = Wire(Vec(EnsbufferWidth , UInt((VLEN/8).W)))
+    private val writeSbufferMask  = Wire(Vec(EnsbufferWidth , UInt((VLENB).W)))
     private val writeSbufferPaddr = Wire(Vec(EnsbufferWidth , UInt(PAddrBits.W)))
     private val writeSbufferVaddr = Wire(Vec(EnsbufferWidth , UInt(VAddrBits.W)))
     private val headCross16B      = headCtrlEntry.cross16Byte
     private val headCrossPage     = headrdataPtr === io.fromUnalignQueue.bits.sqIdx && io.fromUnalignQueue.valid
-    private val diffIsHighPart     = Wire(Vec(EnsbufferWidth, Bool())) //only for difftest
+    private val diffIsHighPart    = Wire(Vec(EnsbufferWidth, Bool())) //only for difftest
 
     // paddrHigh and vaddrHigh only for cross16Byte split
     private val paddrLow          = Cat(headDataEntry.paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W))
@@ -969,13 +988,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val vaddrHigh         = Cat(headDataEntry.vaddr(headDataEntry.vaddr.getWidth - 1, 4), 0.U(4.W)) + 16.U
 
     for (i <- 0 until EnsbufferWidth) {
-      unalignMask(i)         := VecInit(Seq.fill(VLEN/8)(false.B)).asUInt >> dataEntries(i).vaddr(3, 0)
+      unalignMask(i)         := VecInit(Seq.fill(VLENB)(false.B)).asUInt >> dataEntries(i).vaddr(3, 0)
+      // unalignWithin16Byte is for old unalign framework difftest, will be remove in the future.
+      val unalignWithin16Byte = (if (debugEn) ctrlEntries(i).unalignWithin16Byte.get else false.B)
       if(i == 0) {
         writeSbufferData(i)  := outData(i)
         writeSbufferMask(i)  := outMask(i) & unalignMask(i)
         writeSbufferPaddr(i) := paddrLow
         writeSbufferVaddr(i) := vaddrLow
-        diffIsHighPart(i)    := dataEntries(i).paddr(3)
+        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       }
       if(i == 1) {
         writeSbufferData(i)  := Mux(headCross16B, outData(0), outData(i))
@@ -987,14 +1008,17 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         writeSbufferVaddr(i) := Mux(headCross16B,
           vaddrHigh,
           Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)))
-        diffIsHighPart(i)    := Mux(headCross16B, false.B, dataEntries(i).paddr(3)) // if cross 16B, port 1 must low part
+        diffIsHighPart(i)    := Mux(headCross16B,
+                                      false.B,
+                                      dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
+                                    ) // if cross 16B, port 1 must low part
       }
       else {
         writeSbufferData(i)  := outData(i)
         writeSbufferMask(i)  := outMask(i)
         writeSbufferPaddr(i) := Cat(dataEntries(i).paddr(dataEntries(i).paddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
         writeSbufferVaddr(i) := Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
-        diffIsHighPart(i)    := dataEntries(i).paddr(3)
+        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       }
     }
 
@@ -1187,7 +1211,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   private class UnalignQueue(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
       val redirect       = Flipped(ValidIO(new Redirect))
-      val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
+      val fromStaS2      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
       }
@@ -1196,7 +1220,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         val sqIdx        = new SqPtr
       })
     })
-    private val enqWidth: Int  = io.fromStaS1.length
+    private val enqWidth: Int  = io.fromStaS2.length
     private val queueSize: Int = SQUnalignQueueSize
 
     private val entries    = Reg(Vec(queueSize, new UnalignBufferEntry())) // no need to reset!
@@ -1211,11 +1235,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val full       = enqPtr.value === deqPtr.value && enqPtr.flag =/= deqPtr.flag
 
     // enq
-    private val canEnq     = io.fromStaS1.map{case port =>
-      port.fire && port.bits.isLastRequest && port.bits.cross4KPage
-    } // one-hot, only second request of the unaligned need to enter.
+    private val canEnq     = io.fromStaS2.map{case port => port.fire} // one-hot, only second request of the unaligned need to enter.
     private val doEnq      = canEnq.reduce(_ || _)
-    private val doEnqReq   = Mux1H(canEnq, io.fromStaS1.map(_.bits))
+    private val doEnqReq   = Mux1H(canEnq, io.fromStaS2.map(_.bits))
 
     when(doEnq) {
       entries(enqPtr.value).robIdx     := doEnqReq.robIdx
@@ -1256,7 +1278,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toDeqModule.bits.sqIdx := headEntry.sqIdx
     io.toDeqModule.valid      := !empty
 
-    io.fromStaS1.map{case sink =>
+    io.fromStaS2.map{case sink =>
       sink.ready := !full && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
     }
 
@@ -1362,7 +1384,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   // unalignQueue connection
   unalignQueue.io.redirect            := io.redirect
   unalignQueue.io.fromSQ.addrReadyPtr := addrReadyPtrExt
-  unalignQueue.io.fromStaS1.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
+  unalignQueue.io.fromStaS2.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
     sink <> source
   }
 
@@ -1478,7 +1500,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
     }.reduce(_ || _)
     val cross16ByteSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      port.bits.isUnsalign && !port.bits.unalignWithin16Byte && staValidSetVec(j)
+      port.bits.isUnalign && !port.bits.unalignWithin16Byte && staValidSetVec(j)
     }.reduce(_ || _)
     val cboSetVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
       LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
@@ -1506,6 +1528,16 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
           isCboInval(port.bits.uop.fuOpType(1, 0)) -> CboType.inval,
           isCboZero(port.bits.uop.fuOpType(1, 0))  -> CboType.zero
         ))
+      }
+    }
+
+
+    if(debugEn) {
+      val unalignWithin16BSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+        port.bits.isUnalign && port.bits.unalignWithin16Byte && staValidSetVec(j)
+      }.reduce(_ || _)
+      when(staSetValid) {
+        ctrlEntries(i).unalignWithin16Byte.foreach(_ := unalignWithin16BSet)
       }
     }
 
@@ -1717,7 +1749,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     // enqPtr update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
-      (ctrlEntries(ptr.value).addrValid && // currently, dataValid but addrInvalid also need to replay laod.
+      (ctrlEntries(ptr.value).addrValid && !ctrlEntries(ptr.value).waitStoreS2 && //TODO: remove waitStoreS2 in the future
         (isMmio(dataEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) ||
         ctrlEntries(ptr.value).vecMbCommit) && //TODO: vecMbCommit will be remove in the future, entry maybe inactive, so we nned to or vecMbCommit.
       ctrlEntries(ptr.value).allocated &&
@@ -1728,7 +1760,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    stDataReadyVecReg(i) := (ctrlEntries(i).addrValid &&
+    stDataReadyVecReg(i) := (ctrlEntries(i).addrValid && !ctrlEntries(i).waitStoreS2 && // ctrl memoryType is ready.
         (isMmio(dataEntries(i).memoryType) || ctrlEntries(i).dataValid) ||
       ctrlEntries(i).vecMbCommit) &&
       ctrlEntries(i).allocated
@@ -1745,9 +1777,12 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val storeAddrIn   = io.fromStoreUnit.storeAddrIn(i)
     val storeAddrInRe = io.fromStoreUnit.storeAddrInRe(i)
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
-    val byteStart     = storeAddrIn.bits.vaddr(log2Ceil(VLEN/8) - 1, 0)
+    val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
 
+    // !isLastRequest && cross4KPage means it is first request of cross page unalign  --> save paddr
+    //  isLastRequest && cross4KPage means it is second request of cross page unalign --> not save paddr
+    // isLastRequest && !cross4KPage means it is normal request                       --> save paddr
     when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage)){
       // the second paddr of cross4KPage request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
@@ -1755,7 +1790,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       // only unit-stride use it, because unit-stride mask is not continue true.
       dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
         storeAddrIn.bits.mask,
-        UIntToMask(MemorySize.CaculateSelectMask(byteStart, byteStart + byteOffset), VLEN/8))
+        UIntToMask(MemorySize.CaculateSelectMask(byteStart, byteStart + byteOffset), VLENB))
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal
@@ -1880,16 +1915,16 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     /*=========================================== Data and Mask Generate =============================================*/
 
     val outData        = Wire(Vec(EnsbufferWidth , UInt(VLEN.W)))
-    val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLEN/8).W)))
+    val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLENB).W)))
 
     for (i <- 0 until EnsbufferWidth) {
       val selectOffset       = 0.U - dataEntries(i).byteStart // need to generate 0 align data and mask
-      val selectData         = (0 until VLEN/8).map(j => // generate circular right shift byte data.
+      val selectData         = (0 until VLENB).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(dataEntries(i).data, j * 8)
       )
 
       val byteMask           = dataEntries(i).byteMask
-      val selectMsk          = (0 until VLEN/8).map(j => // generate circular right shift byte data.
+      val selectMsk          = (0 until VLENB).map(j => // generate circular right shift byte data.
         j.U -> rotateByteRight(byteMask, j)
       )
 
