@@ -364,6 +364,7 @@ stack.info*
 *.vpd
 *.vcd
 *.bin
+*.fst
 
 !ready-to-run/*
 

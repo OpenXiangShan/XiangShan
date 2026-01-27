@@ -1,0 +1,24 @@
+# FSM to trace the PC of committed instructions.
+# It triggers when the sequence 0x0 -> 0x4 -> 0x7c is observed.
+# Other intermediate PC values are ignored.
+
+start WAIT_PC_0
+
+# Wait for the first PC in the sequence: 0x10000000
+state WAIT_PC_0:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.inner_ctrlBlock.rob.difftest_commit_pc == 0x10000004 goto WAIT_PC_4
+  else goto WAIT_PC_0
+
+# Now wait for the second PC: 0x4.
+# If we see 0x0 again, we assume a new sequence has started.
+state WAIT_PC_4:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.inner_ctrlBlock.rob.difftest_commit_pc == 0x10000008 goto WAIT_PC_80
+  elif SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.inner_ctrlBlock.rob.difftest_commit_pc == 0x10000000 goto WAIT_PC_4
+  else goto WAIT_PC_4
+
+# Now wait for the final PC: 0x7c.
+# If it's observed, trigger. If we see 0x0, restart the sequence logic.
+state WAIT_PC_80:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.inner_ctrlBlock.rob.difftest_commit_pc == 0x80000000 trigger
+  elif SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.inner_ctrlBlock.rob.difftest_commit_pc == 0x10000000 goto WAIT_PC_4
+  else goto WAIT_PC_80
