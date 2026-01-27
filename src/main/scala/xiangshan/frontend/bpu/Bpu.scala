@@ -67,7 +67,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
-  private val prefetchBtb = Module(new PrefetchBtb)
   private val commonHR    = Module(new CommonHR)
   private val uras        = Module(new MicroRas)
 
@@ -78,7 +77,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     utage,
     uras,
     mbtb,
-    prefetchBtb,
     tage,
     sc,
     ittage,
@@ -95,7 +93,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B
-  prefetchBtb.io.enable := true.B
+
   // TODO:need to add prefetch btb support
   uras.io.enable        := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
@@ -226,11 +224,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
-  prefetchBtb.io.prefetchData <> io.fromICache.btbPrefetchResp
-  prefetchBtb.io.prefetchBtbFtqPtr <> io.toFtq.prefetchBtbFtqPtr
-  prefetchBtb.io.ftqEntry <> io.fromFtq.ftqEntry
-  prefetchBtb.io.flush  := redirect.valid
-  prefetchBtb.io.ifuPtr := io.fromFtq.ifuPtr
+  mbtb.io.prefetchData <> io.fromICache.btbPrefetchResp
+  mbtb.io.prefetchBtbFtqPtr <> io.toFtq.prefetchBtbFtqPtr
+  mbtb.io.ftqEntry <> io.fromFtq.ftqEntry
+  mbtb.io.flush  := redirect.valid
+  mbtb.io.ifuPtr := io.fromFtq.ifuPtr
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
@@ -412,10 +410,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
   s3_resolveMeta.mbtb        := RegEnable(mbtb.io.meta, s2_fire)
   s3_resolveMeta.tage        := RegEnable(tage.io.meta, s2_fire)
+  s3_resolveMeta.prefetchBtb := RegEnable(mbtb.io.prefetchBbtMeta, s2_fire)
   s3_resolveMeta.sc          := sc.io.meta
   s3_resolveMeta.ittage      := ittage.io.meta
   s3_resolveMeta.phr         := s3_phrMeta
-  s3_resolveMeta.prefetchBtb := DontCare
   s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
