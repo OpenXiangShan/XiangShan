@@ -730,7 +730,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.mshrForwardKill := killDCache
   io.tldForwardKill := killDCache
 
-  io.dataPathMeta.valid := pipeIn.valid
+  io.dataPathMeta.valid := pipeIn.valid && !kill
   io.dataPathMeta.bits.bankOffset := paddr.take(DCacheVWordOffset)
   io.dataPathMeta.bits.fuOpType := fuOpType
   io.dataPathMeta.bits.fpWen := uop.fpWen
