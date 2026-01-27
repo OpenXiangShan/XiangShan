@@ -176,16 +176,17 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   XSError(s0_use_flow_vec && s0_vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
 
   val s0_isMisalign = Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
-  val s0_addr_low = s0_vaddr(4, 0)
+  val s0_addr_low = s0_vaddr(12, 0)
   val s0_addr_Up_low = LookupTree(s0_alignType, List(
     "b00".U -> 0.U,
     "b01".U -> 1.U,
     "b10".U -> 3.U,
     "b11".U -> 7.U
   )) + s0_addr_low
+  val s0_rs_corss4KPage = s0_addr_Up_low(12) =/= s0_addr_low(12)
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
+  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss4KPage) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -252,7 +253,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
+  s0_out.mask         := Mux(s0_rs_corss4KPage && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
@@ -316,6 +317,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   //For example: `StoreQueue` is exceptionBuffer
   val s1_frm_mab_vec = RegEnable(s0_use_flow_ma && io.misalign_stin.bits.isvec, false.B, s0_fire)
   // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
+  val s1_cross4KPage = RegEnable(s0_rs_corss4KPage, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec && !s1_frm_mabuf)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -438,8 +440,8 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
   // if it was unalign splited, first request will be false, second will be true.
   // Currently, it will be always true. After implement new unaligned process logic, it will be assign.
-  io.toLsq.bits.isLastRequest       := true.B //TODO: support cross page unalign feature!
-  io.toLsq.bits.cross4KPage         := false.B
+  io.toLsq.bits.isLastRequest       := s1_frm_mabuf && s1_out.isFinalSplit || !s1_cross4KPage //TODO: support cross page unalign feature!
+  io.toLsq.bits.cross4KPage         := s1_frm_mabuf //TODO: support cross page unalign feature!
   io.toLsq.bits.unalignWithin16Byte := s1_out.misalignWith16Byte
   io.toLsq.bits.isUnsalign          := s1_out.isMisalign
 
@@ -454,10 +456,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     s1_out.uop.perfDebugInfo.tlbRespTime := GTimer()
   }
   val s1_mis_align = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isCbo && !s1_out.nc && !s1_out.mmio &&
-                      GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
+                      GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && s1_cross4KPage &&
                       !s1_trigger_breakpoint && !s1_trigger_debug_mode
   val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
-    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
+    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && s1_cross4KPage && // only cross page unalign need enter misalignBuffer.
     GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
   io.misalign_enq.req.valid := s1_toMisalignBufferValid && !s1_misalignNeedReplay
   io.misalign_enq.req.bits.fromLsPipelineBundle(s1_in)
@@ -479,6 +481,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_tlb_hit = RegEnable(s1_tlb_hit, s1_fire)
+  val s2_cross4KPage = RegEnable(s1_cross4KPage, s1_fire)
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -532,13 +535,11 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
   val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
-  //TODO: when implement new Unalign, it need to assign
-  io.toStoreUnalignQueue.valid              := false.B //TODO: support cross page unalign feature!
+  //TODO: when implement new Unalign, it need to assign, cross page second request paddr.
+  io.toStoreUnalignQueue.valid              := s2_frm_mabuf && s2_out.isFinalSplit//TODO: support cross page unalign feature!
   io.toStoreUnalignQueue.bits.sqIdx         := s2_out.uop.sqIdx
   io.toStoreUnalignQueue.bits.paddr         := s2_out.paddr
   io.toStoreUnalignQueue.bits.robIdx        := s2_out.uop.robIdx
-  io.toStoreUnalignQueue.bits.cross4KPage   := false.B
-  io.toStoreUnalignQueue.bits.isLastRequest := s2_frm_mabuf && s1_out.isFinalSplit || !s2_out.isMisalign
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -561,12 +562,13 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   // mmio and exception TODO:
   io.toLsqRe.memBackTypeMM   := s2_out.memBackTypeMM
-  io.toLsqRe.isLastRequest   := true.B //TODO: support cross page unalign feature!
+  io.toLsqRe.isLastRequest   := s2_frm_mabuf && s2_out.isFinalSplit || !s2_cross4KPage //TODO: support cross page unalign feature!
   io.toLsqRe.af              := s2_out.af && s2_valid && !s2_kill
   io.toLsqRe.mmio            := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
   io.toLsqRe.nc              := s2_out.nc
   // prefetch related
   io.toLsqRe.cacheMiss       := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+  // when support new unalign, hasException need to consider second request.
   io.toLsqRe.hasException    := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
     TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill
   io.toLsqRe.paddr               := DontCare
