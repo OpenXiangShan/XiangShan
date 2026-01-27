@@ -194,6 +194,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   resolveQueue.io.bpuEnqueue    := bpuEnqueue
   resolveQueue.io.bpuEnqueuePtr := predictionPtr
 
+  private val prefetchBtbPtr      = io.fromBpu.prefetchBtbFtqPtr
+  private val prefetchBtbFtqEntry = entryQueue(prefetchBtbPtr.bits.value)
+  io.toBpu.ftqEntry := RegEnable(prefetchBtbFtqEntry, prefetchBtbPtr.valid)
+  io.toBpu.ifuPtr   := ifuPtr(0)
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
   // --------------------------------------------------------------------------------

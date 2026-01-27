@@ -17,15 +17,15 @@ package xiangshan.frontend.bpu.mbtb.prefetch
 
 import chisel3._
 import chisel3.util._
+import utility.SignExt
 import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.CrossPageHelper
-import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasPrefetchBtbParameters
-    with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
+    with HasXSParameter with TargetFixHelper {
 
   val addrFields = AddrField(
     Seq(
@@ -42,7 +42,8 @@ trait Helpers extends HasPrefetchBtbParameters
       ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
     )
   )
-
+  def getTargetUpper(pc: PrunedAddr): UInt =
+    pc(pc.length - 1, addrFields.getEnd("targetLower") + 1)
   def getSetIndex(pc: PrunedAddr): UInt =
     addrFields.extract("setIdx", pc)
 
@@ -52,4 +53,21 @@ trait Helpers extends HasPrefetchBtbParameters
   def getTag(pc: PrunedAddr): UInt =
     addrFields.extract("tag", pc)
 
+}
+trait SBDHelper extends HasPrefetchBtbParameters {
+  def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
+
+  def getJalOffset(inst: UInt, isRvc: Bool): PrunedAddr = {
+    val rvcOffset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))
+    val rviOffset = Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
+    val maxWidth  = rviOffset.getWidth
+    PrunedAddrInit(SignExt(Mux(isRvc, SignExt(rvcOffset, maxWidth), SignExt(rviOffset, maxWidth)), 20))
+  }
+
+  def getBrOffset(inst: UInt, isRvc: Bool): PrunedAddr = {
+    val rvcOffset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
+    val rviOffset = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
+    val maxWidth  = rviOffset.getWidth
+    PrunedAddrInit(SignExt(Mux(isRvc, SignExt(rvcOffset, maxWidth), SignExt(rviOffset, maxWidth)), 20))
+  }
 }

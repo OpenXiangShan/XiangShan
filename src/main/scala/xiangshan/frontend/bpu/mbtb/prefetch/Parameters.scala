@@ -31,10 +31,11 @@ case class PrefetchBtbParameters(
 
 // TODO: expose this to Parameters.scala / XSCore.scala
 trait HasPrefetchBtbParameters extends HasBpuParameters {
+//
   def prefetchParameters: PrefetchBtbParameters = bpuParameters.prefetchBtbParameters
-
-  def NumEntries: Int = prefetchParameters.NumEntries
-  def NumWay:     Int = prefetchParameters.NumWay
+  def NumBanks:           Int                   = prefetchParameters.NumBanks
+  def NumEntries:         Int                   = prefetchParameters.NumEntries
+  def NumWay:             Int                   = prefetchParameters.NumWay
   // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
   def NumSets:         Int    = NumEntries / NumWay / prefetchParameters.NumBanks
   def TagWidth:        Int    = prefetchParameters.TagWidth
