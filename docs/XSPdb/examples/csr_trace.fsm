@@ -1,0 +1,35 @@
+# FSM to trace a full CSR read-write operation.
+# It triggers after a complete idle -> write -> read_write sequence.
+
+start IDLE
+
+# In IDLE, wait for a new CSR instruction.
+# Exu_Csr_io_redirect_valid: a new instruction is dispatched to the CSR unit.
+# Exu_Csr_io_redirect_bits_is_write: it's a write operation.
+# Exu_Csr_io_redirect_bits_is_read: it's a read operation.
+state IDLE:
+  # If it is a write instruction (csrw, csrrw, etc.)
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_io_redirect_valid == 1 && SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_io_redirect_bits_is_write == 1 goto WRITE
+  # If it is a read-only instruction (csrr, etc.)
+  elif SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_io_redirect_valid == 1 && SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_io_redirect_bits_is_read == 1 goto READ
+  else goto IDLE
+
+# In READ, we just wait for the operation to be released and go back to IDLE.
+# Exu_Csr_release: indicates the current CSR operation is finished.
+state READ:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_release == 1 goto IDLE
+  else goto READ
+
+# In WRITE, check if it's also a read operation.
+# If so, transition to READ_WRITE. Otherwise, wait for release.
+# Exu_Csr_is_read: internal signal indicating if the current operation has a read component.
+state WRITE:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_is_read == 1 goto READ_WRITE
+  elif SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_release == 1 goto IDLE
+  else goto WRITE
+
+# This state is reached after a write that also needs a read.
+# Once it's released, trigger the breakpoint.
+state READ_WRITE:
+  if SimTop_top.SimTop.cpu.l_soc.core_with_l2.core.backend.exu.Exu_Csr_release == 1 trigger
+  else goto READ_WRITE
