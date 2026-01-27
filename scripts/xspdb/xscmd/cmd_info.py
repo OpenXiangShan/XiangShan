@@ -188,14 +188,14 @@ class CmdInfo:
             if not hasattr(self.xsp, "GetFromU64Array"):
                 return [('error_red',"<Error! xspcomm.GetFromU64Array not find, please update your xspcomm lib>>")]
             return " ".join(["%3s: 0x%x" % (self.iregs[i],
-                                            self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, i))
+                                            self.xsp.GetFromU64Array(self.difftest_stat.regs.xrf.value, i))
                              for i in range(32)])
         abs_list += [ireg_map()]
         # Float regs
         abs_list += ["\nFloatReg:"]
         def freg_map():
             return " ".join(["%3s: 0x%x" % (self.fregs[i],
-                                            self.xsp.GetFromU64Array(self.difftest_stat.regs_fp.value, i))
+                                            self.xsp.GetFromU64Array(self.difftest_stat.regs.frf.value, i))
                              for i in range(32)])
         abs_list += [freg_map()]
         # Commit PCs
@@ -206,23 +206,23 @@ class CmdInfo:
 
         # csr
         abs_list += ["\nCSR:"]
-        abs_list += ["mstatus: 0x%x  " % self.difftest_stat.csr.mstatus + 
-                     "mcause: 0x%x  " % self.difftest_stat.csr.mcause +
-                     "mepc: 0x%x  " % self.difftest_stat.csr.mepc +
-                     "mtval: 0x%x  " % self.difftest_stat.csr.mtval +
-                     "mtvec: 0x%x  " % self.difftest_stat.csr.mtvec +
-                     "privilegeMode: %d  " % self.difftest_stat.csr.privilegeMode +
-                     "mie: 0x%x  " % self.difftest_stat.csr.mie +
-                     "mip: 0x%x  " % self.difftest_stat.csr.mip + 
-                     "satp: 0x%x  " % self.difftest_stat.csr.satp +
-                     "sstatus: 0x%x  " % self.difftest_stat.csr.sstatus +
-                     "scause: 0x%x  " % self.difftest_stat.csr.scause +
-                     "sepc: 0x%x  " % self.difftest_stat.csr.sepc +
-                     "stval: 0x%x  " % self.difftest_stat.csr.stval +
-                     "stvec: 0x%x  " % self.difftest_stat.csr.stvec
+        abs_list += ["mstatus: 0x%x  " % self.difftest_stat.regs.csr.mstatus +
+                     "mcause: 0x%x  " % self.difftest_stat.regs.csr.mcause +
+                     "mepc: 0x%x  " % self.difftest_stat.regs.csr.mepc +
+                     "mtval: 0x%x  " % self.difftest_stat.regs.csr.mtval +
+                     "mtvec: 0x%x  " % self.difftest_stat.regs.csr.mtvec +
+                     "privilegeMode: %d  " % self.difftest_stat.regs.csr.privilegeMode +
+                     "mie: 0x%x  " % self.difftest_stat.regs.csr.mie +
+                     "mip: 0x%x  " % self.difftest_stat.regs.csr.mip +
+                     "satp: 0x%x  " % self.difftest_stat.regs.csr.satp +
+                     "sstatus: 0x%x  " % self.difftest_stat.regs.csr.sstatus +
+                     "scause: 0x%x  " % self.difftest_stat.regs.csr.scause +
+                     "sepc: 0x%x  " % self.difftest_stat.regs.csr.sepc +
+                     "stval: 0x%x  " % self.difftest_stat.regs.csr.stval +
+                     "stvec: 0x%x  " % self.difftest_stat.regs.csr.stvec
                      ]
         # fcsr
-        abs_list += ["\nFCSR: 0x%x" % self.difftest_stat.fcsr.fcsr]
+        abs_list += ["\nFCSR: 0x%x" % self.difftest_stat.regs.fcsr.fcsr]
 
         # DASM info base address
         if self.info_force_address is not None:
@@ -283,6 +283,26 @@ class CmdInfo:
                     abs_list += [("error_red", f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}")]
                 else:
                     abs_list += [f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}"]
+        
+        if self.api_is_xbreak_expr_on():
+            abs_list += ["\nXBreak Exprs:"]
+            for k, hit, expr in self.api_xbreak_expr_list():
+                if hit:
+                    abs_list += [("error_red", f"{k}: hit={hit} expr={expr}")]
+                else:
+                    abs_list += [f"{k}: hit={hit} expr={expr}"]
+        if self.api_is_xbreak_fsm_on():
+            abs_list += ["\nXBreak FSM:"]
+            try:
+                status = self.api_xbreak_fsm_status()
+                if status:
+                    line = f"name={status['name']} state={status['state']} triggered={status['triggered']} trigger_state={status['trigger_state']}"
+                    if status.get("triggered"):
+                        abs_list += [("error_red", line)]
+                    else:
+                        abs_list += [line]
+            except Exception as e:
+                abs_list += [("error_red", f"<Error! read xbreak_fsm status failed: {e}>")]
 
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]

@@ -17,6 +17,7 @@
 import os
 import time
 import signal
+import threading
 from . import info, error, message, warn
 
 class CmdForkBackup:
@@ -45,9 +46,9 @@ class CmdForkBackup:
             return
         if self._fork_backup_window_sec <= 0:
             return
+        self._fork_backup_reap_child()
         if self._fork_backup_child_state == "running":
             return
-        self._fork_backup_reap_child()
         now = time.time()
         if now - self._fork_backup_last_fork_time < self._fork_backup_window_sec:
             return
@@ -55,6 +56,9 @@ class CmdForkBackup:
 
     def _fork_backup_spawn_child(self):
         self._fork_backup_cleanup_child()
+        if self._fork_backup_child_pid is not None:
+            warn("fork backup: previous child still alive, skip spawn")
+            return
         try:
             ctl_r, ctl_w = os.pipe()
         except OSError as e:
@@ -100,7 +104,48 @@ class CmdForkBackup:
                 pass
             except OSError as e:
                 warn(f"fork backup: kill child failed: {e}")
-            self._fork_backup_child_pid = None
+            # best-effort reap to avoid zombies
+            pid = self._fork_backup_child_pid
+            reaped = False
+            for _ in range(50):
+                try:
+                    got, _ = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    reaped = True
+                    break
+                except OSError:
+                    break
+                if got != 0:
+                    reaped = True
+                    break
+                time.sleep(0.01)
+            if not reaped:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    reaped = True
+                except OSError as e:
+                    warn(f"fork backup: kill child (SIGKILL) failed: {e}")
+                for _ in range(50):
+                    try:
+                        got, _ = os.waitpid(pid, os.WNOHANG)
+                    except ChildProcessError:
+                        reaped = True
+                        break
+                    except OSError:
+                        break
+                    if got != 0:
+                        reaped = True
+                        break
+                    time.sleep(0.01)
+            if reaped:
+                self._fork_backup_child_pid = None
+                self._fork_backup_child_state = None
+                self._fork_backup_child_wave = None
+                return
+            # keep pid so it can be reaped later
+            self._fork_backup_child_state = "terminating"
+            return
         self._fork_backup_child_state = None
         self._fork_backup_child_wave = None
 
@@ -145,6 +190,7 @@ class CmdForkBackup:
 
     def _fork_backup_child_main(self, ctl_r):
         self._fork_backup_redirect_stdio()
+        self._fork_backup_child_post_fork_init()
         self._fork_backup_log("fork backup child: waiting for wake signal")
         try:
             with os.fdopen(ctl_r, "r") as f:
@@ -166,6 +212,19 @@ class CmdForkBackup:
             self._fork_backup_target_breaks = set()
         self._fork_backup_child_hit = False
         self._fork_backup_log(f"fork backup child: wake, target={break_keys}, wave={wave_file}")
+        try:
+            tid = threading.get_ident()
+            tcount = threading.active_count()
+        except Exception:
+            tid = None
+            tcount = None
+        try:
+            clk = self.dut.xclock.clk
+        except Exception:
+            clk = None
+        self._fork_backup_log(
+            f"fork backup child: pid={os.getpid()} ppid={os.getppid()} tid={tid} tcount={tcount} clk={clk}"
+        )
         if not self.api_waveform_on(wave_file):
             self._fork_backup_log("fork backup child: waveform on failed")
             return
@@ -180,15 +239,56 @@ class CmdForkBackup:
 
     def _fork_backup_run_until_target(self):
         step_cycle = 10000
+        iter_count = 0
+        total_advance = 0
+        last_log_time = time.time()
+        try:
+            start_clk = self.dut.xclock.clk
+        except Exception:
+            start_clk = None
+        tbs = list(self._fork_backup_target_breaks)
+        if not tbs:
+            tbs = ["*"]
+        self._fork_backup_log(f"fork backup child: run start clk={start_clk} target_breaks={tbs}")
         while True:
             if self._fork_backup_child_hit:
+                self._fork_backup_log("fork backup child: hit target break")
                 break
             if self.api_dut_is_step_exit():
                 self._fork_backup_log("fork backup child: exit condition hit")
                 break
-            self.api_step_dut(step_cycle)
+            adv = self.api_step_dut(step_cycle)
+            total_advance += adv
+            iter_count += 1
+            now = time.time()
+            if now - last_log_time >= 1.0:
+                try:
+                    clk = self.dut.xclock.clk
+                    xclk_dis = self.dut.xclock.IsDisable()
+                except Exception:
+                    clk = None
+                    xclk_dis = None
+                self._fork_backup_log(
+                    f"fork backup child: heartbeat iter={iter_count} adv={adv} total={total_advance} clk={clk} xclk_disable={xclk_dis}"
+                )
+                last_log_time = now
             if not self._fork_backup_target_breaks and self.dut.xclock.IsDisable():
                 self._fork_backup_child_hit = True
+
+    def _fork_backup_child_post_fork_init(self):
+        """Best-effort reinit after fork to restore simulator thread pool/state."""
+        for name in ("atClone", "fork_child_init", "ForkChildInit", "forkChildInit", "AtClone"):
+            fn = getattr(self.dut, name, None)
+            if callable(fn):
+                try:
+                    fn()
+                    self._fork_backup_log(f"fork backup child: call dut.{name} ok")
+                    return True
+                except Exception as e:
+                    self._fork_backup_log(f"fork backup child: call dut.{name} failed: {e}")
+                    return False
+        self._fork_backup_log("fork backup child: no dut atClone/fork_child_init hook")
+        return False
 
     def _fork_backup_redirect_stdio(self):
         log_path = self._fork_backup_log_path or os.path.join(os.getcwd(), "fork_backup.log")
