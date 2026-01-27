@@ -25,15 +25,29 @@ import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtb
+import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbMeta
+import xiangshan.frontend.ftq.FtqEntry
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.icache.BtbPrefetchBundle
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // prediction specific bundle
-    val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
-    val meta:   MainBtbMeta            = Output(new MainBtbMeta)
-
+    val result:          Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
+    val meta:            MainBtbMeta            = Output(new MainBtbMeta)
+    val prefetchBbtMeta: PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
+    // prefecth io
+    val flush: Bool = Input(Bool())
+    // prefetch data
+    val prefetchData: Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
+    // get pc from ftq
+    val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
+    val ftqEntry:          FtqEntry        = Input(new FtqEntry())
+    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
+
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -45,7 +59,20 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   addrFields.show(indent = 4)
 
   /* *** submodules *** */
-  private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
+  private val prefetchBtb = Module(new PrefetchBtb)
+  private val alignBanks  = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
+
+  prefetchBtb.io.enable := true.B
+  prefetchBtb.io.prefetchData <> io.prefetchData
+  prefetchBtb.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
+  prefetchBtb.io.ftqEntry <> io.ftqEntry
+  prefetchBtb.io.flush     := io.flush
+  prefetchBtb.io.ifuPtr    := io.ifuPtr
+  prefetchBtb.io.startPc   := io.startPc
+  prefetchBtb.io.stageCtrl := io.stageCtrl
+  prefetchBtb.io.train     := io.train
+
+  io.prefetchBbtMeta := prefetchBtb.io.meta
 
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 
@@ -105,7 +132,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
-  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
+  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ prefetchBtb.io.result)
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 

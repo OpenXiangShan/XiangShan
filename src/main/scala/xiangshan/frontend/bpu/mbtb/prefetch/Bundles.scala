@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu._
+import xiangshan.frontend.bpu.mbtb.MainBtbMetaEntry
 
 class PrefetchBtbEntry(implicit p: Parameters) extends PrefetchBtbBundle {
   val valid:    Bool                 = Bool()
@@ -40,9 +41,8 @@ class PrefetchBtbMetaEntry(implicit p: Parameters) extends PrefetchBtbBundle {
 
   def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
 }
-
 class PrefetchBtbMeta(implicit p: Parameters) extends PrefetchBtbBundle {
-  val entries: Vec[PrefetchBtbMetaEntry] = Vec(NumWay, new PrefetchBtbMetaEntry)
+  val entries: Vec[MainBtbMetaEntry] = Vec(NumWay, new MainBtbMetaEntry)
 }
 //Prefetch pipe write at most 4 entry
 class PrefetchWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
