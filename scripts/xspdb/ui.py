@@ -38,7 +38,7 @@ try:
 except ImportError:
     urwid = None
 
-from xspdb.xscmd.util import GREEN, RESET, YELLOW
+from xspdb.xscmd.util import GREEN, RESET, YELLOW, RED
 
 class XiangShanSimpleTUI:
     def __init__(self, pdb, console_max_height=10, content_asm_fix_width=55, console_prefix="(xiangshan)"):
@@ -71,6 +71,7 @@ class XiangShanSimpleTUI:
         self.exit_error = None
         self.batch_mode_depth = 0
         self.batch_mode_active = False
+        self.last_cmd_error = None
         self._ui_lock = threading.Lock()  # Add lock for thread safety
         self.loop = None  # Initialize loop to None
 
@@ -537,6 +538,13 @@ class XiangShanSimpleTUI:
                     text_data = "\n" + "\n".join(text_lines[:self.console_max_height])
                     self.console_input.set_caption(f"<Up/Down: scroll, Esc: exit>")
                     self.root.focus_part = None
+
+            if self.last_cmd_error:
+                err_lines = [l for l in self.last_cmd_error.strip().splitlines() if l]
+                tail_count = max(2, self.console_max_height - 2)
+                tail = "\n".join(err_lines[-tail_count:]) if err_lines else ""
+                text_data = (text_data or "") + f"\n{RED}Cmd Error (latest):{RESET}\n{tail}\n"
+                self.last_cmd_error = None
             
             try:
                 self.console_output.set_text(self._get_output(text_data))
@@ -656,15 +664,33 @@ class XiangShanSimpleTUI:
             self.pdb._sigint_handler(s, f)
         signal.signal(signal.SIGINT, _sigint_handler)
         self._redirect_stdout(True)
-        ret = self.pdb.onecmd(cmd, log_cmd=False)
-        flush_cpp_stdout()
-        self._redirect_stdout(False)
-        signal.signal(signal.SIGINT, original_sigint)
-        self.cmd_is_excuting = False
-        self.console_input_busy_index = -1
-        self.console_input.set_caption(cap)
-        self.update_asm_abs_info()
-        self.update_console_ouput(False)
+        try:
+            ret = self.pdb.onecmd(cmd, log_cmd=False)
+        except Exception:
+            err = traceback.format_exc()
+            self.last_cmd_error = err
+            try:
+                self.console_output.set_text(self._get_output(f"{RED}Cmd Error:\n{err}{RESET}\n"))
+            except Exception:
+                print(err)
+            ret = None
+        finally:
+            flush_cpp_stdout()
+            self._redirect_stdout(False)
+            signal.signal(signal.SIGINT, original_sigint)
+            self.cmd_is_excuting = False
+            self.console_input_busy_index = -1
+            self.console_input.set_caption(cap)
+            try:
+                self.update_asm_abs_info()
+                self.update_console_ouput(False)
+            except Exception:
+                err = traceback.format_exc()
+                self.last_cmd_error = err
+                try:
+                    self.console_output.set_text(self._get_output(f"{RED}UI Update Error:\n{err}{RESET}\n"))
+                except Exception:
+                    print(err)
         return ret
 
     def update_asm_abs_info(self):
