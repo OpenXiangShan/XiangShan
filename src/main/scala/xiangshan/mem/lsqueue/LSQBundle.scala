@@ -73,8 +73,6 @@ class UnalignQueueIO(implicit p: Parameters) extends MemBlockBundle {
   val sqIdx              = new SqPtr
   val robIdx             = new RobPtr
   val paddr              = UInt(PAddrBits.W)
-  val isLastRequest      = Bool() // is last request of unaligned request
-  val cross4KPage        = Bool() // this unalign request is cross 4KPage
 }
 
 class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
