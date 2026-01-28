@@ -43,6 +43,8 @@ case class BackendParams(
 
   def robCompressEn: Boolean = false
 
+  def regCacheEn: Boolean = true
+
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
