@@ -13,12 +13,12 @@ import xiangshan.frontend.icache.BtbPrefetchBundle
 
 class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helpers {
   class PrefetchIO(implicit p: Parameters) extends PrefetchBtbBundle {
-    val flush:             Bool                      = Input(Bool())
-    val prefetchData:      Valid[BtbPrefetchBundle]  = Flipped(Valid(new BtbPrefetchBundle))
-    val prefetchBtbFtqPtr: ValidIO[FtqPtr]           = Valid(new FtqPtr)
-    val ifuPtr:            FtqPtr                    = Input(new FtqPtr)
-    val ftqEntry:          FtqEntry                  = Input(new FtqEntry())
-    val prefetchWrite:     ValidIO[PrefetchWriteReq] = Valid(new PrefetchWriteReq)
+    val flush:             Bool                     = Input(Bool())
+    val prefetchData:      Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
+    val prefetchBtbFtqPtr: ValidIO[FtqPtr]          = Valid(new FtqPtr)
+//    val ifuPtr:            FtqPtr                    = Input(new FtqPtr)
+    val ftqEntry:      FtqEntry                  = Input(new FtqEntry())
+    val prefetchWrite: ValidIO[PrefetchWriteReq] = Valid(new PrefetchWriteReq)
 
   }
 
@@ -28,8 +28,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
 
   private val prefetchWrite                = io.prefetchWrite
   private val s0_valid, s1_valid, s2_valid = Wire(Bool())
+  private val s0_isNextLine                = io.prefetchData.bits.isNextLine
   // if this prefetch valid
-  s0_valid := io.prefetchData.valid && io.ifuPtr < io.prefetchData.bits.ftqIdx
+  s0_valid := io.prefetchData.valid
   s1_valid := RegNext(s0_valid)
   s2_valid := RegNext(s1_valid)
 
@@ -39,7 +40,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
 
   /* S1:Get pc and decode data
    *  */
-  private val s1_startPc                = io.ftqEntry.startPc
+  private val s1_isNextLine = RegEnable(s0_isNextLine, s0_valid)
+  private val s1_startPc =
+    Mux(s1_isNextLine, getBlockPc(io.ftqEntry.startPc + (CacheLineSize / 8).U), io.ftqEntry.startPc)
   private val s1_cfiOffset              = io.ftqEntry.takenCfiOffset
   private val s1_data                   = RegEnable(io.prefetchData.bits.data, s0_valid)
   private val s1_isRVC                  = RegEnable(io.prefetchData.bits.maybeRvcMap, s0_valid).asBools
@@ -56,9 +59,21 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s1_shadowRange    = Wire(Vec(ICacheLineBytes / 2, Bool()))
   private val s1_finalInstValid = Wire(Vec(ICacheLineBytes / 2, Bool()))
 
+  private val debug_s1InstValid      = Wire(UInt((ICacheLineBytes / 2).W))
+  private val debug_s1InstRange      = Wire(UInt((ICacheLineBytes / 2).W))
+  private val debug_s1ShadowRange    = Wire(UInt((ICacheLineBytes / 2).W))
+  private val debug_s1FinalInstValid = Wire(UInt((ICacheLineBytes / 2).W))
+  debug_s1InstValid      := s1_instValid.asUInt
+  debug_s1InstRange      := s1_instRange.asUInt
+  debug_s1ShadowRange    := s1_shadowRange.asUInt
+  debug_s1FinalInstValid := s1_finalInstValid.asUInt
+  dontTouch(debug_s1InstValid)
+  dontTouch(debug_s1InstRange)
+  dontTouch(debug_s1ShadowRange)
+  dontTouch(debug_s1FinalInstValid)
   // TODO:simplify logic
   s1_instRange := ((Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiOffset.bits).asUInt).asUInt &
-    (Fill(FetchBlockInstNum, 1.U(1.W)) >> s1_startPc(6, 1).asUInt).asUInt).asBools
+    (Fill(FetchBlockInstNum, 1.U(1.W)) >> s1_startPc(5, 1).asUInt).asUInt).asBools
   s1_shadowRange := s1_instRange.map(!_)
   (0 until ICacheLineBytes / 2).foreach { i =>
     if (i == 0) {
@@ -113,6 +128,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   }))
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
+  dontTouch(s2_shadowBranchMask)
+//  dontTouch(s2_revBranchInfo)
+  dontTouch(s1_instRange)
   private val s2_ranks = Wire(Vec(ICacheLineBytes / 2, UInt(log2Ceil(ICacheLineBytes / 2).W)))
   for (i <- 0 until ICacheLineBytes / 2) {
     s2_ranks(i) := PopCount(s2_shadowBranchMask.reverse.asUInt(i, 0))

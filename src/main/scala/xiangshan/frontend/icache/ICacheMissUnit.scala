@@ -262,11 +262,12 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.resp.bits.corrupt     := corruptReg
   io.resp.bits.denied      := deniedReg
 
-  // response btb prefetch
-  io.btbPrefetchResp.valid            := respValid
+  // response btb prefetch,only check prefetch
+  io.btbPrefetchResp.valid            := respValid && idNext >= NumFetchMshr.U
   io.btbPrefetchResp.bits.maybeRvcMap := maybeRvcMap
   io.btbPrefetchResp.bits.data        := respDataReg.asUInt
   io.btbPrefetchResp.bits.ftqIdx      := mshrInfo.ftqIdx
+  io.btbPrefetchResp.bits.isNextLine  := mshrInfo.isNextLine
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)
 

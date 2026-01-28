@@ -449,11 +449,17 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
     toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
     toMissArbiter.io.in(i).bits.ftqIdx   := s2_ftqIdx
+    toMissArbiter.io.in(i).bits.isNextLine := false.B
+
   }
 
-  toMiss <> toMissArbiter.io.out
-
-  s2_flush := io.flush
+  toMiss.valid               := toMissArbiter.io.out.valid
+  toMissArbiter.io.out.ready := toMiss.ready
+  toMiss.bits.blkPAddr       := toMissArbiter.io.out.bits.blkPAddr
+  toMiss.bits.vSetIdx        := toMissArbiter.io.out.bits.vSetIdx
+  toMiss.bits.ftqIdx         := toMissArbiter.io.out.bits.ftqIdx
+  toMiss.bits.isNextLine     := toMissArbiter.io.chosen.asBool
+  s2_flush                   := io.flush
 
   // toMissArbiter.io.in(i).fire is not used here for timing consideration
 // private val s2_finish =
