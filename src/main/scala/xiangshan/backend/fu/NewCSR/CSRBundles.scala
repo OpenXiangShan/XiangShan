@@ -182,6 +182,7 @@ object CSRBundles {
     // Branch predictor
     val bp_ctrl = Output(new BpuCtrl)
     // Memory Block
+    val sbuffer_timeout = Output(UInt(22.W))
     val sbuffer_threshold = Output(UInt(4.W))
     val ldld_vio_check_enable = Output(Bool())
     val soft_prefetch_enable = Output(Bool())
