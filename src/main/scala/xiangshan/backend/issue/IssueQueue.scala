@@ -858,7 +858,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     if (params.aluDeqNeedPickJump && (i ==1)) {
       deq.valid := finalDeqSelValidVec(i) && !cancelDeqVec(i) || entries.io.aluDeqSelectJump.get && deqBeforeDly(0).valid
     }
-    deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.common.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
