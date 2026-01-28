@@ -1740,7 +1740,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     // enqPtr update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
-      (ctrlEntries(ptr.value).addrValid && // currently, dataValid but addrInvalid also need to replay laod.
+      (ctrlEntries(ptr.value).addrValid && !ctrlEntries(ptr.value).waitStoreS2 && //TODO: remove waitStoreS2 in the future
         (isMmio(dataEntries(ptr.value).memoryType) || ctrlEntries(ptr.value).dataValid) ||
         ctrlEntries(ptr.value).vecMbCommit) && //TODO: vecMbCommit will be remove in the future, entry maybe inactive, so we nned to or vecMbCommit.
       ctrlEntries(ptr.value).allocated &&
@@ -1751,7 +1751,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    stDataReadyVecReg(i) := (ctrlEntries(i).addrValid &&
+    stDataReadyVecReg(i) := (ctrlEntries(i).addrValid && !ctrlEntries(i).waitStoreS2 && // ctrl memoryType is ready.
         (isMmio(dataEntries(i).memoryType) || ctrlEntries(i).dataValid) ||
       ctrlEntries(i).vecMbCommit) &&
       ctrlEntries(i).allocated
