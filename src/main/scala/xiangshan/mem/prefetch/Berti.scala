@@ -343,7 +343,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   searchLog.histLineVA := stat_histLineVA
   searchLog.currLineVA := stat_currLineVA
   searchLog.calDelta := io.search.resp.delta.asUInt
-  val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = false)
+  val searchLogDb = ChiselDB.createTable(s"${_name}_searchLog${p(XSCoreParamsKey).HartId}", new SearchLogDb, basicDB = true)
   searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
 }
 
@@ -626,7 +626,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   deltaInfo2Db.delta := pfRes._2.delta.asUInt
   deltaInfo2Db.coverageCnt := pfRes._2.coverageCnt
   deltaInfo2Db.status := pfRes._2.status.asUInt
-  val prefetchDeltaTable = ChiselDB.createTable("berti_prefetchDeltaTable" + p(XSCoreParamsKey).HartId.toString, new DeltaInfo2Db, basicDB = false)
+  val prefetchDeltaTable = ChiselDB.createTable(s"${_name}_prefetchDeltaTable${p(XSCoreParamsKey).HartId}", new DeltaInfo2Db, basicDB = true)
   prefetchDeltaTable.log(data = deltaInfo2Db, en = io.prefetch.valid, clock = clock, reset = reset)
   
   XSPerfAccumulate("learn_req", io.learn.valid)
@@ -891,7 +891,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   /*** performance counter and debug */
   val srcTable = ChiselDB.createTable(
     "berti_source_pf_req" + p(XSCoreParamsKey).HartId.toString,
-    new SourcePrefetchReq, basicDB = false
+    new SourcePrefetchReq, basicDB = true
   )
   srcTable.log(
     data = e0_src,
@@ -902,7 +902,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
 
   val sendTable = ChiselDB.createTable(
     "berti_send_pf_req" + p(XSCoreParamsKey).HartId.toString,
-    new Entry, basicDB = false
+    new Entry, basicDB = true
   )
   sendTable.log(
     data = entries(pfIdx),
