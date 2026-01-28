@@ -359,6 +359,10 @@ class NewTrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasSto
     XSPerfAccumulate(s"${name}_train_filter_filtered_enq_pattern_${toBinary(i)}", filtered_enq_pattern === i.U)
     XSPerfAccumulate(s"${name}_train_filter_actual_enq_pattern_${toBinary(i)}", actual_enq_pattern === i.U)
   }
+  
+  val trainDB = ChiselDB.createTable(s"${name}_trainLog${p(XSCoreParamsKey).HartId}", new TrainReqBundle, basicDB = true)
+  trainDB.log(data = io.trainReq.bits, en = io.trainReq.valid, clock = clock, reset = reset)
+
 }
 
 class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper {
