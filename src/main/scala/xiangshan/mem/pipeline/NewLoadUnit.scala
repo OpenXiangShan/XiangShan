@@ -1041,7 +1041,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
   cause(C_WF) := false.B
-  cause(C_BC) := troubleMaker && needDCacheAccess && bankConflict
+  cause(C_BC) := troubleMaker && (needDCacheAccess && bankConflict || isUnalignHead && in.shouldFastReplay.get)
   cause(C_RAR) := troubleMaker && rarNack
   cause(C_RAW) := troubleMaker && rawNack
   cause(C_NK) := troubleMaker && nuke
@@ -1290,6 +1290,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadHasException = s4Head.hasException.get
   val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
   val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
+  val s4HeadIsReplay = LoadEntrance.isReplay(s4Head.entrance)
 
   val vaddr = Mux(s4HeadValid, s4HeadVAddr, in.vaddr)
   val paddr = Mux(s4HeadValid, s4HeadPAddr, in.paddr.get)
@@ -1445,7 +1446,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.vecVaddrOffset := DontCare
   lqWrite.vecTriggerMask := DontCare
   lqWrite.vecActive := true.B // TODO: remove this
-  lqWrite.isLoadReplay := LoadEntrance.isReplay(entrance)
+  lqWrite.isLoadReplay := LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
   lqWrite.isFastPath := DontCare // TODO: remove this
   lqWrite.isFastReplay := DontCare // TODO: remove this
   lqWrite.replayCarry := DontCare // TODO: remove this

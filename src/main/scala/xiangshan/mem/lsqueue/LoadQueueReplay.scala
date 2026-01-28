@@ -56,7 +56,7 @@ object LoadReplayCauses {
   val C_DM  = 5
   // wpu predict fail
   val C_WF  = 6
-  // dcache bank conflict check
+  // dcache bank conflict check / unalign tail split fail
   val C_BC  = 7
   // RAR queue accept check
   val C_RAR = 8
