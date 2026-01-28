@@ -130,7 +130,7 @@ trait HasDCacheParameters
   val EnableTagEcc = cacheParams.enableTagEcc
 
   // banked dcache support
-  val DCacheSetDiv = 1
+  val DCacheSetDiv = 2
   val DCacheSets = cacheParams.nSets
   val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
