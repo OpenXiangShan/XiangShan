@@ -424,7 +424,7 @@ case class XSCoreParameters
         ExeUnitParams(
           "VFEX1",
           Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg),
-          Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
+          Seq(VfWB(port = 1, 0), V0WB(port = 1, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
           vlRD = VlRD(1, 0),
         ),
@@ -478,6 +478,10 @@ case class XSCoreParameters
       WakeUpConfig(
         Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
         Seq("STD0", "STD1")
+      ),
+      WakeUpConfig(
+        Seq("VFEX0", "VFEX1") ->
+        Seq("VFEX0", "VFEX1")
       ),
     ).flatten
   }
