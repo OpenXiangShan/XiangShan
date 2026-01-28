@@ -304,11 +304,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits := source.bits
   }
   intRegion.io.wakeUpFromFp. foreach(x => x := fpRegion.io.wakeUpToDispatch)
-  intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   fpRegion.io.wakeUpFromInt. foreach(x => x := intRegion.io.wakeUpToDispatch)
-  fpRegion.io.I2FWakeupIn.   foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
+  intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   fpRegion.io.wakeupFromI2F. foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
-  intRegion.io.F2IWakeupIn.  foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
   intRegion.io.staFeedback.  foreach(x => x := io.mem.staIqFeedback)
   vecRegion.io.vstuFeedback. foreach(x => x := io.mem.vstuIqFeedback)
