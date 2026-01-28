@@ -38,7 +38,10 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:7.3.0")
+  def ivyDeps: T[Agg[Dep]] = Agg(
+    ivy"org.chipsalliance::chisel:7.3.0",
+    ivy"com.lihaoyi::sourcecode:0.4.4",
+  )
 
   def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:7.3.0")
 
@@ -78,7 +81,7 @@ object `rocket-chip` extends ChiselModule {
 object utility extends ChiselModule {
   def moduleDeps = Seq(`rocket-chip`)
 
-  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"com.lihaoyi::sourcecode:0.4.4")
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps()
 
   object test extends SbtTests with TestModule.ScalaTest {
     def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"org.scalatest::scalatest:3.2.19")
