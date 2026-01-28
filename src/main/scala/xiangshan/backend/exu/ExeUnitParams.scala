@@ -106,17 +106,39 @@ case class ExeUnitParams(
   val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VecScheduler] && name.contains("VFEX")
   val isMemExeUnit: Boolean = schdType.isInstanceOf[IntScheduler] && !name.contains("ALU") && !name.contains("BJU") || schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
+  val isVecMemExeUnit: Boolean = schdType.isInstanceOf[VecScheduler] && !name.contains("VFEX")
 
   def needDataFromI2F: Boolean = {
     val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
-    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2F)) false
-    else this.getFpWBPort.get.port == exuI2FWBPort
+    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2F) && this.isFpExeUnit) false
+    else (this.getFpWBPort.get.port == exuI2FWBPort) && this.isFpExeUnit
   }
   // F2I includes FcmpCfg and FcvtCfg
   def needDataFromF2I: Boolean = {
     val exuF2IWBPort = backendParam.allExuParams(backendParam.getExuIdxF2I).getIntWBPort.get.port
-    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I)) false
-    else this.getIntWBPort.get.port == exuF2IWBPort
+    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I) && this.isIntExeUnit) false
+    else (this.getIntWBPort.get.port == exuF2IWBPort) && this.isIntExeUnit
+  }
+  def needDataFromF2V: Boolean = {
+    val exuF2VWBPort = backendParam.allExuParams(backendParam.getExuIdxF2V).getVfWBPort.get.port
+    if (this.getVfWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2V) && this.isVfExeUnit) false
+    else (this.getVfWBPort.get.port == exuF2VWBPort) && this.isVfExeUnit
+  }
+  def needDataFromV2F: Boolean = {
+    val exuV2FWBPort = backendParam.allExuParams(backendParam.getExuIdxV2F).getFpWBPort.get.port
+    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxV2F) && this.isFpExeUnit) false
+    else (this.getFpWBPort.get.port == exuV2FWBPort) && this.isFpExeUnit
+  }
+  def needDataFromV2I: Boolean = {
+    val exuV2IWBPort = backendParam.allExuParams(backendParam.getExuIdxV2I).getIntWBPort.get.port
+    println(s"exuIdx = ${this.exuIdx}, is int =${this.isIntExeUnit}, exuV2IWBport = ${exuV2IWBPort}")
+    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxV2I) && this.isIntExeUnit) false
+    else (this.getIntWBPort.get.port == exuV2IWBPort) && this.isIntExeUnit
+  }
+  def needDataFromI2V: Boolean = {
+    val exuI2VWBPort = backendParam.allExuParams(backendParam.getExuIdxI2V).getVfWBPort.get.port
+    if (this.getVfWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2V) && this.isVfExeUnit) false
+    else (this.getVfWBPort.get.port == exuI2VWBPort) && this.isVfExeUnit
   }
   def needReadRegCache: Boolean = backendParam.regCacheEn && (isIntExeUnit || isMemExeUnit && readIntRf)
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
@@ -236,9 +258,8 @@ case class ExeUnitParams(
   def intFuLatencyMap: Map[FuType.OHType, Int] = {
     if (intLatencyCertain) {
       if (isVfExeUnit) {
-        // vf exe unit writing back to int regfile should delay 1 cycle
         // vf exe unit need og2 --> delay 1 cycle
-        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 2)).toMap
+        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap
       } else {
         writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
       }
@@ -304,9 +325,15 @@ case class ExeUnitParams(
 
   def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
 
+  def hasv2iFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vipu, FuType.vsetfwf, FuType.vmove))).reduce(_ || _)
+
   def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)
 
   def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
+
+  def hasf2vFu = fuConfigs.map(_.fuType == FuType.f2v).reduce(_ || _)
+
+  def hasv2fFu = fuConfigs.map(_.fuType == FuType.vmove).reduce(_ || _)
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
@@ -510,5 +537,54 @@ case class ExeUnitParams(
 
   def genExuBypassBundle(implicit p: Parameters): ExuBypassBundle = {
     new ExuBypassBundle(this)
+  }
+
+  def allIntWenPortSeq: Seq[Seq[(Int, Int, Map[FuType.OHType, Int])]] = {
+    backendParam.allIssueParams.map(x => x.exuBlockParams.map { case exuParam =>
+      (exuParam.exuIdx, exuParam.getIntWBPort.getOrElse(IntWB(port = -1)).port, exuParam.intFuLatencyMap)
+    }.filter(x => x._2 != -1))
+  }
+
+  def allFpWenPortSeq: Seq[Seq[(Int, Int, Map[FuType.OHType, Int])]] = {
+    backendParam.allIssueParams.map(x => x.exuBlockParams.map { case exuParam =>
+      (exuParam.exuIdx, exuParam.getFpWBPort.getOrElse(FpWB(port = -1)).port, exuParam.fpFuLatencyMap)
+    }.filter(x => x._2 != -1))
+  }
+
+  def allVecWenPortSeq: Seq[Seq[(Int, Int, Map[FuType.OHType, Int])]] = {
+    backendParam.allIssueParams.map(x => x.exuBlockParams.map { case exuParam =>
+      (exuParam.exuIdx, exuParam.getVfWBPort.getOrElse(VfWB(port = - 1)).port, exuParam.vfFuLatencyMap)
+    }.filter(x => x._2 != -1))
+  }
+
+  def latMax(fuMap: Map[FuType.OHType, Int]): Int = fuMap.values.toSet.fold(0)(_ max _)
+
+  def sameWenPort(exuIdx: Int, port: Int, wenPort: Seq[(Int, Int, Map[FuType.OHType, Int])]): Boolean = {
+    wenPort.nonEmpty && (exuIdx != wenPort.head._1) && (port == wenPort.head._2)
+  }
+
+  def fuMapAddSameWenPortFu(param: ExeUnitParams, wenType: String, fuMap: mutable.Map[FuType.OHType, Int], wenPort: Seq[(Int, Int, Map[FuType.OHType, Int])]) = {
+    val intWBPort = param.getIntWBPort.getOrElse(IntWB(port = -1)).port
+    val fpWBPort  = param.getFpWBPort.getOrElse(FpWB(port = -1)).port
+    val vecWBPort = param.getVfWBPort.getOrElse(VfWB(port = -1)).port
+    if (wenType == "int") {
+      if (param.intLatencyCertain && sameWenPort(param.exuIdx, intWBPort, wenPort)) {
+        fuMap ++= wenPort.head._3
+      } else {
+        fuMap
+      }
+    } else if (wenType == "fp") {
+      if (param.fpLatencyCertain && sameWenPort(param.exuIdx, fpWBPort, wenPort)) {
+        fuMap ++= wenPort.head._3
+      } else {
+        fuMap
+      }
+    } else if (wenType == "vec") {
+      if (param.vfLatencyCertain && sameWenPort(param.exuIdx, vecWBPort, wenPort)) {
+        fuMap ++= wenPort.head._3
+      } else {
+        fuMap
+      }
+    }
   }
 }

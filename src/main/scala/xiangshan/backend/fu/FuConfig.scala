@@ -626,7 +626,7 @@ object FuConfig {
     writeIntRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(2),
+    latency = CertainLatency(2, extraValue = 1),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,

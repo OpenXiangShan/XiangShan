@@ -220,11 +220,6 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
       vlArbiterInput.valid := vlWrite
       vlArbiterInput.bits := exuOut.bits
 
-      if (exuOut.bits.params.writeIntRf && exuOut.bits.params.isVfExeUnit) {
-        intWrite := RegNext(exuOut.valid && writeCond._1(0))
-        intArbiterInput.bits := RegEnable(exuOut.bits, exuOut.valid)
-      }
-
       println(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
 
       // only EXUs with uncertain latency need result of arbiter

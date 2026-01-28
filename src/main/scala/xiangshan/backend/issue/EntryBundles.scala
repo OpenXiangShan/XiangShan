@@ -106,7 +106,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val flush                 = Flipped(ValidIO(new Redirect))
     val enq                   = Flipped(ValidIO(new EntryBundle))
     //wakeup
-    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.isVecExeIQ) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     // vl
     val vlFromIntIsZero       = Input(Bool())
@@ -540,7 +540,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EnqDelayInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //wakeup
-    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.isVecExeIQ) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     //cancel
     val srcLoadDependency     = Input(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))

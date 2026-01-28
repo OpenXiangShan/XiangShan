@@ -67,6 +67,8 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
+  def isVecExeIQ: Boolean = inVfSchd && !isVecMemIQ
+
   def needFeedBackSqIdx: Boolean = isVecStuIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
@@ -271,6 +273,39 @@ case class IssueBlockParams(
       else (x.getIntWBPort.get.port == exuF2IWBPort) && x.isIntExeUnit
     }.reduce(_ || _)
   }
+
+  def needWakeupFromF2V: Boolean = {
+    val exuF2VWBPort = backendParam.allExuParams(backendParam.getExuIdxF2V).getVfWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getVfWBPort.isEmpty) false
+      else (x.getVfWBPort.get.port == exuF2VWBPort) && x.isVfExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromV2F: Boolean = {
+    val exuV2FWBPort = backendParam.allExuParams(backendParam.getExuIdxV2F).getFpWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getFpWBPort.isEmpty) false
+      else (x.getFpWBPort.get.port == exuV2FWBPort) && x.isFpExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromV2I: Boolean = {
+    val exuV2IWBPort = backendParam.allExuParams(backendParam.getExuIdxV2I).getIntWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getIntWBPort.isEmpty) false
+      else (x.getIntWBPort.get.port == exuV2IWBPort) && x.isIntExeUnit  
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromI2V: Boolean = {
+    val exuI2VWBPort = backendParam.allExuParams(backendParam.getExuIdxI2V).getVfWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getVfWBPort.isEmpty) false
+      else (x.getVfWBPort.get.port == exuI2VWBPort) && x.isVfExeUnit
+    }.reduce(_ || _)
+  }
+
   /**
     * Get the regfile type that this issue queue need to read
     */
@@ -340,6 +375,13 @@ case class IssueBlockParams(
   def needWakeupFromV0WBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readV0Rf).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
 
   def needWakeupFromVlWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVlRf).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
+
+  // when vls wakeup vec has implemented, delete it
+  def vfNeedWakeupFromVfWBPort = backendParam.allExuParams.filter(x => x.isVecMemExeUnit && this.readVecRf).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+
+  def vfNeedWakeupFromV0WBPort = backendParam.allExuParams.filter(x => this.readV0Rf).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
+
+  def vfNeedWakeupFromVlWBPort = backendParam.allExuParams.filter(x => this.readVlRf).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
 
   def hasWakeupFromMem: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isMemExeUnit).fold(false)(_ | _)
 
@@ -469,6 +511,22 @@ case class IssueBlockParams(
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
+  }
+
+  def genVfWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    val vfBundle = schdType match {
+      case VecScheduler() => vfNeedWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VecData()))).toSeq
+      case _ => Seq()
+    }
+    val v0Bundle = schdType match {
+      case VecScheduler() => vfNeedWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, V0Data()))).toSeq
+      case _ => Seq()
+    }
+    val vlBundle = schdType match {
+      case VecScheduler() => vfNeedWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VlData()))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(vfBundle ++ v0Bundle ++ vlBundle)
   }
 
   def genIQWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {

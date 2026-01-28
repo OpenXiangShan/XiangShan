@@ -234,7 +234,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.wakeUpVec := vecRegion.io.wakeUpToDispatch
   ctrlBlock.io.toDispatch.IQValidNumVec := intRegion.io.IQValidNumVec ++ fpRegion.io.IQValidNumVec ++ vecRegion.io.IQValidNumVec
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
-  val og0Cancel = (intRegion.io.og0Cancel.asUInt | fpRegion.io.og0Cancel.asUInt | vecRegion.io.og0Cancel.asUInt).asBools
+  val intRegionOg0Cancel = intRegion.io.og0Cancel.asUInt
+  val fpRegionOg0Cancel  = fpRegion.io.og0Cancel.asUInt
+  val vecRegionOg0Cancel = vecRegion.io.og0Cancel.asUInt
+  val og0Cancel = (intRegionOg0Cancel | fpRegionOg0Cancel | vecRegionOg0Cancel).asBools
+  assert(intRegionOg0Cancel === fpRegionOg0Cancel && intRegionOg0Cancel === vecRegionOg0Cancel, "intRegion og0Cancel should be identical to fpRegion og0Cancel and vecRegion og0Cancel")
   ctrlBlock.io.toDispatch.og0Cancel := og0Cancel
   ctrlBlock.io.toDispatch.wbPregsInt.zip(intRegion.io.toIntPreg).map(x => {
     x._1.valid := x._2.wen && x._2.rfWen
@@ -307,6 +311,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.io.wakeUpFromInt. foreach(x => x := intRegion.io.wakeUpToDispatch)
   intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   fpRegion.io.wakeupFromI2F. foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
+  vecRegion.io.wakeupFromF2V.foreach(x => x := fpRegion.io.cross.F2VWakeupOut.get)
+  fpRegion.io.wakeupFromV2F. foreach(x => x := vecRegion.io.cross.V2FWakeupOut.get)
+  intRegion.io.wakeupFromV2I.foreach(x => x := vecRegion.io.cross.V2IWakeupOut.get)
+  vecRegion.io.wakeupFromI2V.foreach(x => x := intRegion.io.cross.I2VWakeupOut.get)
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
   intRegion.io.staFeedback.  foreach(x => x := io.mem.staIqFeedback)
   vecRegion.io.vstuFeedback. foreach(x => x := io.mem.vstuIqFeedback)
@@ -385,6 +393,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intRegion.io.fpRfRdataIn.get := fpRegion.io.fpRfRdataOut.get
   // for fpIQ write int regfile arbiter
   intRegion.io.fromFpIQ.get <> fpRegion.io.fpIQOut.get
+  vecRegion.io.fromFpIQ.get <> fpRegion.io.fpIQOut.get
+  fpRegion.io.fromVecIQ.get <> vecRegion.io.vecIQOut.get
+  intRegion.io.fromVecIQ.get <> vecRegion.io.vecIQOut.get
+  vecRegion.io.fromIntIQ.get <> intRegion.io.intIQOut.get
 
   vecRegion.io.diffVlRat.foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   vecRegion.io.fromVecExcpMod.get.r := vecExcpMod.o.toVPRF.r
@@ -449,6 +461,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   fpRegion.io.cross.I2FDataIn.get  := intRegion.io.cross.I2FDataOut.get
   intRegion.io.cross.F2IDataIn.get := fpRegion.io.cross.F2IDataOut.get
+  vecRegion.io.cross.F2VDataIn.get := fpRegion.io.cross.F2VDataOut.get
+  fpRegion.io.cross.V2FDataIn.get  := vecRegion.io.cross.V2FDataOut.get
+  intRegion.io.cross.V2IDataIn.get := vecRegion.io.cross.V2IDataOut.get
+  vecRegion.io.cross.I2VDataIn.get := intRegion.io.cross.I2VDataOut.get
 
   intRegion.io.frm := csrio.fpu.frm
   intRegion.io.vxrm := csrio.vpu.vxrm

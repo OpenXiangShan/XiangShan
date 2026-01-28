@@ -9,7 +9,7 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
-import xiangshan.backend.datapath.WbConfig.PregWB
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
@@ -26,6 +26,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 
 import utility._
+import scala.collection.mutable
 
 
 object Bundles {
@@ -994,9 +995,22 @@ object Bundles {
     private val vfCertainLat = params.vfLatencyCertain
     private val v0CertainLat = params.v0LatencyCertain
     private val vlCertainLat = params.vlLatencyCertain
-    private val intLat = params.intLatencyValMax
-    private val fpLat = params.fpLatencyValMax
-    private val vfLat = params.vfLatencyValMax
+
+    val intFuMap = mutable.Map[FuType.OHType, Int]()
+    val fpFuMap  = mutable.Map[FuType.OHType, Int]()
+    val vecFuMap = mutable.Map[FuType.OHType, Int]()
+
+    intFuMap ++= params.intFuLatencyMap
+    fpFuMap  ++= params.fpFuLatencyMap
+    vecFuMap ++= params.vfFuLatencyMap
+
+    params.allIntWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "int", intFuMap, x))
+    params.allFpWenPortSeq.map( x => params.fuMapAddSameWenPortFu(params, "fp",  fpFuMap, x))
+    params.allVecWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "vec", vecFuMap, x))
+
+    private val intLat = params.latMax(intFuMap.toMap)
+    private val fpLat = params.latMax(fpFuMap.toMap)
+    private val vfLat = params.latMax(vecFuMap.toMap)
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
@@ -1018,9 +1032,22 @@ object Bundles {
     private val vfCertainLat = params.vfLatencyCertain
     private val v0CertainLat = params.v0LatencyCertain
     private val vlCertainLat = params.vlLatencyCertain
-    private val intLat = params.intLatencyValMax
-    private val fpLat = params.fpLatencyValMax
-    private val vfLat = params.vfLatencyValMax
+  
+    val intFuMap = mutable.Map[FuType.OHType, Int]()
+    val fpFuMap  = mutable.Map[FuType.OHType, Int]()
+    val vecFuMap = mutable.Map[FuType.OHType, Int]()
+
+    intFuMap ++= params.intFuLatencyMap
+    fpFuMap  ++= params.fpFuLatencyMap
+    vecFuMap ++= params.vfFuLatencyMap
+
+    params.allIntWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "int", intFuMap, x))
+    params.allFpWenPortSeq.map( x => params.fuMapAddSameWenPortFu(params, "fp",  fpFuMap, x))
+    params.allVecWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "vec", vecFuMap, x))
+
+    private val intLat = params.latMax(intFuMap.toMap)
+    private val fpLat = params.latMax(fpFuMap.toMap)
+    private val vfLat = params.latMax(vecFuMap.toMap)
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
@@ -1263,6 +1290,18 @@ object Bundles {
     val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
     val F2IDataOut   = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
     val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val F2VWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+    val F2VDataOut   = Option.when(params.isFpSchd)(ValidIO(UInt(VLEN.W)))
+    val F2VDataIn    = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(VLEN.W))))
+    val V2FWakeupOut = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam)))
+    val V2FDataOut   = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+    val V2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val V2IWakeupOut = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam)))
+    val V2IDataOut   = Option.when(params.isVecSchd)(ValidIO(UInt(XLEN.W)))
+    val V2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val I2VWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+    val I2VDataOut   = Option.when(params.isIntSchd)(ValidIO(UInt(VLEN.W)))
+    val I2VDataIn    = Option.when(params.isVecSchd)(Flipped(ValidIO(UInt(VLEN.W))))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
@@ -1560,6 +1599,8 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val params: ExeUnitParams,
   )(implicit p: Parameters) extends XSBundle {
     val intWen = Bool()
+    val fpWen  = Bool()
+    val vecWen = Bool()
     val data   = UInt(params.destDataBitsMax.W)
     val pdest  = UInt(params.wbPregIdxWidth.W)
   }

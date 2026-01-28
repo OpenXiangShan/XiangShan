@@ -8,10 +8,12 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.datapath.DataSource
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.mem.{LqPtr, SqPtr}
-import utility.PerfCCT
+import scala.collection.mutable
+import xiangshan.backend.exu.ExeUnitParams
 
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
@@ -27,12 +29,16 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val snResp = Option.when(params.needSnResp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle)
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle)
-  val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+  val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.isVecExeIQ) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val wakeupFromExu: Option[MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]]] = Option.when(params.needUncertainWakeupFromExu)(Flipped(params.genExuWakeUpOutValidBundle))
   val wakeupFromI2F: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromI2F)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
-  val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+  val wakeupFromF2V: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2V)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam))))
+  val wakeupFromV2F: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromV2F)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam))))
+  val wakeupFromV2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromV2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam))))
+  val wakeupFromI2V: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromI2V)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam))))
+  val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.isVecExeIQ) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
@@ -94,14 +100,54 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
-  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
-  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
-  val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
-  val intWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(x.intFuLatencyMap))) }
-  val fpWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(x.fpFuLatencyMap))) }
-  val fpWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.fpLatencyCertain)(Module(new FuBusyTableRead(x.fpFuLatencyMap))) }
-  val vfWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.vfLatencyCertain)(Module(new FuBusyTableWrite(x.vfFuLatencyMap))) }
-  val vfWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.vfLatencyCertain)(Module(new FuBusyTableRead(x.vfFuLatencyMap))) }
+  val fuBusyTableWrite = params.exuBlockParams.map { case x =>
+    println(s"fuBusyTable, exuIdx =${x.exuIdx}, fuMap = ${x.fuLatencyMap(param.aluDeqNeedPickJump)}")
+    Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump))))
+  }
+  val fuBusyTableRead = params.exuBlockParams.map { case x =>
+    Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump))))
+  }
+  
+  def wenPortFuMap(exuParam: ExeUnitParams, wenType: String): Map[FuType.OHType, Int] = {
+    val sameWenPortFuMap = mutable.Map[FuType.OHType, Int]()
+    if (wenType == "int") {
+      sameWenPortFuMap ++= exuParam.intFuLatencyMap
+      exuParam.allIntWenPortSeq.map(x => exuParam.fuMapAddSameWenPortFu(exuParam, wenType, sameWenPortFuMap, x))
+    } else if (wenType == "fp") {
+      sameWenPortFuMap ++= exuParam.fpFuLatencyMap
+      exuParam.allFpWenPortSeq.map(x => exuParam.fuMapAddSameWenPortFu(exuParam, wenType, sameWenPortFuMap, x))
+    } else if (wenType == "vec") {
+      sameWenPortFuMap ++= exuParam.vfFuLatencyMap
+      exuParam.allVecWenPortSeq.map(x => exuParam.fuMapAddSameWenPortFu(exuParam, wenType, sameWenPortFuMap, x))
+    }
+    val fuMap = sameWenPortFuMap.toMap
+    fuMap
+  }
+
+  val intWbBusyTableWrite = params.exuBlockParams.map { case x =>
+    val fuMap = wenPortFuMap(x, "int")
+    println(s"intWrite, exuIdx=${x.exuIdx}, intLatencyCertain=${x.intLatencyCertain}, fuMap=${fuMap}")
+    Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+  }
+  val intWbBusyTableRead = params.exuBlockParams.map { case x =>
+    Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "int"))))
+  }
+  val fpWbBusyTableWrite = params.exuBlockParams.map { case x =>
+    val fuMap = wenPortFuMap(x, "fp")
+    println(s"fpWrite, exuIdx=${x.exuIdx}, fpLatencyCertain=${x.fpLatencyCertain}, fuMap=${fuMap}")
+    Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+  }
+  val fpWbBusyTableRead = params.exuBlockParams.map { case x =>
+    Option.when(x.fpLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "fp"))))
+  }
+  val vfWbBusyTableWrite = params.exuBlockParams.map { case x =>
+    val fuMap = wenPortFuMap(x, "vec")
+    println(s"vecWrite, exuIdx=${x.exuIdx}, vecLatencyCertain=${x.vfLatencyCertain}, fuMap=${fuMap}")
+    Option.when(x.vfLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+  }
+  val vfWbBusyTableRead = params.exuBlockParams.map { case x =>
+    Option.when(x.vfLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "vec"))))
+  }
   val v0WbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.v0LatencyCertain)(Module(new FuBusyTableWrite(x.v0FuLatencyMap))) }
   val v0WbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.v0LatencyCertain)(Module(new FuBusyTableRead(x.v0FuLatencyMap))) }
   val vlWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.vlLatencyCertain)(Module(new FuBusyTableWrite(x.vlFuLatencyMap))) }
@@ -835,19 +881,26 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           // int i2f wakeup fstore from fpRegion, so there is not need fpWen
           if (params.inIntSchd) {
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.vecWen.foreach(_ := false.B)
           }
           else if (params.inFpSchd) {
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.vecWen.foreach(_ := false.B)
+          }
+          else if (params.inVfSchd) {
+            wakeUpQueue.io.enq.bits.uop.rfWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
           }
         }
         wakeUpQueue.io.enqAppend.valid := false.B
         wakeUpQueue.io.enqAppend.bits := 0.U.asTypeOf(wakeUpQueue.io.enqAppend.bits)
-        if (params.exuBlockParams(i).needDataFromI2F) {
+        if (params.exuBlockParams(i).needDataFromI2F || params.exuBlockParams(i).needDataFromV2F) {
           wakeUpQueue.io.enq.valid := deqBeforeDly(i).valid && deqBeforeDly(i).bits.fpWen.get
           val wakeupFromI2F = io.wakeupFromI2F.get
-          wakeUpQueue.io.enqAppend.valid := wakeupFromI2F.valid
-          wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := wakeupFromI2F.bits.fpWen)
-          wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromI2F.bits.pdest
+          val wakeupFromV2F = io.wakeupFromV2F.get
+          wakeUpQueue.io.enqAppend.valid := wakeupFromI2F.valid || wakeupFromV2F.valid
+          wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := Mux(wakeupFromV2F.valid, wakeupFromV2F.bits.fpWen, wakeupFromI2F.bits.fpWen))
+          wakeUpQueue.io.enqAppend.bits.uop.pdest := Mux(wakeupFromV2F.valid, wakeupFromV2F.bits.pdest, wakeupFromI2F.bits.pdest)
           wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
@@ -857,6 +910,25 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromF2I.valid
           wakeUpQueue.io.enqAppend.bits.uop.rfWen.foreach(x => x := wakeupFromF2I.bits.rfWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromF2I.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
+          wakeUpQueue.io.enqAppend.bits.lat := 0.U
+        }
+        else if (params.exuBlockParams(i).needDataFromF2V || params.exuBlockParams(i).needDataFromI2V) {
+          wakeUpQueue.io.enq.valid := deqBeforeDly(i).valid && deqBeforeDly(i).bits.common.vecWen.get
+          val wakeupFromF2V = io.wakeupFromF2V.get
+          val wakeupFromI2V = io.wakeupFromI2V.get
+          wakeUpQueue.io.enqAppend.valid := wakeupFromF2V.valid || wakeupFromI2V.valid
+          wakeUpQueue.io.enqAppend.bits.uop.vecWen.foreach(x => x := Mux(wakeupFromF2V.valid, wakeupFromF2V.bits.vecWen, wakeupFromI2V.bits.vecWen))
+          wakeUpQueue.io.enqAppend.bits.uop.pdest := Mux(wakeupFromF2V.valid, wakeupFromF2V.bits.pdest, wakeupFromI2V.bits.pdest)
+          wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
+          wakeUpQueue.io.enqAppend.bits.lat := 0.U
+        }
+        else if (params.exuBlockParams(i).needDataFromV2I) {
+          wakeUpQueue.io.enq.valid := deqBeforeDly(i).valid && deqBeforeDly(i).bits.common.rfWen.get
+          val wakeupFromV2I = io.wakeupFromV2I.get
+          wakeUpQueue.io.enqAppend.valid := wakeupFromV2I.valid
+          wakeUpQueue.io.enqAppend.bits.uop.rfWen.foreach(x => x := wakeupFromV2I.bits.rfWen)
+          wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromV2I.bits.pdest
           wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }

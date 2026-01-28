@@ -56,8 +56,12 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     ): Unit = {
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
-          sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.toIntRf.map(_.valid).getOrElse(false.B)
+          sink.valid := source.valid || (source.bits.params.needDataFromF2I.B || source.bits.params.needDataFromV2I.B) && source.bits.toIntRf.map(_.valid).getOrElse(false.B) ||
+                                        (source.bits.params.needDataFromF2V.B || source.bits.params.needDataFromI2V.B) && source.bits.toVecRf.map(_.valid).getOrElse(false.B) ||
+                                        source.bits.params.needDataFromV2F.B && source.bits.toFpRf.map(_.valid).getOrElse(false.B)
           sink.bits.intWen := source.bits.toIntRf.map(_.valid).getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
+          sink.bits.fpWen  := source.bits.toFpRf.map(_.valid).getOrElse(false.B)
+          sink.bits.vecWen := source.bits.toVecRf.map(_.valid).getOrElse(false.B)
           sink.bits.pdest := source.bits.pdest
           // int i2f wakeup fstore from fpRegion, so there is not need bypass fp data in int region
           sink.bits.data := {if (source.bits.params.isIntExeUnit) { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
