@@ -22,7 +22,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     // get pc from ftq
     val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
     val ftqEntry:          FtqEntry        = Input(new FtqEntry())
-    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
+//    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
 
 //    val victimWrite: DecoupledIO[VictimWriteReq] = Flipped(DecoupledIO(new VictimWriteReq))
   }
@@ -104,7 +104,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   prefetchPipe.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
   prefetchPipe.io.prefetchData <> io.prefetchData
   prefetchPipe.io.ftqEntry <> io.ftqEntry
-  prefetchPipe.io.ifuPtr := io.ifuPtr
+//  prefetchPipe.io.ifuPtr := io.ifuPtr
   private val prefetchWrite    = prefetchPipe.io.prefetchWrite
   private val prefetchBankMask = UIntToOH(prefetchWrite.bits.bankIdx)
   private val prefetchWayMask  = WireInit(VecInit(prefetchWrite.bits.entries.map(_.valid)))

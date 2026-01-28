@@ -290,9 +290,10 @@ class WayLookupWriteBundle(implicit p: Parameters) extends WayLookupBundle {
 /* ***** Miss ***** */
 // ICacheMainPipe / ICachePrefetchPipe -> MissUnit
 class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPAddr: UInt   = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt   = UInt(idxBits.W)
-  val ftqIdx:   FtqPtr = new FtqPtr
+  val blkPAddr:   UInt   = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:    UInt   = UInt(idxBits.W)
+  val ftqIdx:     FtqPtr = new FtqPtr
+  val isNextLine: Bool   = Bool()
 }
 // MissUnit -> ICacheMainPipe / ICachePrefetchPipe / ICacheWayLookup
 class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
@@ -318,10 +319,11 @@ class MshrLookupBundle(implicit p: Parameters) extends ICacheBundle {
 
 // Mshr -> ICacheMissUnit
 class MshrInfoBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPAddr: UInt   = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt   = UInt(idxBits.W)
-  val way:      UInt   = UInt(wayBits.W)
-  val ftqIdx:   FtqPtr = new FtqPtr
+  val blkPAddr:   UInt   = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:    UInt   = UInt(idxBits.W)
+  val way:        UInt   = UInt(wayBits.W)
+  val ftqIdx:     FtqPtr = new FtqPtr
+  val isNextLine: Bool   = Bool()
 }
 
 // Mshr -> tilelink bus
@@ -371,6 +373,7 @@ class BtbPrefetchBundle(implicit p: Parameters) extends ICacheBundle {
   val data:        UInt   = UInt(blockBits.W)
   val maybeRvcMap: UInt   = UInt(MaxInstNumPerBlock.W)
   val ftqIdx:      FtqPtr = new FtqPtr
+  val isNextLine:  Bool   = Bool()
 }
 // inner MainPipe -> top
 class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {

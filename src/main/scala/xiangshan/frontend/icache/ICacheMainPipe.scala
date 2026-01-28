@@ -388,8 +388,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
     toMissArbiter.io.in(i).bits.vSetIdx  := s1_vSetIdx(i)
     toMissArbiter.io.in(i).bits.ftqIdx   := s1_ftqIdx
+    toMissArbiter.io.in(i).bits.isNextLine := false.B
   }
-  toMiss <> toMissArbiter.io.out
+  toMiss.valid               := toMissArbiter.io.out.valid
+  toMissArbiter.io.out.ready := toMiss.ready
+  toMiss.bits.blkPAddr       := toMissArbiter.io.out.bits.blkPAddr
+  toMiss.bits.vSetIdx        := toMissArbiter.io.out.bits.vSetIdx
+  toMiss.bits.ftqIdx         := toMissArbiter.io.out.bits.ftqIdx
+  toMiss.bits.isNextLine     := toMissArbiter.io.chosen.asBool
 
   XSPerfAccumulate("to_missUnit_stall", toMiss.valid && !toMiss.ready)
 

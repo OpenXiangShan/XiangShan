@@ -52,7 +52,14 @@ trait Helpers extends HasPrefetchBtbParameters
 
   def getTag(pc: PrunedAddr): UInt =
     addrFields.extract("tag", pc)
+  def getBlockPcUpper(pc: PrunedAddr): UInt =
+    pc(pc.length - 1, FetchBlockSizeWidth)
 
+  def getBlockPc(pc: PrunedAddr): PrunedAddr =
+    PrunedAddrInit(Cat(
+      getBlockPcUpper(pc),
+      0.U(FetchBlockSizeWidth.W)
+    ))
 }
 trait SBDHelper extends HasPrefetchBtbParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U

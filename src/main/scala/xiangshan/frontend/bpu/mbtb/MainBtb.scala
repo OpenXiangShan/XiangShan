@@ -46,7 +46,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     // get pc from ftq
     val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
     val ftqEntry:          FtqEntry        = Input(new FtqEntry())
-    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
+//    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
 
   }
 
@@ -66,8 +66,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   prefetchBtb.io.prefetchData <> io.prefetchData
   prefetchBtb.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
   prefetchBtb.io.ftqEntry <> io.ftqEntry
-  prefetchBtb.io.flush     := io.flush
-  prefetchBtb.io.ifuPtr    := io.ifuPtr
+  prefetchBtb.io.flush := io.flush
+//  prefetchBtb.io.ifuPtr    := io.ifuPtr
   prefetchBtb.io.startPc   := io.startPc
   prefetchBtb.io.stageCtrl := io.stageCtrl
   prefetchBtb.io.train     := io.train
