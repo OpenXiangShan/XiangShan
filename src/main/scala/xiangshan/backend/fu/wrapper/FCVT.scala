@@ -75,7 +75,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   val outIsMvInst = outCtrl.fuOpType === FuOpType.FMVXF
 
   // modules
-  val fcvt = Module(new FPCVT(XLEN))
+  val fcvt = Module(new FPCVT(XLEN, isI2F = false))
   fcvt.io.fire := fire
   fcvt.io.src := src0
   fcvt.io.opType := opcode(7, 0)

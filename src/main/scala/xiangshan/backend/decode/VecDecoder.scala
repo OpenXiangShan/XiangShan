@@ -506,6 +506,27 @@ object VecDecoder extends DecodeConstants {
     FMAX_D -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
     FMIN_H -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
     FMAX_H -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
+
+    // scala int convert Inst
+    FCVT_S_W  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfcvt_fxv,   F, T, F, UopSplitType.SCA_SIM),
+    FCVT_S_WU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfcvt_fxuv,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_S_L  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfncvt_fxw,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_S_LU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfncvt_fxuw, F, T, F, UopSplitType.SCA_SIM),
+
+    FCVT_D_W  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfwcvt_fxv,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_D_WU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfwcvt_fxuv, F, T, F, UopSplitType.SCA_SIM),
+    FCVT_D_L  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfcvt_fxv,   F, T, F, UopSplitType.SCA_SIM),
+    FCVT_D_LU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfcvt_fxuv,  F, T, F, UopSplitType.SCA_SIM),
+
+    FCVT_H_W  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfncvt_fxw,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_H_WU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.vfncvt_fxuw, F, T, F, UopSplitType.SCA_SIM),
+    FCVT_H_L  -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.fcvt_h_l,    F, T, F, UopSplitType.SCA_SIM),
+    FCVT_H_LU -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, VfcvtType.fcvt_h_lu,   F, T, F, UopSplitType.SCA_SIM),
+    // scala i2f mv Inst
+    FMV_D_X   -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, FuOpType.FMVFX,        F, T, F, UopSplitType.SCA_SIM),
+    FMV_W_X   -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, FuOpType.FMVFX,        F, T, F, UopSplitType.SCA_SIM),
+    FMV_H_X   -> OPFFF(SrcType.xp, SrcType.X, SrcType.X, FuType.i2f, FuOpType.FMVFX,        F, T, F, UopSplitType.SCA_SIM),
+
     // Scalar Float Point Convert Inst.
     FCVT_W_S  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.vfcvt_xfv,   T, F, F, UopSplitType.SCA_SIM),
     FCVT_WU_S -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.vfcvt_xufv,  T, F, F, UopSplitType.SCA_SIM),
