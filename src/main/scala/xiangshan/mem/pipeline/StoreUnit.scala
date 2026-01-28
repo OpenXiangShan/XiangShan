@@ -423,7 +423,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_mis_align = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isCbo && !s1_out.nc && !s1_out.mmio &&
                       GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
                       !s1_trigger_breakpoint && !s1_trigger_debug_mode
-  val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
+  val s1_toMisalignBufferValid = s1_valid && !s1_in.isHWPrefetch &&
     !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
     GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
   io.misalign_enq.req.valid := s1_toMisalignBufferValid && !s1_misalignNeedReplay
