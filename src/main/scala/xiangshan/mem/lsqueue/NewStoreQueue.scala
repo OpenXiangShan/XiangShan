@@ -388,22 +388,25 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         val storeIsCboZero = ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
         val isCross16B     = ctrlEntry.cross16Byte
         // vaddr two part match:
-        // [1]: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline), The high bits of vaddr, must match.
-        // [2]: not cross 16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] match or
-        //      cross16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] + 1.U match or
+        // [1]: not cross 16B: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] addr(maxLen -> cacheline) or
+        //      cross 16B: vaddr[VaddrBits - 1, log2Ceil(CacheLineSize / 8)] + 1.U addr(maxLen -> cacheline) [next cacheline]
+        // [2]: not cross 16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] or
+        //      cross 16B: vaddr[log2Ceil(CacheLineSize / 8) - 1, log2Ceil(VLENB)] + 1.U [next 16B] or
         //      The bits within cacheline, if store is cboZero, it can be ignored.
         //
         ((dataEntry.vaddr(DCacheLineOffset - 1, VWordOffset) === s1LoadVaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
           isCross16B && (dataEntry.vaddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s1LoadVaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
           storeIsCboZero) &&
-        dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, DCacheLineOffset - VWordOffset)) &&
+        (dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, DCacheLineOffset - VWordOffset) ||
+          isCross16B && (dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) + 1.U) === s1LoadVaddr(s1LoadVaddr.getWidth - 1, DCacheLineOffset - VWordOffset))) &&
         ctrlEntry.addrValid
       }).asUInt
 
       // Byte overlap check: store covers any part of load's range
       //   Example: store [2,5] and load [3,3] -> overlap (2<=3 && 5>=3)
       val s1OverlapMask  = VecInit((0 until StoreQueueSize).map(j =>
-        io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart
+        io.dataEntriesIn(j).byteStart <= s1LoadEnd && io.dataEntriesIn(j).byteEnd >= s1LoadStart ||
+        io.ctrlEntriesIn(j).cross16Byte && io.dataEntriesIn(j).byteEnd(VWordOffset - 1, 0) <= s1LoadEnd // next 16B, store start always 0.
       )).asUInt
 
       XSError((s1LoadEnd < s1LoadStart) && s1Valid, "ByteStart > ByteEnd!\n")
@@ -483,10 +486,15 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
       val selectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
+      val selectIsCross16B    = s2SelectCtrlEntry.cross16Byte
       // !Paddrmatch
       val paddrNoMatch       = !(
-        (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset -VWordOffset - 1, 0) || selectIsCboZero) &&
-        s2SelectDataEntry.paddr(PAddrBits - 1, DCacheLineOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, DCacheLineOffset - VWordOffset)
+        (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
+          selectIsCross16B && (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
+          selectIsCboZero) &&
+        (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
+          selectIsCross16B && (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
+        s2SelectDataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
         ) && s2Valid
 
       val selectData         = (0 until VLENB).map(j =>
@@ -526,7 +534,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !safeForward || cross4KPage // do not support cross page forward.
-      s2Resp.bits.matchInvalid     := paddrNoMatch
+      s2Resp.bits.matchInvalid     := paddrNoMatch && !cross4KPage // if cross Page, let load replay.
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
