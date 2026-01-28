@@ -902,10 +902,6 @@ object Bundles {
     val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
-    val addrOH = UInt(iqParams.numEntries.W)
-
-    def exuIdx = exuParams.exuIdx
-    def getSource: SchedulerType = exuParams.getWBSource
 
     def getRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       rf.zip(srcType).map {

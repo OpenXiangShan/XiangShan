@@ -481,9 +481,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     s"has v0DiffRead: ${v0DiffReadData.nonEmpty}, " +
     s"has vlDiffRead: ${vlDiffRead.nonEmpty}")
 
-  val s1_addrOHs = Reg(MixedVec(
-    fromIQ.map(x => MixedVec(x.map(_.bits.addrOH.cloneType).toSeq)).toSeq
-  ))
   val s1_toExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(
     toExu.map(x => MixedVec(x.map(_.valid.cloneType).toSeq)).toSeq
   ))
@@ -583,7 +580,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       val s1_valid = s1_toExuValid(i)(j)
       val s1_ready = s1_toExuReady(i)(j)
       val s1_data = s1_toExuData(i)(j)
-      val s1_addrOH = s1_addrOHs(i)(j)
       val s0 = fromIQ(i)(j) // s0
       s0.bits.common.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset))
       s1_data.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset))
@@ -613,7 +609,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       }
       when (s0.valid) {
         s1_data.fromIssueBundle(s0.bits) // no src data here
-        s1_addrOH := s0.bits.addrOH
       }
       // timing Optimize, clock gate can use RegNext(s0.valid)
       if (param.isIntSchd && s0.bits.exuParams.issueBlockParam.inIntSchd) {
