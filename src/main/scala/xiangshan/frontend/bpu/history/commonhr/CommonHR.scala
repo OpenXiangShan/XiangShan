@@ -131,15 +131,19 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
 
   // imli update
   when(r0_valid) {
-    val r0_newImli = Mux(r0_taken && r0_bwTaken && r0_isCond, io.redirect.meta.imli + 1.U, 0.U)
+    val r0_newImli = Mux(
+      r0_taken && r0_bwTaken && r0_isCond,
+      Mux(io.redirect.meta.imli.andR, io.redirect.meta.imli, io.redirect.meta.imli + 1.U),
+      0.U
+    )
     imli    := r0_newImli
     s0_imli := r0_newImli
   }.elsewhen(s3_override) {
-    val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, s3_imli + 1.U, 0.U)
+    val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, Mux(s3_imli.andR, s3_imli, s3_imli + 1.U), 0.U)
     imli    := s3_newImli
     s0_imli := s3_newImli
   }.elsewhen(s1_fire) {
-    val s1_newImli = Mux(io.s1_imliTaken, s1_imli + 1.U, 0.U)
+    val s1_newImli = Mux(io.s1_imliTaken, Mux(s1_imli.andR, s1_imli, s1_imli + 1.U), 0.U)
     imli    := s1_newImli
     s0_imli := s1_newImli
   }.otherwise {
