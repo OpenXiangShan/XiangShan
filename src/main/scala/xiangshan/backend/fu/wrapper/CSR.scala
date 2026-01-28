@@ -354,6 +354,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // Branch predictor
       custom.bp_ctrl                  := csrMod.io.status.custom.bp_ctrl
       // Memory Block
+      custom.sbuffer_timeout                  := csrMod.io.status.custom.sbuffer_timeout
       custom.sbuffer_threshold                := csrMod.io.status.custom.sbuffer_threshold
       custom.ldld_vio_check_enable            := csrMod.io.status.custom.ldld_vio_check_enable
       custom.soft_prefetch_enable             := csrMod.io.status.custom.soft_prefetch_enable
