@@ -563,19 +563,36 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   dontTouch(t1_writeBiasEntryVec)
 
+  /*
+   *  train pipeline stage 2
+   */
+  private val t2_writeValid                 = RegEnable(t1_writeValid, t1_fire)
+  private val t2_bankMask                   = RegEnable(t1_bankMask, t1_fire)
+  private val t2_pathSetIdx                 = RegEnable(VecInit(t1_pathSetIdx), t1_fire)
+  private val t2_globalSetIdx               = RegEnable(VecInit(t1_globalSetIdx), t1_fire)
+  private val t2_biasSetIdx                 = RegEnable(t1_biasSetIdx, t1_fire)
+  private val t2_commonMeta                 = RegEnable(t1_meta.scCommonHR, t1_fire)
+  private val t2_writePathWayMaskVec        = RegEnable(VecInit(t1_writePathWayMaskVec), t1_fire)
+  private val t2_writePathEntryVec          = RegEnable(t1_writePathEntryVec, t1_fire)
+  private val t2_writeGlobalEntryWayMaskVec = RegEnable(VecInit(t1_writeGlobalEntryWayMaskVec), t1_fire)
+  private val t2_writeGlobalEntryVec        = RegEnable(t1_writeGlobalEntryVec, t1_fire)
+  private val t2_writeBiasWayMask           = RegEnable(t1_writeBiasWayMask, t1_fire)
+  private val t2_writeBiasEntryVec          = RegEnable(t1_writeBiasEntryVec, t1_fire)
+  private val t2_writeThresVec              = RegEnable(t1_writeThresVec, t1_fire)
+
   // new entries write back to tables
-  pathTable.zip(t1_pathSetIdx).zip(t1_writePathEntryVec).zip(t1_writePathWayMaskVec).foreach {
+  pathTable.zip(t2_pathSetIdx).zip(t2_writePathEntryVec).zip(t2_writePathWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t1_writeValid && PathEnable.B
+      table.io.update.valid    := t2_writeValid && PathEnable.B
       table.io.update.setIdx   := idx
-      table.io.update.bankMask := t1_bankMask
+      table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
       table.io.update.entryVec := writeEntries
   }
 
-  globalTable.zip(t1_globalSetIdx).zip(t1_writeGlobalEntryVec).zip(t1_writeGlobalEntryWayMaskVec).foreach {
+  globalTable.zip(t2_globalSetIdx).zip(t2_writeGlobalEntryVec).zip(t2_writeGlobalEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t1_writeValid && t1_meta.scCommonHR.valid && GlobalEnable.B
+      table.io.update.valid    := t2_writeValid && t2_commonMeta.valid && GlobalEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t1_bankMask
       table.io.update.wayMask  := writeWayMask
@@ -584,21 +601,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   bwTable.zip(t1_bwSetIdx).zip(t1_writeBWEntryVec).zip(t1_writeBWEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t1_writeValid && t1_meta.scCommonHR.valid && BWEnable.B
+      table.io.update.valid    := t2_writeValid && t2_commonMeta.valid && BWEnable.B
       table.io.update.setIdx   := idx
-      table.io.update.bankMask := t1_bankMask
+      table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
       table.io.update.entryVec := writeEntries
   }
 
-  biasTable.io.update.valid    := t1_writeValid && BiasEnable.B
-  biasTable.io.update.setIdx   := t1_biasSetIdx
-  biasTable.io.update.bankMask := t1_bankMask
-  biasTable.io.update.wayMask  := t1_writeBiasWayMask
-  biasTable.io.update.entryVec := t1_writeBiasEntryVec
+  biasTable.io.update.valid    := t2_writeValid && BiasEnable.B
+  biasTable.io.update.setIdx   := t2_biasSetIdx
+  biasTable.io.update.bankMask := t2_bankMask
+  biasTable.io.update.wayMask  := t2_writeBiasWayMask
+  biasTable.io.update.entryVec := t2_writeBiasEntryVec
 
-  when(t1_writeValid) {
-    scThreshold := t1_writeThresVec
+  when(t2_writeValid) {
+    scThreshold := t2_writeThresVec
   }
 
   private val scCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
