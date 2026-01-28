@@ -89,7 +89,7 @@ class XSArgs(object):
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
-        self.seed = random.randint(0, 9999)
+        self.seed = args.seed if args.seed is not None else random.randint(0, 9999)
         self.numa = args.numa
         self.diff = args.diff
         if args.spike and "nemu" in args.diff:
@@ -103,6 +103,7 @@ class XSArgs(object):
         self.pgo_max_cycle = args.pgo_max_cycle
         self.pgo_emu_args = args.pgo_emu_args
         self.llvm_profdata = args.llvm_profdata
+        self.emulator = args.emulator
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -247,7 +248,12 @@ class XiangShan(object):
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         threads = self.args.make_threads
-        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
+        if self.args.emulator == "verilator":
+            return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
+        elif self.args.emulator == "gsim":
+            return_code = self.__exec_cmd(f'make -C $NOOP_HOME gsim GSIM=1 -j{threads} SIM_ARGS="{sim_args}" {make_args}')
+        else:
+            raise ValueError(f"Unsupported emulator: {self.args.emulator}")
         return return_code
 
     def build_simv(self):
@@ -715,12 +721,14 @@ if __name__ == "__main__":
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
     parser.add_argument('--instr-trace', type=str, default="", help="run the test with the trace of the simfrontend")
+    parser.add_argument('--seed', type=int, help="run emu with the given random seed")
     # both makefile and emu arguments
     parser.add_argument('--dump-db', action='store_true', help='enable chiseldb dump')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
     parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
+    parser.add_argument('--emulator', choices=['verilator', 'gsim'], default='verilator', type=str, help='use verilator or gsim to compile emu')
 
     args = parser.parse_args()
 
