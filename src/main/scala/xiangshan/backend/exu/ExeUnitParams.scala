@@ -115,7 +115,7 @@ case class ExeUnitParams(
     if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I)) false
     else this.getIntWBPort.get.port == exuF2IWBPort
   }
-  def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
+  def needReadRegCache: Boolean = backendParam.regCacheEn && (isIntExeUnit || isMemExeUnit && readIntRf)
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
   def numCopySrc: Int = fuConfigs.map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _)
