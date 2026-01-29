@@ -322,37 +322,37 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //   ageMaskLow  = 0b00001111 (bits 0-3)
       //   ageMaskHigh = 0b11000000 (bits 6-7)
 
-      val s0Req = io.query(i).s0Req
-      val s0Valid          = s0Req.valid
-      val deqMask          = UIntToMask(io.ctrlInfo.deqPtr.value, StoreQueueSize)
-      val differentFlag    = io.ctrlInfo.deqPtr.flag =/= s0Req.bits.sqIdx.flag
-      val forwardMask      = UIntToMask(s0Req.bits.sqIdx.value, StoreQueueSize)
+      val s0Req              = io.query(i).s0Req
+      val s0Valid            = s0Req.valid
+      val s0DeqMask          = UIntToMask(io.ctrlInfo.deqPtr.value, StoreQueueSize)
+      val s0DifferentFlag    = io.ctrlInfo.deqPtr.flag =/= s0Req.bits.sqIdx.flag
+      val s0ForwardMask      = UIntToMask(s0Req.bits.sqIdx.value, StoreQueueSize)
       // generate load byte start and end
-      val loadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
-      val byteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
-      val loadEnd          = loadStart + byteOffset
+      val s0LoadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
+      val s0ByteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
+      val s0LoadEnd          = s0LoadStart + s0ByteOffset
 
       // mdp mask
       val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
-      val storeSetHitVec = Mux(lfstEnable,
+      val s0StoreSetHitVec = Mux(lfstEnable,
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
           s0Req.bits.loadWaitBit && io.dataEntriesIn(j).uop.robIdx === s0Req.bits.waitForRobIdx))),
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
           io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === s0Req.bits.ssid)))
       )
 
-      val ageMaskLow     = deqMask & forwardMask & VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt
-      val ageMaskHigh    = (~deqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(differentFlag)).asUInt | forwardMask)
+      val s0AgeMaskLow     = s0DeqMask & s0ForwardMask & VecInit(Seq.fill(StoreQueueSize)(s0DifferentFlag)).asUInt
+      val s0AgeMaskHigh    = (~s0DeqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(s0DifferentFlag)).asUInt | s0ForwardMask)
 
-      val s1ForwardMask  = RegEnable(forwardMask, s0Valid)
+      val s1ForwardMask  = RegEnable(s0ForwardMask, s0Valid)
       val s1LoadVaddr    = RegEnable(s0Req.bits.vaddr(VAddrBits - 1, VWordOffset), s0Valid)
-      val s1deqMask      = RegEnable(deqMask, s0Valid)
-      val s1LoadStart    = RegEnable(loadStart, s0Valid)
-      val s1LoadEnd      = RegEnable(loadEnd, s0Valid)
-      val s1StoreSetHitVec = RegEnable(storeSetHitVec, s0Valid)
+      val s1deqMask      = RegEnable(s0DeqMask, s0Valid)
+      val s1LoadStart    = RegEnable(s0LoadStart, s0Valid)
+      val s1LoadEnd      = RegEnable(s0LoadEnd, s0Valid)
+      val s1StoreSetHitVec = RegEnable(s0StoreSetHitVec, s0Valid)
 
-      val s1AgeMaskLow   = RegEnable(ageMaskLow, s0Valid)
-      val s1AgeMaskHigh  = RegEnable(ageMaskHigh, s0Valid)
+      val s1AgeMaskLow   = RegEnable(s0AgeMaskLow, s0Valid)
+      val s1AgeMaskHigh  = RegEnable(s0AgeMaskHigh, s0Valid)
       val s1Kill         = io.query(i).s1Kill
       val s1Valid        = RegNext(s0Valid) && !s1Kill
 
@@ -384,7 +384,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s1QueryPaddr = s1Req.paddr(PAddrBits - 1, VWordOffset)
       // prevent X-state
       // Virtual address match (high bits only, ignore byte offset)
-      val vaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
+      val s1VaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         val storeIsCboZero = ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
         val isCross16B     = ctrlEntry.cross16Byte
         // vaddr two part match:
@@ -412,59 +412,59 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       XSError((s1LoadEnd < s1LoadStart) && s1Valid, "ByteStart > ByteEnd!\n")
 
       // Two-step selection to handle circular queue segments
-      val canForwardLow = s1AgeMaskLow & s1OverlapMask & vaddrMatchVec
-      val canForwardHigh = s1AgeMaskHigh & s1OverlapMask & vaddrMatchVec
+      val s1CanForwardLow = s1AgeMaskLow & s1OverlapMask & s1VaddrMatchVec
+      val s1CanForwardHigh = s1AgeMaskHigh & s1OverlapMask & s1VaddrMatchVec
 
       // find youngest entry, which is one-hot
       // Find youngest store (highest index = most recent)
       //   Reverse vector so we can find leftmost 1 (highest index)
-      val (selectLowOH, _)             = findYoungest(Reverse(canForwardLow))
-      val (forwardHighOH, _)           = findYoungest(Reverse(canForwardHigh))
-      val selectHighOH                 = forwardHighOH & VecInit(Seq.fill(StoreQueueSize)(!canForwardLow.orR)).asUInt
-      val selectOH                     = Reverse(selectLowOH | selectHighOH) // index higher, mean it younger
-      val selectDataEntry              = Mux1H(selectOH, io.dataEntriesIn)
-      val selectCtrlEntry              = Mux1H(selectOH, io.ctrlEntriesIn)
-      val dataInvalid                  = !(selectOH & dataValidVec.asUInt).orR
-      val (_, multiMatch)              = findYoungest(canForwardLow | canForwardHigh) // don't care
+      val (s1SelectLowOH, _)             = findYoungest(Reverse(s1CanForwardLow))
+      val (s1ForwardHighOH, _)           = findYoungest(Reverse(s1CanForwardHigh))
+      val s1SelectHighOH                 = s1ForwardHighOH & VecInit(Seq.fill(StoreQueueSize)(!s1CanForwardLow.orR)).asUInt
+      val s1SelectOH                     = Reverse(s1SelectLowOH | s1SelectHighOH) // index higher, mean it younger
+      val s1SelectDataEntry              = Mux1H(s1SelectOH, io.dataEntriesIn)
+      val s1SelectCtrlEntry              = Mux1H(s1SelectOH, io.ctrlEntriesIn)
+      val s1DataInvalid                  = !(s1SelectOH & dataValidVec.asUInt).orR
+      val (_, s1MultiMatch)              = findYoungest(s1CanForwardLow | s1CanForwardHigh) // don't care
 
       // select offset generate
-      val byteSelectOffset   = s1LoadStart - selectDataEntry.byteStart
+      val s1ByteSelectOffset   = s1LoadStart - s1SelectDataEntry.byteStart
 
-      val HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt).orR
+      val s1HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt).orR
 
       // find youngest addrInvalid store
-      val addrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt
-      val addrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt &
-        VecInit(Seq.fill(StoreQueueSize)(!addrInvalidLow.orR)).asUInt
+      val s1AddrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt
+      val s1AddrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt &
+        VecInit(Seq.fill(StoreQueueSize)(!s1AddrInvalidLow.orR)).asUInt
 
-      val (addrInvLowOH, _)   = findYoungest(Reverse(addrInvalidLow))
-      val (addrInvHighOH, _)  = findYoungest(Reverse(addrInvalidHigh))
-      val addrInvSelectOH     = Reverse(addrInvLowOH | addrInvHighOH)
+      val (s1AddrInvLowOH, _)   = findYoungest(Reverse(s1AddrInvalidLow))
+      val (s1AddrInvHighOH, _)  = findYoungest(Reverse(s1AddrInvalidHigh))
+      val s1AddrInvSelectOH     = Reverse(s1AddrInvLowOH | s1AddrInvHighOH)
 
-      val dataInvalidSqIdx   = Wire(new SqPtr)
-      val addrInvalidSqIdx   = Wire(new SqPtr)
+      val s1DataInvalidSqIdx   = Wire(new SqPtr)
+      val s1AddrInvalidSqIdx   = Wire(new SqPtr)
 
-      dataInvalidSqIdx.value := OHToUInt(selectOH)
-      dataInvalidSqIdx.flag  := Mux(selectLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
+      s1DataInvalidSqIdx.value := OHToUInt(s1SelectOH)
+      s1DataInvalidSqIdx.flag  := Mux(s1SelectLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
-      addrInvalidSqIdx.value := OHToUInt(addrInvSelectOH)
-      addrInvalidSqIdx.flag  := Mux(addrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
+      s1AddrInvalidSqIdx.value := OHToUInt(s1AddrInvSelectOH)
+      s1AddrInvalidSqIdx.flag  := Mux(s1AddrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
-      val forwardValid       = s1Valid && selectOH.orR // indicate whether forward is valid.
-      val s2ByteSelectOffset = RegEnable(byteSelectOffset, s1Valid)
-      val s2SelectDataEntry  = RegEnable(selectDataEntry, s1Valid)
-      val s2SelectCtrlEntry  = RegEnable(selectCtrlEntry, s1Valid)
-      val s2DataInValid      = RegEnable(dataInvalid, s1Valid)
-      val s2HasAddrInvalid   = RegEnable(HasAddrInvalid, s1Valid)
+      val s1ForwardValid     = s1Valid && s1SelectOH.orR // indicate whether forward is valid.
+      val s2ByteSelectOffset = RegEnable(s1ByteSelectOffset, s1Valid)
+      val s2SelectDataEntry  = RegEnable(s1SelectDataEntry, s1Valid)
+      val s2SelectCtrlEntry  = RegEnable(s1SelectCtrlEntry, s1Valid)
+      val s2DataInValid      = RegEnable(s1DataInvalid, s1Valid)
+      val s2HasAddrInvalid   = RegEnable(s1HasAddrInvalid, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
-      val s2DataInvalidSqIdx = RegEnable(dataInvalidSqIdx, s1Valid)
-      val s2AddrInvalidSqIdx = RegEnable(addrInvalidSqIdx, s1Valid)
-      val s2MultiMatch       = RegEnable(multiMatch, s1Valid)
+      val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
+      val s2AddrInvalidSqIdx = RegEnable(s1AddrInvalidSqIdx, s1Valid)
+      val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
-      val s2LoadStart        = RegEnable(s1LoadStart, s1Valid) // TODO: remove in the tuture
-      val s2Valid            = RegNext(forwardValid)
+      val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
+      val s2Valid            = RegNext(s1ForwardValid)
       // debug
-      XSError(selectOH.orR && !selectCtrlEntry.allocated && s1Valid, "forward select a invalid entry!\n")
+      XSError(s1SelectOH.orR && !s1SelectCtrlEntry.allocated && s1Valid, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
 
       // Data Generation Process:
@@ -485,37 +485,37 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //                                  Load needs this byte (0x77)
 
       //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val selectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
-      val selectIsCross16B    = s2SelectCtrlEntry.cross16Byte
+      val s2SelectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
+      val s2SelectIsCross16B    = s2SelectCtrlEntry.cross16Byte
       // !Paddrmatch
-      val paddrNoMatch       = !(
+      val s2PaddrNoMatch       = !(
         (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
-          selectIsCross16B && (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
-          selectIsCboZero) &&
+          s2SelectIsCross16B && (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
+          s2SelectIsCboZero) &&
         (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
-          selectIsCross16B && (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
+          s2SelectIsCross16B && (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
         s2SelectDataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
         ) && s2Valid
 
-      val selectData         = (0 until VLENB).map(j =>
+      val s2SelectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
       )
-      val outData            = ParallelLookUp(s2ByteSelectOffset, selectData)
+      val s2OutData            = ParallelLookUp(s2ByteSelectOffset, s2SelectData)
 
-      val selectMask         = (0 until VLENB).map(j =>
+      val s2SelectMask         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.byteMask, j)
       )
-      val outMask            = ParallelLookUp(s2ByteSelectOffset, selectMask) & s2LoadMaskEnd
+      val s2OutMask            = ParallelLookUp(s2ByteSelectOffset, s2SelectMask) & s2LoadMaskEnd
 
-      val fullOverlap        = (s2SelectDataEntry.byteMask & s2LoadMaskEnd) === s2LoadMaskEnd
+      val s2FullOverlap        = (s2SelectDataEntry.byteMask & s2LoadMaskEnd) === s2LoadMaskEnd
       // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
       // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
-      val cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR
-      val safeForward        = !s2MultiMatch || fullOverlap
+      val s2Cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR
+      val s2SafeForward        = !s2MultiMatch || s2FullOverlap
 
       //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
-      val finalData          = outData << (s2LoadStart * 8.U)
-      val finalMask          = outMask << s2LoadStart
+      val s2FinalData          = s2OutData << (s2LoadStart * 8.U)
+      val s2FinalMask          = s2OutMask << s2LoadStart
 
       val s1Resp = io.query(i).s1Resp
       val s2Resp = io.query(i).s2Resp
@@ -526,28 +526,31 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 //      s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
 //        sink := outMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
       s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
-        sink := finalData((j + 1) * 8 - 1, j * 8)}
+        sink := s2FinalData((j + 1) * 8 - 1, j * 8)}
       s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
-        sink := finalMask(j) && s2Valid && safeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
-      s2Resp.bits.dataInvalid.valid := s2DataInValid || !safeForward
+        sink := s2FinalMask(j) && s2Valid && s2SafeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
+      s2Resp.bits.dataInvalid.valid := s2DataInValid || !s2SafeForward
       s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
-      s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !safeForward && s2Valid // maby can't select a entry
+      s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !s2SafeForward && s2Valid // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
-      s2Resp.bits.forwardInvalid   := !safeForward || cross4KPage // do not support cross page forward.
-      s2Resp.bits.matchInvalid     := paddrNoMatch && !cross4KPage // if cross Page, let load replay.
+      s2Resp.bits.forwardInvalid   := !s2SafeForward || s2Cross4KPage // do not support cross page forward.
+      s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage // if cross Page, let load replay.
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
         dontTouch(s1OverlapMask)
-        dontTouch(ageMaskLow)
-        dontTouch(ageMaskHigh)
-        dontTouch(canForwardLow)
-        dontTouch(canForwardHigh)
-        dontTouch(multiMatch)
-        dontTouch(addrInvLowOH)
-        dontTouch(addrInvHighOH)
-        dontTouch(selectOH)
-        dontTouch(safeForward)
+        dontTouch(s1AgeMaskLow)
+        dontTouch(s1AgeMaskHigh)
+        dontTouch(s1CanForwardLow)
+        dontTouch(s1CanForwardHigh)
+        dontTouch(s1MultiMatch)
+        dontTouch(s1AddrInvLowOH)
+        dontTouch(s1AddrInvHighOH)
+        dontTouch(s1SelectOH)
+        dontTouch(s1AddrInvSelectOH)
+        dontTouch(s2OutMask)
+        dontTouch(s2OutData)
+        dontTouch(s2SafeForward)
       }
     }
   }
