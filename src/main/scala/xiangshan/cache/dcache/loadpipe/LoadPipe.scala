@@ -164,11 +164,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val tag_read = io.tag_read.bits
 
   // Tag read for new requests
-  meta_read.idx := get_idx(io.lsu.req.bits.vaddr)
+  meta_read.idx := get_dcache_idx(io.lsu.req.bits.vaddr)
   meta_read.way_en := ~0.U(nWays.W)
   // meta_read.tag := DontCare
 
-  tag_read.idx := get_idx(io.lsu.req.bits.vaddr)
+  tag_read.idx := get_dcache_idx(io.lsu.req.bits.vaddr)
   tag_read.way_en := ~0.U(nWays.W)
 
   // --------------------------------------------------------------------------------
@@ -287,7 +287,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.valid := false.B
-  io.replace_way.set.bits := get_idx(s1_vaddr)
+  io.replace_way.set.bits := get_dcache_idx(s1_vaddr)
   io.replace_way.dmWay := get_direct_map_way(s1_vaddr)
   val s1_invalid_vec = wayMap(w => !meta_resp(w).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
@@ -571,28 +571,28 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.valid := s3_error && s3_valid
 
   io.replace_access.valid := s3_valid && s3_hit
-  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
-  io.access_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
 
   // clear prefetch source when prefetch hit
   val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.prefetch_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
   io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
-  io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_query.req.bits.idx := get_dcache_idx(s3_vaddr)
   io.counter_filter_query.req.bits.way := OHToUInt(s3_tag_match_way)
 
   io.counter_filter_enq.valid := io.prefetch_flag_write.valid
-  io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_enq.bits.idx := get_dcache_idx(s3_vaddr)
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
   io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp

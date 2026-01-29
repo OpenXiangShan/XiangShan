@@ -261,13 +261,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     name = Some("main_pipe_req")
   )
 
-  val store_idx = get_idx(io.store_req.bits.vaddr)
+  val store_idx = get_dcache_idx(io.store_req.bits.vaddr)
   // manually assign store_req.ready for better timing
   // now store_req set conflict check is done in parallel with req arbiter
   store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
     !io.probe_req.valid && !io.refill_req.valid && !io.atomic_req.valid
   val s0_req = req.bits
-  val s0_idx = get_idx(s0_req.vaddr)
+  val s0_idx = get_dcache_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
   val s0_fire = req.valid && s0_can_go
@@ -310,7 +310,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_tag = RegEnable(s0_need_tag, s0_fire)
   val s1_can_go = s2_ready && (io.data_readline.ready || !s1_need_data)
   val s1_fire = s1_valid && s1_can_go
-  val s1_idx = get_idx(s1_req.vaddr)
+  val s1_idx = get_dcache_idx(s1_req.vaddr)
   val s1_dmWay = RegEnable(get_direct_map_way(s0_req.vaddr), s0_fire)
 
   when (s0_fire) {
@@ -431,7 +431,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_need_eviction = RegEnable(s1_need_eviction, s1_fire)
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
-  val s2_idx = get_idx(s2_req.vaddr)
+  val s2_idx = get_dcache_idx(s2_req.vaddr)
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
@@ -816,11 +816,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
   io.meta_read.valid := req.valid
-  io.meta_read.bits.idx := get_idx(s0_req.vaddr)
+  io.meta_read.bits.idx := get_dcache_idx(s0_req.vaddr)
   io.meta_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
   io.tag_read.valid := req.valid && !s0_req.replace
-  io.tag_read.bits.idx := get_idx(s0_req.vaddr)
+  io.tag_read.bits.idx := get_dcache_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
   io.data_read_intend := s1_valid && s1_need_data
@@ -1020,7 +1020,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid
-  io.status.s0_set.bits := get_idx(s0_req.vaddr)
+  io.status.s0_set.bits := get_dcache_idx(s0_req.vaddr)
   io.status.s1.valid := s1_valid
   io.status.s1.bits.set := s1_idx
   io.status.s1.bits.way_en := s1_way_en
@@ -1033,13 +1033,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   for ((s, i) <- io.status_dup.zipWithIndex) {
     s.s1.valid := s1_valid
-    s.s1.bits.set := RegEnable(get_idx(s0_req.vaddr), s0_fire)
+    s.s1.bits.set := RegEnable(get_dcache_idx(s0_req.vaddr), s0_fire)
     s.s1.bits.way_en := s1_way_en
     s.s2.valid := s2_valid && !RegEnable(s1_req.replace, s1_fire)
-    s.s2.bits.set := RegEnable(get_idx(s1_req.vaddr), s1_fire)
+    s.s2.bits.set := RegEnable(get_dcache_idx(s1_req.vaddr), s1_fire)
     s.s2.bits.way_en := s2_way_en
     s.s3.valid := s3_valid && !RegEnable(s2_req.replace, s2_fire_to_s3)
-    s.s3.bits.set := RegEnable(get_idx(s2_req.vaddr), s2_fire_to_s3)
+    s.s3.bits.set := RegEnable(get_dcache_idx(s2_req.vaddr), s2_fire_to_s3)
     s.s3.bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
   }
   dontTouch(io.status_dup)

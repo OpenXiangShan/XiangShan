@@ -220,14 +220,28 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     if(DCacheSetDivBits == 0) 0.U else addr(DCacheSetOffset + DCacheSetDivBits - 1, DCacheSetOffset)
   }
 
-  def addr_to_dcache_div_set(addr: UInt) = {
+  def addr_to_dcache_div_set(addr: UInt, modeId: Int = modeId) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
+    modeId match {
+      case 1 => Cat(
+                 hashBitPairs(addr, PAddrBits - 1, pgIdxBits),
+                 addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset + DCacheSetDivBits)
+                )
+      case 2 => addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
+      case _ => throw new IllegalArgumentException(s"Invalid L1DCache index modeId: $modeId")
+    }
   }
 
-  def addr_to_dcache_set(addr: UInt) = {
+  def addr_to_dcache_set(addr: UInt, modeId: Int = modeId) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
+    modeId match {
+      case 1 => Cat(
+                 hashBitPairs(addr, PAddrBits - 1, pgIdxBits),
+                 addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset)
+                )
+      case 2 => addr(DCacheAboveIndexOffset - 1, DCacheSetOffset)
+      case _ => throw new IllegalArgumentException(s"Invalid L1DCache index modeId: $modeId")
+    }
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
@@ -240,19 +254,23 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
-  def get_alias(vaddr: UInt): UInt ={
+  def get_alias(vaddr: UInt, modeId: Int = modeId): UInt ={
     // require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
-      vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+      modeId match {
+        case 1 => hashBitPairs(vaddr, PAddrBits - 1, pgIdxBits)
+        case 2 => vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+        case _ => throw new IllegalArgumentException(s"Invalid L1DCache alias modeId: $modeId")
+      }
     }else{
       0.U
     }
   }
 
-  def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
+  def is_alias_match(vaddr0: UInt, vaddr1: UInt, modeId: Int = modeId): Bool = {
     require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
     if(blockOffBits + idxBits > pgIdxBits) {
-      vaddr0(blockOffBits + idxBits - 1, pgIdxBits) === vaddr1(blockOffBits + idxBits - 1, pgIdxBits)
+      get_alias(vaddr0, modeId) === get_alias(vaddr1, modeId)
     }else {
       // no alias problem
       true.B
@@ -395,7 +413,7 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
-  def idx: UInt = get_idx(vaddr)
+  def idx: UInt = get_dcache_idx(vaddr)
 }
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
@@ -1559,7 +1577,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // have alias problem, extra alias bits needed for index
     val alias_addr_frag = bus.b.bits.data(2, 1)
     missQueue.io.probe.req.bits.vaddr := Cat(
-      bus.b.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      0.U(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
       bus.b.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )
