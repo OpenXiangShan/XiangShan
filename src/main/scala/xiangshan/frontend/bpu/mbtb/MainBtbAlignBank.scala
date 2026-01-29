@@ -73,9 +73,9 @@ class MainBtbAlignBank(
     val resetDone: Bool      = Output(Bool())
     val stageCtrl: StageCtrl = Input(new StageCtrl)
 
-    val read:  Read  = new Read
-    val write: Write = new Write
-    val trace: Trace = Output(new Trace)
+    val read:  Read                  = new Read
+    val write: Write                 = new Write
+    val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
