@@ -919,7 +919,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     io.sbufferForwardResp.bits.forwardMask.asUInt |
     io.uncacheForwardResp.bits.forwardMask.asUInt
 
-  val sqAddrInvalid = io.sqForwardResp.valid && io.sqForwardResp.bits.addrInvalid.valid
+  val sqAddrInvalid = io.sqForwardResp.bits.addrInvalid.valid
   val sqAddrInvalidSqIdx = io.sqForwardResp.bits.addrInvalid.bits
   val sqDataInvalid = io.sqForwardResp.valid && io.sqForwardResp.bits.dataInvalid.valid
   val sqDataInvalidSqIdx = io.sqForwardResp.bits.dataInvalid.bits
