@@ -40,7 +40,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
 
     // release cacheline
-    val release = Flipped(Valid(new Release))
+    val release = Input(Vec(2, ValidIO(UInt(PAddrBits.W)))) // from L2 release
 
     // from VirtualLoadQueue
     val ldWbPtr = Input(new LqPtr)
@@ -129,8 +129,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val release1Cycle = io.release
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
-  val release2Cycle = RegEnable(io.release, io.release.valid)
-  release2Cycle.valid := RegNext(io.release.valid)
+  val release2Cycle = Wire(Vec(2, ValidIO(UInt(PAddrBits.W))))
+  release2Cycle(0).bits := RegEnable(io.release(0).bits, io.release(0).valid)
+  release2Cycle(0).valid := RegNext(io.release(0).valid)
+  release2Cycle(1).bits := RegEnable(io.release(1).bits, io.release(1).valid)
+  release2Cycle(1).valid := RegNext(io.release(1).valid)
   //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 
   // LoadQueueRAR enqueue condition:
@@ -177,10 +180,14 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  So NC requests are not allowed to have RAR
       released(enqIndex) := enq.bits.is_nc || (
         enq.bits.data_valid &&
-        (release2Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
-        release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+        (release2Cycle(0).valid &&
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle(0).bits(PAddrBits-1, DCacheLineOffset) ||
+        release2Cycle(1).valid &&
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle(1).bits(PAddrBits-1, DCacheLineOffset) ||
+        release1Cycle(0).valid &&
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle(0).bits(PAddrBits-1, DCacheLineOffset) ||
+        release1Cycle(1).valid &&
+        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle(1).bits(PAddrBits-1, DCacheLineOffset))
       )
     }
     val debug_robIdx = enq.bits.uop.robIdx.asUInt
@@ -254,13 +261,19 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
-  val releaseVioMask = Reg(Vec(LoadQueueRARSize, Bool()))
-  when (release1Cycle.valid) {
-    paddrModule.io.releaseMdata.takeRight(1)(0) := genPartialPAddr(release1Cycle.bits.paddr)
+  // val releaseVioMask = Reg(Vec(LoadQueueRARSize, Bool()))
+  // Update: for L2 release, it uses the last two cam ports to set release flags in 1 cycle.
+  when (release1Cycle(0).valid) {
+    paddrModule.io.releaseMdata.takeRight(2)(0) := genPartialPAddr(release1Cycle(0).bits)
+  }
+  when (release1Cycle(1).valid) {
+    paddrModule.io.releaseMdata.takeRight(2)(1) := genPartialPAddr(release1Cycle(1).bits)
   }
 
   (0 until LoadQueueRARSize).map(i => {
-    when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i)) && allocated(i) && release1Cycle.valid)) {
+    when (RegNext((paddrModule.io.releaseMmask.takeRight(2)(0)(i) && release1Cycle(0).valid ||
+                   paddrModule.io.releaseMmask.takeRight(2)(1)(i) && release1Cycle(1).valid) &&
+                  allocated(i))) {
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches.
       released(i) := true.B
