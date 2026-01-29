@@ -657,7 +657,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqPtrEntry.ftqIdx)
   io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqPtrEntry.ftqOffset)
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
-  io.flushOut.bits.interrupt := true.B
+  io.flushOut.bits.interrupt := !isFlushPipe
   XSPerfAccumulate("flush_num", io.flushOut.valid)
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && deqHasException)
