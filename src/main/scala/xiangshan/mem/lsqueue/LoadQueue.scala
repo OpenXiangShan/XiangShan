@@ -272,7 +272,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3
     val ldinBits = io.ldu.ldin(w).bits
-    buff.valid := io.ldu.ldin(w).valid && (!ldinBits.nc_with_data || ldinBits.nc_with_data && io.ldu.ldin(w).bits.rep_info.mmioOrNc)
+    buff.valid := io.ldu.ldin(w).valid && ldinBits.rep_info.mmioOrNc
     buff.bits := ldinBits
   }
 
