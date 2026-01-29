@@ -29,8 +29,8 @@ from pydifftest import difftest as df
 from collections import OrderedDict
 from logging import DEBUG, INFO, WARNING, ERROR
 from xspdb.xscmd.util import load_module_from_file, load_package_from_dir, set_xspdb_log_level, set_xspdb_debug_level, logging_level_map
-from xspdb.xscmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message
-from xspdb.ui import enter_simple_tui
+from xspdb.xscmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message, xspdb_set_ui_handler, ui_prompt
+from xspdb.ui import enter_tui
 
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, default_file=None,
@@ -97,6 +97,7 @@ class XSPdb(pdb.Pdb):
         self.sigint_callback = []
         self.log_cmd_prefix = "@cmd{"
         self.log_cmd_suffix = "}"
+        self._ui_handler = None
 
     def check_is_need_trace(self):
         if getattr(self, "__xspdb_need_fast_trace__", False) is True:
@@ -176,6 +177,26 @@ class XSPdb(pdb.Pdb):
                     dut.Step(1000)
         except BdbQuit:
             pass
+
+    def set_ui_handler(self, handler):
+        self._ui_handler = handler
+        xspdb_set_ui_handler(handler)
+
+    def clear_ui_handler(self):
+        self._ui_handler = None
+        xspdb_set_ui_handler(None)
+
+    def ui_tick(self):
+        handler = self._ui_handler
+        fn = getattr(handler, "ui_tick", None) if handler else None
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def ui_prompt(self, msg=""):
+        return ui_prompt(msg)
 
     def _sigint_handler(self, s, f):
         self.interrupt = True
@@ -277,20 +298,43 @@ class XSPdb(pdb.Pdb):
         return cmd or "", arg, line
 
     def do_xui(self, arg):
-        """Enter the Text UI interface
+        """Enter the Text UI interface, or manage XUI config.
 
-        Args:
-            arg (None): No arguments
+        Usage:
+            xui
+            xui save
+            xui load
         """
+        sub = (arg or "").strip()
+        if sub:
+            parts = sub.split(maxsplit=1)
+            cmd = parts[0]
+            rest = parts[1] if len(parts) > 1 else ""
+            if cmd in ("save", "load"):
+                return self._ui_config(cmd)
+            if cmd == "goto":
+                if not rest:
+                    warn("Usage: xui goto <address>")
+                    return
+                try:
+                    addr = int(rest, 0)
+                except ValueError:
+                    error(f"Invalid address: {rest}")
+                    return
+                self.api_set_info_force_mid_address(addr)
+                info(f"force address set to 0x{addr:x}")
+                return
+            warn(f"Unknown xui subcommand: {sub}")
+            return
         if self.in_tui:
             error("Already in TUI")
             return
         try:
             self.tui_ret = None
             self.in_tui = True
-            enter_simple_tui(self)
+            enter_tui(self)
             self.in_tui = False
-            self.on_update_tstep = None
+            self.clear_ui_handler()
             self.interrupt = False
             info("XUI Exited.")
             return self.tui_ret
@@ -300,6 +344,85 @@ class XSPdb(pdb.Pdb):
             error(f"XUI Error: {e}")
             traceback.print_exc()
             return False
+
+    def do_xtheme(self, arg):
+        """Set or list Text UI themes.
+
+        Usage:
+            xtheme <name>
+            xtheme list
+            xtheme cycle
+        """
+        handler = self._ui_handler
+        if not handler:
+            warn("TUI not active")
+            return
+        name = (arg or "").strip()
+        fn = getattr(handler, "ui_theme", None)
+        if not callable(fn):
+            warn("Theme control not available")
+            return
+        if not name or name in ("list", "ls", "-l", "?"):
+            fn("__list__")
+            return
+        if name in ("cycle", "next", "-n"):
+            fn("__cycle__")
+            return
+        fn(name)
+
+    def complete_xtheme(self, text, line, begidx, endidx):
+        opts = ["list", "cycle", "next"]
+        return [o for o in opts if o.startswith(text)]
+
+    def _ui_config(self, action: str):
+        handler = self._ui_handler
+        if not handler:
+            warn("TUI not active")
+            return
+        fn = getattr(handler, "ui_config", None)
+        if not callable(fn):
+            warn("Config control not available")
+            return
+        fn(action)
+
+    def complete_xui(self, text, line, begidx, endidx):
+        opts = ["save", "load", "goto"]
+        return [o for o in opts if o.startswith(text)]
+
+    def _exec_batch_cmds(self, break_handler=None):
+        cmd_count = 0
+        if not hasattr(self, "batch_depth"):
+            self.batch_depth = 0
+        self.batch_depth += 1
+        try:
+            while getattr(self, "batch_cmds_to_exec", []):
+                cmd, gap_time, callback = self.batch_cmds_to_exec.pop(0)
+                if gap_time:
+                    self.api_busy_sleep(gap_time)
+                ret = self.onecmd(cmd, log_cmd=False)
+                cmd_count += 1
+                setattr(self, "__last_batch_cmd_ret__", ret)
+                if callback:
+                    try:
+                        if callback(cmd_count) is False:
+                            break
+                    except Exception:
+                        break
+                if break_handler:
+                    try:
+                        if break_handler(cmd_count) is False:
+                            break
+                    except Exception:
+                        break
+        finally:
+            self.batch_depth -= 1
+            if self.batch_depth < 0:
+                self.batch_depth = 0
+        return cmd_count
+
+    def do_xcontinue_batch(self, arg):
+        """Continue executing loaded batch commands"""
+        return self._exec_batch_cmds()
 
     def do_xcmds(self, arg):
         """Print all xcmds
@@ -326,6 +449,38 @@ class XSPdb(pdb.Pdb):
         for c in cmds:
             message(("%-"+str(max_cmd_len+2)+"s: %s (from %s)") % (c[1], c[2], self.register_map.get(c[0], self.__class__.__name__)))
         info(f"Total {cmd_count} xcommands")
+
+    def do_xload_log(self, arg):
+        """Load an XSPdb log file
+
+        Args:
+            log_file (string): Path to the log file
+            delay_time (float): time delay between each cmd
+        """
+        usage = "usage: xload_log <log_file> [delay_time]"
+        if not arg:
+            message(usage)
+            return
+        args = arg.split()
+        path = args[0]
+        delay = 0
+        if len(args) > 1:
+            try:
+                delay = float(args[1])
+            except Exception as e:
+                error("Convert dalay fail: %s, from args: %s\n%s" % (e, arg, usage))
+        if not os.path.exists(path):
+            error(f"log file: {path} not find!")
+            return
+        cmd_count = self.api_exec_script(path,
+                                         gap_time=delay,
+                                         target_prefix=self.log_cmd_prefix,
+                                         target_subfix=self.log_cmd_suffix)
+        if cmd_count >= 0:
+            self._exec_batch_cmds()
+            is_continue = getattr(self, "__last_batch_cmd_ret__", False)
+            message(f"Load log: {path} success, cmd count: {cmd_count}, continue: {is_continue}")
+            return is_continue
 
     def do_xcmds(self, arg):
         """Print all xcmds
