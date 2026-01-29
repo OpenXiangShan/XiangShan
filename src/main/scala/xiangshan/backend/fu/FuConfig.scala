@@ -6,7 +6,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{ExuInput, NewExuInput}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode._
-import xiangshan.backend.fu.fpu.{IntFPToVec, IntToFP}
+import xiangshan.backend.fu.fpu.IntFPToVec
 import xiangshan.backend.fu.wrapper._
 import xiangshan.mem.Std
 

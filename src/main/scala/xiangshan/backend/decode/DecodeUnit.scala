@@ -30,7 +30,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop}
 import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl, VSew}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.Zimop._
@@ -816,12 +816,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   // output
   val decodedInst: DecodeOutUop = Wire(new DecodeOutUop()).decode(ctrl_flow.instr, decode_table)
-
-  val fpDecoder = Module(new FPDecoder)
-  fpDecoder.io.instr := ctrl_flow.instr
-  decodedInst.fpu := fpDecoder.io.fpCtrl
-  decodedInst.fpu.wflags := fpDecoder.io.fpCtrl.wflags || decodedInst.wfflags
-
   decodedInst.connectDecodeInUop(io.enq.decodeInUop)
 
   decodedInst.uopIdx := 0.U
@@ -1031,6 +1025,50 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFMV_S_F,
   )
 
+  private val scalarSew32 = Seq(
+    FADD_S, FSUB_S, FEQ_S, FLT_S, FLE_S, FMIN_S, FMAX_S,
+    FMUL_S, FDIV_S, FSQRT_S,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S,
+    FCLASS_S, FSGNJ_S, FSGNJX_S, FSGNJN_S,
+    // zfa inst
+    FLEQ_S, FLTQ_S, FMINM_S, FMAXM_S,
+    FROUND_S, FROUNDNX_S,
+
+    // scalar cvt inst
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
+    FMV_X_W,
+    // zfa inst
+    FCVTMOD_W_D,
+    // i2f cvt & mv
+    FCVT_S_W, FCVT_S_WU, FCVT_S_L, FCVT_S_LU,
+    FCVT_D_W, FCVT_D_WU, FMV_W_X,
+  )
+  /*
+  The optype for FCVT_D_H and FCVT_H_D is the same,
+  so the two instructions are distinguished by sew.
+  e64 -> e16: VSew.e64
+  e16 -> e64: VSew.e16
+   */
+  private val scalarSew16 = Seq(
+    // zfh inst
+    FADD_H, FSUB_H, FEQ_H, FLT_H, FLE_H, FMIN_H, FMAX_H,
+    FMUL_H, FDIV_H, FSQRT_H,
+    FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
+    FCLASS_H, FSGNJ_H, FSGNJX_H, FSGNJN_H,
+    // zfa inst
+    FLEQ_H, FLTQ_H, FMINM_H, FMAXM_H,
+    FROUND_H, FROUNDNX_H,
+
+    FCVT_S_H, FCVT_H_S, FCVT_D_H,
+    FCVT_W_H, FCVT_L_H, FCVT_WU_H, FCVT_LU_H,
+    FMV_X_H,
+    // i2f cvt & mv
+    FCVT_H_W, FCVT_H_WU, FMV_H_X,
+  )
+  private val scalarIsSew32 = scalarSew32.map(ctrl_flow.instr === _).reduce(_ || _)
+  private val scalarIsSew16 = scalarSew16.map(ctrl_flow.instr === _).reduce(_ || _)
+
   private val isFmaNeedVd = FuType.isVecOPFFma(decodedInst.fuType) & (decodedInst.fuOpType(3, 0) =/= VfmaOpCode.vfmul)
 
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
@@ -1078,6 +1116,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.srcType(3) := Mux(inst.VM === 0.U, SrcType.vp, SrcType.DC) // mask src
   decodedInst.vlRen := true.B
+
+  decodedInst.fpu.fmt := Mux(scalarIsSew32, VSew.e32, Mux(scalarIsSew16, VSew.e16, VSew.e64))
+  decodedInst.fpu.wflags := decodedInst.wfflags
+  decodedInst.fpu.rm := inst.RM
 
   val uopInfoGen = Module(new UopInfoGen)
   uopInfoGen.io.in.preInfo.isVecArith := inst.isVecArith
