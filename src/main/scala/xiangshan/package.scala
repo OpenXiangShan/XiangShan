@@ -69,26 +69,10 @@ package object xiangshan {
   object FuOpType {
     def apply() = UInt(FuOpTypeWidth.W)
     def X     = BitPat("b0_0000_0000")
-    def FMVXF = BitPat("b1_1000_0000") //for fmv_x_d & fmv_x_w
-  }
 
-  object I2fType {
-    // move/cvt ## i64/i32(input) ## f64/f32/f16(output) ## hassign
-    def fcvt_h_wu = BitPat("b0_0_00_0")
-    def fcvt_h_w  = BitPat("b0_0_00_1")
-    def fcvt_h_lu = BitPat("b0_1_00_0")
-    def fcvt_h_l  = BitPat("b0_1_00_1")
-
-    def fcvt_s_wu = BitPat("b0_0_01_0")
-    def fcvt_s_w  = BitPat("b0_0_01_1")
-    def fcvt_s_lu = BitPat("b0_1_01_0")
-    def fcvt_s_l  = BitPat("b0_1_01_1")
-
-    def fcvt_d_wu = BitPat("b0_0_10_0")
-    def fcvt_d_w  = BitPat("b0_0_10_1")
-    def fcvt_d_lu = BitPat("b0_1_10_0")
-    def fcvt_d_l  = BitPat("b0_1_10_1")
-
+    // mv/cvt ##  f/i(input) ## f/i(output) ## intr's func
+    def FMVFX     = BitPat("b1_0_1_000000") // i2f
+    def FMVXF     = BitPat("b1_1_0_000000") // f2i
   }
   object VlduType {
     // bit encoding: | vector or scala (2bit) || mop (2bit) | lumop(5bit) |

@@ -314,19 +314,25 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FMV_X_W,
     // zfa inst
     FCVTMOD_W_D,
+
+    // i2f cvt & mv
+    FCVT_S_W, FCVT_S_WU, FCVT_S_L, FCVT_S_LU,
+    FCVT_D_W, FCVT_D_WU, FMV_W_X,
   )
   /*
   The optype for FCVT_D_H and FCVT_H_D is the same,
   so the two instructions are distinguished by sew.
-  FCVT_H_D:VSew.e64
-  FCVT_D_H:VSew.e16
+  e64 -> e16: VSew.e64
+  e16 -> e64: VSew.e16
    */
   val isSew2Cvth = Seq(
     FCVT_S_H, FCVT_H_S, FCVT_D_H,
     FMV_X_H,
-    FCVT_W_H, FCVT_L_H, FCVT_H_W,
-    FCVT_H_L, FCVT_H_WU, FCVT_H_LU,
+    FCVT_W_H, FCVT_L_H, 
     FCVT_WU_H, FCVT_LU_H,
+    
+    // i2f cvt & mv
+    FCVT_H_W, FCVT_H_WU, FMV_H_X,
   )
   val simpleFmt = Mux1H(
     // scala format to vsew format, when inst.FMT === "b11".U, ctrl.fmt := "b00".U
