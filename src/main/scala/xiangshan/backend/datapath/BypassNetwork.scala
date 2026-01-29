@@ -31,7 +31,6 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     val int: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(intSchdParams.genExuInputBundle)
     val fp : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(fpSchdParams.genExuInputBundle)
     val vf : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(vecSchdParams.genExuInputBundle)
-    val immInfo: Vec[ImmInfo] = Input(Vec(params.allExuParams.size, new ImmInfo))
     val rcData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
       Seq(intSchdParams, fpSchdParams, vecSchdParams).map(schd => schd.issueBlockParams.map(iq =>
         MixedVec(iq.exuBlockParams.map(exu => Input(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
@@ -87,7 +86,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val toExus: Seq[DecoupledIO[ExuInput]] = (toExusInt ++ toExusFp ++ toExusVf).flatten.toSeq
   private val toNewExus: Seq[DecoupledIO[NewExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf).flatten.toSeq
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
-  private val immInfo = io.fromDataPath.immInfo
 
   println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
 
@@ -156,12 +154,12 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
 
   toExus.zipWithIndex.foreach { case (exuInput, exuIdx) =>
     val imm = ImmExtractor(
-      immInfo(exuIdx).imm,
-      immInfo(exuIdx).immType,
+      fromDPs(exuIdx).bits.imm,
+      fromDPs(exuIdx).bits.selImm,
       exuInput.bits.params.destDataBitsMax,
       exuInput.bits.params.immType,
     )
-    val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(immInfo(exuIdx).imm(immInfo(exuIdx).imm.getWidth - 1, ImmUnion.I.len)), XLEN)
+    val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(fromDPs(exuIdx).bits.imm(31, ImmUnion.I.len)), XLEN)
     val exuParm = exuInput.bits.params
     val isIntScheduler = exuParm.isIntExeUnit
     val isReadVfRf = exuParm.readVfRf
@@ -219,7 +217,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val nextPcOffset = exuInput.bits.getNextPcOffset()
       val isJALR = FuType.isJump(fuType) && JumpOpType.jumpOpisJalr(fuOpType)
       val immBJU = imm + Mux(isJALR, 0.U, SignExt(thisPcOffset, imm.getWidth))
-      val immCsrFence = immInfo(exuIdx).imm
+      val immCsrFence = fromDPs(exuIdx).bits.imm
       exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType))&& exuParm.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.foreach(_ := nextPcOffset)
       dontTouch(isJALR)
