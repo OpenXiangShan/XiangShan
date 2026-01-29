@@ -68,9 +68,6 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
           og2Resp.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
       }
   }
-  io.toBypassNetworkImmInfo := io.fromOg1ImmInfo.zip(s1_validVec2.flatten).map{
-    case (imm, valid) => RegEnable(imm, valid)
-  }
 }
 
 class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
@@ -80,9 +77,7 @@ class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   val ldCancel                                                    = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
   val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[ExuInput]]]   = Flipped(vecSchdParams.genExuInputBundle)
-  val fromOg1ImmInfo: Vec[ImmInfo]                                = Input(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 
   val toVfArithExu                                                = MixedVec(vecSchdParams.genExuInputBundle)
   val toVfIQOg2Resp                                               = MixedVec(vecSchdParams.issueBlockParams.map(_.genOG2RespBundle))
-  val toBypassNetworkImmInfo: Vec[ImmInfo]                        = Output(Vec(params.allIssueParams.filter(_.needOg2Resp).flatMap(_.exuBlockParams).size, new ImmInfo))
 }
