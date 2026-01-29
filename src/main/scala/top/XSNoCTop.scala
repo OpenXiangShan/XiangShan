@@ -270,14 +270,20 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
 
   require(socParams.enableCHI)
 
-  socParams.EnableCHIAsyncBridge match {
-    case Some(param) =>
+  (socParams.EnableCHIAsyncBridge, socParams.CHIAsyncFromDSU) match {
+    case (Some(param), true) => // chiasync bridge can be provided by customer J co.
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-        val time_sink = Module(new CHIAsyncBridgeSink(param))
-        time_sink.io.async <> core_with_l2.module.io.chi
-        io_chi <> time_sink.io.deq
+        val chiasync_sink = Module(new CHIAsyncICNDSU(CDBParams()))
+        chiasync_sink.io.cdb <> core_with_l2.module.io.chi
+        io_chi <> chiasync_sink.io.chi
       }
-    case None =>
+    case (Some(param), false) =>
+      withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+        val chiasync_sink = Module(new CHIAsyncBridgeSink(param))
+        chiasync_sink.io.async <> core_with_l2.module.io.chi
+        io_chi <> chiasync_sink.io.deq
+      }
+    case (None, _) =>
       io_chi <> core_with_l2.module.io.chi
   }
 }
