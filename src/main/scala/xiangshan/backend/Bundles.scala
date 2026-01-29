@@ -488,8 +488,6 @@ object Bundles {
     // from dispatch
     val srcState          = Vec(numSrc, SrcState())
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val useRegCache       = Vec(backendParams.numIntRegSrc, Bool())
-    val regCacheIdx       = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val lqIdx             = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
     val sqIdx             = Option.when(params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ || params.isLdAddrIQ)(new SqPtr) // load unit need sqIdx
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)

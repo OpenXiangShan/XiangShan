@@ -300,11 +300,14 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     val regCache = Module(new RegCache())
     def IssueBundle2RCReadPort(issue: DecoupledIO[IssueQueueIssueBundle]): Vec[RCReadPort] = {
       val readPorts = Wire(Vec(issue.bits.exuParams.numIntSrc, new RCReadPort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth)))
-      readPorts.zipWithIndex.foreach { case (r, idx) =>
-        r.ren := issue.valid && issue.bits.common.dataSources(idx).readRegCache
-        r.addr := issue.bits.rcIdx.get(idx)
-        r.data := DontCare
-      }
+      if (backendParams.regCacheEn)
+        readPorts.zipWithIndex.foreach { case (r, idx) =>
+          r.ren := issue.valid && issue.bits.common.dataSources(idx).readRegCache
+          r.addr := issue.bits.rcIdx.get(idx)
+          r.data := DontCare
+        }
+      else
+        readPorts := 0.U.asTypeOf(readPorts)
       readPorts
     }
     val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
