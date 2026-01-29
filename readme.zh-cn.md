@@ -67,7 +67,7 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 │       └── xiangshan      # 主体设计代码
 │           └── transforms # 一些实用的 firrtl 变换代码
 ├── scripts                # 用于敏捷开发的脚本文件
-├── fudian                 # 香山浮点子模块
+├── yunsuan                # 香山运算子模块
 ├── huancun                # 香山 L2/L3 缓存子模块
 ├── difftest               # 香山协同仿真框架
 └── read-to-run            # 预建的仿真镜像文件

@@ -2,7 +2,6 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fudian.FloatPoint
 
 object FPU {
 
@@ -24,14 +23,18 @@ object FPU {
   val D = ftypes.indexOf(f64).U(ftypeWidth.W)
   val H = ftypes.indexOf(f16).U(ftypeWidth.W)
 
+  def defaultNaNUInt(expWidth: Int, pc: Int): UInt = {
+    Cat(0.U(1.W), Fill(expWidth + 1, 1.U(1.W)), 0.U((pc - 2).W))
+  }
+
   // Produce zero-extended FPXX data
   def unbox(x: UInt, typeTag: UInt): UInt = {
     require(x.getWidth == 64)
     require(typeTag.getWidth == ftypeWidth)
     Mux1H(Seq(
       (typeTag === D) -> x,
-      (typeTag === S) -> Mux(x.head(32).andR, x(f32.len - 1, 0), FloatPoint.defaultNaNUInt(f32.expWidth, f32.precision)),
-      (typeTag === H) -> Mux(x.head(48).andR, x(f16.len - 1, 0), FloatPoint.defaultNaNUInt(f16.expWidth, f16.precision)),
+      (typeTag === S) -> Mux(x.head(32).andR, x(f32.len - 1, 0), defaultNaNUInt(f32.expWidth, f32.precision)),
+      (typeTag === H) -> Mux(x.head(48).andR, x(f16.len - 1, 0), defaultNaNUInt(f16.expWidth, f16.precision)),
     ))
   }
 

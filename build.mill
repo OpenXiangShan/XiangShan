@@ -113,8 +113,6 @@ object difftest extends ChiselModule {
   }
 }
 
-object fudian extends ChiselModule {}
-
 object ChiselAIA extends ChiselModule {
   def moduleDeps = Seq(`rocket-chip`, utility)
 }
@@ -139,7 +137,6 @@ object xiangshan extends ChiselModule {
     coupledL2,
     openLLC,
     yunsuan,
-    fudian,
     utility,
     ChiselAIA,
     ChiselIOPMP,
