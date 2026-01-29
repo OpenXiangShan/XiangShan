@@ -50,30 +50,47 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s1_prevLastInstrIsHalfRvi = RegInit(false.B)
 
   // default at most 32 inst per cacheline
-  private val s1_cutInst   = Wire(Vec(ICacheLineBytes / 2, UInt(32.W)))
-  private val s1_dataVec   = s1_data.asTypeOf(Vec(ICacheLineBytes / 2, UInt(16.W)))
-  private val s1_finalInst = s1_cutInst
-  private val s1_instValid = Wire(Vec(ICacheLineBytes / 2, Bool()))
-  private val s1_instRange = Wire(Vec(ICacheLineBytes / 2, Bool()))
+  private val s1_cutInst    = Wire(Vec(ICacheLineBytes / 2, UInt(32.W)))
+  private val s1_dataVec    = s1_data.asTypeOf(Vec(ICacheLineBytes / 2, UInt(16.W)))
+  private val s1_finalInst  = s1_cutInst
+  private val s1_instValid  = Wire(Vec(ICacheLineBytes / 2, Bool()))
+  private val s1_instRange  = Wire(Vec(ICacheLineBytes / 2, Bool()))
+  private val s1_startRange = Wire(Vec(ICacheLineBytes / 2, Bool()))
+  private val s1_endRange   = Wire(Vec(ICacheLineBytes / 2, Bool()))
   // invalid inst range which need to decode
   private val s1_shadowRange    = Wire(Vec(ICacheLineBytes / 2, Bool()))
   private val s1_finalInstValid = Wire(Vec(ICacheLineBytes / 2, Bool()))
 
+  private val debug_s1_startRange    = Wire(UInt((ICacheLineBytes / 2).W))
+  private val debug_s1_endRange      = Wire(UInt((ICacheLineBytes / 2).W))
   private val debug_s1InstValid      = Wire(UInt((ICacheLineBytes / 2).W))
   private val debug_s1InstRange      = Wire(UInt((ICacheLineBytes / 2).W))
   private val debug_s1ShadowRange    = Wire(UInt((ICacheLineBytes / 2).W))
   private val debug_s1FinalInstValid = Wire(UInt((ICacheLineBytes / 2).W))
+  debug_s1_startRange    := s1_startRange.asUInt
+  debug_s1_endRange      := s1_endRange.asUInt
   debug_s1InstValid      := s1_instValid.asUInt
   debug_s1InstRange      := s1_instRange.asUInt
   debug_s1ShadowRange    := s1_shadowRange.asUInt
   debug_s1FinalInstValid := s1_finalInstValid.asUInt
+  dontTouch(debug_s1_startRange)
+  dontTouch(debug_s1_endRange)
   dontTouch(debug_s1InstValid)
   dontTouch(debug_s1InstRange)
   dontTouch(debug_s1ShadowRange)
   dontTouch(debug_s1FinalInstValid)
+  dontTouch(s1_startPc)
+  dontTouch(s1_isNextLine)
+
+  s1_cfiOffset.bits := Mux(
+    io.ftqEntry.takenCfiOffset.valid,
+    io.ftqEntry.takenCfiOffset.bits,
+    (1 << s1_cfiOffset.bits.getWidth - 1).U
+  )
+  s1_startRange := (Fill(FetchBlockInstNum, 1.U(1.W)) << getPosition(s1_startPc))(FetchBlockInstNum - 1, 0).asBools
+  s1_endRange   := (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiOffset.bits).asUInt).asBools
   // TODO:simplify logic
-  s1_instRange := ((Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiOffset.bits).asUInt).asUInt &
-    (Fill(FetchBlockInstNum, 1.U(1.W)) >> s1_startPc(5, 1).asUInt).asUInt).asBools
+  s1_instRange   := (s1_startRange.asUInt & s1_endRange.asUInt).asBools
   s1_shadowRange := s1_instRange.map(!_)
   (0 until ICacheLineBytes / 2).foreach { i =>
     if (i == 0) {

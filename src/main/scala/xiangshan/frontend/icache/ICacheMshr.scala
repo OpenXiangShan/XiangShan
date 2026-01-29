@@ -49,7 +49,8 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     // after respond to requester, invalid the MSHR
     val invalid: Bool = Input(Bool())
 
-    val perf_latency: UInt = Output(UInt(16.W)) // magic number: latency should less than 65536 cycles
+    val ftqIdx:       ValidIO[FtqPtr] = Flipped(Valid(new FtqPtr))
+    val perf_latency: UInt            = Output(UInt(16.W)) // magic number: latency should less than 65536 cycles
   }
 
   val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
@@ -139,6 +140,11 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     valid := false.B
   }
 
+  // prefetch real ftq idx and invalid isNextLine
+  when(io.ftqIdx.valid) {
+    ftqIdx     := io.ftqIdx.bits
+    isNextLine := false.B
+  }
   // offer the information other than data for write sram and response fetch
   io.info.valid           := valid && (!flush && !fencei)
   io.info.bits.blkPAddr   := blkPAddr
