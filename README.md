@@ -71,7 +71,7 @@ Some of the key directories are shown below.
 │       └── xiangshan      # main design code
 │           └── transforms # some useful firrtl transforms
 ├── scripts                # scripts for agile development
-├── fudian                 # floating unit submodule of XiangShan
+├── yunsuan                # yunsuan submodule of XiangShan
 ├── huancun                # L2/L3 cache submodule of XiangShan
 ├── difftest               # difftest co-simulation framework
 └── ready-to-run           # pre-built simulation images

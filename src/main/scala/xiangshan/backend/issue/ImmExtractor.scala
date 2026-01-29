@@ -2,11 +2,11 @@ package xiangshan.backend.issue
 
 import chisel3._
 import chisel3.util._
-import fudian.utils.SignExt
 import utility.LookupTree
 import xiangshan.SelImm
 import xiangshan.backend.decode.{Imm, ImmUnion}
 import xiangshan.backend.datapath.DataConfig._
+import utility.SignExt
 
 import scala.collection.MapView
 

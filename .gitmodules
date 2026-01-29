@@ -10,9 +10,6 @@
 [submodule "huancun"]
 	path = huancun
 	url = https://github.com/OpenXiangShan/HuanCun.git
-[submodule "fudian"]
-	path = fudian
-	url = https://github.com/OpenXiangShan/fudian.git
 [submodule "utility"]
 	path = utility
 	url = https://github.com/OpenXiangShan/Utility.git

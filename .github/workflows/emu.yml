@@ -668,8 +668,6 @@ jobs:
         run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check huancun
         run: cd huancun && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check fudian
-        run: cd fudian && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/pipeline
       - name: check utility
         run: cd utility && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check yunsuan

@@ -7,7 +7,6 @@
 - changed-files:
   - any-glob-to-any-file:
     - src/main/scala/xiangshan/backend/**
-    - fudian
     - yunsuan
 
 "module: memory":
