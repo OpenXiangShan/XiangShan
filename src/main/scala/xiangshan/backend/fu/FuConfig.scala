@@ -3,7 +3,7 @@ package xiangshan.backend.fu
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.ExuInput
+import xiangshan.backend.Bundles.{ExuInput, NewExuInput}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode._
 import xiangshan.backend.fu.fpu.{IntFPToVec, IntToFP}
@@ -99,10 +99,10 @@ case class FuConfig (
 
   def readFp: Boolean = numFpSrc > 0
 
-  def fuSel(uop: ExuInput): Bool = {
+  def fuSel(uop: NewExuInput): Bool = {
     // Don't add more shit here!!!
     // Todo: add new FuType to distinguish f2i, f2f
-    uop.fuType === this.fuType.U
+    uop.ctrl.fuType === this.fuType.U
   }
 
   /**

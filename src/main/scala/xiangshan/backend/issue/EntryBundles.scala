@@ -99,7 +99,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
-    val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val payload               = new IssueQueuePayload(params)
   }
 
@@ -413,7 +412,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val updateIssueTimer = Mux(status.issueTimer === params.issueTimerMaxValue.U, status.issueTimer, status.issueTimer + 1.U)
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
-    entryUpdate.imm.foreach(_                         := entryReg.imm.get)
     entryUpdate.payload                               := entryReg.payload
     if (params.isVecMemIQ) {
       entryUpdate.status.vecMem.get := entryReg.status.vecMem.get
@@ -458,6 +456,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.entry.bits                              := entryReg
     if(isEnq) {
       commonOut.entry.bits.status                     := status
+    }
+    if (isEnq || !isComp) {
+      // Enq and Simp can back to back trans
+      commonOut.entry.bits.payload.og1Payload         := RegNext(entryReg.payload.og1Payload)
     }
     commonOut.issueTimerRead                          := status.issueTimer
     commonOut.deqPortIdxRead                          := status.deqPortIdx

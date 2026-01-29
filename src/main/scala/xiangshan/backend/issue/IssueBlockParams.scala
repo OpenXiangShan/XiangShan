@@ -394,12 +394,28 @@ case class IssueBlockParams(
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputCopySrcBundle)))
   }
 
+  def genNewExuInputDecoupledCopySrcBundle(implicit p: Parameters): MixedVec[DecoupledIO[NewExuInput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genNewExuInputCopySrcBundle)))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuOutputBundle)))
   }
 
+  def genNewExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[NewExuOutput]] = {
+    MixedVec(this.exuParams.map(x => DecoupledIO(x.genNewExuOutputBundle)))
+  }
+
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => ValidIO(x.genExuOutputBundle)))
+  }
+
+  def genNewExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[NewExuOutput]] = {
+    MixedVec(this.exuParams.map(x => ValidIO(x.genNewExuOutputBundle)))
+  }
+
+  def genWriteBackRobValidBundle(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
+    MixedVec(this.exuParams.map(x => ValidIO(x.genWriteBackRobBundle)))
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {
@@ -412,6 +428,10 @@ case class IssueBlockParams(
 
   def genIssueValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIssueBundle]] = {
     MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new IssueQueueIssueBundle(this, x))))
+  }
+
+  def genIssueDeqOg1PayloadBundle(implicit p: Parameters): MixedVec[Og1Payload] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => new Og1Payload(x.issueBlockParam)))
   }
 
   def genExuWakeUpOutValidBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]] = {

@@ -492,6 +492,14 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       s1.immType := Mux(s0.valid, s0.bits.immType, s1.immType)
     }
   }
+  if (param.isIntSchd) {
+    s1_immInfo.zip(io.fromIntIQDeqOg1Payload.get).map { case (s1Vec, s0Vec) =>
+      s1Vec.zip(s0Vec).map { case (s1, s0) =>
+        s0.imm.foreach(x => s1.imm := x)
+        s0.selImm.foreach(x => s1.immType := x)
+      }
+    }
+  }
   io.og1ImmInfo.zip(s1_immInfo.flatten).map{ case(out, reg) =>
     out := reg
   }
@@ -603,6 +611,12 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       when (s0.valid) {
         s1_data.fromIssueBundle(s0.bits) // no src data here
         s1_addrOH := s0.bits.addrOH
+      }
+      // timing Optimize, clock gate can use RegNext(s0.valid)
+      if (param.isIntSchd && s0.bits.exuParams.issueBlockParam.inIntSchd) {
+        println(s"s0.bits.exuParams.name = ${s0.bits.exuParams.name}")
+        val og1Payload = io.fromIntIQDeqOg1Payload.get(i)(j)
+        s1_data.fromIssueOg1PayloadBundle(og1Payload)
       }
       s0.ready := notBlock && !s0_cancel
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
@@ -797,6 +811,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
+
+  val fromIntIQDeqOg1Payload: Option[MixedVec[MixedVec[Og1Payload]]] =
+    Option.when(param.isIntSchd)(Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
 
   val fromFpIQ: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] =
     Flipped(MixedVec(fpSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))

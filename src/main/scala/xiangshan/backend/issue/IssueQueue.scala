@@ -56,6 +56,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
 
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
+  val deqOg1Payload: MixedVec[Og1Payload] = params.genIssueDeqOg1PayloadBundle
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
@@ -324,8 +325,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.status.firstIssue                                := false.B
       enq.bits.status.issueTimer                                := 0.U
       enq.bits.status.deqPortIdx                                := 0.U
-      enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm.get)
-      enq.bits.payload                                          := s0_enqBits(enqIdx)
+      connectSamePort(enq.bits.payload, s0_enqBits(enqIdx))
+      // for IssueQueueSta imm width is not 32
+      enq.bits.payload.imm.foreach(_                            := s0_enqBits(enqIdx).imm.get)
+      connectSamePort(enq.bits.payload.og1Payload, enq.bits.payload)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp
@@ -346,6 +349,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
       entriesIO.compEntryOldestSel.foreach(_(deqIdx)            := compEntryOldestSel.get(deqIdx))
       entriesIO.othersEntryOldestSel.foreach(_(deqIdx)          := othersEntryOldestSel(deqIdx))
+      entriesIO.enqEntryOldestSelDelay(deqIdx)                  := RegNext(enqEntryOldestSel(deqIdx))
+      entriesIO.simpEntryOldestSelDelay.foreach(_(deqIdx)       := RegNext(simpEntryOldestSel.get(deqIdx)))
+      entriesIO.compEntryOldestSelDelay.foreach(_(deqIdx)       := RegNext(compEntryOldestSel.get(deqIdx)))
+      entriesIO.othersEntryOldestSelDelay.foreach(_(deqIdx)     := RegNext(othersEntryOldestSel(deqIdx)))
       entriesIO.subDeqRequest.foreach(_(deqIdx)                 := subDeqRequest.get)
       entriesIO.subDeqSelOH.foreach(_(deqIdx)                   := subDeqSelOHVec.get(deqIdx))
     }
@@ -908,7 +915,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       sink := source
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm.getOrElse(0.U.asTypeOf(deq.bits.immType))
-    deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
+    deq.bits.common.imm := deqEntryVec(i).bits.payload.imm.getOrElse(0.U)
     deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
     deq.bits.common.pc.foreach(_ := 0.U)
@@ -969,6 +976,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     sink.valid := source.valid
     sink.bits := source.bits
   }
+  io.deqOg1Payload := entries.io.deqOg1Payload
   if(backendParams.debugEn) {
     dontTouch(deqDelay)
     dontTouch(io.deqDelay)

@@ -324,6 +324,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val pdestReg = RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
   io.outRFWenAhead3Cycle.get := rfWenReg
   io.outPdestAhead3Cycle.get := pdestReg
+  io.out.bits.ctrl.toRobValid := RegEnable(io.in.bits.ctrl.toRobValid, io.in.fire)
   io.out.bits.ctrl.robIdx := Mux(isXRetReg, robIdxReg, DelayNWithValid(robIdxReg, csrModOutValid, 3)._2)
   io.out.bits.ctrl.pdest := DelayNWithValid(RegEnable(io.in.bits.ctrl.pdest, io.in.fire), csrModOutValid, 3)._2
   io.out.bits.ctrl.rfWen.foreach(_ := Mux(isXRetReg, rfWenReg, DelayNWithValid(rfWenReg, csrModOutValid, 3)._2))
@@ -365,6 +366,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // Branch predictor
       custom.bp_ctrl                  := csrMod.io.status.custom.bp_ctrl
       // Memory Block
+      custom.sbuffer_timeout                  := csrMod.io.status.custom.sbuffer_timeout
       custom.sbuffer_threshold                := csrMod.io.status.custom.sbuffer_threshold
       custom.ldld_vio_check_enable            := csrMod.io.status.custom.ldld_vio_check_enable
       custom.soft_prefetch_enable             := csrMod.io.status.custom.soft_prefetch_enable

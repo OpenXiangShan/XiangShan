@@ -105,6 +105,7 @@ class SlvpredctlBundle extends CSRBundle {
 }
 
 class SmblockctlBundle extends CSRBundle {
+  val SBUFFER_TIMEOUT                  = SbufferTimeout(31, 10).withReset(SbufferTimeout.initValue) // Store buffer flush timeout.
   val HD_MISALIGN_LD_ENABLE            = RW(   9).withReset(true.B)  // Enable hardware load misalign.
   val HD_MISALIGN_ST_ENABLE            = RW(   8).withReset(true.B)  // Enable hardware store misalign.
   val UNCACHE_WRITE_OUTSTANDING_ENABLE = RW(   7).withReset(false.B)  // Enable uncache write outstanding (0).
@@ -130,6 +131,10 @@ class MflushpwrBundle extends CSRBundle {
 
 object SbufferThreshold extends CSREnum with RWApply {
   val initValue = Value(7.U)
+}
+
+object SbufferTimeout extends CSREnum with RWApply {
+  val initValue = Value((1<<20).U)
 }
 
 object SpfctlL1DPfActiveStride extends CSREnum with RWApply {

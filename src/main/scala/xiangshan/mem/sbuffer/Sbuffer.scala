@@ -284,7 +284,7 @@ class Sbuffer(implicit p: Parameters)
   // insert and merge: cohCount=0
   // every cycle cohCount+=1
   // if cohCount(EvictCountBits-1)==1, evict
-  val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
+  val cohTimeOutMask = VecInit(widthMap(i => cohCount(i) >= io.csrCtrl.sbuffer_timeout && stateVec(i).isActive()))
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
   val cohTimeOutOH = PriorityEncoderOH(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))

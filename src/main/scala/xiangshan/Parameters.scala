@@ -292,7 +292,7 @@ case class XSCoreParameters
     "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
     // multi-letter extensions, sorted alphanumerically
     "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
-    "shvstvecd", "smaia", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
+    "shvstvecd", "smaia", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
     "ss1p13", "ssaia", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
     "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zawrs", "zba",

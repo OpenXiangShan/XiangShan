@@ -40,9 +40,9 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
   }
 
   class ToExus extends Bundle {
-    val int: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputCopySrcBundle
-    val fp : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = fpSchdParams.genExuInputCopySrcBundle
-    val vf : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = vecSchdParams.genExuInputCopySrcBundle
+    val int: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = intSchdParams.genNewExuInputCopySrcBundle
+    val fp : MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = fpSchdParams.genNewExuInputCopySrcBundle
+    val vf : MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = vecSchdParams.genNewExuInputCopySrcBundle
   }
 
   class FromExus extends Bundle {
@@ -53,15 +53,20 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     def connectExuOutput(
       getSinkVecN: FromExus => MixedVec[MixedVec[ValidIO[ExuBypassBundle]]]
     )(
-      sourceVecN: MixedVec[MixedVec[DecoupledIO[ExuOutput]]]
+      sourceVecN: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]]
     ): Unit = {
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
-          sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.intWen.getOrElse(false.B)
-          sink.bits.intWen := source.bits.intWen.getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
+          sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.toIntRf.map(_.valid).getOrElse(false.B)
+          sink.bits.intWen := source.bits.toIntRf.map(_.valid).getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
           sink.bits.pdest := source.bits.pdest
           // int i2f wakeup fstore from fpRegion, so there is not need bypass fp data in int region
-          sink.bits.data := source.bits.data(source.bits.params.getForwardIndex())
+          sink.bits.data := {if (source.bits.params.isIntExeUnit) { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
+                        else if (source.bits.params.isFpExeUnit)  { source.bits.toFpRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
+                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVecRf) { source.bits.toVecRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
+                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeV0Rf)  { source.bits.toV0Rf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
+                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVlRf)  { source.bits.toVlRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
+                        else { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }} 
         }
       }
     }
@@ -76,7 +81,11 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
 
   private val fromDPs: Seq[DecoupledIO[ExuInput]] = (io.fromDataPath.int ++ io.fromDataPath.fp ++ io.fromDataPath.vf).flatten.toSeq
   private val fromExus: Seq[ValidIO[ExuBypassBundle]] = (io.fromExus.int ++ io.fromExus.fp ++ io.fromExus.vf).flatten.toSeq
-  private val toExus: Seq[DecoupledIO[ExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf).flatten.toSeq
+  private val toExusInt: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Wire(params.intSchdParams.get.genExuInputCopySrcBundle)
+  private val toExusFp: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Wire(params.fpSchdParams.get.genExuInputCopySrcBundle)
+  private val toExusVf: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Wire(params.vecSchdParams.get.genExuInputCopySrcBundle)
+  private val toExus: Seq[DecoupledIO[ExuInput]] = (toExusInt ++ toExusFp ++ toExusVf).flatten.toSeq
+  private val toNewExus: Seq[DecoupledIO[NewExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf).flatten.toSeq
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
   private val immInfo = io.fromDataPath.immInfo
 
@@ -205,14 +214,14 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     }
     exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
 
-    if (exuParm.hasBrhFu) {
+    if (exuParm.hasBrhFu || exuParm.hasCSR || exuParm.hasFence) {
       val thisPcOffset = exuInput.bits.getPcOffset()
       val nextPcOffset = exuInput.bits.getNextPcOffset()
       val isJALR = FuType.isJump(fuType) && JumpOpType.jumpOpisJalr(fuOpType)
       val immBJU = imm + Mux(isJALR, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = immInfo(exuIdx).imm
       exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType))&& exuParm.hasCSR.B, immCsrFence, immBJU)
-      exuInput.bits.nextPcOffset.get := nextPcOffset
+      exuInput.bits.nextPcOffset.foreach(_ := nextPcOffset)
       dontTouch(isJALR)
       dontTouch(immBJU)
       dontTouch(immCsrFence)
@@ -305,4 +314,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     x.data := bypassRCDataVec(i)
     x.tag.foreach(_ := bypassTagVec(i))
   }
+
+  toNewExus.zip(toExus).foreach { case (sink, source) => connectNewExuInput(sink, source) }
 }

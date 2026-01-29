@@ -1315,6 +1315,26 @@ class NewCSR(implicit val p: Parameters) extends Module
       m.lcofiReq := lcofiReq
     case _ =>
   }
+  // Smcntrpmf extension
+  mcycle match {
+    case m: SmcntrpmfBundle =>
+      m.countingEn := (privState.isModeM && !mcyclecfg.regOut.MINH) ||
+        (privState.isModeHS && !mcyclecfg.regOut.SINH)  ||
+        (privState.isModeHU && !mcyclecfg.regOut.UINH)  ||
+        (privState.isModeVS && !mcyclecfg.regOut.VSINH) ||
+        (privState.isModeVU && !mcyclecfg.regOut.VUINH)
+    case _ =>
+  }
+
+  minstret match {
+    case m: SmcntrpmfBundle =>
+      m.countingEn := (privState.isModeM && !minstretcfg.regOut.MINH) ||
+        (privState.isModeHS && !minstretcfg.regOut.SINH)  ||
+        (privState.isModeHU && !minstretcfg.regOut.UINH)  ||
+        (privState.isModeVS && !minstretcfg.regOut.VSINH) ||
+        (privState.isModeVU && !minstretcfg.regOut.VUINH)
+    case _ =>
+  }
   /**
    * perf_end
    */
@@ -1353,6 +1373,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.bp_ctrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
   io.status.custom.bp_ctrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
 
+  io.status.custom.sbuffer_timeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
   io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
   io.status.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
   io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
