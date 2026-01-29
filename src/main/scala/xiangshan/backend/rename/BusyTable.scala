@@ -90,7 +90,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     case VfWB(_, _) => allWakeUp.filter(_.bits.params.writeVfRf)
     case V0WB(_, _) => allWakeUp.filter(_.bits.params.writeV0Rf)
     // avoid load fast wakes, since load cancel signal not connected to vlbusytable, may have bug for vsetvli
-    case VlWB(_, _) => allWakeUp.filter(x => false)
+    case VlWB(_, _) => allWakeUp.filter(_.bits.params.writeVlRf)
     case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
   }
   val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
