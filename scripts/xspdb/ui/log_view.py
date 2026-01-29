@@ -9,12 +9,22 @@ from .stream_render import StreamRenderer
 
 
 class LogView:
-    def __init__(self, app, level_prefix, level_style, sanitize_fn, render_strip_fn):
+    _LEVEL_ORDER = {
+        "debug": 10,
+        "message": 20,
+        "info": 20,
+        "warn": 30,
+        "warning": 30,
+        "error": 40,
+    }
+
+    def __init__(self, app, level_prefix, level_style, sanitize_fn, render_strip_fn, min_level="info"):
         self._app = app
         self._level_prefix = level_prefix
         self._level_style = level_style
         self._sanitize = sanitize_fn
         self._render_strip = render_strip_fn
+        self._min_level = min_level
         self._log_console = None
         self._stream_console = None
         self._stream_renderer = None
@@ -31,8 +41,19 @@ class LogView:
         self._stream_console = stream_console
         self._stream_renderer = StreamRenderer(stream_console, self._render_strip)
 
+    def set_min_level(self, level: str) -> None:
+        if level:
+            self._min_level = level
+
+    def _level_allowed(self, level: str) -> bool:
+        min_order = self._LEVEL_ORDER.get(self._min_level, 20)
+        level_order = self._LEVEL_ORDER.get(level, 20)
+        return level_order >= min_order
+
     def log_line(self, text, level="message", replace: bool = False) -> None:
         if not text:
+            return
+        if not self._level_allowed(level):
             return
         prefix = self._level_prefix.get(level, "")
         if prefix:
