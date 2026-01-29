@@ -1154,27 +1154,33 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
     val s1Req = RegEnable(s0Req, s0ReqValid)
-    val mshrId = s1Req.mshrId
+    val mshrIdOH = UIntToOH(s1Req.mshrId)
     val paddr = forward.s1Req.paddr
-    val mshrForwardInfo = forwardInfo_vec(mshrId)
+//    val mshrForwardInfo = forwardInfo_vec(mshrId)
 
-    val paddrMatch = (paddr >> blockOffBits) === (mshrForwardInfo.paddr >> blockOffBits)
-    val beatMatch = Mux(
-      paddr(log2Up(refillBytes)).asBool,
-      mshrForwardInfo.lastbeat_valid,
-      mshrForwardInfo.firstbeat_valid
-    )
+    val s1PaddrMatchVec = VecInit(forwardInfo_vec.map{ case info =>
+      paddr(paddr.getWidth - 1, blockOffBits) === info.paddr(paddr.getWidth - 1, blockOffBits) &&
+      info.inflight})
+    val s1BeatMatchVec  = VecInit(forwardInfo_vec.map{ case info =>
+      Mux(paddr(log2Up(refillBytes)).asBool,
+        info.lastbeat_valid,
+        info.firstbeat_valid
+    )})
+    val s1SelectOH     = s1PaddrMatchVec.asUInt & s1BeatMatchVec.asUInt
+    val s1MshrForwardInfo = Mux1H(s1SelectOH, forwardInfo_vec)
     val s1RespData = VecInit(
-      mshrForwardInfo.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
+      s1MshrForwardInfo.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
     )(paddr(blockOffBits - 1, log2Up(VLEN / 8)))
-    val s1RespValid = s1ReqValid && mshrForwardInfo.inflight && paddrMatch && beatMatch
+    val s1RespValid = s1ReqValid && s1SelectOH.orR
+
 
     forward.s2Resp.valid := RegNext(s1RespValid)
     forward.s2Resp.bits.matchInvalid := false.B
     forward.s2Resp.bits.forwardData := RegEnable(s1RespData.asTypeOf(forward.s2Resp.bits.forwardData), s1ReqValid)
-    forward.s2Resp.bits.denied := RegEnable(mshrForwardInfo.denied, s1ReqValid)
-    forward.s2Resp.bits.corrupt := RegEnable(mshrForwardInfo.corrupt, s1ReqValid)
-    io.forwardS1PAddrMatch(i) := s1ReqValid && mshrForwardInfo.inflight && paddrMatch
+    forward.s2Resp.bits.denied := RegEnable(s1MshrForwardInfo.denied, s1ReqValid)
+    forward.s2Resp.bits.corrupt := RegEnable(s1MshrForwardInfo.corrupt, s1ReqValid)
+    io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec.asUInt).orR
+    XSError(((s1SelectOH - 1.U) & s1SelectOH).orR, "multi mshr hit when forward!\n")
   }
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
