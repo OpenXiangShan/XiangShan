@@ -25,10 +25,9 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
-import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
@@ -148,7 +147,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val lfst = new DispatchLFSTIO
 
     // perf only
-    val robHead = Input(new DynInst)
+    val robHeadFuType = Input(FuType())
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
     val lqCanAccept = Input(Bool())
     val sqCanAccept = Input(Bool())
@@ -776,7 +775,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val isBlockBackward  = VecInit(fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(fromRename.map(x => x.valid && x.bits.waitForward))
 
-  val updatedUop = Wire(Vec(RenameWidth, new DynInst))
+  val updatedUop = Wire(Vec(RenameWidth, new RenameOutUop))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     fromRename(i).fire
@@ -785,8 +784,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   for (i <- 0 until RenameWidth) {
 
-    updatedUop(i).connectRenameOutUop(fromRename(i).bits)
-    updatedUop(i).perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove
+    updatedUop(i) := fromRename(i).bits
+    updatedUop(i).debug.foreach { debug => debug.perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove}
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
@@ -880,11 +879,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     // needAlloc no use, need deleted
     io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
-    io.enqRob.req(i).bits := updatedUop(i)
-    io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
-    io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
-    io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
-    io.enqRob.req(i).bits.stdwriteNeed := FuType.isStore(updatedUop(i).fuType)
+    io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
   }
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
@@ -938,12 +933,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
-    val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
-    val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
-    val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
-    val headIsLd  = io.robHead.getDebugFuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
-    val headIsSt  = io.robHead.getDebugFuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
-    val headIsAmo = io.robHead.getDebugFuType === FuType.mou.U && io.robHeadNotReady
+    val headIsInt = FuType.isInt(io.robHeadFuType)  && io.robHeadNotReady
+    val headIsFp  = FuType.isFArith(io.robHeadFuType)   && io.robHeadNotReady
+    val headIsDiv = FuType.isDivSqrt(io.robHeadFuType) && io.robHeadNotReady
+    val headIsLd  = io.robHeadFuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
+    val headIsSt  = io.robHeadFuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
+    val headIsAmo = io.robHeadFuType === FuType.mou.U && io.robHeadNotReady
     val headIsLs  = headIsLd || headIsSt
     val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
 
