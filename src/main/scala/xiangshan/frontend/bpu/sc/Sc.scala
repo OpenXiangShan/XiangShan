@@ -234,6 +234,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     s1_sumPercsum.length == NumWays,
     s"s1_sumPercsum length ${s1_sumPercsum.length} != NumWays $NumWays"
   )
+  private val s1_totalPercsumAll = VecInit(s1_biasPercsum.zipWithIndex.map {
+    case (biasPercsum, wayIdx) =>
+      val idx = wayIdx >> BiasUseTageBitWidth
+      biasPercsum +& s1_sumPercsum(idx)
+  }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
+
+  private val Seq(s1_sumAboveThresholdShift1All, s1_sumAboveThresholdShift2All, s1_sumAboveThresholdShift3All) =
+    Seq(4, 5, 6).map(shiftRight =>
+      VecInit(s1_totalPercsumAll.zipWithIndex.map { case (vec, idx) =>
+        VecInit(vec.map(percsum =>
+          aboveThreshold(percsum, scThreshold(idx).value >> shiftRight)
+        ))
+      })
+    )
 
   /*
    *  predict pipeline stage 2
@@ -279,9 +293,23 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_imliPred   = s2_wayIdx.map(wayIdx => s2_imliPercsum(wayIdx) >= 0.S)       // for performance counter
   private val s2_biasPred   = s2_biasWayIdx.map(biasIdx => s2_biasPercsum(biasIdx) >= 0.S) // for performance counter
 
-  private val s2_totalPercsum = VecInit(s2_wayIdx.zip(s2_biasWayIdx).map {
-    case (wayIdx, biasIdx) =>
-      s2_sumPercsum(wayIdx) +& s2_biasPercsum(biasIdx)
+  private val s2_totalPercsumAll            = RegEnable(s1_totalPercsumAll, s1_fire)
+  private val s2_sumAboveThresholdShift1All = RegEnable(s1_sumAboveThresholdShift1All, s1_fire)
+  private val s2_sumAboveThresholdShift2All = RegEnable(s1_sumAboveThresholdShift2All, s1_fire)
+  private val s2_sumAboveThresholdShift3All = RegEnable(s1_sumAboveThresholdShift3All, s1_fire)
+
+  private val s2_totalPercsum = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_totalPercsumAll(wayIdx)(lowBits)
+  })
+
+  private val s2_sumAboveThresholdShift1 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift1All(wayIdx)(lowBits)
+  })
+  private val s2_sumAboveThresholdShift2 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift2All(wayIdx)(lowBits)
+  })
+  private val s2_sumAboveThresholdShift3 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift3All(wayIdx)(lowBits)
   })
 
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
@@ -298,12 +326,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
     val tageConfMid  = s2_providerCtr(i).isMid
     val tageConfLow  = s2_providerCtr(i).isWeak
+
     val conf = MuxCase(
       false.B,
       Seq(
-        (predValid && tageConfHigh) -> aboveThreshold(sum, thres >> 1),
-        (predValid && tageConfMid)  -> aboveThreshold(sum, thres >> 2),
-        (predValid && tageConfLow)  -> aboveThreshold(sum, thres >> 3)
+        (predValid && tageConfHigh) -> s2_sumAboveThresholdShift1(i),
+        (predValid && tageConfMid)  -> s2_sumAboveThresholdShift2(i),
+        (predValid && tageConfLow)  -> s2_sumAboveThresholdShift3(i)
       )
     )
     s2_useScPred(i)     := conf
