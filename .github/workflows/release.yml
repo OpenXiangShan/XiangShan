@@ -2,9 +2,9 @@ name: Release Jobs
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, kunminghu-v3 ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, kunminghu-v3 ]
 
 jobs:
   build-xsdev-image:
@@ -81,7 +81,7 @@ jobs:
           cd XSPdb
           make pdb-run
       - name: upload compressed XSPdb package (pr merge only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/kunminghu-v3')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FILE_NAME }}
