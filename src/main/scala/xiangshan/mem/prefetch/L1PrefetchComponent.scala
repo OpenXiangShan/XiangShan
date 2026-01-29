@@ -367,7 +367,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val sent_vec = UInt(BIT_VEC_WITDH.W)
   val sink = UInt(SINK_BITS.W)
-  val alias = UInt(2.W)
   val is_vaddr = Bool()
   val source = new L1PrefetchSource()
   val debug_va_region = UInt(REGION_TAG_BITS.W)
@@ -379,7 +378,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     bit_vec := 0.U
     sent_vec := 0.U
     sink := SINK_L1
-    alias := 0.U
     is_vaddr := false.B
     source.value := L1_HW_PREFETCH_NULL
     debug_va_region := 0.U
@@ -410,7 +408,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     !valid || RegNext(PopCount(sent_vec) === BIT_VEC_WITDH.U)
   }
 
-  def get_pf_addr(): UInt = {
+  def get_pf_paddr(): UInt = {
     require(PAddrBits <= VAddrBits)
     require((region.getWidth + REGION_BITS + BLOCK_OFFSET) == VAddrBits)
 
@@ -418,7 +416,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     Cat(region, candidate, 0.U(BLOCK_OFFSET.W))
   }
 
-  def get_pf_debug_vaddr(): UInt = {
+  def get_pf_vaddr(): UInt = {
     val candidate = PriorityEncoder(bit_vec & ~sent_vec).asTypeOf(UInt(REGION_BITS.W))
     Cat(debug_va_region, candidate, 0.U(BLOCK_OFFSET.W))
   }
@@ -429,7 +427,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   }
 
   def fromStreamPrefetchReqBundle(x : StreamPrefetchReqBundle): MLPReqFilterBundle = {
-    require(PAGE_OFFSET >= REGION_TAG_OFFSET, "region is greater than 4k, alias bit may be incorrect")
 
     val res = Wire(new MLPReqFilterBundle)
     res.tag := region_hash_tag(x.region)
@@ -439,7 +436,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res.sink := x.sink
     res.is_vaddr := true.B
     res.source := x.source
-    res.alias := x.region(PAGE_OFFSET - REGION_TAG_OFFSET + 1, PAGE_OFFSET - REGION_TAG_OFFSET)
     res.debug_va_region := x.region
     res.confidence := x.confidence
 
@@ -802,12 +798,12 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   for(i <- 0 until MLP_L1_SIZE) {
     val evict = s1_l1_alloc && (s1_l1_index === i.U)
     l1_pf_req_arb.io.in(i).valid := l1_array(i).can_send_pf(l1_valids(i)) && l1_array(i).sink === SINK_L1 && !evict
-    l1_pf_req_arb.io.in(i).bits.req.paddr := l1_array(i).get_pf_addr()
-    l1_pf_req_arb.io.in(i).bits.req.alias := l1_array(i).alias
+    l1_pf_req_arb.io.in(i).bits.req.paddr := l1_array(i).get_pf_paddr()
+    l1_pf_req_arb.io.in(i).bits.req.vaddr := l1_array(i).get_pf_vaddr()
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
-    l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_debug_vaddr()
+    l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr()
   }
 
   when(s0_pf_fire) {
@@ -851,12 +847,12 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   for(i <- 0 until MLP_L2L3_SIZE) {
     val evict = s1_l2_alloc && (s1_l2_index === i.U)
     l2_pf_req_arb.io.in(i).valid := l2_array(i).can_send_pf(l2_valids(i)) && (l2_array(i).sink === SINK_L2) && !evict
-    l2_pf_req_arb.io.in(i).bits.req.addr := l2_array(i).get_pf_addr()
+    l2_pf_req_arb.io.in(i).bits.req.addr := l2_array(i).get_pf_paddr()
     l2_pf_req_arb.io.in(i).bits.req.source := MuxLookup(l2_array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))
-    l2_pf_req_arb.io.in(i).bits.debug_vaddr := l2_array(i).get_pf_debug_vaddr()
+    l2_pf_req_arb.io.in(i).bits.debug_vaddr := l2_array(i).get_pf_vaddr()
   }
 
   when(l2_pf_req_arb.io.out.valid) {
@@ -896,7 +892,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   for(i <- 0 until MLP_L2L3_SIZE) {
     val evict = s1_l2_alloc && (s1_l2_index === i.U)
     l3_pf_req_arb.io.in(i).valid := l2_array(i).can_send_pf(l2_valids(i)) && (l2_array(i).sink === SINK_L3) && !evict
-    l3_pf_req_arb.io.in(i).bits.addr := l2_array(i).get_pf_addr()
+    l3_pf_req_arb.io.in(i).bits.addr := l2_array(i).get_pf_paddr()
     l3_pf_req_arb.io.in(i).bits.source := MuxLookup(l2_array(i).source.value, MemReqSource.Prefetch2L3Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L3Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L3Stream.id.U
