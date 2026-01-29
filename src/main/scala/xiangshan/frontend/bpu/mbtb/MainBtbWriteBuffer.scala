@@ -101,6 +101,37 @@ class MainBtbWriteBuffer(
     )
   }
 
+  //  read buffer entry
+  for (nRows <- 0 until numPorts) {
+    val replacer = ReplacementPolicy.fromString("plru", numEntries)
+    readReadyVec(nRows) := io.read(nRows).ready
+    readValidVec(nRows) := needWrite(nRows)
+    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
+    fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
+    val readIdx = PriorityEncoder(readValidVec(nRows))
+
+    io.write(nRows).ready := !fullVec(nRows)
+    io.read(nRows).valid  := !emptyVec(nRows)
+    io.read(nRows).bits   := DontCare
+
+    when(readReadyVec(nRows) && !emptyVec(nRows)) {
+      io.read(nRows).bits       := entries(nRows)(readIdx)
+      needWrite(nRows)(readIdx) := false.B
+    }
+    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
+    replacerWay(nRows) := replacer.way
+    replacer.access(touchWays)
+
+    XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
+    XSPerfHistogram(
+      f"${namePrefix}_port${nRows}_useful",
+      PopCount(readValidVec(nRows)),
+      readReadyVec(nRows),
+      0,
+      numEntries
+    )
+  }
+
   /**
    * Write request processing cases:
    * 1. Write req miss
@@ -170,6 +201,9 @@ class MainBtbWriteBuffer(
           when(hitNotWritten) {
             entry.shared := write.shared
             isValid      := true.B
+            when(sharedChange) {
+              isNeedWrite := true.B
+            }
           }.elsewhen(hitWritten && sharedChange) {
             entry.shared := write.shared
             isValid      := true.B
@@ -184,6 +218,9 @@ class MainBtbWriteBuffer(
           }.elsewhen(hitNotWritten) {
             entry.shared := write.shared
             isValid      := true.B
+            when(sharedChange) {
+              isNeedWrite := true.B
+            }
           }.elsewhen(hitWritten && sharedChange) {
             entry.shared           := write.shared
             entry.status.writeType := MainBtbWriteStatus.WriteType.Shared // only need to write shared info
@@ -202,6 +239,9 @@ class MainBtbWriteBuffer(
           when(hitNotWritten) {
             entry   := write
             isValid := true.B
+            when(wholeChange) {
+              isNeedWrite := true.B
+            }
           }.elsewhen(hitWritten && wholeChange) {
             entry       := write
             isValid     := true.B
@@ -217,34 +257,4 @@ class MainBtbWriteBuffer(
 
   }
 
-  //  read buffer entry
-  for (nRows <- 0 until numPorts) {
-    val replacer = ReplacementPolicy.fromString("plru", numEntries)
-    readReadyVec(nRows) := io.read(nRows).ready
-    readValidVec(nRows) := needWrite(nRows)
-    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
-    fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
-    val readIdx = PriorityEncoder(readValidVec(nRows))
-
-    io.write(nRows).ready := !fullVec(nRows)
-    io.read(nRows).valid  := !emptyVec(nRows)
-    io.read(nRows).bits   := DontCare
-
-    when(readReadyVec(nRows) && !emptyVec(nRows)) {
-      io.read(nRows).bits       := entries(nRows)(readIdx)
-      needWrite(nRows)(readIdx) := false.B
-    }
-    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
-    replacerWay(nRows) := replacer.way
-    replacer.access(touchWays)
-
-    XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
-    XSPerfHistogram(
-      f"${namePrefix}_port${nRows}_useful",
-      PopCount(readValidVec(nRows)),
-      readReadyVec(nRows),
-      0,
-      numEntries
-    )
-  }
 }
