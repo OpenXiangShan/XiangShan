@@ -384,10 +384,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   })
 
   (0 until PortNumber).foreach { i =>
-    toMissArbiter.io.in(i).valid         := s1_valid && s1_shouldFetch(i) && !s1_hasSend(i) && !s1_flush
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
-    toMissArbiter.io.in(i).bits.vSetIdx  := s1_vSetIdx(i)
-    toMissArbiter.io.in(i).bits.ftqIdx   := s1_ftqIdx
+    toMissArbiter.io.in(i).valid           := s1_valid && s1_shouldFetch(i) && !s1_hasSend(i) && !s1_flush
+    toMissArbiter.io.in(i).bits.blkPAddr   := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
+    toMissArbiter.io.in(i).bits.vSetIdx    := s1_vSetIdx(i)
+    toMissArbiter.io.in(i).bits.ftqIdx     := s1_ftqIdx
     toMissArbiter.io.in(i).bits.isNextLine := false.B
   }
   toMiss.valid               := toMissArbiter.io.out.valid

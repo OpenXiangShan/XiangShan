@@ -55,6 +55,9 @@ trait Helpers extends HasPrefetchBtbParameters
   def getBlockPcUpper(pc: PrunedAddr): UInt =
     pc(pc.length - 1, FetchBlockSizeWidth)
 
+  def getPosition(pc: PrunedAddr): UInt =
+    addrFields.extract("position", pc)
+
   def getBlockPc(pc: PrunedAddr): PrunedAddr =
     PrunedAddrInit(Cat(
       getBlockPcUpper(pc),

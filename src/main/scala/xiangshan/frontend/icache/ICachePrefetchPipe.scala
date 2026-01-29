@@ -445,10 +445,10 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }
 
   (0 until PortNumber).foreach { i =>
-    toMissArbiter.io.in(i).valid         := s2_valid && s2_miss(i) && !s2_hasSend(i)
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
-    toMissArbiter.io.in(i).bits.vSetIdx  := s2_vSetIdx(i)
-    toMissArbiter.io.in(i).bits.ftqIdx   := s2_ftqIdx
+    toMissArbiter.io.in(i).valid           := s2_valid && s2_miss(i) && !s2_hasSend(i)
+    toMissArbiter.io.in(i).bits.blkPAddr   := getBlkAddrFromPTag(s2_vAddr(i), s2_pTag)
+    toMissArbiter.io.in(i).bits.vSetIdx    := s2_vSetIdx(i)
+    toMissArbiter.io.in(i).bits.ftqIdx     := s2_ftqIdx
     toMissArbiter.io.in(i).bits.isNextLine := false.B
 
   }
