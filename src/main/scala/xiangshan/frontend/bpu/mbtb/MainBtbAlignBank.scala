@@ -52,28 +52,19 @@ class MainBtbAlignBank(
       val resp: Resp = Output(new Resp)
     }
 
-    class WriteEntry extends Bundle {
+    class Write extends Bundle {
       class Req extends Bundle {
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc: PrunedAddr        = new PrunedAddr(VAddrBits)
-        val wayMask: UInt              = UInt(NumWay.W)
-        val entry:   MainBtbEntry      = new MainBtbEntry
-        val shared:  MainBtbSharedInfo = new MainBtbSharedInfo
+        val startPc: PrunedAddr              = new PrunedAddr(VAddrBits)
+        val wayMask: UInt                    = UInt(NumWay.W)
+        val entries: Vec[MainBtbEntry]       = Vec(NumWay, new MainBtbEntry)
+        val shareds: Vec[MainBtbSharedInfo]  = Vec(NumWay, new MainBtbSharedInfo)
+        val status:  Vec[MainBtbWriteStatus] = Vec(NumWay, new MainBtbWriteStatus)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
-    class WriteShared extends Bundle {
-      class Req extends Bundle {
-        // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc: PrunedAddr             = new PrunedAddr(VAddrBits)
-        val wayMask: UInt                   = UInt(NumWay.W)
-        val shareds: Vec[MainBtbSharedInfo] = Vec(NumWay, new MainBtbSharedInfo)
-      }
-
-      val req: Valid[Req] = Flipped(Valid(new Req))
-    }
     class Trace extends Bundle {
       val needWrite: Bool         = Bool()
       val setIdx:    UInt         = UInt(SetIdxLen.W)
@@ -85,19 +76,17 @@ class MainBtbAlignBank(
     val resetDone: Bool      = Output(Bool())
     val stageCtrl: StageCtrl = Input(new StageCtrl)
 
-    val read:        Read        = new Read
-    val writeEntry:  WriteEntry  = new WriteEntry
-    val writeShared: WriteShared = new WriteShared
-    val trace:       Trace       = new Trace
+    val read:  Read  = new Read
+    val write: Write = new Write
+    val trace: Trace = new Trace
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
 
   // alias
-  private val r  = io.read
-  private val we = io.writeEntry
-  private val ws = io.writeShared
-  private val t  = io.trace
+  private val r = io.read
+  private val w = io.write
+  private val t = io.trace
 
   private val internalBanks = Seq.tabulate(NumInternalBanks) { bankIdx =>
     Module(new MainBtbInternalBank(alignIdx, bankIdx))
@@ -124,7 +113,7 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
+    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i) //  && !io.redirectValid
     b.io.read.req.bits.setIdx := s0_setIdx
   }
 
@@ -191,7 +180,8 @@ class MainBtbAlignBank(
     // send rawHit for training
     val rawHit = e.valid && tagHit
     // filter out branches before alignedInstOffset
-    // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
+    // also filter out all entries
+    // - if crossPage to satisfy Ifu/ICache's requirement
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
     pred.valid            := hit
     pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
@@ -217,46 +207,25 @@ class MainBtbAlignBank(
   /* *** t1 ***
    * send write req to internal banks (srams)
    */
-  private val t1_entryValid   = we.req.valid
-  private val t1_entryStartPc = we.req.bits.startPc
-//  private val t1_branches         = w.req.bits.branches
-//  private val t1_meta             = w.req.bits.meta
-//  private val t1_mispredictInfo   = w.req.bits.mispredictInfo
-  private val t1_entryWayMask          = we.req.bits.wayMask
-  private val t1_entry                 = we.req.bits.entry
-  private val t1_entryShared           = we.req.bits.shared
-  private val t1_entrySetIdx           = getSetIndex(t1_entryStartPc)
-  private val t1_entryInternalBankIdx  = getInternalBankIndex(t1_entryStartPc)
-  private val t1_entryInternalBankMask = UIntToOH(t1_entryInternalBankIdx, NumInternalBanks)
-  private val t1_entryAlignBankIdx     = getAlignBankIndex(t1_entryStartPc)
+  private val t1_valid   = w.req.valid
+  private val t1_startPc = w.req.bits.startPc
+  private val t1_wayMask = w.req.bits.wayMask
+  private val t1_entries = w.req.bits.entries
+  private val t1_shareds = w.req.bits.shareds
+  private val t1_status  = w.req.bits.status
 
-  // similar to s0 case
-  assert(!t1_entryValid || t1_entryAlignBankIdx === alignIdx.U, "t1 MainBtbAlignBank alignIdx mismatch")
+  private val t1_setIdx           = getSetIndex(t1_startPc)
+  private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
+  private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
+  private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.writeEntry.req.valid        := t1_entryValid && t1_entryInternalBankMask(i)
-    b.io.writeEntry.req.bits.setIdx  := t1_entrySetIdx
-    b.io.writeEntry.req.bits.wayMask := t1_entryWayMask
-    b.io.writeEntry.req.bits.entry   := t1_entry
-    b.io.writeEntry.req.bits.shared  := t1_entryShared
-  }
-
-  private val t1_sharedValid            = ws.req.valid
-  private val t1_sharedStartPc          = ws.req.bits.startPc
-  private val t1_sharedWayMask          = ws.req.bits.wayMask
-  private val t1_shareds                = ws.req.bits.shareds
-  private val t1_sharedSetIdx           = getSetIndex(t1_sharedStartPc)
-  private val t1_sharedInternalBankIdx  = getInternalBankIndex(t1_sharedStartPc)
-  private val t1_sharedInternalBankMask = UIntToOH(t1_sharedInternalBankIdx, NumInternalBanks)
-  private val t1_sharedAlignBankIdx     = getAlignBankIndex(t1_sharedStartPc)
-
-  assert(!t1_sharedValid || t1_sharedAlignBankIdx === alignIdx.U, "t2 MainBtbAlignBank alignIdx mismatch")
-
-  internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.writeShared.req.valid        := t1_sharedValid && t1_sharedInternalBankMask(i)
-    b.io.writeShared.req.bits.setIdx  := t1_sharedSetIdx
-    b.io.writeShared.req.bits.wayMask := t1_sharedWayMask
-    b.io.writeShared.req.bits.shareds := t1_shareds
+    b.io.write.req.valid        := t1_valid && t1_internalBankMask(i)
+    b.io.write.req.bits.setIdx  := t1_setIdx
+    b.io.write.req.bits.wayMask := t1_wayMask
+    b.io.write.req.bits.entries := t1_entries
+    b.io.write.req.bits.shareds := t1_shareds
+    b.io.write.req.bits.status  := t1_status
   }
 
   /* *** multi-hit detection & flush *** */
@@ -269,9 +238,15 @@ class MainBtbAlignBank(
   }
 
   // mainBTB trace bundle
-  io.trace.needWrite := t1_entryValid
-  io.trace.setIdx    := t1_entrySetIdx
-  io.trace.bankIdx   := t1_entryInternalBankIdx
+  private val t1_entryWayMask = VecInit.tabulate(NumWay) { i =>
+    t1_wayMask(i) &&
+    t1_status(i).isWriteAll
+  }
+  private val t1_entry = Mux1H(t1_entryWayMask, t1_entries)
+
+  io.trace.needWrite := t1_valid && t1_entryWayMask.asUInt.orR
+  io.trace.setIdx    := t1_setIdx
+  io.trace.bankIdx   := t1_internalBankIdx
   io.trace.wayIdx    := PriorityEncoder(t1_entryWayMask.asUInt)
   io.trace.entry     := t1_entry
   XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)

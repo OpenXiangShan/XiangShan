@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utils.EnumUInt
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
@@ -25,7 +26,6 @@ import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
-import xiangshan.frontend.bpu.WriteReqBundle
 
 object TakenCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -102,22 +102,41 @@ class MainBtbRegionTableEntry(implicit p: Parameters) extends MainBtbBundle {
   val vpnUpper: UInt = UInt(VpnUpperWidth.W)
 }
 
-class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx: UInt              = UInt(SetIdxLen.W)
-  val entry:  MainBtbEntry      = new MainBtbEntry
-  val shared: MainBtbSharedInfo = new MainBtbSharedInfo
-  override def tag: Option[UInt] =
-    Some(Cat(
-      // if not cross page, i.e. a short branch, use full tag
-      Mux(!entry.targetCrossPage, shared.asShort.tagUpper, 0.U),
-      entry.tagLower,
-      entry.position
-    ))
+class MainBtbWriteStatus extends Bundle {
+  val writeType: UInt = MainBtbWriteStatus.WriteType()
+  val reqType:   UInt = MainBtbWriteStatus.ReqType()
+
+  def isWriteAll:    Bool = writeType === MainBtbWriteStatus.WriteType.All
+  def isWriteShared: Bool = writeType === MainBtbWriteStatus.WriteType.Shared
+  def isReqOverride: Bool = reqType === MainBtbWriteStatus.ReqType.Override
+  def isReqUpdate:   Bool = reqType === MainBtbWriteStatus.ReqType.Update
 }
 
-class MainBtbSharedSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
-  val setIdx: UInt              = UInt(SetIdxLen.W)
-  val shared: MainBtbSharedInfo = new MainBtbSharedInfo
+object MainBtbWriteStatus {
+  object WriteType extends EnumUInt(2) {
+    def All:    UInt = 0.U(width.W)
+    def Shared: UInt = 1.U(width.W)
+  }
+  object ReqType extends EnumUInt(2) {
+    def Override: UInt = 0.U(width.W)
+    def Update:   UInt = 1.U(width.W)
+  }
+}
+
+class MainBtbWriteReq(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx: UInt               = UInt(SetIdxLen.W)
+  val entry:  MainBtbEntry       = new MainBtbEntry
+  val shared: MainBtbSharedInfo  = new MainBtbSharedInfo
+  val status: MainBtbWriteStatus = new MainBtbWriteStatus
+
+  def getOverrideTag: UInt = Cat(
+    // if not cross page, i.e. a short branch, use full tag
+    Mux(!entry.targetCrossPage, shared.asShort.tagUpper, 0.U),
+    entry.tagLower,
+    entry.position
+  )
+
+  def getUpdateTag: UInt = Cat(entry.position, entry.attribute.asUInt)
 }
 
 class MainBtbPageTableEntrySramWriteReq(implicit p: Parameters) extends MainBtbBundle {
