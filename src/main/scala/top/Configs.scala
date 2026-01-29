@@ -472,7 +472,7 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
             EnableTraceAndDebug = true,
           ),
           mbtbParameters = p.frontendParameters.bpuParameters.mbtbParameters.copy(
-            EnableMainbtbTrace = true,
+            EnableMainBtbTrace = true,
           ),
           tageParameters = p.frontendParameters.bpuParameters.tageParameters.copy(
             EnableTageTrace = true,

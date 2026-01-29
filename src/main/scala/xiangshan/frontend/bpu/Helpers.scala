@@ -132,6 +132,19 @@ trait TargetFixHelper extends HasBpuParameters {
     )
   }
 
+  def getTargetCarrySlow(startPc: PrunedAddr, fullTarget: PrunedAddr): TargetCarry = {
+    val startPcUpper = getTargetUpper(startPc)
+    val targetUpper  = getTargetUpper(fullTarget)
+    MuxCase(
+      TargetCarry.Invalid,
+      Seq(
+        (targetUpper + 1.U === startPcUpper) -> TargetCarry.Underflow,
+        (targetUpper - 1.U === startPcUpper) -> TargetCarry.Overflow,
+        (targetUpper === startPcUpper)       -> TargetCarry.Fit
+      )
+    )
+  }
+
   def fixTargetUpper(
       startPcUpper: UInt,
       targetCarry:  TargetCarry,
