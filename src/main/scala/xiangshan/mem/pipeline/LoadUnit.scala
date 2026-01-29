@@ -269,20 +269,19 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // src 3: mmio (io.lsq.uncache)
   // src 4: nc (io.lsq.nc_ldin)
   // src 5: load replayed by LSQ (io.replay)
-  // src 6: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // NOTE: Now vec/int loads are sent from same RS
   //       A vec load will be splited into multiple uops,
   //       so as long as one uop is issued,
   //       the other uops should have higher priority
-  // src 7: vec read from RS (io.vecldin)
-  // src 8: int read / software prefetch first issue from RS (io.in)
-  // src 9: hardware prefetch from prefetchor (low confidence) (io.prefetch)
+  // src 6: vec read from RS (io.vecldin)
+  // src 7: int read / software prefetch first issue from RS (io.in)
+  // src 8: hardware prefetch from prefetchor (low confidence) (io.prefetch)
   // priority: high to low
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
                                io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
-  private val SRC_NUM = 10
+  private val SRC_NUM = 9
   private val Seq(
-    mab_idx, super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
+    mab_idx, super_rep_idx, fast_rep_idx, lsq_rep_idx,
     vec_iss_idx, int_iss_idx, mmio_idx, nc_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -291,7 +290,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     io.replay.valid && io.replay.bits.forward_tlDchannel,
     io.fast_rep_in.valid,
     io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
-    io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
     io.ldin.valid, // int flow first issue or software prefetch
     io.lsq.uncache.valid,
@@ -306,7 +304,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   }
   // load flow source select (OH)
   val s0_src_select_vec = WireInit(VecInit((0 until SRC_NUM).map{i => s0_src_valid_vec(i) && s0_src_ready_vec(i)}))
-  val s0_hw_prf_select = s0_src_select_vec(high_pf_idx) || s0_src_select_vec(low_pf_idx)
+  val s0_hw_prf_select = s0_src_select_vec(low_pf_idx)
 
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
     s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
@@ -316,7 +314,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s0_src_valid_vec(super_rep_idx) ||
     s0_src_valid_vec(fast_rep_idx) ||
     s0_src_valid_vec(lsq_rep_idx) ||
-    s0_src_valid_vec(high_pf_idx) ||
     s0_src_valid_vec(vec_iss_idx) ||
     s0_src_valid_vec(int_iss_idx) ||
     s0_src_valid_vec(low_pf_idx)
@@ -344,7 +341,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   // prefetch related ctrl signal
   io.canAcceptLowConfPrefetch  := s0_src_ready_vec(low_pf_idx) && io.dcache.req.ready
-  io.canAcceptHighConfPrefetch := s0_src_ready_vec(high_pf_idx) && io.dcache.req.ready
+  io.canAcceptHighConfPrefetch := false.B // high confidence prefetch moved to MainPipe
 
   // query DTLB
   io.tlb.req.valid                   := s0_tlb_valid
@@ -627,7 +624,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     fromNormalReplaySource(io.replay.bits),
     fromFastReplaySource(io.fast_rep_in.bits),
     fromNormalReplaySource(io.replay.bits),
-    fromPrefetchSource(io.prefetch_req.bits),
     fromVecIssueSource(io.vecldin.bits),
     fromIntIssueSource(io.ldin.bits),
     fromMmioSource(io.lsq.uncache.bits),
@@ -828,7 +824,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     s0_src_valid_vec(fast_rep_idx) ||
     s0_src_valid_vec(lsq_rep_idx) ||
     (s0_src_valid_vec(int_iss_idx) && !s0_sel_src.prf &&
-    !s0_src_valid_vec(vec_iss_idx) && !s0_src_valid_vec(high_pf_idx))
+    !s0_src_valid_vec(vec_iss_idx))
   ) || s0_mmio_fire || s0_nc_fire || s0_misalign_wakeup_fire
   connectSamePort(io.wakeup.bits, s0_wakeup_uop)
 

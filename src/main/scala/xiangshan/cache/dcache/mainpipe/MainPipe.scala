@@ -27,6 +27,7 @@ import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.mem.L1PrefetchReq
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -77,6 +78,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   def isLoad: Bool = source === LOAD_SOURCE.U
   def isStore: Bool = source === STORE_SOURCE.U
   def isAMO: Bool = source === AMO_SOURCE.U
+  def isPrefetch: Bool = source === DCACHE_PREFETCH_SOURCE.U
 
   def quad_word_idx = word_idx >> 1
 
@@ -97,6 +99,26 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req
+  }
+
+  def convertPrefetchReq(prefetch: L1PrefetchReq): MainPipeReq = {
+    val req = Wire(new MainPipeReq)
+    req := DontCare
+    req.miss := false.B
+    req.miss_dirty := false.B
+    req.probe := false.B
+    req.probe_need_data := false.B
+    req.source := DCACHE_PREFETCH_SOURCE.U
+    req.cmd := MemoryOpConstants.M_PFR
+    req.addr := prefetch.paddr
+    req.vaddr := prefetch.getVaddr()
+    req.replace := false.B
+    req.error := false.B
+    req.miss_fail_cause_evict_btot := false.B
+    req.pf_source := prefetch.pf_source.value
+    req.access := false.B
+    req.id := 0.U
     req
   }
 }
@@ -142,6 +164,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
+    // High confidence prefetch
+    val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
+    // pass to Prefetch Monitor for statistic
+    val prefetch_stat = Output(new MainPipePrefetchStatBundle)
 
     // data sram
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
@@ -220,12 +246,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   assert(RegNext(io.meta_read.ready))
   assert(RegNext(io.meta_write.ready))
 
-  val s1_s0_set_conflict, s2_s0_set_conlict, s3_s0_set_conflict = Wire(Bool())
-  val set_conflict = s1_s0_set_conflict || s2_s0_set_conlict || s3_s0_set_conflict
+  val s1_s0_set_conflict, s2_s0_set_conflict, s3_s0_set_conflict = Wire(Bool())
+  val set_conflict = s1_s0_set_conflict || s2_s0_set_conflict || s3_s0_set_conflict
   // check sbuffer store req set_conflict in parallel with req arbiter
   // it will speed up the generation of store_req.ready, which is in crit. path
-  val s1_s0_set_conflict_store, s2_s0_set_conlict_store, s3_s0_set_conflict_store = Wire(Bool())
-  val store_set_conflict = s1_s0_set_conflict_store || s2_s0_set_conlict_store || s3_s0_set_conflict_store
+  val s1_s0_set_conflict_store, s2_s0_set_conflict_store, s3_s0_set_conflict_store = Wire(Bool())
+  val store_set_conflict = s1_s0_set_conflict_store || s2_s0_set_conflict_store || s3_s0_set_conflict_store
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
 
   // convert store req to main pipe req, and select a req from store and probe
@@ -248,12 +274,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     storeWaitCycles := storeWaitCycles + 1.U
   }
 
+  // convert prefetch req to main pipe req
+  val prefetch_req = Wire(DecoupledIO(new MainPipeReq))
+  prefetch_req.bits := (new MainPipeReq).convertPrefetchReq(io.prefetch_req.bits)
+  prefetch_req.valid := io.prefetch_req.valid
+  io.prefetch_req.ready := prefetch_req.ready
+
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
   arbiter(
     in = Seq(
       io.probe_req,
       io.refill_req,
+      prefetch_req, // Todo: what's the best priority
       store_req, // Note: store_req.ready is now manually assigned for better timing
       io.atomic_req,
     ),
@@ -265,7 +298,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // manually assign store_req.ready for better timing
   // now store_req set conflict check is done in parallel with req arbiter
   store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid && !io.atomic_req.valid
+    !io.probe_req.valid && !io.refill_req.valid && !prefetch_req.valid
+  // Prefetch request has lower priority, so it needs to check higher priority requests
+  prefetch_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict &&
+    !io.probe_req.valid && !io.refill_req.valid
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
@@ -312,6 +348,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_fire = s1_valid && s1_can_go
   val s1_idx = get_idx(s1_req.vaddr)
   val s1_dmWay = RegEnable(get_direct_map_way(s0_req.vaddr), s0_fire)
+  val s1_isPrefetch = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isPrefetch
 
   when (s0_fire) {
     s1_valid := true.B
@@ -319,8 +356,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s1_valid := false.B
   }
   s1_ready := !s1_valid || s1_can_go
-  s1_s0_set_conflict := s1_valid && s0_idx === s1_idx
-  s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx
+  s1_s0_set_conflict := s1_valid && s0_idx === s1_idx && !s1_isPrefetch
+  s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx && !s1_isPrefetch
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
@@ -404,7 +441,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_isStore = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isStore
   val s1_isAMO = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isAMO && s1_req.cmd =/= M_XSC
-  val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO) && !s1_hit
+  val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO || s1_isPrefetch) && !s1_hit
   val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
   // s2: select data, return resp if this is a store miss
@@ -451,6 +488,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
   val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
+  val s2_isPrefetch = !s2_req.replace && !s2_req.probe && !s2_req.miss && s2_req.isPrefetch
 
   if(EnableTagEcc) {
     val s2_probe_or_atomic = (s2_req.probe || s2_req.isAMO && !s2_sc) && !s2_req.miss
@@ -459,8 +497,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s2_tag_error := (s2_probe_atomic_tag_error || s2_evict_tag_error) && s2_need_tag
   }
 
-  s2_s0_set_conlict := s2_valid && s0_idx === s2_idx
-  s2_s0_set_conlict_store := s2_valid && store_idx === s2_idx
+  s2_s0_set_conflict := s2_valid && s0_idx === s2_idx && !s2_isPrefetch
+  s2_s0_set_conflict_store := s2_valid && store_idx === s2_idx && !s2_isPrefetch
 
   // Grow permission fail
   // Only in case BtoT will both cache and missqueue be occupied
@@ -481,7 +519,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     Mux(
       s2_req.miss,
       io.refill_info.valid && !s2_replace_block,
-      (s2_req.isStore || s2_req.isAMO) && s2_hit
+      (s2_req.isStore || s2_req.isAMO || s2_req.isPrefetch) && s2_hit
     )
   ) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
@@ -537,6 +575,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
   val s3_store_data_merged_without_cache = RegEnable(s2_store_data_merged_without_cache, s2_fire_to_s3)
   val s3_merge_mask = RegEnable(VecInit(s2_merge_mask.map(~_)), s2_fire_to_s3)
+  val s3_isPrefetch = !s3_req.replace && !s3_req.probe && !s3_req.miss && s3_req.isPrefetch
 
   val s3_data_resp = io.data_resp
   val s3_data = WireInit(VecInit((0 until DCacheBanks).map(i => {
@@ -743,6 +782,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s3_probe_can_go = s3_req.probe && io.wb.ready && (io.meta_write.ready || !probe_update_meta)
   val s3_store_can_go = s3_req.source === STORE_SOURCE.U && !s3_req.probe && (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data) && !s3_req.miss
+  val s3_prefetch_can_go = s3_req.isPrefetch && !s3_req.replace && !s3_req.probe && !s3_req.miss && (io.meta_write.ready || !update_meta) && (io.data_write.ready || !update_data)
   val s3_amo_can_go = s3_amo_hit && (io.meta_write.ready || !amo_update_meta) && (io.data_write.ready || !update_data) && (s3_s_amoalu || !amo_wait_amoalu) || s3_sc_fail
   val s3_miss_can_go = s3_req.miss &&
     (io.meta_write.ready || !amo_update_meta) &&
@@ -752,7 +792,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.wb.ready
   val s3_replace_nothing = s3_req.replace && s3_coh.state === ClientStates.Nothing
   val s3_replace_can_go = s3_req.replace && (s3_replace_nothing || io.wb.ready)
-  val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go
+  val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go || s3_prefetch_can_go
   val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
   when (s2_fire_to_s3) {
@@ -813,8 +853,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   s3_ready := !s3_valid || s3_can_go
-  s3_s0_set_conflict := s3_valid && s3_idx === s0_idx
-  s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx
+  s3_s0_set_conflict := s3_valid && s3_idx === s0_idx && !s3_isPrefetch
+  s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx && !s3_isPrefetch
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
   io.meta_read.valid := req.valid
@@ -835,7 +875,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val miss_req = io.miss_req.bits
   miss_req := DontCare
   miss_req.source := s2_req.source
-  miss_req.pf_source := L1_HW_PREFETCH_NULL
+  miss_req.pf_source := s2_req.pf_source
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
@@ -901,6 +941,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
+
+  val total_prefetch = s2_fire && s2_isPrefetch
+  val pf_late_in_cache = s2_fire && s2_hit && s2_isPrefetch
+  // val hit_source = s3_hit_prefetch
+  
+  io.prefetch_stat.total_prefetch := total_prefetch
+  io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
+  io.prefetch_stat.nack_prefetch := s2_valid && s2_can_go_to_mq && !io.miss_req.ready && s2_isPrefetch
+  io.prefetch_stat.pf_source := s2_req.pf_source
+  io.prefetch_stat.hit_pf_in_cache := DontCare
+  io.prefetch_stat.hit_source := DontCare
+
+  io.prefetch_stat.demand_miss := DontCare
+  io.prefetch_stat.pollution := DontCare
 
   // io.replace_resp.valid := s3_fire && s3_req.replace
   // io.replace_resp.bits := s3_req.miss_id
