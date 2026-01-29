@@ -127,7 +127,7 @@ class XSPdbTextualApp(App):
         self._backend = None
         self._history = []
         self._history_index = 0
-        self._log = LogView(self, LEVEL_PREFIX, LEVEL_STYLE, self._sanitize_text, self._render_console_strip)
+        self._log = LogView(self, LEVEL_PREFIX, LEVEL_STYLE, self._sanitize_text, self._render_console_strip, min_level="info")
         self._prompt_id = None
         self._backend_pid = None
         self._asm_offset = 0
