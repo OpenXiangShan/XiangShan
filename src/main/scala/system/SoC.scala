@@ -123,6 +123,10 @@ case class SoCParameters
   EnablePowerDown: Boolean = false
 ){
   require(
+    !IMSICParams.HasTEEIMSIC || (IMSICParams.HasTEEIMSIC && IMSICBusType == device.IMSICBusType.AXI),
+    "HasTEEIMSIC only can be set true with IMSICBusType == AXI"
+  )
+  require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
     "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
   )

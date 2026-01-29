@@ -37,7 +37,7 @@ class InterruptFilter extends Module {
   val miprios = io.in.miprios
   val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
-  val fromAIAValid = io.in.fromAIA.meip || io.in.fromAIA.seip
+  val fromAIAValid = io.in.fromAIA.meip || io.in.fromAIA.seip || io.in.fromAIA.notice_pending
   val platformValid = io.in.platform.meip || io.in.platform.seip
 
   /**
@@ -615,6 +615,7 @@ class InterruptFilterIO extends Bundle {
     val fromAIA = new Bundle {
       val meip = Bool()
       val seip = Bool()
+      val notice_pending = Bool()
     }
   })
 

@@ -202,7 +202,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapTvalMod.io.fromCtrlBlock.flush := io.flush
   trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
-  val imsic = Module(new aia.IMSIC(soc.IMSICParams))
+  val imsic = Module(new aia.IMSIC_WRAP(soc.IMSICParams))
   imsic.fromCSR.addr.valid := csrMod.toAIA.addr.valid
   imsic.fromCSR.addr.bits.addr := csrMod.toAIA.addr.bits.addr
   imsic.fromCSR.addr.bits.virt := csrMod.toAIA.addr.bits.v.asUInt.asBool
@@ -228,6 +228,17 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   imsic.msiio.vld_req := io.csrin.get.msiInfo.valid
   imsic.msiio.data := io.csrin.get.msiInfo.bits
   io.csrio.get.msiAck := imsic.msiio.vld_ack
+
+  imsic.teemsiio.foreach { teemsiio =>
+    teemsiio.vld_req := io.csrin.get.teemsiInfo.get.valid
+    teemsiio.data := io.csrin.get.teemsiInfo.get.bits
+    io.csrio.get.teemsiAck.get := teemsiio.vld_ack
+  }
+  csrMod.fromAIA.notice_pending := false.B
+  imsic.sec.foreach { imsicsec =>
+    imsicsec.cmode := csrMod.io.tlb.mbmc.CMODE.asBool
+    csrMod.fromAIA.notice_pending := imsicsec.notice_pending
+  }
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
 
@@ -393,6 +404,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+  val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val l2FlushDone = Input(Bool())
