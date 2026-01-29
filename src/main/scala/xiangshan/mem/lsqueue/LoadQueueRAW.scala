@@ -48,6 +48,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // global rollback flush
     val rollback = Vec(StorePipelineWidth,Output(Valid(new Redirect)))
 
+    // mdp train io
+    val mdpTrain        = ValidIO(new Redirect)
+
     // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
     val stIssuePtr       = Input(new SqPtr)
@@ -193,6 +196,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // if need replay deallocate entry
   val lastCanAccept = GatedValidRegNext(acceptedVec)
   val lastAllocIndex = GatedRegNext(enqIndexVec)
+  val willRevoke = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -201,6 +205,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
       freeMaskVec(revokeIndex) := true.B
+      willRevoke(revokeIndex) := true.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -295,7 +300,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect) && !willRevoke(j)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -329,12 +334,16 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
+  val stIsRVC = Wire(Vec(StorePipelineWidth, Bool()))
+  val stIsFirstIssue = Wire(Vec(StorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
+    stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
+    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -351,6 +360,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
     redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
+    redirect.bits.stIsRVC     := stIsRVC(i)
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
@@ -360,15 +370,30 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   io.rollback := allRedirect
 
+  val mdpTrainFilter = (0 until StorePipelineWidth).map(i => {
+    val redirect = Wire(Valid(new Redirect))
+    redirect.bits  := allRedirect(i).bits
+    redirect.valid := allRedirect(i).valid && stIsFirstIssue(i)
+    redirect
+  })
+
+  val oldestOH = Redirect.selectOldestRedirect(mdpTrainFilter)
+  io.mdpTrain := Mux1H(oldestOH, mdpTrainFilter)
+
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRAWSize - LoadPipelineWidth).U
   val rollbaclValid = io.rollback.map(_.valid).reduce(_ || _).asUInt
+  val storeDelay = allRedirect.zipWithIndex.map{case (redirect, i) =>
+      redirect.valid && !stIsFirstIssue(i)
+    }
 
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
   XSPerfAccumulate("stld_rollback", rollbaclValid)
+  // store is tlb miss, and it occure RAW
+  XSPerfAccumulate("stld_rollback_store_delay", PopCount(storeDelay))
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq ", canEnqCount),
     ("stld_rollback", rollbaclValid),

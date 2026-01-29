@@ -322,7 +322,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
-      enq.bits.status.firstIssue                                := false.B
+      enq.bits.status.firstIssue                                := true.B
       enq.bits.status.issueTimer                                := 0.U
       enq.bits.status.deqPortIdx                                := 0.U
       connectSamePort(enq.bits.payload, s0_enqBits(enqIdx))

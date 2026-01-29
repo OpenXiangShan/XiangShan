@@ -799,10 +799,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
-      updatedUop(i).loadWaitBit := io.lfst.resp(i).bits.shouldWait
-      updatedUop(i).waitForRobIdx := io.lfst.resp(i).bits.robIdx
+      fromRenameUpdate(i).bits.loadWaitBit := io.lfst.resp(i).bits.shouldWait
+      fromRenameUpdate(i).bits.waitForRobIdx := io.lfst.resp(i).bits.robIdx
+      fromRenameUpdate(i).bits.loadWaitStrict := fromRename(i).bits.loadWaitStrict && io.lfst.resp(i).bits.shouldWait
     } else {
-      updatedUop(i).loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
+      fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
@@ -828,13 +829,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRename(i).fire && fromRename(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && !isStore(i) && isLs(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_strict_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && updatedUop(i).loadWaitBit && isStore(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && isStore(i)
   )))
 
   val allResourceReady = io.enqRob.canAccept

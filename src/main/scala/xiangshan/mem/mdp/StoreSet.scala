@@ -179,6 +179,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
     valid_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
     data_array.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
     data_array.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+
+    valid_array.io.ren.get(SSIT_UPDATE_LOAD_READ_PORT)  := true.B
+    valid_array.io.ren.get(SSIT_UPDATE_STORE_READ_PORT) := true.B
+    data_array.io.ren.get(SSIT_UPDATE_LOAD_READ_PORT)   := true.B
+    data_array.io.ren.get(SSIT_UPDATE_STORE_READ_PORT)  := true.B
   }
 
   // update stage 1: get ssit read result
@@ -318,6 +323,16 @@ class SSIT(implicit p: Parameters) extends XSModule {
     s2_mempred_update_req_valid && s2_ssidIsSame && s2_loadStrict && s2_loadAssigned && s2_storeAssigned
   ) // should be zero
 
+  val pred_dependence = io.ren.zip(io.rdata).map{case (v, rdata) =>
+    RegNext(v) && rdata.valid
+  }
+  val pred_dependence_strict = io.ren.zip(io.rdata).map{case (v, rdata) =>
+    RegNext(v) && rdata.valid && rdata.strict
+  }
+
+  XSPerfAccumulate("ssit_pred_dependence", PopCount(pred_dependence))
+  XSPerfAccumulate("ssit_pred_strict", PopCount(pred_dependence_strict))
+
   // debug
   XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
   XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
@@ -406,6 +421,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     })
   })
 
+  val overflowVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   // when store is dispatched, mark it as valid
   (0 until RenameWidth).map(i => {
     when(io.dispatch.req(i).valid && io.dispatch.req(i).bits.isstore){
@@ -414,6 +430,9 @@ class LFST(implicit p: Parameters) extends XSModule {
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
       robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
+      when(validVec(waddr)(wptr)) {
+        overflowVec(i) := true.B
+      }
     }
   })
 
@@ -438,4 +457,6 @@ class LFST(implicit p: Parameters) extends XSModule {
       })
     })
   }
+
+  XSPerfAccumulate("LFST_Overflow_Count", PopCount(overflowVec))
 }

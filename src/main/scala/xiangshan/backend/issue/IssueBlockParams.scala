@@ -128,11 +128,11 @@ case class IssueBlockParams(
 
   def needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
 
-  def needPc: Boolean = JmpCnt + BrhCnt + FenceCnt > 0
+  def needPc: Boolean = exuBlockParams.map(_.needPc).reduce(_ || _)
 
-  def needRasAction: Boolean = JmpCnt > 0
+  def needRasAction: Boolean = exuBlockParams.map(_.hasRasAction).reduce(_ || _)
 
-  def needIsRVC: Boolean = JmpCnt + BrhCnt + CsrCnt + LduCnt > 0
+  def needIsRVC: Boolean = exuBlockParams.map(_.hasIsRVC).reduce(_ || _)
 
   def needTaken: Boolean = JmpCnt + BrhCnt > 0
 
@@ -145,7 +145,7 @@ case class IssueBlockParams(
   def needSrcVxrm: Boolean = exuBlockParams.map(_.needSrcVxrm).reduce(_ || _)
 
   def writeVConfig: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
-  
+
   def writeVType: Boolean = exuBlockParams.map(_.writeVType).reduce(_ || _)
 
   def numWriteIntRf: Int = exuBlockParams.count(_.writeIntRf)
