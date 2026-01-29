@@ -124,7 +124,7 @@ class MicroTageTable(
     val entry  = t0_trainReadEntries(way)
     val useful = t0_trainReadUseful(way)
     val hit    = entry.valid && (entry.startPcTag === t0_trainTag)
-    io.train.t0_read(way).valid            := hit
+    io.train.t0_read(way).valid            := entry.valid
     io.train.t0_read(way).bits.taken       := entry.takenCtr.isPositive
     io.train.t0_read(way).bits.cfiPosition := entry.posTag
     io.train.t0_read(way).bits.useful      := useful.value
