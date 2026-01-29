@@ -77,6 +77,8 @@ WFIClockGate: false
 
 EnablePowerDown: false
 
+CHIAsyncFromDSU: false
+
 XSTopPrefix: ""
 
 EnableDFX: true
