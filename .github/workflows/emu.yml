@@ -679,7 +679,7 @@ jobs:
       - name: check openLLC
         run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check ChiselAIA
-        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
+        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v3
 
   scalafmt:
     runs-on: ubuntu-latest
