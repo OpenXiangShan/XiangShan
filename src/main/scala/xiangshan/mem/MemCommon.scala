@@ -129,3 +129,53 @@ object AddPipelineReg {
     pipelineReg.io.isFlush := isFlush
   }
 }
+
+object MemorySize {
+
+  sealed abstract class Size (uint: UInt) {
+    def U: UInt = this.uint
+    def ByteOffset: UInt
+  }
+
+  object Size {
+    def width:           Int = 3
+    def ByteOffsetWidth: Int = 5
+    val all:      List[Size] = List(B, H, W, D, Q)
+  }
+
+  /*
+  * ByteOffset is for generate ByteEnd, the range of request is [BytesStart, ByteEnd]
+  */
+  case object B extends Size("b000".U(Size.width.W)){
+    def ByteOffset = 0.U(Size.ByteOffsetWidth.W)
+  }
+  case object H extends Size("b001".U(Size.width.W)){
+    def ByteOffset = 1.U(Size.ByteOffsetWidth.W)
+  }
+  case object W extends Size("b010".U(Size.width.W)){
+    def ByteOffset = 3.U(Size.ByteOffsetWidth.W)
+  }
+  case object D extends Size("b011".U(Size.width.W)){
+    def ByteOffset = 7.U(Size.ByteOffsetWidth.W)
+  }
+  case object Q extends Size("b100".U(Size.width.W)){
+    def ByteOffset = 15.U(Size.ByteOffsetWidth.W)
+  }
+
+  /*
+  * According to memorySize to select byteOffset
+  */
+  def ByteOffset (size: UInt): UInt = {
+    require(size.getWidth == Size.width)
+    LookupTree(size, Size.all.map(s => s.U -> s.ByteOffset))
+  }
+
+  // The range of request is [BytesStart, ByteEnd]
+  def CaculateSelectMask(start: UInt, end: UInt): UInt = {
+    end - start + 1.U
+  }
+
+  def sizeIs(op: UInt, sz: Size): Bool = {
+    op === sz.U
+  }
+}
