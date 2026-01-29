@@ -8,6 +8,7 @@ XSPdb is a Python `pdb`-based debugging tool for RISC-V IPs, customized for Xian
 - **Waveform control**: `xwave_on/off/flush`, `xwave_continue`
 - **Fork backup waveform**: `xfork_backup_*` for xbreak-triggered wave capture
 - **Visibility**: `xprint`, `xwatch`, `xset`, `xpc`
+- **Text UI**: `xui` (layout/theme via `xui save/load`, theme control via `xtheme`)
 
 ## Layout
 
@@ -47,6 +48,7 @@ xcmds
 xpc
 xload /abs/path/to/bin
 xwave_on
+xui
 xstep 1000
 xwave_off
 ```
