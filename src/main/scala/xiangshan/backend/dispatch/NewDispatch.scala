@@ -23,6 +23,7 @@ import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.ExceptionNO._
+import xiangshan.TopDownCounters._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DispatchUpdateUop, DynInst, ExuVec, IssueQueueIQWakeUpBundle, RenameOutUop, connectSamePort}
@@ -34,8 +35,10 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.VfWB
+import xiangshan.backend.fu
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
+import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace.Itype
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._
@@ -148,7 +151,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val lfst = new DispatchLFSTIO
 
     // perf only
-    val robHead = Input(new DynInst)
+    val robHead = Input(new RobEntryBundle)
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
     val lqCanAccept = Input(Bool())
     val sqCanAccept = Input(Bool())
@@ -915,53 +918,202 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val l2Miss = io.debugTopDown.fromCore.l2MissMatch
   val l3Miss = io.debugTopDown.fromCore.l3MissMatch
 
-  val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
-  Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
-  Mux(l1Miss, TopDownCounters.LoadL2Stall.id.U,
-  Mux(notIssue, TopDownCounters.MemNotReadyStall.id.U,
-  Mux(tlbMiss, TopDownCounters.LoadTLBStall.id.U,
-  Mux(tlbReplay, TopDownCounters.LoadTLBStall.id.U,
-  Mux(mshrReplay, TopDownCounters.LoadMSHRReplayStall.id.U,
-  Mux(vioReplay, TopDownCounters.LoadVioReplayStall.id.U,
-  TopDownCounters.LoadL1Stall.id.U))))))))
+  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
+  Mux(l2Miss, LoadL3Stall.id.U,
+  Mux(l1Miss, LoadL2Stall.id.U,
+  Mux(notIssue, MemNotReadyStall.id.U,
+  Mux(tlbMiss, LoadTLBStall.id.U,
+  Mux(tlbReplay, LoadTLBStall.id.U,
+  Mux(mshrReplay, LoadMSHRReplayStall.id.U,
+  Mux(vioReplay, LoadVioReplayStall.id.U,
+  LoadL1Stall.id.U))))))))
 
   val fusedVec = (0 until RenameWidth).map{ case i =>
     if (i == 0 || !backendParams.debugEn) false.B
     else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
   }
 
-  val decodeReason = RegNextN(io.stallReason.reason, 2)
-  val renameReason = RegNext(io.stallReason.reason)
+//  val decodeReason = RegNextN(io.stallReason.reason, 2)
+//  val renameReason = RegNext(io.stallReason.reason)
+  
+  temp = 0
+  val dispatchPolicyStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
+    val result = uopSelIQMatrix.map(_(iqidx)).map(x => x > issue.numEnq.U)
+    temp = temp + issue.numEnq
+    result
+  }}.transpose
+  val dispatchPolicyStallVec = dispatchPolicyStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
+    // TODO: explain
+    val block = blockList.reduce(_ || _)
+    uop.valid && block
+  }
+
+  temp = 0
+  val issueQueueStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
+    val result = uopSelIQMatrix.map(_(iqidx)).map(x => !io.toIssueQueues(temp).ready && x.orR && x <= issue.numEnq.U)
+    temp = temp + issue.numEnq
+    result
+  }}.transpose
+  val issueQueueStallVec = issueQueueStallMatrix.zip(fromRename).map{ case (blockList, uop) =>
+    val block = blockList.reduce(_ || _)
+    uop.valid && block
+  }
+
+  val dispatchlsqBubbleVec = allowDispatch.map(!_)
+
+  // TODO delete it
+  io.stallReason.backReason := 0.U.asTypeOf(io.stallReason.backReason)
+
+  val fuTypes = fromRename.map(_.bits.fuType)
+  val firedVec = fromRename.map(_.fire)
+  val inValidVec = fromRename.map(_.valid)
+  val inReadyVec = fromRename.map(_.ready)
+  // current stall
+  val dispatchStall = !(inReadyVec.reduce(_ || _))
+  val dispatchStallReason = Wire(chiselTypeOf(io.stallReason.reason(0)))
+
+
+  val robHeadFutype = io.robHead.debug_fuType.getOrElse(0.U)
+
+  val robStall = !isWaitForwardOrBlockBackward && !io.enqRob.canAccept
+  val lsqStall = !lsqCanAccept
+  val roblsqStall = robStall ||  lsqStall
+  val lqStall  = lsqEnqCtrl.io.lqStall.getOrElse(false.B)
+  val sqStall  = lsqEnqCtrl.io.sqStall.getOrElse(false.B)
+  val roblsqStallReason = MuxCase(NoStall.id.U, Seq(
+    (FuType.isAMO(robHeadFutype) && io.robHeadNotReady)                      -> AtomicStall.id.U          ,
+    ((FuType.isStoreVstore(robHeadFutype) && io.robHeadNotReady) || sqStall) -> StoreStall.id.U           ,
+    ((FuType.isLoadVload(robHeadFutype) && io.robHeadNotReady) || lqStall)   -> ldReason                  ,
+    (FuType.isDivSqrt(robHeadFutype) && io.robHeadNotReady)                  -> DivStall.id.U             ,
+    (FuType.isInt(robHeadFutype) && io.robHeadNotReady)                      -> IntNotReadyStall.id.U     ,
+    (FuType.isFArith(robHeadFutype) && io.robHeadNotReady)                   -> FPNotReadyStall.id.U      ,
+    (robStall)                                                               -> RobStall.id.U             ,
+  ))
+
+  val issueQueueStall = issueQueueStallVec.reduce(_ && _)
+  val issueQueueStallFutype = PriorityMux(issueQueueStallVec, fuTypes)
+  val issueQueueStallReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U        ,
+    FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U        ,
+    FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U      ,
+    FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U            ,
+    FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U           ,
+    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U          ,
+    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U         ,
+  ))
+
+  val dispatchlsqStall = dispatchlsqBubbleVec.reduce(_ && _)
+  val dispatchlsqStallFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
+  val dispatchlsqStallReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isLoadVload(dispatchlsqStallFutype)   -> LoadIQFullStall.id.U  ,
+    FuType.isStoreVstore(dispatchlsqStallFutype) -> StoreIQFullStall.id.U ,
+  ))
+
+  val specialInstructionStall = isWaitForwardOrBlockBackward
+  val specialInstructionStallReason = SpecialInsts.id.U
+
+  dispatchStallReason := MuxCase(BackendOtherCoreStall.id.U, Seq(
+    roblsqStall             -> roblsqStallReason             ,
+    issueQueueStall         -> issueQueueStallReason         ,
+    dispatchlsqStall        -> dispatchlsqStallReason        ,
+    specialInstructionStall -> specialInstructionStallReason ,
+  ))
+
+  // current bubble
+  val dispatchBubble = !(inReadyVec.reduce(_ && _)) && !dispatchStall
+  val dispatchBubbleReason = Wire(chiselTypeOf(io.stallReason.reason(0)))
+  val dispatchBubbleReg = RegInit(false.B)
+  val dispatchBubbleReasonReg = RegInit(NoStall.id.U)
+
+  val issueQueueBubble = issueQueueStallVec.reduce(_ || _)
+  val issueQueueBubbleFutype = PriorityMux(issueQueueStallVec, fuTypes)
+
+  val issueQueueBubbleReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isAlu(issueQueueBubbleFutype)         -> IntIQFullStallAlu.id.U        ,
+    FuType.isBJU(issueQueueBubbleFutype)         -> IntIQFullStallBrh.id.U        ,
+    FuType.isInt(issueQueueBubbleFutype)         -> IntIQFullStallOther.id.U      ,
+    FuType.isFArith(issueQueueBubbleFutype)      -> FpIQFullStall.id.U            ,
+    FuType.isVArith(issueQueueBubbleFutype)      -> VecIQFullStall.id.U           ,
+    FuType.isLoadVload(issueQueueBubbleFutype)   -> LoadIQFullStall.id.U          ,
+    FuType.isStoreVstore(issueQueueBubbleFutype) -> StoreIQFullStall.id.U         ,
+  ))
+  //TODO explain
+  val dispatchPolicyBubble = dispatchPolicyStallVec.reduce(_ || _)
+  val dispatchPolicyBubbleFutype = PriorityMux(dispatchPolicyStallVec, fuTypes)
+  val dispatchPolicyBubbleReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isLoadVload(dispatchPolicyBubbleFutype)   -> LoadDispatchPolicyStall.id.U  ,
+    FuType.isStoreVstore(dispatchPolicyBubbleFutype) -> StoreDispatchPolicyStall.id.U ,
+    dispatchPolicyBubble                             -> OtherDispatchPolicyStall.id.U ,
+  ))
+
+  val dispatchlsqBubble = dispatchlsqBubbleVec .reduce(_ || _)
+  val dispatchlsqBubbleFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
+  val dispatchlsqBubbleReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isLoadVload(dispatchlsqBubbleFutype)   -> LoadIQFullStall.id.U  ,
+    FuType.isStoreVstore(dispatchlsqBubbleFutype) -> StoreIQFullStall.id.U ,
+  ))
+
+  val specialInstructionBubble = isWaitForwardOrBlockBackward
+  val specialInstructionBubbleReason = SpecialInsts.id.U
+
+  dispatchBubbleReason := MuxCase(NoStall.id.U, Seq(
+    issueQueueBubble          -> issueQueueBubbleReason         ,
+    dispatchPolicyBubble      -> dispatchPolicyBubbleReason     ,
+    dispatchlsqBubble         -> dispatchlsqBubbleReason        ,
+    specialInstructionBubble  -> specialInstructionBubbleReason ,
+    dispatchBubble            -> BackendOtherCoreStall.id.U     ,
+  ))
+
+  // store bubble reason
+  when(io.redirect.valid || io.toRenameAllFire){
+    dispatchBubbleReg := false.B
+    dispatchBubbleReasonReg := NoStall.id.U
+  }.elsewhen(dispatchBubble && !dispatchBubbleReg) {
+    dispatchBubbleReg := true.B
+    dispatchBubbleReasonReg := dispatchBubbleReason
+  }.otherwise {
+    dispatchBubbleReg := dispatchBubbleReg
+    dispatchBubbleReasonReg := dispatchBubbleReasonReg
+  }
+
 
   val stallReason = Wire(chiselTypeOf(io.stallReason.reason))
-  val firedVec = fromRename.map(_.fire)
-  io.stallReason.backReason.valid := !canAccept
-  io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.zip(fusedVec).map { case ((((update, in), fire), idx), fused) =>
-    val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
-    val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
-    val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
-    val headIsLd  = io.robHead.getDebugFuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
-    val headIsSt  = io.robHead.getDebugFuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept
-    val headIsAmo = io.robHead.getDebugFuType === FuType.mou.U && io.robHeadNotReady
-    val headIsLs  = headIsLd || headIsSt
-    val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
 
-    import TopDownCounters._
-    update := MuxCase(OtherCoreStall.id.U, Seq(
-      // fire
-      (fire || fused                                     ) -> NoStall.id.U          ,
-      // dispatch not stall / core stall from decode or rename
-      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                    ,
-      // rob stall
-      (headIsAmo                                         ) -> AtomicStall.id.U      ,
-      (headIsSt                                          ) -> StoreStall.id.U       ,
-      (headIsLd                                          ) -> ldReason              ,
-      (headIsDiv                                         ) -> DivStall.id.U         ,
-      (headIsInt                                         ) -> IntNotReadyStall.id.U ,
-      (headIsFp                                          ) -> FPNotReadyStall.id.U  ,
-      (renameReason(idx) =/= NoStall.id.U                ) -> renameReason(idx)     ,
-      (decodeReason(idx) =/= NoStall.id.U                ) -> decodeReason(idx)     ,
+//  io.stallReason.backReason.valid := !canAccept || dispatchPolicyStallReason1.reduce(_ || _)
+//  io.stallReason.backReason.bits := Mux(dispatchPolicyStallReason1.reduce(_ || _), dispatchPolicyStallReason2,
+//    BackendOtherCoreStall.id.U)
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.foreach { case (((update, inReason), fire), idx) =>
+    val inValid = inValidVec(idx)
+    val inReady = inReadyVec(idx)
+
+    // bubble back pressure
+    val currentPipeBackPressure = dispatchBubbleReg
+    val currentPipeBackPressureReason = dispatchBubbleReasonReg
+
+    // TopDown collect pre pipe reason
+    val prePipeStall   = !inValid
+    val prePipeStallReason = inReason
+//    if (backendParams.debugEn){
+//      assert((!reset.asBool && !inValid && !dispatchPolicyStallReason2) && (inReason === NoStall.id.U || inReason === BackendOtherCoreStall.id.U),
+//        "[TopDown]: Dispatch has no instruction in ,but reason is null")
+//    }
+
+    // TopDown collect current stage stall
+    val currentPipeStall = !inReady || dispatchBlock
+    val currentPipeStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+      // current cycle stall
+      (dispatchStall                                       ) -> dispatchStallReason         ,
+      // current cycle bubble
+      (dispatchBubble                                      ) -> dispatchBubbleReason             ,
+    ))
+
+    update := MuxCase(BackendOtherCoreStall.id.U, Seq(
+      (fire                                                 ) -> NoStall.id.U                  ,
+      (currentPipeBackPressure                              ) -> currentPipeBackPressureReason ,
+      (prePipeStall && (prePipeStallReason =/= NoStall.id.U)) -> prePipeStallReason            ,
+      (currentPipeStall                                     ) -> currentPipeStallReason        ,
+//      // TODO
+//      (decodeReason(idx) =/= NoStall.id.U                   ) -> decodeReason(idx)             ,
     ))
   }
 

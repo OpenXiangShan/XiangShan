@@ -120,7 +120,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val excpInfo = ValidIO(new VecExcpInfo)
     })
     val debug_ls = Flipped(new DebugLSIO)
-    val debugRobHead = Output(new DynInst)
+    val debugRobHead = Output(new RobEntryBundle)
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
@@ -362,7 +362,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
   val vxsatDataRead = Wire(Vec(CommitWidth, Bool()))
   io.robDeqPtr := deqPtr
-  io.debugRobHead := debug_microOp(deqPtr.value)
+  io.debugRobHead := robEntries(deqPtr.value)
 
   /**
    * connection of [[rab]]
