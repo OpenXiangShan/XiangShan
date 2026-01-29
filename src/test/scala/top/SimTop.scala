@@ -23,12 +23,68 @@ import chisel3.util._
 import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
-import freechips.rocketchip.amba.axi4.AXI4Bundle
-import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
-import system.SoCParamsKey
+import system._
+import device._
+
+class MemXbar(implicit p: Parameters) extends LazyModule
+  with HasSoCParameter
+  with HasPeripheralRanges
+{
+
+  val cpuNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "cpu_node",
+      id = IdRange(0, 1 << 14),
+      aligned = true
+    ))
+  )))
+  
+  val devNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "device_node",
+      id = IdRange(0, 1 << 14),
+      aligned = true
+    ))
+  )))
+
+  val device = new MemoryDevice
+  val memRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  val memNode = AXI4SlaveNode(Seq(
+    AXI4SlavePortParameters(
+      slaves = Seq(
+        AXI4SlaveParameters(
+          address = memRange,
+          regionType = RegionType.UNCACHED,
+          executable = true,
+          supportsRead = TransferSizes(1, L3BlockSize),
+          supportsWrite = TransferSizes(1, L3BlockSize),
+          interleavedId = Some(0),
+          resources = device.reg("mem")
+        )
+      ),
+      beatBytes = L3OuterBusWidth / 8,
+      requestKeys = if (debugOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
+    )
+  ))
+
+  val memXbar = AXI4Xbar()
+
+  memXbar := cpuNode
+  memXbar := devNode
+  memNode := memXbar
+
+  val io_cpuNode = InModuleBody {cpuNode.makeIOs()}
+  val io_devNode = InModuleBody {devNode.makeIOs()}
+  val io_memNode = InModuleBody {memNode.makeIOs()}
+
+  lazy val module = new Imp
+  class Imp extends LazyModuleImp(this) 
+}
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
@@ -49,14 +105,20 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.viewAs[AXI4Bundle]
 
+  val l_memXbar = LazyModule(new MemXbar())
+  val memXbar = Module(l_memXbar.module)
+
   val l_simAXIMem = AXI4MemorySlave(
-    l_soc.misc.memAXI4SlaveNode,
+    l_memXbar.memNode,
     8190L * 1024 * 1024 * 1024,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
-  val simAXIMem = Module(l_simAXIMem.module)
-  l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
+  val simAXIMem = Module(l_simAXIMem.module) 
+
+  l_memXbar.io_cpuNode.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
+  l_memXbar.io_devNode.elements.head._2 <> l_simMMIO.io_mem.elements.head._2
+  l_simAXIMem.io_axi4.elements.head._2 <> l_memXbar.io_memNode.elements.head._2
 
   soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
