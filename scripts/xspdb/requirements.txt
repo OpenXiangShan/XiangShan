@@ -1,2 +1,3 @@
-urwid>=2.6.16
+textual>=0.58.0
+rich>=13.0.0
 capstone>=5.0.5

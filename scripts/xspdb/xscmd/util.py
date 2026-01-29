@@ -28,6 +28,7 @@ YELLOW = "\033[33m"
 
 _xspdb_enable_log = False
 _xspdb_logger = None
+_ui_handler = None
 logging_level_map = {"debug": logging.DEBUG,
                      "error": logging.ERROR,
                      "info" : logging.INFO,
@@ -42,20 +43,48 @@ def xspdb_set_log(xspdb_enable_log:bool):
     if _xspdb_enable_log and _xspdb_logger is None:
         #initialize logger
         _xspdb_logger = logging.getLogger("XSPdb")
-        _xspdb_logger.setLevel(logging.DEBUG)
+        _xspdb_logger.setLevel(logging.INFO)
         ch = logging.FileHandler("XSPdb.log")
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
         _xspdb_logger.addHandler(ch)
+
+def xspdb_set_ui_handler(handler):
+    """Register a UI handler for output/prompt routing."""
+    global _ui_handler
+    _ui_handler = handler
+
+def _ui_write(level, msg):
+    if _ui_handler is None:
+        return False
+    fn = getattr(_ui_handler, "ui_write", None)
+    if not callable(fn):
+        return False
+    try:
+        fn(level, msg)
+        return True
+    except Exception:
+        return False
+
+def ui_prompt(msg=""):
+    """Prompt via UI handler when available, else fallback to input()."""
+    if _ui_handler is not None:
+        fn = getattr(_ui_handler, "ui_prompt", None)
+        if callable(fn):
+            try:
+                return fn(msg)
+            except Exception:
+                pass
+    return input(msg)
 
 def xspdb_set_log_file(log_file:str):
     global _xspdb_logger
     if _xspdb_logger is None:
         _xspdb_logger = logging.getLogger("XSPdb")
-        _xspdb_logger.setLevel(logging.DEBUG)
+        _xspdb_logger.setLevel(logging.INFO)
         ch = logging.FileHandler(log_file)
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
         _xspdb_logger.addHandler(ch)
@@ -65,12 +94,12 @@ def xspdb_set_log_file(log_file:str):
                 handler.close()
                 _xspdb_logger.removeHandler(handler)
         ch = logging.FileHandler(log_file)
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)
         formatter = logging.Formatter('%(message)s')
         ch.setFormatter(formatter)
         _xspdb_logger.addHandler(ch)
 
-_XSPDB_LOG_LEVEL = logging.DEBUG
+_XSPDB_LOG_LEVEL = logging.INFO
 
 def set_xspdb_log_level(level):
     """
@@ -100,35 +129,45 @@ def log_message(*a, **k):
 
 def message(*a, **k):
     """Print a message"""
-    k["flush"] = True
-    print(*a, **k)
-    del k["flush"]
+    msg = " ".join([str(x) for x in a])
+    if not _ui_write("message", msg):
+        k["flush"] = True
+        print(*a, **k)
+        del k["flush"]
     log_message(*a, **k)
 
 def info(msg):
     """Print information"""
-    if _XSPDB_LOG_LEVEL <= logging.INFO:
+    if _ui_write("info", msg):
+        pass
+    elif _XSPDB_LOG_LEVEL <= logging.INFO:
         print(f"{GREEN}[Info] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.info("[Info] %s" % msg)
 
 def debug(msg):
     """Print debug information"""
-    if _XSPDB_LOG_LEVEL <= logging.DEBUG:
+    if _ui_write("debug", msg):
+        pass
+    elif _XSPDB_LOG_LEVEL <= logging.DEBUG:
         print("[Debug] %s" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.debug("[Debug] %s" % msg)
 
 def error(msg):
     """Print error information"""
-    if _XSPDB_LOG_LEVEL <= logging.ERROR:
+    if _ui_write("error", msg):
+        pass
+    elif _XSPDB_LOG_LEVEL <= logging.ERROR:
         print(f"{RED}[Error] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.error("[Error] %s" % msg)
 
 def warn(msg):
     """Print warning information"""
-    if _XSPDB_LOG_LEVEL <= logging.WARNING:
+    if _ui_write("warn", msg):
+        pass
+    elif _XSPDB_LOG_LEVEL <= logging.WARNING:
         print(f"{YELLOW}[Warn] %s{RESET}" % msg, flush=True)
     if _xspdb_enable_log:
         _xspdb_logger.warning("[Warn] %s" % msg)
