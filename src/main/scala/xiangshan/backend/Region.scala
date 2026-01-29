@@ -337,7 +337,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     xx.valid := false.B
     xx.bits := 0.U.asTypeOf(xx.bits)
   })
-  bypassNetwork.io.fromDataPath.immInfo := 0.U.asTypeOf(bypassNetwork.io.fromDataPath.immInfo)
   bypassNetwork.io.fromDataPath.rcData := 0.U.asTypeOf(bypassNetwork.io.fromDataPath.rcData)
   bypassNetwork.io.fromExus := 0.U.asTypeOf(bypassNetwork.io.fromExus)
   val bypassNetworkToExus = (bypassNetwork.io.toExus.int ++ bypassNetwork.io.toExus.fp ++ bypassNetwork.io.toExus.vf).flatten
@@ -422,7 +421,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         source.io.deqDelay(i).ready := s.ready && iqOut(i).ready
       }
     }
-    dataPath.io.fromIntIQDeqOg1Payload.get.zip(issueQueues).zip(io.intIQOut.get).map { case ((sink, source), iqOut) =>
+    dataPath.io.fromIQDeqOg1Payload.zip(issueQueues).map { case (sink, source) =>
       sink.zipWithIndex.map { case (s, i) =>
         s := source.io.deqOg1Payload(i)
       }
@@ -437,7 +436,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
 
     bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
-    bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
     bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
     bypassNetwork.io.fromExus.connectExuOutput(_.int)(MixedVecInit(exuBlock.io.out ++ io.memWriteback))
     bypassNetwork.io.fromExus.connectExuOutput(_.fp)(io.fromFpExuBlockOut.get)
@@ -524,6 +522,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromIntIQ.zip(io.fromIntIQ.get).map { case (sink, source) =>
       sink <> source
     }
+    dataPath.io.fromIQDeqOg1Payload.zip(issueQueues).map { case (sink, source) =>
+      sink.zipWithIndex.map { case (s, i) =>
+        s := source.io.deqOg1Payload(i)
+      }
+    }
     io.fpToIntIQResp.get := dataPath.io.toIntIQ
     dataPath.io.fromFpWb.get := wbDataPath.io.toFpPreg
     dataPath.io.fromBypassNetwork <> bypassNetwork.io.toDataPath
@@ -604,6 +607,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     dataPath.io.fromVfIQ.zip(issueQueues).map { case (sink, source) =>
       sink <> source.io.deqDelay
     }
+    dataPath.io.fromIQDeqOg1Payload.zip(issueQueues).map { case (sink, source) =>
+      sink.zipWithIndex.map { case (s, i) =>
+        s := source.io.deqOg1Payload(i)
+      }
+    }
     dataPath.io.fromVfWb.get := wbDataPath.io.toVfPreg
     dataPath.io.fromV0Wb.get := wbDataPath.io.toV0Preg
     dataPath.io.fromVlWb.get := wbDataPath.io.toVlPreg
@@ -614,13 +622,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     og2ForVector.get.io.flush := flushCopyRegVec.last
     og2ForVector.get.io.ldCancel := io.ldCancel
     og2ForVector.get.io.fromOg1VfArith <> dataPath.io.toVecExu
-    og2ForVector.get.io.fromOg1ImmInfo := dataPath.io.og1ImmInfo.zip(backendParams.allExuParams).filter(_._2.needOg2).map(_._1)
 
     bypassNetwork.io.fromDataPath.vf <> og2ForVector.get.io.toVfArithExu
-    bypassNetwork.io.fromDataPath.immInfo.zip(backendParams.allExuParams).filter(_._2.needOg2).map(_._1)
-      .zip(og2ForVector.get.io.toBypassNetworkImmInfo).foreach {
-      case (immInfo, og2ImmInfo) => immInfo := og2ImmInfo
-    }
     bypassNetwork.io.fromExus.connectExuOutput(_.vf)(exuBlock.io.out)
     for (i <- 0 until exuBlock.io.in.size) {
       for (j <- 0 until exuBlock.io.in(i).size) {
