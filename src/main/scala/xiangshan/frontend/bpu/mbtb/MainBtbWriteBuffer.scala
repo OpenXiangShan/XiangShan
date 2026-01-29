@@ -200,8 +200,8 @@ class MainBtbWriteBuffer(
           // Case 4: write and entry request override
           // - override entry with write
           when(hitNotWritten) {
-            entry       := write
-            isValid     := true.B
+            entry   := write
+            isValid := true.B
           }.elsewhen(hitWritten && wholeChange) {
             entry       := write
             isValid     := true.B
