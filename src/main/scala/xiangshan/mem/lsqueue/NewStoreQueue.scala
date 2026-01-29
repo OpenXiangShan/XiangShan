@@ -528,10 +528,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
         sink := s2FinalData((j + 1) * 8 - 1, j * 8)}
       s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
-        sink := s2FinalMask(j) && s2Valid && s2SafeForward} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
-      s2Resp.bits.dataInvalid.valid := s2DataInValid || !s2SafeForward
+        sink := s2FinalMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
+      s2Resp.bits.dataInvalid.valid := s2DataInValid
       s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
-      s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid || !s2SafeForward && s2Valid // maby can't select a entry
+      s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !s2SafeForward || s2Cross4KPage // do not support cross page forward.
       s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage // if cross Page, let load replay.
