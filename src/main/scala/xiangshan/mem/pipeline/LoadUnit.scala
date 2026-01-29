@@ -1449,15 +1449,16 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
 
-
+  val s2_fwd_mmio_valid = io.lsq.uncacheBypass.s2Resp.valid && !s2_nc_with_data
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && (io.replay.bits.forward_tlDchannel || io.replay.bits.isMmioOrNc) || io.misalign_ldin.valid || !io.dcache.req.ready
 
   val s3_can_enter_lsq_valid = s3_valid && (!s3_fast_rep || s3_fast_rep_canceled || RegNext(s2_out.rep_info.mmioOrNc)) && !s3_in.feedbacked
-  io.lsq.ldin.valid := s3_can_enter_lsq_valid
+
+  io.lsq.ldin.valid := s3_can_enter_lsq_valid || RegNext(s2_fwd_mmio_valid)
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
-  io.lsq.ldin.bits := s3_in
+  io.lsq.ldin.bits := Mux(RegNext(s2_fwd_mmio_valid), RegNextN(s0_out, 3), s3_in)
   io.lsq.ldin.bits.miss := s3_in.miss
 
   // connect to misalignBuffer
@@ -1495,7 +1496,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   s3_misalign_rep_cause := VecInit(s3_mab_sel_rep_cause.asBools)
 
-  when (s3_rep_frm_fetch || s3_frm_mabuf) {
+  when (s3_rep_frm_fetch || s3_frm_mabuf || RegNext(s2_fwd_mmio_valid)) {
     s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
   } .otherwise {
     s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
@@ -1547,7 +1548,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
-  io.lsq.ldin.bits.uop := s3_out.bits.uop
+  io.lsq.ldin.bits.uop := Mux(RegNext(s2_fwd_mmio_valid), RegNextN(s0_out.uop, 3), s3_out.bits.uop)
 //  io.lsq.ldin.bits.uop.exceptionVec(loadAddrMisaligned) := Mux(s3_in.onlyMisalignException, false.B, s3_in.uop.exceptionVec(loadAddrMisaligned))
 
   val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep || s3_mis_align || (s3_frm_mabuf && io.misalign_ldout.bits.rep_info.need_rep)
@@ -1614,7 +1615,6 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   val s3_ld_wb_meta = Wire(new ExuOutput(param))
   s3_ld_wb_meta := Mux(s3_valid, s3_wb, s3_mmio_req.bits)
-  val s2_fwd_mmio_valid = io.lsq.uncacheBypass.s2Resp.valid && !s2_nc_with_data
   // data from load queue refill
   val s3_ld_raw_data_frm_mmio = RegEnable(io.lsq.uncacheBypass.s2Resp.bits.data, s2_fwd_mmio_valid)//RegNextN(io.lsq.ld_raw_data, 3)
   val s3_merged_data_frm_mmio = s3_ld_raw_data_frm_mmio//.mergedData()
