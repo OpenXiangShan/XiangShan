@@ -1180,7 +1180,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     forward.s2Resp.bits.denied := RegEnable(s1MshrForwardInfo.denied, s1ReqValid)
     forward.s2Resp.bits.corrupt := RegEnable(s1MshrForwardInfo.corrupt, s1ReqValid)
     io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec.asUInt).orR
-    XSError(((s1SelectOH - 1.U) & s1SelectOH).orR, "multi mshr hit when forward!\n")
+    XSError(((s1SelectOH - 1.U) & s1SelectOH).orR && s1RespValid, "multi mshr hit when forward!\n")
   }
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
