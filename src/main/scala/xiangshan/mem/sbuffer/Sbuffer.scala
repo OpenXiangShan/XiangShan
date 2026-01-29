@@ -849,7 +849,7 @@ class Sbuffer(implicit p: Parameters)
         s2Resp.forwardData(j) := selectedValidData(j)
       }
     }
-    s2RespValid := Cat(s2Resp.forwardMask).orR
+    s2RespValid := RegNext(s1ReqValid)
   }
 
   for (i <- 0 until StoreBufferSize) {
