@@ -78,7 +78,8 @@ class CmdForkBackup:
             self._fork_backup_child_state = "waiting"
             self._fork_backup_target_breaks = set()
             self._fork_backup_child_hit = False
-            self.on_update_tstep = None
+            if hasattr(self, "clear_ui_handler"):
+                self.clear_ui_handler()
             self._fork_backup_child_main(ctl_r)
             os._exit(0)
         os.close(ctl_r)
