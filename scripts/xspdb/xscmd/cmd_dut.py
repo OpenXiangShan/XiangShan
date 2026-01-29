@@ -55,9 +55,8 @@ class CmdDut:
                     self.dut.xclock.clk, hex(self.dut.xclock.clk)))
                 self._fork_backup_on_break_any()
                 return True
-            fc = getattr(self, "on_update_tstep", None)
-            if fc:
-                fc()
+            if hasattr(self, "ui_tick"):
+                self.ui_tick()
             self._fork_backup_tick()
             if self.api_is_difftest_diff_exit(show_log=True):
                 return True

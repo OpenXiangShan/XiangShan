@@ -15,7 +15,7 @@
 #***************************************************************************************
 
 import os
-from . import info, error, message, warn, get_completions
+from . import info, error, message, warn, get_completions, ui_prompt
 
 class CmdBreak:
 
@@ -469,10 +469,9 @@ class CmdBreak:
         if not arg.strip():
             message("do you want to clear all breakpoints? (y/n):")
             while True:
-                fc = getattr(self, "on_update_tstep", None)
-                if fc:
-                    fc()
-                ans = input()
+                if hasattr(self, "ui_tick"):
+                    self.ui_tick()
+                ans = ui_prompt("")
                 if ans == "y":
                     self.api_xbreak_clear()
                     break
