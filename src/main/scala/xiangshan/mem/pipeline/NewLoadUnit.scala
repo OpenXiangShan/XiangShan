@@ -1291,6 +1291,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
   val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
   val s4HeadIsReplay = LoadEntrance.isReplay(s4Head.entrance)
+  val s4HeadCacheMiss = s4Head.cause.get(C_DM)
+  val s4HeadMshrId    = s4Head.mshrId.get
 
   val vaddr = Mux(s4HeadValid, s4HeadVAddr, in.vaddr)
   val paddr = Mux(s4HeadValid, s4HeadPAddr, in.paddr.get)
@@ -1405,6 +1407,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, cause)
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
+  val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec := exceptionVec
@@ -1469,7 +1472,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.misalignWith16Byte := DontCare // TODO: remove this
   lqWrite.misalignNeedWakeUp := DontCare // TODO: remove this
   lqWrite.updateAddrValid := ldoutValid
-  lqWrite.rep_info.mshr_id := in.mshrId.get
+  lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
   lqWrite.rep_info.data_inv_sq_idx := in.dataInvalidSqIdx.get
   lqWrite.rep_info.addr_inv_sq_idx := in.addrInvalidSqIdx.get
