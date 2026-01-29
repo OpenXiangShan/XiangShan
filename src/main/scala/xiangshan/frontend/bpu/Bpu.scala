@@ -532,6 +532,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.bpSource.s1Source   := s3_s1PredictionSource
   s3_perfMeta.bpSource.s3Source   := s3_predictionSource
   s3_perfMeta.bpSource.s3Override := s3_override
+  s3_perfMeta.mbtbMeta            := RegEnable(mbtb.io.meta, s2_fire)
 
   io.toFtq.perfMeta := s3_perfMeta
   // TODO: override reason and redirect reason

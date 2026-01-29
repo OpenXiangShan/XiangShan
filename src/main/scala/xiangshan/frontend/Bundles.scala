@@ -36,6 +36,7 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -368,15 +369,18 @@ object BlameBpuSource {
 
   def apply(perf: BpuPerfMeta, branch: BranchInfo): UInt = {
     import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
-    val src  = perf.bpSource
-    val pred = perf.bpPred
-    val attr = branch.attribute
+    val src         = perf.bpSource
+    val pred        = perf.bpPred
+    val attr        = branch.attribute
+    val isHitInMbtb = perf.mbtbMeta.entries.flatten.map(_.hit(branch)).reduce(_ || _)
 
     // Check mispredict type
     val onlyDirectionWrong = branch.taken =/= pred.taken && branch.cfiPosition === pred.cfiPosition
     val blame              = WireInit(BTB) // Default to BTB
 
-    when(src.s3Ras) {
+    when(!isHitInMbtb) {
+      blame := BTB
+    }.elsewhen(src.s3Ras) {
       when(attr.isConditional) {
         // If cond before, TAGE mispredicts
         // If cond after, should trigger assertion, TODO
