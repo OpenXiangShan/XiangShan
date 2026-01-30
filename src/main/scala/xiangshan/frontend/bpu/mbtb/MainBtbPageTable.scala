@@ -174,8 +174,10 @@ class MainBtbPageTable(implicit p: Parameters) extends MainBtbModule {
     val io: MainBtbPageTableIO = IO(new MainBtbPageTableIO)
 
     private val table = Seq.fill(NumPageTableWay) {
-      RegInit(VecInit.fill(NumPageTableSet)(0.U.asTypeOf(new MainBtbPageTableEntry)))
+      Reg(Vec(NumPageTableSet, new MainBtbPageTableEntry))
     }
+
+    when(reset.asBool)(table.foreach(_.foreach(_.valid := false.B)))
 
     /* *** read way *** */
     private val readWayRespEntryReg = RegInit(0.U.asTypeOf(new MainBtbPageTableEntry))
