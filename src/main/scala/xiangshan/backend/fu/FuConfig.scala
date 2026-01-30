@@ -146,7 +146,7 @@ case class FuConfig (
   def needTargetPc: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 
   // predict info
-  def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
+  def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 
   def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
 

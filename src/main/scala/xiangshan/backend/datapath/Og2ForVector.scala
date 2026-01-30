@@ -76,8 +76,8 @@ class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   val flush: ValidIO[Redirect]                                    = Flipped(ValidIO(new Redirect))
   val ldCancel                                                    = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
-  val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[ExuInput]]]   = Flipped(vecSchdParams.genExuInputBundle)
+  val fromOg1VfArith: MixedVec[MixedVec[DecoupledIO[Og1InUop]]]   = Flipped(vecSchdParams.genOg1InUopBundle)
 
-  val toVfArithExu                                                = MixedVec(vecSchdParams.genExuInputBundle)
+  val toVfArithExu                                                = MixedVec(vecSchdParams.genOg1InUopBundle)
   val toVfIQOg2Resp                                               = MixedVec(vecSchdParams.issueBlockParams.map(_.genOG2RespBundle))
 }

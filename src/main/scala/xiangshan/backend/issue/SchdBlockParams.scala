@@ -128,6 +128,10 @@ case class SchdBlockParams(
 
   def needWriteRegCache: Boolean = numWriteRegCache > 0
 
+  def genOg1InUopBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[Og1InUop]]] = {
+    MixedVec(this.issueBlockParams.map(_.genOg1InUopDecoupledBundle))
+  }
+
   def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
   }

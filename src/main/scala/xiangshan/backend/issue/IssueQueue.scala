@@ -55,7 +55,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val canIssueVec = Output(Vec(params.numEntries, Bool()))
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
 
-  val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
+  val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
   val deqOg1Payload: MixedVec[Og1Payload] = params.genIssueDeqOg1PayloadBundle
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
@@ -329,8 +329,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // for IssueQueueSta imm width is not 32
       enq.bits.payload.imm.foreach(_                            := s0_enqBits(enqIdx).imm.get)
       connectSamePort(enq.bits.payload.og1Payload, enq.bits.payload)
-      // dirty code, uopidx has two, vuopidx is zero from dispatch
-      enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := enq.bits.payload.uopIdx.get)
+      // dirty code, for uopidx and lastUop's assign
+      enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
+      enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp

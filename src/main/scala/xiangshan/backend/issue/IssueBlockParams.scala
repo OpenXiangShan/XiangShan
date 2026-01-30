@@ -386,6 +386,10 @@ case class IssueBlockParams(
     wakeUpInExuSources.map(x => backendParam.getExuIdx(x.name))
   }
 
+  def genOg1InUopDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[Og1InUop]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(new Og1InUop(this, x))))
+  }
+
   def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
   }
@@ -422,12 +426,12 @@ case class IssueBlockParams(
     MixedVec(this.exuParams.filterNot(_.fakeUnit).map(x => ValidIO(x.genExuBypassBundle)))
   }
 
-  def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
+  def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[Og0InUop]] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => DecoupledIO(new Og0InUop(this, x))))
   }
 
-  def genIssueValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIssueBundle]] = {
-    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new IssueQueueIssueBundle(this, x))))
+  def genIssueValidBundle(implicit p: Parameters): MixedVec[ValidIO[Og0InUop]] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new Og0InUop(this, x))))
   }
 
   def genIssueDeqOg1PayloadBundle(implicit p: Parameters): MixedVec[Og1Payload] = {
