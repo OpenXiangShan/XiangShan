@@ -852,6 +852,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isUncacheReplay = in.isUncacheReplay()
   val isPrefetch = accessType.isPrefetch()
   val isHwPrefetch = accessType.isHwPrefetch()
+  val isSwPrefetch = accessType.isSwPrefetch()
   val isUnalignHead = in.unalignHead.get
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
@@ -869,7 +870,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val redirect = io.redirect
   val kill = io.kill || robIdx.needFlush(redirect)
-  val endPipe = isPrefetch
+  val endPipe = isHwPrefetch
 
   /**
     * PMP result & exception handling
@@ -1062,8 +1063,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     * 1. `wakeup` should not asserted when exception occurs
     * 2. `wakeup` should not asserted in case of a vaddr / paddr mismatch (debatable yet)
     */
-  val shouldWakeup = !shouldReplay && !isUncache && !exception
-  val shouldWriteback = shouldWakeup || exception || matchInvalid
+  val shouldWakeup = !shouldReplay && !isUncache && !exception && !isSwPrefetch
+  val shouldWriteback = shouldWakeup || exception || matchInvalid || isSwPrefetch
 
   /**
     * Pipeline connect
@@ -1255,7 +1256,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val cause = in.cause.get
   val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get
 
-  assert(!pipeIn.valid || !accessType.isPrefetch(), "Prefetch should be killed in S2")
+  assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
   assert(!io.ldout.valid || io.ldout.ready, "Writeback to Backend should always be ready")
   assert(!io.vecldout.valid || io.vecldout.ready, "Writeback to VLMergeBuffer should always be ready")
 
@@ -1381,7 +1382,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     * Writeback to Backend / LQ / VLMergeBuffer
     */
   // Writeback to Backend
-  val ldoutValid = pipeIn.valid && shouldWriteback && isScalar && endPipe
+  val ldoutValid = pipeIn.valid && shouldWriteback && !isVector && endPipe
   val ldout = Wire(new ExuOutput(param))
   ldout.data := DontCare // assign data from LoadUnitDataPath
   ldout.pdest := uop.pdest
