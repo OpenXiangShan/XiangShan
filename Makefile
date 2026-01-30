@@ -127,9 +127,9 @@ COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
 endif
 
 # L3 cache size in KB
-ifneq ($(L3_CACHE_SIZE),)
-COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
-endif
+#ifneq ($(L3_CACHE_SIZE),)
+COMMON_EXTRA_ARGS += --l3-cache-size 4096
+#endif
 
 # hart id bits
 ifneq ($(HART_ID_BITS),)
