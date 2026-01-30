@@ -365,14 +365,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  topdownStage := io.in.bits.topdownInfo
-  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
+  private def numStages    = 2
+  private val topdownStages = RegInit(VecInit(Seq.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle))))
 
-  private val matchBubble   = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
-  private val deqValidCount = PopCount(validVec.asBools)
+  topdownStages(0) := io.in.bits.topdownInfo
+  for (i <- 1 until numStages) {
+    topdownStages(i) := topdownStages(i - 1)
+  }
+
+  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
+
+  private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdownStage.reasons.reverse)
+  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
+    topdownStages(numStages - 1).reasons.reverse
+  )
 
   io.stallReason.reason.foreach(_ := 0.U)
   for (i <- 0 until DecodeWidth) {
@@ -381,7 +388,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }
   }
 
-  when(!(deqWasteCount === DecodeWidth.U || topdownStage.reasons.asUInt.orR)) {
+  when(!(deqWasteCount === DecodeWidth.U || topdownStages(numStages - 1).reasons.asUInt.orR)) {
     // should set reason for FetchFragmentationStall
     // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
     for (i <- 0 until DecodeWidth) {
@@ -389,11 +396,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
       }
     }
-  }
-
-  when(io.stallReason.backReason.valid) {
-    // Backend always overrides frontend reasons
-    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
   }
 
   // Debug info
