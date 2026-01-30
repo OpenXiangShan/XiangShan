@@ -1137,13 +1137,13 @@ object Bundles {
       this.pdestVl       .foreach(_ := source.pdestVl.get)
       this.numLsElem     .foreach(_ := source.numLsElem.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
-      this.storeSetHit   .foreach(_ := source.storeSetHit.get)
+      this.storeSetHit   .foreach(_ := source.storeSetHit.getOrElse(false.B))
       this.waitForRobIdx .foreach(_ := source.waitForRobIdx.get)
       this.loadWaitBit   .foreach(_ := source.loadWaitBit.get)
       this.loadWaitStrict.foreach(_ := source.loadWaitStrict.get)
       this.ssid          .foreach(_ := source.ssid.get)
       this.lqIdx         .foreach(_ := source.lqIdx.get)
-      this.sqIdx         .foreach(_ := source.sqIdx.get)
+      this.sqIdx         .foreach(_ := source.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
     }
 
     def toDynInst(): DynInst = {
