@@ -455,7 +455,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2SelectCtrlEntry  = RegEnable(s1SelectCtrlEntry, s1Valid)
       val s2DataInValid      = RegEnable(s1DataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(s1HasAddrInvalid, s1Valid)
-      val s2CanForward       = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & s1OverlapMask, s1Valid)
+      val s2CanForward       = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & s1OverlapMask & addrValidVec.asUInt, s1Valid)
       val s2SelectOH         = RegEnable(s1SelectOH, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
@@ -496,12 +496,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
           storeIsCboZero) &&
         (dataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
           isCross16B && (dataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
-        dataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset) &&
-        ctrlEntry.addrValid
+        dataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
       }).asUInt
 
       val s2PaddrNoMatch       = (
-        ((s2PaddrMatchVec ^ s2SelectOH) & s2CanForward).orR
+        ((s2PaddrMatchVec & s2CanForward) ^ s2SelectOH).orR
         )
 
       val s2SelectData         = (0 until VLENB).map(j =>
