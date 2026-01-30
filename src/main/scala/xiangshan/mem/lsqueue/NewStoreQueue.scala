@@ -450,19 +450,21 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s1AddrInvalidSqIdx.value := OHToUInt(s1AddrInvSelectOH)
       s1AddrInvalidSqIdx.flag  := Mux(s1AddrInvLowOH.orR, io.ctrlInfo.enqPtr.flag, io.ctrlInfo.deqPtr.flag)
 
-      val s1ForwardValid     = s1Valid && s1SelectOH.orR // indicate whether forward is valid.
       val s2ByteSelectOffset = RegEnable(s1ByteSelectOffset, s1Valid)
       val s2SelectDataEntry  = RegEnable(s1SelectDataEntry, s1Valid)
       val s2SelectCtrlEntry  = RegEnable(s1SelectCtrlEntry, s1Valid)
       val s2DataInValid      = RegEnable(s1DataInvalid, s1Valid)
       val s2HasAddrInvalid   = RegEnable(s1HasAddrInvalid, s1Valid)
+      val s2CanForward       = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & s1OverlapMask, s1Valid)
+      val s2SelectOH         = RegEnable(s1SelectOH, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(s1AddrInvalidSqIdx, s1Valid)
       val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
-      val s2Valid            = RegNext(s1ForwardValid)
+      val s2ForwardValid     = RegEnable(s1SelectOH.orR, s1Valid) // indicate whether forward is valid.
+      val s2Valid            = RegNext(s1Valid)
       // debug
       XSError(s1SelectOH.orR && !s1SelectCtrlEntry.allocated && s1Valid, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
@@ -484,18 +486,23 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       //                                  ^^^^
       //                                  Load needs this byte (0x77)
 
-      //TODO: consumer need to choise whether use paddrNoMatch or not.
-      val s2SelectIsCboZero     = s2SelectCtrlEntry.isCbo && isCboZero(s2SelectDataEntry.cboType)
-      val s2SelectIsCross16B    = s2SelectCtrlEntry.cross16Byte
       // !Paddrmatch
-      val s2PaddrNoMatch       = !(
-        (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
-          s2SelectIsCross16B && (s2SelectDataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
-          s2SelectIsCboZero) &&
-        (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
-          s2SelectIsCross16B && (s2SelectDataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
-        s2SelectDataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
-        ) && s2Valid
+      val s2PaddrMatchVec       = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
+        val storeIsCboZero      = ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+        val isCross16B          = ctrlEntry.cross16Byte
+
+        (dataEntry.paddr(DCacheLineOffset - 1, VWordOffset) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) ||
+          isCross16B && (dataEntry.paddr(DCacheLineOffset - 1, VWordOffset) + 1.U) === s2LoadPaddr(DCacheLineOffset - VWordOffset - 1, 0) || // next 16B
+          storeIsCboZero) &&
+        (dataEntry.paddr(pageOffset - 1, DCacheLineOffset) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset) ||
+          isCross16B && (dataEntry.paddr(pageOffset - 1, DCacheLineOffset) + 1.U) === s2LoadPaddr(pageOffset - VWordOffset - 1, DCacheLineOffset - VWordOffset)) && // next Cacheline
+        dataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset) &&
+        ctrlEntry.addrValid
+      }).asUInt
+
+      val s2PaddrNoMatch       = (
+        ((s2PaddrMatchVec ^ s2SelectOH) & s2CanForward).orR
+        )
 
       val s2SelectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -510,7 +517,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2FullOverlap        = (s2SelectDataEntry.byteMask & s2LoadMaskEnd) === s2LoadMaskEnd
       // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
       // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
-      val s2Cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR
+      val s2Cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR && s2ForwardValid
       val s2SafeForward        = !s2MultiMatch || s2FullOverlap
 
       //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
@@ -528,13 +535,13 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.forwardData.zipWithIndex.map{case (sink, j) =>
         sink := s2FinalData((j + 1) * 8 - 1, j * 8)}
       s2Resp.bits.forwardMask.zipWithIndex.map{case (sink, j) =>
-        sink := s2FinalMask(j) && s2Valid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
-      s2Resp.bits.dataInvalid.valid := s2DataInValid
+        sink := s2FinalMask(j) && s2ForwardValid} // TODO: FIX ME, when Resp.valid is false, do not use ByteMask!!
+      s2Resp.bits.dataInvalid.valid := s2DataInValid && s2ForwardValid // select is valid
       s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
       s2Resp.bits.forwardInvalid   := !s2SafeForward || s2Cross4KPage // do not support cross page forward.
-      s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage // if cross Page, let load replay.
+      s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage && s2SafeForward // if cross Page/multi match, let load replay.
       s2Resp.valid                 := s2Valid
 
       if(debugEn) {
@@ -551,6 +558,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dontTouch(s2OutMask)
         dontTouch(s2OutData)
         dontTouch(s2SafeForward)
+        dontTouch(s2PaddrMatchVec)
+        dontTouch(s2CanForward)
       }
     }
   }

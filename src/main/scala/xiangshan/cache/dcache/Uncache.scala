@@ -570,7 +570,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
         forward.s2Resp.bits.forwardMask(j) := true.B
       }
     }
-    forward.s2Resp.valid := f1_fwdValid && f1_fwdMask.asUInt.orR
+    forward.s2Resp.valid := f1_fwdValid
 
   }
 
