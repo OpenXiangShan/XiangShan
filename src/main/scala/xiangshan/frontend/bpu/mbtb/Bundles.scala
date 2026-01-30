@@ -93,12 +93,14 @@ class MainBtbSharedInfo(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbPageTableEntry(implicit p: Parameters) extends MainBtbBundle {
+  val valid:     Bool = Bool()
   val vpnLower:  UInt = UInt(VpnLowerWidth.W)
   val regionWay: UInt = UInt(RegionWayIdxLen.W)
   // TODO: move RRPV here
 }
 
 class MainBtbRegionTableEntry(implicit p: Parameters) extends MainBtbBundle {
+  val valid:    Bool = Bool()
   val vpnUpper: UInt = UInt(VpnUpperWidth.W)
 }
 

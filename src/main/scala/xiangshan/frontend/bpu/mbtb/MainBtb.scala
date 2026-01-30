@@ -62,6 +62,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val regionTable         = Reg(Vec(NumRegionTableWay, new MainBtbRegionTableEntry))
   private val regionTableReplacer = Module(new MainBtbReplacer(1, NumRegionTableWay))
 
+  when(reset.asBool)(regionTable.foreach(_.valid := false.B))
+
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _) && pageTable.io.resetDone
 
   io.trainReady := true.B
@@ -170,7 +172,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s3_pageSetIdx    = RegEnable(s2_pageSetIdx, s2_fire)
   private val s3_pageWayIdx    = RegEnable(s2_pageWayIdx, s2_fire)
 
-  private val s3_pageEntry = pageTable.io.readWay.resp.entry
+  private val s3_pageEntry   = pageTable.io.readWay.resp.entry
+  private val s3_regionEntry = regionTable(s3_pageEntry.regionWay)
 
   // Case 1: jump not cross page
   // - use cond target fix helper
@@ -182,8 +185,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // Case 2: jump cross page
   // - use full target from page/region table
   private val s3_pageTableTarget = Cat(
-    regionTable(s3_pageEntry.regionWay).vpnUpper,
-    pageTable.io.readWay.resp.entry.vpnLower,
+    Mux(s3_regionEntry.valid && s3_pageEntry.valid, s3_regionEntry.vpnUpper, 0.U),
+    Mux(s3_pageEntry.valid, s3_pageEntry.vpnLower, 0.U),
     s3_entry.targetLower,
     0.U(instOffsetBits.W)
   )
@@ -303,7 +306,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_targetVpnUpper = getVpnUpper(t1_mispredictInfo.bits.target)
 
   private val t1_vpnUpperMatchVec = VecInit.tabulate(NumRegionTableWay) { i =>
-    regionTable(i).vpnUpper === t1_targetVpnUpper
+    regionTable(i).vpnUpper === t1_targetVpnUpper && regionTable(i).valid
   }
   private val t1_vpnUpperMatchOH = PriorityEncoderOH(t1_vpnUpperMatchVec.asUInt)
   private val t1_vpnUpperMatch   = t1_vpnUpperMatchVec.asUInt.orR
@@ -314,7 +317,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val t1_vpnMatchVec = VecInit(
     t1_pageEntries.map { e =>
-      t1_vpnUpperMatch &&
+      t1_vpnUpperMatch && e.valid &&
       e.vpnLower === t1_targetVpnLower &&
       e.regionWay === OHToUInt(t1_vpnUpperMatchVec)
     }
@@ -327,10 +330,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_pageWayIdx     = OHToUInt(t1_pageWayMask)
 
   private val t1_writePageEntry = Wire(new MainBtbPageTableEntry)
+  t1_writePageEntry.valid     := true.B
   t1_writePageEntry.vpnLower  := t1_targetVpnLower
   t1_writePageEntry.regionWay := t1_regionWay
 
   private val t1_writeRegionEntry = Wire(new MainBtbRegionTableEntry)
+  t1_writeRegionEntry.valid    := true.B
   t1_writeRegionEntry.vpnUpper := t1_targetVpnUpper
 
   // write page table

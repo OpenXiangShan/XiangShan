@@ -31,7 +31,7 @@ import xiangshan.frontend.bpu.CompareMatrix
 class RripStateGen(
     NumWays:              Int,
     AccessSize:           Int = 1,
-    UseFrequencyPriority: Boolean = true
+    UseFrequencyPriority: Boolean = false
 ) extends ReplacerStateGen(NumWays, AccessSize) {
   def RrpvWidth:  Int = log2Ceil(NumWays)
   def StateWidth: Int = NumWays * RrpvWidth
