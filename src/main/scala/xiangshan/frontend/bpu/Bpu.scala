@@ -204,6 +204,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
   utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
   utage.io.abtbPrediction         := abtb.io.abtbResult
+  utage.io.overrideValid          := s3_override
+  utage.io.redirectValid          := redirect.valid
 
   // uras
   uras.io.specIn.startPc     := s1_startPc
