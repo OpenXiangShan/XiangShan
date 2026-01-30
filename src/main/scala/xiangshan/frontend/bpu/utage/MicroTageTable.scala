@@ -27,22 +27,17 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import yunsuan.vector.alu.VIntFixpTable.table
 
 class MicroTageTable(
-    val numSets:       Int,
-    val histLen:       Int,
-    val tagLen:        Int,
-    val histBitsInTag: Int,
-    val tableId:       Int,
-    val numWay:        Int
+    val numSets: Int,
+    val numWay:  Int,
+    val tableId: Int
 )(implicit p: Parameters) extends MicroTageModule with Helpers {
   class MicroTageTableIO extends MicroTageBundle {
     class MicroTageReq extends Bundle {
-      val startPc:        PrunedAddr            = new PrunedAddr(VAddrBits)
-      val foldedPathHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
+      val readIndex: UInt = UInt(log2Ceil(numSets).W)
     }
-    class MicroTageRead extends Bundle {
-      val taken:       Bool = Bool()
-      val cfiPosition: UInt = UInt(CfiPositionWidth.W)
-      val useful:      UInt = UInt(UsefulWidth.W)
+    class MicroTageResp extends Bundle {
+      val readEntries: Vec[MicroTageEntry]  = Vec(numWay, new MicroTageEntry)
+      val readUsefuls: Vec[SaturateCounter] = Vec(numWay, new SaturateCounter(UsefulWidth))
     }
     class MicroTageUpdateInfo extends Bundle {
       val updateValid: Bool = Bool()
@@ -54,86 +49,73 @@ class MicroTageTable(
       val taken:       Bool = Bool()
       val wayMask:     UInt = UInt(numWay.W)
       val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+      val tag:         UInt = UInt(MaxTagLen.W)
     }
     class MicroTageTrain extends Bundle {
-      val t0_startPc:                PrunedAddr                = Input(new PrunedAddr(VAddrBits))
-      val t0_foldedPathHistForTrain: PhrAllFoldedHistories     = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-      val t0_read:                   Vec[Valid[MicroTageRead]] = Output(Vec(numWay, Valid(new MicroTageRead)))
-      val t1_update: Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
-      val t1_alloc:  Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo))
+      val t0_trainIndex: UInt                            = Input(UInt(log2Ceil(numSets).W))
+      val t0_read:       Vec[MicroTageTrainRead]         = Output(Vec(numWay, new MicroTageTrainRead))
+      val t1_update:     Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
+      val t1_alloc:      Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo))
     }
-    val req:         MicroTageReq                   = Input(new MicroTageReq)
-    val resps:       Vec[Valid[MicroTageTablePred]] = Output(Vec(numWay, Valid(new MicroTageTablePred)))
-    val train:       MicroTageTrain                 = new MicroTageTrain
-    val usefulReset: Bool                           = Input(Bool())
-    val debugIdx:    UInt                           = Output(UInt(log2Ceil(MaxNumSets).W))
-  }
-  class MicroTageEntry() extends MicroTageBundle {
-    val valid:      Bool            = Bool()
-    val startPcTag: UInt            = UInt(tagLen.W)
-    val posTag:     UInt            = UInt(CfiPositionWidth.W)
-    val takenCtr:   SaturateCounter = TakenCounter()
+    val req:         Valid[MicroTageReq] = Input(Valid(new MicroTageReq))
+    val resps:       MicroTageResp       = Output(new MicroTageResp)
+    val train:       MicroTageTrain      = new MicroTageTrain
+    val usefulReset: Bool                = Input(Bool())
   }
   val io              = IO(new MicroTageTableIO)
-  private val entries = RegInit(VecInit(Seq.fill(numSets)(VecInit(Seq.fill(numWay)(0.U.asTypeOf(new MicroTageEntry))))))
-  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(
-    VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
-  )))
-  val idxFhInfo    = new FoldedHistoryInfo(histLen, min(log2Ceil(numSets), histLen))
-  val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag))
-  val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag - 1))
+  val numBanks = 4
+  require(numSets % numBanks == 0, s"numSets must be divisible by $numBanks")
+  val setsPerBank = numSets / numBanks
+  val bankAddrWidth = log2Ceil(setsPerBank)
 
-  def computeHash(startPc: PrunedAddr, allFh: PhrAllFoldedHistories, tableId: Int): (UInt, UInt) = {
-    val unhashedIdx = getUnhashedIdx(startPc)
-    val unhashedTag = getUnhashedTag(startPc)
-    val idxFh       = allFh.getHistWithInfo(idxFhInfo).foldedHist
-    val tagFh       = allFh.getHistWithInfo(tagFhInfo).foldedHist
-    val altTagFh    = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-    val idx = if (idxFhInfo.FoldedLength < log2Ceil(numSets)) {
-      val foldShift = log2Ceil(numSets) - idxFhInfo.FoldedLength
-      (unhashedIdx ^ Cat(0.U(foldShift.W), idxFh) ^ (idxFh << foldShift))(log2Ceil(numSets) - 1, 0)
-    } else {
-      (unhashedIdx ^ idxFh)(log2Ceil(numSets) - 1, 0)
-    }
-    val lowTag  = (unhashedTag ^ tagFh ^ (altTagFh << 1))(histBitsInTag - 1, 0)
-    val highTag = connectPcTag(unhashedIdx, tableId)
-    val tag     = Cat(highTag, lowTag)(tagLen - 1, 0)
-    (idx, tag)
-  }
+  private val entries = RegInit(VecInit(
+    Seq.fill(numBanks)(
+      VecInit(Seq.fill(setsPerBank)(
+        VecInit(Seq.fill(numWay)(0.U.asTypeOf(new MicroTageEntry)))
+      ))
+    )
+  ))
 
-  // predict
-  private val (s0_idx, s0_tag) = computeHash(io.req.startPc, io.req.foldedPathHist, tableId)
-  private val predReadEntries  = entries(s0_idx)
-  private val predReadUseful   = usefulEntries(s0_idx)
+  private val useful = RegInit(VecInit(
+    Seq.fill(numBanks)(
+      VecInit(Seq.fill(setsPerBank)(
+        VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
+      ))
+    )
+  ))
 
-  // Output prediction results for all ways
+  def getBankSel(addr: UInt): UInt = addr(1, 0)
+  def getBankAddr(addr: UInt): UInt = addr(bankAddrWidth + 1, 2)
+
+  val predIndex = io.req.bits.readIndex
+  val predBankSel = getBankSel(predIndex)
+  val predBankAddr = getBankAddr(predIndex)
+
+  val predReadEntries = entries(predBankSel)(predBankAddr)
+  val predReadUseful = useful(predBankSel)(predBankAddr)
+
+  io.resps.readEntries := RegNext(predReadEntries, 0.U.asTypeOf(Vec(numWay, new MicroTageEntry)))
+  io.resps.readUsefuls := RegNext(predReadUseful, 0.U.asTypeOf(Vec(numWay, new SaturateCounter(UsefulWidth))))
+
+  val t0_trainIdx = io.train.t0_trainIndex
+  val t0_bankSel = getBankSel(t0_trainIdx)
+  val t0_bankAddr = getBankAddr(t0_trainIdx)
+  
+  val t0_trainReadEntries = entries(t0_bankSel)(t0_bankAddr)
+  val t0_trainReadUseful = useful(t0_bankSel)(t0_bankAddr)
+
   for (way <- 0 until numWay) {
-    val entry  = predReadEntries(way)
-    val useful = predReadUseful(way)
-    val hit    = entry.valid && (entry.startPcTag === s0_tag)
-    io.resps(way).valid            := hit
-    io.resps(way).bits.taken       := entry.takenCtr.isPositive
-    io.resps(way).bits.cfiPosition := entry.posTag
+    io.train.t0_read(way).valid := t0_trainReadEntries(way).valid
+    io.train.t0_read(way).cfiPosition := t0_trainReadEntries(way).cfiPosition
+    io.train.t0_read(way).useful := t0_trainReadUseful(way).value
   }
 
-  // train / write logic
-  private val (t0_trainIdx, t0_trainTag) = computeHash(io.train.t0_startPc, io.train.t0_foldedPathHistForTrain, tableId)
-  private val t0_trainReadEntries        = entries(t0_trainIdx)
-  private val t0_trainReadUseful         = usefulEntries(t0_trainIdx)
-  for (way <- 0 until numWay) {
-    val entry  = t0_trainReadEntries(way)
-    val useful = t0_trainReadUseful(way)
-    val hit    = entry.valid && (entry.startPcTag === t0_trainTag)
-    io.train.t0_read(way).valid            := hit
-    io.train.t0_read(way).bits.taken       := entry.takenCtr.isPositive
-    io.train.t0_read(way).bits.cfiPosition := entry.posTag
-    io.train.t0_read(way).bits.useful      := useful.value
-  }
+  val t1_trainIdx = RegNext(t0_trainIdx)
+  val t1_bankSel = RegNext(t0_bankSel)
+  val t1_bankAddr = RegNext(t0_bankAddr)
+  private val t1_trainReadEntries = entries(t1_bankSel)(t1_bankAddr)
+  private val t1_trainReadUseful  = useful(t1_bankSel)(t1_bankAddr)
 
-  private val t1_trainIdx         = RegNext(t0_trainIdx)
-  private val t1_trainTag         = RegNext(t0_trainTag)
-  private val t1_trainReadEntries = entries(t1_trainIdx)
-  private val t1_trainReadUseful  = usefulEntries(t1_trainIdx)
   // For each way, prepare updated entry and useful counter
   for (way <- 0 until numWay) {
     val oldEntry    = t1_trainReadEntries(way)
@@ -146,9 +128,9 @@ class MicroTageTable(
 
     // New entry values
     val newEntry = Wire(new MicroTageEntry)
-    newEntry.valid      := true.B
-    newEntry.startPcTag := t1_trainTag
-    newEntry.posTag     := Mux(doAlloc, io.train.t1_alloc.bits.cfiPosition, oldEntry.posTag)
+    newEntry.valid       := true.B
+    newEntry.tag         := Mux(doAlloc, io.train.t1_alloc.bits.tag, oldEntry.tag)
+    newEntry.cfiPosition := Mux(doAlloc, io.train.t1_alloc.bits.cfiPosition, oldEntry.cfiPosition)
     newEntry.takenCtr := Mux(
       doAlloc,
       Mux(io.train.t1_alloc.bits.taken, TakenCounter.WeakPositive, TakenCounter.WeakNegative),
@@ -166,6 +148,7 @@ class MicroTageTable(
       )
     )
 
+    // New entry values
     when(doAlloc || doUpdate) {
       t1_trainReadEntries(way) := newEntry
     }
@@ -176,17 +159,17 @@ class MicroTageTable(
 
   // Write back updated entry on valid update
   when(io.usefulReset) {
-    for (i <- 0 until numSets) {
-      for (w <- 0 until numWay) {
-        val entry = usefulEntries(i)(w)
-        if (tableId == 0) {
-          usefulEntries(i)(w).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
-        } else {
-          usefulEntries(i)(w).value := entry.value >> 1.U
+    for (bank <- 0 until numBanks) {
+      for (setIdx <- 0 until setsPerBank) {
+        for (way <- 0 until numWay) {
+          val entry = useful(bank)(setIdx)(way)
+          if (tableId == 0) {
+            useful(bank)(setIdx)(way).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
+          } else {
+            useful(bank)(setIdx)(way).value := entry.value >> 1.U
+          }
         }
       }
     }
   }
-
-  io.debugIdx := t1_trainIdx.pad(log2Ceil(MaxNumSets))
 }
