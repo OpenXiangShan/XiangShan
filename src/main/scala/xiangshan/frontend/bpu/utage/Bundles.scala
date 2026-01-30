@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 
 object TakenCounter extends SaturateCounterFactory {
@@ -39,6 +40,7 @@ class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
 }
 
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
+  val readIndex:  Vec[UInt]       = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
   val abtbResult: Vec[AbtbResult] = Vec(NumAheadBtbPredictionEntries, new AbtbResult)
 }
 
@@ -61,9 +63,20 @@ class AbtbResult(implicit p: Parameters) extends MicroTageBundle {
   val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
 }
 
+class MicroTageEntry(implicit p: Parameters) extends MicroTageBundle {
+  val valid:       Bool            = Bool()
+  val tag:         UInt            = UInt(MaxTagLen.W)
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val takenCtr:    SaturateCounter = TakenCounter()
+}
+
 class MicroTageTablePred(implicit p: Parameters) extends MicroTageBundle {
   val taken:       Bool = Bool()
+  val tag:         UInt = UInt(MaxTagLen.W)
   val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+  val posHit:      Bool = Bool()
+  val tagHit:      Bool = Bool()
+  val valid:       Bool = Bool()
 }
 
 class MicroTageTrainResult(implicit p: Parameters) extends MicroTageBundle {
@@ -99,4 +112,10 @@ class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
   val missHitMisPredBr: MicroTageTrainResult      = new MicroTageTrainResult
   val setIdx:           Vec[UInt]                 = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
   val branches:         Vec[MicroTageTrainResult] = Vec(NumAheadBtbPredictionEntries, new MicroTageTrainResult)
+}
+
+class MicroTageTrainRead(implicit p: Parameters) extends MicroTageBundle {
+  val valid:       Bool = Bool()
+  val useful:      UInt = UInt(UsefulWidth.W)
+  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
 }
