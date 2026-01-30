@@ -460,7 +460,7 @@ object Bundles {
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
-    val storeSetHit    = Option.when(params.isLdAddrIQ)(Bool())
+    val storeSetHit    = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
     val waitForRobIdx  = Option.when(params.isLdAddrIQ)(new RobPtr)
     val loadWaitBit    = Option.when(params.isLdAddrIQ)(Bool())
     val loadWaitStrict = Option.when(params.isLdAddrIQ)(Bool())
@@ -1246,9 +1246,9 @@ object Bundles {
     val isFirstIssue   = Bool()                        // Only used by store yet
     val loadWaitBit    = Option.when(params.hasLoadExu)(Bool())
     val waitForRobIdx  = Option.when(params.hasLoadExu)(new RobPtr) // store set predicted previous store robIdx
-    val storeSetHit    = Option.when(params.hasLoadExu)(Bool())     // inst has been allocated an store set
+    val storeSetHit    = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(Bool())     // inst has been allocated an store set
     val loadWaitStrict = Option.when(params.hasLoadExu)(Bool())     // load inst will not be executed until ALL former store addr calcuated
-    val ssid           = Option.when(params.hasLoadExu)(UInt(SSIDWidth.W))
+    val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
     val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
     val lqIdx          = Option.when(params.hasLoadExu || params.hasVecLsFu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu)(new SqPtr)
@@ -1476,7 +1476,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       this.pdest  := (if (wbType == "vl") { source.pdestVl.getOrElse(0.U(VlPhyRegIdxWidth.W)) } else { source.pdest })
       this.data   := (if (wbType == "int") { source.toIntRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
                       else if (wbType == "fp") { source.toFpRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
-                      else if (wbType == "vf") { source.toVecRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) } 
+                      else if (wbType == "vf") { source.toVecRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
                       else if (wbType == "v0") { source.toV0Rf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
                       else                     { source.toVlRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) })
     }
