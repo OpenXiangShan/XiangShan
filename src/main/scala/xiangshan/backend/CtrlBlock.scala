@@ -607,6 +607,7 @@ class CtrlBlockImp(
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
     rename.io.fusionCross2FtqVec(i) := false.B
+    decode.io.debugOutValid.get(i) := decodePipeRename(i).valid
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -697,6 +698,7 @@ class CtrlBlockImp(
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
+  rename.io.debugDispatchAllFire.foreach(_ := dispatch.io.toRenameAllFire)
 
   for (i <- 0 until RenameWidth - 1) {
     when (fusionDecoder.io.out(i).valid) {
@@ -720,6 +722,9 @@ class CtrlBlockImp(
 
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
+
+  rename.io.debugOutValidVec.foreach( validVec => validVec := dispatch.io.fromRename.map(_.valid))
+
 
   dispatch.io.redirect := s1_s3_redirect
   val enqRob = Wire(chiselTypeOf(rob.io.enq))
@@ -764,6 +769,8 @@ class CtrlBlockImp(
   dispatch.io.robHeadNotReady := rob.io.headNotReady
   dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
+  dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
+  dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
 
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
