@@ -1004,7 +1004,7 @@ package object xiangshan {
     val VecIQFullStall = Value("VecIQFullStall")
     val LoadIQFullStall = Value("LoadIQFullStall")
     val StoreIQFullStall = Value("StoreIQFullStall")
-    val MultiIssueStall = Value("MultiIssueStall")
+    val OtherIQFullStall = Value("OtherIQFullStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
