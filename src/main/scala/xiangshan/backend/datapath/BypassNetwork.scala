@@ -211,7 +211,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
           readBypass2    -> (if (bypass2ExuIdx >= 0) Mux1H(bypass2ValidVec3(bypass2ExuIdx)(srcIdx), bypass2DataVec) else 0.U),
           readZero       -> 0.U,
-          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.src(3) else 0.U),
+          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.v0.get else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0.get else if (exuParm.aluNeedPc) immALU else imm)
@@ -220,6 +220,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       src := originSrc
     }
     exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
+    exuInput.bits.v0.foreach { _ := fromDPs(exuIdx).bits.v0.get }
 
     if (exuParm.hasBrhFu || exuParm.hasCSR || exuParm.hasFence) {
       val thisPcOffset = exuInput.bits.getPcOffset()
@@ -249,7 +250,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         val maskWakeUpFus = exuParm.fuConfigs.distinct.filter(_.maskWakeUp).map(x => x.fuType.U)
         val maskWakeUpFu = maskWakeUpFus.map(_ === fuType).reduce(_ || _)
         when (maskWakeUpFu) {
-          val maskIn = exuInput.bits.src(3)
+          val maskIn = exuInput.bits.v0.get
           val vm = vpu.vm
           val needClearMask = isViAlu & VialuFixType.needClearMask(fuOpType)
           srcMask := MuxCase(maskIn, Seq(

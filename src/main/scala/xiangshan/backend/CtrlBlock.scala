@@ -570,7 +570,6 @@ class CtrlBlockImp(
   decode.io.intRat <> rename.io.intReadPorts
   decode.io.fpRat  <> rename.io.fpReadPorts
   decode.io.vecRat <> rename.io.vecReadPorts
-  decode.io.v0Rat  <> rename.io.v0ReadPorts
   decode.io.vlRat  <> rename.io.vlReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
   decode.io.stallReason.in <> io.frontend.stallReason

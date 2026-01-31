@@ -17,24 +17,22 @@ case class DiffRatStateParams()(implicit p: Parameters) {
 
   val intEntries: Int = 32
   val fpEntries: Int = 32
-  val vecEntries: Int = 31
-  val v0Entries: Int = 1
+  val vecEntries: Int = 32
   val vlEntries: Int = 1
   val robEntries: Int = coreParams.RobSize
   val renameWidth: Int = coreParams.RenameWidth
   val commitWidth: Int = coreParams.CommitWidth
 
-  require(Seq(intEntries, fpEntries, vecEntries, v0Entries, vlEntries).forall(_ > 0))
+  require(Seq(intEntries, fpEntries, vecEntries, vlEntries).forall(_ > 0))
   require(coreParams.IntLogicRegs >= intEntries)
   require(coreParams.FpLogicRegs >= fpEntries)
-  require(coreParams.VecLogicRegs >= vecEntries + v0Entries)
-  require(coreParams.V0LogicRegs >= v0Entries)
+  require(coreParams.VecLogicRegs >= vecEntries)
   require(coreParams.VlLogicRegs >= vlEntries)
   require(robEntries > 0)
   require(renameWidth > 0)
   require(commitWidth > 0)
 
-  val totalEntries: Int = intEntries + fpEntries + vecEntries + v0Entries + vlEntries
+  val totalEntries: Int = intEntries + fpEntries + vecEntries + vlEntries
   // Keep the two circular ROB pointer generations distinct in snapshot storage.
   val storageEntries: Int = robEntries * 2
   val bankBits: Int = log2Ceil(renameWidth max 2)
@@ -45,7 +43,6 @@ class DiffRatState(val params: DiffRatStateParams)(implicit p: Parameters) exten
   val intRat = Vec(params.intEntries, UInt(PhyRegIdxWidth.W))
   val fpRat = Vec(params.fpEntries, UInt(PhyRegIdxWidth.W))
   val vecRat = Vec(params.vecEntries, UInt(PhyRegIdxWidth.W))
-  val v0Rat = Vec(params.v0Entries, UInt(PhyRegIdxWidth.W))
   val vlRat = Vec(params.vlEntries, UInt(PhyRegIdxWidth.W))
 }
 
@@ -55,18 +52,16 @@ class DiffRatRenameUpdate(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
-  val v0Wen = Bool()
   val vlWen = Bool()
 }
 
 object DiffRatState {
   def init(params: DiffRatStateParams)(implicit p: Parameters): DiffRatState = {
     val state = Wire(new DiffRatState(params))
-    val pregWidth = state.v0Rat.head.getWidth
+    val pregWidth = state.intRat.head.getWidth
     state.intRat := VecInit.fill(params.intEntries)(0.U(pregWidth.W))
     state.fpRat := VecInit.tabulate(params.fpEntries)(_.U(pregWidth.W))
-    state.vecRat := VecInit.tabulate(params.vecEntries)(i => (i + params.v0Entries).U(pregWidth.W))
-    state.v0Rat := VecInit.tabulate(params.v0Entries)(_.U(pregWidth.W))
+    state.vecRat := VecInit.tabulate(params.vecEntries)(_.U(pregWidth.W))
     state.vlRat := VecInit.tabulate(params.vlEntries)(_.U(pregWidth.W))
     state
   }
@@ -107,12 +102,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
       next.fpRat(reg) := Mux(hit, req.bits.pdest, prev.fpRat(reg))
     }
     for (reg <- 0 until params.vecEntries) {
-      val hit = req.valid && req.bits.vecWen && req.bits.ldest === (reg + params.v0Entries).U
+      val hit = req.valid && req.bits.vecWen && req.bits.ldest === reg.U
       next.vecRat(reg) := Mux(hit, req.bits.pdest, prev.vecRat(reg))
-    }
-    for (reg <- 0 until params.v0Entries) {
-      val hit = req.valid && req.bits.v0Wen && req.bits.ldest === reg.U
-      next.v0Rat(reg) := Mux(hit, req.bits.pdest, prev.v0Rat(reg))
     }
     for (reg <- 0 until params.vlEntries) {
       val hit = req.valid && req.bits.vlWen && req.bits.ldest === reg.U
