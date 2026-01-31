@@ -59,11 +59,11 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     case Reg_Vl => 1
   }
   val rdataNums = reg_t match {
-    case Reg_I => 32
-    case Reg_F => 32
-    case Reg_V => 31 // no v0
-    case Reg_V0 => 1 // v0
-    case Reg_Vl => 1 // vl
+    case Reg_I => IntLogicRegs
+    case Reg_F => FpLogicRegs
+    case Reg_V => VecStdLogicRegs // with v0
+    case Reg_V0 => V0LogicRegs // v0
+    case Reg_Vl => VlLogicRegs // vl
   }
   val renameTableWidth = reg_t match {
     case Reg_I => log2Ceil(IntLogicRegs)
@@ -175,11 +175,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
 
   io.old_pdest := old_pdest
   io.need_free := need_free
-  io.debug_rdata.foreach{ x => reg_t match {
-      case Reg_V => x := arch_table.drop(1).take(rdataNums)
-      case _ => x := arch_table.take(rdataNums)
-    }
-  }
+  io.debug_rdata.foreach(_ := arch_table.take(io.debug_rdata.get.size))
   io.debug_v0.foreach(_ := arch_table(0))
   io.debug_vl.foreach(_ := arch_table(0))
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
@@ -193,11 +189,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     }
     difftest_table := difftest_table_next
 
-    io.diff_rdata.foreach{ x => reg_t match {
-        case Reg_V => x := difftest_table.drop(1).take(rdataNums)
-        case _ => x := difftest_table.take(rdataNums)
-      }
-    }
+    io.diff_rdata.foreach(_ := difftest_table.take(io.diff_rdata.get.size))
     io.diff_v0.foreach(_ := difftest_table(0))
     io.diff_vl.foreach(_ := difftest_table(0))
   }
@@ -241,14 +233,14 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val snpt = Input(new SnapshotPort)
 
     // for debug assertions
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_int_rat = Option.when(backendParams.debugEn)(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_fp_rat  = Option.when(backendParams.debugEn)(Vec(FpLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vec_rat = Option.when(backendParams.debugEn)(Vec(VecStdLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_v0_rat  = Option.when(backendParams.debugEn)(Vec(V0LogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
 
     // for difftest
-    val diff_vl_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I, RabCommitWidth * MaxUopSize))
@@ -336,11 +328,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
-    val splitVecPregs = 2 * (V0PhyRegs + VfPhyRegs)
+    val splitVecPregs = VLEN / 64 * VfPhyRegs
     val difftest = DifftestModule(new DiffArchVecRenameTable(splitVecPregs), delay = 2)
     difftest.coreid := io.hartId
     // When merge v0Rat and vecRat, the index of vecRats should starts from V0PhyRegs
-    val vecRats = v0Rat.io.diff_rdata.get ++ vecRat.io.diff_rdata.get.map(_ + V0PhyRegs.U)
+    val vecRats = vecRat.io.diff_rdata.get
     difftest.value := VecInit(vecRats.flatMap { r =>
       val splitDest = (r << 1).asUInt
       Seq(splitDest, splitDest + 1.U)
