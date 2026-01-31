@@ -499,9 +499,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         dataEntry.paddr(PAddrBits - 1, pageOffset) === s2LoadPaddr(s2LoadPaddr.getWidth - 1, pageOffset - VWordOffset)
       }).asUInt
 
-      val s2PaddrNoMatch       = (
-        ((s2PaddrMatchVec & s2CanForward) ^ s2SelectOH).orR
-        )
+      // two situation need to trigger paddr not match :
+      // [1]. vaddr match, but paddr not match.
+      // [2]. vaddr not match, but paddr match.
+      val s2PaddrNoMatch       = Mux(s2ForwardValid,
+        !(s2PaddrMatchVec & s2CanForward & s2SelectOH).orR, // if forward valid, select entry's paddr must match
+        (s2PaddrMatchVec & s2CanForward).orR) // if forward invalid, must no paddr match
 
       val s2SelectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
