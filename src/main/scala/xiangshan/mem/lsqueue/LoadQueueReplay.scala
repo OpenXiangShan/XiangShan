@@ -44,30 +44,30 @@ object LoadReplayCauses {
    */
   // uncache
   val C_UNCACHE = 0
-  // st-ld violation re-execute check
-  val C_MA  = 1
-  // tlb miss check
-  val C_TM  = 2
-  // store-to-load-forwarding check
-  val C_FF  = 3
-  // dcache replay check
-  val C_DR  = 4
-  // dcache miss check
-  val C_DM  = 5
-  // wpu predict fail
-  val C_WF  = 6
-  // dcache bank conflict check / unalign tail split fail
-  val C_BC  = 7
-  // RAR queue accept check
-  val C_RAR = 8
-  // RAW queue accept check
-  val C_RAW = 9
-  // st-ld violation
-  val C_NK  = 10
-  // misalignBuffer Full
-  val C_MF  = 11
   // storeQueue multi forward invalid
-  val C_SMF = 12
+  val C_SMF = 1
+  // st-ld violation re-execute check
+  val C_MA  = 2
+  // tlb miss check
+  val C_TM  = 3
+  // store-to-load-forwarding check
+  val C_FF  = 4
+  // dcache replay check
+  val C_DR  = 5
+  // dcache miss check
+  val C_DM  = 6
+  // wpu predict fail
+  val C_WF  = 7
+  // dcache bank conflict check / unalign tail split fail
+  val C_BC  = 8
+  // RAR queue accept check
+  val C_RAR = 9
+  // RAW queue accept check
+  val C_RAW = 10
+  // st-ld violation
+  val C_NK  = 11
+  // misalignBuffer Full
+  val C_MF  = 12
   // total causes
   val allCauses = 13
 }
