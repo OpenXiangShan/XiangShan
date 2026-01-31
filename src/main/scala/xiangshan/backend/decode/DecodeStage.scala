@@ -51,8 +51,6 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(log2Ceil(IntLogicRegs)))))
   val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(log2Ceil(FpLogicRegs)))))
   val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(log2Ceil(VecLogicRegs)))))
-  // no v0Rat and vlRat Bundle because they are only one logic register
-  val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(V0LogicRegs))))
   val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(VlLogicRegs))))
   // csr control
   val csrCtrl = Input(new CustomCSRCtrlIO)
@@ -227,18 +225,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     inst.bits.srcType(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(1), finalDecodedInst(i).srcType(0))
     inst.bits.srcType(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(0), finalDecodedInst(i).srcType(1))
     inst.bits.v0Wen := finalDecodedInst(i).vecWen && finalDecodedInst(i).ldest === 0.U || finalDecodedInst(i).v0Wen
-    inst.bits.vecWen := finalDecodedInst(i).vecWen && finalDecodedInst(i).ldest =/= 0.U
-    // when src0/src1/src2 read V0, src3 read V0
-    val srcType0123HasV0 = finalDecodedInst(i).srcType.zip(finalDecodedInst(i).lsrc).take(4).map { case (s, l) =>
-      SrcType.isVp(s) && (l === 0.U)
-    }.reduce(_ || _)
-    inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
+    inst.bits.vecWen := finalDecodedInst(i).vecWen
     inst.bits.debug.foreach(_.debug_seqNum.uopIdx := inst.bits.uopIdx)
   }
 
   io.out.map(x =>
     when(x.valid){
-      assert(PopCount(VecInit(x.bits.rfWen, x.bits.fpWen, x.bits.vecWen, x.bits.v0Wen, x.bits.vlWen)) < 2.U,
+      assert(PopCount(VecInit(x.bits.rfWen, x.bits.fpWen, x.bits.vecWen || x.bits.v0Wen, x.bits.vlWen)) < 2.U,
         "DecodeOut: can't wirte two regfile in one uop/instruction")
     }
   )
@@ -260,14 +253,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.fpRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Vec instructions
-    // TODO: vec uop dividers need change this
     io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
     io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
-
-    io.v0Rat(i).addr := V0_IDX.U // v0
-    io.v0Rat(i).hold := !io.out(i).ready
 
     io.vlRat(i).addr := Vl_IDX.U // vl
     io.vlRat(i).hold := !io.out(i).ready

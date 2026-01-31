@@ -192,6 +192,12 @@ object Bundles {
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
   }
 
+  object V0 {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters): Int = p(XSCoreParamsKey).VLEN
+  }
+
   object Vstart {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)
 
