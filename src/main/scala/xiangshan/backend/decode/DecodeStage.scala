@@ -27,7 +27,7 @@ import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.PipelineStallReason
+import xiangshan.backend.{PipelineStallReason, StoreBubbleReason}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
@@ -80,6 +80,8 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   val toCSR = new Bundle {
     val trapInstInfo = ValidIO(new TrapInstInfo)
   }
+  // debug
+  val debugOutValid =  OptionWrapper(backendParams.debugEn,Vec(RenameWidth,  Input(Bool())))
 }
 
 class DecodeStage(implicit p: Parameters) extends XSModule
@@ -314,30 +316,70 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // Topdown
   val inValidVec = io.in.map(_.valid)
-  val outValidVec = io.out.map(_.valid)
-  val outFireVec = io.out.map(_.fire)
+  val inReadyVec = io.in.map(_.ready)
+  val outReadyVec = io.out.map(_.ready)
+  val outValidVec = io.debugOutValid.get
+  val outFireVec = outReadyVec.zip(outValidVec).map { case (ready, valid) =>
+    ready && valid
+  }
+  val outAllFire = outFireVec.zip(outValidVec).map { case(fire, valid) =>
+    !valid || fire
+  }.reduce(_ && _)
+  val outHasValidAllFire = outValidVec.reduce(_ || _) && outAllFire
+
+  // prepipe stall
+  val frontendReason = io.stallReason.in.reason
+  val frontendStall  = !inValidVec.reduce(_ || _)
+  val frontendBubble = !inValidVec.reduce(_ && _) && !frontendStall
+  val decodeStall = !inReadyVec.reduce(_ || _)
+  val decodeStallReason = Wire(chiselTypeOf(io.stallReason.in.reason(0)))
+
+  val frontendBubbleValidVec = Wire(Vec(RenameWidth, Bool()))
+  val frontendBubbleReasonVec = Wire(chiselTypeOf(io.stallReason.in.reason))
+  // prepipe bubble
+  for (i <- 0 until RenameWidth) {
+    val frontendBubbleValid = frontendBubble && !inValidVec(i)
+    val bubbleStore = Module(new StoreBubbleReason(log2Ceil(TopDownCounters.NumStallReasons.id)))
+    bubbleStore.io.bubbleValid := frontendBubbleValid
+    bubbleStore.io.bubbleReason := Mux(frontendReason(i) === NoStall.id.U, FrontendOtherCoreStall.id.U, frontendReason(i))
+    bubbleStore.io.redirect := io.redirect.valid
+    bubbleStore.io.reasonFire := outAllFire && !decodeStall
+
+    frontendBubbleValidVec(i) := bubbleStore.io.outReasonValid
+    frontendBubbleReasonVec(i) := bubbleStore.io.outReason
+  }
+
+  dontTouch(frontendBubbleValidVec)
+  dontTouch(frontendBubbleReasonVec)
+  // current pipe
+  // current stall
+
+  decodeStallReason := MuxCase(BackendOtherCoreStall.id.U, Seq(
+    ctrlRecStall  -> ControlRecoveryStall.id.U,
+    mvioRecStall  -> MemVioRecoveryStall.id.U,
+    otherRecStall -> OtherRecoveryStall.id.U,
+  ))
+
+  // current bubble
+  val decodeBubble = false.B
+  val decodeBubbleReason = 0.U
 
   io.stallReason.out.reason.zipWithIndex.foreach{ case (stallReason, idx) =>
     val inValid = inValidVec(idx)
     val outValid = outValidVec(idx)
     val inReason = io.stallReason.in.reason(idx)
     // TopDown collect pre pipe reason
-    val prePipeStall = !inValidVec.reduce(_||_)
-    val prePipeBubble = !inValid
+    val prePipeStall = frontendStall
+    val prePipeBubble = frontendBubbleValidVec(idx)
     // TODO
     val prePipeStallReason = Mux(inReason === NoStall.id.U, FrontendOtherCoreStall.id.U, inReason)
+    val prePipeBubbleReason = frontendBubbleReasonVec(idx)
     // other reason like out.ready will be collect by next stage dispatch
     //    if (backendParams.debugEn) {
     //      assert(!reset.asBool && (!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
     //        "[TopDown]: Rename has no instruction in ,but reason is null")
     //    }
     // TopDown count current stage stall
-    val decodeStall = inValid && !outValid
-    val decodeStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-      ctrlRecStall  -> ControlRecoveryStall.id.U,
-      mvioRecStall  -> MemVioRecoveryStall.id.U,
-      otherRecStall -> OtherRecoveryStall.id.U,
-    ))
     val redirect = redirectStall
     val redirectReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
       ctrlRedirectStall  -> ControlRedirectStall.id.U,
@@ -345,17 +387,20 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       otherRedirectStall -> OtherRedirectStall.id.U,
     ))
 
-    val renameFire = outFireVec.reduce(_||_)
 
     val stallReasonPipe = Module(new PipelineStallReason(log2Ceil(TopDownCounters.NumStallReasons.id)))
+    stallReasonPipe.io.rightFire := outFireVec(idx)
+    stallReasonPipe.io.rightHasFire := outHasValidAllFire
     stallReasonPipe.io.prePipeStall := prePipeStall
     stallReasonPipe.io.prePipeStallReason := prePipeStallReason
     stallReasonPipe.io.prePipeBubble := prePipeBubble
+    stallReasonPipe.io.prePipeBubbleReason := prePipeBubbleReason
     stallReasonPipe.io.redirect := redirect
     stallReasonPipe.io.redirectReason := redirectReason
     stallReasonPipe.io.currentPipeStall := decodeStall
     stallReasonPipe.io.currentPipeStallReason := decodeStallReason
-    stallReasonPipe.io.pastPipeFire := renameFire
+    stallReasonPipe.io.currentPipeBubble := decodeBubble
+    stallReasonPipe.io.currentPipeBubbleReason := decodeBubbleReason
 
     stallReason := stallReasonPipe.io.outReason
   }
@@ -387,14 +432,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val fusionValid = VecInit(io.fusion.map(x => GatedValidRegNext(x)))
   val inValidNotReady = io.in.map(in => GatedValidRegNext(in.valid && !in.ready))
-  val frontendStall = GatedValidRegNext(!io.in.head.valid && io.in.head.ready)
+  val frontendStallReg = GatedValidRegNext(!io.in.head.valid && io.in.head.ready)
   val backendStall  = GatedValidRegNext(io.in.head.valid && !io.in.head.ready)
   val perfEvents = Seq(
     ("decoder_fused_instr",  PopCount(fusionValid)       ),
     ("decoder_waitInstr",    PopCount(inValidNotReady)   ),
     ("decoder_stall_cycle",  hasValid && !io.out(0).ready),
     ("decoder_utilization",  PopCount(io.in.map(_.valid))),
-    ("frontend_stall_cycle", frontendStall),
+    ("frontend_stall_cycle", frontendStallReg),
     ("backend_stall_cycle",  backendStall),
     ("INST_SPEC",            PopCount(io.in.map(_.fire))),
     ("RECOVERY_BUBBLE",      recoveryFlag)
