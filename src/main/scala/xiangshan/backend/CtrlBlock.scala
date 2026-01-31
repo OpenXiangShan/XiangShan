@@ -723,7 +723,7 @@ class CtrlBlockImp(
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
 
-  rename.io.debugOutValidVec.foreach( validVec => validVec := dispatch.io.fromRename.map(_.valid))
+  rename.io.debugOutValidVec.get := dispatch.io.fromRename.map(_.valid)
 
 
   dispatch.io.redirect := s1_s3_redirect

@@ -343,7 +343,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     bubbleStore.io.bubbleValid := frontendBubbleValid
     bubbleStore.io.bubbleReason := Mux(frontendReason(i) === NoStall.id.U, FrontendOtherCoreStall.id.U, frontendReason(i))
     bubbleStore.io.redirect := io.redirect.valid
-    bubbleStore.io.reasonFire := outAllFire && !decodeStall
+    bubbleStore.io.reasonFire := outHasValidAllFire && !decodeStall
 
     frontendBubbleValidVec(i) := bubbleStore.io.outReasonValid
     frontendBubbleReasonVec(i) := bubbleStore.io.outReason

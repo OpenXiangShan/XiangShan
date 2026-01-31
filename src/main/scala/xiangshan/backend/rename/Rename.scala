@@ -793,7 +793,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     bubbleStore.io.bubbleValid := decodeBubbleValid
     bubbleStore.io.bubbleReason := decodeReason(i)
     bubbleStore.io.redirect := io.redirect.valid
-    bubbleStore.io.reasonFire := dispatchAllFire && !renameStall
+    bubbleStore.io.reasonFire := outHasValidAllFire && !renameStall
 
     decodeBubbleValidVec(i) := bubbleStore.io.outReasonValid
     decodeBubbleReasonVec(i) := bubbleStore.io.outReason
