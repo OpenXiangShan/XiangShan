@@ -152,6 +152,7 @@ object Bundles {
     def numSrc = backendParams.numSrc
     val srcType = Vec(numSrc, SrcType())
     val vlRen = Bool()
+    val v0Ren = Bool()
     val lsrc = Vec(numSrc, UInt(LogicRegsWidth.W))
     val ldest = UInt(LogicRegsWidth.W)
     val fuType = FuType()
@@ -250,6 +251,7 @@ object Bundles {
     val vecWen = Bool()
     val v0Wen = Bool()
     val vlWen = Bool()
+    val v0Ren = Bool()
     val vlRen = Bool()
     val waitForward = Bool() // no speculate execution
     val blockBackward = Bool()
@@ -270,8 +272,11 @@ object Bundles {
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
+    val psrcV0 = UInt(V0PhyRegIdxWidth.W)
     val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
+    // Todo[AREA]: vl and v0 can be merged into one field, since they are never used in the same time
+    val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val dirtyFs = Bool()
@@ -356,8 +361,10 @@ object Bundles {
     val lastUop = Bool()
     // from rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcV0 = UInt(V0PhyRegIdxWidth.W)
     val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
+    val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
     val robIdx = new RobPtr
     val numLsElem = NumLsElem()
@@ -369,6 +376,7 @@ object Bundles {
     val loadWaitStrict = Bool()
     val ssid = UInt(SSIDWidth.W)
     val srcState = Vec(numSrc, SrcState())
+    val srcStateV0 = SrcState()
     val srcStateVl = SrcState()
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val useRegCache = Vec(backendParams.numIntRegSrc, Bool())
@@ -417,8 +425,10 @@ object Bundles {
     // from rename
     val robIdx    = new RobPtr
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcV0    = Option.when(params.readV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
+    val pdestV0   = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W)) // Todo: merge it with pdestVl
     val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W)) // Todo: reuse psrc to store it
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -433,6 +443,7 @@ object Bundles {
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val useRegCache       = Vec(backendParams.numIntRegSrc, Bool())
     val regCacheIdx       = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
+    val srcStateV0        = Option.when(params.readV0Rf)(SrcState())
     val srcStateVl        = Option.when(params.readVlRf)(SrcState())
     val lqIdx             = Option.when(params.needLqIdx)(new LqPtr)
     val sqIdx             = Option.when(params.needSqIdx)(new SqPtr) // load unit need sqIdx
@@ -491,6 +502,7 @@ object Bundles {
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // psrc are used in datapath to generate regfile's bank Ren
     val psrc      = Vec(params.numRegSrc, UInt(params.rdPregIdxWidth.W))
+    val psrcV0    = Option.when(params.readV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     // for mdp
     val storeSetHit    = Option.when(params.issueBlockParam.isLdAddrIQ || params.issueBlockParam.isStAddrIQ)(Bool())
@@ -520,6 +532,7 @@ object Bundles {
     // from rename
     val pdest     = UInt(PhyRegIdxWidth.W)
     val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
+    val pdestV0   = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     // from dispatch
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
@@ -593,6 +606,7 @@ object Bundles {
     val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
+    val pdestV0         = UInt(V0PhyRegIdxWidth.W)
     val pdestVl         = UInt(VlPhyRegIdxWidth.W)
     val rasAction       = BranchAttribute.RasAction()
     // reg cache
@@ -702,6 +716,7 @@ object Bundles {
     val v0Wen = Bool()
     val vlWen = Bool()
     val pdest = UInt(pregIdxWidth.W)
+    val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
 
     /**
@@ -720,7 +735,7 @@ object Bundles {
     }
     def wakeUpV0(successor: (UInt, UInt), valid: Bool): Bool = {
       val (thatPsrc, srcType) = successor
-      val pdestMatch = pdest === thatPsrc
+      val pdestMatch = pdestV0 === thatPsrc
       pdestMatch && (
         SrcType.isV0(srcType) && this.v0Wen
       ) && valid
@@ -744,7 +759,7 @@ object Bundles {
     }
     def wakeUpV0FromIQ(successor: (UInt, UInt)): Bool = {
       val (thatPsrc, srcType) = successor
-      val pdestMatch = pdest === thatPsrc
+      val pdestMatch = pdestV0 === thatPsrc
       pdestMatch && (
         SrcType.isV0(srcType) && this.v0Wen
       )
@@ -805,6 +820,8 @@ object Bundles {
       this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.loadDependency := exuInput.loadDependency.getOrElse(0.U.asTypeOf(this.loadDependency))
       this.is0Lat := exuInput.is0Lat.getOrElse(false.B)
+      this.pdest := exuInput.pdest
+      this.pdestV0 := exuInput.pdestV0.getOrElse(0.U)
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
       connectSamePort(this, exuInput)
     }
@@ -935,7 +952,7 @@ object Bundles {
     val rfBankRen      = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Vec(coreParams.intPreg.numBank, Bool())))
     val fpRen          = Option.when(exuParams.readFpRf )(Vec(exuParams.numRegSrc, Bool()))
     val vecRen         = Option.when(exuParams.readVecRf)(Vec(exuParams.numRegSrc, Bool()))
-    val v0Ren          = Option.when(exuParams.readV0Rf )(Vec(exuParams.numRegSrc, Bool()))
+    val v0Ren          = Option.when(exuParams.readV0Rf )(Bool())
     val vlRen          = Option.when(exuParams.readVlRf )(Bool())
     val rfWen          = Option.when(exuParams.needIntWen)(Bool())
     val fpWen          = Option.when(exuParams.needFpWen )(Bool())
@@ -943,6 +960,7 @@ object Bundles {
     val v0Wen          = Option.when(exuParams.needV0Wen )(Bool())
     val vlWen          = Option.when(exuParams.needVlWen )(Bool())
     val pdest          = UInt(exuParams.wbPregIdxWidth.W)
+    val pdestV0        = Option.when(exuParams.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl        = Option.when(exuParams.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val flushPipe      = Option.when(exuParams.flushPipe)    (Bool())
     val ftqIdx         = Option.when(exuParams.needFtqPtr)   (new FtqPtr)
@@ -967,7 +985,7 @@ object Bundles {
     val rfRen          = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Bool()))
     val fpRen          = Option.when(exuParams.readFpRf )(Vec(exuParams.numRegSrc, Bool()))
     val vecRen         = Option.when(exuParams.readVecRf)(Vec(exuParams.numRegSrc, Bool()))
-    val v0Ren          = Option.when(exuParams.readV0Rf )(Vec(exuParams.numRegSrc, Bool()))
+    val v0Ren          = Option.when(exuParams.readV0Rf )(Bool())
     val vlRen          = Option.when(exuParams.readVlRf )(Bool())
     val rfWen          = Option.when(exuParams.needIntWen)(Bool())
     val fpWen          = Option.when(exuParams.needFpWen )(Bool())
@@ -975,6 +993,7 @@ object Bundles {
     val v0Wen          = Option.when(exuParams.needV0Wen )(Bool())
     val vlWen          = Option.when(exuParams.needVlWen )(Bool())
     val pdest          = UInt(exuParams.wbPregIdxWidth.W)
+    val pdestV0        = Option.when(exuParams.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl        = Option.when(exuParams.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val flushPipe      = Option.when(exuParams.flushPipe)    (Bool())
     val ftqIdx         = Option.when(exuParams.needFtqPtr)   (new FtqPtr)
@@ -1002,6 +1021,7 @@ object Bundles {
     val sqIdx          = Option.when(iqParams.needSqIdx)(new SqPtr)
 
     val src = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataBitsMax.W))
+    val v0  = Option.when(exuParams.readV0Rf)(V0())
     val vl  = Option.when(exuParams.readVlRf)(Vl())
     val pc  = Option.when(exuParams.needPc || exuParams.aluNeedPc)(UInt(VAddrData().dataWidth.W))
     val predTarget = Option.when(exuParams.needTarget)(UInt(VAddrData().dataWidth.W))
@@ -1083,6 +1103,7 @@ object Bundles {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val v0            = Option.when(params.readV0Rf)(V0())
     val vl            = Option.when(params.readVlRf)(Vl())
     val is0Lat        = Option.when(params.fuConfigs.map(x => x.latency.latencyVal.getOrElse(1) == 0 && !x.hasNoDataWB).reduce(_ || _))(Bool())
     val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
@@ -1100,6 +1121,7 @@ object Bundles {
     val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
+    val pdestV0       = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl       = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
@@ -1147,13 +1169,6 @@ object Bundles {
       nextPcOffset
     }
 
-    def fromIssueBundle(source: Og0InUop): Unit = {
-      connectSamePort(this , source)
-      // same name, need shift logic, not simple connection
-      this.loadDependency.foreach(_ := source.loadDependency.get.map(_ << 1))
-      this.vialuCtrl     .foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
-    }
-
     def fromIssueOg1PayloadBundle(source: EntryOg1Payload): Unit = {
       this.isRVC         .foreach(_ := source.isRVC.get)
       this.predictInfo.foreach(_.fixedTaken := source.fixedTaken.get)
@@ -1182,6 +1197,7 @@ object Bundles {
       uop.imm            := this.imm
       uop.robIdx         := this.robIdx
       uop.pdest          := this.pdest
+      uop.pdestV0        := this.pdestV0.getOrElse(0.U)
       uop.pdestVl        := this.pdestVl.getOrElse(0.U)
       uop.rfWen          := this.rfWen.getOrElse(false.B)
       uop.fpWen          := this.fpWen.getOrElse(false.B)
@@ -1240,6 +1256,7 @@ object Bundles {
 
   class ExuInputDataBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val src = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val v0  = Option.when(params.readV0Rf)(V0())
     val vl  = Option.when(params.readVlRf)(Vl())
     val imm = UInt(64.W)
     val pc  = Option.when(params.needPc || params.aluNeedPc)(UInt(VAddrData().dataWidth.W))
@@ -1248,6 +1265,7 @@ object Bundles {
 
   class ExuInputToRegFileBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val pdest   = UInt(params.wbPregIdxWidth.W)
+    val pdestV0 = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   }
 
@@ -1301,6 +1319,7 @@ object Bundles {
   ) extends Bundle with BundleSource with HasXSParameter {
     val data         = Vec(params.wbPathNum, UInt(params.destDataBitsMax.W))
     val pdest        = UInt(params.wbPregIdxWidth.W)
+    val pdestV0      = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl      = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val robIdx       = new RobPtr
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
@@ -1375,6 +1394,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
   ) extends Bundle with BundleSource with HasXSParameter {
     val toRob          = ValidIO(new ExuOutputToRob(params))
     val pdest          = UInt(params.wbPregIdxWidth.W)
+    val pdestV0        = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl        = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val toIntRf        = Option.when(params.writeIntRf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val toFpRf         = Option.when(params.writeFpRf)(ValidIO(UInt(params.destDataBitsMax.W)))
@@ -1490,7 +1510,11 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       this.vecWen := source.vecWen.getOrElse(false.B)
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
-      this.pdest  := (if (wbType == "vl") source.pdestVl.get else source.pdest)
+      this.pdest  := (wbType match {
+        case "vl" => source.pdestVl.get
+        case "v0" => source.pdestV0.get
+        case _ => source.pdest
+      })
       println(s"[fromExuOutput]: ${source.params.wbIndex(typeMap(wbType))}, exuName = ${source.params.name}")
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
@@ -1765,6 +1789,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       val output = Wire(new ExuOutput(param))
       output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
       output.pdest  := this.uop.pdest
+      output.pdestV0.foreach(_ := this.uop.pdestV0)
       output.robIdx := this.uop.robIdx
       output.intWen.foreach(_ := this.uop.rfWen)
       output.fpWen.foreach(_ := this.uop.fpWen)

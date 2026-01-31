@@ -380,7 +380,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val vm                               = instMicroOp.uop.vpu.vm
   val vstart                           = instMicroOp.uop.vpu.vstart
   val srcMask                          = GenFlowMask(
-    Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src(v0Indice)),
+    Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.v0.get),
     vstart, vl, true
   )
   // first uop enqueue, we need to latch microOp of segment instruction
