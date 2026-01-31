@@ -45,12 +45,11 @@ trait VecFuncUnitAlias { this: FuncUnit =>
 
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val srcMask: UInt = if(!cfg.maskWakeUp) inCtrl.vpu.get.vmask else {
-    MuxCase(inData.getSrcMask, Seq(
+  protected val srcMask: UInt =
+    MuxCase(inData.v0.get, Seq(
       needClearMask -> allMaskFalse,
       vm -> allMaskTrue
     ))
-  }
   protected val vl = inData.vl.get
 }
 
@@ -79,9 +78,9 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val outLastUop  = outCtrl.vpu.get.lastUop
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {
+  protected val outSrcMask: UInt = {
     MuxCase(
-      outData.getSrcMask, Seq(
+      outData.v0.get, Seq(
         outNeedClearMask -> allMaskFalse,
         outVm -> allMaskTrue
       )

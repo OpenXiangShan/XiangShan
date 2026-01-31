@@ -21,16 +21,20 @@ case class ExeUnitParams(
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
-  copyWakeupOut: Boolean = false,
-  copyDistance: Int = 1,
+  copyWakeupOut : Boolean = false,
+  copyDistance  : Int = 1,
   fakeUnit      : Boolean = false,
+  v0RD          : V0RD = null,
+  v0WB          : V0WB = null,
   vlRD          : VlRD = null,
   vlWB          : VlWB = null,
 )(
   implicit
   val schdType: SchedulerType,
 ) {
+  require(rfrPortConfigs.forall(!_.exists(_.isInstanceOf[V0RD])), "V0RD should not appear in rfrPortConfigs")
   require(rfrPortConfigs.forall(!_.exists(_.isInstanceOf[VlRD])), "VlRD should not appear in rfrPortConfigs")
+  require(!wbPortConfigs.exists(_.isInstanceOf[V0WB]), "V0WB should not appear in wbPortConfigs")
   require(!wbPortConfigs.exists(_.isInstanceOf[VlWB]), "VlWB should not appear in wbPortConfigs")
 
   // calculated configs
@@ -56,11 +60,12 @@ case class ExeUnitParams(
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
   val readVfRf: Boolean = numVfSrc > 0
+  val readV0Rf: Boolean = fuConfigs.exists(_.readV0)
   val readVlRf: Boolean = fuConfigs.exists(_.readVl)
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
-  val writeV0Rf: Boolean = fuConfigs.map(_.writeV0Rf).reduce(_ || _)
+  val writeV0Rf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
   val writeVlRf: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val needIntWen: Boolean = fuConfigs.map(_.needIntWen).reduce(_ || _)
   val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
@@ -409,10 +414,8 @@ case class ExeUnitParams(
     }
   }
 
-  def getV0WBPort = {
-    wbPortConfigs.collectFirst {
-      case x: V0WB => x
-    }
+  def getV0WBPort: Option[V0WB] = {
+    Option(v0WB)
   }
 
   def getVlWBPort: Option[VlWB] = {

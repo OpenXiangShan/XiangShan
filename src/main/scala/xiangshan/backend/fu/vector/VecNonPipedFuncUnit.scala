@@ -34,9 +34,9 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   protected val outOldVd    = outData.src(2)
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {
+  protected val outSrcMask: UInt = {
     MuxCase(
-      outData.getSrcMask, Seq(
+      outData.v0.get, Seq(
         outNeedClearMask -> allMaskFalse,
         outVm -> allMaskTrue
       )

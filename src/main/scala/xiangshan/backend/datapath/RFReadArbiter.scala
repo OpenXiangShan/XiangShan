@@ -273,7 +273,7 @@ class V0RFReadArbiter(
   backendParams: BackendParams
 )(implicit
   p: Parameters
-) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[V0RD], backendParams.v0PregParams)) {
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getV0RdCfgs, backendParams.v0PregParams)) {
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(V0Data()).max
 }
 

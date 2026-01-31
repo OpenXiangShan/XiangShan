@@ -219,6 +219,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     sink.bits.v0Wen := source.v0Wen
     sink.bits.vlWen := source.vlWen
     sink.bits.pdest := source.pdest
+    sink.bits.pdestV0 := source.pdest
     sink.bits.pdestVl := source.pdest
   }
 

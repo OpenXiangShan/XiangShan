@@ -10,7 +10,7 @@ import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl, Vxsat}
+import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxsat}
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
@@ -48,6 +48,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val fuOpType    = FuOpType()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
+  val pdestV0     = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
   val pdestVl     = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
@@ -71,6 +72,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
+  val pdestV0       = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
   val pdestVl       = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
@@ -88,11 +90,10 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val vl        = Option.when(cfg.readVl)(Vl())
+  val v0        = Option.when(cfg.readV0)(V0())
   val imm       = UInt(cfg.destDataBits.W)
   val pc        = OptionWrapper(cfg.needPc || cfg.aluNeedPc, UInt(VAddrData().dataWidth.W))
   val nextPcOffset = OptionWrapper(cfg.needPc, UInt((FetchBlockInstOffsetWidth + 2).W))
-
-  def getSrcMask    : UInt = src(cfg.maskSrcIdx)
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -151,6 +152,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   def connectNonPipedCtrlSingal: Unit = {
     io.out.bits.ctrl.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest  := RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.pdestV0.foreach(_ := RegEnable(io.in.bits.ctrl.pdestV0.get, io.in.fire))
     io.out.bits.ctrl.rfWen  .foreach(_ := RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire))
     io.out.bits.ctrl.fpWen  .foreach(_ := RegEnable(io.in.bits.ctrl.fpWen.get, io.in.fire))
     io.out.bits.ctrl.vecWen .foreach(_ := RegEnable(io.in.bits.ctrl.vecWen.get, io.in.fire))
@@ -167,6 +169,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   def connectNonPipedCtrlDataHoldBypass: Unit = {
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.pdestV0.foreach(_ := DataHoldBypass(io.in.bits.ctrl.pdestV0.get, io.in.fire))
     io.out.bits.ctrl.rfWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
     io.out.bits.ctrl.fpWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpWen.get, io.in.fire))
     io.out.bits.ctrl.vecWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
@@ -280,6 +283,7 @@ trait HasPipelineReg { this: FuncUnit =>
 
   io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
   io.out.bits.ctrl.pdest := ctrlVec.last.pdest
+  io.out.bits.ctrl.pdestV0.foreach(_ := ctrlVec.last.pdestV0.get)
   io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
   io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)

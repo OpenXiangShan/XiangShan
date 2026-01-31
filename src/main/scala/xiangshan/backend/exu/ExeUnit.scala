@@ -180,6 +180,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.fuOpType    := source.bits.fuOpType
       sink.bits.ctrl.robIdx      := source.bits.robIdx
       sink.bits.ctrl.pdest       := source.bits.pdest
+      sink.bits.ctrl.pdestV0     .foreach(x => x := source.bits.pdestV0.get)
       sink.bits.ctrl.pdestVl     .foreach(x => x := source.bits.pdestVl.get)
       sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.rfWen.get)
       sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.fpWen.get)
@@ -212,6 +213,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.fuOpType := source.fuOpType
       sink.robIdx := source.robIdx
       sink.pdest := source.pdest
+      sink.pdestV0.foreach(_ := source.pdestV0.get)
       sink.pdestVl.foreach(_ := source.pdestVl.get)
       sink.rfWen.foreach(x => x := source.rfWen.get)
       sink.fpWen.foreach(x => x := source.fpWen.get)
@@ -232,6 +234,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
+      sinkData.v0.foreach(_ := sourceData.v0.get)
       sinkData.vl.foreach(_ := sourceData.vl.get)
       sinkData.pc.foreach(x => x := sourceData.pc.get)
       sinkData.nextPcOffset.foreach(x => x := sourceData.nextPcOffset.get)
@@ -244,6 +247,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
     if(fu.cfg.srcNeedCopy) {
       (fu.io.in.bits.data.src).zip(io.in.bits.copySrc.get(idx)).foreach { case(fuSrc, copySrc) => fuSrc := copySrc }
     }
+    fu.io.in.bits.data.v0.foreach(_ := io.in.bits.v0.get)
     fu.io.in.bits.data.vl.foreach(_ := io.in.bits.vl.get)
   }
 
@@ -373,6 +377,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       outBits(0).ctrl.v0Wen.foreach(x =>  out.bits.v0Wen  := Mux1H(outOH, outBits.map(_.ctrl.v0Wen .get)))
       outBits(0).ctrl.vlWen.foreach(x =>  out.bits.vlWen  := Mux1H(outOH, outBits.map(_.ctrl.vlWen .get)))
       out.bits.pdest := Mux1H(outOH, outBits.map(_.ctrl.pdest))
+      out.bits.pdestV0 := Mux1H(outOH, outBits.map(_.ctrl.pdestV0.getOrElse(0.U)))
       out.bits.pdestVl := Mux1H(outOH, outBits.map(_.ctrl.pdestVl.getOrElse(0.U)))
     }
   }
@@ -381,6 +386,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
+  io.out.bits.pdestV0.foreach(_ := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestV0.getOrElse(0.U))))
   io.out.bits.pdestVl.foreach(_ := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestVl.getOrElse(0.U))))
   val F2IIntWen = io.F2IDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec) || F2IIntWen)

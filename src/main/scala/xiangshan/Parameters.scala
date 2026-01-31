@@ -89,8 +89,9 @@ case class XSCoreParameters
   frontendParameters: FrontendParameters = FrontendParameters(),
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
-  FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
-  VecLogicRegs: Int = 32 + 15, // 15: tmp
+  FpLogicRegs: Int = 32,
+  VecStdLogicRegs: Int = 32,
+  VecInnerLogicRegs: Int = 15,
   V0LogicRegs: Int = 1, // V0
   VlLogicRegs: Int = 1, // Vl
   V0_IDX: Int = 0,
@@ -304,6 +305,8 @@ case class XSCoreParameters
 
   def vlWidth = log2Up(VLEN) + 1
 
+  def VecLogicRegs = VecStdLogicRegs + VecInnerLogicRegs
+
   /* 
     Top-Down, ExecutionStall used
   */
@@ -337,11 +340,12 @@ case class XSCoreParameters
         ExeUnitParams(
           "ALU2",
           Seq(AluCfg, I2fCfg, VSetRiWiCfg, VSetRiWvfCfg, I2vCfg),
-          Seq(IntWB(port = 2, 0), VfWB(4, 0), V0WB(port = 2, 0), FpWB(port = 0, 1)),
+          Seq(IntWB(port = 2, 0), VfWB(4, 0), FpWB(port = 0, 1)),
           Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0))),
           true,
           2,
           vlWB = VlWB(port = intSchdVlWbPort, 0),
+          v0WB = V0WB(port = 4, 0),
         ),
         ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(5, 1)), Seq(IntRD(11, 2))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
@@ -388,7 +392,13 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       // FcmpCfg and FcvtCfg must be in the same ExuUnit because they both need to write to the integer register file.
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
+        ExeUnitParams(
+          "FEX0",
+          Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg),
+          Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0)),
+          Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0))),
+          v0WB = V0WB(port = 5, 0)
+        ),
       ), numEntries = 20, numEnq = 2, numComp = 16),
       IssueBlockParams(Seq(
         ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
@@ -414,39 +424,47 @@ case class XSCoreParameters
         ExeUnitParams(
           "VFEX0",
           Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
-          Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
-          Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
+          Seq(VfWB(port = 0, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
+          Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0))),
           vlWB = VlWB(port = vfSchdVlWbPort, 0),
           vlRD = VlRD(0, 0),
+          v0WB = V0WB(0, 0),
+          v0RD = V0RD(0, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
           Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg),
-          Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
-          Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
+          Seq(VfWB(port = 1, 0), FpWB(port = 7, 0)),
+          Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0))),
           vlRD = VlRD(1, 0),
+          v0WB = V0WB(1, 0),
+          v0RD = V0RD(1, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VLSU0",
           Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg),
-          Seq(VfWB(2, 0), V0WB(2, 0)),
-          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0))),
+          Seq(VfWB(2, 0)),
+          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0))),
           vlWB = VlWB(port = 2, 0),
           vlRD = VlRD(2, 0),
+          v0WB = V0WB(2, 0),
+          v0RD = V0RD(2, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VLSU1",
           Seq(VlduCfg, VstuCfg),
-          Seq(VfWB(3, 0), V0WB(3, 0)),
-          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0))),
+          Seq(VfWB(3, 0)),
+          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0))),
           vlWB = VlWB(port = 3, 0),
           vlRD = VlRD(3, 0),
+          v0WB = V0WB(3, 0),
+          v0RD = V0RD(3, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
     ),
@@ -647,6 +665,7 @@ trait HasXSParameter {
   def IntLogicRegs = coreParams.IntLogicRegs
   def FpLogicRegs = coreParams.FpLogicRegs
   def VecLogicRegs = coreParams.VecLogicRegs
+  def VecStdLogicRegs = coreParams.VecStdLogicRegs
   def V0LogicRegs = coreParams.V0LogicRegs
   def VlLogicRegs = coreParams.VlLogicRegs
   def MaxLogicRegs = Set(IntLogicRegs, FpLogicRegs, VecLogicRegs, V0LogicRegs, VlLogicRegs).max

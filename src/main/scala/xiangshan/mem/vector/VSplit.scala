@@ -128,7 +128,7 @@ class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p
   //      uopIdxInField = 0 and vdIdxInField = 0, flowMask = 0x0000, toMergeBuffMask = 0x0000
   val isSpecialIndexed = isIndexed(instType) && s0_emul.asSInt > s0_lmul.asSInt
 
-  val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src(v0Indice)), vvstart, evl, true)
+  val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.v0.get), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
   val flowMask = ((srcMask &

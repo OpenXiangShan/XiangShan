@@ -869,7 +869,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.lsrc(1) := inst.RS2
   // src(2) of fma is fs3, src(2) of vector inst is old vd
   decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
-  decodedInst.lsrc(3) := V0_IDX.U
 
   // read dest location
   decodedInst.ldest := inst.RD
@@ -1096,7 +1095,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.vlsInstr := isVls
 
-  decodedInst.srcType(3) := Mux(inst.VM === 0.U, SrcType.vp, SrcType.DC) // mask src
+  decodedInst.v0Ren := !inst.VM
   decodedInst.vlRen := true.B
 
   val uopInfoGen = Module(new UopInfoGen)
@@ -1130,7 +1129,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.srcType(0) := SrcType.no
     decodedInst.srcType(1) := SrcType.no
     decodedInst.srcType(2) := SrcType.no
-    decodedInst.srcType(3) := SrcType.no
     decodedInst.vlRen := true.B
     decodedInst.waitForward   := false.B
     decodedInst.blockBackward := false.B
@@ -1139,7 +1137,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.srcType(0) := SrcType.reg
     decodedInst.srcType(1) := SrcType.imm
     decodedInst.srcType(2) := SrcType.no
-    decodedInst.srcType(3) := SrcType.no
     decodedInst.vlRen := false.B
     decodedInst.selImm := SelImm.IMM_I
     decodedInst.waitForward := false.B

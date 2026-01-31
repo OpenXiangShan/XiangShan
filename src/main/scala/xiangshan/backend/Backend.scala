@@ -284,6 +284,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.srcType.zip(source.bits.srcType).map(x => x._1 := x._2)
     sink.bits.psrc.zip(source.bits.psrc).map(x => x._1 := x._2)
     sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
+    sink.bits.psrcV0.foreach(_ := source.bits.psrcV0)
+    sink.bits.srcStateV0.foreach(_ := source.bits.srcStateV0)
     // only the IQ contains VSET uop will use psrcVl and srcStateVl
     sink.bits.psrcVl.foreach(_ := source.bits.psrcVl)
     sink.bits.srcStateVl.foreach(_ := source.bits.srcStateVl)
@@ -343,8 +345,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
     source.ready := sink.ready
+    sink.bits.srcStateV0.get := source.bits.srcStateV0
     sink.bits.srcStateVl.get := source.bits.srcStateVl
+    sink.bits.psrcV0.get := source.bits.psrcV0
     sink.bits.psrcVl.get := source.bits.psrcVl
+    sink.bits.pdestV0.get := source.bits.pdestV0
     sink.bits.pdestVl.foreach(_ := source.bits.pdestVl)
   }
   vecRegion.io.memWriteback <> io.mem.vecWriteback

@@ -192,7 +192,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
           readBypass2    -> (if (bypass2ExuIdx >= 0) Mux1H(bypass2ValidVec3(bypass2ExuIdx)(srcIdx), bypass2DataVec) else 0.U),
           readZero       -> 0.U,
-          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.src(3) else 0.U),
+          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.v0.get else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else if (exuParm.aluNeedPc) immALU else imm)
@@ -246,6 +246,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       }
     }
     exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
+    exuInput.bits.v0.foreach { _ := fromDPs(exuIdx).bits.v0.get }
 
     if (exuParm.hasAluFu) {
       when(isAlu) {

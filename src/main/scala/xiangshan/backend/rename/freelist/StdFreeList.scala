@@ -26,12 +26,12 @@ import utility._
 
 
 class StdFreeList(
-  freeListSize: Int,
-  numLogicRegs: Int,
-  regType: RegType,
-  commitWidth: Int,
-  realNumLogicRegs: Int = 32,
-)(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, realNumLogicRegs) with HasPerfEvents {
+  freeListSize     : Int,
+  numLogicRegs     : Int,
+  regType          : RegType,
+  commitWidth      : Int,
+  debugNumLogicRegs: Int = 32,
+)(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, debugNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
