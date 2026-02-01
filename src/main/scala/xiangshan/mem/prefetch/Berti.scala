@@ -367,10 +367,10 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   // def thresholdOfL2PF: UInt = 5.U 
   // def thresholdOfL2PFR: UInt = 2.U 
   val thresholdOfReset = Constantin.createRecord(_name+"_thresholdOfReset", 6)    // (1 << DtCntWidth) - 1
-  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 3)  // (1 << (DtCntWidth - 1))
-  val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 3)      // ((1 << DtCntWidth) * 0.65).toInt
-  val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 3)      // ((1 << DtCntWidth) * 0.5).toInt
-  val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 3)    // ((1 << DtCntWidth) * 0.35).toInt
+  val thresholdOfUpdate = Constantin.createRecord(_name+"_thresholdOfUpdate", 2)  // (1 << (DtCntWidth - 1))
+  val thresholdOfL1PF = Constantin.createRecord(_name+"_thresholdOfL1PF", 4)      // ((1 << DtCntWidth) * 0.65).toInt
+  val thresholdOfL2PF = Constantin.createRecord(_name+"_thresholdOfL2PF", 2)      // ((1 << DtCntWidth) * 0.5).toInt
+  val thresholdOfL2PFR = Constantin.createRecord(_name+"_thresholdOfL2PFR", 1)    // ((1 << DtCntWidth) * 0.35).toInt
   val l2DepthRatio = Constantin.createRecord(s"${_name}_l2DepthRatio", 2)
   def getPcTag(pc: UInt): UInt = {
     val res = getPCHash(pc)
@@ -595,12 +595,18 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
         replacer.access(way)
         deltaInfo := entries(way).deltaList(entries(way).bestDeltaIdx)
         
-        when(deltaInfo.status === DeltaStatus.L1_PREF){
+        when(deltaInfo.status =/= DeltaStatus.NO_PREF){
           res.valid := train.valid
           res.bits.triggerPC := train.bits.pc
           res.bits.triggerVA := train.bits.vaddr
           res.bits.prefetchVA := getPrefetchVAddr(train.bits.vaddr, deltaInfo.delta)
-          res.bits.prefetchTarget := PrefetchTarget.L1.id.U
+          when(deltaInfo.status === DeltaStatus.L1_PREF) {
+            res.bits.prefetchTarget := PrefetchTarget.L1.id.U
+          }.elsewhen(deltaInfo.status === DeltaStatus.L2_PREF || deltaInfo.status === DeltaStatus.L2_PREF_REPL){
+            res.bits.prefetchTarget := PrefetchTarget.L2.id.U
+          }.otherwise{
+            res.bits.prefetchTarget := PrefetchTarget.L3.id.U
+          }
         }
       }
     }
@@ -612,9 +618,16 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   entries.foreach(x => x.setStatus())
   this.updateLite(io.learn)
   val pfRes = this.prefetch(io.train)
-  io.prefetch_l1 := pfRes._1
+  // l1 prefetch
+  io.prefetch_l1.valid := pfRes._1.valid && pfRes._1.bits.prefetchTarget === PrefetchTarget.L1.id.U
+  io.prefetch_l1.bits := pfRes._1.bits
+  // when l1, prefetch l2 ahead; l2 prefetch
   io.prefetch_l2 := pfRes._1
-  io.prefetch_l2.bits.prefetchVA := getPrefetchVAddr(io.train.bits.vaddr, pfRes._2.delta, l2DepthRatio)
+  when(pfRes._1.bits.prefetchTarget === PrefetchTarget.L1.id.U){
+    io.prefetch_l2.bits.prefetchVA := getPrefetchVAddr(io.train.bits.vaddr, pfRes._2.delta, l2DepthRatio)
+  }.otherwise{
+    io.prefetch_l2.bits.prefetchVA := pfRes._1.bits.prefetchVA
+  }
   io.prefetch_l2.bits.prefetchTarget := PrefetchTarget.L2.id.U
   val deltaInfo = WireInit(0.U.asTypeOf(new DeltaInfo()))
 
