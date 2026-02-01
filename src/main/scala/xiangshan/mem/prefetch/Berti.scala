@@ -144,6 +144,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_overflow = WireInit(false.B)
   val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
+  val stat_directCorrect = WireInit(false.B)
   val stat_histLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   /*** built-in function */
@@ -291,6 +292,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     res.pc := pc
     res.valid := stat_find_delta && isTimely && pair._1
     when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
+      stat_directCorrect := true.B
       res.delta := -pair._2
     }.otherwise{
       res.delta := pair._2
@@ -333,6 +335,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("search_resp_find_overflow", stat_find_delta && stat_overflow)
   XSPerfAccumulate("search_resp_find_dissatisfy", stat_find_delta && stat_dissatisfy)
   XSPerfAccumulate("search_resp_find_satisfy", stat_find_delta && stat_satisfy)
+  XSPerfAccumulate("search_resp_find_directCorrect", stat_find_delta && stat_directCorrect)
 
   class SearchLogDb extends Bundle {
     val histLineVA = UInt(HtLineVAddrWidth.W)
@@ -773,7 +776,7 @@ extends DCacheModule {
     XSPerfAccumulate(s"src_req_fire_${partName}_alloc", e0_fire && !e0_update)
 
     // Debug DB logging per part
-    val srcTable = ChiselDB.createTable(s"${name}_${partName}SourcePrefetch${p(XSCoreParamsKey).HartId}", new SourcePrefetchReq, basicDB = false)
+    val srcTable = ChiselDB.createTable(s"${name}_${partName}SourcePrefetch${p(XSCoreParamsKey).HartId}", new SourcePrefetchReq, basicDB = true)
     srcTable.log(data = e0_src, en = e0_fire, clock = clock, reset = reset)
   }
   
