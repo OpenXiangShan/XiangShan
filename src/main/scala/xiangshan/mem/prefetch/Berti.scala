@@ -102,10 +102,12 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   }
 
   def getPrefetchVAddr(triggerVA: UInt, delta: SInt, ratio: UInt = 0.U): UInt = {
+    val ratioShift = ratio.pad(5)(4, 0)
+    val lineShift = (HtLineOffsetWidth.U + ratioShift)(4, 0)
     if (useByteAddr) {
-      triggerVA + _signedExtend((delta.asUInt << ratio(3, 0)), VAddrBits)
+      (triggerVA.asSInt + (delta.pad(VAddrBits) << ratioShift).asSInt).asUInt
     } else {
-      triggerVA + _signedExtend((delta.asUInt << (HtLineOffsetWidth.U(3, 0) + ratio(3, 0))), VAddrBits)
+      (triggerVA.asSInt + (delta.pad(VAddrBits) << lineShift).asSInt).asUInt
     }
   }
 }
