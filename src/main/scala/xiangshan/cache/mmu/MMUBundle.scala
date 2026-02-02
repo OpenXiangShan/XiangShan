@@ -23,11 +23,11 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import xiangshan.backend.fu.{PMPReqBundle, PMPConfig}
+import xiangshan.backend.fu.{PMPConfig, PMPReqBundle}
 import xiangshan.backend.fu.PMPBundle
 
 
@@ -698,6 +698,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
   val tlbreplay = Vec(Width, Output(Bool()))
+  val robPendingPtr = Input(new RobPtr)
 }
 
 class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
