@@ -40,7 +40,7 @@ import scala.math.max
 class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
   val addr = Vec(LoadPipelineWidth, Bits(PAddrBits.W))
   val set_index = Vec(LoadPipelineWidth, UInt((DCacheAboveIndexOffset - DCacheSetOffset).W))
-  val bank_index = Vec(VLEN/DCacheSRAMRowBits, UInt((DCacheSetOffset - DCacheBankOffset).W))
+  val bank_index = Vec(MLEN/DCacheSRAMRowBits, UInt((DCacheSetOffset - DCacheBankOffset).W))
   val way_index = UInt(wayBits.W)
   val fake_rr_bank_conflict = Bool()
 }
@@ -262,8 +262,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val readline_resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error = Output(Bool())
     val readline_error_delayed = Output(Bool())
-    val read_resp          = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
-    val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(VLEN/DCacheSRAMRowBits, Bool())))
+    val read_resp          = Output(Vec(LoadPipelineWidth, Vec(MLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
+    val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(MLEN/DCacheSRAMRowBits, Bool())))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, ValidIO(new L1CacheErrorInfo))) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
@@ -380,7 +380,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val set_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
-  val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt())))
+  val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(MLEN/DCacheSRAMRowBits, UInt())))
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
@@ -573,7 +573,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val rr_div_addr = RegEnable(RegEnable(div_addrs(i), io.read(i).fire), r_read_fire)
     val rr_bank_addr = RegEnable(RegEnable(bank_addrs(i), io.read(i).fire), r_read_fire)
     val rr_way_addr = RegEnable(RegEnable(OHToUInt(way_en(i)), io.read(i).fire), r_read_fire)
-    (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+    (0 until MLEN/DCacheSRAMRowBits).map( j =>{
       io.read_resp(i)(j) := read_result(r_div_addr)(r_bank_addr(j))(r_way_addr)
       // error detection
       // normal read ports
@@ -623,13 +623,13 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // FIXME: rr_bank_conflict(0)(1) no generalization
   when(rr_bank_conflict(0)(1)) {
-    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+    (0 until (MLEN/DCacheSRAMRowBits)).map(i => {
       bankConflictData.bank_index(i) := bank_addrs(0)(i)
     })
     bankConflictData.way_index  := OHToUInt(way_en(0))
     bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1) && div_addrs(0) === div_addrs(1)
   }.otherwise {
-    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+    (0 until (MLEN/DCacheSRAMRowBits)).map(i => {
       bankConflictData.bank_index(i) := 0.U
     })
     bankConflictData.way_index := 0.U
@@ -682,8 +682,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val set_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
-  val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt())))
-  val bank_addrs_dup = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt())))
+  val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(MLEN/DCacheSRAMRowBits, UInt())))
+  val bank_addrs_dup = Wire(Vec(LoadPipelineWidth, Vec(MLEN/DCacheSRAMRowBits, UInt())))
   val way_en_reg = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val set_addrs_reg = Wire(Vec(LoadPipelineWidth, UInt()))
   val set_addrs_dup_reg = Wire(Vec(LoadPipelineWidth, UInt()))
@@ -897,7 +897,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val rr_div_addr = RegEnable(RegEnable(div_addrs(i), io.read(i).fire), r_read_fire)
     val rr_bank_addr = RegEnable(RegEnable(bank_addrs(i), io.read(i).fire), r_read_fire)
     val rr_way_addr = RegEnable(RegEnable(OHToUInt(way_en(i)), io.read(i).fire), r_read_fire)
-    (0 until VLEN/DCacheSRAMRowBits).map( j =>{
+    (0 until MLEN/DCacheSRAMRowBits).map( j =>{
       io.read_resp(i)(j)          := bank_result(r_div_addr)(r_bank_addr(j))(r_way_addr)
       // error detection
       io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
@@ -960,13 +960,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // FIXME: rr_bank_conflict(0)(1) no generalization
   when(rr_bank_conflict(0)(1)) {
-    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+    (0 until (MLEN/DCacheSRAMRowBits)).map(i => {
       bankConflictData.bank_index(i) := bank_addrs(0)(i)
     })
     bankConflictData.way_index := OHToUInt(way_en(0))
     bankConflictData.fake_rr_bank_conflict := set_addrs(0) === set_addrs(1) && div_addrs(0) === div_addrs(1)
   }.otherwise {
-    (0 until (VLEN/DCacheSRAMRowBits)).map(i => {
+    (0 until (MLEN/DCacheSRAMRowBits)).map(i => {
       bankConflictData.bank_index(i) := 0.U
     })
     bankConflictData.way_index := 0.U

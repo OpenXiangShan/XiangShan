@@ -53,8 +53,8 @@ object Bundles {
     val vaNeedExt = Bool()
     val paddr = UInt(PAddrBits.W)
     val gpaddr = UInt(XLEN.W)
-    val mask = UInt((VLEN/8).W)
-    val data = UInt((VLEN+1).W)
+    val mask = UInt((MLEN/8).W)
+    val data = UInt((MLEN+1).W)
     val wlineflag = Bool() // store write the whole cache line
     val miss = Bool()
     val tlbMiss = Bool()
@@ -68,8 +68,8 @@ object Bundles {
     val isForVSnonLeafPTE = Bool()
     val isPrefetch = Bool()
     val isHWPrefetch = Bool()
-    val forwardMask = Vec(VLEN/8, Bool())
-    val forwardData = Vec(VLEN/8, UInt(8.W))
+    val forwardMask = Vec(MLEN/8, Bool())
+    val forwardData = Vec(MLEN/8, UInt(8.W))
     val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
     // val func                = UInt(6.W)
 
@@ -87,7 +87,7 @@ object Bundles {
     val is_first_ele = Bool()
     val vecBaseVaddr = UInt(VAddrBits.W)
     val vecVaddrOffset = UInt(VAddrBits.W)
-    val vecTriggerMask = UInt((VLEN/8).W)
+    val vecTriggerMask = UInt((MLEN/8).W)
     // 1: vector active element or scala mem operation, 0: vector not active element
     val vecActive = Bool()
     // val flowPtr             = new VlflowPtr() // VLFlowQueue ptr
@@ -193,14 +193,14 @@ object Bundles {
   class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
     val vaddr = Output(UInt(VAddrBits.W))
     val paddr = Output(UInt(PAddrBits.W))
-    val mask = Output(UInt((VLEN/8).W))
+    val mask = Output(UInt((MLEN/8).W))
     val uop = Output(new DynInst) // for replay
     val pc = Output(UInt(VAddrBits.W)) //for debug
     val valid = Output(Bool())
 
-    val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
-    val forwardMask = Input(Vec((VLEN/8), Bool())) // resp to load_s2
-    val forwardData = Input(Vec((VLEN/8), UInt(8.W))) // resp to load_s2
+    val forwardMaskFast = Input(Vec((MLEN/8), Bool())) // resp to load_s1
+    val forwardMask = Input(Vec((MLEN/8), Bool())) // resp to load_s2
+    val forwardData = Input(Vec((MLEN/8), UInt(8.W))) // resp to load_s2
 
     // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
     val sqIdx = Output(new SqPtr)
@@ -247,7 +247,7 @@ object Bundles {
   class LoadNukeQueryReqBundle(implicit p: Parameters) extends XSBundle { // provide lqIdx
     val uop = new DynInst
     // mask: load's data mask.
-    val mask = UInt((VLEN/8).W)
+    val mask = UInt((MLEN/8).W)
 
     // paddr: load's paddr.
     val paddr      = UInt(PAddrBits.W)
@@ -276,7 +276,7 @@ object Bundles {
     val paddr  = UInt(PAddrBits.W)
 
     //  mask: requestor's (a store instruction) data width mask for match logic.
-    val mask = UInt((VLEN/8).W)
+    val mask = UInt((MLEN/8).W)
 
     // matchType: store load nuke match type. See this class for details.
     val matchType = StLdNukeMatchType()
@@ -312,7 +312,7 @@ object Bundles {
   // Store byte valid mask write to SQ takes 2 cycles
   class StoreMaskBundle(implicit p: Parameters) extends XSBundle {
     val sqIdx = new SqPtr
-    val mask = UInt((VLEN/8).W)
+    val mask = UInt((MLEN/8).W)
   }
 
   class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
@@ -321,19 +321,19 @@ object Bundles {
     // val bank_oh = UInt(DCacheBanks.W)
 
     // new dcache
-    val respDcacheData = UInt(VLEN.W)
-    val forwardMask = Vec(VLEN/8, Bool())
-    val forwardData = Vec(VLEN/8, UInt(8.W))
+    val respDcacheData = UInt(MLEN.W)
+    val forwardMask = Vec(MLEN/8, Bool())
+    val forwardData = Vec(MLEN/8, UInt(8.W))
     val uop = new DynInst // for data selection, only fwen and fuOpType are used
     val addrOffset = UInt(4.W) // for data selection
 
     // forward tilelink D channel
     val forward_D = Bool()
-    val forwardData_D = Vec(VLEN/8, UInt(8.W))
+    val forwardData_D = Vec(MLEN/8, UInt(8.W))
 
     // forward mshr data
     val forward_mshr = Bool()
-    val forwardData_mshr = Vec(VLEN/8, UInt(8.W))
+    val forwardData_mshr = Vec(MLEN/8, UInt(8.W))
 
     val forward_result_valid = Bool()
 
@@ -355,7 +355,7 @@ object Bundles {
 
     def mergeLsqFwdData(dcacheData: UInt): UInt = {
       // merge dcache and lsq forward data at load s3
-      val rdataVec = VecInit((0 until VLEN / 8).map(j =>
+      val rdataVec = VecInit((0 until MLEN / 8).map(j =>
         Mux(forwardMask(j), forwardData(j), dcacheData(8*(j+1)-1, 8*j))
       ))
       rdataVec.asUInt

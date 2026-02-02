@@ -599,6 +599,7 @@ class TLConfig(n: Int = 1) extends Config(
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
+
 class DefaultConfig(n: Int = 1) extends TLConfig(n) with DeprecatedConfigWarning
 
 class TLCVMConfig(n: Int = 1) extends Config(

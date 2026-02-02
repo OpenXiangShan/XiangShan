@@ -576,13 +576,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
 
   val splitStoreData = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new XSBundle {
-    val wdata = UInt(VLEN.W)
-    val wmask = UInt((VLEN / 8).W)
+    val wdata = UInt(MLEN.W)
+    val wmask = UInt((MLEN / 8).W)
   }))))
 
-  val wmaskLow  = Wire(Vec(VLEN / 8, Bool()))
-  val wmaskHigh = Wire(Vec(VLEN / 8, Bool()))
-  (0 until (VLEN / 8)).map {
+  val wmaskLow  = Wire(Vec(MLEN / 8, Bool()))
+  val wmaskHigh = Wire(Vec(MLEN / 8, Bool()))
+  (0 until (MLEN / 8)).map {
     case i  => {
       when (i.U < highResultWidth) {
         wmaskHigh(i) := true.B

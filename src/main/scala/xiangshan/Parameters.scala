@@ -26,11 +26,13 @@ import org.chipsalliance.cde.config.{Field, Parameters}
 import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.BackendV2SchdParams
+import xiangshan.backend.datapath.DataConfig
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.NewCSR.CSRConfig
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.backend.trace._
@@ -51,6 +53,7 @@ case class XSCoreParameters
   HartId: Int = 0,
   XLEN: Int = 64,
   VLEN: Int = 128,
+  MLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
   HasBitmapCheck: Boolean = true,
@@ -286,6 +289,9 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
 ){
+  DataConfig.setVLen(VLEN)
+  CSRConfig.setVLen(VLEN)
+
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
     // single letter extensions, in canonical order
@@ -557,6 +563,7 @@ trait HasXSParameter {
   def ISAExtensions = coreParams.ISAExtensions
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
+  def MLEN = coreParams.MLEN
   def ELEN = coreParams.ELEN
   def HSXLEN = coreParams.HSXLEN
   val minFLen = 32
@@ -623,6 +630,8 @@ trait HasXSParameter {
   def QuadWordBits = DataBits * 2
   def QuadWordBytes = QuadWordBits / 8
   def VDataBytes = VLEN / 8
+  def MDataBytes = MLEN / 8
+  def MLENB = MLEN / 8
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp

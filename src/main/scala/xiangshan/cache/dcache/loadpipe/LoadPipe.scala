@@ -50,8 +50,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
     val is128Req = Output(Bool())
-    val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
-    val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits, Bool()))
+    val banked_data_resp = Input(Vec(MLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
+    val read_error_delayed = Input(Vec(MLEN/DCacheSRAMRowBits, Bool()))
 
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)

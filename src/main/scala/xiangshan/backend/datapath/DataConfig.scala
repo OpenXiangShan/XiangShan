@@ -5,22 +5,51 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 
 object DataConfig {
+  private var vlen: Int = 128
+  private var vlWidth: Int = log2Up(vlen) + 1
+
+  def setVLen(newVLen: Int): Unit = {
+    vlen = newVLen
+    vlWidth = log2Up(newVLen) + 1
+  }
+
+  def VLEN: Int = vlen
+  def VlWidth: Int = vlWidth
+
   sealed abstract class DataConfig (
     val name: String,
-    val dataWidth: Int,
   ) {
+    def dataWidth: Int
     override def toString: String = name
   }
 
-  case class IntData() extends DataConfig("int", 64)
-  case class FpData() extends DataConfig("fp", 64)
-  case class VecData() extends DataConfig("vec", 128)
-  case class ImmData(len: Int) extends DataConfig("int", len)
-  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", 48 + 2) // Todo: associate it with the width of vaddr
-  case class V0Data() extends DataConfig("v0", 128)
-  case class VlData() extends DataConfig("vl", log2Up(VecData().dataWidth) + 1 ) // 8
-  case class FakeIntData() extends DataConfig("fakeint", 64)
-  case class NoData() extends DataConfig("nodata", 0)
+  case class IntData() extends DataConfig("int") {
+    override def dataWidth: Int = 64
+  }
+  case class FpData() extends DataConfig("fp") {
+    override def dataWidth: Int = 64
+  }
+  case class VecData() extends DataConfig("vec") {
+    override def dataWidth: Int = VLEN
+  }
+  case class ImmData(len: Int) extends DataConfig("int") {
+    override def dataWidth: Int = len
+  }
+  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr") { // Todo: associate it with the width of vaddr
+    override def dataWidth: Int = 48 + 2
+  }
+  case class V0Data() extends DataConfig("v0") {
+    override def dataWidth: Int = VLEN
+  }
+  case class VlData() extends DataConfig("vl") {
+    override def dataWidth: Int = VlWidth
+  }
+  case class FakeIntData() extends DataConfig("fakeint") {
+    override def dataWidth: Int = 64
+  }
+  case class NoData() extends DataConfig("nodata") {
+    override def dataWidth: Int = 0
+  }
 
   def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData(), V0Data(), VlData())
   def IntRegSrcDataSet: Set[DataConfig] = Set(IntData())

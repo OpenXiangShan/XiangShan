@@ -756,7 +756,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   val fromPcTargetMem = Option.when(params.isIntSchd)(Flipped(new PcToDataPathIO(backendParams)))
   val diffVlRat = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
-  val diffVl = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
+  val diffVl = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Output(UInt(coreParams.vlWidth.W)))
   val vlWriteBackInfoIn = new Bundle {
     val vlFromIntIsZero = Input(Bool())
     val vlFromIntIsVlmax = Input(Bool())
@@ -842,4 +842,3 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // TopDown
   val uopTopDown = new UopTopDown
 }
-

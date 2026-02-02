@@ -284,7 +284,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = CertainLatency(0, extraValue = 3),
-    destDataBits = 128,
+    destDataBits = VLEN,
     srcDataBits = Some(64),
     immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
   )
@@ -302,7 +302,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = CertainLatency(0, extraValue = 3),
-    destDataBits = 128,
+    destDataBits = VLEN,
     srcDataBits = Some(64),
   )
 
@@ -554,7 +554,7 @@ object FuConfig {
     latency = CertainLatency(1),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     readVl = true,
   )
@@ -574,7 +574,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     readVl = true,
   )
@@ -592,7 +592,7 @@ object FuConfig {
     latency = UncertainLatency(),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     readVl = true,
   )
@@ -600,7 +600,7 @@ object FuConfig {
   val VppuCfg = FuConfig (
     name = "vppu",
     fuType = FuType.vppu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VPPU(cfg)(p).suggestName("Vppu")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VDisabled(cfg)(p).suggestName("Vppu")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data()),  // vs1, vs2, vd_old, v0
     ),
@@ -610,7 +610,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     readVl = true,
   )
@@ -629,7 +629,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     readVl = true,
   )
@@ -649,7 +649,7 @@ object FuConfig {
     latency = CertainLatency(0, extraValue = 3),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     readVl = true,
   )
 
@@ -668,7 +668,7 @@ object FuConfig {
     latency = CertainLatency(1),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
     readVl = true,
@@ -688,7 +688,7 @@ object FuConfig {
     latency = CertainLatency(3),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
     readVl = true,
@@ -708,7 +708,7 @@ object FuConfig {
     latency = UncertainLatency(),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
     readVl = true,
@@ -728,7 +728,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
     readVl = true,
@@ -814,7 +814,7 @@ object FuConfig {
     hasLoadError = true,
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     readVl = true,
   )
 
@@ -834,7 +834,7 @@ object FuConfig {
     hasLoadError = true,
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     readVl = true,
   )
 
@@ -857,7 +857,7 @@ object FuConfig {
     hasLoadError = true,
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     readVl = true,
   )
 
@@ -877,7 +877,7 @@ object FuConfig {
     hasLoadError = true,
     vlWakeUp = true,
     maskWakeUp = true,
-    destDataBits = 128,
+    destDataBits = VLEN,
     readVl = true,
   )
 

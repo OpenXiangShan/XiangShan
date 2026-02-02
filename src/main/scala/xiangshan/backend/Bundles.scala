@@ -806,7 +806,7 @@ object Bundles {
     val vuopIdx   = UopIdx()
     val lastUop   = Bool()
     // maybe used if data dependancy
-    val vmask     = UInt(V0Data().dataWidth.W)
+    val vmask     = UInt(VLEN.W)
     val vl        = Vl()
 
     // vector load/store
@@ -825,7 +825,7 @@ object Bundles {
 
     val isVleff = Bool() // vleff
 
-    val maskVecGen = UInt((V0Data().dataWidth / 8).W)
+    val maskVecGen = UInt((VLEN / 8).W)
     val sew8  = Bool()
     val sew16 = Bool()
     val sew32 = Bool()

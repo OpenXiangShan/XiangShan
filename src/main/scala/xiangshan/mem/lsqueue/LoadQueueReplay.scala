@@ -87,7 +87,7 @@ class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParamet
   val reg_offset = UInt(vOffsetBits.W)
   val vecActive = Bool()
   val is_first_ele = Bool()
-  val mask = UInt((VLEN/8).W)
+  val mask = UInt((MLEN/8).W)
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {

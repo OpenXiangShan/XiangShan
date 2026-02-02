@@ -83,7 +83,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
   // vlen = 128, lmul = 2, sew = 16
   // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
-  private val log2Vlmax: UInt = log2Vlen.U(3.W) + log2Vlmul - log2Vsew
+  private val log2Vlmax: UInt = log2Vlen.U(vlWidth.W) + log2Vlmul - log2Vsew
   private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
@@ -106,7 +106,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
   outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
 
-  private val log2VlenDivVsew = log2Vlen.U(3.W) - log2Vsew
+  private val log2VlenDivVsew = log2Vlen.U(vlWidth.W) - log2Vsew
   private val vlenDivVsew = 1.U(vlWidth.W) << log2VlenDivVsew
   io.out.vlmax := Mux(vlmax >= vlenDivVsew, vlmax, vlenDivVsew)
 

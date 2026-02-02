@@ -435,7 +435,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   //Todo here need change design
   csrio.vpu.set_vtype.valid := commitVType.valid
   csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
-  csrio.vpu.vl := vecRegion.io.diffVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
+  csrio.vpu.vl := vecRegion.io.diffVl.getOrElse(0.U.asTypeOf(UInt(coreParams.vlWidth.W)))
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr

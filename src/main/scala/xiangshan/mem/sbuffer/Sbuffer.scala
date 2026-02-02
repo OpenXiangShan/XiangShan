@@ -57,9 +57,9 @@ trait HasSbufferConst extends HasXSParameter {
   val VTagWidth: Int = VAddrBits - OffsetWidth
   val WordOffsetWidth: Int = PAddrBits - WordsWidth
 
-  val CacheLineVWords: Int = CacheLineBytes / VDataBytes
+  val CacheLineVWords: Int = CacheLineBytes / MDataBytes
   val VWordsWidth: Int = log2Up(CacheLineVWords)
-  val VWordWidth: Int = log2Up(VDataBytes)
+  val VWordWidth: Int = log2Up(MDataBytes)
   val VWordOffsetWidth: Int = PAddrBits - VWordWidth
 }
 
@@ -82,8 +82,8 @@ class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   // univerisal writemask
   val wvec = UInt(StoreBufferSize.W)
   // 2 cycle update
-  val mask = UInt((VLEN/8).W)
-  val data = UInt(VLEN.W)
+  val mask = UInt((MLEN/8).W)
+  val data = UInt(MLEN.W)
   val vwordOffset = UInt(VWordOffsetWidth.W)
   val wline = Bool() // write full cacheline
 }
@@ -99,16 +99,16 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     val writeReq = Vec(EnsbufferWidth, Flipped(ValidIO(new DataWriteReq)))
     // clean mask when deq
     val maskFlushReq = Vec(NumDcacheWriteResp, Flipped(ValidIO(new MaskFlushReq)))
-    val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
-    val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
+    val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(MDataBytes, UInt(8.W)))))
+    val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(MDataBytes, Bool()))))
   })
 
-  val data = Reg(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
+  val data = Reg(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(MDataBytes, UInt(8.W)))))
   // val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val mask = RegInit(
     VecInit(Seq.fill(StoreBufferSize)(
       VecInit(Seq.fill(CacheLineVWords)(
-        VecInit(Seq.fill(VDataBytes)(false.B))
+        VecInit(Seq.fill(MDataBytes)(false.B))
       ))
     ))
   )
@@ -121,7 +121,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     line_mask_clean_flag.suggestName("line_mask_clean_flag_"+line)
     when(line_mask_clean_flag){
       for(word <- 0 until CacheLineVWords){
-        for(byte <- 0 until VDataBytes){
+        for(byte <- 0 until MDataBytes){
           mask(line)(word)(byte) := false.B
         }
       }
@@ -145,7 +145,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
       line_write_buffer_mask.suggestName("line_write_buffer_mask_"+line)
       line_write_buffer_offset.suggestName("line_write_buffer_offset_"+line)
       for(word <- 0 until CacheLineVWords){
-        for(byte <- 0 until VDataBytes){
+        for(byte <- 0 until MDataBytes){
           val write_byte = sbuffer_in_s2_line_wen && (
             line_write_buffer_mask(byte) && (line_write_buffer_offset === word.U) ||
             line_write_buffer_wline
@@ -824,12 +824,12 @@ class Sbuffer(implicit p: Parameters)
     selectedInflightData.suggestName("selectedInflightData_"+i)
 
     // currently not being used
-    val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
-    val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
+    val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(MDataBytes, Bool()))))
+    val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineVWords, Vec(MDataBytes, Bool()))))
 
     forward.dataInvalid := false.B // data in store line merge buffer is always ready
     forward.matchInvalid := tag_mismatch // paddr / vaddr cam result does not match
-    for (j <- 0 until VDataBytes) {
+    for (j <- 0 until MDataBytes) {
       forward.forwardMask(j) := false.B
       forward.forwardData(j) := DontCare
 
@@ -922,7 +922,7 @@ class Sbuffer(implicit p: Parameters)
       val vpu             = uop.vpu
       val veew            = uop.vpu.veew
       val eew             = EewLog2(veew)
-      val EEB             = (1.U << eew).asUInt //Only when VLEN=128 effective element byte
+      val EEB             = (1.U << eew).asUInt //Only when MLEN=128 effective element byte
       val EEWBits         = (EEB << 3.U).asUInt
       val nf              = Mux(isVsr, 0.U, vpu.nf)
 

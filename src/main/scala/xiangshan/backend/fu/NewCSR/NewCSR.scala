@@ -1,6 +1,7 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.util.log2Up
 import chisel3.util._
 import difftest._
 import org.chipsalliance.cde.config.Parameters
@@ -25,6 +26,16 @@ import xiangshan.backend.decode.isa.CSRs
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
+  private var vlen: Int = 128
+  private var vlWidth: Int = log2Up(vlen) + 1
+
+  def setVLen(newVLen: Int): Unit = {
+    vlen = newVLen
+    vlWidth = log2Up(newVLen) + 1
+  }
+
+  def VLEN: Int = vlen
+  def VlWidth: Int = vlWidth
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
   final val ASIDMAX = 16 // the max value of ASIDLEN defined by spec
@@ -41,12 +52,7 @@ object CSRConfig {
 
   final val XLEN = 64 // Todo: use XSParams
 
-  final val VLEN = 128
-
-  // Since we need macro to compute the width of CSR field, the input of macro should be the value that can be computed
-  // at compile time. The log2Up function cannot be used as meta-programming function, so we use litral value here
-  // log2Up(128 + 1), hold 0~128
-  final val VlWidth = 8
+  // log2Up(VLEN + 1), hold [0, VLEN]
 
   final val PAddrWidth = 48
 

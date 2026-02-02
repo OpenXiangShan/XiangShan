@@ -335,15 +335,16 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   }
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
-    val splitVecPregs = 2 * (V0PhyRegs + VfPhyRegs)
+    // Split each VLEN-bit vector reg into XLEN-bit regs, so convert index to (idx * splitFactor + i)
+    val splitFactor = VLEN / XLEN
+    val splitVecPregs = splitFactor * (V0PhyRegs + VfPhyRegs)
     val difftest = DifftestModule(new DiffArchVecRenameTable(splitVecPregs), delay = 2)
     difftest.coreid := io.hartId
     // When merge v0Rat and vecRat, the index of vecRats should starts from V0PhyRegs
     val vecRats = v0Rat.io.diff_rdata.get ++ vecRat.io.diff_rdata.get.map(_ + V0PhyRegs.U)
     difftest.value := VecInit(vecRats.flatMap { r =>
-      val splitDest = (r << 1).asUInt
-      Seq(splitDest, splitDest + 1.U)
+      val splitDest = (r * splitFactor.U).asUInt
+      Seq.tabulate(splitFactor)(i => splitDest + i.U)
     })
   }
   // debug read ports for difftest

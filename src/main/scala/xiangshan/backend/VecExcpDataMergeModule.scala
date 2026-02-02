@@ -537,7 +537,7 @@ class ExcpModToVprf(numReadPort: Int, numWritePort: Int)(implicit p: Parameters)
 
 class NfMappedElemIdx(vlen: Int) extends Module {
   require(isPow2(vlen))
-  // vlen = 128, idxWidth = 8, hold 0~128
+  // idxWidth holds [0, vlen]
   val idxWidth = log2Up(vlen + 1)
 
   val in = IO(Input(new Bundle {

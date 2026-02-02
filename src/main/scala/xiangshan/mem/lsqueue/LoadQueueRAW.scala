@@ -91,7 +91,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val maskModule = Module(new LqMaskModule(
-    gen = UInt((VLEN/8).W),
+    gen = UInt((MLEN/8).W),
     numEntries = LoadQueueRAWSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,

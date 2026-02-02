@@ -224,7 +224,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   // flow source bundle
   class FlowSource extends Bundle {
     val vaddr         = UInt(VAddrBits.W)
-    val mask          = UInt((VLEN/8).W)
+    val mask          = UInt((MLEN/8).W)
     val uop           = new DynInst
     val has_rob_entry = Bool()
     val rep_carry     = new ReplayCarry(nWays)
@@ -258,7 +258,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
     //for Svpbmt NC
     val isnc          = Bool()
     val paddr         = UInt(PAddrBits.W)
-    val data          = UInt((VLEN+1).W)
+    val data          = UInt((MLEN+1).W)
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -1280,11 +1280,11 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
 
   // merge forward result
   // lsq has higher priority than sbuffer
-  val s2_fwd_mask = Wire(Vec((VLEN/8), Bool()))
-  val s2_fwd_data = Wire(Vec((VLEN/8), UInt(8.W)))
+  val s2_fwd_mask = Wire(Vec((MLEN/8), Bool()))
+  val s2_fwd_data = Wire(Vec((MLEN/8), UInt(8.W)))
   s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.lsq.forward.dataInvalid
   // generate XLEN/8 Muxs
-  for (i <- 0 until VLEN / 8) {
+  for (i <- 0 until MLEN / 8) {
     s2_fwd_mask(i) := io.lsq.forward.forwardMask(i) || io.sbuffer.forwardMask(i) || io.ubuffer.forwardMask(i)
     s2_fwd_data(i) :=
       Mux(io.lsq.forward.forwardMask(i), io.lsq.forward.forwardData(i),

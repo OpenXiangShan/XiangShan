@@ -140,7 +140,7 @@ trait HasDCacheParameters
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
-  val DCacheVWordBytes = VLEN / 8
+  val DCacheVWordBytes = MLEN / 8
   require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -310,8 +310,8 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
   val cmd    = UInt(M_SZ.W)
   val vaddr  = UInt(VAddrBits.W)
   val vaddr_dup = UInt(VAddrBits.W)
-  val data   = UInt(VLEN.W)
-  val mask   = UInt((VLEN/8).W)
+  val data   = UInt(MLEN.W)
+  val mask   = UInt((MLEN/8).W)
   val id     = UInt(reqIdWidth.W)
   val instrtype   = UInt(sourceTypeWidth.W)
   val isFirstIssue = Bool()
@@ -386,9 +386,9 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   // read in s2
-  val data = UInt(VLEN.W)
+  val data = UInt(MLEN.W)
   // select in s3
-  val data_delayed = UInt(VLEN.W)
+  val data_delayed = UInt(MLEN.W)
   val id     = UInt(reqIdWidth.W)
   // cache req missed, send it to miss queue
   val miss   = Bool()
@@ -661,7 +661,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
                 req_mshr_id === mshrid &&
                 req_paddr(log2Up(refillBytes)) === last
     val forward_D = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(MLEN/8)(0.U(8.W))))
     val forwardDenied = RegInit(false.B)
     val forwardCorrupt = RegInit(false.B)
 
@@ -674,7 +674,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_D := all_match
-    for (i <- 0 until VLEN/8) {
+    for (i <- 0 until MLEN/8) {
       when (all_match) {
         forwardData(i) := selected_data(8 * i + 7, 8 * i)
       }
@@ -707,7 +707,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
                     (req_paddr(log2Up(refillBytes)) === 1.U && lastbeat_valid)
 
     val forward_mshr = RegInit(false.B)
-    val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
+    val forwardData = RegInit(VecInit(List.fill(MLEN/8)(0.U(8.W))))
 
     val block_idx = req_paddr(log2Up(refillBytes), 3)
     val block_data = raw_data
@@ -716,7 +716,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_mshr := all_match
-    for (i <- 0 until VLEN/8) {
+    for (i <- 0 until MLEN/8) {
       forwardData(i) := selected_data(8 * i + 7, 8 * i)
     }
 
@@ -733,7 +733,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val paddr = Input(UInt(PAddrBits.W))
   // resp
   val forward_mshr = Output(Bool())
-  val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
+  val forwardData = Output(Vec(MLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
   val denied = Output(Bool())
   val corrupt = Output(Bool())

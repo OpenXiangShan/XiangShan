@@ -25,7 +25,7 @@ case class IssueBlockParams(
   numDeqOutside        : Int = 0,
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,
-  VLEN                 : Int = 128,
+  VLEN                 : Int = xiangshan.backend.datapath.DataConfig.VLEN,
   // calculate in scheduler
   var idxInSchBlk      : Int = 0,
 )(

@@ -61,7 +61,7 @@ class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
   val fuType = FuType()
   val fuOpType = FuOpType()
-  val data = UInt(VLEN.W)
+  val data = UInt(MLEN.W)
   val sqIdx = new SqPtr
   val vecDebug = new VecMissalignedDebugBundle
 }
@@ -69,8 +69,8 @@ class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(VLEN.W)
-  val mask   = UInt((VLEN/8).W)
+  val data   = UInt(MLEN.W)
+  val mask   = UInt((MLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
   val prefetch = Bool()

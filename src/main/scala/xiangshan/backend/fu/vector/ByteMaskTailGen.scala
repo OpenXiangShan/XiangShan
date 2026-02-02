@@ -13,7 +13,7 @@ import yunsuan.util.LookupTree
 class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   private val numBytes = vlen / 8
   private val maxVLMUL = 8
-  private val maxVLMAX = 8 * 16 // TODO: parameterize this
+  private val maxVLMAX = maxVLMUL * numBytes
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
   println(s"elemIdxWidth: $elemIdxWidth")
 
@@ -49,7 +49,7 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   private val numBytes = vlen / 8
   private val byteWidth = log2Up(numBytes) // vlen=128, numBytes=16, byteWidth=log2(16)=4
   private val maxVLMUL = 8
-  private val maxVLMAX = 8 * 16 // TODO: parameterize this
+  private val maxVLMAX = maxVLMUL * numBytes
   private val elemIdxWidth = log2Up(maxVLMAX + 1)
 
   println(s"numBytes: ${numBytes}, byteWidth: ${byteWidth}")

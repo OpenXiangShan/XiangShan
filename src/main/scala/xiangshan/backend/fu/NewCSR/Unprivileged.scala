@@ -62,7 +62,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   val vstart = Module(new CSRModule("Vstart", new CSRBundle {
     // vstart is not a WARL CSR.
     // Since we need to judge whether flush pipe by vstart being not 0 in DecodeStage, vstart must be initialized to some value at reset.
-    val vstart = RW(VlWidth - 2, 0).withReset(0.U) // hold [0, 128)
+    val vstart = RW(VlWidth - 2, 0).withReset(0.U) // hold [0, VLEN)
   }) with HasRobCommitBundle {
     // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
     // Not trap

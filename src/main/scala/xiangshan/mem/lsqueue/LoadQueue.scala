@@ -120,10 +120,10 @@ trait HasLoadHelper { this: XSModule =>
 
   def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
     LookupTree(alignedType, List(
-      "b00".U -> ZeroExt(rdata(7, 0), VLEN),
-      "b01".U -> ZeroExt(rdata(15, 0), VLEN),
-      "b10".U -> ZeroExt(rdata(31, 0), VLEN),
-      "b11".U -> ZeroExt(rdata(63, 0), VLEN)
+      "b00".U -> ZeroExt(rdata(7, 0), MLEN),
+      "b01".U -> ZeroExt(rdata(15, 0), MLEN),
+      "b10".U -> ZeroExt(rdata(31, 0), MLEN),
+      "b11".U -> ZeroExt(rdata(63, 0), MLEN)
     ))
   }
 }

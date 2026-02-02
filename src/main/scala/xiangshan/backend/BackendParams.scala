@@ -542,7 +542,7 @@ object BackendV2SchdParams {
   def numPregsFp = 192
   def rfDataWidthFp= 64
   def numPregsVec = 128
-  def rfDataWidthVec = 128
+  def rfDataWidthVec = VLEN
 
   def intSchdParams = {
     implicit val schdType: SchedulerType = IntScheduler()

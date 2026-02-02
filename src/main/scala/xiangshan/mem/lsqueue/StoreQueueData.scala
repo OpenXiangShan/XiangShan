@@ -40,18 +40,18 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(dataWidth.W))) // wdata: store addr
-    val wmask = Input(Vec(numWrite, UInt((VLEN/8).W)))
+    val wmask = Input(Vec(numWrite, UInt((MLEN/8).W)))
     val wlineflag = Input(Vec(numWrite, Bool())) // wdata: line op flag
     // forward addr cam
     val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W))) // addr
-    val forwardDataMask = Input(Vec(numForward, UInt((VLEN/8).W))) // forward mask
+    val forwardDataMask = Input(Vec(numForward, UInt((MLEN/8).W))) // forward mask
     val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool()))) // cam result mask
     // debug
     val debug_data = Output(Vec(numEntries, UInt(dataWidth.W)))
   })
 
   val data = Reg(Vec(numEntries, UInt(dataWidth.W)))
-  val mask = Reg(Vec(numEntries, UInt((VLEN/8).W)))
+  val mask = Reg(Vec(numEntries, UInt((MLEN/8).W)))
   val lineflag = Reg(Vec(numEntries, Bool())) // cache line match flag
   // if lineflag == true, this address points to a whole cacheline
   io.debug_data := data
@@ -270,8 +270,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 }
 
 class SQDataEntry(implicit p: Parameters) extends XSBundle {
-  val mask = UInt((VLEN/8).W)
-  val data = UInt(VLEN.W)
+  val mask = UInt((MLEN/8).W)
+  val data = UInt(MLEN.W)
 }
 
 // SQDataModule is a wrapper of SQData8Modules
@@ -284,30 +284,30 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
-      val wdata = Vec(numWrite, Input(UInt(VLEN.W)))
+      val wdata = Vec(numWrite, Input(UInt(MLEN.W)))
     }
     // mask (data valid) write port
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
-      val wdata = Vec(numWrite, Input(UInt((VLEN/8).W)))
+      val wdata = Vec(numWrite, Input(UInt((MLEN/8).W)))
     }
 
     // st-ld forward addr cam result input, used to select forward data
     val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
     // forward result valid bit generated in current cycle
-    val forwardMaskFast = Vec(numForward, Output(Vec((VLEN/8), Bool())))
+    val forwardMaskFast = Vec(numForward, Output(Vec((MLEN/8), Bool())))
     // forward result generated in the next cycle
-    val forwardMask = Vec(numForward, Output(Vec((VLEN/8), Bool()))) // forwardMask = RegNext(forwardMaskFast)
-    val forwardData = Vec(numForward, Output(Vec((VLEN/8), UInt(8.W))))
+    val forwardMask = Vec(numForward, Output(Vec((MLEN/8), Bool()))) // forwardMask = RegNext(forwardMaskFast)
+    val forwardData = Vec(numForward, Output(Vec((MLEN/8), UInt(8.W))))
   })
 
-  val data16 = Seq.fill(16)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
+  val data16 = Seq.fill(MLENB)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
 
   // writeback to lq/sq
   for (i <- 0 until numWrite) {
     // write to data16
-    for (j <- 0 until 16) {
+    for (j <- 0 until MLENB) {
       data16(j).io.mask.waddr(i) := io.mask.waddr(i)
       data16(j).io.mask.wdata(i) := io.mask.wdata(i)(j)
       data16(j).io.mask.wen(i)   := io.mask.wen(i)
@@ -319,11 +319,11 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
 
   // destorequeue read data
   for (i <- 0 until numRead) {
-    for (j <- 0 until 16) {
+    for (j <- 0 until MLENB) {
       data16(j).io.raddr(i) := io.raddr(i)
     }
-    io.rdata(i).mask := VecInit((0 until 16).map(j => data16(j).io.rdata(i).valid)).asUInt
-    io.rdata(i).data := VecInit((0 until 16).map(j => data16(j).io.rdata(i).data)).asUInt
+    io.rdata(i).mask := VecInit((0 until MLENB).map(j => data16(j).io.rdata(i).valid)).asUInt
+    io.rdata(i).data := VecInit((0 until MLENB).map(j => data16(j).io.rdata(i).data)).asUInt
   }
 
   // DataModuleTemplate should not be used when there're any write conflicts
