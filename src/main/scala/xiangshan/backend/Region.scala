@@ -152,8 +152,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   val fromDataPathResp = if (params.isIntSchd) dataPath.io.toIntIQ
                          else if (params.isFpSchd) dataPath.io.toFpIQ
                          else dataPath.io.toVfIQ
-  // for fix timing, 1 iq use 1 flushCopyReg, the other modules use 1 flushCopyReg
-  val flushCopyRegVec = VecInit(Seq.tabulate(issueQueues.size + 1)(x => RegNextWithEnable(io.flush)))
+  // for fix timing, 1 iq use 1 flushCopyReg, oldestRedirect use 1 flushCopyReg, the other modules use 1 flushCopyReg
+  val flushCopyRegVec = VecInit(Seq.tabulate(issueQueues.size + 2)(x => RegNextWithEnable(io.flush)))
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush := flushCopyRegVec(i)
     iq.io.og0Cancel := og0Cancel
@@ -676,7 +676,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   if (params.isIntSchd) {
     val exuRedirects: Seq[ValidIO[Redirect]] = wbDataPath.io.toCtrlBlock.writeback.filter(_.bits.redirect.nonEmpty).map(x => {
       val out = Wire(Valid(new Redirect()))
-      out.valid := x.valid && x.bits.redirect.get.valid && !x.bits.robIdx.needFlush(Seq(io.flush, flushCopyRegVec.last))
+      out.valid := x.valid && x.bits.redirect.get.valid && !x.bits.robIdx.needFlush(Seq(io.flush, flushCopyRegVec(flushCopyRegVec.length - 2)))
       out.bits := x.bits.redirect.get.bits
       out.bits.debugIsCtrl := true.B
       out.bits.debugIsMemVio := false.B
