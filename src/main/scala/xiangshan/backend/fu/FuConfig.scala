@@ -283,7 +283,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0, extraValue = 4),
     destDataBits = 128,
     srcDataBits = Some(64),
     immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
@@ -301,7 +301,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0, extraValue = 4),
     destDataBits = 128,
     srcDataBits = Some(64),
   )
