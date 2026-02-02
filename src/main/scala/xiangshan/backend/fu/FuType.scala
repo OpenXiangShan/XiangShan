@@ -57,6 +57,9 @@ object FuType extends ChiselOHEnum {
   val vsegldu = addType(name = "vsegldu")
   val vsegstu = addType(name = "vsegstu")
 
+  val vsha256ms = addType(name = "vsha256ms")
+  val vsha256c = addType(name = "vsha256c")
+
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
