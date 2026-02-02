@@ -191,9 +191,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.debug_startPc := s2_startPc
 
   replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
+    r.io.readValid   := s2_valid && s2_taken && s2_bankMask(i)
     r.io.readSetIdx  := s2_setIdx
-    r.io.readWayMask := s2_hitMask
+    r.io.readWayMask := s2_takenMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------
