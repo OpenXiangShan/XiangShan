@@ -168,7 +168,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
-  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.redirect      := DontCare // itlb has flushpipe, don't need redirect signal
   itlb.io.robPendingPtr := DontCare // only lsu
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
