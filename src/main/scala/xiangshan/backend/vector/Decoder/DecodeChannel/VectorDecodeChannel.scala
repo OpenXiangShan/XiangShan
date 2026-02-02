@@ -50,7 +50,9 @@ class VectorDecodeChannel(
 
   val instPats: Seq[VecInstPattern] = instSeq
 
-  val instSewPats: Seq[DecodePatternComb2[VecInstPattern, SewPattern]] = VecInstPattern.withSew(instSeq)
+  val instSewPats: Seq[DecodePatternComb2[VecInstPattern, SewPattern]] =
+    VecInstPattern.withSew(instSeq.filterNot(_.isInstanceOf[VecCryptoVVVVPattern])) ++
+      instSeq.filter(_.isInstanceOf[VecCryptoVVVVPattern]).map(_ ## SewPattern.e32)
 
   val instSewLmulNfPats: Seq[DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern]] = {
     instSeq.flatMap {
@@ -76,6 +78,10 @@ class VectorDecodeChannel(
                     }
                   case VecIntS2DVExtF4Pattern() =>
                     for (sewlmul <- SewLmulPattern.e8All ++ SewLmulPattern.e16All) yield {
+                      vi ## sewlmul ## NfPattern.dontCare
+                    }
+                  case VecCryptoVVVVPattern() =>
+                    for (sewlmul <- SewLmulPattern.e32All) yield {
                       vi ## sewlmul ## NfPattern.dontCare
                     }
                   case _ =>
