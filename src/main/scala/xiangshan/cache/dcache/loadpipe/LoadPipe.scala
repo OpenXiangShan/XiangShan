@@ -69,6 +69,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val wbq_conflict_check = Valid(UInt())
     val wbq_block_miss_req = Input(Bool())
 
+    // write hint from main pipe
+    val writehint = Flipped(Valid(UInt(DCacheBanks.W)))
+
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
@@ -106,6 +109,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // it you got nacked, you can directly passdown
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
+  XSPerfAccumulate("other_no_ready", io.lsu.req.valid && !not_nacked_ready)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -113,8 +117,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // --------------------------------------------------------------------------------
   // read tag
 
-  // ready can wait for valid
-  io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
+  val wr_conflict_check = Wire(Bool())
+
+  // ready depends on valid
+  io.lsu.req.ready := ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready)) && !wr_conflict_check
   io.meta_read.valid := io.lsu.req.fire && !io.nack
   io.tag_read.valid := io.lsu.req.fire && !io.nack
 
@@ -131,6 +137,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
+
+  wr_conflict_check := io.writehint.valid && (io.writehint.bits & s0_bank_oh).orR
+  XSPerfAccumulate("wr_conflict_no_ready", io.lsu.req.valid && wr_conflict_check)
 
   // wpu
   // val dwpu = Module(new DCacheWpuWrapper)
