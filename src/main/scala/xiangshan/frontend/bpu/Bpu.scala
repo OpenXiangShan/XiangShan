@@ -331,8 +331,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
         e.bits.taken,
         Seq(
           useSc         -> scTaken,
-          p.useProvider -> p.providerPred,
-          p.hasAlt      -> p.altPred
+          p.useProvider -> p.providerPred
         )
       )
   })

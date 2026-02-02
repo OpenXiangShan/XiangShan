@@ -151,18 +151,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // get prediction for each branch
     io.prediction(i).useProvider  := useProvider
     io.prediction(i).providerPred := provider.takenCtr.isPositive
-    io.prediction(i).hasAlt       := hasAlt
-    io.prediction(i).altPred      := alt.takenCtr.isPositive
 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
+    io.meta.entries(i).hasProvider       := hasProvider
     io.meta.entries(i).useProvider       := useProvider
     io.meta.entries(i).providerTableIdx  := OHToUInt(providerTableOH)
     io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
-    io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
+    io.meta.entries(i).basePred          := branch.bits.taken
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -200,14 +199,19 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }.unzip3
 
   // if all hit conditional branches use provider and no mispredict, use meta to train
-  private val t0_useMeta = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
-    val isCond       = t0_condMask(i)
-    val useProvider  = t0_meta(i).useProvider
-    val mispredicted = branch.bits.mispredict
-    !(mbtbHit && isCond) || (useProvider && !mispredicted)
-  }.reduce(_ && _)
-  private val t0_needRead = !t0_useMeta
+//  private val t0_useMeta = t0_branches.zipWithIndex.map { case (branch, i) =>
+//    val mbtbHit      = t0_mbtbHitMask(i)
+//    val isCond       = t0_condMask(i)
+//    val useProvider  = t0_meta(i).useProvider
+//    val mispredicted = branch.bits.mispredict
+//    !(mbtbHit && isCond) || (useProvider && !mispredicted)
+//  }.reduce(_ && _)
+  private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
+    val mbtbHit = t0_mbtbHitMask(i)
+    val isCond  = t0_condMask(i)
+    mbtbHit && isCond && branch.bits.mispredict
+  }.reduce(_ || _)
+  private val t0_useMeta = !t0_needRead
 
   private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
   io.trainReady := !t0_readBankConflict
@@ -346,12 +350,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altTableOH = Wire(UInt(NumTables.W))
     val alt        = Wire(new TrainTagMatchResult)
 
-    val useProvider   = Wire(Bool())
-    val useAlt        = Wire(Bool())
-    val altOrBasePred = Wire(Bool())
+    val useProvider = Wire(Bool())
+    val useAlt      = Wire(Bool())
+    val basePred    = Wire(Bool())
 
     when(t2_useMeta) {
-      hasProvider     := true.B
+      hasProvider     := meta.hasProvider
       providerTableOH := UIntToOH(meta.providerTableIdx, NumTables)
 
       provider.hit          := true.B
@@ -364,9 +368,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       altTableOH := 0.U
       alt        := 0.U.asTypeOf(new TrainTagMatchResult)
 
-      useProvider   := true.B
-      useAlt        := false.B
-      altOrBasePred := meta.altOrBasePred
+      useProvider := meta.useProvider
+      useAlt      := false.B
+      basePred    := meta.basePred
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
@@ -377,18 +381,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
 
-      useProvider   := hasProvider && (!useAltOnNa || !provider.takenCtr.isWeak)
-      useAlt        := !useProvider && hasAlt
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_basePred(i))
+      useProvider := hasProvider && (!useAltOnNa || !provider.takenCtr.isWeak)
+      useAlt      := false.B
+      basePred    := t2_basePred(i)
     }
 
     val providerPred = provider.takenCtr.isPositive
-    val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
+    val finalPred    = Mux(useProvider, providerPred, basePred)
 
     val providerNewTakenCtr = provider.takenCtr.getUpdate(actualTaken)
     val altNewTakenCtr      = alt.takenCtr.getUpdate(actualTaken)
 
-    val incProviderUsefulCtr = hasProvider && providerPred === actualTaken && providerPred =/= altOrBasePred
+    val incProviderUsefulCtr = hasProvider && providerPred === actualTaken && providerPred =/= basePred
     val providerNewUsefulCtr = provider.usefulCtr.getIncrease(en = incProviderUsefulCtr)
 
     // allocate when mispredict, but except when:
@@ -400,12 +404,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val notNeedUpdate = hasProvider && provider.takenCtr.shouldHold(actualTaken) &&
       provider.usefulCtr.isSaturatePositive && incProviderUsefulCtr &&
-      (useProvider || !hasAlt || alt.takenCtr.shouldHold(actualTaken))
+      useProvider
     val needUpdateProvider = !notNeedUpdate && hasProvider
-    val needUpdateAlt      = !notNeedUpdate && useAlt
+    val needUpdateAlt      = false.B
 
-    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
-    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
+    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && basePred === actualTaken
+    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && basePred =/= actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
@@ -644,7 +648,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   )
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
-  XSPerfAccumulate("read_conflict", debug_readBankConflict)
+  XSPerfAccumulate("read_conflict", t0_readBankConflict)
   XSPerfAccumulate("reset_useful", t2_fire && usefulResetCtr.isSaturatePositive)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {

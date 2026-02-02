@@ -60,8 +60,6 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
 class TagePrediction(implicit p: Parameters) extends TageBundle {
   val useProvider:  Bool = Bool()
   val providerPred: Bool = Bool()
-  val hasAlt:       Bool = Bool()
-  val altPred:      Bool = Bool()
 }
 
 class PhrToTageIO(implicit p: Parameters) extends TageBundle {
@@ -106,12 +104,13 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
+  val hasProvider:       Bool            = Bool()
   val useProvider:       Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
-  val altOrBasePred:     Bool            = Bool()
+  val basePred:          Bool            = Bool()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
