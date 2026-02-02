@@ -19,13 +19,17 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
+import utility.CircularQueuePtr
+import utility.HasCircularQueuePtrHelper
 import utility.XSError
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.StageCtrl
 
-class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
+class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
   class CommonHRIO extends CommonHRBundle {
     val stageCtrl:   StageCtrl        = Input(new StageCtrl)
+    val s0_startPc:  PrunedAddr       = Input(PrunedAddr(VAddrBits))
     val update:      CommonHRUpdate   = Input(new CommonHRUpdate)
     val redirect:    CommonHRRedirect = Input(new CommonHRRedirect)
     val fromSc:      Bool             = Input(Bool())
@@ -44,8 +48,12 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   // common history register
   private val s0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
   private val commonHR    = RegInit(0.U.asTypeOf(new CommonHREntry))
-  private val commonHRBuffer =
-    Module(new Queue(new CommonHREntry, StallQueueSize, pipe = true, flow = true, hasFlush = true))
+
+  private val enqPtr     = RegInit(HistPtr(false.B, 0.U))
+  private val predPtr    = RegInit(HistPtr(false.B, 0.U))
+  private val writePtr   = RegInit(HistPtr(false.B, 0.U))
+  private val recoverPtr = RegInit(HistPtr(false.B, 0.U))
+  private val histQueue  = RegInit(VecInit(Seq.fill(HistQueueSize)(0.U.asTypeOf(new CommonHREntry))))
 
   /*
    * CommonHR train from redirect/s3_prediction
@@ -73,8 +81,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_numHit   = PopCount(s3_hitMask)
   private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  s3_commonHR.valid := s3_fire
-  s3_commonHR.ghr   := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
+  s3_commonHR.valid       := s3_fire
+  s3_commonHR.predStartPc := s3_update.startPc
+  s3_commonHR.ghr := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
   s3_commonHR.bw := getNewHR(
     commonHR.bw,
     s3_numLess,
@@ -106,8 +115,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val r0_numLess  = PopCount(r0_lessThanPc)
   private val r0_numHit   = PopCount(r0_oldHits)
   private val r0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
-  r0_commonHR.valid := false.B
-  r0_commonHR.ghr   := getNewHR(r0_metaGhr, r0_numLess, r0_numHit, r0_taken, r0_isCond)(GhrHistoryLength)
+  r0_commonHR.valid       := false.B
+  r0_commonHR.predStartPc := io.s0_startPc
+  r0_commonHR.ghr         := getNewHR(r0_metaGhr, r0_numLess, r0_numHit, r0_taken, r0_isCond)(GhrHistoryLength)
   r0_commonHR.bw := getNewHR(r0_metaBW, r0_numLess, r0_numHit, r0_taken, r0_isCond, Option(r0_bwTaken && r0_taken))(
     BWHistoryLength
   )
@@ -120,18 +130,119 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   }
 
   // avoid losing updates due to !s0_fire
-  commonHRBuffer.io.enq.valid := s3_fire
-  commonHRBuffer.io.enq.bits  := s3_commonHR
-  commonHRBuffer.io.flush.get := r0_valid || s3_override
-  commonHRBuffer.io.deq.ready := s0_fire && io.fromSc
+  // commonHRBuffer.io.enq.valid := s3_fire
+  // commonHRBuffer.io.enq.bits  := s3_commonHR
+  // commonHRBuffer.io.flush.get := r0_valid
+  // commonHRBuffer.io.deq.ready := s0_fire
 
-  XSError(s3_fire && !commonHRBuffer.io.enq.ready, "CommonHR stall queue overflow!\n")
+  // XSError(s3_fire && !commonHRBuffer.io.enq.ready, "CommonHR stall queue overflow!\n")
 
-  s0_commonHR := Mux(
-    r0_valid,
-    r0_commonHR,
-    Mux(s0_fire && commonHRBuffer.io.deq.valid, commonHRBuffer.io.deq.bits, 0.U.asTypeOf(commonHR))
+  // s0_commonHR := Mux(
+  //   r0_valid,
+  //   r0_commonHR,
+  //   Mux(s0_fire && commonHRBuffer.io.deq.valid, commonHRBuffer.io.deq.bits, 0.U.asTypeOf(commonHR))
+  // )
+
+//
+  /*
+   * NOTE:Only applicable to the current predicted flow structure
+   * when an bp-override occurs in s3
+   * if s3_override,  the current s0 should use s2,
+   * the next cycle should use the current s1,
+   * and the next cycle should use the current s0
+   * At the current flow level, a maximum of two levels of history need to be restored
+   */
+
+  private val enqEnable       = s0_fire
+  private val predEnable      = s0_fire && ((predPtr + 3.U) === enqPtr)
+  private val writeEnable     = s3_fire
+  private val hasOverrideHist = recoverPtr + 2.U === writePtr
+  private val recoverInc      = s3_fire && hasOverrideHist
+  private val sync            = predPtr === writePtr
+  private val initCommonHR    = WireInit(0.U.asTypeOf(new CommonHREntry))
+  initCommonHR.predStartPc := io.s0_startPc
+  // when(enqEnable) {
+  //   histQueue(enqPtr.value) := initCommonHR
+  //   enqPtr                  := enqPtr + 1.U
+  //   predPtr                 := Mux(predEnable, predPtr + 1.U, predPtr)
+  // }
+
+  // when(writeEnable) {
+  //   histQueue(writePtr.value) := s3_commonHR
+  //   writePtr                  := writePtr + 1.U
+  //   recoverPtr                := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
+  // }
+
+  // when(s3_override) {
+  //   enqPtr                            := writePtr + 2.U
+  //   predPtr                           := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
+  //   histQueue((writePtr + 1.U).value) := initCommonHR
+  // }
+
+  when(r0_valid) {
+    enqPtr                    := writePtr + 1.U
+    recoverPtr                := writePtr
+    predPtr                   := writePtr
+    histQueue(writePtr.value) := initCommonHR
+  }.elsewhen(s3_override) {
+    val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
+    histQueue(writePtr.value)         := s3_commonHR  // update s3_fire block
+    histQueue((writePtr + 1.U).value) := initCommonHR // write new s0_block
+    enqPtr                            := writePtr + 2.U
+    predPtr                           := realRecoverPtr
+    writePtr                          := writePtr + 1.U
+    recoverPtr                        := realRecoverPtr
+    dontTouch(realRecoverPtr)
+  }.otherwise {
+    when(enqEnable) {
+      histQueue(enqPtr.value) := initCommonHR
+      enqPtr                  := enqPtr + 1.U
+      predPtr                 := Mux(predEnable, predPtr + 1.U, predPtr)
+    }
+    when(writeEnable) {
+      histQueue(writePtr.value) := s3_commonHR
+      writePtr                  := writePtr + 1.U
+      recoverPtr                := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
+    }
+  }
+
+  XSError(enqEnable && (writePtr < predPtr || predPtr < recoverPtr), "The predPtr exceeds the correct range")
+  XSError(
+    writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc,
+    "update history maybe mismatched!"
   )
+
+  s0_commonHR := MuxCase(
+    0.U.asTypeOf(new CommonHREntry),
+    Seq(
+      r0_valid          -> r0_commonHR,
+      s3_override       -> histQueue(recoverPtr.value),
+      (s0_fire && sync) -> s3_commonHR, // bypass s3_commonHR
+      s0_fire           -> histQueue(predPtr.value)
+    )
+  )
+
+  // s0_commonHR := Mux(
+  //   r0_valid,
+  //   r0_commonHR,
+  //   Mux(
+  //     s3_override,
+  //     histQueue(deqPtr.value + 1.U),
+  //     Mux(
+  //       s0_fire && s3_fire && enqPtr === predPtr,
+  //       s3_commonHR,
+  //       Mux(s0_fire && enqPtr > predPtr, histQueue(predPtr.value), 0.U.asTypeOf(commonHR))
+  //     )
+  //   )
+  // )
+
+  dontTouch(writePtr)
+  dontTouch(enqPtr)
+  dontTouch(predPtr)
+  dontTouch(predEnable)
+  dontTouch(sync)
+  dontTouch(hasOverrideHist)
+  dontTouch(recoverInc)
 
   if (EnableCommitGHistDiff) {
     val s3_lessThanFirstTakenUInt = s3_lessThanFirstTaken.asUInt
