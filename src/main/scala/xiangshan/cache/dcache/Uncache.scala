@@ -340,7 +340,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val e0_req_valid = req.valid
   val e0_req = req.bits
 
-  val e0_rejectVec = Wire(Vec(UncacheBufferSize, Bool()))
   val e0_mergeVec = Wire(Vec(UncacheBufferSize, Bool()))
   val e0_allocWaitSameVec = Wire(Vec(UncacheBufferSize, Bool()))
   sizeForeach(i => {
@@ -348,7 +347,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val isAddrMatch = addrMatch(e0_req, entries(i))
     val canMerge1 = canMergePrimary(e0_req, entries(i), i.U)
     val canMerge2 = canMergeSecondary(i.U)
-    e0_rejectVec(i) := valid && isAddrMatch && !canMerge1
     e0_mergeVec(i) := valid && isAddrMatch && canMerge1 && canMerge2
     e0_allocWaitSameVec(i) := valid && isAddrMatch && canMerge1 && !canMerge2
   })
@@ -359,10 +357,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_allocWaitSame = e0_allocWaitSameVec.reduce(_ || _)
   val e0_sid = Mux(e0_canMerge, e0_mergeIdx, e0_allocIdx)
-  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
+  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_canAlloc)
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_req_valid){
+  when(e0_canMerge && e0_fire){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
