@@ -36,10 +36,10 @@ on:
         required: false
         type: choice
         options:
-          - KunminghuV2Config
-          - DefaultConfig
-          - BackendV2Config
-        default: KunminghuV2Config
+          - CHIConfig
+          - TLConfig
+          - TLBackendV2Config
+        default: CHIConfig
       benchmark_type:
         description: Benchmark type
         required: false

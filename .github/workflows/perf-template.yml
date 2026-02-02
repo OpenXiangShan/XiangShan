@@ -21,7 +21,7 @@ on:
         description: Config for XiangShan core
         required: false
         type: string
-        default: KunminghuV2Config
+        default: CHIConfig
       benchmark_type:
         required: false
         type: string
