@@ -21,11 +21,11 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class PrefetchBtbParameters(
     NumEntries:      Int = 8192,
-    NumWay:          Int = 4,
+    NumWay:          Int = 8,
     NumBanks:        Int = 4,
     TagWidth:        Int = 16,
     TargetWidth:     Int = 20, // 2B aligned
-    WriteBufferSize: Int = 4,
+    WriteBufferSize: Int = 8,
     Replacer:        String = "Lru"
 ) {}
 
