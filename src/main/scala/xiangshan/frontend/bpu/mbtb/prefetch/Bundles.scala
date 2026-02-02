@@ -85,4 +85,7 @@ class WbufWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefet
   val setIdx:  UInt             = UInt(SetIdxLen.W)
   val wayMask: UInt             = UInt(NumWay.W)
   val entry:   PrefetchBtbEntry = new PrefetchBtbEntry()
+  // used for write buf
+  override def tag: Option[UInt] =
+    Some(Cat(entry.sramData.tag, entry.sramData.position, entry.sramData.target, entry.sramData.attribute.asUInt))
 }

@@ -154,7 +154,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.prediction(i).hasAlt       := hasAlt
     io.prediction(i).altPred      := alt.takenCtr.isPositive
 
-    io.toSc.providerTakenCtrVec(i).valid := hasProvider
+    io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
     io.meta.entries(i).useProvider       := useProvider

@@ -41,12 +41,12 @@ case class MainBtbParameters(
 
 // TODO: expose this to Parameters.scala / XSCore.scala
 trait HasMainBtbParameters extends HasBpuParameters {
-  def mbtbParameters: MainBtbParameters = bpuParameters.mbtbParameters
-
-  def NumEntries:       Int = mbtbParameters.NumEntries
-  def NumWay:           Int = mbtbParameters.NumWay
-  def NumInternalBanks: Int = mbtbParameters.NumInternalBanks
-  def NumAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
+  def mbtbParameters:   MainBtbParameters = bpuParameters.mbtbParameters
+  def NumPrefetchWay:   Int               = bpuParameters.prefetchBtbParameters.NumWay
+  def NumEntries:       Int               = mbtbParameters.NumEntries
+  def NumWay:           Int               = mbtbParameters.NumWay
+  def NumInternalBanks: Int               = mbtbParameters.NumInternalBanks
+  def NumAlignBanks:    Int               = FetchBlockSize / FetchBlockAlignSize
   // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
   def NumSets:            Int    = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
   def TagWidth:           Int    = mbtbParameters.TagWidth

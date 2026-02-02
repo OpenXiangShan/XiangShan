@@ -132,7 +132,17 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
-  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ prefetchBtb.io.result)
+  private val prefetchFinalResult = WireInit(prefetchBtb.io.result)
+  (prefetchFinalResult zip prefetchBtb.io.result).foreach { case (res, ori) =>
+    val hit = alignBanks.flatMap(_.io.read.resp.predictions).map(mbtb =>
+      mbtb.valid &&
+        ori.valid && mbtb.bits.attribute === ori.bits.attribute &&
+        mbtb.bits.cfiPosition === ori.bits.cfiPosition
+    ).reduce(_ || _)
+    res.valid := ori.valid && !hit
+    res.bits  := ori.bits
+  }
+  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ prefetchFinalResult)
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 

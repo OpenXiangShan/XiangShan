@@ -63,6 +63,12 @@ trait Helpers extends HasPrefetchBtbParameters
       getBlockPcUpper(pc),
       0.U(FetchBlockSizeWidth.W)
     ))
+  def getCfiPc(pc: PrunedAddr, pos: UInt): PrunedAddr =
+    PrunedAddrInit(Cat(
+      getBlockPcUpper(pc),
+      pos,
+      0.U
+    ))
 }
 trait SBDHelper extends HasPrefetchBtbParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
@@ -73,7 +79,13 @@ trait SBDHelper extends HasPrefetchBtbParameters {
     val maxWidth  = rviOffset.getWidth
     PrunedAddrInit(SignExt(Mux(isRvc, SignExt(rvcOffset, maxWidth), SignExt(rviOffset, maxWidth)), 20))
   }
-
+  def isValidInstr(inst: UInt): Bool = {
+    val opcode      = inst(6, 0)
+    val validOpcode = Seq(3.U, 15.U, 19.U, 23.U, 27.U, 35.U, 47.U, 51.U, 55.U, 59.U, 99.U, 103.U, 111.U, 115.U)
+    val isValid     = Wire(Bool())
+    isValid := validOpcode.map(_ === opcode).reduce(_ || _)
+    isValid
+  }
   def getBrOffset(inst: UInt, isRvc: Bool): PrunedAddr = {
     val rvcOffset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
     val rviOffset = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))

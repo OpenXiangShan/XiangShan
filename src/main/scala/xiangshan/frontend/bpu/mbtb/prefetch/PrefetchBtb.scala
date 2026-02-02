@@ -3,10 +3,13 @@ package xiangshan.frontend.bpu.mbtb.prefetch
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.mbtb.TakenCounter
 import xiangshan.frontend.bpu.mbtb.prefetch._
 import xiangshan.frontend.ftq.FtqEntry
 import xiangshan.frontend.ftq.FtqPtr
@@ -35,7 +38,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   val prefetchPipe: PrefetchPipe         = Module(new PrefetchPipe)
   io.resetDone  := banks.map(_.io.resetDone).reduce(_ && _)
   io.trainReady := true.B
-  io.meta       := DontCare
+
   // Predict pipe
   private val s0_fire, s1_fire, s2_fire = Wire(Bool())
 
@@ -67,14 +70,19 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
   private val s2_tag     = getTag(s2_startPc)
   private val s2_entries = RegEnable(s1_entries, s1_fire)
+  private val s2_InstOffset = getPosition(s2_startPc)
   s2_fire := io.stageCtrl.s2_fire && io.enable
-  (io.result zip s2_entries).foreach { case (result, entry) =>
+  (io.result zip s2_entries zip io.meta.entries).foreach { case ((result, entry), meta) =>
     val hit = entry.sramData.tag === s2_tag
-    result.valid            := entry.valid && s2_fire
+    result.valid            := entry.valid && s2_fire && hit && entry.sramData.position>=s2_InstOffset
     result.bits.taken       := false.B
     result.bits.target      := getFullTarget(s2_startPc, entry.sramData.target, None)
     result.bits.attribute   := entry.sramData.attribute
     result.bits.cfiPosition := entry.sramData.position
+    meta.rawHit             := hit
+    meta.position           := entry.sramData.position
+    meta.counter            := TakenCounter.WeakPositive
+    meta.attribute          := entry.sramData.attribute
   }
 
   // Train pipe
@@ -90,6 +98,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val isHit = t1_train.meta.mbtb.entries.flatten.map { mbtb =>
       mbtb.rawHit && pbtb.rawHit && mbtb.position === pbtb.position
     }.reduce(_ || _)
+
     isHit
   }
   // train write to invalid entry
@@ -115,4 +124,9 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     bank.io.writeReq.bits.wayMask := prefetchWayMask.asUInt
     bank.io.writeReq.bits.entry   := prefetchEntries
   }
+
+  XSPerfAccumulate(
+    "prefetch_hit_mbtb",
+    PopCount(needInvalid.map(_ && t1_fire))
+  )
 }
