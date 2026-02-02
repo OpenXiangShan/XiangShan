@@ -900,8 +900,14 @@ object SplitTable {
       VFWNMSAC_VF       -> dupF2W(null, vfwnmsac_fp16.s1f, vfwnmsac_fp32.s1f),
     )
 
+    val cryptoTable = SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[VecUop]]](
+      VSHA2MS_VV -> dup(null, null, vsha256ms_e32, null),
+      VSHA2CL_VV -> dup(null, null, vsha256cl_e32, null),
+      VSHA2CH_VV -> dup(null, null, vsha256ch_e32, null),
+    )
+
     opi00Table ++ opi01Table ++ opi10Table ++ opi11Table ++
     opm00Table ++ opm01Table ++ opm10Table ++ opm11Table ++
-    opf00Table ++ opf01Table ++ opf10Table ++ opf11Table
+    opf00Table ++ opf01Table ++ opf10Table ++ opf11Table ++ cryptoTable
   }
 }

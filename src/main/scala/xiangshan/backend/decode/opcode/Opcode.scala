@@ -55,6 +55,8 @@ object Opcode {
   val VIRedOpcodes  = opcodes.VIRedOpcode
   val VIPermOpcodes = opcodes.VIPermOpcode
   val VMoveOpcodes  = opcodes.VMoveOpcode
+  val VSha256msOpcodes = opcodes.VSha256msOpcode
+  val VSha256cOpcodes = opcodes.VSha256cOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
