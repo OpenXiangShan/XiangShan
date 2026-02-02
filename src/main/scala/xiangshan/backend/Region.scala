@@ -259,7 +259,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val vecWriteV0Idx = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeV0Rf).map(_.wbPortConfigs.filter(_.isInstanceOf[V0WB]).head.port)
     val vecWriteVlIdx = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeVlRf).map(_.vlWB.port)
     val vlsVfIdxes = vlsWriteVfIdx.distinct.sorted
-    val vfIdxes = (intWriteVfIdx ++ fpWriteVfIdx ++ vecWriteVfIdx).distinct.sorted
+    val vfIdxes = vlsVfIdxes
     val v0Idxes = (intWriteV0Idx ++ fpWriteV0Idx ++ vecWriteV0Idx).distinct.sorted
     val vlIdxes = (intWriteVlIdx ++ vecWriteVlIdx).distinct.sorted
     println(s"[Region] int write vf port = ${intWriteVfIdx}")
@@ -292,7 +292,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     println(s"[Region] wakeupFromWB size = ${wakeupFromWB.size}")
     println(s"[Region] nonVlsWakeupFromWB size = ${nonVlsWakeupFromWB.size}")
     issueQueues.map { case iq =>
-      if (iq.param.isVecMemIQ) {
+      if (iq.param.inVfSchd) {
         iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
         iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayed).map(x => connectWakeupWB(x._1, x._2))
         println(s"[Region_vec] vec mem iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
