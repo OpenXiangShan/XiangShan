@@ -55,6 +55,8 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
           case _: Opcode.VIRedOpcodes.type => FuType.vipu.U
           case _: Opcode.VIPermOpcodes.type => FuType.vppu.U
           case _: Opcode.VIDivOpcodes.type => FuType.vidiv.U
+          case _: Opcode.VSha256msOpcodes.type => FuType.vsha256ms.U
+          case _: Opcode.VSha256cOpcodes.type => FuType.vsha256c.U
         }
       }
       catch {

@@ -55,7 +55,7 @@ object Src2SelectField extends DecodeField[
           case vii: VecIntArithInstPattern =>
             vii match {
               case VecIntVVVPattern() => INC1
-              case VecIntVVVVPattern() => INC1
+              case VecIntVVVVPattern() | VecCryptoVVVVPattern() => INC1
               case VecIntVVMPattern() => INC1
               case VecIntMMMPattern() => CONST
               case VecIntVVWPattern() => INCF2
