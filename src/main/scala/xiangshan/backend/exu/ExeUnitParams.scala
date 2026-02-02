@@ -131,7 +131,6 @@ case class ExeUnitParams(
   }
   def needDataFromV2I: Boolean = {
     val exuV2IWBPort = backendParam.allExuParams(backendParam.getExuIdxV2I).getIntWBPort.get.port
-    println(s"exuIdx = ${this.exuIdx}, is int =${this.isIntExeUnit}, exuV2IWBport = ${exuV2IWBPort}")
     if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxV2I) && this.isIntExeUnit) false
     else (this.getIntWBPort.get.port == exuV2IWBPort) && this.isIntExeUnit
   }

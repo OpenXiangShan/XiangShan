@@ -249,65 +249,30 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
   }
   else if (params.isVecSchd) {
-    val intWriteVfIdx = backendParams.intSchdParams.get.exuBlockParams.filter(_.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[VfWB]).head.port)
     val intWriteV0Idx = backendParams.intSchdParams.get.exuBlockParams.filter(_.writeV0Rf).map(_.wbPortConfigs.filter(_.isInstanceOf[V0WB]).head.port)
     val intWriteVlIdx = backendParams.intSchdParams.get.exuBlockParams.filter(_.writeVlRf).map(_.vlWB.port)
-    val fpWriteVfIdx  = backendParams.fpSchdParams.get.exuBlockParams.filter(_.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[VfWB]).head.port)
     val fpWriteV0Idx  = backendParams.fpSchdParams.get.exuBlockParams.filter(_.writeV0Rf).map(_.wbPortConfigs.filter(_.isInstanceOf[V0WB]).head.port)
     val vlsWriteVfIdx = backendParams.vecSchdParams.get.exuBlockParams.filter(x => (x.hasVecLsFu || x.hasVSegFu) && x.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[VfWB]).head.port)
-    val vecWriteVfIdx = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeVecRf).map(_.wbPortConfigs.filter(_.isInstanceOf[VfWB]).head.port)
     val vecWriteV0Idx = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeV0Rf).map(_.wbPortConfigs.filter(_.isInstanceOf[V0WB]).head.port)
     val vecWriteVlIdx = backendParams.vecSchdParams.get.exuBlockParams.filter(_.writeVlRf).map(_.vlWB.port)
-    val vlsVfIdxes = vlsWriteVfIdx.distinct.sorted
-    val vfIdxes = vlsVfIdxes
+    val vfIdxes = vlsWriteVfIdx.distinct.sorted
     val v0Idxes = (intWriteV0Idx ++ fpWriteV0Idx ++ vecWriteV0Idx).distinct.sorted
     val vlIdxes = (intWriteVlIdx ++ vecWriteVlIdx).distinct.sorted
-    println(s"[Region] int write vf port = ${intWriteVfIdx}")
-    println(s"[Region] fp write vf port =  ${fpWriteVfIdx}")
-    println(s"[Region] vls write vf port = ${vlsVfIdxes}")
-    println(s"[Region] vec write vf port = ${vfIdxes}")
-    println(s"[Region] int write v0 port = ${intWriteV0Idx}")
-    println(s"[Region] fp write v0 port =  ${fpWriteV0Idx}")
-    println(s"[Region] all vec write v0 port = ${v0Idxes}")
-    println(s"[Region] int write vl port = ${intWriteVlIdx}")
-    println(s"[Region] all vec write vl port = ${vlIdxes}")
-    val wakeupFromVlsVfWb = MixedVecInit(vlsVfIdxes.map(x => io.fromVfWb(x)))
     val wakeupFromVfWb = MixedVecInit(vfIdxes.map(x => io.fromVfWb(x)))
     val wakeupFromV0Wb = MixedVecInit(v0Idxes.map(x => io.fromV0Wb(x)))
     val wakeupFromVlWb = MixedVecInit(vlIdxes.map(x => io.fromVlWb(x)))
-    println(s"[Region] wakeupFromVlsVfWb size = ${wakeupFromVlsVfWb.size}")
-    println(s"[Region] wakeupFromVfWb size = ${wakeupFromVfWb.size}")
-    println(s"[Region] wakeupFromV0Wb size = ${wakeupFromV0Wb.size}")
-    println(s"[Region] wakeupFromVlWb size = ${wakeupFromVlWb.size}")
     val wakeupFromWB = wakeupFromVfWb ++ wakeupFromV0Wb ++ wakeupFromVlWb
     val wakeupFromWBDelayedVf = RegNext(wakeupFromVfWb)
     val wakeupFromWBDelayedV0 = RegNext(wakeupFromV0Wb)
     val wakeupFromWBDelayedVl = RegNext(wakeupFromVlWb)
     val wakeupFromWBDelayed = wakeupFromWBDelayedVf ++ wakeupFromWBDelayedV0 ++ wakeupFromWBDelayedVl
-    val nonVlsWakeupFromWB = wakeupFromVlsVfWb ++ wakeupFromV0Wb ++ wakeupFromVlWb
-    val nonVlsWakeupFromWBDelayedVf = RegNext(wakeupFromVlsVfWb)
-    val nonVlsWakeupFromWBDelayedV0 = wakeupFromWBDelayedV0
-    val nonVlsWakeupFromWBDelayedVl = wakeupFromWBDelayedVl
-    val nonVlsWakeupFromWBDelayed = nonVlsWakeupFromWBDelayedVf ++ nonVlsWakeupFromWBDelayedV0 ++ nonVlsWakeupFromWBDelayedVl
-    println(s"[Region] wakeupFromWB size = ${wakeupFromWB.size}")
-    println(s"[Region] nonVlsWakeupFromWB size = ${nonVlsWakeupFromWB.size}")
     issueQueues.map { case iq =>
-      if (iq.param.inVfSchd) {
-        iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
-        iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayed).map(x => connectWakeupWB(x._1, x._2))
-        println(s"[Region_vec] vec mem iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
-      } else {
-        iq.io.wakeupFromWB.zip(nonVlsWakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
-        iq.io.wakeupFromWBDelayed.zip(nonVlsWakeupFromWBDelayed).map(x => connectWakeupWB(x._1, x._2))
-        println(s"[Region_vec] non vec mem iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
-      }
+      iq.io.wakeupFromWB.zip(wakeupFromWB).map(x => connectWakeupWB(x._1, x._2))
+      iq.io.wakeupFromWBDelayed.zip(wakeupFromWBDelayed).map(x => connectWakeupWB(x._1, x._2))
       iq.io.wakeupFromF2V.foreach(_ := io.wakeupFromF2V.get)
       iq.io.wakeupFromI2V.foreach(_ := io.wakeupFromI2V.get)
-      // println(s"[Region_vec] nonVlsWakeupFromWB.size = ${nonVlsWakeupFromWB.size}")
-      // println(s"[Region_vec] wakeupFromWB.size = ${wakeupFromWB.size}")
-      println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromVfWBPort = ${iq.param.needWakeupFromVfWBPort.map(x => (x._1, x._2.map(_.name)))}")
-      println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromV0WBPort = ${iq.param.needWakeupFromV0WBPort.map(x => (x._1, x._2.map(_.name)))}")
-      println(s"[Region_vec] ${iq.param.getIQName}: iq.param.needWakeupFromVlWBPort = ${iq.param.needWakeupFromVlWBPort.map(x => (x._1, x._2.map(_.name)))}")
+      println(s"[Region_vec] wakeupFromWB size = ${wakeupFromWB.size}")
+      println(s"[Region_vec] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
     }
   }
   // std dispatch

@@ -101,7 +101,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   // Modules
   val entries = Module(new Entries)
   val fuBusyTableWrite = params.exuBlockParams.map { case x =>
-    println(s"fuBusyTable, exuIdx =${x.exuIdx}, fuMap = ${x.fuLatencyMap(param.aluDeqNeedPickJump)}")
     Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump))))
   }
   val fuBusyTableRead = params.exuBlockParams.map { case x =>
@@ -125,25 +124,19 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   val intWbBusyTableWrite = params.exuBlockParams.map { case x =>
-    val fuMap = wenPortFuMap(x, "int")
-    println(s"intWrite, exuIdx=${x.exuIdx}, intLatencyCertain=${x.intLatencyCertain}, fuMap=${fuMap}")
-    Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+    Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(wenPortFuMap(x, "int"))))
   }
   val intWbBusyTableRead = params.exuBlockParams.map { case x =>
     Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "int"))))
   }
   val fpWbBusyTableWrite = params.exuBlockParams.map { case x =>
-    val fuMap = wenPortFuMap(x, "fp")
-    println(s"fpWrite, exuIdx=${x.exuIdx}, fpLatencyCertain=${x.fpLatencyCertain}, fuMap=${fuMap}")
-    Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+    Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(wenPortFuMap(x, "fp"))))
   }
   val fpWbBusyTableRead = params.exuBlockParams.map { case x =>
     Option.when(x.fpLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "fp"))))
   }
   val vfWbBusyTableWrite = params.exuBlockParams.map { case x =>
-    val fuMap = wenPortFuMap(x, "vec")
-    println(s"vecWrite, exuIdx=${x.exuIdx}, vecLatencyCertain=${x.vfLatencyCertain}, fuMap=${fuMap}")
-    Option.when(x.vfLatencyCertain)(Module(new FuBusyTableWrite(fuMap)))
+    Option.when(x.vfLatencyCertain)(Module(new FuBusyTableWrite(wenPortFuMap(x, "vec"))))
   }
   val vfWbBusyTableRead = params.exuBlockParams.map { case x =>
     Option.when(x.vfLatencyCertain)(Module(new FuBusyTableRead(wenPortFuMap(x, "vec"))))

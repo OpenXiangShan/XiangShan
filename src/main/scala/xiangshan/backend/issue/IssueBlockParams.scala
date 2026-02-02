@@ -67,8 +67,6 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
-  def isVecExeIQ: Boolean = inVfSchd && !isVecMemIQ
-
   def needFeedBackSqIdx: Boolean = isVecStuIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
