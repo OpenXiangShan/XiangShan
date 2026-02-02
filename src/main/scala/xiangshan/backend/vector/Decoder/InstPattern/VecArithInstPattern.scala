@@ -195,6 +195,7 @@ object VecArithInstPattern extends VecInstFieldDefination {
 
 case class VecIntVVVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntVVVVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
+
 case class VecIntVVMPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntMMMPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntVVWPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
@@ -241,6 +242,7 @@ case class VecDVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPatte
 case class VecIntRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntWRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 
+case class VecCryptoVVVVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 
 trait VecInstFieldDefination {
   def func6(implicit rawInst: BitPat): BitPat = rawInst(31, 26)

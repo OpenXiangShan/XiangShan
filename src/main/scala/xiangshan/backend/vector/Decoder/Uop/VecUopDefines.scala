@@ -771,6 +771,10 @@ object VecUopDefines {
   def vrol = new VecIntUopVV_DV
   def vror = new VecIntUopVV_DV
 
+  def vsha256ms_e32 = VecIntUopVVV_DV().setOpcode(VSha256msOpcodes.vsha256ms).s1v
+  def vsha256cl_e32 = VecIntUopVVV_DV().setOpcode(VSha256cOpcodes.vsha256cl).s1v
+  def vsha256ch_e32 = VecIntUopVVV_DV().setOpcode(VSha256cOpcodes.vsha256ch).s1v
+
   /**
    * This uop is used to fill tail of Vector Registers
    * E.g.

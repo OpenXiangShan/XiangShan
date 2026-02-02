@@ -412,7 +412,7 @@ object InstPattern {
           // Todo: Check it
           case _ => CSRInstPattern()
         }
-      case OP_VE => null // Todo: Add Vector Crypto Inst
+      case OP_VE => VecCryptoVVVVPattern()
       case CUSTOM_3 => null
       case INSTge80b => null
       case _ => throw new IllegalArgumentException(s"The opcode7(${opcode5.rawString}) of inst${rawInst.rawString} is unknown")
@@ -449,12 +449,18 @@ object InstPattern {
 
     val instWithNames: Seq[(BitPat, String)] = extTypes.flatMap(_.allWithNames)
 
-    instWithNames.map {
+    val instOption = instWithNames.map {
       case (bp, name) =>
         val pattern = InstPattern(bp)
         pattern.foreach(_.setName(name))
+        if (pattern.isEmpty) {
+          println(s"[InstPattern] inst ${name}(${bp}) has not been decoded !")
+        }
         pattern
-    }.filter(_.nonEmpty).map(_.get).distinctBy(_.bitPat)
+    }
+
+    instOption
+      .filter(_.nonEmpty).map(_.get).distinctBy(_.bitPat)
   }
 
   object Opcode5 {
