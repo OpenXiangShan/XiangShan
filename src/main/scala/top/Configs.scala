@@ -78,7 +78,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
 // * L1 cache included
 // * L2 cache NOT included
 // * L3 cache included
-class MinimalConfig(n: Int = 1) extends Config(
+class TLMinimalConfig(n: Int = 1) extends Config(
   new BaseConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(
       p => p.copy(
@@ -287,10 +287,11 @@ class MinimalConfig(n: Int = 1) extends Config(
       )
   })
 )
+class MinimalConfig(n: Int = 1) extends TLMinimalConfig(n) with DeprecatedConfigWarning
 
 // Non-synthesizable MinimalConfig, for fast simulation only
-class MinimalSimConfig(n: Int = 1) extends Config(
-  new MinimalConfig(n).alter((site, here, up) => {
+class TLMinimalSimConfig(n: Int = 1) extends Config(
+  new TLMinimalConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(_.copy(
       dcacheParametersOpt = None,
       softPTW = true
@@ -301,6 +302,7 @@ class MinimalSimConfig(n: Int = 1) extends Config(
     )
   })
 )
+class MinimalSimConfig(n: Int = 1) extends TLMinimalSimConfig(n) with DeprecatedConfigWarning
 
 case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
   case XSTileKey =>
@@ -433,13 +435,15 @@ class WithL3DebugConfig extends Config(
   L3CacheConfig("256KB", inclusive = false) ++ L2CacheConfig("64KB")
 )
 
-class MinimalL3DebugConfig(n: Int = 1) extends Config(
-  new WithL3DebugConfig ++ new MinimalConfig(n)
+class TLMinimalL3DebugConfig(n: Int = 1) extends Config(
+  new WithL3DebugConfig ++ new TLMinimalConfig(n)
 )
+class MinimalL3DebugConfig(n: Int = 1) extends TLMinimalL3DebugConfig(n) with DeprecatedConfigWarning
 
-class DefaultL3DebugConfig(n: Int = 1) extends Config(
+class TLDefaultL3DebugConfig(n: Int = 1) extends Config(
   new WithL3DebugConfig ++ new BaseConfig(n)
 )
+class DefaultL3DebugConfig(n: Int = 1) extends TLDefaultL3DebugConfig(n) with DeprecatedConfigWarning
 
 class WithFuzzer extends Config((site, here, up) => {
   case DebugOptionsKey => up(DebugOptionsKey).copy(
@@ -462,8 +466,8 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
-class FrontendDebugConfig(n: Int = 1) extends Config(
-  (new DefaultConfig(n)).alter((site, here, up) => {
+class TLFrontendDebugConfig(n: Int = 1) extends Config(
+  (new TLConfig(n)).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map{ p => p.copy(
       frontendParameters = p.frontendParameters.copy(
         bpuParameters = p.frontendParameters.bpuParameters.copy(
@@ -483,9 +487,10 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
     )
   })
 )
+class FrontendDebugConfig(n: Int = 1) extends TLFrontendDebugConfig(n) with DeprecatedConfigWarning
 
-class BackendV2Config(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+class TLBackendV2Config(n: Int = 1) extends Config(
+  new TLConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map { p =>
       p.copy(
         EnableBackendV2Config = true,
@@ -533,6 +538,7 @@ class BackendV2Config(n: Int = 1) extends Config(
     }
   })
 )
+class BackendV2Config(n: Int = 1) extends TLBackendV2Config(n) with DeprecatedConfigWarning
 
 class CVMCompile extends Config((site, here, up) => {
   case CVMParamsKey => up(CVMParamsKey).copy(
@@ -556,67 +562,75 @@ class CVMTestCompile extends Config((site, here, up) => {
     HasBitmapCheckDefault = true))
 })
 
-class MinimalAliasDebugConfig(n: Int = 1) extends Config(
+class TLMinimalAliasDebugConfig(n: Int = 1) extends Config(
   L3CacheConfig("512KB", inclusive = false)
     ++ L2CacheConfig("256KB", inclusive = true)
     ++ WithNKBL1D(128)
-    ++ new MinimalConfig(n)
+    ++ new TLMinimalConfig(n)
 )
+class MinimalAliasDebugConfig(n: Int = 1) extends TLMinimalAliasDebugConfig(n) with DeprecatedConfigWarning
 
-class MediumConfig(n: Int = 1) extends Config(
+class TLMediumConfig(n: Int = 1) extends Config(
   L3CacheConfig("4MB", inclusive = false, banks = 4)
     ++ L2CacheConfig("512KB", inclusive = true)
     ++ WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
+class MediumConfig(n: Int = 1) extends TLMediumConfig(n) with DeprecatedConfigWarning
 
-class FuzzConfig(dummy: Int = 0) extends Config(
+class CHIFuzzConfig(dummy: Int = 0) extends Config(
   new WithFuzzer
-    ++ new KunminghuV2Config(1)
+    ++ new CHIConfig(1)
 )
+class FuzzConfig(dummy: Int = 0) extends CHIFuzzConfig(dummy) with DeprecatedConfigWarning
 
-class DefaultConfig(n: Int = 1) extends Config(
+class TLConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
+class DefaultConfig(n: Int = 1) extends TLConfig(n) with DeprecatedConfigWarning
 
-class CVMConfig(n: Int = 1) extends Config(
+class TLCVMConfig(n: Int = 1) extends Config(
   new CVMCompile
-    ++ new DefaultConfig(n)
+    ++ new TLConfig(n)
 )
+class CVMConfig(n: Int = 1) extends TLCVMConfig(n) with DeprecatedConfigWarning
 
-class CVMTestConfig(n: Int = 1) extends Config(
+class TLCVMTestConfig(n: Int = 1) extends Config(
   new CVMTestCompile
-    ++ new DefaultConfig(n)
+    ++ new TLConfig(n)
 )
+class CVMTestConfig(n: Int = 1) extends TLCVMTestConfig(n) with DeprecatedConfigWarning
 
 class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
-class KunminghuV2Config(n: Int = 1) extends Config(
+class CHIConfig(n: Int = 1) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
-    ++ new DefaultConfig(n)
+    ++ new TLConfig(n)
     ++ new WithCHI
 )
+class KunminghuV2Config(n: Int = 1) extends CHIConfig(n) with DeprecatedConfigWarning
 
-class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
+class CHIMinimalConfig(n: Int = 1) extends Config(
   L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
     ++ WithNKBL1D(32, ways = 4)
-    ++ new MinimalConfig(n)
+    ++ new TLMinimalConfig(n)
     ++ new WithCHI
 )
+class KunminghuV2MinimalConfig(n: Int = 1) extends CHIMinimalConfig(n) with DeprecatedConfigWarning
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  (new CHIConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
 
 class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
-  (new KunminghuV2MinimalConfig(n)).alter((site, here, up) => {
+  (new CHIMinimalConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
@@ -633,7 +647,7 @@ class XSNoCDiffTopMinimalConfig(n: Int = 1) extends Config(
   })
 )
 
-class FpgaDefaultConfig(n: Int = 1) extends Config(
+class TLFpgaDefaultConfig(n: Int = 1) extends Config(
   (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
@@ -649,8 +663,9 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
     )
   })
 )
+class FpgaDefaultConfig(n: Int = 1) extends TLFpgaDefaultConfig(n) with DeprecatedConfigWarning
 
-class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
+class TLFpgaDiffDefaultConfig(n: Int = 1) extends Config(
   (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
@@ -667,9 +682,10 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
     )
   })
 )
+class FpgaDiffDefaultConfig(n: Int = 1) extends TLFpgaDiffDefaultConfig(n) with DeprecatedConfigWarning
 
-class FpgaDiffMinimalConfig(n: Int = 1) extends Config(
-  (new MinimalConfig(n)).alter((site, here, up) => {
+class TLFpgaDiffMinimalConfig(n: Int = 1) extends Config(
+  (new TLMinimalConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
       AlwaysBasicDB = false
@@ -682,3 +698,15 @@ class FpgaDiffMinimalConfig(n: Int = 1) extends Config(
     )
   })
 )
+class FpgaDiffMinimalConfig(n: Int = 1) extends TLFpgaDiffMinimalConfig(n) with DeprecatedConfigWarning
+
+trait DeprecatedConfigWarning {
+  val className = this.getClass().getSimpleName()
+  val parentClassName = this.getClass().getSuperclass().getSimpleName()
+  Console.println(
+    Console.WHITE ++ Console.BOLD ++ Console.MAGENTA_B ++ Console.BLINK ++
+    s"[Warning] $className is deprecated. Use $parentClassName instead." ++
+    Console.RESET
+  )
+  Thread.sleep(10000)
+}
