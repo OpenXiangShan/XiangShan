@@ -448,8 +448,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     loadDependencyVec(entryIdx) := out.entry.bits.status.mergedLoadDependency
     cancelBypassVec(entryIdx)   := out.cancelBypass
     exuSourceVec.foreach(_(entryIdx) := out.exuSources.get)
-    lqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.lqIdx.get)
-    sqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.sqIdx.get)
+    lqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.og1Payload.lqIdx.get)
+    sqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.og1Payload.sqIdx.get)
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
     entryOutTransValidVec(entryIdx) := out.entryOutTransValid

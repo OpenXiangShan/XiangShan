@@ -327,8 +327,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.status.deqPortIdx                                := 0.U
       connectSamePort(enq.bits.payload, s0_enqBits(enqIdx))
       // for IssueQueueSta imm width is not 32
-      enq.bits.payload.imm.foreach(_                            := s0_enqBits(enqIdx).imm.get)
-      connectSamePort(enq.bits.payload.og1Payload, enq.bits.payload)
+      enq.bits.payload.og1Payload.imm.foreach(_                 := s0_enqBits(enqIdx).imm.get)
+      connectSamePort(enq.bits.payload.og1Payload, s0_enqBits(enqIdx))
       // dirty code, for uopidx and lastUop's assign
       enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
       enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)

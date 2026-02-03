@@ -323,7 +323,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByIntWb = common.vlWakeupByIntWb
       val vlWakeUpByVfWb = common.vlWakeupByVfWb
-      val vpu = entryReg.payload.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      val vpu = entryReg.payload.og1Payload.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
       val isDependOldVd = vpu.isDependOldVd
       val isWritePartVd = vpu.isWritePartVd
       val vta = vpu.vta
@@ -511,7 +511,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
     // vecMem
     if (params.isVecMemIQ) {
-      commonOut.uopIdx.get                            := entryReg.payload.uopIdx.get
+      commonOut.uopIdx.get                            := entryReg.payload.og1Payload.uopIdx.get
     }
   }
 
@@ -523,7 +523,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
     val isFirstLoad = entryReg.status.vecMem.get.lqIdx === fromLsq.lqDeqPtr
 
-    val isVleff                                        = entryReg.payload.vpu.get.isVleff
+    val isVleff                                        = entryReg.payload.og1Payload.vpu.get.isVleff
     // update blocked
     entryUpdate.status.blocked                        := !isFirstLoad && isVleff
   }

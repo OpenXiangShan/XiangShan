@@ -473,44 +473,23 @@ object Bundles {
     def numSrc = params.numSrc
     val og1Payload = new Og1Payload(params)
     // from frontend
-    val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
-    val predTaken  = Option.when(params.needTaken)(Bool())
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     // from decode
     val srcType  = Vec(numSrc, SrcType())
     val fuType   = FuType()
-    val fuOpType = FuOpType()
     val rfWen    = Option.when(params.needIntWen)(Bool())
     val fpWen    = Option.when(params.needFpWen )(Bool())
     val vecWen   = Option.when(params.needVecWen)(Bool())
     val v0Wen    = Option.when(params.needV0Wen )(Bool())
     val vlWen    = Option.when(params.needVlWen )(Bool())
-    val selImm   = Option.when(params.needImm)(SelImm())
-    val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
-    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
-    val wfflags  = Option.when(params.writeFflags)(Bool())
-    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
-    val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
     val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
-    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
-    val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
-    // for mdp
-    val storeSetHit       = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
-    val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
-    val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
-    val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
-    val ssid              = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
     // from dispatch
     val srcState          = Vec(numSrc, SrcState())
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val lqIdx             = Option.when(params.isLdAddrIQ || params.isVecMemIQ)(new LqPtr)
-    val sqIdx             = Option.when(params.isStAddrIQ || params.isStdIQ || params.isVecMemIQ || params.isLdAddrIQ)(new SqPtr) // load unit need sqIdx
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
