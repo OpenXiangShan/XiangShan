@@ -120,6 +120,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   // 0. unalign tail inject from s1
   unalignTail <> io.unalignTail
+  unalignTail.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 1. high-priority replay from LRQ, including NC / MMIO replay
   val replay = Wire(new LoadStageIO)
@@ -131,6 +132,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   replayHiPrio.valid := io.replay.valid && replayIsHiPrio
   replayHiPrio.bits := replay
   replayHiPrio.bits.entrance := LoadEntrance.replayHiPrio.U
+  replayHiPrio.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 2. fast replay from s3
   fastReplay.valid := io.fastReplay.valid
@@ -138,6 +140,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   fastReplay.bits.noQuery.get := true.B
   fastReplay.bits.entrance := io.fastReplay.bits.entrance | LoadEntrance.fastReplay.U
   fastReplay.bits.DontCareUnalign() // assign later in sink
+  fastReplay.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 3. low-priority replay from LRQ
   val replayStall = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
@@ -146,6 +149,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   replayLoPrio.valid := io.replay.valid && replayIsLoPrio
   replayLoPrio.bits := replay
   replayLoPrio.bits.entrance := LoadEntrance.replayLoPrio.U
+  replayLoPrio.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 4. high-confidence prefetch
   val prefetch = Wire(new LoadStageIO)
@@ -166,6 +170,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.DontCareVectorFields()
   prefetch.hasROBEntry := false.B
   prefetch.missDbUpdated := false.B
+  prefetch.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
   prefetchHiConf.valid := io.prefetchReq.valid && prefetchIsHiConf
   prefetchHiConf.bits := prefetch
   prefetchHiConf.bits.entrance := LoadEntrance.prefetchHiConf.U
@@ -181,6 +186,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   vectorIssue.bits.noQuery.get := false.B
   vectorIssue.bits.DontCareUnalign() // assign later in sink
   vectorIssue.bits.DontCareReplayFromLRQFields()
+  vectorIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 6. loads issued from IQ
   val ldin = io.ldin.bits
@@ -216,11 +222,13 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.DontCareVectorFields()
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
+  scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 7. low-confidence prefetch
   prefetchLoConf.valid := io.prefetchReq.valid
   prefetchLoConf.bits := prefetch
   prefetchLoConf.bits.entrance := LoadEntrance.prefetchLoConf.U
+  prefetchLoConf.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // sources arbitration
   arbiter(sources, sink, Some("RequestSources"))
@@ -1603,6 +1611,19 @@ class LoadUnitS3(param: ExeUnitParams)(
   XSPerfAccumulate("nc_writeback", io.ldout.fire && (in.isNCReplay() || in.nc.get))
   XSPerfAccumulate("nc_exception", io.ldout.fire && (in.isNCReplay() || in.nc.get) && exception)
   XSPerfAccumulate("nc_rar_violation", pipeIn.valid && in.isNCReplay() && rarViolation)
+
+  // source occupy others but fail perf counter
+    // unalignTail
+  val executeFail = lqWriteValid && lqWriteCause.asUInt.orR || pipeIn.valid && shouldFastReplay
+  for (i <- 0 until LoadEntrance.num) {
+    val highPrioNume = LoadEntrance.findNameById(i)
+    for (j <- i + 1 until LoadEntrance.num) {
+      val lowPrioNume = LoadEntrance.findNameById(j)
+      println(s"[${param.name}] Add S0 Occupy PerfEvents of ${highPrioNume} oocupy ${lowPrioNume}, index: ${i} and ${j}")
+      val enable = pipeIn.bits.occupySource(j.U) && pipeIn.bits.entrance(i.U)
+      XSPerfAccumulate(s"${highPrioNume}_occupy_${lowPrioNume}", executeFail && enable)
+    }
+  }
 
   /**
    * PerfCCT
