@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.DefaultConfig
+import top.TLConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
 import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
 import xiangshan.frontend.PrunedAddrInit
 
 
 class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
-  implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new DefaultConfig).alterPartial {
+  implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new TLConfig).alterPartial {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
     case LogUtilsOptionsKey => LogUtilsOptions(

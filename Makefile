@@ -47,7 +47,7 @@ JAR = $(BUILD_DIR)/xsgen.jar
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
-CONFIG ?= DefaultConfig
+CONFIG ?= TLConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
 CHISEL_TARGET ?= systemverilog
