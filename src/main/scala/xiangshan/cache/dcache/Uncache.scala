@@ -369,9 +369,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   // enter e0. New LSQ requests are stopped at the skid input.
   val e0_reject = (do_uarch_drain && !skidOccupied) ||
     (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
+  req_ready := !e0_reject
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_req_valid){
+  when(e0_canMerge && e0_fire){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
@@ -380,8 +381,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       states(e0_allocIdx).setWaitSame(true.B)
     }
   }
-
-  req_ready := !e0_reject
 
   /* e1: return accept */
   io.lsq.idResp.valid := RegNext(e0_fire)
