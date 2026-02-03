@@ -221,6 +221,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.memidx.idx         := s0_mem_idx
   io.tlb.req.bits.debug.robIdx       := s0_rob_idx
   io.tlb.req.bits.no_translate       := false.B
+  io.tlb.req.bits.frm_mabuf          := s0_use_flow_ma
   io.tlb.req.bits.debug.pc           := s0_pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill                    := false.B

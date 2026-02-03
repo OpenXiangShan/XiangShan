@@ -134,7 +134,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (mode(i) < ModeM)
   )
   val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
-  val canGetGpa =  (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd))
+  val canGetGpa =  (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
