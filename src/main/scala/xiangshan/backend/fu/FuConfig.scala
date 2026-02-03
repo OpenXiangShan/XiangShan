@@ -159,7 +159,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256c, vsha256ms).contains(fuType)
   }
 
   def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
@@ -733,6 +733,46 @@ object FuConfig {
     needSrcFrm = true,
     readVl = true,
   )
+
+  val VSha256msCfg = FuConfig(
+    name = "vsha256ms",
+    fuType = FuType.vsha256ms,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSha256msWrapper(cfg)(p).suggestName("VSha256ms")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), V0Data()), // vs1, vs2, vs3
+    ),
+    piped = false,
+    writeVecRf = true,
+    writeV0Rf = true,
+    writeFflags = false,
+    latency = CertainLatency(4),
+    vlWakeUp = true,
+    maskWakeUp = true,
+    destDataBits = 128,
+    needSrcFrm = true,
+    readVl = true,
+  )
+
+  val VSha256cCfg = FuConfig(
+    name = "vsha256c",
+    fuType = FuType.vsha256c,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSha256cWrapper(cfg)(p).suggestName("VSha256c")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), V0Data()), // vs1, vs2, vs3
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeV0Rf = true,
+    writeFflags = false,
+    latency = CertainLatency(2),
+    vlWakeUp = true,
+    maskWakeUp = true,
+    destDataBits = 128,
+    needSrcFrm = true,
+    readVl = true,
+  )
+
+
 
   val FaluCfg = FuConfig(
     name = "falu",

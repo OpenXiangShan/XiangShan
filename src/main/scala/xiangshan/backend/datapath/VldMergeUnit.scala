@@ -8,7 +8,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.vector.{ByteMaskTailGen, Mgu, VldMgu, VecInfo}
 import xiangshan.mem.GenUSMaskRegVL
-import yunsuan.vector.SewOH
+import yunsuan.vector.Common.SewOH
 
 class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new VldMergeUnitIO(params))

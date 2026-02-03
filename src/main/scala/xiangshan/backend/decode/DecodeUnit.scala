@@ -28,13 +28,14 @@ import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop}
+import xiangshan.backend.decode.VecDecoder._
 import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl, VSew}
+import xiangshan.backend.fu.vector.Bundles.{VSew, VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.Zimop._
-import yunsuan.{FcmpOpCode, MULOpType, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
+import yunsuan.{FcmpOpCode, MULOpType, VfaluType, VfcvtType, VfmaOpCode, VfmaType}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -1096,13 +1097,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
   val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
   val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isVk = Seq(VSHA2CH_VV, VSHA2CL_VV, VSHA2MS_VV).map(_ === inst.ALL).reduce(_ || _)
   val positiveEmulIsFrac = decodedInst.vpu.vlmul +& decodedInst.vpu.veew < decodedInst.vpu.vsew
   val negativeEmulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 3.U +& decodedInst.vpu.vsew
   val emulIsFrac = Mux(decodedInst.vpu.vlmul(2), negativeEmulIsFrac, positiveEmulIsFrac)
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
   decodedInst.vpu.isOpMask := isOpMask
-  decodedInst.vpu.isDependOldVd := isVppu || (isVfNarrow || isFmaNeedVd) || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof
+  decodedInst.vpu.isDependOldVd := isVppu || (isVfNarrow || isFmaNeedVd) || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || isVk
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U

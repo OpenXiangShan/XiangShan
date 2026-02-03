@@ -10,8 +10,9 @@ import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
-import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VmoveType, VfmaType, VfdivType, VfcvtType, VidivType, FcmpOpCode}
+import yunsuan.{FcmpOpCode, VMoveOpcode, VfaluType, VfcvtType, VfdivType, VfmaType, VfpuType, VialuFixType, VidivType, VimacType, VipuType, VmoveType, VpermType}
 import xiangshan.backend.decode.Zvbb._
+import yunsuan.encoding.Opcode.Opcodes.{VSha256cOpcode, VSha256msOpcode}
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -839,6 +840,16 @@ object VecDecoder extends DecodeConstants {
     VS8R_V        -> VST(SrcType.X,   VstuType.vsr, whole = T),
   )
 
+  def VSHA2CH_VV         :BitPat = BitPat("b1011101??????????010?????1110111")
+  def VSHA2CL_VV         :BitPat = BitPat("b1011111??????????010?????1110111")
+  def VSHA2MS_VV         :BitPat = BitPat("b1011011??????????010?????1110111")
+
+  val zvk = Array(
+    VSHA2MS_VV -> OPIVV(FuType.vsha256ms, VSha256msOpcode.vsha256ms.encode, T, F, F),
+    VSHA2CL_VV -> OPIVV(FuType.vsha256c , VSha256cOpcode.vsha256cl.encode, T, F, F),
+    VSHA2CH_VV -> OPIVV(FuType.vsha256c , VSha256cOpcode.vsha256ch.encode, T, F, F),
+  )
+
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++
-    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff ++ vls
+    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff ++ vls ++ zvk
 }

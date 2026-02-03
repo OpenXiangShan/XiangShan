@@ -71,6 +71,8 @@ object FuType extends OHEnumeration {
   val vstu = addType(name = "vstu")
   val vsegldu = addType(name = "vsegldu")
   val vsegstu = addType(name = "vsegstu")
+  val vsha256ms = addType(name = "vsha256ms")
+  val vsha256c = addType(name = "vsha256c")
 
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
@@ -125,7 +127,7 @@ object FuType extends OHEnumeration {
   }
   val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
+  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv, vsha256ms, vsha256c)
   val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
   val vecArith = vecOPI ++ vecOPF

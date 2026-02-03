@@ -10,7 +10,7 @@ import xiangshan.backend.fu.vector.{DstMgu, Mgtu, Mgu, NewMgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
-import yunsuan.vector.SewOH
+import yunsuan.vector.Common.SewOH
 import yunsuan.vector.VectorALU.VIAluFixPoint
 
 import math.pow

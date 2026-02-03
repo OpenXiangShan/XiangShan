@@ -29,6 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import yunsuan.vector._
+import yunsuan.vector.Common._
 
 class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val numBytes = vlen / 8
