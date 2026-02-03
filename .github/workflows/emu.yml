@@ -485,11 +485,15 @@ jobs:
           mill-version: 0.12.3
       - name: swapfile
         run: |
-          sudo fallocate -l 10G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-      - name: clean up
+          if [ -f /mnt/swapfile ]; then
+            sudo swapoff /mnt/swapfile || true
+            sudo rm -f /mnt/swapfile
+          fi
+          sudo fallocate -l 10G /mnt/xs-swapfile
+          sudo chmod 600 /mnt/xs-swapfile
+          sudo mkswap /mnt/xs-swapfile
+          sudo swapon /mnt/xs-swapfile
+      - name: Clean up
         run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: generate standalone devices for AXI4
         run: |
