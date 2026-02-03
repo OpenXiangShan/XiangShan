@@ -556,6 +556,7 @@ case class DebugOptions
   EnablePerfDebug: Boolean = true,
   PerfLevel: String = "VERBOSE",
   EnableXMR: Boolean = true,
+  SimMemSize: Long = 8190L * 1024 * 1024 * 1024, // same as PMA, (0x80000000L, 0x80000000000L)
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,

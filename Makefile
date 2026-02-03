@@ -163,6 +163,11 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# SimAXIMem size in GB (for sim-verilog only)
+ifneq ($(SIM_MEM_SIZE),)
+override SIM_ARGS += --sim-mem-size $(SIM_MEM_SIZE)
+endif
+
 # run emu with chisel-db
 ifeq ($(WITH_CHISELDB),1)
 override SIM_ARGS += --with-chiseldb

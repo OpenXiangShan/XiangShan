@@ -51,7 +51,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
 
   val l_simAXIMem = AXI4MemorySlave(
     l_soc.misc.memAXI4SlaveNode,
-    8190L * 1024 * 1024 * 1024,
+    debugOpts.SimMemSize,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
