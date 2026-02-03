@@ -30,6 +30,7 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
 }
 class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
   val taken:            Bool              = Bool()
+  val s3Override:       Bool              = Bool()
   val condHitMask:      Vec[Bool]         = Vec(NumBtbResultEntries, Bool())
   val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
   val position:         Vec[UInt]         = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))

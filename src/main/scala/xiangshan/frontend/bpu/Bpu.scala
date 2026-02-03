@@ -475,6 +475,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.update.startPc          := s3_startPc
   commonHR.io.update.target           := s3_prediction.target
   commonHR.io.update.taken            := s3_taken
+  commonHR.io.update.s3Override       := s3_override
   commonHR.io.update.firstTakenBranch := s3_firstTakenBranch
   commonHR.io.update.position         := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   commonHR.io.update.condHitMask      := s3_condHitMask
@@ -484,6 +485,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.redirect.taken          := redirect.bits.taken
   commonHR.io.redirect.attribute      := redirect.bits.attribute
   commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
+  commonHR.io.fromSc                  := sc.io.toCommonHR
   private val s0_commonHR = commonHR.io.s0_commonHR
   dontTouch(s0_commonHR)
 

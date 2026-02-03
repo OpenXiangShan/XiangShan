@@ -47,6 +47,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val scTakenMask:         Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val scUsed:              Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
+    val toCommonHR:          Bool                  = Output(Bool())
     val meta:                ScMeta                = Output(new ScMeta())
   }
   val io: ScIO = IO(new ScIO)
@@ -144,6 +145,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       }
     }
   }
+  io.toCommonHR := (ghrStateReg === idle) || (ghrStateReg === state3 && s0_fire)
 
   /*
    *  predict pipeline stage 0
