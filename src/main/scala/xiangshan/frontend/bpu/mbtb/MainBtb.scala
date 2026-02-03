@@ -105,7 +105,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
-  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
+  private val dummyResults = Wire(Vec(8, Valid(new Prediction)))
+  dummyResults := 0.U.asTypeOf(Vec(8, Valid(new Prediction)))
+  io.result    := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ dummyResults)
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
