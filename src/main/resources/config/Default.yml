@@ -17,6 +17,8 @@ PMAConfigs:
 
 EnableCHIAsyncBridge: true
 
+CHIAsyncFromDSU: false
+
 L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true, enableFlush: false }
 
 L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
@@ -76,8 +78,6 @@ CHIIssue: E.b
 WFIClockGate: false
 
 EnablePowerDown: false
-
-CHIAsyncFromDSU: false
 
 XSTopPrefix: ""
 
