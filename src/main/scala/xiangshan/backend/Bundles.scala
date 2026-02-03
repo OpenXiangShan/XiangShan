@@ -986,7 +986,7 @@ object Bundles {
     val wfflags  = Option.when(exuParams.writeFflags)(Bool())
     val numLsElem = Option.when(iqParams.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(exuParams.needRasAction)(BranchAttribute.RasAction())
-    val storeSetHit    = Option.when(iqParams.isLdAddrIQ)(Bool())
+    val storeSetHit    = Option.when(exuParams.hasLoadExu || exuParams.hasStoreAddrExu)(Bool())
     val waitForRobIdx  = Option.when(iqParams.isLdAddrIQ)(new RobPtr)
     val loadWaitBit    = Option.when(iqParams.isLdAddrIQ)(Bool())
     val loadWaitStrict = Option.when(iqParams.isLdAddrIQ)(Bool())
