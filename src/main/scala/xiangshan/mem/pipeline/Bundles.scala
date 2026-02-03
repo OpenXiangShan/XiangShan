@@ -130,6 +130,7 @@ class LoadPipeBundle(
   // TODO: use Option
   val hasROBEntry = Bool()
   val missDbUpdated = Bool()
+  val occupySource = LoadEntrance()
 
   def offset(): UInt = vaddr.take(DCacheLineOffset)
   def bankOffset(): UInt = vaddr.take(DCacheVWordOffset)

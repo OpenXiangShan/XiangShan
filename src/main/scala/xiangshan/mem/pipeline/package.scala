@@ -88,6 +88,10 @@ object LoadEntrance extends ChiselOHEnum {
   def isHWPrefetch(source: UInt): Bool = IsOneOf(source, prefetchHiConf, prefetchLoConf)
   def isVectorIssue(source: UInt): Bool = IsOneOf(source, vectorIssue)
   def isScalarIssue(source: UInt): Bool = IsOneOf(source, scalarIssue)
+
+  def findNameById(id: Int): String = {
+    values.find(_.id == id).map(_.getName).getOrElse("UNKNOW")
+  }
 }
 
 class LoadAccessType extends Bundle {
