@@ -61,7 +61,7 @@ object ArgParser {
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
   def parse(args: Array[String]): (Parameters, Array[String], Array[String]) = {
-    val default = new DefaultConfig(1)
+    val default = new TLConfig(1)
     var firrtlOpts = Array[String]()
     var firtoolOpts = Array[String]()
     @tailrec
