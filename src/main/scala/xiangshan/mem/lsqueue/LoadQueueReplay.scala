@@ -578,6 +578,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       s2_vecReplay.mask,
       genVWmask(replay_req_vaddr, replay_req_size)
     )
+    replay_req(i).bits.occupySource := DontCare
     replay_req(i).bits.mshrId.get := s2_replayMSHRId
     replay_req(i).bits.replayQueueIdx.get := s2_oldestSel(i).bits
     replay_req(i).bits.cause.get := s2_replayCauses.asTypeOf(replay_req(i).bits.cause.get)
@@ -842,6 +843,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val replayDCacheReplayCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DR)))
   val replayForwardFailCount  = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_FF)))
   val replayDCacheMissCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DM)))
+  val replayMultiMatchCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MF)))
   XSPerfAccumulate("enq", enqNumber)
   XSPerfAccumulate("deq", deqNumber)
   XSPerfAccumulate("deq_block", deqBlockCount)
@@ -857,6 +859,29 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
+  XSPerfAccumulate("replay_storeQueue_multi_match", replayMultiMatchCount)
+
+  // replay counter
+  val perfReplayCounter = RegInit(VecInit(Seq.fill(LoadQueueReplaySize)(0.U(4.W))))
+  for((enq, i) <- io.enq.zipWithIndex){
+    //  Allocated ready
+    val offset = PopCount(newEnqueue.take(i))
+    val enqIndex = freeList.io.allocateSlot(offset)
+
+    when(newEnqueue(i) && enq.ready) { // first enqueue
+      perfReplayCounter(enqIndex) := 1.U
+    }
+
+    val schedIndex = enq.bits.schedIndex
+    when (enq.valid && enq.bits.isLoadReplay && needReplay(i)) { // re-relpay
+       perfReplayCounter(schedIndex) := perfReplayCounter(schedIndex) + 1.U
+    }
+
+    val enable = enq.valid && enq.bits.isLoadReplay && !needReplay(i) && allocated(schedIndex)
+    val replayCounter = LookupTree(schedIndex, perfReplayCounter.zipWithIndex.map{case (d, v) => (v.U, d)})
+    XSPerfHistogram(s"load_replay_count_${i}", replayCounter, enable, 1, 16, 1)
+  }
+
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqNumber),

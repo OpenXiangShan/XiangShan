@@ -176,6 +176,7 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     out.vecTriggerMask.get := DontCare
     out.hasROBEntry := true.B
     out.missDbUpdated := false.B
+    out.occupySource := DontCare
     out
   }
 }
