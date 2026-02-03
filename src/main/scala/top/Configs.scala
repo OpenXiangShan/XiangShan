@@ -494,7 +494,7 @@ class FrontendDebugConfig(n: Int = 1) extends Config(
 )
 
 class BackendV2Config(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+  new KunminghuV2Config(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map { p =>
       p.copy(
         EnableBackendV2Config = true,
