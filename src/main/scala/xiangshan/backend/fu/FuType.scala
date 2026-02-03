@@ -223,6 +223,10 @@ object FuType extends OHEnumeration {
 
   def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
 
+  def isStoreVstore(fuType: UInt): Bool = isStore(fuType) || isVStore(fuType)
+
+  def isLoadVload(fuType: UInt): Bool = isLoad(fuType) || isVLoad(fuType)
+
   object FuTypeOrR {
     def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
       apply(fuType, fu0 +: fus)

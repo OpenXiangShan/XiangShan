@@ -65,13 +65,6 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
   val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent)
   val retiredInstr = UInt(7.W)
-  val frontendInfo = new Bundle {
-    val ibufFull  = Bool()
-    val bpuInfo = new Bundle {
-      val bpRight = UInt(XLEN.W)
-      val bpWrong = UInt(XLEN.W)
-    }
-  }
   val ctrlInfo = new Bundle {
     val robFull   = Bool()
     val intdqFull = Bool()

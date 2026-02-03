@@ -122,6 +122,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHeadFuType = Output(FuType())
+    val debugBlockBackward = Option.when(backendParams.debugEn)(Output(Bool()))
+    val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
@@ -433,6 +435,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   when(io.commits.hasWalkInstr || io.commits.hasCommitInstr) {
     hasWaitForward := false.B
   }
+
+  io.debugWaitForward.foreach(_ := hasWaitForward)
+  io.debugBlockBackward.foreach(_ := hasBlockBackward)
 
   // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
   // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.

@@ -972,6 +972,7 @@ package object xiangshan {
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
     val FetchFragBubble = Value("FetchFragBubble")
+    val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")
 
     // backend
     // long inst stall at rob head
@@ -979,6 +980,7 @@ package object xiangshan {
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
     val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    val RobStall = Value("RobStall")
     // freelist full
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
@@ -986,6 +988,23 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
+    // fusion bubble
+    val FusionBubble = Value("FusionBubble")
+    // dispatch stall
+    // dispatch stall for dispatch policy
+    // TODO: explain only load store exist
+    val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall")
+    val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall")
+    val OtherDispatchPolicyStall = Value("OtherDispatchPolicyStall")
+    // dispatch stall for issuequeue full
+    val IntIQFullStallAlu = Value("IntIQFullStallAlu")
+    val IntIQFullStallBrh = Value("IntIQFullStallBrh")
+    val IntIQFullStallOther = Value("IntIQFullStallOther")
+    val FpIQFullStall = Value("FpIQFullStall")
+    val VecIQFullStall = Value("VecIQFullStall")
+    val LoadIQFullStall = Value("LoadIQFullStall")
+    val StoreIQFullStall = Value("StoreIQFullStall")
+    val OtherIQFullStall = Value("OtherIQFullStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
@@ -1001,13 +1020,17 @@ package object xiangshan {
     val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
 
     // bad speculation
+    val ControlRedirectStall = Value("ControlRedirectStall")
+    val MemVioRedirectStall = Value("MemVioRedirectStall")
+    val OtherRedirectStall = Value("OtherRedirectStall")
     val ControlRecoveryStall = Value("ControlRecoveryStall")
     val MemVioRecoveryStall = Value("MemVioRecoveryStall")
     val OtherRecoveryStall = Value("OtherRecoveryStall")
 
     val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
+    val SpecialInsts = Value("SpecialInsts")
 
-    val OtherCoreStall = Value("OtherCoreStall")
+    val BackendOtherCoreStall = Value("BackendOtherCoreStall")
 
     val NumStallReasons = Value("NumStallReasons")
   }

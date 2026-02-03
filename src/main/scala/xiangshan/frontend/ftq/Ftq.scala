@@ -34,10 +34,9 @@ import utility.XSPerfPriorityAccumulate
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.BlameBpuSource
-import xiangshan.frontend.BpuPerfInfo
 import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FrontendTopDownBundle
@@ -71,10 +70,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
 
-    val bpuInfo: BpuPerfInfo = Output(new BpuPerfInfo)
-
-    // for perf
-    val bpuTopDownInfo: BpuTopDownInfo = Output(new BpuTopDownInfo)
+    // Topdown analysis
+    val backendRedirectTopdown: BackendRedirectTopdown = Output(new BackendRedirectTopdown)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -274,19 +271,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
 
-  // toIFU topdown counters
-  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle()))
-  // only driven by clock, not valid-ready
-  topdown_stage                 := io.fromBpu.topdownReasons
-  io.toIfu.req.bits.topdownInfo := topdown_stage
-  when(backendRedirect.valid) {
-    // TODO: reasoning back to each BP component
-    when(backendRedirect.bits.debugIsMemVio) {
-      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id)                 := true.B
-      io.toIfu.req.bits.topdownInfo.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    }
-  }
-
   // --------------------------------------------------------------------------------
   // Interaction with backend
   // --------------------------------------------------------------------------------
@@ -387,16 +371,31 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
-  io.bpuInfo := DontCare
-  // io.toIfu.req.bits.topdownInfo is assigned above
-  io.toIfu.topdownRedirect := backendRedirect
 
-  io.bpuTopDownInfo.btbMissBubble    := false.B // TODO: add more info to distinguish
-  io.bpuTopDownInfo.tageMissBubble   := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isConditional)
-  io.bpuTopDownInfo.scMissBubble     := false.B // TODO: add SC info
-  io.bpuTopDownInfo.ittageMissBubble := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.needIttage)
-  io.bpuTopDownInfo.rasMissBubble    := RegNext(backendRedirect.valid && backendRedirect.bits.attribute.isReturn)
+  // Topdown analysis
+  io.backendRedirectTopdown.backendRedirect         := backendRedirect.valid
+  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
+  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
 
+  io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
+  io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional
+  io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
+  io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
+  io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
+
+  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  // only driven by clock, not valid-ready
+  topdownStage := io.fromBpu.topdownReasons
+  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
+  io.toIfu.req.bits.topdownInfo := topdownStage
+
+  when(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U) {
+    topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
+  }.elsewhen(distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U && bpTrainStallCnt < BpTrainStallLimit.U) {
+    topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
+  }
+
+  // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 
