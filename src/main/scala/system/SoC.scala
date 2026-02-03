@@ -120,14 +120,14 @@ case class SoCParameters
     HasTEEIMSIC = false
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = true)),
+  CHIAsyncFromDSU: Boolean = false, // CHI Async bridge is from DSU
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = true)),
   SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = true)),
   // when UsePrivateClint is true, private clint is used, Timer will be instanced and mtip is generated inside XSTileWrap
   // when UsePrivateClint is false, mtip is from soc.
   UsePrivateClint: Boolean = false,
   WFIClockGate: Boolean = false,
-  EnablePowerDown: Boolean = false,
-  CHIAsyncFromDSU: Boolean = false // CHI Async bridge is from DSU
+  EnablePowerDown: Boolean = false
 ){
   require(
     !IMSICParams.HasTEEIMSIC || (IMSICParams.HasTEEIMSIC && IMSICBusType == device.IMSICBusType.AXI),
@@ -194,6 +194,9 @@ trait HasSoCParameter {
 
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
+  val CHIAsyncFromDSU = soc.CHIAsyncFromDSU
+  require((CHIAsyncFromDSU == false) || (CHIAsyncFromDSU && EnableCHIAsyncBridge.isDefined),
+    " CHIAsyncFromDSU = true must set with EnableCHIAsyncBridge")
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
   val SeperateBusAsyncBridge = soc.SeperateBusAsyncBridge
 
@@ -202,7 +205,6 @@ trait HasSoCParameter {
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
-  val CHIAsyncFromDSU = soc.CHIAsyncFromDSU
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),

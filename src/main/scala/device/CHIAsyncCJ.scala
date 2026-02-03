@@ -34,13 +34,13 @@ case class CDBParams(
                       CDB_DEV2ICN_RSP_BYPASS_EN: Int = 1,
                       CDB_DEV2ICN_SNP_BYPASS_EN: Int = 1,
                       CDB_DEV2ICN_DAT_BYPASS_EN: Int = 1,
-                      CDB_ICN2DEV_REQ_EN: Int = 1,
+                      CDB_ICN2DEV_REQ_EN: Int = 0, // modify from 1
                       CDB_ICN2DEV_RSP_EN: Int = 1,
                       CDB_ICN2DEV_SNP_EN: Int = 1,
                       CDB_ICN2DEV_DAT_EN: Int = 1,
                       CDB_DEV2ICN_REQ_EN: Int = 1,
                       CDB_DEV2ICN_RSP_EN: Int = 1,
-                      CDB_DEV2ICN_SNP_EN: Int = 1,
+                      CDB_DEV2ICN_SNP_EN: Int = 0, // modify from 1
                       CDB_DEV2ICN_DAT_EN: Int = 1,
                       CDB_REQFLIT_WIDTH: Int = 162, // 示例值，需替换为你的 MESH_REQ_FLIT_WIDTH 实际值
                       CDB_RSPFLIT_WIDTH: Int = 73, // 示例值，需替换为你的 MESH_RSP_FLIT_WIDTH 实际值
@@ -312,7 +312,6 @@ class cdb_icn(params: CDBParams) extends BlackBox(Map(
   addResource("/dsu_cdb/sync_dff.sv")
   addResource("/dsu_cdb/rstn_dff.sv")
   addResource("/dsu_cdb/clock_gate.sv")
-  addResource("/dsu_cdb/reset_sync.sv")
   addResource("/dsu_cdb/cdb_ingress_channel.sv")
   addResource("/dsu_cdb/cdb_egress_channel.sv")
   addResource("/dsu_cdb/cdb_icn.sv")
@@ -456,7 +455,6 @@ class cdb_dev(params: CDBParams) extends BlackBox(Map(
   addResource("/dsu_cdb/sync_dff.sv")
   addResource("/dsu_cdb/rstn_dff.sv")
   addResource("/dsu_cdb/clock_gate.sv")
-  addResource("/dsu_cdb/reset_sync.sv")
   addResource("/dsu_cdb/cdb_ingress_channel.sv")
   addResource("/dsu_cdb/cdb_egress_channel.sv")
   addResource("/dsu_cdb/cdb_dev.sv")

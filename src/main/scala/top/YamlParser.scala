@@ -37,6 +37,7 @@ case class YamlConfig(
   PmemRanges: Option[List[MemoryRange]],
   PMAConfigs: Option[List[PMAConfigEntry]],
   EnableCHIAsyncBridge: Option[Boolean],
+  CHIAsyncFromDSU: Option[Boolean],
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
   HartIDBits: Option[Int],
@@ -58,7 +59,6 @@ case class YamlConfig(
   CHIIssue: Option[String],
   WFIClockGate: Option[Boolean],
   EnablePowerDown: Option[Boolean],
-  CHIAsyncFromDSU: Option[Boolean],
   XSTopPrefix: Option[String],
   EnableDFX: Option[Boolean],
   EnableSramCtl: Option[Boolean],
@@ -100,6 +100,11 @@ object YamlParser {
         case SoCParamsKey => up(SoCParamsKey).copy(
           EnableCHIAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 16, sync = 3, safe = true))
         )
+      })
+    }
+    yamlConfig.CHIAsyncFromDSU.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(CHIAsyncFromDSU = enable)
       })
     }
     yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))
@@ -202,11 +207,6 @@ object YamlParser {
     yamlConfig.EnablePowerDown.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(EnablePowerDown = enable)
-      })
-    }
-    yamlConfig.CHIAsyncFromDSU.foreach { enable =>
-      newConfig = newConfig.alter((site, here, up) => {
-        case SoCParamsKey => up(SoCParamsKey).copy(CHIAsyncFromDSU = enable)
       })
     }
     yamlConfig.XSTopPrefix.foreach { prefix =>
