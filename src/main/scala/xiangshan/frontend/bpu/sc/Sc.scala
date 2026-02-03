@@ -412,8 +412,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_oldBWEntries   = VecInit(t1_meta.scBWResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
   private val t1_oldBiasEntries = VecInit(t1_meta.scBiasResp.map(v => v.asTypeOf(new ScEntry())))
   private val t1_oldBiasLowBits = t1_meta.scBiasLowerBits
-  private val t1_mbtbPosition   = VecInit(t1_train.meta.mbtb.entries.flatten.map(e => e.position))
-
+  private val dummyMbtbPosition = Wire(Vec(8, UInt(log2Ceil(FetchBlockInstNum).W)))
+  dummyMbtbPosition := 0.U.asTypeOf(Vec(8, UInt(log2Ceil(FetchBlockInstNum).W)))
+  private val dummyMbtbHit = Wire(Vec(8, Bool()))
+  dummyMbtbHit := 0.U.asTypeOf(Vec(8, Bool()))
+  private val t1_mbtbPosition = VecInit(t1_train.meta.mbtb.entries.flatten.map(e => e.position) ++ dummyMbtbPosition)
+  private val t1_mbtbHit      = VecInit(t1_train.meta.mbtb.entries.flatten.map(e => e.rawHit) ++ dummyMbtbHit)
   private val t1_branchesWayIdxVec = VecInit(t1_branches.map(b => getWayIdx(b.bits.cfiPosition)))
   private val t1_branchesScIdxVec  = WireInit(VecInit.fill(ResolveEntryBranchNumber)(0.U(log2Ceil(NumWays).W)))
   private val t1_branchesScIdxHitVec =

@@ -29,6 +29,7 @@ import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
+import xiangshan.frontend.bpu.mbtb.MainBtbMetaEntry
 
 /**
  * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
@@ -186,10 +187,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
-  private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
-
+  private val t0_fire       = io.stageCtrl.t0_fire && t0_hasCond && io.enable
+  private val dummyMbtbMeta = Wire(Vec(8, new MainBtbMetaEntry))
+  dummyMbtbMeta := 0.U.asTypeOf(Vec(8, new MainBtbMetaEntry))
   private val (t0_mbtbHitMask, t0_basePred, t0_meta) = t0_branches.map { branch =>
-    val mbtbMeta  = io.train.meta.mbtb.entries.flatten
+    val mbtbMeta  = io.train.meta.mbtb.entries.flatten ++ dummyMbtbMeta
     val tageMeta  = io.train.meta.tage.entries
     val hitMask   = mbtbMeta.map(_.hit(branch.bits))
     val hitMaskOH = PriorityEncoderOH(hitMask)
