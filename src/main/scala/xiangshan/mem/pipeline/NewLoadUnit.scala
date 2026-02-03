@@ -606,9 +606,9 @@ class LoadUnitS1(param: ExeUnitParams)(
   val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
   val af = tlbHit && tlbResp.bits.excp.head.af.ld
   val gpf = tlbHit && tlbResp.bits.excp.head.gpf.ld
-  val exception = pf || af || gpf
+  val tlbException = pf || af || gpf
 
-  val killDCache = kill || tlbMiss || exception
+  val killDCache = kill || tlbMiss || tlbException
 
   assert(!(pipeIn.valid && !tlbResp.valid && !noQuery))
 
@@ -680,6 +680,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   .elsewhen (pipeIn.fire) { pipeOutValid := true.B }
   .elsewhen (pipeOut.fire) { pipeOutValid := false.B }
 
+  // exception
+  val exception = tlbException || bp
   val stageInfo = Wire(pipeOut.bits.cloneType)
   connectSamePort(stageInfo, in)
   stageInfo.uop.trigger := triggerAction
@@ -710,7 +712,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
-  stageInfo.shouldFastReplay.get := unalignTailNack && !tlbMiss
+  stageInfo.shouldFastReplay.get := unalignTailNack && !tlbMiss && !exception
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -1104,7 +1106,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.tlbFull.get := io.tlbHint.full
   // Pre-process for s3
   stageInfo.troubleMaker.get := troubleMaker
-  stageInfo.shouldFastReplay.get := in.shouldFastReplay.get || fastReplay
+  stageInfo.shouldFastReplay.get := in.shouldFastReplay.get || fastReplay && !exception
   stageInfo.matchInvalid.get := matchInvalid && troubleMaker
   stageInfo.shouldWakeup.get := shouldWakeup
   stageInfo.shouldWriteback.get := shouldWriteback
