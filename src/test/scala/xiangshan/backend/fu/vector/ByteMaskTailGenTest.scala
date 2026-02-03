@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.DefaultConfig
+import top.TLConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
@@ -12,7 +12,7 @@ class ByteMaskTailGenTest extends AnyFlatSpec with Matchers with ChiselSim {
 
   println("Generating the ByteMaskTailGen hardware")
 
-  val defaultConfig = (new DefaultConfig).alterPartial({
+  val defaultConfig = (new TLConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
   })
 

@@ -4,13 +4,13 @@ import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.DefaultConfig
+import top.TLConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.{VSETOpType, XSCoreParameters, XSCoreParamsKey, XSTileKey}
 
 class VsetModuleMain extends AnyFlatSpec with Matchers with ChiselSim {
 
-  val defaultConfig = (new DefaultConfig).alterPartial({
+  val defaultConfig = (new TLConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
   })
 
