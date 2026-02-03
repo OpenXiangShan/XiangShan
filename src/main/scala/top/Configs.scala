@@ -499,7 +499,7 @@ class TLFrontendDebugConfig(n: Int = 1) extends Config(
 class FrontendDebugConfig(n: Int = 1) extends TLFrontendDebugConfig(n) with DeprecatedConfigWarning
 
 class TLBackendV2Config(n: Int = 1) extends Config(
-  new TLConfig(n).alter((site, here, up) => {
+  new CHIConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map { p =>
       p.copy(
         EnableBackendV2Config = true,
