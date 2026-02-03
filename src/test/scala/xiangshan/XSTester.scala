@@ -8,12 +8,12 @@ import svsim.CommonCompilationSettings.VerilogPreprocessorDefine
 import svsim.verilator.Backend.CompilationSettings.{TraceKind, TraceStyle}
 import org.scalatest.flatspec._
 import org.scalatest.matchers.should._
-import top.{ArgParser, DefaultConfig}
+import top.TLConfig
 import xiangshan.backend.regfile.IntPregParams
 
 abstract class XSTester extends AnyFlatSpec with ChiselSim with Matchers {
   behavior of "XiangShan Module"
-  val defaultConfig = (new DefaultConfig)
+  val defaultConfig = (new TLConfig)
   implicit val config: org.chipsalliance.cde.config.Parameters = defaultConfig.alterPartial({
     // Get XSCoreParams and pass it to the "small module"
     case XSCoreParamsKey => defaultConfig(XSTileKey).head.copy(
