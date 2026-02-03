@@ -580,10 +580,10 @@ jobs:
             sudo swapoff /mnt/swapfile || true
             sudo rm -f /mnt/swapfile
           fi
-          sudo fallocate -l 32G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
+          sudo fallocate -l 32G /mnt/xs-swapfile
+          sudo chmod 600 /mnt/xs-swapfile
+          sudo mkswap /mnt/xs-swapfile
+          sudo swapon /mnt/xs-swapfile
       - name: Clean up
         run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Generate standalone devices for AXI4
