@@ -225,6 +225,7 @@ class CtrlBlockImp(
   val loadReplay = Wire(ValidIO(new Redirect))
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
+  loadReplay.bits.isFromLoad := true.B
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
@@ -326,6 +327,7 @@ class CtrlBlockImp(
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.bits.isFromLoad := false.B
   redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
   redirectGen.io.loadReplay <> loadReplay
@@ -346,6 +348,7 @@ class CtrlBlockImp(
   redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead + loadRedirectPcOffset
 
   redirectGen.io.robFlush := s1_robFlushRedirect
+  redirectGen.io.robFlush.bits.isFromLoad := false.B
 
   val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
   val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)

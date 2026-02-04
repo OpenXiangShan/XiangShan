@@ -223,6 +223,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val robIdx = new RobPtr
   val interrupt: Bool = Bool()
   val isMisPred: Bool = Bool()
+  val isFromLoad: Bool = Bool()
 
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
