@@ -97,6 +97,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := inRFReadReqSeq(srcIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -113,6 +114,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := inRFReadReqSeq(srcIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -130,6 +132,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := inRFReadReqSeq(srcIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -147,6 +150,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := inRFReadReqSeq(srcIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -164,6 +168,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := inRFReadReqSeq(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := inRFReadReqSeq(srcIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := inRFReadReqSeq(srcIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B

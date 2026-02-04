@@ -299,6 +299,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.enq.zipWithIndex.foreach { case (enq, enqIdx) =>
       enq.valid                                                 := s0_doEnqSelValidVec(enqIdx)
       enq.bits.status.robIdx                                    := s0_enqBits(enqIdx).robIdx
+      enq.bits.status.chanelIdx                                 := s0_enqBits(enqIdx).chanelIdx
       enq.bits.status.fuType                                    := IQFuType.readFuType(VecInit(s0_enqBits(enqIdx).fuType.asBools), params.getFuCfgs.map(_.fuType))
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
       for(j <- 0 until numLsrc) {
@@ -903,6 +904,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       rf.foreach(_.addr := psrc)
       rf.foreach(_.srcType := srcType)
       rf.foreach(_.robIdx := deqEntryVec(i).bits.status.robIdx)
+      rf.foreach(_.chanelIdx := deqEntryVec(i).bits.status.chanelIdx)
       rf.foreach(_.issueValid := deqEntryVec(i).valid)
     }
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>

@@ -78,6 +78,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   //entries status
   val entries             = Wire(Vec(params.numEntries, ValidIO(new EntryBundle)))
   val robIdxVec           = Wire(Vec(params.numEntries, new RobPtr))
+  val chanelIdxVec        = Wire(Vec(params.numEntries, UInt(log2Up(RenameWidth).W)))
   val validVec            = Wire(Vec(params.numEntries, Bool()))
   val issuedVec           = Wire(Vec(params.numEntries, Bool()))
   val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
@@ -425,6 +426,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.compEntryEnqSelVec.foreach(_   := finalCompTransSelVec.get.zip(compEnqVec.get).map(x => x._1 & Fill(CompEntryNum, x._2.valid)))
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
   io.robIdx.foreach(_               := robIdxVec)
+  io.chanelIdx                      := chanelIdxVec
+
 
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
@@ -452,6 +455,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
+    chanelIdxVec(entryIdx)      := out.chanelIdx
     dataSourceVec(entryIdx)     := out.dataSources
     isFirstIssueVec(entryIdx)   := out.isFirstIssue
     entries(entryIdx)           := out.entry
@@ -605,6 +609,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val resp              = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   })
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
+  val chanelIdx = Vec(params.numEntries, UInt(log2Up(RenameWidth).W))
 
   // trans
   val simpEntryDeqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Input(UInt(params.numSimp.W))))
