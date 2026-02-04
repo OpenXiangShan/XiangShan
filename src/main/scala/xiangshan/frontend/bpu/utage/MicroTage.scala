@@ -43,6 +43,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val prediction:             MicroTagePrediction   = Output(new MicroTagePrediction)
     val meta:                   Valid[MicroTageMeta]  = Output(Valid(new MicroTageMeta))
     val abtbPrediction: Vec[Valid[AheadBtbResult]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
+    val overrideValid:  Bool                       = Input(Bool())
+    val redirectValid:  Bool                       = Input(Bool())
   }
   val io: MicroTageIO = IO(new MicroTageIO)
   io.resetDone  := true.B
@@ -50,10 +52,13 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   private val a0_fire           = io.enable && io.stageCtrl.s0_fire
   private val a1_fire           = a0_fire
+  private val a2_fire           = io.stageCtrl.s1_fire
   private val a0_startPc        = io.startPc
   private val a0_foldedPathHist = io.foldedPathHist
   private val a1_startPc        = io.startPc
   private val a1_foldedPathHist = io.foldedPathHist
+
+  private val overrideValid = io.overrideValid
 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map {
@@ -97,8 +102,24 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     }
   }
 
-  private val a2_readIndex      = RegEnable(a1_readIndex, a1_fire)
-  private val a2_predRead       = RegEnable(a1_predRead, 0.U.asTypeOf(a1_predRead), a1_fire)
+  private val a3_readIndex     = RegInit(0.U.asTypeOf(a1_readIndex))
+  private val a3_predRead      = RegInit(0.U.asTypeOf(a1_predRead))
+  private val overridePredRead = Wire(Vec(NumTables, Vec(NumWays, new MicroTageTablePred)))
+  for (i <- 0 until NumTables) {
+    val predTag = computeHashTag(a1_startPc, a1_foldedPathHist, TableInfos, i)
+    for (j <- 0 until NumWays) {
+      overridePredRead(i)(j).taken       := a3_predRead(i)(j).taken
+      overridePredRead(i)(j).valid       := a3_predRead(i)(j).valid
+      overridePredRead(i)(j).tag         := a3_predRead(i)(j).tag
+      overridePredRead(i)(j).tagHit      := a3_predRead(i)(j).tag === predTag
+      overridePredRead(i)(j).cfiPosition := a3_predRead(i)(j).cfiPosition
+      overridePredRead(i)(j).posHit      := false.B
+    }
+  }
+
+  private val a2_readIndex = RegEnable(Mux(overrideValid, a3_readIndex, a1_readIndex), a1_fire)
+  private val a2_predRead =
+    RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
   private val a2_abtbHitVec     = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a2_abtbTakenVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a2_abtbUseTableId = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumTables).W)))
@@ -154,6 +175,10 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Done here for timing/layout reasons.
   io.prediction.hitVec := a2_abtbHitVec
   io.meta              := s1_predMeta
+
+  when(a2_fire) {
+    a3_predRead := a2_predRead
+  }
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_fire                = io.stageCtrl.t0_fire && io.enable
