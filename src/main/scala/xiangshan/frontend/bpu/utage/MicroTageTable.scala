@@ -62,34 +62,62 @@ class MicroTageTable(
     val train:       MicroTageTrain      = new MicroTageTrain
     val usefulReset: Bool                = Input(Bool())
   }
-  val io              = IO(new MicroTageTableIO)
-  private val entries = RegInit(VecInit(Seq.fill(numSets)(VecInit(Seq.fill(numWay)(0.U.asTypeOf(new MicroTageEntry))))))
-  private val usefulEntries = RegInit(VecInit(Seq.fill(numSets)(
-    VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
-  )))
+  val io       = IO(new MicroTageTableIO)
+  val numBanks = 4
+  require(numSets % numBanks == 0, s"numSets must be divisible by $numBanks")
+  val setsPerBank   = numSets / numBanks
+  val bankAddrWidth = log2Ceil(setsPerBank)
 
-  // predict
-  private val predReadEntries = entries(io.req.bits.readIndex)
-  private val predReadUseful  = usefulEntries(io.req.bits.readIndex)
+  private val entries = RegInit(VecInit(
+    Seq.fill(numBanks)(
+      VecInit(Seq.fill(setsPerBank)(
+        VecInit(Seq.fill(numWay)(0.U.asTypeOf(new MicroTageEntry)))
+      ))
+    )
+  ))
 
-  io.resps.readEntries := RegNext(predReadEntries, 0.U.asTypeOf(Vec(numWay, new MicroTageEntry)))
-  io.resps.readUsefuls := RegNext(predReadUseful, 0.U.asTypeOf(Vec(numWay, new SaturateCounter(UsefulWidth))))
+  private val useful = RegInit(VecInit(
+    Seq.fill(numBanks)(
+      VecInit(Seq.fill(setsPerBank)(
+        VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
+      ))
+    )
+  ))
 
-  private val t0_trainIdx         = io.train.t0_trainIndex
-  private val t0_trainReadEntries = entries(t0_trainIdx)
-  private val t0_trainReadUseful  = usefulEntries(t0_trainIdx)
+  def getBankSel(addr:  UInt): UInt = addr(1, 0)
+  def getBankAddr(addr: UInt): UInt = addr(bankAddrWidth + 1, 2)
+
+  val predIndex       = io.req.bits.readIndex
+  val a1_predBankSel  = RegNext(getBankSel(predIndex))
+  val a1_predBankAddr = RegNext(getBankAddr(predIndex))
+
+  val a1_predReadEntries = entries(a1_predBankSel)(a1_predBankAddr)
+  val a1_predReadUseful  = useful(a1_predBankSel)(a1_predBankAddr)
+
+  // io.resps.readEntries := RegNext(predReadEntries, 0.U.asTypeOf(Vec(numWay, new MicroTageEntry)))
+  // io.resps.readUsefuls := RegNext(predReadUseful, 0.U.asTypeOf(Vec(numWay, new SaturateCounter(UsefulWidth))))
+  io.resps.readEntries := a1_predReadEntries
+  io.resps.readUsefuls := a1_predReadUseful
+
+  val t0_trainIdx = io.train.t0_trainIndex
+  val t0_bankSel  = getBankSel(t0_trainIdx)
+  val t0_bankAddr = getBankAddr(t0_trainIdx)
+
+  val t0_trainReadEntries = entries(t0_bankSel)(t0_bankAddr)
+  val t0_trainReadUseful  = useful(t0_bankSel)(t0_bankAddr)
 
   for (way <- 0 until numWay) {
-    val entry  = t0_trainReadEntries(way)
-    val useful = t0_trainReadUseful(way)
-    io.train.t0_read(way).valid       := entry.valid
-    io.train.t0_read(way).cfiPosition := entry.cfiPosition
-    io.train.t0_read(way).useful      := useful.value
+    io.train.t0_read(way).valid       := t0_trainReadEntries(way).valid
+    io.train.t0_read(way).cfiPosition := t0_trainReadEntries(way).cfiPosition
+    io.train.t0_read(way).useful      := t0_trainReadUseful(way).value
   }
 
-  private val t1_trainIdx         = RegNext(t0_trainIdx)
-  private val t1_trainReadEntries = entries(t1_trainIdx)
-  private val t1_trainReadUseful  = usefulEntries(t1_trainIdx)
+  val t1_trainIdx                 = RegNext(t0_trainIdx)
+  val t1_bankSel                  = RegNext(t0_bankSel)
+  val t1_bankAddr                 = RegNext(t0_bankAddr)
+  private val t1_trainReadEntries = entries(t1_bankSel)(t1_bankAddr)
+  private val t1_trainReadUseful  = useful(t1_bankSel)(t1_bankAddr)
+
   // For each way, prepare updated entry and useful counter
   for (way <- 0 until numWay) {
     val oldEntry    = t1_trainReadEntries(way)
@@ -133,13 +161,15 @@ class MicroTageTable(
 
   // Write back updated entry on valid update
   when(io.usefulReset) {
-    for (i <- 0 until numSets) {
-      for (w <- 0 until numWay) {
-        val entry = usefulEntries(i)(w)
-        if (tableId == 0) {
-          usefulEntries(i)(w).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
-        } else {
-          usefulEntries(i)(w).value := entry.value >> 1.U
+    for (bank <- 0 until numBanks) {
+      for (setIdx <- 0 until setsPerBank) {
+        for (way <- 0 until numWay) {
+          val entry = useful(bank)(setIdx)(way)
+          if (tableId == 0) {
+            useful(bank)(setIdx)(way).value := Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
+          } else {
+            useful(bank)(setIdx)(way).value := entry.value >> 1.U
+          }
         }
       }
     }
