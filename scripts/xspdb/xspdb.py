@@ -32,6 +32,59 @@ from xspdb.xscmd.util import load_module_from_file, load_package_from_dir, set_x
 from xspdb.xscmd.util import message, info, error, warn, build_prefix_tree, register_commands, YELLOW, RESET, xspdb_set_log, xspdb_set_log_file, log_message, xspdb_set_ui_handler, ui_prompt
 from xspdb.ui import enter_tui
 
+def timesec_to_str(t):
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = int(t % 60)
+    return f"{h:02}:{m:02}:{s:02}"
+
+def run_script(xspdb, script_path, it_time):
+    xspdb.api_exec_script(script_path, gap_time=it_time)
+    xspdb.api_append_init_cmd("xnop")
+    xspdb.set_trace()
+    return False
+
+def run_replay(xspdb, replay_path, it_time):
+    xspdb.api_exec_script(replay_path, gap_time=it_time,
+                          target_prefix=xspdb.log_cmd_prefix,
+                          target_subfix=xspdb.log_cmd_suffix,
+                          )
+    xspdb.api_append_init_cmd("xnop")
+    xspdb.set_trace()
+    return False
+
+def run_commits(xspdb, commits, max_run_time):
+    time_start = time.time()
+    if commits < 0:
+        commits = 0xFFFFFFFFFFFFFF
+    batch_size = 100
+    batch_count = commits // batch_size
+    batch_remain = commits % batch_size
+    reach_max_time = False
+    def run_delta(delta):
+        nonlocal reach_max_time
+        runc = 0
+        while delta > 0 and not xspdb.api_dut_is_step_exit():
+            c = xspdb.api_xistep(delta)
+            runc += c
+            delta = delta - c
+            xspdb.check_is_need_trace()
+            delta_time = time.time() - time_start
+            if delta_time > max_run_time and max_run_time > 0:
+                info(f"Max run time {timesec_to_str(max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit instruction execution")
+                reach_max_time = True
+                break
+        return runc
+    run_ins = 0
+    for _ in range(batch_count):
+        if not reach_max_time and not xspdb.api_dut_is_step_exit():
+           run_ins += run_delta(batch_size)
+        else:
+            break
+    if not reach_max_time:
+        run_ins += run_delta(batch_remain)
+    message(f"Execute {run_ins} commits completed ({commits - run_ins} ignored)")
+
 class XSPdb(pdb.Pdb):
     def __init__(self, dut, default_file=None,
                  mem_base=0x80000000,
@@ -124,19 +177,100 @@ class XSPdb(pdb.Pdb):
             self.api_dut_bin_load(args.image)
         if (args.mem_base_address):
             self.df.Set_PMEM_BASE(args.mem_base_address)
+        if (args.flash):
+            self.api_dut_flash_load(args.flash)
+        if (args.flash_base_address):
+            self.flash_base = args.flash_base_address
+        if (args.diff_first_inst_address != -1):
+            self.finstr_addr = args.diff_first_inst_address
+            self.api_update_pmem_base_and_first_inst_addr(self.mem_base, self.finstr_addr)
+        if (args.ram_size is not None):
+            self.mem_size = args.ram_size
+        if (args.trace_pc_symbol_block_change):
+            self.api_turn_on_pc_symbol_block_change(True)
+        if (args.cmds):
+            for c in args.cmds.replace("\\n", "\n").split("\n"):
+                self.api_append_init_cmd(c.strip())
+        if (args.cmds_post):
+            for c in args.cmds_post.replace("\\n", "\n").split("\n"):
+                self.api_batch_append_tail_one_cmd(c.strip())
 
     def __run_batch(self, args):
+        # Handle waveform control
+        if args.wave_begin != args.wave_end:
+            wave_file_path = args.wave_path if args.wave_path else ""
+            if args.wave_begin <= 0:
+                info(f"Waveform on at HW cycle = Zero")
+                self.api_waveform_on(wave_file_path)
+            else:
+                def cb_on_wave_begin(s, checker, k, clk, sig, target):
+                    info(f"Waveform on at HW cycle = {target}")
+                    self.api_waveform_on(wave_file_path)
+                    s.interrupt = False
+                info(f"Set waveform on callback at HW cycle = {args.wave_begin}")
+                self.api_xbreak("SimTop_top.SimTop.timer", "eq", args.wave_begin, callback=cb_on_wave_begin, callback_once=True)
+            def cb_on_wave_end(s, checker, k, clk, sig, target):
+                info(f"Waveform off at HW cycle = {target}")
+                self.api_waveform_off()
+                s.interrupt = False
+            if args.wave_end > 0:
+                info(f"Set waveform off callback at HW cycle = {args.wave_end}")
+                self.api_xbreak("SimTop_top.SimTop.timer", "eq", args.wave_end, callback=cb_on_wave_end, callback_once=True)
+
+        # Handle interact_at
         if args.interact_at > 0:
             def cb_on_interact(s, checker, k, clk, sig, target):
                 info(f"Interact at HW cycle = {target}")
                 setattr(self, "__xspdb_need_fast_trace__", True)
             info(f"Set interact callback at HW cycle = {args.interact_at}")
             self.api_xbreak("SimTop_top.SimTop.timer", "eq", args.interact_at, callback=cb_on_interact, callback_once=True)
+
+        # Handle script execution
         if args.script:
-            if run_script(xspdb, args.script, args.batch_interval):
+            if run_script(self, args.script, args.batch_interval):
                 return
-        cycle_batch_size = 100
+
+        # Handle replay
+        if args.replay:
+            if run_replay(self, args.replay, args.batch_interval):
+                return
+
+        # Handle diff
+        if args.diff:
+            if not self.api_load_ref_so(args.diff):
+                error(f"Load difftest ref so {args.diff} failed")
+                return
+            self.api_set_difftest_diff(True)
+
+        # Set trace if cmds or cmds-post are set but no script/replay
+        if args.cmds or args.cmds_post:
+            if not args.script and not args.replay:
+                self.set_trace()
+
+        # Handle pc-commits
+        if args.pc_commits != 0:
+            cycle_index = self.dut.xclock.clk
+            run_commits(self, args.pc_commits, args.max_run_time)
+            run_cycles = self.dut.xclock.clk - cycle_index
+            wave_at_last = (args.wave_begin != args.wave_end) and (args.wave_end <= 0)
+            if run_cycles >= args.wave_end or wave_at_last:
+                info("Waveform off at HW cycle = %d (simulated %d cycles)" % (self.dut.xclock.clk, run_cycles))
+                self.api_waveform_off()
+            return
+
+        # Set trace if interact_at is 0
+        if args.interact_at == 0:
+            self.set_trace()
+
+        # Warn if no image
+        if not args.image:
+            warn("No image to execute, Entering the interactive debug mode")
+            self.set_trace()
+
+        # Main cycle execution loop
+        cycle_batch_size = 10000
         cycle_batch_count = args.max_cycles // cycle_batch_size
+        cycle_batch_remain = args.max_cycles % cycle_batch_size
         cycle_reach_max_time = False
         time_start = time.time()
         def emu_step(delta):
@@ -154,7 +288,7 @@ class XSPdb(pdb.Pdb):
                 delta_time = time.time() - time_start
                 if delta_time > args.max_run_time and args.max_run_time > 0:
                     cycle_reach_max_time = True
-                    XSPdb.info(f"Max run time {timesec_to_str(args.max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit cycle execution")
+                    info(f"Max run time {timesec_to_str(args.max_run_time)} reached (runed {timesec_to_str(delta_time)}), exit cycle execution")
                     break
             return runc
         run_cycles = 0
@@ -163,8 +297,15 @@ class XSPdb(pdb.Pdb):
                 run_cycles += run_cycle_deta(cycle_batch_size)
             else:
                 break
+        if not cycle_reach_max_time:
+            run_cycles += run_cycle_deta(cycle_batch_remain)
         delta = args.max_cycles - run_cycles
-        info("Finished cycles: %d (%d ignored)" % (run_cycles, 0))
+        wave_at_last = (args.wave_begin != args.wave_end) and (args.wave_end <= 0)
+        # Check if the waveform is on
+        if wave_at_last or args.wave_end >= run_cycles:
+            info("Waveform off at HW cycle = %d" % (self.dut.xclock.clk))
+            self.api_waveform_off()
+        info("Finished cycles: %d (%d ignored)" % (run_cycles, delta))
 
     def run(self, args):
         self.__init_pdb(args)
@@ -263,6 +404,14 @@ class XSPdb(pdb.Pdb):
         import xspdb.xscmd
         cmd_count = self.api_load_custom_pdb_cmds(xspdb.xscmd)
         info(f"Loaded {cmd_count} functions from XSPdb.cmd")
+
+    def api_append_init_cmd(self, cmd):
+        """Append a command to the init_cmds list for execution before run"""
+        self.init_cmds.append(cmd)
+
+    def api_batch_append_tail_one_cmd(self, cmd):
+        """Append a command to the batch execution tail"""
+        self.init_cmds.append(cmd)
 
     def api_load_custom_pdb_cmds(self, path_or_module):
         """Load custom command
