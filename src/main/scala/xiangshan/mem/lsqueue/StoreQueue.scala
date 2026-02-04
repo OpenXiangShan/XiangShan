@@ -352,11 +352,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
   // deqPtrExtNext traces which inst is about to leave store queue
+  val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   val sqDeqCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
-  val readyDeqVec = WireInit(VecInit((0 until EnsbufferWidth).map(i =>
-    allocated(deqPtrExt(i).value) && completed(deqPtrExt(i).value)
-  )))
+  val readyDeqVec = WireInit(VecInit((0 until EnsbufferWidth).map{ case i =>
+    val deqPtr = deqPtrExt(i).value
+    allocated(deqPtr) && completed(deqPtr) 
+    // && (isVec(deqPtr) && isNotAfter(uop(deqPtr).robIdx, pendingPtr) || isBefore(uop(deqPtr).robIdx, pendingPtr))
+  }))
   for (i <- 0 until EnsbufferWidth) {
     val ptr = deqPtrExt(i).value
     when(readyDeqVec.take(i + 1).reduce(_ && _)) {
@@ -1133,7 +1136,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val isCommit = WireInit(false.B)
     when (
       allocated(ptr) &&
-      isNotAfter(uop(ptr).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
+      ((isVec(ptr) || mmio(ptr)) && isNotAfter(uop(ptr).robIdx, pendingPtr) || isBefore(uop(ptr).robIdx, pendingPtr)) &&
       !needCancel(ptr) &&
       (!waitStoreS2(ptr) || isVec(ptr))) {
       if (i == 0){
