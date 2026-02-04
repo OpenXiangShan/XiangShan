@@ -64,11 +64,17 @@ class MainBtbInternalBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
+    // probe write buffer for prediction
+    class Probe extends Bundle {
+      val buffers: Vec[MainBtbWriteProbe] = Output(Vec(NumWay, new MainBtbWriteProbe))
+    }
+
     val resetDone: Bool = Output(Bool())
 
     val read:  Read  = new Read
     val write: Write = new Write
     val flush: Flush = new Flush
+    val probe: Probe = new Probe
   }
 
   val io: MainBtbInternalBankIO = IO(new MainBtbInternalBankIO)
@@ -77,6 +83,7 @@ class MainBtbInternalBank(
   private val read  = io.read
   private val write = io.write
   private val flush = io.flush
+  private val probe = io.probe
 
   private val entrySrams = Seq.tabulate(NumWay) { wayIdx =>
     Module(
@@ -206,6 +213,8 @@ class MainBtbInternalBank(
       valid
     )
   }
+
+  probe.buffers := writeBuffer.io.probe
 
   /* *** perf *** */
   private val perf_entryDropWrite = (0 until NumWay).map { i =>
