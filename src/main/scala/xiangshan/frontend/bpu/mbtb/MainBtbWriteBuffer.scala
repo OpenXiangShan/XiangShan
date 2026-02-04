@@ -32,10 +32,21 @@ class MainBtbWriteBuffer(
   require(numPorts >= 1)
   require(numPorts <= numEntries)
   class MainBtbWriteBufferIO extends Bundle {
+    // used for prediction
+    class Probe extends Bundle {
+      class Req extends Bundle {
+        val setIdx: UInt = UInt(SetIdxLen.W)
+      }
+      class Resp extends Bundle {
+        val entries: Vec[ValidIO[MainBtbWriteReq]] = Vec(numPorts, Valid(new MainBtbWriteReq))
+      }
+      val req:  Req  = Input(new Req)
+      val resp: Resp = Output(new Resp)
+    }
+
+    val probe: Probe                             = new Probe
     val write: Vec[DecoupledIO[MainBtbWriteReq]] = Vec(numPorts, Flipped(Decoupled(new MainBtbWriteReq)))
     val read:  Vec[DecoupledIO[MainBtbWriteReq]] = Vec(numPorts, Decoupled(new MainBtbWriteReq))
-    // used for prediction
-    val probe: Vec[MainBtbWriteProbe] = Vec(numPorts, new MainBtbWriteProbe)
   }
   val io: MainBtbWriteBufferIO = IO(new MainBtbWriteBufferIO)
 
@@ -62,15 +73,20 @@ class MainBtbWriteBuffer(
   // Replace is to prioritize replacing the entry of the same port as setIdx
   private val victimSameSetIdx = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
 
-  io.probe.zipWithIndex.foreach { case (port, portIdx) =>
-    val readIdx   = PriorityEncoder(readValidVec(portIdx))
-    val readValid = readValidVec(portIdx).reduce(_ || _)
-    port.valid  := readValid
-    port.fire   := readValid && readReadyVec(portIdx)
-    port.setIdx := entries(portIdx)(readIdx).setIdx
-    port.entry  := entries(portIdx)(readIdx).entry
-    port.shared := entries(portIdx)(readIdx).shared
-    port.status := entries(portIdx)(readIdx).status
+  io.probe.resp.entries.zipWithIndex.foreach { case (port, portIdx) =>
+    val validVec     = valids(portIdx)
+    val needWriteVec = needWrite(portIdx)
+    val entryVec     = entries(portIdx)
+    val setIdxHitVec = (validVec zip needWriteVec zip entryVec).map { case ((valid, needWrite), entry) =>
+      valid && needWrite && entry.setIdx === io.probe.req.setIdx
+    }
+    val hit    = setIdxHitVec.reduce(_ || _)
+    val hitIdx = PriorityEncoder(setIdxHitVec)
+    port.valid       := hit
+    port.bits.entry  := entryVec(hitIdx).entry
+    port.bits.setIdx := entryVec(hitIdx).setIdx
+    port.bits.shared := entryVec(hitIdx).shared
+    port.bits.status := entryVec(hitIdx).status
   }
 
   def isEntryMatch(a: MainBtbWriteReq, b: MainBtbWriteReq): Bool = {
