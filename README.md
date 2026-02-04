@@ -122,9 +122,18 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ```
 
 ### Run with xspdb 
+
+There are two ways to use xspdb:
+
+1. Build from source code
 * Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
 * Run `make pdb` to build XiangShan Python binaries.
 * Run `make pdb-run` to run XiangShan binaries.
+
+2.Quick Start with Prebuilt Binaries
+* **Why choose this?** lt is lightweight and reguires no compilation. A standard Python environment is sufficient to run the fulXiangShan experience without high memory usage.
+* **Step 1: Download** Get the latest XSPdb from the repository's [Actions](https://github.com/OpenXiangShan/XiangShan/actions/workflows/release.yml?query=is%3Asuccess+event%3Apush) run summary
+* **Step 2: Extract & Run**
 
 Example output and interaction:
 
