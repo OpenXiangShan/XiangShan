@@ -23,14 +23,14 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
       // TageTableInfo(Size, NumWays, HistoryLength)
-      new TageTableInfo(4096, 2, 4),
-      new TageTableInfo(4096, 2, 9),
-      new TageTableInfo(4096, 2, 17),
-      new TageTableInfo(4096, 2, 29),
-      new TageTableInfo(4096, 2, 56),
-      new TageTableInfo(4096, 2, 109),
-      new TageTableInfo(4096, 2, 211),
-      new TageTableInfo(4096, 2, 397)
+      new TageTableInfo(1024, 2, 4),
+      new TageTableInfo(1024, 2, 9),
+      new TageTableInfo(1024, 2, 17),
+      new TageTableInfo(1024, 2, 29),
+      new TageTableInfo(1024, 2, 56),
+      new TageTableInfo(1024, 2, 109),
+      new TageTableInfo(1024, 2, 211),
+      new TageTableInfo(1024, 2, 397)
     ),
     NumBanks:            Int = 4, // to alleviate read-write conflicts in single-port SRAM
     TagWidth:            Int = 13,
