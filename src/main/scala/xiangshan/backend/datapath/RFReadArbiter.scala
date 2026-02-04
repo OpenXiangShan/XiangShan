@@ -30,6 +30,7 @@ case class RFRdArbParams(
 class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int)(implicit p: Parameters) extends Bundle {
   val addr       = UInt(pregWidth.W)
   val robIdx     = new RobPtr
+  val chanelIdx  = UInt(log2Up(8).W) // TODO: use RenameWidth instead of constant
   val issueValid = Bool()
 
   def this(rdCfg_ : RdConfig, pregWidth_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_)
@@ -53,6 +54,7 @@ class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Modu
     val validVec = io.in.map(_.valid)
     val validVecReg = RegNext(VecInit(io.in.map(x => x.valid)), VecInit.tabulate(n)(i => false.B))
     val robIdxVecReg = RegNext(VecInit(io.in.map(x => x.bits.robIdx)))
+    val chanelIdxVecReg = RegNext(VecInit(io.in.map(x => x.bits.chanelIdx)))
     val priorityVecReg = RegInit(VecInit((0 until n).map(i => (1 << i).U(n.W))))
     val mergePriority = validVec.zip(priorityVecReg).map(x => Mux(x._1, x._2, 0.U)).reduce(_ | _)
     val lzdMergePriority = LZD(Reverse(mergePriority))
@@ -61,8 +63,12 @@ class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Modu
       // count valid and older than other num
       val otherValidVec = validVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
       val otherRobIdxVec = robIdxVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
+      val otherChanelIdxVec = chanelIdxVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
       val indexLowerInvalidVec = validVecReg.zipWithIndex.filter(_._2 < i).map(!_._1)
-      val olderThanOtherNum = PopCount(otherRobIdxVec.map(x => robIdxVecReg(i) < x).zip(otherValidVec).map(x => x._1 || !x._2))
+//      val olderThanOtherNum = PopCount(otherRobIdxVec.map(x => robIdxVecReg(i).isBefore(x, 0.U, 0.U)).zip(otherValidVec).map(x => x._1 || !x._2))
+      val olderThanOtherNum = PopCount(otherRobIdxVec.zip(otherChanelIdxVec).map {
+        case (thatRobidx, thatChanelIdx) => robIdxVecReg(i).isBefore(thatRobidx, chanelIdxVecReg(i), thatChanelIdx)
+      }.zip(otherValidVec).map(x => x._1 || !x._2))
       val otherValidNum = PopCount(otherValidVec)
       dontTouch(olderThanOtherNum)
       dontTouch(otherValidNum)
