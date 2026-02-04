@@ -79,7 +79,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
 
   val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
   val usAligned128        = Bool()
-  val usMask              = UInt((VLENB*2).W) // for unit-stride split
+  val usMask              = UInt((MLENB * VecMemUnitStrideMaxFlowNum).W) // for unit-stride split
 }
 
 object VSFQFeedbackType {
@@ -132,7 +132,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
 
   val usSecondInv          = Bool() // only for unit stride, second flow is Invalid
   val elemIdx              = UInt(elemIdxBits.W) // element index
-  val mask                 = UInt(VLENB.W)
+  val mask                 = UInt(MLENB.W)
   val alignedType          = UInt(alignTypeBits.W)
   // for load
   val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
@@ -143,7 +143,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
   val vaddr               = UInt(XLEN.W)
   val basevaddr           = UInt(VAddrBits.W)
-  val mask                = UInt(VLENB.W)
+  val mask                = UInt(MLENB.W)
   val isvec               = Bool()
   val uop_unit_stride_fof = Bool()
   val reg_offset          = UInt(vOffsetBits.W)

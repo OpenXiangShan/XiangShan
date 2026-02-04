@@ -885,7 +885,7 @@ class Sbuffer(implicit p: Parameters)
   io.diffStore := DontCare
   if (env.EnableDifftest) {
     var diffStoreEventCount: Int = 0
-    val VecMemFLOWMaxNumber = 16
+    val VecMemFLOWMaxNumber = MDataBytes
     val WlineMaxNumber = blockWords
 
     def UIntSlice(in: UInt, High: UInt, Low: UInt): UInt = {
@@ -922,7 +922,7 @@ class Sbuffer(implicit p: Parameters)
       val vpu             = uop.vpu
       val veew            = uop.vpu.veew
       val eew             = EewLog2(veew)
-      val EEB             = (1.U << eew).asUInt //Only when MLEN=128 effective element byte
+      val EEB             = (1.U << eew).asUInt
       val EEWBits         = (EEB << 3.U).asUInt
       val nf              = Mux(isVsr, 0.U, vpu.nf)
 
@@ -934,7 +934,7 @@ class Sbuffer(implicit p: Parameters)
       // No other vector instructions need to be considered.
       val flow            = Mux(
                               isVSLine,
-                              (16.U >> eew).asUInt,
+                              (MDataBytes.U >> eew).asUInt,
                               0.U
                             )
 

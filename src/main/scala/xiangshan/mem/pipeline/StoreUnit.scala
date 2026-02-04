@@ -198,7 +198,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     io.misalign_stin.bits.mask,
     Mux(
       s0_use_flow_rs,
-      Mux(s0_isCbo, Fill(MLEN/8, 1.U(1.W)), genVWmask128(s0_saddr, LSUOpType.size(s0_uop.fuOpType))),
+      Mux(s0_isCbo, Fill(MLEN/8, 1.U(1.W)), genVWmask128(s0_saddr, LSUOpType.size(s0_uop.fuOpType), maxMemByteNum)),
       Mux(
         s0_use_flow_vec,
         s0_vecstin.mask,

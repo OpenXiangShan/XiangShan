@@ -687,9 +687,9 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     elemIdx = elemIdxInVd,
     alignedType = alignedType
   )
-  val flowData  = genVWdata(splitData, alignedType) // TODO: connect vstd, pass vector data
-  val wmask     = genVWmask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
-  val bmask     = genBasemask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
+  val flowData  = genVWdata(splitData, alignedType, maxMemByteNum) // TODO: connect vstd, pass vector data
+  val wmask     = genVWmask(latchVaddr, alignedType(1, 0)) & Fill(MLENB, segmentActive)
+  val bmask     = genBasemask(latchVaddr, alignedType(1, 0)) & Fill(MLENB, segmentActive)
   val dcacheReqVaddr = Mux(isMisalignReg, misalignVaddr, latchVaddr)
   val dcacheReqVaddrDup = Mux(isMisalignReg, misalignVaddrDup, latchVaddrDup)
   val dcacheReqPaddr = Mux(isMisalignReg, Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, PageOffsetWidth), misalignVaddr(PageOffsetWidth - 1, 0)), instMicroOp.paddr)
@@ -732,8 +732,8 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val notCross16BytePaddr          = Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, 4), 0.U(4.W))
   val notCross16ByteData           = flowData << (sbufferAddrLow4bit << 3)
 
-  val Cross16ByteMask = Wire(UInt(32.W))
-  val Cross16ByteData = Wire(UInt(256.W))
+  val Cross16ByteMask = Wire(UInt((MLENB * 2).W))
+  val Cross16ByteData = Wire(UInt((MLEN * 2).W))
   Cross16ByteMask := bmask << sbufferAddrLow4bit
   Cross16ByteData := flowData << (sbufferAddrLow4bit << 3)
 
@@ -747,8 +747,8 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val maskLow   = Cross16ByteMask(15, 0)
   val maskHigh  = Cross16ByteMask(31, 16)
 
-  val dataLow   = Cross16ByteData(127, 0)
-  val dataHigh  = Cross16ByteData(255, 128)
+  val dataLow   = Cross16ByteData(MLEN - 1, 0)
+  val dataHigh  = Cross16ByteData((MLEN * 2) - 1, MLEN)
 
   val sbuffermisalignMask          = Mux(notCross16ByteReg, wmask, Mux(isFirstSplit, maskLow, maskHigh))
   val sbuffermisalignData          = Mux(notCross16ByteReg, notCross16ByteData, Mux(isFirstSplit, dataLow, dataHigh))
@@ -1002,4 +1002,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
-

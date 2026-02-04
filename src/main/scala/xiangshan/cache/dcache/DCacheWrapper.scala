@@ -670,7 +670,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     (0 until l1BusDataWidth / 64).map(i => {
       block_data(i) := data(64 * i + 63, 64 * i)
     })
-    val selected_data = Wire(UInt(128.W))
+    val selected_data = Wire(UInt(MLEN.W))
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_D := all_match
@@ -712,7 +712,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     val block_idx = req_paddr(log2Up(refillBytes), 3)
     val block_data = raw_data
 
-    val selected_data = Wire(UInt(128.W))
+    val selected_data = Wire(UInt(MLEN.W))
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
     forward_mshr := all_match
