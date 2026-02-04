@@ -1033,8 +1033,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
 
   val pendingEntry = robEntries(deqPtr.value)
-  io.lsq.pendingPtr := RegNext(deqPtr)
-  io.lsq.pendingPtr.isFormer := RegNext(pendingEntry.uopNum =/= 1.U)
+
+  val pendingBackPtr = Wire(new RobPtr)
+  pendingBackPtr := deqPtr
+  pendingBackPtr.isFormer := false.B
+
+  val pendingPtrIsFormer = Reg(Bool())
+  when (io.commits.isCommit && io.commits.commitValid.asUInt.orR) {
+    pendingPtrIsFormer := true.B
+  }.elsewhen(!pendingBackPtr.needFlush(io.redirect) && pendingEntry.valid && CompressType.isNotNORMAL(pendingEntry.compressType) && pendingEntry.uopNum === 1.U) {
+    pendingPtrIsFormer := false.B
+  }
+
+  val pendingPtrReg = Reg(new RobPtr)
+  pendingPtrReg := deqPtr
+  pendingPtrReg.isFormer := pendingPtrIsFormer
+
+  io.lsq.pendingPtr := pendingPtrReg
+
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head) // TODO: useless, delete it
   io.lsq.scommit := RegNext(
     Mux(io.commits.isCommit && newStCommit ||
