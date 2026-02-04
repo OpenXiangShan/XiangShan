@@ -42,7 +42,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.rename.{SnapshotGenerator, CompressType}
+import xiangshan.backend.rename.{SnapshotGenerator, CompressType, NoCompressSource}
 import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
@@ -205,10 +205,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val redirectFlushItSelf = io.redirect.bits.flushItself()
       when(CompressType.isCC(compressType) && (redirectIsFormer ^ redirectFlushItSelf)){
         robEntries(i).compressType := CompressType.NORMAL
+        robEntries(i).noCompressSource := NoCompressSource.flushedHalf
       }.elsewhen(CompressType.isCS(compressType) && redirectIsFormer && !redirectFlushItSelf){
         robEntries(i).compressType := CompressType.NORMAL
+        robEntries(i).noCompressSource := NoCompressSource.flushedHalf
       }.elsewhen(CompressType.isSC(compressType) && !redirectIsFormer && redirectFlushItSelf){
         robEntries(i).compressType := CompressType.NORMAL
+        robEntries(i).noCompressSource := NoCompressSource.flushedHalf
       }
     }
   }
@@ -1594,6 +1597,47 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
   )
   XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
+
+  val compressTypeIsNORMAL = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isNORMAL(x._2.compressType))
+  val compressTypeIsCC = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isCC(x._2.compressType))
+  val compressTypeIsCS = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isCS(x._2.compressType))
+  val compressTypeIsSC = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isSC(x._2.compressType))
+  XSPerfAccumulate("compressType_NORMAL", ifCommit(PopCount(compressTypeIsNORMAL)))
+  XSPerfAccumulate("compressType_CC", ifCommit(PopCount(compressTypeIsCC)))
+  XSPerfAccumulate("compressType_CS", ifCommit(PopCount(compressTypeIsCS)))
+  XSPerfAccumulate("compressType_SC", ifCommit(PopCount(compressTypeIsSC)))
+  XSPerfAccumulate("RobEntriesCommited", ifCommit(PopCount(io.commits.commitValid)))
+
+  // By CommitType
+//  val commitIsLoad   = io.commits.info.map(x => x.commitType === CommitType.LOAD)
+//  val commitIsStore  = io.commits.info.map(x => x.commitType === CommitType.STORE)
+//  val commitIsBranch = io.commits.info.map(x => x.commitType === CommitType.BRANCH)
+  val commitIsNormal = io.commits.info.map(x => x.commitType === CommitType.NORMAL)
+
+  XSPerfAccumulate("NoCompressIsLoad", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsLoad).map(x => x._1 && x._2))))
+  XSPerfAccumulate("NoCompressIsStore", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsStore).map(x => x._1 && x._2))))
+  XSPerfAccumulate("NoCompressIsBranch", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsBranch).map(x => x._1 && x._2))))
+  XSPerfAccumulate("NoCompressIsNORMAL", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsNormal).map(x => x._1 && x._2))))
+
+  // By FuType
+  for (fuType <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(fuType)
+    val commitIsFuType = compressTypeIsNORMAL.zip(deqPtrVec.map(_.value).map(debug_microOp(_).head)).map {
+      case (commit, uop) => commit && uop.fuType === fuType.U
+    }
+    XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
+    val NoCompress_Source = commitIsFuType.zip(io.commits.info).map {
+      case (valid, info) =>
+        val noEnoughInstr  = valid && info.noCompressSource === NoCompressSource.noEnoughInstr
+        val flushedHalf    = valid && info.noCompressSource === NoCompressSource.flushedHalf
+        val cannotCompress = valid && info.noCompressSource === NoCompressSource.cannotCompress
+        (noEnoughInstr, flushedHalf, cannotCompress)
+    }
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_noEnoughInstr", ifCommit(PopCount(NoCompress_Source.map(_._1))))
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_flushedHalf", ifCommit(PopCount(NoCompress_Source.map(_._2))))
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_cannotCompress", ifCommit(PopCount(NoCompress_Source.map(_._3))))
+  }
+
   val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
   val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
   val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)

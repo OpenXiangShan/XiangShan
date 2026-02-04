@@ -48,6 +48,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val valid = Bool()
 
     val compressType = CompressType()
+    val noCompressSource = UInt(2.W) // used for Perf
 
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
@@ -100,6 +101,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_v = Bool()
     val commit_w = Bool()
     val compressType = CompressType()
+    val noCompressSource = UInt(2.W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
@@ -143,6 +145,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
 //    robEntry.valid
 
     robEntry.compressType := robEnq.compressType // TODO
+    robEntry.noCompressSource := robEnq.noCompressSource
 
 //    robEntry.uopNum
 //    robEntry.realDestSize
@@ -190,6 +193,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.commit_v := robEntry.valid
     robCommitEntry.commit_w := robEntry.uopNum === 0.U
     robCommitEntry.compressType := robEntry.compressType
+    robCommitEntry.noCompressSource := robEntry.noCompressSource
     robCommitEntry.uopNum := robEntry.uopNum
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe

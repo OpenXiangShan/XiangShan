@@ -37,6 +37,7 @@ import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan.ExceptionNO.{illegalInstr, selectFrontend, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.rename
 
 object CompressType {
   def NORMAL = "b00".U // Complex/Simple/Simplesss
@@ -58,6 +59,15 @@ object CompressType {
   def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1)
 }
 
+object NoCompressSource {
+  def compressed        = "b00".U
+  def noEnoughInstr     = "b01".U
+  def flushedHalf       = "b10".U
+  def cannotCompress    = "b11".U
+
+  def apply() = UInt(2.W)
+}
+
 class NewCompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))
@@ -73,6 +83,7 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       val isRVC = Vec(RenameWidth, Output(Bool()))
       val complexHasDest = Vec(RenameWidth, Output(UInt(1.W)))
       val hasStore = Vec(RenameWidth, Output(Bool()))
+      val noCompressSource = Vec(RenameWidth, NoCompressSource())
     }
   })
 
@@ -101,6 +112,7 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       io.out.isRVC(i)               := io.in(i).bits.isRVC
       io.out.complexHasDest(i)      := io.in(i).bits.rfWen || io.in(i).bits.fpWen
       io.out.hasStore(i)            := FuType.isStore(io.in(i).bits.fuType)
+      io.out.noCompressSource(i)    := NoCompressSource.cannotCompress
     }
   }.otherwise{
     for (i <- 0 until RenameWidth/2) {
@@ -127,6 +139,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)            := FuType.isStore(io.in(2*i).bits.fuType) || FuType.isStore(io.in(2*i+1).bits.fuType)
         io.out.hasStore(2*i+1)          := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.compressed
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
       }.elsewhen(io.in(2*i).valid) {
         io.out.needRobFlags(2*i)   := true.B
         io.out.needRobFlags(2*i+1) := false.B
@@ -150,6 +164,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)          := FuType.isStore(io.in(2*i).bits.fuType)
         io.out.hasStore(2*i+1)        := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.noEnoughInstr
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
       }.otherwise {
         io.out.needRobFlags(2*i)   := false.B
         io.out.needRobFlags(2*i+1) := false.B
@@ -173,6 +189,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)            := false.B
         io.out.hasStore(2*i+1)          := false.B
+        io.out.noCompressSource(2*i)    := NoCompressSource.compressed
+        io.out.noCompressSource(2*i+1)  := NoCompressSource.compressed
       }
     }
   }
