@@ -84,6 +84,10 @@ class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
   val ftqPtr          = new FtqPtr
   val ftqOffset       = UInt(log2Up(FetchBlockInstOffsetWidth).W)
 
+  // mdp
+  val isFirstIssue    = Bool()
+  val isRVC           = Bool()
+
   // debug info
   val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   val debugInfo       = Option.when(debugEn)(new PerfDebugInfo)
