@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, kunminghu-v3 ]
+    branches: [ master, kunminghu-v3, '*-ideal' ]
   pull_request:
     branches: [ master, kunminghu-v3 ]
 
