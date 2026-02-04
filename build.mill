@@ -85,7 +85,9 @@ object utility extends ChiselModule {
   }
 }
 
-object yunsuan extends ChiselModule {}
+object yunsuan extends ChiselModule {
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"com.lihaoyi::sourcecode:0.4.4")
+}
 
 object huancun extends ChiselModule {
   def moduleDeps = Seq(`rocket-chip`, utility)
