@@ -40,6 +40,7 @@ class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int)(implic
   val addr    = Input(UInt(addrWidth.W))
   val srcType = Input(UInt(3.W))
   val robIdx  = new RobPtr
+  val chanelIdx = UInt(3.W)
   val issueValid = Bool()
 
   def readInt: Boolean = IntRegSrcDataSet.contains(rfReadDataCfg)

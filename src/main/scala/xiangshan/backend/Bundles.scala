@@ -227,6 +227,7 @@ object Bundles {
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W) // TODO: move it to dispatchOut
     val dirtyFs = Bool()
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
@@ -291,6 +292,7 @@ object Bundles {
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
     val robIdx = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val numLsElem = NumLsElem()
     val rasAction = BranchAttribute.RasAction()
     // for mdp
@@ -346,6 +348,7 @@ object Bundles {
     val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
     val robIdx    = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())

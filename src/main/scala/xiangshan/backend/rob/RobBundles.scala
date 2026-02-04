@@ -296,6 +296,10 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     out
   }
 
+  def isBefore(that: RobPtr, thisChanelIdx: UInt, thatChanelIdx: UInt): Bool = {
+    isBefore(this, that) || (this === that) && (thisChanelIdx < thatChanelIdx)
+  }
+
 }
 
 object RobPtr {
