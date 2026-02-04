@@ -34,6 +34,8 @@ class MainBtbWriteBuffer(
   class MainBtbWriteBufferIO extends Bundle {
     val write: Vec[DecoupledIO[MainBtbWriteReq]] = Vec(numPorts, Flipped(Decoupled(new MainBtbWriteReq)))
     val read:  Vec[DecoupledIO[MainBtbWriteReq]] = Vec(numPorts, Decoupled(new MainBtbWriteReq))
+    // used for prediction
+    val probe: Vec[MainBtbWriteProbe] = Vec(numPorts, new MainBtbWriteProbe)
   }
   val io: MainBtbWriteBufferIO = IO(new MainBtbWriteBufferIO)
 
@@ -59,6 +61,17 @@ class MainBtbWriteBuffer(
   private val writeFlowVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   // Replace is to prioritize replacing the entry of the same port as setIdx
   private val victimSameSetIdx = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
+
+  io.probe.zipWithIndex.foreach { case (port, portIdx) =>
+    val readIdx   = PriorityEncoder(readValidVec(portIdx))
+    val readValid = readValidVec(portIdx).reduce(_ || _)
+    port.valid  := readValid
+    port.fire   := readValid && readReadyVec(portIdx)
+    port.setIdx := entries(portIdx)(readIdx).setIdx
+    port.entry  := entries(portIdx)(readIdx).entry
+    port.shared := entries(portIdx)(readIdx).shared
+    port.status := entries(portIdx)(readIdx).status
+  }
 
   def isEntryMatch(a: MainBtbWriteReq, b: MainBtbWriteReq): Bool = {
     val rawHit    = a.setIdx === b.setIdx
