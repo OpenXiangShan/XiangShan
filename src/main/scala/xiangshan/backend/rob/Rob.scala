@@ -146,6 +146,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
+  val ldWBs = io.exuWriteback.filter(x => x.bits.params.hasLoadFu).toSeq
 
   PerfCCT.tick(clock, reset)
 
@@ -1249,6 +1250,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
+    val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer).reduce(_ || _)
+
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val needFlush = robEntries(i).needFlush
     val needFlushWriteBack = Wire(Bool())
@@ -1266,7 +1269,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     when(robEntries(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === i.U && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
-      robEntries(i).uopNum := 0.U
+      when(io.redirect.bits.isFromLoad && !hasFormerLdWb){
+        robEntries(i).uopNum := 1.U
+      }.otherwise{
+        robEntries(i).uopNum := 0.U
+      }
     }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robEntries(i).compressType)) || needFlushWriteBack)) {
       // exception flush
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
@@ -1327,6 +1334,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
+    val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer).reduce(_ || _)
+
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && (writeback.bits.robIdx.value === needUpdateRobIdx(i)))
     val needFlush = robBanksRdata(i).needFlush
     val needFlushWriteBack = Wire(Bool())
@@ -1340,7 +1349,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     // TODO: clear uopNum
     when(needUpdate(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === needUpdateRobIdx(i) && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
-      needUpdate(i).uopNum := 0.U
+      when(io.redirect.bits.isFromLoad && !hasFormerLdWb){
+        needUpdate(i).uopNum := 1.U
+      }.otherwise{
+        needUpdate(i).uopNum := 0.U
+      }
     }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robBanksRdata(i).compressType)) || needFlushWriteBack)) {
       // exception flush
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
