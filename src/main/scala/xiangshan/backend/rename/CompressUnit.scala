@@ -99,7 +99,7 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
     x.valid && (x.bits.waitForward || x.bits.blockBackward)
   }).asUInt.orR
 
-  when(cannotCompress) {
+  when(cannotCompress || needFlush.reduce(_ || _)) {
     for (i <- 0 until RenameWidth) {
       io.out.needRobFlags(i)        := io.in(i).valid
       io.out.instrSizes(i)          := 1.U
