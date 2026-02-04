@@ -189,7 +189,8 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     dontTouch(pwrdownGateClock)
     dontTouch(cpuClockEn)
 
-    ClockGate(false.B, cpuClockEn, clock)
+    val te = io.dft.map(_.cgen).getOrElse(false.B)
+    ClockGate(te, cpuClockEn, clock)
   }
 }
 
