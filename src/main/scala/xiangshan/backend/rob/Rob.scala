@@ -1269,7 +1269,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     when(robEntries(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === i.U && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
-      when(io.redirect.bits.isFromLoad && !hasFormerLdWb){
+      when(io.redirect.bits.isFromLoad && !(hasFormerLdWb || RegNext(hasFormerLdWb))){
         robEntries(i).uopNum := 1.U
       }.otherwise{
         robEntries(i).uopNum := 0.U
@@ -1349,7 +1349,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     // TODO: clear uopNum
     when(needUpdate(i).valid && io.redirect.valid && io.redirect.bits.robIdx.value === needUpdateRobIdx(i) && io.redirect.bits.robIdx.isFormer && !io.redirect.bits.flushItself()) {
-      when(io.redirect.bits.isFromLoad && !hasFormerLdWb){
+      when(io.redirect.bits.isFromLoad && !(hasFormerLdWb || RegNext(hasFormerLdWb))){
         needUpdate(i).uopNum := 1.U
       }.otherwise{
         needUpdate(i).uopNum := 0.U
