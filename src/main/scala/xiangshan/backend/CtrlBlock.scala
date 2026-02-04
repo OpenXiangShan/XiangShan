@@ -569,14 +569,14 @@ class CtrlBlockImp(
   val useSnpt = VecInit.tabulate(RenameSnapshotNum){ case idx =>
     val snptRobidx = snpt.io.snapshots(idx).robIdx.head
     // (redirectRobidx.value =/= snptRobidx.value) for only flag diffrence
-    snpt.io.valids(idx) && ((redirectRobidx > snptRobidx) && (redirectRobidx.value =/= snptRobidx.value) ||
+    snpt.io.valids(idx) && ((redirectRobidx > snptRobidx) && !(redirectRobidx.value === snptRobidx.value && redirectRobidx.flag =/= snptRobidx.flag) ||
       !s1_s3_redirect.bits.flushItself() && redirectRobidx === snptRobidx)
   }.reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map{case idx =>
       val thisSnapRobidx = snpt.io.snapshots(idx).robIdx.head
-      (snpt.io.valids(idx) && (redirectRobidx > thisSnapRobidx && (redirectRobidx.value =/= thisSnapRobidx.value) ||
+      (snpt.io.valids(idx) && (redirectRobidx > thisSnapRobidx && !(redirectRobidx.value === thisSnapRobidx.value && redirectRobidx.flag =/= thisSnapRobidx.flag) ||
         !s1_s3_redirect.bits.flushItself() && redirectRobidx === thisSnapRobidx), idx)
     }
   )
