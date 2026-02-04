@@ -508,8 +508,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // used for performance counters
   private val s3_condTakenMask      = RegEnable(s2_condTakenMask, s2_fire)
   private val s3_scFlipTage         = RegEnable(s2_scFlipTage, s2_fire)
+  private val s3_useScVec           = RegEnable(s2_scUsed, s2_fire)
+  private val s3_useSc              = s3_useScVec.reduce(_ || _)
   private val s3_firstTakenPosition = Mux1H(s3_firstTakenBranchOH, VecInit(s3_mbtbResult.map(_.bits.cfiPosition)))
   private val s3_firstTakenBlameSc  = Mux1H(s3_firstTakenBranchOH, s3_scFlipTage)
+  private val s3_firstTakenUseSc    = Mux1H(s3_firstTakenBranchOH, s3_useScVec)
   // if the branch before the first take has a flipped and !s3_taken && flipped, then blamed on sc
   // first tage taken flip to not taken
   private val s3_firstT2NT = VecInit((s3_mbtbResult zip s3_scFlipTage).map {
@@ -528,9 +531,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
   private val s3_predictionSource = PriorityEncoder(Seq(
-    s3_taken && s3_useRas,                                                                                    // RAS
-    s3_taken && s3_useIttage,                                                                                 // ITTage
-    s3_firstTakenBranch.bits.attribute.isConditional && ((s3_taken && s3_firstTakenBlameSc) || s3_firstT2NT), // MbtbSc
+    s3_taken && s3_useRas,    // RAS
+    s3_taken && s3_useIttage, // ITTage
+    s3_firstTakenBranch.bits.attribute.isConditional && ((s3_taken && s3_firstTakenUseSc) || !s3_taken && s3_useSc), // MbtbSc
     s3_taken && s3_firstTakenBranch.bits.attribute.isConditional, // MbtbTage
     s3_taken,                                                     // Mbtb
     (s3_mbtbResult zip s3_condTakenMask).map { case (info, taken) =>
