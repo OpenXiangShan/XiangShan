@@ -45,31 +45,29 @@ on:
         required: false
         type: choice
         options:
-          - spec06-0.3c
-          - spec06-0.8c
-          - spec06-1.0c
+          - gcc15-spec06-1.0c
+          - xscc-spec06-1.0c
+          - gcc12-spec06-0.3c
+          - gcc12-spec06-0.8c
+          - gcc12-spec06-1.0c
           - custom
-        default: spec06-1.0c
+        default: gcc15-spec06-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
         type: string
-        default: ''
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
         type: string
-        default: ''
       checkpoint_path:
-        description: Directory for SPEC06 checkpoints, only valid when benchmark_type is set to custom
+        description: Directory for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
-        default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
       json_path:
-        description: JSON file path for SPEC06 checkpoints, only valid when benchmark_type is set to custom
+        description: JSON file path for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
-        default: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json
 
 jobs:
   performance-test:
