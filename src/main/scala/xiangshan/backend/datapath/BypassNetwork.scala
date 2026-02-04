@@ -62,14 +62,15 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
           sink.bits.intWen := source.bits.toIntRf.map(_.valid).getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
           sink.bits.fpWen  := source.bits.toFpRf.map(_.valid).getOrElse(false.B)
           sink.bits.vecWen := source.bits.toVecRf.map(_.valid).getOrElse(false.B)
-          sink.bits.pdest := source.bits.pdest
+          sink.bits.pdest := {if (source.bits.params.isIntExeUnit) { source.bits.toIntRf.map(_.bits.pdest).getOrElse(0.U(IntPhyRegIdxWidth.W)) }
+                        else if (source.bits.params.isFpExeUnit)   { source.bits.toFpRf.map(_.bits.pdest).getOrElse(0.U(FpPhyRegIdxWidth.W))   }
+                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVecRf) { source.bits.toVecRf.map(_.bits.pdest).getOrElse(0.U(VfPhyRegIdxWidth.W)) }
+                        else { source.bits.toIntRf.map(_.bits.data).getOrElse(0.U(IntPhyRegIdxWidth.W)) }}
           // int i2f wakeup fstore from fpRegion, so there is not need bypass fp data in int region
-          sink.bits.data := {if (source.bits.params.isIntExeUnit) { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
-                        else if (source.bits.params.isFpExeUnit)  { source.bits.toFpRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
-                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVecRf) { source.bits.toVecRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
-                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeV0Rf)  { source.bits.toV0Rf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
-                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVlRf)  { source.bits.toVlRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
-                        else { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }} 
+          sink.bits.data := {if (source.bits.params.isIntExeUnit) { source.bits.toIntRf.map(_.bits.data).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
+                        else if (source.bits.params.isFpExeUnit)  { source.bits.toFpRf.map(_.bits.data).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
+                        else if (source.bits.params.isVfExeUnit && source.bits.params.writeVecRf) { source.bits.toVecRf.map(_.bits.data).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
+                        else { source.bits.toIntRf.map(_.bits.data).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }} 
         }
       }
     }

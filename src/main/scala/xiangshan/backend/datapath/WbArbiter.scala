@@ -202,9 +202,9 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
       val notWrite = Wire(Bool())
 
       println(s"[wbDataPath_${schdParams.schdType}] exuOut name = ${exuOut.bits.params.name}")
-      intWrite := exuOut.valid && writeCond._1(0)
-      fpWrite := exuOut.valid && writeCond._1(1)
-      vfWrite := exuOut.valid && writeCond._1(2)
+      intWrite := writeCond._1(0)
+      fpWrite := writeCond._1(1)
+      vfWrite := writeCond._1(2)
       v0Write := exuOut.valid && writeCond._1(3)
       vlWrite := exuOut.valid && writeCond._1(4)
       notWrite := writeCond._2
@@ -300,7 +300,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   intWbArbiter.io.flush <> io.flush
   require(intWbArbiter.io.in.size == intArbiterInputsWireY.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all int wb size: ${intArbiterInputsWireY.size}")
   intWbArbiter.io.in.zip(intArbiterInputsWireY).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid && in.bits.toIntRf.map(_.valid).getOrElse(false.B)
+    arbiterIn.valid := in.bits.toIntRf.map(_.valid).getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "int")
   }
@@ -312,7 +312,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   fpWbArbiter.io.in.zip(fpArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     println(s"[WbDataPath_fpWbArbiter] fpArbiterInputsWireY.name = ${in.bits.params.name}")
     println(s"[WbDataPath_fpWbArbiter] arbiterIn.bits.params.port,priority = ${arbiterIn.bits.params.port},${arbiterIn.bits.params.priority}")
-    arbiterIn.valid := in.valid && in.bits.toFpRf.map(_.valid).getOrElse(false.B)
+    arbiterIn.valid := in.bits.toFpRf.map(_.valid).getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "fp")
   }
@@ -321,7 +321,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   vfWbArbiter.io.flush <> io.flush
   require(vfWbArbiter.io.in.size == vfArbiterInputsWireY.size, s"vfWbArbiter input size: ${vfWbArbiter.io.in.size}, all vf wb size: ${vfArbiterInputsWireY.size}")
   vfWbArbiter.io.in.zip(vfArbiterInputsWireY).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid && in.bits.toVecRf.map(_.valid).getOrElse(false.B)
+    arbiterIn.valid := in.bits.toVecRf.map(_.valid).getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "vf")
   }

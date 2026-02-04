@@ -191,6 +191,18 @@ case class FuConfig (
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu
+  
+  def isIntWenFp: Boolean = fuType == FuType.i2f || fuType == FuType.i2v
+
+  def isVecWenFp: Boolean = fuType == FuType.vmove
+
+  def isFpWenInt: Boolean = fuType == FuType.fcvt || fuType == FuType.fcmp
+
+  def isVecWenInt: Boolean = fuType == FuType.vipu || fuType == FuType.vsetfwf || fuType == FuType.vmove
+
+  def isIntWenVec: Boolean = fuType == FuType.i2v
+
+  def isFpWenVec: Boolean = fuType == FuType.f2v
 
   def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || isVecMem
 

@@ -170,7 +170,7 @@ case class ExeUnitParams(
   val wbV0Index : Int = wbIndexeds.getOrElse("v0" , 0)
   val wbVlIndex : Int = wbIndexeds.getOrElse("vl" , 0)
   val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
-  def getForwardIndex(): Int = {
+  def getForwardIndex: Int = {
     if (this.isIntExeUnit) wbIntIndex
     else if (this.isFpExeUnit) wbFpIndex
     else 0
