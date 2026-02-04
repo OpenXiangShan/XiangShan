@@ -144,26 +144,27 @@ class MainBtbAlignBank(
 
   private val s1_writeBuffer = Mux1H(
     s1_internalBankMask,
-    internalBanks.map(_.io.probe)
+    internalBanks.map(_.io.probe.resp.entries)
   )
-
-  private val s1_bufferHitSetIdxMask =
-    s1_writeBuffer.buffers.map(w => w.valid && w.setIdx === s1_setIdx)
 
   // for those requests in write buffer,
   // it means this newest data is not written yet,
   // simply override raw data // TODO: is this correct?
   private val s1_rawEntries = VecInit(s1_readEntries.zipWithIndex.map { case (e, i) =>
     Mux(
-      s1_bufferHitSetIdxMask(i) && s1_writeBuffer.buffers(i).status.isWriteAll,
-      s1_writeBuffer.buffers(i).entry,
+      s1_writeBuffer(i).valid && s1_writeBuffer(i).bits.status.isWriteAll,
+      s1_writeBuffer(i).bits.entry,
       e
     )
   })
 
   private val s1_rawShareds = VecInit(s1_readShareds.zipWithIndex.map { case (s, i) =>
-    Mux(s1_bufferHitSetIdxMask(i), s1_writeBuffer.buffers(i).shared, s)
+    Mux(s1_writeBuffer(i).valid, s1_writeBuffer(i).bits.shared, s)
   })
+
+  internalBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.probe.req.setIdx := s1_setIdx
+  }
 
   /* *** s2 ***
    * check entries hit

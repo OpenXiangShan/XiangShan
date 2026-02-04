@@ -66,7 +66,15 @@ class MainBtbInternalBank(
 
     // probe write buffer for prediction
     class Probe extends Bundle {
-      val buffers: Vec[MainBtbWriteProbe] = Output(Vec(NumWay, new MainBtbWriteProbe))
+      class Req extends Bundle {
+        val setIdx: UInt = UInt(SetIdxLen.W)
+      }
+      class Resp extends Bundle {
+        val entries: Vec[Valid[MainBtbWriteReq]] = Vec(NumWay, Valid(new MainBtbWriteReq))
+      }
+
+      val req:  Req  = Input(new Req)
+      val resp: Resp = Output(new Resp)
     }
 
     val resetDone: Bool = Output(Bool())
@@ -214,7 +222,8 @@ class MainBtbInternalBank(
     )
   }
 
-  probe.buffers := writeBuffer.io.probe
+  writeBuffer.io.probe.req := io.probe.req
+  probe.resp.entries       := writeBuffer.io.probe.resp.entries
 
   /* *** perf *** */
   private val perf_entryDropWrite = (0 until NumWay).map { i =>

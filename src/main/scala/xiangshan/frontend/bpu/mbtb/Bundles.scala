@@ -141,11 +141,6 @@ class MainBtbWriteReq(implicit p: Parameters) extends MainBtbBundle {
   def getUpdateTag: UInt = Cat(entry.position, entry.attribute.asUInt)
 }
 
-class MainBtbWriteProbe(implicit p: Parameters) extends MainBtbWriteReq {
-  val valid: Bool = Bool()
-  val fire:  Bool = Bool()
-}
-
 class MainBtbPageTableEntrySramWriteReq(implicit p: Parameters) extends MainBtbBundle {
   val setIdx: UInt                  = UInt(PageTableSetIdxLen.W)
   val entry:  MainBtbPageTableEntry = new MainBtbPageTableEntry
