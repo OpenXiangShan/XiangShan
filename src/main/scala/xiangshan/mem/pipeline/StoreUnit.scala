@@ -427,6 +427,8 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.toLsq.bits.uop.fuOpType  := s1_out.uop.fuOpType
   io.toLsq.bits.uop.ftqPtr    := s1_out.uop.ftqPtr
   io.toLsq.bits.uop.ftqOffset := s1_out.uop.ftqOffset
+  io.toLsq.bits.uop.isRVC     := s1_out.uop.isRVC
+  io.toLsq.bits.uop.isFirstIssue := s1_out.isFirstIssue
   io.toLsq.bits.nc            := DontCare // will be set in stage 2
   io.toLsq.bits.mmio          := DontCare // will be set in stage 2
   io.toLsq.bits.memBackTypeMM := DontCare // will be set in stage 2

@@ -341,6 +341,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         WireInit(VecInit((0 until StoreQueueSize).map(j =>
           io.dataEntriesIn(j).uop.storeSetHit && io.dataEntriesIn(j).uop.ssid === s0Req.bits.ssid)))
       )
+      val s0LoadWaitStrict = s0Req.bits.loadWaitStrict
+      val s0LoadSqIdx      = s0Req.bits.sqIdx
 
       val s0AgeMaskLow     = s0DeqMask & s0ForwardMask & VecInit(Seq.fill(StoreQueueSize)(s0DifferentFlag)).asUInt
       val s0AgeMaskHigh    = (~s0DeqMask).asUInt & (VecInit(Seq.fill(StoreQueueSize)(s0DifferentFlag)).asUInt | s0ForwardMask)
@@ -351,6 +353,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s1LoadStart    = RegEnable(s0LoadStart, s0Valid)
       val s1LoadEnd      = RegEnable(s0LoadEnd, s0Valid)
       val s1StoreSetHitVec = RegEnable(s0StoreSetHitVec, s0Valid)
+      val s1LoadWaitStrict = RegEnable(s0LoadWaitStrict, s0Valid)
+      val s1LoadSqIdx      = RegEnable(s0LoadSqIdx, s0Valid)
 
       val s1AgeMaskLow   = RegEnable(s0AgeMaskLow, s0Valid)
       val s1AgeMaskHigh  = RegEnable(s0AgeMaskHigh, s0Valid)
@@ -431,8 +435,29 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // select offset generate
       val s1ByteSelectOffset   = s1LoadStart - s1SelectDataEntry.byteStart
 
-      val s1HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) &
-        VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt & allocatedVec.asUInt).orR
+      // MDP
+      //                +-----------------------+
+      //                | Search a SSID for the |
+      //                |    load operation     |
+      //                +-----------------------+
+      //                           |
+      //                           V
+      //                 +-------------------+
+      //                 | load wait strict? |
+      //                 +-------------------+
+      //                           |
+      //                           V
+      //               +----------------------+
+      //            Set|                      |Clean
+      //               V                      V
+      //  +------------------------+   +------------------------------+
+      //  | Waiting for all older  |   | Wait until the corresponding |
+      //  |   stores operations    |   | older store operations       |
+      //  +------------------------+   +------------------------------+
+
+      val s1HasAddrInvalidVec  = (s1AgeMaskLow | s1AgeMaskHigh) & VecInit(addrValidVec.map(!_)).asUInt & allocatedVec.asUInt
+      val s1PreciseWait        = (s1HasAddrInvalidVec & s1StoreSetHitVec.asUInt).orR // precise storeset hit judgement
+      val s1HasAddrInvalid     = Mux(s1LoadWaitStrict, s1HasAddrInvalidVec.orR, s1PreciseWait)
 
       // find youngest addrInvalid store
       val s1AddrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & allocatedVec.asUInt &
@@ -463,6 +488,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(s1AddrInvalidSqIdx, s1Valid)
+      val s2LoadWaitStrict   = RegEnable(s1LoadWaitStrict, s1Valid)
+      val s2WaitStrictSqIdx  = RegEnable(s1LoadSqIdx - 1.U, s1Valid)
       val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
@@ -544,7 +571,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       s2Resp.bits.dataInvalid.valid := s2DataInValid && s2ForwardValid // select is valid
       s2Resp.bits.dataInvalid.bits := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid.valid := s2HasAddrInvalid // maby can't select a entry
-      s2Resp.bits.addrInvalid.bits := s2AddrInvalidSqIdx
+      s2Resp.bits.addrInvalid.bits := Mux(s2LoadWaitStrict, s2WaitStrictSqIdx, s2AddrInvalidSqIdx)
       s2Resp.bits.forwardInvalid   := !s2SafeForward || s2Cross4KPage // do not support cross page forward.
       s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage && s2SafeForward // if cross Page/multi match, let load replay.
       s2Resp.valid                 := s2Valid

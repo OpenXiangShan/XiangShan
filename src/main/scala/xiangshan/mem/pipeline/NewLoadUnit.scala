@@ -579,6 +579,10 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   val isSwInstrPrefetch = accessType.isSwPrefetch() && accessType.isInstrPrefetch()
 
+  // storeset
+  val isStoreSetHit = uop.storeSetHit
+  val waitRobIdx = uop.waitForRobIdx
+
   /**
     * Redirect
     */
@@ -670,6 +674,9 @@ class LoadUnitS1(param: ExeUnitParams)(
   val nuke = Cat((nukeQueryValids lazyZip nukePAddrMatches lazyZip nukeStoreOlders lazyZip nukeMaskMatches).map {
     case (valid, paddrMatch, storeOlder, maskMatch) => valid && paddrMatch && storeOlder && maskMatch
   }).orR && paddrEffective
+  // if nuke is storeSetHit store, let load fast replay
+  val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
+    req.robIdx === waitRobIdx && v}.reduce(_ || _)
 
   /**
     * Pipeline connect
@@ -709,6 +716,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   // update replay cause (only nuke is detected in S1)
   stageInfo.cause.get := 0.U.asTypeOf(stageInfo.cause.get)
   stageInfo.cause.get(LoadReplayCauses.C_NK) := nuke
+  stageInfo.fastReplayNukeFirst.get := fastReplayNukeFirst
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
@@ -866,6 +874,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
+  val isStoreSetHit = uop.storeSetHit
+  val waitRobIdx = uop.waitForRobIdx
 
   /**
     * Redirect
@@ -978,6 +988,10 @@ class LoadUnitS2(param: ExeUnitParams)(
   val nuke = Cat((nukeQueryValids lazyZip nukePAddrMatches lazyZip nukeStoreOlders lazyZip nukeMaskMatches).map {
     case (valid, paddrMatch, storeOlder, maskMatch) => valid && paddrMatch && storeOlder && maskMatch
   }).orR && tlbNotMiss || prevStageNuke
+  // if nuke is storeSetHit store, let load fast replay
+  val prevStageFastReplayNukeFirst = in.fastReplayNukeFirst.get
+  val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
+    req.robIdx === waitRobIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
 
   /**
     * Preliminary assessment of the load exit
@@ -1008,7 +1022,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   val cause = Wire(in.cause.get.cloneType)
   val fastReplayMSHRNack = cause(C_DR) && !hasHigherPriorityCauses(cause, C_DR)
   val fastReplayBankConflict = cause(C_BC) && !hasHigherPriorityCauses(cause, C_BC)
-  val fastReplayNuke = cause(C_NK) && !hasHigherPriorityCauses(cause, C_RAR) // TODO: use C_RAR or C_NK?
+  // if store pipeline is waiting for store, send this load to fast replay
+  val fastReplayNuke = cause(C_NK) &&  // TODO: use C_RAR or C_NK?
+    !hasHigherPriorityCauses(VecInit(cause.patch(C_MA, Seq(cause(C_MA) && !fastReplayNukeFirst), 1)), C_RAR)
   val fastReplay = !LoadEntrance.isFastReplay(entrance) && // 1.3.1
     (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke) && // 1.3.2
     !isUnalign && !tlbMiss // 1.3.3, if tlb miss, should not to fast replay

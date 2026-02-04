@@ -367,7 +367,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
     stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
-    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
+    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.uop.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -394,15 +394,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   io.rollback := allRedirect
 
-  val mdpTrainFilter = (0 until StorePipelineWidth).map(i => {
-    val redirect = Wire(Valid(new Redirect))
-    redirect.bits  := allRedirect(i).bits
-    redirect.valid := allRedirect(i).valid && stIsFirstIssue(i)
-    redirect
-  })
-
-  val oldestOH = Redirect.selectOldestRedirect(mdpTrainFilter)
-  io.mdpTrain := Mux1H(oldestOH, mdpTrainFilter)
+  val oldestOH = Redirect.selectOldestRedirect(allRedirect)
+  io.mdpTrain := Mux1H(oldestOH, allRedirect)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
