@@ -227,6 +227,8 @@ class storeMisaignIO(implicit p: Parameters) extends Bundle{
   val storeMisalignBufferEmpty  = Input(Bool())
   val storeMisalignBufferRobIdx = Input(new RobPtr)
   val storeMisalignBufferUopIdx = Input(UopIdx())
+  val blockScalaIssue           = Output(Bool())
+
 }
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
