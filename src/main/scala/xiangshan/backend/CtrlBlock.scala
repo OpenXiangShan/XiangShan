@@ -646,7 +646,7 @@ class CtrlBlockImp(
     RegEnable(waittable2rename, decodeOut.fire)
   }
   rename.io.ssit := memCtrl.io.ssit2Rename
-  // disble mdp
+  // disable mdp
   dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
   rename.io.waittable := 0.U.asTypeOf(rename.io.waittable)
   rename.io.ssit := 0.U.asTypeOf(rename.io.ssit)
