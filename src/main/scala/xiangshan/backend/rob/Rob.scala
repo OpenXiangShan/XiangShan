@@ -632,7 +632,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
   val deqNeedFlush = (deqPtrEntry.needFlush(0) || deqPtrEntry.needFlush(1) && CompressType.isNotNORMAL(deqPtrEntry.compressType)) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
-  val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
+  val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx.isSameEntry(deqPtr)
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && RegNext(RegNext(deqPtrEntry.commit_w))
