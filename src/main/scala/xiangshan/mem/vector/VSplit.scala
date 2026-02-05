@@ -495,9 +495,9 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   if(env.EnableDifftest){
     val usVaddrOffset   = LookupTree(issueEew, List(
       "b00".U -> 0.U,
-      "b01".U -> vaddr(0),
-      "b10".U -> vaddr(1, 0),
-      "b11".U -> vaddr(2, 0)
+      "b01".U -> issueUopAddr(0),
+      "b10".U -> issueUopAddr(1, 0),
+      "b11".U -> issueUopAddr(2, 0)
     ))
 
     vstd.bits.vecDebug.get.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
