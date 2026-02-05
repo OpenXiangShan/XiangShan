@@ -33,27 +33,53 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
     val Unknown = 3
   }
   def getUnhashedIdx(pc: PrunedAddr): UInt = pc(VAddrBits - 1, instOffsetBits)
-  def getUnhashedTag(pc: PrunedAddr): UInt = pc(VAddrBits - 1, PCHighTagStart)
+  // def getUnhashedTag(pc: PrunedAddr): UInt = pc(VAddrBits - 1, PCHighTagStart)
+  // def connectPcTag(partPc: UInt, tableId: Int): UInt = {
+  //   require(tableId >= 0 && tableId <= 3, s"tableId must be in [0,3], got $tableId")
+  //   def concatBits(bits: Seq[Bool]): UInt = if (bits.isEmpty) 0.U(1.W) else bits.foldLeft(0.U(0.W))(Cat(_, _))
+  //   val tagPC = partPc
+  //   val hashPC = tableId match {
+  //     case TAGEHistoryType.Short =>
+  //       concatBits(PCTagHashBitsForShortHistory.map(tagPC(_)))
+  //     case TAGEHistoryType.Medium =>
+  //       concatBits(PCTagHashBitsForMediumHistory.map(tagPC(_)))
+  //     case TAGEHistoryType.Long =>
+  //       concatBits(PCTagHashBitsForLongHistory.map(tagPC(_)))
+  //     case _ =>
+  //       concatBits(PCTagHashBitsDefault.map(tagPC(_)))
+  //   }
+  //   hashPC
+  // }
+  def getUnhashedTag(pc: PrunedAddr, tableId: Int): UInt = {
+    def concatBits(bits: Seq[Bool]): UInt = if (bits.isEmpty) 0.U(1.W) else bits.foldLeft(0.U(0.W))(Cat(_, _))
+    val tagPC = pc(VAddrBits - 1, instOffsetBits)
+    val xorPC = tableId match {
+      case TAGEHistoryType.Short =>
+        concatBits(PCTagXorBitsForShortHistory.map(tagPC(_)))
+      case TAGEHistoryType.Medium =>
+        concatBits(PCTagXorBitsForMediumHistory.map(tagPC(_)))
+      case TAGEHistoryType.Long =>
+        concatBits(PCTagXorBitsForLongHistory.map(tagPC(_)))
+      case _ =>
+        concatBits(PCTagXorBitsForVeryLongHistory.map(tagPC(_)))
+    }
+    xorPC
+  }
   def connectPcTag(partPc: UInt, tableId: Int): UInt = {
     require(tableId >= 0 && tableId <= 3, s"tableId must be in [0,3], got $tableId")
     def concatBits(bits: Seq[Bool]): UInt = if (bits.isEmpty) 0.U(1.W) else bits.foldLeft(0.U(0.W))(Cat(_, _))
     val tagPC = partPc
-    val hashPC = tableId match {
+    val connectPC = tableId match {
       case TAGEHistoryType.Short =>
-        concatBits(PCTagHashBitsForShortHistory.map(tagPC(_)))
-
+        concatBits(PCTagConcatBitsForShortHistory.map(tagPC(_)))
       case TAGEHistoryType.Medium =>
-        concatBits(PCTagHashBitsForMediumHistory.map(tagPC(_)))
-
+        concatBits(PCTagConcatBitsForMediumHistory.map(tagPC(_)))
       case TAGEHistoryType.Long =>
-        val xorBits = PCTagHashXorPairsForLongHistory.map { case (i, j) => tagPC(i) ^ tagPC(j) }
-        concatBits(xorBits)
-
+        concatBits(PCTagConcatBitsForLongHistory.map(tagPC(_)))
       case _ =>
-        concatBits(PCTagHashBitsDefault.map(tagPC(_)))
+        concatBits(PCTagConcatBitsForVeryLongHistory.map(tagPC(_)))
     }
-
-    hashPC
+    connectPC
   }
   def computeSameIdx(pc: PrunedAddr, allFh: PhrAllFoldedHistories): UInt = {
     val idxFhInfo   = new FoldedHistoryInfo(log2Ceil(MaxNumSets), log2Ceil(MaxNumSets))
@@ -89,7 +115,7 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
     val altTagFhInfo  = new FoldedHistoryInfo(histLen, min(histLen, histBitsInTag - 1))
     val tagFh         = allFh.getHistWithInfo(tagFhInfo).foldedHist
     val altTagFh      = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-    val unhashedTag   = getUnhashedTag(pc)
+    val unhashedTag   = getUnhashedTag(pc, tableId)
     val unhashedIdx   = getUnhashedIdx(pc)
     val lowTag        = (unhashedTag ^ tagFh ^ (altTagFh << 1))(histBitsInTag - 1, 0)
     val highTag       = connectPcTag(unhashedIdx, tableId)
@@ -97,5 +123,14 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
     // Temporarily expand the bit width to be consistent for easier processing.
     // This may later be changed to use SRAM storage
     tag.pad(log2Ceil(MaxTagLen))
+  }
+
+  def getBankId(index: UInt, numBanks: Int): UInt = {
+    val bankId = index(log2Ceil(numBanks) - 1, 0)
+    bankId
+  }
+  def getBankInnerIndex(index: UInt, numBanks: Int, numSets: Int): UInt = {
+    val bankInnerIndex = index(log2Ceil(numSets) - 1, log2Ceil(numBanks))
+    bankInnerIndex
   }
 }
