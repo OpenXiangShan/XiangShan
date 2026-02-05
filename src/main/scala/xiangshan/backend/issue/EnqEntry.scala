@@ -50,7 +50,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelayValidReg = GatedValidRegNext(enqDelayValidRegNext, false.B)
 
   //Wire
-  CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)
+  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.payload.og1Payload, currentStatus, io.commonIn, true)
 
   when(io.commonIn.enq.valid) {
     assert(common.enqReady, s"${params.getIQName}'s EnqEntry is not ready when enq is valid\n")
