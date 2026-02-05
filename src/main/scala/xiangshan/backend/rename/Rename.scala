@@ -206,7 +206,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val isFormer = compressUnit.io.out.isFormer
   val needFlush = compressUnit.io.out.needFlush
   val interrupt_safe = compressUnit.io.out.interrupt_safe
-  val isRVC = compressUnit.io.out.isRVC
+  val RVC = compressUnit.io.out.RVC
   val complexHasDest = compressUnit.io.out.complexHasDest
   val hasStore = compressUnit.io.out.hasStore
   val noCompressSource = compressUnit.io.out.noCompressSource
@@ -336,7 +336,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).compressType := compressType(i)
     uops(i).needFlush := needFlush(i)
     uops(i).interrupt_safe := interrupt_safe(i)
-    uops(i).isRVC := isRVC(i)
+    uops(i).isRVC := io.in(i).bits.isRVC
+    uops(i).RVC := RVC(i)
     uops(i).complexHasDest := complexHasDest(i)
     uops(i).hasStore := hasStore(i)
     uops(i).noCompressSource := noCompressSource(i)

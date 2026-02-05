@@ -1534,7 +1534,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       isBare -> barePC,
     ))
 
-    val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
+    val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 4, dontCare = true)
     diffArchEvent.coreid := hartId
     diffArchEvent.valid := trapValid
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)

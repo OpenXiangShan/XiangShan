@@ -184,6 +184,7 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
+    val RVC = UInt(2.W)
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
@@ -264,6 +265,7 @@ object Bundles {
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
+    val RVC = UInt(2.W)
     val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
@@ -435,6 +437,7 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
+    val RVC             = UInt(2.W)
     val isRVC           = Bool()
     val fixedTaken      = Bool()
     val predTaken       = Bool()

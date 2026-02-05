@@ -71,6 +71,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isVset = Bool()
     val isHls = Bool() // double
     val mmio = Bool()  // double?
+    val RVC = UInt(2.W)
     val isRVC = Bool()
     val predTaken = Bool() // for former
 
@@ -108,6 +109,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val wflags = Bool()
     val fflags = UInt(5.W)
     val vxsat = Bool()
+    val RVC = UInt(2.W)
     val isRVC = Bool()
     val isVset = Bool()
     val isHls = Bool()
@@ -169,6 +171,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.isHls := robEnq.isHls
     robEntry.mmio := false.B
     robEntry.isRVC := robEnq.isRVC
+    robEntry.RVC := robEnq.RVC
     robEntry.predTaken := robEnq.predTaken
 
     // trace
@@ -203,6 +206,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.wflags := robEntry.wflags
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
+    robCommitEntry.RVC := robEntry.RVC
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
