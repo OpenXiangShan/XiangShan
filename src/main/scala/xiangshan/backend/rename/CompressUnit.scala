@@ -80,7 +80,7 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       val isFormer = Vec(RenameWidth, Output(Bool()))
       val needFlush = Vec(RenameWidth, Output(UInt(2.W)))
       val interrupt_safe = Vec(RenameWidth, Output(Bool()))
-      val isRVC = Vec(RenameWidth, Output(Bool()))
+      val RVC = Vec(RenameWidth, Output(UInt(2.W)))
       val complexHasDest = Vec(RenameWidth, Output(UInt(1.W)))
       val hasStore = Vec(RenameWidth, Output(Bool()))
       val noCompressSource = Vec(RenameWidth, NoCompressSource())
@@ -109,7 +109,7 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       io.out.isFormer(i)            := true.B
       io.out.needFlush(i)           := Cat(0.U(1.W), needFlush(i))
       io.out.interrupt_safe(i)      := allow_interrupts(i)
-      io.out.isRVC(i)               := io.in(i).bits.isRVC
+      io.out.RVC(i)               := Cat(0.U(1.W), io.in(i).bits.isRVC)
       io.out.complexHasDest(i)      := io.in(i).bits.rfWen || io.in(i).bits.fpWen
       io.out.hasStore(i)            := FuType.isStore(io.in(i).bits.fuType)
       io.out.noCompressSource(i)    := NoCompressSource.cannotCompress
@@ -133,8 +133,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.needFlush(2*i+1)         := 0.U(2.W)
         io.out.interrupt_safe(2*i)      := allow_interrupts(2*i) && allow_interrupts(2*i+1)
         io.out.interrupt_safe(2*i+1)    := true.B
-        io.out.isRVC(2*i)               := io.in(2*i).bits.isRVC
-        io.out.isRVC(2*i+1)             := io.in(2*i+1).bits.isRVC
+        io.out.RVC(2*i)               := Cat(io.in(2*i+1).bits.isRVC, io.in(2*i).bits.isRVC)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
         io.out.complexHasDest(2*i)      := io.in(2*i).bits.rfWen || io.in(2*i).bits.fpWen
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)            := FuType.isStore(io.in(2*i).bits.fuType) || FuType.isStore(io.in(2*i+1).bits.fuType)
@@ -158,8 +158,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.needFlush(2*i+1)         := 0.U(2.W)
         io.out.interrupt_safe(2*i)      := allow_interrupts(2*i)
         io.out.interrupt_safe(2*i+1)    := true.B
-        io.out.isRVC(2*i)               := io.in(2*i).bits.isRVC
-        io.out.isRVC(2*i+1)             := false.B
+        io.out.RVC(2*i)               := Cat(0.U(1.W), io.in(2*i).bits.isRVC)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
         io.out.complexHasDest(2*i)      := 0.U
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)          := FuType.isStore(io.in(2*i).bits.fuType)
@@ -183,8 +183,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
         io.out.needFlush(2*i+1)         := 0.U(2.W)
         io.out.interrupt_safe(2*i)      := true.B
         io.out.interrupt_safe(2*i+1)    := true.B
-        io.out.isRVC(2*i)               := false.B
-        io.out.isRVC(2*i+1)             := false.B
+        io.out.RVC(2*i)               := 0.U(2.W)
+        io.out.RVC(2*i+1)             := 0.U(2.W)
         io.out.complexHasDest(2*i)      := 0.U
         io.out.complexHasDest(2*i+1)    := 0.U
         io.out.hasStore(2*i)            := false.B
