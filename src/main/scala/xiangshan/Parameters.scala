@@ -143,7 +143,7 @@ case class XSCoreParameters
     numRead    = None,
     numWrite   = None,
   ),
-  IntRegCacheSize: Int = 16,
+  IntRegCacheSize: Int = 24,
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
