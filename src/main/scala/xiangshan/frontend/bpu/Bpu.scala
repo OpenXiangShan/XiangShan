@@ -343,8 +343,35 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_takenMask = VecInit(s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b })
   private val s2_taken     = s2_takenMask.reduce(_ || _)
 
-  private val s2_compareMatrix      = CompareMatrix(VecInit(s2_mbtbResult.map(_.bits.cfiPosition)))
-  private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
+  // construct first taken branch using compare matrix from MainBtb, which calculated in s1
+  private val s2_alignMatrix = mbtb.io.matrix
+  private val s2_alignTakenMask = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    VecInit(s2_takenMask.slice(i * mbtb.NumWay, (i + 1) * mbtb.NumWay))
+  }
+  private val s2_alignTaken = VecInit(s2_alignTakenMask.map(_.reduce(_ || _)))
+
+  // one-hot of first taken branch in each align bank
+  private val s2_alignTakenOH =
+    (s2_alignMatrix zip s2_alignTakenMask).map { case (matrix, takenMask) =>
+      matrix.getLeastElementOH(takenMask)
+    }
+
+  private val s2_alignPosHigherBits = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    // use first result from each align bank is ok, because higher bits are the same in one bank
+    s2_mbtbResult(i * mbtb.NumWay).bits.cfiPosition(CfiPositionWidth - 1, mbtb.CfiAlignedPositionWidth)
+  }
+
+  // use compare matrix to find the first align bank that has taken branch
+  private val s2_posHigherMatrix  = CompareMatrix(s2_alignPosHigherBits)
+  private val s2_firstAlignBankOH = s2_posHigherMatrix.getLeastElementOH(s2_alignTaken)
+
+  private val s2_firstTakenBranchOH = VecInit(Seq.tabulate(mbtb.NumAlignBanks) { i =>
+    Mux(
+      s2_firstAlignBankOH(i),
+      s2_alignTakenOH(i),
+      0.U.asTypeOf(s2_alignTakenOH(i))
+    )
+  }.flatten)
 
   /* *** s3 prediction selection *** */
   private val s3_taken              = RegEnable(s2_taken, s2_fire)

@@ -24,12 +24,14 @@ import utility.XSPerfHistogram
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 
 class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // prediction specific bundle
     val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
+    val matrix: Vec[CompareMatrix]     = Output(Vec(NumAlignBanks, new CompareMatrix(NumWay)))
     val meta:   MainBtbMeta            = Output(new MainBtbMeta)
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
@@ -108,6 +110,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
+  io.matrix       := VecInit(alignBanks.map(_.io.read.resp.matrix))
 
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
