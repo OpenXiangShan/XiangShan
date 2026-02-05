@@ -142,7 +142,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid         := t1_fire && t1_writeAlignBankMask(i)
+    b.io.write.req.valid         := t1_fire
     b.io.write.req.bits.startPc  := t1_startPcVec(i)
     b.io.write.req.bits.branches := t1_train.branches
     b.io.write.req.bits.meta     := t1_meta.entries(i)
