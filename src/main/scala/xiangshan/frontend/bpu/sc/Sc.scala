@@ -413,6 +413,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_oldBiasEntries = VecInit(t1_meta.scBiasResp.map(v => v.asTypeOf(new ScEntry())))
   private val t1_oldBiasLowBits = t1_meta.scBiasLowerBits
   private val t1_mbtbPosition   = VecInit(t1_train.meta.mbtb.entries.flatten.map(e => e.position))
+  private val t1_mbtbHit        = VecInit(t1_train.meta.mbtb.entries.flatten.map(e => e.rawHit))
 
   private val t1_branchesWayIdxVec = VecInit(t1_branches.map(b => getWayIdx(b.bits.cfiPosition)))
   private val t1_branchesScIdxVec  = WireInit(VecInit.fill(ResolveEntryBranchNumber)(0.U(log2Ceil(NumWays).W)))
@@ -430,7 +431,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   // MBTB may invalidate entry with larger idx during multihit, and the order needs to be reversed
   t1_branches.zipWithIndex.foreach { case (branch, branchIdx) =>
     for (i <- (0 until NumWays).reverse) {
-      when(branch.valid && (t1_mbtbPosition(i) === branch.bits.cfiPosition)) { // branch.valid may have been recalculated on t1_writeValidVec
+      when(branch.valid && (t1_mbtbPosition(i) === branch.bits.cfiPosition) && t1_mbtbHit(i)) { // branch.valid may have been recalculated on t1_writeValidVec
         t1_branchesScIdxHitVec(branchIdx) := true.B
         t1_branchesScIdxVec(branchIdx)    := i.U
       }
