@@ -51,6 +51,7 @@ class MainBtbAlignBank(
 
     class Write extends Bundle {
       class Req extends Bundle {
+        val needWrite: Bool = Bool()
         // similar to Read.Req.startPc, calculated in MainBtb top
         val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
         val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
@@ -197,6 +198,7 @@ class MainBtbAlignBank(
    * send write req to internal banks (srams)
    */
   private val t1_fire             = w.req.valid
+  private val t1_needWrite        = w.req.bits.needWrite
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
   private val t1_meta             = w.req.bits.meta
@@ -205,12 +207,6 @@ class MainBtbAlignBank(
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
-
-  private val t1_rotator            = VecRotate(getAlignBankIndex(t1_startPc))
-  private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)
-  private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
-
-  private val t1_needWrite = t1_writeAlignBankMask(alignIdx)
 
   /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
