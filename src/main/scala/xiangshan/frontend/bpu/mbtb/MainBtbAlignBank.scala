@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utils.VecRotate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
@@ -205,13 +206,19 @@ class MainBtbAlignBank(
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
 
+  private val t1_rotator            = VecRotate(getAlignBankIndex(t1_startPc))
+  private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)
+  private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
+
+  private val t1_needWrite = t1_writeAlignBankMask(alignIdx)
+
   /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
   private val t1_hitMask = PriorityEncoderOH(VecInit(t1_meta.map(_.hit(t1_mispredictInfo.bits))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
   // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_mispredictInfo.valid && (
+  private val t1_entryNeedWrite = t1_needWrite && t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
