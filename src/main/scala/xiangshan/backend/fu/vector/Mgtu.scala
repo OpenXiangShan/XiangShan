@@ -21,7 +21,6 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import top.{ArgParser, BaseConfig, DefaultConfig}
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{Vl}
 import yunsuan.vector._

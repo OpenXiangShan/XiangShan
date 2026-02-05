@@ -80,8 +80,8 @@ body:
         Please provide your environment information.
         请提供您的环境信息。
 
-        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `DefaultConfig`.
-        XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `DefaultConfig`。
+        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `TLConfig`.
+        XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `TLConfig`。
       placeholder:
       value: |
         - XiangShan branch:

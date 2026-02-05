@@ -4,13 +4,13 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.DefaultConfig
+import top.TLConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
 import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
 
 
 class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
-  val defaultConfig = (new DefaultConfig).alterPartial {
+  val defaultConfig = (new TLConfig).alterPartial {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
     case LogUtilsOptionsKey => LogUtilsOptions(
