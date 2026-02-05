@@ -98,4 +98,29 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
     // This may later be changed to use SRAM storage
     tag.pad(log2Ceil(MaxTagLen))
   }
+
+  def getBankId(index: UInt, numBanks: Int): UInt = {
+    val bankId = index(log2Ceil(numBanks) - 1, 0)
+    bankId
+  }
+  def getBankInnerIndex(index: UInt, numBanks: Int, numSets: Int): UInt = {
+    val bankInnerIndex = index(log2Ceil(numSets) - 1, log2Ceil(numBanks))
+    bankInnerIndex
+  }
+
+  def findTwoZeros(dataVec: UInt): (UInt, UInt, Bool, Bool, Bool) = {
+    val width = dataVec.getWidth
+    require(width == 8 || width == 16, "Width must be 8 or 16")
+    val zerosVec       = (~dataVec).asBools
+    val firstZeroFound = zerosVec.reduce(_ || _)
+    val firstZeroIdx   = PriorityEncoder(zerosVec)
+    val maskVec        = Wire(Vec(width, Bool()))
+    for (i <- 0 until width) {
+      maskVec(i) := zerosVec(i) && (i.U =/= firstZeroIdx)
+    }
+    val secondZeroFound = maskVec.reduce(_ || _)
+    val secondZeroIdx   = PriorityEncoder(maskVec)
+    val noZeros         = !firstZeroFound
+    (firstZeroIdx, secondZeroIdx, firstZeroFound, secondZeroFound, noZeros)
+  }
 }
