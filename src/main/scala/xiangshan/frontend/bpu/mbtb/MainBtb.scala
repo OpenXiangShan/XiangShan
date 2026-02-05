@@ -373,80 +373,80 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   t1_overrideShared.bits := Mux(t1_targetCarry.isInvalid, t1_overrideLongShared.asUInt, t1_overrideShortShared.asUInt)
 
   private val t1_branches     = t1_train.branches
-  private val t1_writeEntries = Wire(Vec(NumWay, new MainBtbEntry))
-  private val t1_writeShareds = Wire(Vec(NumWay, new MainBtbSharedInfo))
-  private val t1_writeStatus  = Wire(Vec(NumWay, new MainBtbWriteStatus))
-  private val t1_writeMask    = Wire(Vec(NumWay, Bool()))
+  private val t1_writeEntries = Wire(Vec(NumAlignBanks, Vec(NumWay, new MainBtbEntry)))
+  private val t1_writeShareds = Wire(Vec(NumAlignBanks, Vec(NumWay, new MainBtbSharedInfo)))
+  private val t1_writeStatus  = Wire(Vec(NumAlignBanks, Vec(NumWay, new MainBtbWriteStatus)))
+  private val t1_writeMask    = Wire(Vec(NumAlignBanks, Vec(NumWay, Bool())))
 
-  t1_updateMeta.zipWithIndex.foreach { case (meta, i) =>
-    val condHitMask = VecInit(t1_branches.map { branch =>
-      branch.valid && branch.bits.attribute.isConditional && meta.hit(branch.bits)
-//      meta.position === branch.bits.cfiPosition // TODO: really need meta.hit?
-    })
+  t1_meta.entries.zipWithIndex.foreach { case (bank, bankIdx) =>
+    bank.zipWithIndex.foreach { case (meta, wayIdx) =>
+      val isOverrideBank = t1_writeAlignBankMask(bankIdx) && t1_entryNeedWrite
+      val condHitMask = VecInit(t1_branches.map { branch =>
+        branch.valid && branch.bits.attribute.isConditional && meta.hit(branch.bits)
+      })
+      val condHit       = condHitMask.reduce(_ || _)
+      val actualTaken   = Mux1H(condHitMask, t1_branches.map(_.bits.taken))
+      val entryOverride = isOverrideBank && t1_entryWayMask(wayIdx)
 
-    val condHit       = condHitMask.reduce(_ || _)
-    val actualTaken   = Mux1H(condHitMask, t1_branches.map(_.bits.taken))
-    val entryOverride = t1_entryNeedWrite && t1_entryWayMask(i)
+      val shortShared = WireInit(meta.shared.asShort)
+      shortShared.counter := meta.shared.asShort.counter.getUpdate(actualTaken)
 
-    val metaShortShared = meta.shared.asShort
-    val newShortShared  = Wire(new ShortSharedInfo)
-    newShortShared.targetCarry := metaShortShared.targetCarry
-    newShortShared.tagUpper    := metaShortShared.tagUpper
-    newShortShared.counter     := metaShortShared.counter.getUpdate(actualTaken)
+      // multiple hit detect
+      val invalidate =
+        // Case 1: entry need write and position matches write entry's position
+        (isOverrideBank && meta.position === t1_writeEntry.position) ||
+          // Case 2: position matches previously condHit way
+          (0 until wayIdx).map(j =>
+            t1_writeMask(bankIdx)(j) && t1_writeStatus(bankIdx)(j).isReqUpdate &&
+              meta.position === t1_meta.entries(bankIdx)(j).position
+          ).foldLeft(false.B)(_ || _)
 
-    // multiple hit detect
-    val invalidate =
-      // Case 1: entry need write and position matches write entry's position
-      (t1_entryNeedWrite && meta.position === t1_writeEntry.position) ||
-        // Case 2: position matches previously condHit way
-        (0 until i).map(j =>
-          t1_writeMask(j) && t1_writeStatus(j).isReqUpdate && meta.position === t1_updateMeta(j).position
-        ).foldLeft(false.B)(_ || _)
+      val condHitEntry = Wire(new MainBtbEntry)
+      condHitEntry.valid           := true.B
+      condHitEntry.position        := meta.position
+      condHitEntry.attribute       := meta.attribute
+      condHitEntry.targetCrossPage := false.B
+      // TODO: need to store infos below in meta?
+      condHitEntry.targetLower := DontCare
+      condHitEntry.tagLower    := DontCare
 
-    val condHitEntry = Wire(new MainBtbEntry)
-    condHitEntry.valid           := true.B
-    condHitEntry.position        := meta.position
-    condHitEntry.attribute       := meta.attribute
-    condHitEntry.targetCrossPage := false.B
-    // TODO: need to store infos below in meta?
-    condHitEntry.targetLower := DontCare
-    condHitEntry.tagLower    := DontCare
-
-    t1_writeMask(i) := (condHit && !invalidate) || entryOverride
-    t1_writeEntries(i) := Mux(
-      entryOverride,
-      t1_writeEntry,
-      condHitEntry
-    )
-    t1_writeShareds(i).bits := MuxCase(
-      meta.shared.bits,
-      Seq(
-        entryOverride -> t1_overrideShared.bits,
-        condHit       -> newShortShared.asUInt
+      t1_writeMask(bankIdx)(wayIdx) := (condHit && !invalidate) || entryOverride
+      t1_writeEntries(bankIdx)(wayIdx) := Mux(
+        entryOverride,
+        t1_writeEntry,
+        condHitEntry
       )
-    )
-    t1_writeStatus(i).writeType := Mux(
-      entryOverride,
-      MainBtbWriteStatus.WriteType.All,
-      MainBtbWriteStatus.WriteType.Shared
-    )
-    t1_writeStatus(i).reqType := Mux(
-      entryOverride,
-      MainBtbWriteStatus.ReqType.Override,
-      MainBtbWriteStatus.ReqType.Update
-    )
+      t1_writeShareds(bankIdx)(wayIdx).bits := MuxCase(
+        meta.shared.bits,
+        Seq(
+          entryOverride -> t1_overrideShared.bits,
+          condHit       -> shortShared.asUInt
+        )
+      )
+      t1_writeStatus(bankIdx)(wayIdx).writeType := Mux(
+        entryOverride,
+        MainBtbWriteStatus.WriteType.All,
+        MainBtbWriteStatus.WriteType.Shared
+      )
+      t1_writeStatus(bankIdx)(wayIdx).reqType := Mux(
+        entryOverride,
+        MainBtbWriteStatus.ReqType.Override,
+        MainBtbWriteStatus.ReqType.Update
+      )
+    }
   }
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid        := t1_fire && t1_writeAlignBankMask(i) && t1_writeMask.asUInt.orR
+    b.io.write.req.valid        := t1_fire && t1_writeMask(i).asUInt.orR
     b.io.write.req.bits.startPc := t1_startPcVec(i)
-    b.io.write.req.bits.wayMask := t1_writeMask.asUInt
-    b.io.write.req.bits.entries := t1_writeEntries
-    b.io.write.req.bits.shareds := t1_writeShareds
-    b.io.write.req.bits.status  := t1_writeStatus
+    b.io.write.req.bits.wayMask := t1_writeMask(i).asUInt
+    b.io.write.req.bits.entries := t1_writeEntries(i)
+    b.io.write.req.bits.shareds := t1_writeShareds(i)
+    b.io.write.req.bits.status  := t1_writeStatus(i)
   }
 
   // update align bank replacer
+  // only touch when entry need write
   alignBankReplacers.zipWithIndex.foreach { case (r, i) =>
     r.io.trainTouch.valid        := t1_fire && t1_writeAlignBankMask(i) && t1_entryNeedWrite
     r.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPcVec(i))
