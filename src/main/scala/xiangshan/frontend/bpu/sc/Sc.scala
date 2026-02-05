@@ -47,6 +47,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val scTakenMask:         Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val scUsed:              Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
+    val toCommonHR:          Bool                  = Output(Bool())
     val meta:                ScMeta                = Output(new ScMeta())
   }
   val io: ScIO = IO(new ScIO)
@@ -91,7 +92,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    * ghr stage ctrl signals
    */
-  private val s0_commonHR = WireInit(io.commonHR)
+  private val s0_commonHR = WireInit(0.U.asTypeOf(io.commonHR))
   private val s1_commonHR = RegEnable(s0_commonHR, s0_fire)
   private val s2_commonHR = RegEnable(s1_commonHR, s1_fire)
   private val s3_override = io.s3_override && io.enable
@@ -103,47 +104,48 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    * and the next cycle should use the current io.commonHR
    * The state machine is used to store the above two historical records
    */
-  // private val idle :: state1 :: state2 :: state3 :: Nil = Enum(4)
+  private val idle :: state1 :: state2 :: state3 :: Nil = Enum(4)
 
-  // private val ghrStateReg = RegInit(idle)
-  // private val stage2Ghr   = RegInit(0.U.asTypeOf(io.commonHR))
-  // private val stage3Ghr   = RegInit(0.U.asTypeOf(io.commonHR))
-  // switch(ghrStateReg) {
-  //   is(idle) {
-  //     when(!s3_override) {
-  //       ghrStateReg := idle
-  //       s0_commonHR := io.commonHR
-  //     }.elsewhen(s3_override) {
-  //       ghrStateReg := state1
-  //       s0_commonHR := s2_commonHR
-  //       stage2Ghr   := s1_commonHR
-  //       stage3Ghr   := io.commonHR
-  //     }
-  //   }
-  //   is(state1) {
-  //     when(s0_fire) {
-  //       ghrStateReg := state2
-  //       s0_commonHR := stage2Ghr
-  //     }
-  //   }
-  //   is(state2) {
-  //     when(s0_fire) {
-  //       ghrStateReg := state3
-  //       s0_commonHR := stage3Ghr
-  //     }
-  //   }
-  //   is(state3) {
-  //     when(s0_fire && !s3_override) {
-  //       ghrStateReg := idle
-  //       s0_commonHR := io.commonHR
-  //     }.elsewhen(s3_override) {
-  //       ghrStateReg := state1
-  //       s0_commonHR := s2_commonHR
-  //       stage2Ghr   := s1_commonHR
-  //       stage3Ghr   := io.commonHR
-  //     }
-  //   }
-  // }
+  private val ghrStateReg = RegInit(idle)
+  private val stage2Ghr   = RegInit(0.U.asTypeOf(io.commonHR))
+  private val stage3Ghr   = RegInit(0.U.asTypeOf(io.commonHR))
+  switch(ghrStateReg) {
+    is(idle) {
+      when(!s3_override) {
+        ghrStateReg := idle
+        s0_commonHR := io.commonHR
+      }.elsewhen(s3_override) {
+        ghrStateReg := state1
+        s0_commonHR := s2_commonHR
+        stage2Ghr   := s1_commonHR
+        stage3Ghr   := io.commonHR
+      }
+    }
+    is(state1) {
+      when(s0_fire) {
+        ghrStateReg := state2
+        s0_commonHR := stage2Ghr
+      }
+    }
+    is(state2) {
+      when(s0_fire) {
+        ghrStateReg := state3
+        s0_commonHR := stage3Ghr
+      }
+    }
+    is(state3) {
+      when(s0_fire && !s3_override) {
+        ghrStateReg := idle
+        s0_commonHR := io.commonHR
+      }.elsewhen(s3_override) {
+        ghrStateReg := state1
+        s0_commonHR := s2_commonHR
+        stage2Ghr   := s1_commonHR
+        stage3Ghr   := io.commonHR
+      }
+    }
+  }
+  io.toCommonHR := (ghrStateReg === idle) || (ghrStateReg === state3 && s0_fire)
 
   /*
    *  predict pipeline stage 0

@@ -28,6 +28,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
     val stageCtrl:   StageCtrl        = Input(new StageCtrl)
     val update:      CommonHRUpdate   = Input(new CommonHRUpdate)
     val redirect:    CommonHRRedirect = Input(new CommonHRRedirect)
+    val fromSc:      Bool             = Input(Bool())
     val s0_commonHR: CommonHREntry    = Output(new CommonHREntry)
     val commonHR:    CommonHREntry    = Output(new CommonHREntry)
   }
@@ -72,7 +73,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   private val s3_numHit   = PopCount(s3_hitMask)
   private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  s3_commonHR.valid := !s3_override && s3_fire
+  s3_commonHR.valid := s3_fire
   s3_commonHR.ghr   := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
   s3_commonHR.bw := getNewHR(
     commonHR.bw,
@@ -122,7 +123,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   commonHRBuffer.io.enq.valid := s3_fire
   commonHRBuffer.io.enq.bits  := s3_commonHR
   commonHRBuffer.io.flush.get := r0_valid || s3_override
-  commonHRBuffer.io.deq.ready := s0_fire
+  commonHRBuffer.io.deq.ready := s0_fire && io.fromSc
 
   XSError(s3_fire && !commonHRBuffer.io.enq.ready, "CommonHR stall queue overflow!\n")
 

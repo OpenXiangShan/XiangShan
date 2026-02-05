@@ -485,6 +485,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.redirect.taken          := redirect.bits.taken
   commonHR.io.redirect.attribute      := redirect.bits.attribute
   commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
+  commonHR.io.fromSc                  := sc.io.toCommonHR
   private val s0_commonHR = commonHR.io.s0_commonHR
   dontTouch(s0_commonHR)
 
