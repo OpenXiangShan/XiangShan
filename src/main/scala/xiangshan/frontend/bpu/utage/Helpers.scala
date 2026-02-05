@@ -46,8 +46,7 @@ trait Helpers extends HasMicroTageParameters with HalfAlignHelper {
         concatBits(PCTagHashBitsForMediumHistory.map(tagPC(_)))
 
       case TAGEHistoryType.Long =>
-        val xorBits = PCTagHashXorPairsForLongHistory.map { case (i, j) => tagPC(i) ^ tagPC(j) }
-        concatBits(xorBits)
+        concatBits(PCTagHashBitsForLongHistory.map(tagPC(_)))
 
       case _ =>
         concatBits(PCTagHashBitsDefault.map(tagPC(_)))
