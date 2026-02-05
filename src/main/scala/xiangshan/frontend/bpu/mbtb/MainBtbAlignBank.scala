@@ -22,6 +22,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -41,6 +42,7 @@ class MainBtbAlignBank(
       class Resp extends Bundle {
         val predictions: Vec[Valid[Prediction]] = Vec(NumWay, Valid(new Prediction))
         val metas:       Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        val matrix:      CompareMatrix          = new CompareMatrix(NumWay)
       }
       // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
       val req: Req = Input(new Req)
@@ -135,6 +137,8 @@ class MainBtbAlignBank(
     internalBanks.map(_.io.read.resp.counters)
   )
 
+  private val s1_compareMatrix = CompareMatrix(VecInit(s1_rawEntries.map(_.position)))
+
   /* *** s2 ***
    * check entries hit
    * filter-out unneeded entries
@@ -147,6 +151,9 @@ class MainBtbAlignBank(
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
+
+  // TODO: optimize matrix storage to n * (n-1) / 2
+  private val s2_compareMatrix = RegEnable(s1_compareMatrix, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startPc)
   private val s2_tag    = getTag(s2_startPc)
@@ -175,6 +182,7 @@ class MainBtbAlignBank(
     meta.position  := Cat(s2_posHigherBits, e.position)
     meta.counter   := c
   }
+  r.resp.matrix := s2_compareMatrix
 
   // add an alias for hitMask for later use & debug purpose
   private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
