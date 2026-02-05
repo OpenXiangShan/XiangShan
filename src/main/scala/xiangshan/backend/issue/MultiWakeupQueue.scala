@@ -63,8 +63,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
     case (deq, i) => modificationFunc(deq)
   }))
   // for i2f in fp iq, donot need && !pipesValidVec.asUInt.orR, for fdiv, need !pipesValidVec.asUInt.orR
-  assert(!(io.enqAppend.valid && pipesValidVec.head), "enq wakeup queue lat is 1 and enqAppend valid is true")
-  val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.valid && !pipesValidVec.head))
+  assert(!(io.enqAppend.fire && pipesValidVec.head), "enq wakeup queue lat is 1 and enqAppend.fire is true")
+  val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.fire && !pipesValidVec.head))
   val allBitsVec = VecInit(pipesBitsVec :+ io.enqAppend.bits.uop)
   if (exuParam.issueBlockParam.needUncertainWakeupFromExu) {
     io.enqAppend.ready := Mux(io.enqAppend.valid, !pipesValidVec.asUInt.orR, true.B)
