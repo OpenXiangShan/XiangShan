@@ -10,5 +10,5 @@ jobs:
     with:
       test_branch: kunminghu-v3
       perf_report_dir: /nfs/home/cirunner/perf-report-nightly
-      benchmark_type: spec06-0.3c
+      benchmark_type: gcc12-spec06-0.3c
       servers: all
