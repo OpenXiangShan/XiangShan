@@ -133,6 +133,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
     (mode(i) < ModeM)
   )
+  val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
+  val canGetGpa =  (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
@@ -290,7 +292,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       need_gpa := false.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
-    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
+    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect && canGetGpa(i)) {
       maybe_need_gpa_not_allow_refill := true.B
       need_gpa_wire := true.B
       need_gpa := true.B
@@ -516,7 +518,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
     val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
-    val ptw_getGpa = req_need_gpa && hitVec(idx)
+    val ptw_getGpa = req_need_gpa && hitVec(idx) && canGetGpa(idx)
     val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(idx).vaddr)
 
     io.ptw.req(idx).valid := false.B;

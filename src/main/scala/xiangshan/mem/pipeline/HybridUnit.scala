@@ -277,6 +277,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.no_translate       := s0_hw_prf_select  // hw b.reqetch addr does not need to be translated
   io.tlb.req.bits.debug.pc           := s0_uop.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
+  io.tlb.req.bits.frm_mabuf          := DontCare
 
   // query DCache
   // for load
