@@ -287,6 +287,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         io.ctrlEntriesIn(j).dataValid && (isCboZero(io.dataEntriesIn(j).cboType) || !io.ctrlEntriesIn(j).isCbo))))
       val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j =>
         io.ctrlEntriesIn(j).allValid)))
+      val allocatedVec = WireInit(VecInit((0 until StoreQueueSize).map(j => io.ctrlEntriesIn(j).allocated)))
 
       /*================================================== Stage 0 ===================================================*/
       // Circular Queue Handling:
@@ -430,12 +431,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // select offset generate
       val s1ByteSelectOffset   = s1LoadStart - s1SelectDataEntry.byteStart
 
-      val s1HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt).orR
+      val s1HasAddrInvalid = ((s1AgeMaskLow | s1AgeMaskHigh) &
+        VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt & allocatedVec.asUInt).orR
 
       // find youngest addrInvalid store
-      val s1AddrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt
-      val s1AddrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt & s1StoreSetHitVec.asUInt &
-        VecInit(Seq.fill(StoreQueueSize)(!s1AddrInvalidLow.orR)).asUInt
+      val s1AddrInvalidLow     = s1AgeMaskLow & VecInit(addrValidVec.map(!_)).asUInt & allocatedVec.asUInt &
+        s1StoreSetHitVec.asUInt
+      val s1AddrInvalidHigh    = s1AgeMaskHigh & VecInit(addrValidVec.map(!_)).asUInt & allocatedVec.asUInt &
+        s1StoreSetHitVec.asUInt & VecInit(Seq.fill(StoreQueueSize)(!s1AddrInvalidLow.orR)).asUInt
 
       val (s1AddrInvLowOH, _)   = findYoungest(Reverse(s1AddrInvalidLow))
       val (s1AddrInvHighOH, _)  = findYoungest(Reverse(s1AddrInvalidHigh))
