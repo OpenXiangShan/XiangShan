@@ -58,6 +58,7 @@ case class YamlConfig(
   CHIIssue: Option[String],
   WFIClockGate: Option[Boolean],
   EnablePowerDown: Option[Boolean],
+  CHIAsyncFromDSU: Option[Boolean],
   XSTopPrefix: Option[String],
   EnableDFX: Option[Boolean],
   EnableSramCtl: Option[Boolean],
@@ -201,6 +202,11 @@ object YamlParser {
     yamlConfig.EnablePowerDown.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(EnablePowerDown = enable)
+      })
+    }
+    yamlConfig.CHIAsyncFromDSU.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(CHIAsyncFromDSU = enable)
       })
     }
     yamlConfig.XSTopPrefix.foreach { prefix =>
