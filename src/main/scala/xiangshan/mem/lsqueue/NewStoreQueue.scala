@@ -1989,7 +1989,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
 
   /*********************************************** perf event *********************************************************/
+  val entriesUtilization = PopCount(ctrlEntries.map(e => (e.addrValid || e.dataValid) && e.allocated))
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
+  XSPerfHistogram("entries_util", entriesUtilization, true.B, 0, StoreQueueSize, 1)
 //  val vecValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => allocated(i) && isVec(i))))
 //  QueuePerf(StoreQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.sqFull := !allowEnqueue
