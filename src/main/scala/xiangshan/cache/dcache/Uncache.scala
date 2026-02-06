@@ -64,9 +64,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
   val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
-
-  val resp_denied = Bool()
-  val resp_corrupt = Bool()
+  val resp_derr = Bool()
 
   /* NOTE: if it support the internal forward logic, here can uncomment */
   // val fwd_data = UInt(XLEN.W)
@@ -81,6 +79,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
     resp_nderr := false.B
+    resp_derr := false.B
     // fwd_data := 0.U
     // fwd_mask := 0.U
   }
@@ -101,9 +100,8 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     when(cmd === MemoryOpConstants.M_XRD) {
       data := x.data
     }
-    resp_nderr := x.denied || x.corrupt
-    resp_denied := x.denied
-    resp_corrupt := x.corrupt
+    resp_nderr := x.denied
+    resp_derr := x.corrupt && !x.denied
   }
 
   // def update(forwardData: UInt, forwardMask: UInt): Unit = {
@@ -121,14 +119,12 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     r.data := resp_fwd_data
     r.id := eid
     r.nderr := resp_nderr
-    r.denied := resp_denied
-    r.corrupt := resp_corrupt
     r.nc := nc
     r.is2lq := cmd === MemoryOpConstants.M_XRD
     r.miss := false.B
     r.replay := false.B
     r.tag_error := false.B
-    r.error := false.B
+    r.error := resp_derr
     r
   }
 }
@@ -180,7 +176,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val enableOutstanding = Input(Bool())
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
-  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  val forward = Vec(LoadPipelineWidth, Flipped(new UncacheForward))
   val wfi = Flipped(new WfiReqBundle)
   val busError = Output(new L1BusErrorUnitInfo())
 }
@@ -517,28 +513,32 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   f1_needDrain := f1_tagMismatchVec.asUInt.orR && !empty
 
   for ((forward, i) <- io.forward.zipWithIndex) {
-    val f0_fwdValid = forward.valid
+    val fn1_fwdValid = forward.s0Req.valid
+    val fn1_req = forward.s0Req.bits
+    val f0_fwdValid = RegNext(fn1_fwdValid)
+    val f0_req = RegEnable(fn1_req, fn1_fwdValid)
+    val f0_paddr = forward.s1Req.paddr
     val f1_fwdValid = RegNext(f0_fwdValid)
 
     /* f0 */
     // vaddr match
-    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
+    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, f0_req.vaddr))
     val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdOld())
     val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdNew())
     // ONLY for fast use to get better timing
     val f0_flyMaskFast = shiftMaskToHigh(
-      forward.vaddr,
+      f0_req.vaddr,
       Mux1H(f0_flyTagMatches, f0_fwdMaskCandidates)
     ).asTypeOf(Vec(VDataBytes, Bool()))
     val f0_idleMaskFast = shiftMaskToHigh(
-      forward.vaddr,
+      f0_req.vaddr,
       Mux1H(f0_idleTagMatches, f0_fwdMaskCandidates)
     ).asTypeOf(Vec(VDataBytes, Bool()))
 
     /* f1 */
     val f1_flyTagMatches = RegEnable(f0_flyTagMatches, f0_fwdValid)
     val f1_idleTagMatches = RegEnable(f0_idleTagMatches, f0_fwdValid)
-    val f1_fwdPAddr = RegEnable(forward.paddr, f0_fwdValid)
+    val f1_fwdPAddr = RegEnable(f0_paddr, f0_fwdValid)
     // select
     val f1_flyMask = Mux1H(f1_flyTagMatches, f1_fwdMaskCandidates)
     val f1_flyData = Mux1H(f1_flyTagMatches, f1_fwdDataCandidates)
@@ -558,22 +558,19 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
       f1_ptagMatches.asUInt,
       RegEnable(f0_vtagMatches.asUInt, f0_fwdValid),
-      RegEnable(forward.vaddr, f0_fwdValid),
-      RegEnable(forward.paddr, f0_fwdValid)
+      RegEnable(f0_req.vaddr, f0_fwdValid),
+      RegEnable(f0_paddr, f0_fwdValid)
     )
     // response
-    forward.addrInvalid := false.B // addr in ubuffer is always ready
-    forward.dataInvalid := false.B // data in ubuffer is always ready
-    forward.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
+    forward.s2Resp.bits.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
     for (j <- 0 until VDataBytes) {
-      forward.forwardMaskFast(j) := f0_flyMaskFast(j) || f0_idleMaskFast(j)
-
-      forward.forwardData(j) := f1_fwdData(j)
-      forward.forwardMask(j) := false.B
+      forward.s2Resp.bits.forwardData(j) := f1_fwdData(j)
+      forward.s2Resp.bits.forwardMask(j) := false.B
       when(f1_fwdMask(j) && f1_fwdValid) {
-        forward.forwardMask(j) := true.B
+        forward.s2Resp.bits.forwardMask(j) := true.B
       }
     }
+    forward.s2Resp.valid := f1_fwdValid
 
   }
 
@@ -610,7 +607,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && mem_acquire.fire)
-  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR)))
+  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
   val perfEvents = Seq(
@@ -619,7 +616,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_outstanding", uState =/= s_idle && mem_acquire.fire),
-    ("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR))),
+    ("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
   )
 

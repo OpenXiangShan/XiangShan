@@ -489,7 +489,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   vstd.bits.fuType := FuType.vstu.U
   vstd.bits.fuOpType := issueUop.fuOpType
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
-  vstd.bits.vecDebug := DontCare
+  vstd.bits.vecDebug.foreach(_ := DontCare)
 
   if(env.EnableDifftest){
     val usVaddrOffset   = LookupTree(issueEew, List(
@@ -499,8 +499,8 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
       "b11".U -> vaddr(2, 0)
     ))
 
-    vstd.bits.vecDebug.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
-    vstd.bits.vecDebug.offset := usVaddrOffset
+    vstd.bits.vecDebug.foreach(_.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U))// for unaligned store event
+    vstd.bits.vecDebug.foreach(_.offset := usVaddrOffset)
   }
 
 }

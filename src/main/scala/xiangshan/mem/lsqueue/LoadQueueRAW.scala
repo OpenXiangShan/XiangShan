@@ -40,10 +40,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val redirect = Flipped(ValidIO(new Redirect))
 
     // violation query
-    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
 
     // from store unit s1
-    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO)))
 
     // global rollback flush
     val rollback = Vec(StorePipelineWidth,Output(Valid(new Redirect)))
@@ -76,8 +76,19 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Mask        : data mask
   //  Datavalid   : data valid
   //
+  class UopEntry(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr()
+    val sqIdx = new SqPtr()
+    val isRVC = Bool()
+    val ftqPtr = new FtqPtr()
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    // only fo
+    val pc = UInt(VAddrBits.W)
+    val debugInfo = new PerfDebugInfo
+  }
+  private def isOlder(left: UopEntry, right: UopEntry): Bool = isBefore(left.robIdx, right.robIdx)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
+  val uop = Reg(Vec(LoadQueueRAWSize, new UopEntry))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PartialPAddrWidth.W),
     numEntries = LoadQueueRAWSize,
@@ -117,9 +128,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
+  val cancelEnqueue = io.query.map(_.req.bits.robIdx.needFlush(io.redirect))
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
-  val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => {
+  val hasAddrInvalidStore = io.query.map(_.req.bits.sqIdx).map(sqIdx => {
     Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
@@ -163,16 +174,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       maskModule.io.wdata(w) := enq.bits.mask
 
       //  Fill info
-      uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      uop(enqIndex).robIdx := enq.bits.robIdx
+      uop(enqIndex).sqIdx := enq.bits.sqIdx
+      uop(enqIndex).isRVC := enq.bits.isRVC
+      uop(enqIndex).ftqPtr := enq.bits.ftqPtr
+      uop(enqIndex).ftqOffset := enq.bits.ftqOffset
+      uop(enqIndex).pc := enq.bits.pc
+      uop(enqIndex).debugInfo := enq.bits.debugInfo
+      datavalid(enqIndex) := enq.bits.dataValid
     }
-    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    val debug_robIdx = enq.bits.robIdx.asUInt
     XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
-  }
-
-  for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
-    query.valid := RegNext(io.query(w).req.valid)
-    query.bits.rep_frm_fetch := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate
@@ -194,18 +206,27 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   // if need replay deallocate entry
-  val lastCanAccept = GatedValidRegNext(acceptedVec)
-  val lastAllocIndex = GatedRegNext(enqIndexVec)
+  val lastCanAccept = RegNext(acceptedVec)
+  val lastAllocIndex = enqIndexVec.zip(acceptedVec).map(x => RegEnable(x._1, x._2))
+  val lastLastCanAccept = RegNext(lastCanAccept)
+  val lastLastAllocIndex = lastAllocIndex.zip(lastCanAccept).map(x => RegEnable(x._1, x._2))
   val willRevoke = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
-  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && lastCanAccept(w)
-    val revokeIndex = lastAllocIndex(w)
+  for ((query, w) <- io.query.zipWithIndex) {
+    val revokeLastCycle = query.revokeLastCycle && lastCanAccept(w)
+    val revokeLastLastCycle = query.revokeLastLastCycle && lastLastCanAccept(w)
+    val revokeLastIndex = lastAllocIndex(w)
+    val revokeLastLastIndex = lastLastAllocIndex(w)
 
-    when (allocated(revokeIndex) && revokeValid) {
-      allocated(revokeIndex) := false.B
-      freeMaskVec(revokeIndex) := true.B
-      willRevoke(revokeIndex) := true.B
+    when (allocated(revokeLastIndex) && revokeLastCycle) {
+      allocated(revokeLastIndex) := false.B
+      freeMaskVec(revokeLastIndex) := true.B
+      willRevoke(revokeLastIndex) := true.B
+    }
+    when (allocated(revokeLastLastIndex) && revokeLastLastCycle) {
+      allocated(revokeLastLastIndex) := false.B
+      freeMaskVec(revokeLastLastIndex) := true.B
+      willRevoke(revokeLastLastIndex) := true.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -248,7 +269,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val lgSelectGroupSize = log2Ceil(SelectGroupSize)
   val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
 
-  def selectPartialOldest[T <: XSBundleWithMicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+  // TODO: unify selectOldest
+  def selectPartialOldest[T <: UopEntry](
+    valid: Seq[Bool], bits: Seq[T], isOlderFu: (T, T) => Bool
+    ): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     if (valid.length == 0 || valid.length == 1) {
       (valid, bits)
@@ -258,16 +282,20 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
         res(i).valid := valid(i)
         res(i).bits := bits(i)
       }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      val oldest = Mux(
+        valid(0) && valid(1),
+        Mux(isOlderFu(bits(0), bits(1)), res(0), res(1)),
+        Mux(valid(0) && !valid(1), res(0), res(1))
+      )
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
-      val left = selectPartialOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectPartialOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectPartialOldest(left._1 ++ right._1, left._2 ++ right._2)
+      val left = selectPartialOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), isOlderFu)
+      val right = selectPartialOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), isOlderFu)
+      selectPartialOldest(left._1 ++ right._1, left._2 ++ right._2, isOlderFu)
     }
   }
 
-  def selectOldest[T <: XSBundleWithMicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+  def selectOldest[T <: UopEntry](valid: Seq[Bool], bits: Seq[T], isOlderFu: (T, T) => Bool): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
@@ -276,18 +304,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val selectBitsGroups = bits.grouped(SelectGroupSize).toList
     // select logic
     if (valid.length <= SelectGroupSize) {
-      val (selValid, selBits) = selectPartialOldest(valid, bits)
+      val (selValid, selBits) = selectPartialOldest(valid, bits, isOlderFu)
       val selValidNext = GatedValidRegNext(selValid(0))
       val selBitsNext = RegEnable(selBits(0), selValid(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
+      (Seq(selValidNext && !selBitsNext.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
-        val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
+        val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g), isOlderFu)
         val selValidNext = RegNext(selValid(0))
         val selBitsNext = RegEnable(selBits(0), selValid(0))
-        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
+        (selValidNext && !selBitsNext.robIdx.needFlush(io.redirect) && !selBitsNext.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
       })
-      selectOldest(select.map(_._1), select.map(_._2))
+      selectOldest(select.map(_._1), select.map(_._2), isOlderFu)
     }
   }
 
@@ -306,24 +334,20 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
 
-    val lqViolationSelUopExts = uop.map(uop => {
-      val wrapper = Wire(new XSBundleWithMicroOp)
-      wrapper.uop := uop
-      wrapper
-    })
-
     // select logic
-    val lqSelect: (Seq[Bool], Seq[XSBundleWithMicroOp]) = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
+    val lqSelect: (Seq[Bool], Seq[UopEntry]) = selectOldest(lqViolationSelVec, uop, isOlder)
 
     // select one inst
     val lqViolation = lqSelect._1(0)
-    val lqViolationUop = lqSelect._2(0).uop
+    val lqViolationUop = lqSelect._2(0)
 
-    XSDebug(
-      lqViolation,
-      "need rollback (ld wb before store) pc %x robidx %d target %x\n",
-      storeIn(i).bits.uop.pc, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
-    )
+    if(debugEn) {
+      XSDebug(
+        lqViolation,
+        "need rollback (ld wb before store) pc %x robidx %d target %x\n",
+        storeIn(i).bits.uop.pc.get, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
+      )
+    }
 
     (lqViolation, lqViolationUop)
   }
@@ -331,19 +355,19 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // select rollback (part1) and generate rollback request
   // rollback check
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
-  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
+  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new UopEntry)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(FetchBlockInstOffsetWidth.W)))
   val stIsRVC = Wire(Vec(StorePipelineWidth, Bool()))
   val stIsFirstIssue = Wire(Vec(StorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.tlbMiss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
     stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
     stIsRVC(w) := DelayNWithValid(storeIn(w).bits.uop.isRVC, storeIn(w).valid, TotalSelectCycles)._2
-    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
+    stIsFirstIssue(w) := DelayNWithValid(storeIn(w).bits.uop.isFirstIssue, storeIn(w).valid, TotalSelectCycles)._2 // for perf
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -365,7 +389,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
     redirect.bits.target      := rollbackLqWb(i).bits.pc
-    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.perfDebugInfo.runahead_checkpoint_id
+    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
     redirect
   })
   io.rollback := allRedirect

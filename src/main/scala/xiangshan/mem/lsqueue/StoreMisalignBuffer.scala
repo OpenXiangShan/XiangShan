@@ -391,9 +391,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         }
 
         is (SH) {
-          lowAddrStore.uop.fuOpType := SB
+          lowAddrStore.uop.fuOpType := SH
           lowAddrStore.vaddr := req.vaddr
-          lowAddrStore.mask  := 0x1.U << lowAddrStore.vaddr(3, 0)
+          lowAddrStore.mask  := 0x3.U
           lowResultWidth    := BYTE1
 
           highAddrStore.uop.fuOpType := SB
@@ -410,8 +410,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b01".U) {
               lowAddrStore.uop.fuOpType := SW
-              lowAddrStore.vaddr := req.vaddr - 1.U
-              lowAddrStore.mask  := 0xf.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xf.U
               lowResultWidth    := BYTE3
 
               highAddrStore.uop.fuOpType := SB
@@ -421,9 +421,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
             }
 
             is ("b10".U) {
-              lowAddrStore.uop.fuOpType := SH
+              lowAddrStore.uop.fuOpType := SW
               lowAddrStore.vaddr := req.vaddr
-              lowAddrStore.mask  := 0x3.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.mask  := 0xf.U
               lowResultWidth    := BYTE2
 
               highAddrStore.uop.fuOpType := SH
@@ -433,9 +433,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
             }
 
             is ("b11".U) {
-              lowAddrStore.uop.fuOpType := SB
+              lowAddrStore.uop.fuOpType := SW
               lowAddrStore.vaddr := req.vaddr
-              lowAddrStore.mask  := 0x1.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.mask  := 0xf.U
               lowResultWidth    := BYTE1
 
               highAddrStore.uop.fuOpType := SW
@@ -454,8 +454,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b001".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 1.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE7
 
               highAddrStore.uop.fuOpType := SB
@@ -466,8 +466,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b010".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 2.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE6
 
               highAddrStore.uop.fuOpType := SH
@@ -478,8 +478,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b011".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 3.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE5
 
               highAddrStore.uop.fuOpType := SW
@@ -489,9 +489,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
             }
 
             is ("b100".U) {
-              lowAddrStore.uop.fuOpType := SW
+              lowAddrStore.uop.fuOpType := SD
               lowAddrStore.vaddr := req.vaddr
-              lowAddrStore.mask  := 0xf.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE4
 
               highAddrStore.uop.fuOpType := SW
@@ -502,8 +502,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b101".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 5.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE3
 
               highAddrStore.uop.fuOpType := SD
@@ -514,8 +514,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b110".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 6.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE2
 
               highAddrStore.uop.fuOpType := SD
@@ -526,8 +526,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
             is ("b111".U) {
               lowAddrStore.uop.fuOpType := SD
-              lowAddrStore.vaddr := req.vaddr - 7.U
-              lowAddrStore.mask  := 0xff.U << lowAddrStore.vaddr(3, 0)
+              lowAddrStore.vaddr := req.vaddr
+              lowAddrStore.mask  := 0xff.U
               lowResultWidth    := BYTE1
 
               highAddrStore.uop.fuOpType := SD
@@ -631,8 +631,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.mmio              := globalMMIO
       wb.bits.exceptionVec      := ExceptionNO.selectByFu(exceptionVec, VstuCfg)
       wb.bits.hasException      := globalException
-      wb.bits.usSecondInv       := req.usSecondInv
-      wb.bits.vecFeedback       := true.B
       wb.bits.elemIdx           := req.elemIdx
       wb.bits.alignedType       := req.alignedType
       wb.bits.mask              := req.mask

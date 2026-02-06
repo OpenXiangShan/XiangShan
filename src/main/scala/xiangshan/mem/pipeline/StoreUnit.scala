@@ -50,8 +50,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val tlb             = new TlbRequestIO()
     val dcache          = new DCacheStoreIO
     val pmp             = Flipped(new PMPRespBundle())
-    val lsq             = ValidIO(new LsPipelineBundle)
-    val lsq_replenish   = Output(new LsPipelineBundle())
+    val toLsq           = ValidIO(new StoreAddrIO)
+    val toLsqRe         = Output(new StoreAddrIO) // write some exception info and memory type generate in s2
+    // ready indicate unaligned queue reject this unaligned request;
+    val toStoreUnalignQueue = DecoupledIO(new UnalignQueueIO)
     val feedback_slow   = ValidIO(new RSFeedback)
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
@@ -59,7 +61,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
-    val stld_nuke_query = Valid(new StoreNukeQueryBundle)
+    val stld_nuke_query = Valid(new StoreNukeQueryReq)
     val stout           = DecoupledIO(new ExuOutput(param)) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
@@ -75,6 +77,9 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val sqCommitPtr    = Input(new SqPtr)
     val sqCommitUopIdx = Input(UopIdx())
     val sqCommitRobIdx = Input(new RobPtr)
+
+    // exception, last stage signal
+    val exceptionInfo  = ValidIO(new MemExceptionInfo)
 
     val s0_s1_s2_valid = Output(Bool())
   })
@@ -130,7 +135,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   // val s0_isLastElem   = s0_vecstin.isLastElem
   val s0_secondInv    = s0_vecstin.usSecondInv
   val s0_elemIdx      = s0_vecstin.elemIdx
-  val s0_alignedType  = s0_vecstin.alignedType
+  val s0_alignedType  = Mux(s0_use_flow_vec, s0_vecstin.alignedType, Cat(0.U, s0_uop.fuOpType(1, 0)))
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
@@ -171,16 +176,17 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   XSError(s0_use_flow_vec && s0_vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
 
   val s0_isMisalign = Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
-  val s0_addr_low = s0_vaddr(4, 0)
+  val s0_addr_low = s0_vaddr(12, 0)
   val s0_addr_Up_low = LookupTree(s0_alignType, List(
     "b00".U -> 0.U,
     "b01".U -> 1.U,
     "b10".U -> 3.U,
     "b11".U -> 7.U
   )) + s0_addr_low
+  val s0_rs_corss4KPage = s0_addr_Up_low(12) =/= s0_addr_low(12)
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
+  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss4KPage && !s0_use_flow_ma) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -247,7 +253,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
+  s0_out.mask         := s0_mask
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
@@ -311,6 +317,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   //For example: `StoreQueue` is exceptionBuffer
   val s1_frm_mab_vec = RegEnable(s0_use_flow_ma && io.misalign_stin.bits.isvec, false.B, s0_fire)
   // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
+  val s1_cross4KPage = RegEnable(s0_rs_corss4KPage, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec && !s1_frm_mabuf)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -406,11 +413,39 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   // scalar store and scalar load nuke check, and also other purposes
   //A 128-bit aligned unaligned memory access requires changing the unaligned flag bit in sq
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
-  io.lsq.bits      := s1_out
-  io.lsq.bits.miss := s1_tlb_miss
-  io.lsq.bits.isvec := s1_out.isvec || s1_frm_mab_vec
-  io.lsq.bits.updateAddrValid := (!s1_in.isMisalign || s1_in.misalignWith16Byte) && (!s1_frm_mabuf || s1_in.isFinalSplit) || s1_exception
+  //TODO: FIX this connect!!
+  io.toLsq.valid          := s1_valid && !s1_in.isHWPrefetch
+  io.toLsq.bits.paddr     := s1_out.paddr
+  io.toLsq.bits.vaddr     := s1_out.vaddr
+  io.toLsq.bits.cacheMiss := false.B // will be set in stage 2
+  io.toLsq.bits.tlbMiss   := s1_out.tlbMiss
+  io.toLsq.bits.wlineflag := s1_out.wlineflag
+  io.toLsq.bits.mask      := s1_out.mask
+  io.toLsq.bits.size      := s1_out.alignedType
+  io.toLsq.bits.uop.sqIdx     := s1_out.uop.sqIdx
+  io.toLsq.bits.uop.robIdx    := s1_out.uop.robIdx
+  io.toLsq.bits.uop.fuOpType  := s1_out.uop.fuOpType
+  io.toLsq.bits.uop.ftqPtr    := s1_out.uop.ftqPtr
+  io.toLsq.bits.uop.ftqOffset := s1_out.uop.ftqOffset
+  io.toLsq.bits.uop.isRVC     := s1_out.uop.isRVC
+  io.toLsq.bits.uop.isFirstIssue := s1_out.isFirstIssue
+  io.toLsq.bits.nc            := DontCare // will be set in stage 2
+  io.toLsq.bits.mmio          := DontCare // will be set in stage 2
+  io.toLsq.bits.memBackTypeMM := DontCare // will be set in stage 2
+  io.toLsq.bits.hasException  := DontCare // will be set in stage 2
+  io.toLsq.bits.af            := DontCare // will be set in stage 2
+  io.toLsq.bits.uop.pc.foreach(_ := s1_out.uop.pc)
+  io.toLsq.bits.uop.debugInfo.foreach(_  := s1_out.uop.perfDebugInfo)
+  io.toLsq.bits.uop.debug_seqNum.foreach(_ := s1_out.uop.debug_seqNum)
+
+
+  //TODO: `isLastRequest` means it's last request to write to storeQueue. if is normal request, it will be true,
+  // if it was unalign splited, first request will be false, second will be true.
+  io.toLsq.bits.isLastRequest       := s1_frm_mabuf && s1_out.isFinalSplit || !s1_cross4KPage && !s1_frm_mabuf //TODO: support cross page unalign feature!
+  io.toLsq.bits.cross4KPage         := s1_frm_mabuf //TODO: support cross page unalign feature!
+  io.toLsq.bits.unalignWithin16Byte := s1_out.misalignWith16Byte && !s1_frm_mabuf
+  io.toLsq.bits.isUnalign           := s1_out.isMisalign || s1_frm_mabuf
+
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_out.nc || s1_in.uop.robIdx.needFlush(io.redirect))
   io.dcache.s1_paddr := s1_paddr
@@ -422,10 +457,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     s1_out.uop.perfDebugInfo.tlbRespTime := GTimer()
   }
   val s1_mis_align = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isCbo && !s1_out.nc && !s1_out.mmio &&
-                      GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
+                      GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && s1_cross4KPage &&
                       !s1_trigger_breakpoint && !s1_trigger_debug_mode
   val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
-    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
+    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && s1_cross4KPage && // only cross page unalign need enter misalignBuffer.
     GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
   io.misalign_enq.req.valid := s1_toMisalignBufferValid && !s1_misalignNeedReplay
   io.misalign_enq.req.bits.fromLsPipelineBundle(s1_in)
@@ -447,6 +482,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_tlb_hit = RegEnable(s1_tlb_hit, s1_fire)
+  val s2_cross4KPage = RegEnable(s1_cross4KPage, s1_fire)
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -497,8 +533,14 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire)
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
+
   val s2_misalignNeedReplay = RegEnable(s1_toMisalignBufferValid && (!io.misalign_enq.req.ready || s1_misalignNeedReplay), false.B, s1_fire)
   val s2_misalignBufferNack = !io.misalign_enq.revoke && s2_misalignNeedReplay
+  //TODO: when implement new Unalign, it need to assign, cross page second request paddr.
+  io.toStoreUnalignQueue.valid              := s2_frm_mabuf && s2_out.isFinalSplit && s2_valid//TODO: support cross page unalign feature!
+  io.toStoreUnalignQueue.bits.sqIdx         := s2_out.uop.sqIdx
+  io.toStoreUnalignQueue.bits.paddr         := s2_out.paddr
+  io.toStoreUnalignQueue.bits.robIdx        := s2_out.uop.robIdx
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -519,18 +561,27 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
 
   val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
 
-  // mmio and exception
-  io.lsq_replenish := s2_out
-  io.lsq_replenish.af := s2_out.af && s2_valid && !s2_kill
-  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
-
+  // mmio and exception TODO:
+  io.toLsqRe.memBackTypeMM   := s2_out.memBackTypeMM
+  io.toLsqRe.isLastRequest   := s2_frm_mabuf && s2_out.isFinalSplit || !s2_cross4KPage && !s2_frm_mabuf //TODO: support cross page unalign feature!
+  io.toLsqRe.af              := s2_out.af && s2_valid && !s2_kill
+  io.toLsqRe.mmio            := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  io.toLsqRe.nc              := s2_out.nc
   // prefetch related
-  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
-  io.lsq_replenish.updateAddrValid := !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) || s2_exception
-  io.lsq_replenish.isvec := s2_out.isvec || s2_frm_mab_vec
-
-  io.lsq_replenish.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
+  io.toLsqRe.cacheMiss       := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+  // when support new unalign, hasException need to consider second request.
+  io.toLsqRe.hasException    := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
     TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill
+  io.toLsqRe.paddr               := DontCare
+  io.toLsqRe.vaddr               := DontCare
+  io.toLsqRe.tlbMiss             := DontCare
+  io.toLsqRe.wlineflag           := DontCare
+  io.toLsqRe.mask                := DontCare
+  io.toLsqRe.size                := DontCare
+  io.toLsqRe.uop                 := DontCare
+  io.toLsqRe.cross4KPage         := false.B
+  io.toLsqRe.unalignWithin16Byte := s2_out.misalignWith16Byte && !s2_frm_mabuf
+  io.toLsqRe.isUnalign          := s2_out.isMisalign || s2_frm_mabuf
 
 
   // RegNext prefetch train for better timing
@@ -631,6 +682,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
       sx_in(i).mask        := s3_in.mask
       sx_in(i).vaddr       := s3_in.fullva
       sx_in(i).vaNeedExt   := s3_in.vaNeedExt
+      sx_in(i).isHyper     := s3_in.isHyper
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
@@ -673,6 +725,19 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.stout.bits := sx_last_in.output
   io.stout.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg))
 
+  // exceptionInfo Gen
+  io.exceptionInfo.valid             := sx_last_valid && !sx_last_in_vec // normal writeback, not vector writeback
+  io.exceptionInfo.bits.robIdx       := sx_last_in.output.robIdx
+  io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg)
+  io.exceptionInfo.bits.vaddr        := sx_last_in.vaddr
+  io.exceptionInfo.bits.gpaddr       := sx_last_in.gpaddr
+  io.exceptionInfo.bits.isForVSnonLeafPTE := sx_last_in.isForVSnonLeafPTE
+  io.exceptionInfo.bits.vaNeedExt    := sx_last_in.vaNeedExt
+  io.exceptionInfo.bits.isHyper      := sx_last_in.isHyper
+  io.exceptionInfo.bits.uopIdx       := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
+  io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
+  io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
+
   io.vecstout.valid := sx_last_valid && sx_last_in_vec
   // TODO: implement it!
   io.vecstout.bits.mBIndex := sx_last_in.mbIndex
@@ -685,8 +750,6 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, VstuCfg)
   io.vecstout.bits.hasException := sx_last_in.hasException
-  io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
-  io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
   io.vecstout.bits.alignedType := sx_last_in.alignedType
   io.vecstout.bits.mask        := sx_last_in.mask
