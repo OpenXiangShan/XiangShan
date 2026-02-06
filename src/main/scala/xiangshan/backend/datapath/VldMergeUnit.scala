@@ -22,9 +22,9 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val wbFire = !io.writeback.bits.toRob.bits.robIdx.needFlush(io.flush) && io.writeback.fire
   wbReg.bits := Mux(io.writeback.fire, io.writeback.bits, wbReg.bits)
   wbReg.valid := wbFire
-  mgu.io.in.vd := wbReg.bits.toVecRf.map(_.bits).getOrElse(0.U(params.destDataBitsMax.W))
+  mgu.io.in.vd := wbReg.bits.toVecRf.map(_.bits.data).getOrElse(0.U(params.destDataBitsMax.W))
   // oldVd is contained in data and is already masked with new data
-  mgu.io.in.oldVd := wbReg.bits.toVecRf.map(_.bits).getOrElse(0.U(params.destDataBitsMax.W))
+  mgu.io.in.oldVd := wbReg.bits.toVecRf.map(_.bits.data).getOrElse(0.U(params.destDataBitsMax.W))
   mgu.io.in.mask := Mux(wbReg.bits.toRob.bits.vls.get.vpu.vm, Fill(VLEN, 1.U(1.W)), wbReg.bits.toRob.bits.vls.get.vpu.vmask)
   mgu.io.in.info.valid := wbReg.valid
   mgu.io.in.info.ta := wbReg.bits.toRob.bits.vls.get.isMasked || wbReg.bits.toRob.bits.vls.get.vpu.vta
@@ -40,13 +40,13 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   mgu.io.in.isIndexedVls := wbReg.bits.toRob.bits.vls.get.isIndexed
 
   //For the uop whose vl is modified by first-only-fault, the data written back can be used directly
-  vdAfterMerge := Mux(wbReg.bits.toVlRf.map(_.valid).getOrElse(false.B), wbReg.bits.toVecRf.map(_.bits).getOrElse(0.U(params.destDataBitsMax.W)), mgu.io.out.vd)
+  vdAfterMerge := Mux(wbReg.valid && wbReg.bits.toVlRf.map(_.valid).getOrElse(false.B), wbReg.bits.toVecRf.map(_.bits.data).getOrElse(0.U(params.destDataBitsMax.W)), mgu.io.out.vd)
 
   io.writebackAfterMerge.valid := wbReg.valid
   io.writebackAfterMerge.bits := wbReg.bits
-  io.writebackAfterMerge.bits.toVecRf.foreach(_.valid := wbReg.bits.toVecRf.map(_.valid).getOrElse(false.B))
-  io.writebackAfterMerge.bits.toV0Rf.foreach(_.valid := wbReg.bits.toV0Rf.map(_.valid).getOrElse(false.B))
-  io.writebackAfterMerge.bits.toVecRf.foreach(_.bits := vdAfterMerge)
+  io.writebackAfterMerge.bits.toVecRf.foreach(_.valid := wbReg.valid && wbReg.bits.toVecRf.map(_.valid).getOrElse(false.B))
+  io.writebackAfterMerge.bits.toV0Rf.foreach(_.valid := wbReg.valid && wbReg.bits.toV0Rf.map(_.valid).getOrElse(false.B))
+  io.writebackAfterMerge.bits.toVecRf.foreach(_.bits.data := vdAfterMerge)
 }
 
 class VldMergeUnitIO(param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {

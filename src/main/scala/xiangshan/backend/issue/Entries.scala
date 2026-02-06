@@ -551,9 +551,9 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val subDeqRequest       = OptionWrapper(params.deqFuSame, Vec(params.numDeq, Input(UInt(params.numEntries.W))))
   val subDeqSelOH         = OptionWrapper(params.deqFuSame, Vec(params.numDeq, Input(UInt(params.numEntries.W))))
   // wakeup
-  val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+  val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.inVfSchd) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val wakeUpFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+  val wakeUpFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.inVfSchd) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
   val wakeUpFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlFromIntIsZero     = Input(Bool())
   val vlFromIntIsVlmax    = Input(Bool())

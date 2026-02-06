@@ -191,6 +191,18 @@ case class FuConfig (
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu
+  
+  def isIntWenFp: Boolean = fuType == FuType.i2f || fuType == FuType.i2v
+
+  def isVecWenFp: Boolean = fuType == FuType.vmove
+
+  def isFpWenInt: Boolean = fuType == FuType.fcvt || fuType == FuType.fcmp
+
+  def isVecWenInt: Boolean = fuType == FuType.vipu || fuType == FuType.vsetfwf || fuType == FuType.vmove
+
+  def isIntWenVec: Boolean = fuType == FuType.i2v
+
+  def isFpWenVec: Boolean = fuType == FuType.f2v
 
   def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || isVecMem
 
@@ -283,7 +295,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0, extraValue = 4),
     destDataBits = 128,
     srcDataBits = Some(64),
     immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
@@ -294,14 +306,13 @@ object FuConfig {
     FuType.f2v,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("f2v")),
     srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
+      Seq(FpData(), FpData(), FpData()),
     ),
     piped = true,
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0, extraValue = 4),
     destDataBits = 128,
     srcDataBits = Some(64),
   )
@@ -626,7 +637,7 @@ object FuConfig {
     writeIntRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(2),
+    latency = CertainLatency(2, extraValue = 1),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
@@ -663,7 +674,6 @@ object FuConfig {
     piped = true,
     writeVecRf = true,
     writeV0Rf = true,
-    writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
     vlWakeUp = true,

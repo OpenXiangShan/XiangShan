@@ -106,7 +106,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val flush                 = Flipped(ValidIO(new Redirect))
     val enq                   = Flipped(ValidIO(new EntryBundle))
     //wakeup
-    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.inVfSchd) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     // vl
     val vlFromIntIsZero       = Input(Bool())
@@ -243,8 +243,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
       if (params.readVecRf) {
         bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
-        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
-        bundle.bits.wakeUpVlFromIQ((status.srcStatusVl.get.psrc, SrcType.vp))
+        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3))
       }
       else
         bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
@@ -256,8 +255,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       (VecInit(
         if (params.readVecRf) {
           bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
-          bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
-          bundle.bits.wakeUpVlFromIQ((status.srcStatusVl.get.psrc, SrcType.vp))
+          bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3))
         }
         else {
           bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
@@ -422,7 +420,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     commonOut.valid                                   := validReg
     commonOut.issued                                  := entryReg.status.issued
-    commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
+    commonOut.canIssue                                := (if (isComp && !params.readVlRf) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
     commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
@@ -542,7 +540,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EnqDelayInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //wakeup
-    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+    val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = if (params.inVfSchd) (Flipped(params.genVfWBWakeUpSinkValidBundle)) else (Flipped(params.genWBWakeUpSinkValidBundle))
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     //cancel
     val srcLoadDependency     = Input(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
@@ -580,8 +578,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
         if (params.readVecRf) {
           x.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
-          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
-          x.bits.wakeUpVlFromIQ((status.srcStatusVl.get.psrc, SrcType.vp))
+          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3))
         }
         else
           x.bits.wakeUpFromIQ(psrcSrcTypeVec)
