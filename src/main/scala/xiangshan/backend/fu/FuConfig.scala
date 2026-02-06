@@ -306,8 +306,7 @@ object FuConfig {
     FuType.f2v,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("f2v")),
     srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
+      Seq(FpData(), FpData(), FpData()),
     ),
     piped = true,
     writeFpRf = true,

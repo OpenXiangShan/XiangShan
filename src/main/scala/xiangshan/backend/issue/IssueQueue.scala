@@ -822,8 +822,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.rfWen, deqBeforeDly(i).bits.rfWen.get))
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.fpWen, deqBeforeDly(i).bits.fpWen.get))
             wakeUpQueue.io.enq.bits.uop.vecWen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.vecWen, deqBeforeDly(i).bits.vecWen.get))
-            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.v0Wen, deqBeforeDly(i).bits.v0Wen.get))
-            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.vlWen, deqBeforeDly(i).bits.vlWen.get))
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(x => x := 0.U)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := 0.U)
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(wakeupFromExu.valid, wakeupFromExu.bits.pdest, deqBeforeDly(i).bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(wakeupFromExu.valid, FuType.div.U, deqBeforeDly(i).bits.fuType)
             wakeUpQueue.io.enq.bits.lat := Mux(wakeupFromExu.valid, 0.U, getDeqLat(i, deqBeforeDly(i).bits.fuType))
@@ -839,8 +839,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.rfWen.get, wakeupFromExu.bits.rfWen))
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.fpWen.get, wakeupFromExu.bits.fpWen))
             wakeUpQueue.io.enq.bits.uop.vecWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.vecWen.get, wakeupFromExu.bits.vecWen))
-            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.v0Wen.get, wakeupFromExu.bits.v0Wen))
-            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.vlWen.get, wakeupFromExu.bits.vlWen))
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(x => x := 0.U)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := 0.U)
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.pdest, wakeupFromExu.bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.fuType, FuType.fDivSqrt.U)
             wakeUpQueue.io.enq.bits.lat := Mux(deqBeforeDly(i).valid, getDeqLat(i, deqBeforeDly(i).bits.fuType), 0.U)
@@ -856,8 +856,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach( x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.rfWen.get,  wakeupFromExu.bits.rfWen))
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach( x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.fpWen.get,  wakeupFromExu.bits.fpWen))
             wakeUpQueue.io.enq.bits.uop.vecWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.vecWen.get, wakeupFromExu.bits.vecWen))
-            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach( x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.v0Wen.get,  wakeupFromExu.bits.v0Wen))
-            wakeUpQueue.io.enq.bits.uop.vlWen.foreach( x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.vlWen.get,  wakeupFromExu.bits.vlWen))
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach( x => x := 0.U)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach( x => x := 0.U)
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.pdest, wakeupFromExu.bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.fuType, FuType.vidiv.U) // FuType.vfdiv.U
             wakeUpQueue.io.enq.bits.lat := Mux(deqBeforeDly(i).valid, getDeqLat(i, deqBeforeDly(i).bits.fuType), 0.U)
@@ -875,14 +875,20 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           if (params.inIntSchd) {
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
             wakeUpQueue.io.enq.bits.uop.vecWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(_ := false.B)
           }
           else if (params.inFpSchd) {
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach(_ := false.B)
             wakeUpQueue.io.enq.bits.uop.vecWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(_ := false.B)
           }
           else if (params.inVfSchd) {
             wakeUpQueue.io.enq.bits.uop.rfWen.foreach(_ := false.B)
             wakeUpQueue.io.enq.bits.uop.fpWen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.v0Wen.foreach(_ := false.B)
+            wakeUpQueue.io.enq.bits.uop.vlWen.foreach(_ := false.B)
           }
         }
         wakeUpQueue.io.enqAppend.valid := false.B

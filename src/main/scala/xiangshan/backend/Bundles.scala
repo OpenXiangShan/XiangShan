@@ -1628,8 +1628,6 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val params: ExeUnitParams,
   )(implicit p: Parameters) extends XSBundle {
     val intWen = Bool()
-    val fpWen  = Bool()
-    val vecWen = Bool()
     val data   = UInt(params.destDataBitsMax.W)
     val pdest  = UInt(params.wbPregIdxWidth.W)
   }
