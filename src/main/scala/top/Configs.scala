@@ -624,7 +624,7 @@ class WithCHI extends Config((_, _, _) => {
 // )
 
 class CHIConfig(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ new TLConfig(n)
     ++ new WithCHI
 )
