@@ -177,12 +177,14 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcLoadDependencyNext = Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
-  def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+  def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, og1Payload: Og1Payload, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet        = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
     val finalSuccess           = (if (params.needFeedBackSqIdx)
                                     status.issueTimer === (params.issueTimerMaxValue - 1).U && commonIn.issueResp.finalSuccess ||
-                                    status.issueTimer === params.issueTimerMaxValue.U && status.vecMem.get.sqIdx === commonIn.issueResp.sqIdx.get && commonIn.issueResp.finalSuccess
+                                    status.issueTimer === params.issueTimerMaxValue.U && og1Payload.sqIdx.get === commonIn.issueResp.sqIdx.get && commonIn.issueResp.finalSuccess
+                                  else if (params.isLdAddrIQ)
+                                    status.issueTimer === params.issueTimerMaxValue.U && og1Payload.lqIdx.get === commonIn.issueResp.lqIdx.get && commonIn.issueResp.finalSuccess
                                   else
                                     commonIn.issueResp.finalSuccess)
     common.deqSuccess         := status.issued && finalSuccess && !common.srcLoadCancelVec.asUInt.orR

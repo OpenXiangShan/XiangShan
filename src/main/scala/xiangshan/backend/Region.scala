@@ -471,8 +471,17 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         val toMemExuInput = bypassNetwork.io.toExus.int(firstMemExu + i)(j)
         val shouldLdCancel = LoadShouldCancel(toMemExuInput.bits.ctrl.loadDependency, io.ldCancel)
         toMemExuInput.ready := true.B
-        toMem(i)(j).valid := RegNext(toMemExuInput.valid && !(toMemExuInput.bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel))
+        val toMemValidAfterCancel = toMemExuInput.valid && !(toMemExuInput.bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel)
+        toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
+        if (toMem(i)(j).bits.params.hasLoadFu){
+          toMemExuInput.ready := toMem(i)(j).ready
+          val toMemValidReg = RegInit(Bool(), false.B)
+          toMemValidReg := toMemValidAfterCancel && (!toMemValidReg || toMem(i)(j).fire) ||
+                           toMemValidReg && !toMem(i)(j).fire && !toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last)
+          toMem(i)(j).valid := toMemValidReg
+          toMem(i)(j).bits := RegEnable(toMemExuInput.bits, toMemValidAfterCancel && (!toMem(i)(j).valid || toMem(i)(j).fire))
+        }
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
@@ -480,6 +489,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+        }
+        // for intRegion's loadUnit
+        if (thisIQ.io.snResp.nonEmpty) {
+          thisIQ.io.snResp.get(j).failed := false.B
+          thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
+          thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
+          thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
         }
       }
     }
