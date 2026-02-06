@@ -480,17 +480,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 //      io.out(i).bits.imm := Cat(io.in(i).bits.imm(io.in(i).bits.imm.getWidth - 1, 5), 0.U(5.W))
 //    }
 
-    // dirty code for lui+addi(w) fusion
-    if (i < RenameWidth - 1) {
-      val fused_lui32 = io.in(i).bits.selImm === SelImm.IMM_LUI32 && io.in(i).bits.fuType === FuType.alu.U
-      when (fused_lui32) {
-        val lui_imm = io.in(i).bits.imm(19, 0)
-        val add_imm = io.in(i + 1).bits.imm(11, 0)
-        require(io.out(i).bits.imm.getWidth >= lui_imm.getWidth + add_imm.getWidth)
-        io.out(i).bits.imm := Cat(lui_imm, add_imm)
-      }
-    }
-
     // write speculative rename table
     // we update rat later inside commit code
     intSpecWen(i) := needIntDest(i) && intFreeList.io.canAllocate && intFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
