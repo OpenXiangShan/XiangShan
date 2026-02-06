@@ -282,7 +282,8 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
   val ittage: IttageMeta  = new IttageMeta
   val phr:    PhrMeta     = new PhrMeta
 
-  val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
+  // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
+  val utage: MicroTageMeta = new MicroTageMeta
 }
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
