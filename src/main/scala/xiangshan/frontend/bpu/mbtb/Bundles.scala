@@ -79,6 +79,14 @@ class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
   val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay, new MainBtbMetaEntry))
 }
 
+class MainBtbAlignBankTrace(implicit p: Parameters) extends MainBtbBundle {
+  val needWrite: Bool         = Bool()
+  val setIdx:    UInt         = UInt(SetIdxLen.W)
+  val bankIdx:   UInt         = UInt(log2Ceil(NumInternalBanks).W)
+  val wayIdx:    UInt         = UInt(log2Ceil(NumWay).W)
+  val entry:     MainBtbEntry = new MainBtbEntry
+}
+
 class MainBtbTrace(implicit p: Parameters) extends MainBtbBundle {
 
   val startPc:     PrunedAddr      = PrunedAddr(VAddrBits)
