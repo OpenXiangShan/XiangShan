@@ -50,6 +50,7 @@ class MainBtbAlignBank(
 
     class Write extends Bundle {
       class Req extends Bundle {
+        val needWrite: Bool = Bool()
         // similar to Read.Req.startPc, calculated in MainBtb top
         val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
         val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
@@ -196,6 +197,7 @@ class MainBtbAlignBank(
    * send write req to internal banks (srams)
    */
   private val t1_fire             = w.req.valid
+  private val t1_needWrite        = w.req.bits.needWrite
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
   private val t1_meta             = w.req.bits.meta
@@ -211,7 +213,7 @@ class MainBtbAlignBank(
   private val t1_hit     = t1_hitMask.orR
 
   // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_mispredictInfo.valid && (
+  private val t1_entryNeedWrite = t1_needWrite && t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
