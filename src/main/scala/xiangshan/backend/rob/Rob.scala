@@ -139,10 +139,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback
   val vldWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
-  val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
+  val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
-  val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
+  val vxsatWBs = io.writeback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
@@ -765,7 +765,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val oldestRobidxEnqUpdateDirtyFs = PriorityMuxDefault(enqUpdateDirtyFsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
 
-  when(!updateDirtyFs || dirtyFs.valid) {
+  when(oldestRobidxupdateDirtyFs.needFlush(io.redirect)) {
+    updateDirtyFs := false.B
+  }.elsewhen(!updateDirtyFs || dirtyFs.valid) {
     updateDirtyFs := enqUpdateDirtyFs
   }
 
@@ -816,7 +818,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //    )
 //  }
 
-  when(!updateDirtyVs || dirtyVs.valid) {
+  when(oldestRobidxupdateDirtyVs.needFlush(io.redirect)) {
+    updateDirtyVs := false.B
+  }.elsewhen(!updateDirtyVs || dirtyVs.valid) {
     updateDirtyVs := enqUpdateDirtyVs
   }
 
@@ -877,7 +881,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
 
-  when(!updateVxsat || vxsat.valid) {
+  when(wbUpdateVxsat && !oldestWbUpdateVxsat.robIdx.needFlush(io.redirect)){
+    updateVxsat := true.B
+  }.elsewhen(oldestRobidxUpdateVxsat.needFlush(io.redirect)) {
+    updateVxsat := false.B
+  }.elsewhen(!updateVxsat || vxsat.valid) {
     updateVxsat := wbUpdateVxsat
   }
 
@@ -923,7 +931,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     }
 
-    when(!updateFflags(i) || fflags(i).valid) {
+    when(wbUpdateFflags && !oldestWbUpdateFflags.robIdx.needFlush(io.redirect)){
+      updateFflags(i) := true.B
+    }.elsewhen(oldestRobidxUpdateFflags(i).needFlush(io.redirect)) {
+      updateFflags(i) := false.B
+    }.elsewhen(!updateFflags(i) || fflags(i).valid) {
       updateFflags(i) := wbUpdateFflags
     }
 
