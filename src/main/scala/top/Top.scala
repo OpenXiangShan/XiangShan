@@ -212,7 +212,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
-  if (config(DebugOptionsKey).EnableDifftest) {
+  val enableDifftest = config(DebugOptionsKey).EnableDifftest || config(DebugOptionsKey).AlwaysBasicDiff
+
+  if (enableDifftest) {
     Gateway.setConfig("U")
   }
 
@@ -224,7 +226,7 @@ object TopMain extends App {
   )
 
   // generate difftest bundles (w/o DifftestTopIO)
-  if (config(DebugOptionsKey).EnableDifftest) {
+  if (enableDifftest) {
     DifftestModule.collect("XiangShan")
   }
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
