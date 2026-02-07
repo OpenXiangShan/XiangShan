@@ -27,6 +27,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
 import device.{AXI4Plic, DebugModule, TLTimer}
 import difftest.DifftestModule
+import difftest.gateway.Gateway
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
@@ -210,6 +211,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
 object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
+
+  if (config(DebugOptionsKey).EnableDifftest) {
+    Gateway.setConfig("U")
+  }
 
   val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
   Generator.execute(
