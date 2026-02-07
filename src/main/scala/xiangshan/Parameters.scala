@@ -244,7 +244,7 @@ case class XSCoreParameters
   EnableHardwareStoreMisalign: Boolean = true,
   EnableHardwareLoadMisalign: Boolean = true,
   EnableStorePrefetchAtIssue: Boolean = false,
-  EnableStorePrefetchAtCommit: Boolean = false,
+  EnableStorePrefetchAtCommit: Boolean = true,
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
