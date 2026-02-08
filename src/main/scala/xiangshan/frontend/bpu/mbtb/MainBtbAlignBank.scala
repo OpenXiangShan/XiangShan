@@ -24,6 +24,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
+import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbMeta
 
 class MainBtbAlignBank(
     alignIdx: Int
@@ -51,9 +52,10 @@ class MainBtbAlignBank(
     class Write extends Bundle {
       class Req extends Bundle {
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
-        val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
-        val meta:     Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        val startPc:         PrunedAddr             = new PrunedAddr(VAddrBits)
+        val branches:        Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+        val meta:            Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        val prefetchBtbMeta: PrefetchBtbMeta        = new PrefetchBtbMeta
         // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
         // but we still pass it through a port anyway,
         // perhaps in the future we can move this Mux1H to prior stages for better timing.
@@ -199,6 +201,7 @@ class MainBtbAlignBank(
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
   private val t1_meta             = w.req.bits.meta
+  private val t1_prefetchMeta     = w.req.bits.prefetchBtbMeta
   private val t1_mispredictInfo   = w.req.bits.mispredictInfo
   private val t1_setIdx           = getSetIndex(t1_startPc)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
@@ -210,8 +213,21 @@ class MainBtbAlignBank(
   private val t1_hitMask = PriorityEncoderOH(VecInit(t1_meta.map(_.hit(t1_mispredictInfo.bits))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
+  private val t1_prefetchHitMask = VecInit(t1_prefetchMeta.entries.map { entry =>
+    entry.rawHit && entry.position === t1_mispredictInfo.bits.cfiPosition
+  }).asUInt
+  private val t1_prefetchHit = t1_prefetchHitMask.orR
   // Write entry only when there's a mispredict, and if:
   private val t1_entryNeedWrite = t1_mispredictInfo.valid && (
+    // 1. not hit, always write a new entry, use mbtb replacer's victim way.
+    !(t1_hit || t1_prefetchHit) ||
+      // 2. hit, do write only if:
+      //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
+      t1_mispredictInfo.bits.attribute.needIttage ||
+      //   b. attribute changed, probably indicating a software self-modification.
+      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute)))
+  )
+  private val t1_entryNeedTouch = t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
@@ -242,7 +258,7 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.trainTouch.valid        := t1_fire && t1_entryNeedWrite
+  replacer.io.trainTouch.valid        := t1_fire && t1_entryNeedTouch
   replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
 
@@ -256,7 +272,7 @@ class MainBtbAlignBank(
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
-    val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
+    val entryOverridden = t1_entryNeedTouch && t1_entryWayMask(i)
 
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
@@ -300,4 +316,5 @@ class MainBtbAlignBank(
   )
 
   XSPerfAccumulate("updateCounter", Mux(t1_fire, PopCount(t1_counterWayMask), 0.U))
+  XSPerfAccumulate("prefetchHitMispred", t1_prefetchHit && t1_fire && t1_mispredictInfo.valid)
 }

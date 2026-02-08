@@ -95,7 +95,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.enable       := true.B
 
   // TODO:need to add prefetch btb support
-  uras.io.enable        := true.B
+  uras.io.enable := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)

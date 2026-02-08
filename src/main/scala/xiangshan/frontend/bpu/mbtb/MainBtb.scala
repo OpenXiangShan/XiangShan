@@ -173,16 +173,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     VecInit.tabulate(NumAlignBanks)(i => getAlignedPc(t1_startPc + (i << FetchBlockAlignWidth).U))
   )
   private val t1_meta           = t1_train.meta.mbtb
+  private val t1_prefetchMeta   = t1_train.meta.prefetchBtb
   private val t1_mispredictInfo = t1_train.mispredictBranch
 
   private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid         := t1_fire && t1_writeAlignBankMask(i)
-    b.io.write.req.bits.startPc  := t1_startPcVec(i)
-    b.io.write.req.bits.branches := t1_train.branches
-    b.io.write.req.bits.meta     := t1_meta.entries(i)
+    b.io.write.req.valid                := t1_fire && t1_writeAlignBankMask(i)
+    b.io.write.req.bits.startPc         := t1_startPcVec(i)
+    b.io.write.req.bits.branches        := t1_train.branches
+    b.io.write.req.bits.meta            := t1_meta.entries(i)
+    b.io.write.req.bits.prefetchBtbMeta := t1_prefetchMeta
     // see comments in MainBtbAlignBank.scala
     b.io.write.req.bits.mispredictInfo := t1_mispredictInfo
   }

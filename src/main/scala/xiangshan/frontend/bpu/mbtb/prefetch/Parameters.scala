@@ -20,7 +20,7 @@ import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class PrefetchBtbParameters(
-    NumEntries:      Int = 8192,
+    NumEntries:      Int = 1024,
     NumWay:          Int = 8,
     NumBanks:        Int = 4,
     TagWidth:        Int = 16,

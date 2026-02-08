@@ -67,14 +67,14 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
    * receive read response from Banks
    * send out prediction result and meta info
    */
-  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
-  private val s2_tag     = getTag(s2_startPc)
-  private val s2_entries = RegEnable(s1_entries, s1_fire)
+  private val s2_startPc    = RegEnable(s1_startPc, s1_fire)
+  private val s2_tag        = getTag(s2_startPc)
+  private val s2_entries    = RegEnable(s1_entries, s1_fire)
   private val s2_InstOffset = getPosition(s2_startPc)
   s2_fire := io.stageCtrl.s2_fire && io.enable
   (io.result zip s2_entries zip io.meta.entries).foreach { case ((result, entry), meta) =>
     val hit = entry.sramData.tag === s2_tag
-    result.valid            := entry.valid && s2_fire && hit && entry.sramData.position>=s2_InstOffset
+    result.valid            := entry.valid && s2_fire && hit && entry.sramData.position >= s2_InstOffset
     result.bits.taken       := false.B
     result.bits.target      := getFullTarget(s2_startPc, entry.sramData.target, None)
     result.bits.attribute   := entry.sramData.attribute

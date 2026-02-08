@@ -6,6 +6,7 @@ import freechips.rocketchip.util.SeqBoolBitwiseOps
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbModule
 import xiangshan.frontend.ftq.FtqEntry
@@ -121,7 +122,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s2_startPc         = RegEnable(s1_startPc, s1_valid)
 
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && (info.brAttribute.isDirect) && valid // only use direct branch
+    info.valid && info.brAttribute.isDirect && valid // only use direct branch
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
@@ -200,5 +201,11 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
       )
     )
   )
-
+  XSPerfHistogram(
+    "prefetch_write_entry",
+    PopCount(prefetchWrite.bits.entries.map(_.valid)),
+    true.B,
+    0,
+    NumWay
+  )
 }
