@@ -434,6 +434,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       val outOH = VecInit(uncertainFus.map(_.io.outValidAhead3Cycle.get))
       val outBits = uncertainFus.map(_.io.out.bits)
       out.valid := outOH.asUInt.orR
+      uncertainFus.map(_.io.wakeupSuccess.get := out.ready)
       out.bits := 0.U.asTypeOf(out.bits)
       outBits(0).ctrl.rfWen.foreach(x =>  out.bits.rfWen  := Mux1H(outOH, outBits.map(_.ctrl.rfWen .get)))
       outBits(0).ctrl.fpWen.foreach(x =>  out.bits.fpWen  := Mux1H(outOH, outBits.map(_.ctrl.fpWen .get)))

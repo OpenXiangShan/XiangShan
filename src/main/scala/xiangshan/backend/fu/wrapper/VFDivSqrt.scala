@@ -156,4 +156,6 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   mgu.io.in.isIndexedVls := false.B
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.outValidAhead3Cycle.get := vfdivs.map(_.io.outValidAhead3Cycle).reduce(_ & _)
+  vfdivs.foreach(x => x.io.wakeupSuccess := io.wakeupSuccess.get)
 }

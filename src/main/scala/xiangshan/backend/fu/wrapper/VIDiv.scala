@@ -68,4 +68,5 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
   mgu.io.in.isIndexedVls := false.B
   io.out.bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.outValidAhead3Cycle.get := vidiv.io.outValidAhead3Cycle
 }
