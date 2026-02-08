@@ -286,6 +286,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.toRobValid := ctrlVec.last.toRobValid
   io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
   io.out.bits.ctrl.pdest := ctrlVec.last.pdest
+  io.out.bits.ctrl.pdestVl.foreach(_ := ctrlVec.last.pdestVl.get)
   io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
   io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)

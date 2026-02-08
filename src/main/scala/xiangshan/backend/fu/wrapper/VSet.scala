@@ -2,7 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import utility.ZeroExt
+import utility._
 import xiangshan.{VSETOpType, CSROpType}
 import xiangshan.backend.decode.{Imm_VSETIVLI, Imm_VSETVLI}
 import xiangshan.backend.decode.isa.bitfield.InstVType
@@ -29,9 +29,12 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val vtype: VsetVType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VsetVType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
   vsetModule.io.in.func := in.ctrl.fuOpType
-  connect0LatencyCtrlSingal
-  io.out.valid := io.in.valid
-  io.in.ready := io.out.ready
+
+  if (latency == 0) {
+    connect0LatencyCtrlSingal
+    io.out.valid := io.in.valid
+    io.in.ready  := io.out.ready
+  }
 }
 
 
@@ -105,14 +108,19 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
   val isReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
 
+  val isVsetvlReg = DelayN(isVsetvl, latency)
+  val vtypeReg    = DelayN(vsetModule.io.out.vconfig.vtype, latency)
+  val isReadVlReg = DelayN(isReadVl, latency)
+  val vlReg       = DelayN(vl, latency)
+  val vlmaxReg    = DelayN(vlmax, latency)
+
   // csrr vl instruction will use this exu to read vl
   out.res.data := Mux(isReadVl, oldVL, vl)
-  out.ctrl.pdestVl.get := in.ctrl.pdestVl.get
 
-  if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
-  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isReadVl && vl === 0.U
-  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isReadVl && vl === vlmax
+  if (cfg.writeVlRf) io.vtype.get.bits := vtypeReg
+  if (cfg.writeVlRf) io.vtype.get.valid := isVsetvlReg && io.out.valid
+  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isReadVlReg && vlReg === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isReadVlReg && vlReg === vlmaxReg
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }

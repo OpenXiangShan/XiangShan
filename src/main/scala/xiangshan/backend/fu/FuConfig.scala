@@ -405,7 +405,7 @@ object FuConfig {
     writeVlRf = true,
     writeVType = true,
     writeIntRf = true,
-    latency = CertainLatency(0),
+    latency = CertainLatency(0, extraValue = 3),
     immType = Set(Imm_VSETVLI(), Imm_VSETIVLI()),
     readVl = true,
   )
