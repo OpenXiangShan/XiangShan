@@ -25,9 +25,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     // get pc from ftq
     val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
     val ftqEntry:          FtqEntry        = Input(new FtqEntry())
-//    val ifuPtr:            FtqPtr          = Input(new FtqPtr)
-
-//    val victimWrite: DecoupledIO[VictimWriteReq] = Flipped(DecoupledIO(new VictimWriteReq))
+    val s3_takenMask:      Vec[Bool]       = Input(Vec(NumBtbResultEntries, Bool()))
   }
 
   val io: PrefetchBtbIO = IO(new PrefetchBtbIO)
@@ -36,6 +34,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   val banks:        Seq[PrefetchBtbBank] = Seq.tabulate(NumBanks)(bankIdx => Module(new PrefetchBtbBank(bankIdx)))
   val prefetchPipe: PrefetchPipe         = Module(new PrefetchPipe)
+  val replacer:     PrefetchBtbReplacer  = Module(new PrefetchBtbReplacer)
   io.resetDone  := banks.map(_.io.resetDone).reduce(_ && _)
   io.trainReady := true.B
 
@@ -85,6 +84,14 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     meta.attribute          := entry.sramData.attribute
   }
 
+  private val s3_takenMask      = VecInit(io.s3_takenMask.slice(NumMBtbResultEntries, NumBtbResultEntries))
+  private val s3_fire           = io.stageCtrl.s3_fire
+  private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
+
+  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
+  replacer.io.predictTouch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
+  replacer.io.predictTouch.bits.setIdx  := s3_replacerSetIdx
+  replacer.io.predictTouch.bits.wayMask := s3_takenMask.asUInt
   // Train pipe
   private val t0_fire  = io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
@@ -114,17 +121,38 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   prefetchPipe.io.prefetchData <> io.prefetchData
   prefetchPipe.io.ftqEntry <> io.ftqEntry
 //  prefetchPipe.io.ifuPtr := io.ifuPtr
-  private val prefetchWrite    = prefetchPipe.io.prefetchWrite
-  private val prefetchBankMask = UIntToOH(prefetchWrite.bits.bankIdx)
-  private val prefetchWayMask  = WireInit(VecInit(prefetchWrite.bits.entries.map(_.valid)))
-  private val prefetchEntries  = WireInit(VecInit(prefetchWrite.bits.entries.map(_.bits)))
+  private val w0_prefetchWrite    = prefetchPipe.io.prefetchWrite
+  private val w0_prefetchBankMask = UIntToOH(w0_prefetchWrite.bits.bankIdx)
+  private val w0_prefetchWayMask  = WireInit(VecInit(w0_prefetchWrite.bits.entries.map(_.valid)))
+  private val w0_prefetchEntries  = WireInit(VecInit(w0_prefetchWrite.bits.entries.map(_.bits)))
+
+//  private val
+  replacer.io.writeMask.valid := w0_prefetchWrite.valid
+  replacer.io.writeMask.bits  := w0_prefetchBankMask
+  private val victimWayMask = replacer.io.victim.wayMask
+
+  private val w1_prefetchWrite    = RegNext(w0_prefetchWrite)
+  private val w1_prefetchBankMask = RegNext(w0_prefetchBankMask)
+  private val w1_prefetchWayMask  = RegNext(w0_prefetchWayMask)
+  private val w1_prefetchEntries  = RegNext(w0_prefetchEntries)
+  private val w1_victimWayMask    = RegNext(victimWayMask)
+  private val w1_writeEntries     = Wire(Vec(NumWay, new PrefetchBtbEntry))
+
+  for (i <- 0 until NumWay) {
+    val writeIdx = if (i == 0) 0.U else PopCount(w1_victimWayMask(i - 1, 0))
+
+    w1_writeEntries(i) := w1_prefetchEntries(writeIdx)
+  }
   banks.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.writeReq.valid        := prefetchWrite.valid && prefetchBankMask(idx).asBool
-    bank.io.writeReq.bits.setIdx  := prefetchWrite.bits.setIdx
-    bank.io.writeReq.bits.wayMask := prefetchWayMask.asUInt
-    bank.io.writeReq.bits.entry   := prefetchEntries
+    bank.io.writeReq.valid        := w1_prefetchWrite.valid && w1_prefetchBankMask(idx).asBool
+    bank.io.writeReq.bits.setIdx  := w1_prefetchWrite.bits.setIdx
+    bank.io.writeReq.bits.wayMask := w1_victimWayMask.asUInt
+    bank.io.writeReq.bits.entry   := w1_writeEntries
   }
 
+  replacer.io.writeTouch.valid        := w1_prefetchWrite.valid
+  replacer.io.writeTouch.bits.setIdx  := w1_prefetchWrite.bits.setIdx
+  replacer.io.writeTouch.bits.wayMask := w1_victimWayMask
   XSPerfAccumulate(
     "prefetch_hit_mbtb",
     PopCount(needInvalid.map(_ && t1_fire))

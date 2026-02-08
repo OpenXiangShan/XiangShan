@@ -154,7 +154,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.s3_takenMask := io.s3_takenMask.slice(i * NumWay, (i + 1) * NumWay)
   }
-
+  prefetchBtb.io.s3_takenMask := io.s3_takenMask
   /* *** t0 ***
    * receive training data and latch
    */

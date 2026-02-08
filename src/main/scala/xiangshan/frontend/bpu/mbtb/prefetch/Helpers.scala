@@ -46,7 +46,8 @@ trait Helpers extends HasPrefetchBtbParameters
     pc(pc.length - 1, addrFields.getEnd("targetLower") + 1)
   def getSetIndex(pc: PrunedAddr): UInt =
     addrFields.extract("setIdx", pc)
-
+  def getReplacerSetIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("replacerSetIdx", pc)
   def getBankIndex(pc: PrunedAddr): UInt =
     addrFields.extract("BankIdx", pc)
 

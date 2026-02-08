@@ -27,6 +27,9 @@ abstract class ReplacerStateGen(NumWays: Int, AccessSize: Int = 1) extends Modul
     val touches:   Vec[Valid[UInt]] = Input(Vec(AccessSize, Valid(UInt(log2Ceil(NumWays).W))))
     val nextState: UInt             = Output(UInt(StateWidth.W))
     val victim:    UInt             = Output(UInt(log2Ceil(NumWays).W))
+    // only for multi victim
+    val writeCnt = Input(UInt(log2Ceil(NumWays).W))
+    val victimMask: UInt = Output(UInt(NumWays.W))
   }
 
   val io: ReplacerStateGenIO = IO(new ReplacerStateGenIO)
@@ -36,10 +39,11 @@ abstract class ReplacerStateGen(NumWays: Int, AccessSize: Int = 1) extends Modul
 
   def getNextState(state: UInt, touch: UInt): UInt
 
-  def getVictim(state: UInt): UInt
-
-  io.nextState := getNextState(io.state, io.touches)
-  io.victim    := getVictim(io.state)
+  def getVictim(state:      UInt): UInt
+  def getMultiVictim(state: UInt, num: UInt): UInt
+  io.victimMask := getMultiVictim(io.state, io.writeCnt)
+  io.nextState  := getNextState(io.state, io.touches)
+  io.victim     := getVictim(io.state)
 }
 
 object ReplacerStateGen {

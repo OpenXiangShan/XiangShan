@@ -204,7 +204,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   XSPerfHistogram(
     "prefetch_write_entry",
     PopCount(prefetchWrite.bits.entries.map(_.valid)),
-    true.B,
+    prefetchWrite.valid,
     0,
     NumWay
   )

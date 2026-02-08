@@ -180,4 +180,7 @@ class PlruStateGen(NumWays: Int, AccessSize: Int = 1) extends ReplacerStateGen(N
   }
 
   def getVictim(state: UInt): UInt = getVictim(state, NumWays)
+
+  def getMultiVictim(state: UInt, num: UInt): UInt =
+    0.U
 }

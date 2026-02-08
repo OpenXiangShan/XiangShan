@@ -13,7 +13,7 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu.mbtb
+package xiangshan.frontend.bpu.mbtb.prefetch
 
 import chisel3._
 import chisel3.util._
@@ -21,28 +21,28 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.replacer.ReplacerState
 import xiangshan.frontend.bpu.replacer.ReplacerStateGen
 
-class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
-  class MainBtbReplacerIO extends Bundle {
+class PrefetchBtbReplacer(implicit p: Parameters) extends PrefetchBtbModule {
+  class PrefetchBtbReplacerIO extends Bundle {
     class Touch extends Bundle {
       val setIdx:  UInt = UInt(SetIdxLen.W)
       val wayMask: UInt = UInt(NumWay.W)
     }
-
+    // may has at least one victim
     class Victim extends Bundle {
       val wayMask: UInt = UInt(NumWay.W)
     }
-
-    val victim: Victim            = Output(new Victim)
-    val touch:  Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
+    val writeMask: ValidIO[UInt]     = Flipped(Valid(UInt(NumWay.W)))
+    val victim:    Victim            = Output(new Victim)
+    val touch:     Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
 
     def predictTouch: Valid[Touch] = touch(0)
-    def trainTouch:   Valid[Touch] = touch(1)
+    def writeTouch:   Valid[Touch] = touch(1)
   }
 
-  val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
+  val io: PrefetchBtbReplacerIO = IO(new PrefetchBtbReplacerIO)
 
   private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = 1))
+  private val writeStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
   private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
 
   /* *** predict *** */
@@ -71,29 +71,28 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   /* *** train *** */
   // read current state
-  stateBank.io.trainReadSetIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainReadSetIdx := io.writeTouch.bits.setIdx
   private val trainState = stateBank.io.trainReadState
 
   // compose touch way vec
-  private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
-  trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
-  assert(
-    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
-    "victim wayMask should be at-most-one-hot"
-  )
+  private val writeTouchWay = VecInit((0 until NumWay).map { i =>
+    val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
+    wayValid.valid := io.writeTouch.valid && io.writeTouch.bits.wayMask(i)
+    wayValid.bits  := i.U
+    wayValid
+  })
 
   // generate next state
-  trainStateGen.io.state    := trainState
-  trainStateGen.io.touches  := VecInit(Seq(trainTouchWay))
-  trainStateGen.io.writeCnt := 0.U
-  private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
+  writeStateGen.io.state    := trainState
+  writeStateGen.io.touches  := writeTouchWay
+  writeStateGen.io.writeCnt := Mux(io.writeMask.valid, PopCount(io.writeMask.bits), 0.U)
+  private val trainNextState = Mux(io.writeTouch.valid, writeStateGen.io.nextState, trainState)
 
   // write back next state
-  stateBank.io.trainWriteValid  := io.trainTouch.valid
-  stateBank.io.trainWriteSetIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainWriteValid  := io.writeTouch.valid
+  stateBank.io.trainWriteSetIdx := io.writeTouch.bits.setIdx
   stateBank.io.trainWriteState  := trainNextState
 
   /* *** victim *** */
-  io.victim.wayMask := UIntToOH(trainStateGen.io.victim)
+  io.victim.wayMask := writeStateGen.io.victimMask
 }

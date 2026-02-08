@@ -261,7 +261,6 @@ class MainBtbAlignBank(
   replacer.io.trainTouch.valid        := t1_fire && t1_entryNeedTouch
   replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
-
   /* *** update counter *** */
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))

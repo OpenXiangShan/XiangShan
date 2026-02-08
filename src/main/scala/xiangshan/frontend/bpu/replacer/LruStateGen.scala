@@ -47,7 +47,26 @@ class LruStateGen(NumWays: Int, AccessSize: Int = 1) extends ReplacerStateGen(Nu
     }
     moreRecentVec
   }
-
+  private def extractMultiMRUVec(state: UInt): Seq[UInt] = {
+    // Extract per-way information about which higher-indexed ways are more recently used
+    val moreRecentVec = extractMRUVec(state)
+    val matrix        = Wire(Vec(NumWays, Vec(NumWays, Bool())))
+    var lsb           = 0
+    // M ij = true=>j more recent than i
+    for (i <- 0 until NumWays - 1) {
+      for (j <- i until NumWays) {
+        val isMoreRecent = moreRecentVec(i)(j).asBool
+        if (i == j) {
+          matrix(i)(j) := false.B
+        } else {
+          matrix(i)(j) := isMoreRecent
+          matrix(j)(i) := !isMoreRecent
+        }
+      }
+    }
+    matrix(NumWays - 1)(NumWays - 1) := false.B
+    matrix.map(_.asUInt)
+  }
   def getNextState(state: UInt, touchWays: Seq[Valid[UInt]]): UInt =
     touchWays.foldLeft(state)((prev, touchWay) => Mux(touchWay.valid, getNextState(prev, touchWay.bits), prev))
 
@@ -77,6 +96,13 @@ class LruStateGen(NumWays: Int, AccessSize: Int = 1) extends ReplacerStateGen(Nu
       upperMoreRecent && lowerMoreRecent
     }
     OHToUInt(mruWayDec)
+  }
+
+  // output Victim Mask
+  def getMultiVictim(state: UInt, num: UInt): UInt = {
+    val moreRecentVec = extractMultiMRUVec(state) // reconstruct lower triangular matrix
+    val multiVictim   = VecInit((0 until NumWays).map(i => PopCount(moreRecentVec(i)) >= NumWays.U - num))
+    multiVictim.asUInt
   }
 }
 

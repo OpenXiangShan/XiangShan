@@ -35,14 +35,15 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   private val writeTouch       = Wire(Valid(UInt(WayIdxWidth.W)))
   private val touchWays        = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
 
-  writeTouch.valid            := io.writeValid
-  writeTouch.bits             := io.writeWayIdx
-  states.io.trainReadSetIdx   := io.writeSetIdx
-  states.io.trainWriteValid   := io.writeValid
-  states.io.trainWriteSetIdx  := io.writeSetIdx
-  states.io.trainWriteState   := writeReplacerGen.io.nextState
-  writeReplacerGen.io.state   := states.io.trainReadState
-  writeReplacerGen.io.touches := Seq(writeTouch)
+  writeTouch.valid             := io.writeValid
+  writeTouch.bits              := io.writeWayIdx
+  states.io.trainReadSetIdx    := io.writeSetIdx
+  states.io.trainWriteValid    := io.writeValid
+  states.io.trainWriteSetIdx   := io.writeSetIdx
+  states.io.trainWriteState    := writeReplacerGen.io.nextState
+  writeReplacerGen.io.state    := states.io.trainReadState
+  writeReplacerGen.io.touches  := Seq(writeTouch)
+  writeReplacerGen.io.writeCnt := 0.U
 
   touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
     t.valid := r
@@ -54,7 +55,7 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   states.io.predictWriteState  := predReplacerGen.io.nextState
   predReplacerGen.io.state     := states.io.predictReadState
   predReplacerGen.io.touches   := touchWays
-
+  predReplacerGen.io.writeCnt  := 0.U
   states.io.readSetIdx.foreach(_ := io.replaceSetIdx)
   private val replacerState = states.io.readState.getOrElse(0.U)
 
