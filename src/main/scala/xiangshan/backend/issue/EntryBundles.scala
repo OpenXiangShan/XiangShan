@@ -29,8 +29,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val firstIssue            = Bool()
     val issueTimer            = UInt(params.issueTimerWidth.W)
     val deqPortIdx            = UInt(1.W)
-    //vector mem status
-    val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
 
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR &&
@@ -307,7 +305,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val cancelBypassVec                                = Wire(Vec(params.numRegSrc, Bool()))
     val srcCancelByLoad                                = common.srcLoadCancelVec.asUInt.orR
     val sqIdxHit                                       = (if (params.needFeedBackSqIdx)
-                                                            status.issueTimer =/= params.issueTimerMaxValue.U || status.issueTimer === params.issueTimerMaxValue.U && status.vecMem.get.sqIdx === commonIn.issueResp.sqIdx.get
+                                                            status.issueTimer =/= params.issueTimerMaxValue.U ||
+                                                            status.issueTimer === params.issueTimerMaxValue.U && entryReg.payload.og1Payload.sqIdx.get === commonIn.issueResp.sqIdx.get
                                                           else true.B)
     val respIssueFail                                  = commonIn.issueResp.failed && sqIdxHit
     entryUpdate.status.robIdx                         := status.robIdx
@@ -415,9 +414,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.payload                               := entryReg.payload
-    if (params.isVecMemIQ) {
-      entryUpdate.status.vecMem.get := entryReg.status.vecMem.get
-    }
   }
 
   def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
@@ -519,12 +515,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   def EntryVecMemConnect(commonIn: CommonInBundle, common: CommonWireBundle, validReg: Bool, entryReg: EntryBundle, entryRegNext: EntryBundle, entryUpdate: EntryBundle)(implicit p: Parameters, params: IssueBlockParams) = {
     val fromLsq                                        = commonIn.vecMemIn.get
-    val vecMemStatus                                   = entryReg.status.vecMem.get
-    val vecMemStatusUpdate                             = entryUpdate.status.vecMem.get
-    vecMemStatusUpdate                                := vecMemStatus
-
-    val isFirstLoad = entryReg.status.vecMem.get.lqIdx === fromLsq.lqDeqPtr
-
+    val isFirstLoad                                    = entryReg.payload.og1Payload.lqIdx.get === fromLsq.lqDeqPtr
     val isVleff                                        = entryReg.payload.og1Payload.vpu.get.isVleff
     // update blocked
     entryUpdate.status.blocked                        := !isFirstLoad && isVleff
