@@ -387,15 +387,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.simpEntryDeqSelVec.foreach(_                      := VecInit(simpEntryOldestSel.get.takeRight(params.numEnq).map(_.bits)))
     if (params.isVecMemIQ){
       entries.io.enq.zipWithIndex.map{ case(enqData, i) =>
-        val enqStatus = enqData.bits.status
-        enqStatus.vecMem.get.sqIdx := s0_enqBits(i).sqIdx.get
-        enqStatus.vecMem.get.lqIdx := s0_enqBits(i).lqIdx.get
-        // MemAddrIQ also handle vector insts
-        enqStatus.vecMem.get.numLsElem := s0_enqBits(i).numLsElem.get
+        val enqPayload = enqData.bits.payload.og1Payload
+        enqPayload.sqIdx.get := s0_enqBits(i).sqIdx.get
+        enqPayload.lqIdx.get := s0_enqBits(i).lqIdx.get
 
         val isFirstLoad = s0_enqBits(i).lqIdx.get <= io.memIO.get.lqDeqPtr.get
         val isVleff = s0_enqBits(i).vpu.get.isVleff
-        enqStatus.blocked := !isFirstLoad && isVleff
+        enqData.bits.status.blocked := !isFirstLoad && isVleff
       }
     }
     entries.io.vecMemIn.foreach(_.sqDeqPtr := io.memIO.get.sqDeqPtr.get)
