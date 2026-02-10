@@ -46,9 +46,10 @@ class PrefetchBtbMeta(implicit p: Parameters) extends PrefetchBtbBundle {
 }
 //Prefetch pipe write at most 4 entry
 class PrefetchWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
-  val setIdx:  UInt                           = UInt(SetIdxLen.W)
-  val bankIdx: UInt                           = UInt(BankIdxLen.W)
-  val entries: Vec[ValidIO[PrefetchBtbEntry]] = Vec(NumWay, Valid(new PrefetchBtbEntry()))
+  val setIdx:         UInt                           = UInt(SetIdxLen.W)
+  val bankIdx:        UInt                           = UInt(BankIdxLen.W)
+  val replacerSetIdx: UInt                           = UInt(SetIdxLen.W)
+  val entries:        Vec[ValidIO[PrefetchBtbEntry]] = Vec(NumWay, Valid(new PrefetchBtbEntry()))
 }
 //Victim pipe only write one entry
 class VictimWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {

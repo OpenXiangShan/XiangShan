@@ -155,9 +155,10 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     debug_s2_writeCfiPc(i - 1) := s2_jumpOffset.reverse(idx) + getCfiPc(getBlockPc(s2_startPc), ~idx)
   }
 
-  prefetchWrite.valid        := s2_valid && s2_shadowBranchMask.reduce(_ || _)
-  prefetchWrite.bits.bankIdx := getBankIndex(s2_startPc)
-  prefetchWrite.bits.setIdx  := getSetIndex(s2_startPc)
+  prefetchWrite.valid               := s2_valid && s2_shadowBranchMask.reduce(_ || _)
+  prefetchWrite.bits.bankIdx        := getBankIndex(s2_startPc)
+  prefetchWrite.bits.setIdx         := getSetIndex(s2_startPc)
+  prefetchWrite.bits.replacerSetIdx := getReplacerSetIndex(s2_startPc)
 
   debug_s1_startRange       := s1_startRange.asUInt
   debug_s1_endRange         := s1_endRange.asUInt

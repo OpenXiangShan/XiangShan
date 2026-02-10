@@ -151,10 +151,22 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   replacer.io.writeTouch.valid        := w1_prefetchWrite.valid
-  replacer.io.writeTouch.bits.setIdx  := w1_prefetchWrite.bits.setIdx
+  replacer.io.writeTouch.bits.setIdx  := w1_prefetchWrite.bits.replacerSetIdx
   replacer.io.writeTouch.bits.wayMask := w1_victimWayMask
+
+  val debug_prefetchMispred = t1_train.meta.prefetchBtb.entries.map { pbtb =>
+    val isprefetchBtb = t1_train.meta.mbtb.entries.flatten.map { mbtb =>
+      !mbtb.rawHit && pbtb.rawHit && pbtb.position === t1_train.mispredictBranch.bits.cfiPosition &&
+      t1_train.mispredictBranch.valid
+    }.reduce(_ || _)
+    isprefetchBtb
+  }.reduce(_ || _)
   XSPerfAccumulate(
     "prefetch_hit_mbtb",
     PopCount(needInvalid.map(_ && t1_fire))
+  )
+  XSPerfAccumulate(
+    "mispredReasonPrefetchBtb",
+    PopCount(debug_prefetchMispred)
   )
 }
