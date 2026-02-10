@@ -1185,6 +1185,7 @@ object Bundles {
     val pc = UInt(VAddrData().dataWidth.W)
     val instr = UInt(32.W)
     val commitType = CommitType()
+    val isStore = Bool()
     val exceptionVec = ExceptionVec()
     val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()

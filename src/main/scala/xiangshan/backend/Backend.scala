@@ -459,7 +459,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
-  io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  io.mem.isStoreException := ctrlBlock.io.robio.exception.bits.isStore
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
 
   val issueSta = issue.flatten.filter(_.bits.params.hasStoreAddrFu)
