@@ -106,7 +106,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
-    val writeBack       = Decoupled(new ExuOutput(staParams.head))
+    val writeBack       = DecoupledIO(new NewExuOutput(staParams.head))
     val vecWriteBack    = Vec(VecStorePipelineWidth, Decoupled(new VecPipelineFeedbackIO(isVStore = true)))
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
@@ -597,26 +597,27 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && !req.isvec
-  io.writeBack.bits := 0.U.asTypeOf(io.writeBack.bits)
-  io.writeBack.bits.pdest := req.uop.pdest
-  io.writeBack.bits.robIdx := req.uop.robIdx
-  io.writeBack.bits.intWen.foreach(_ := req.uop.rfWen)
-  io.writeBack.bits.exceptionVec.foreach(x => {
+  val writeBack = Wire(new NewExuOutput(staParams.head))
+  writeBack.toRob.valid := req_valid && (bufferState === s_wb) && !req.isvec
+  writeBack.pdest := req.uop.pdest
+  writeBack.toRob.bits.robIdx := req.uop.robIdx
+  writeBack.toRob.bits.exceptionVec.foreach(x => {
     x := 0.U.asTypeOf(x)
     StaCfg.exceptionOut.map(no => x(no) := (globalUncache || globalException) && exceptionVec(no))
   })
-  io.writeBack.bits.flushPipe.foreach(_ := false.B)
-  io.writeBack.bits.lqIdx.foreach(_ := req.uop.lqIdx)
-  io.writeBack.bits.sqIdx.foreach(_ := req.uop.sqIdx)
-  io.writeBack.bits.trigger.foreach(_ := req.uop.trigger)
-  io.writeBack.bits.debug.isMMIO := globalMMIO
-  io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
-  io.writeBack.bits.debug.isPerfCnt := false.B
-  io.writeBack.bits.debug.paddr := req.paddr
-  io.writeBack.bits.debug.vaddr := req.vaddr
-  io.writeBack.bits.perfDebugInfo.foreach(_  := req.uop.perfDebugInfo)
-  io.writeBack.bits.debug_seqNum.foreach(_  := req.uop.debug_seqNum)
+  writeBack.toRob.bits.lqIdx.foreach(_ := req.uop.lqIdx)
+  writeBack.toRob.bits.sqIdx.foreach(_ := req.uop.sqIdx)
+  writeBack.toRob.bits.trigger.foreach(_ := req.uop.trigger)
+  writeBack.toRob.bits.isRVC.foreach(_ := req.uop.isRVC)
+  writeBack.debug.isMMIO := globalMMIO
+  writeBack.debug.isNCIO := globalNC && !globalMemBackTypeMM
+  writeBack.debug.isPerfCnt := false.B
+  writeBack.debug.paddr := req.paddr
+  writeBack.debug.vaddr := req.vaddr
+  writeBack.perfDebugInfo.foreach(_  := req.uop.perfDebugInfo)
+  writeBack.debug_seqNum.foreach(_  := req.uop.debug_seqNum)
+
+  connectMemDecoupledNewExuOutput(io.writeBack, writeBack)
 
   io.vecWriteBack.zipWithIndex.map{
     case (wb, index) => {

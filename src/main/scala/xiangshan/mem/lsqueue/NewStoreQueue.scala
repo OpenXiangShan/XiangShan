@@ -21,9 +21,9 @@ import difftest.common.DifftestMem
 import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
 import utility._
-import xiangshan.ExceptionNO.hardwareError
+import xiangshan.ExceptionNO.{hardwareError, storeAccessFault}
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, NewExuOutput, UopIdx, connectMemDecoupledNewExuOutput, connectSamePort}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.backend.rob.RobPtr
@@ -750,7 +750,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val toDCache        = new ToCacheIO
       val fromRob         = Input(new FromRobIO)
       val writeToSbuffer  = new SbufferWriteIO
-      val writeBack       = DecoupledIO(new ExuOutput(param))
+      val writeBack       = DecoupledIO(new NewExuOutput(param))
       val exceptionInfo   = ValidIO(new MemExceptionInfo)
       val sbufferCtrl     = new SbufferCtrlIO
 
@@ -833,6 +833,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     }
 
+    // exception check
+    private val hasHardwareError = RegInit(false.B)
+    private val hasAccessFault   = RegInit(false.B)
     /*================================================================================================================*/
     /*================================================= CBO.FSM ======================================================*/
     /*                                           zero
@@ -908,15 +911,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     uncacheState := uncacheStateNext
 
     private val isNC             = isPbmtNC(headDataEntry.memoryType)
-    private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) &&
+    private val isPBMTIO         = isPbmtIO(headDataEntry.memoryType)
+    private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) && !headCtrlEntry.isCbo &&
       headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated && headCtrlEntry.committed
-    private val hasHardwareError = RegInit(false.B)
-
-    when(uncacheState === UncacheState.waitResp) {
-      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.nderr
-    }.elsewhen(uncacheState === UncacheState.writeback) {
-      hasHardwareError := false.B
-    }
 
     switch(uncacheState) {
       is(UncacheState.idle) {
@@ -956,7 +953,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.req.bits.data          := Mux(headDataEntry.vaddr(3), outData.head(VLEN - 1, 64), outData.head(63,0))
     io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLENB - 1 , 8), outMask.head(7,0))
     io.toUncacheBuffer.req.bits.robIdx        := headDataEntry.uop.robIdx
-    io.toUncacheBuffer.req.bits.memBackTypeMM := isNC
+    io.toUncacheBuffer.req.bits.memBackTypeMM := isNC || isPBMTIO
     io.toUncacheBuffer.req.bits.nc            := isNC //TODO: remove it, why not use memBackTypeMM ?!
     io.toUncacheBuffer.req.bits.id            := brodenId
 
@@ -964,25 +961,51 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.resp.ready             := true.B
 
     //stout
-    io.writeBack.valid                        := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
-    io.writeBack.bits                         := DontCare // init, TODO: fix it!!!!!!
-    io.writeBack.bits.robIdx := dataEntries.head.uop.robIdx
-    io.writeBack.bits.exceptionVec.foreach(_(hardwareError) := hasHardwareError)// override
+    when(uncacheState === UncacheState.waitResp) {
+      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.corrupt
+    }.elsewhen(cboState === CboState.waitResp){
+      hasHardwareError := io.toDCache.resp.fire && io.toDCache.resp.bits.corrupt
+    }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
+      hasHardwareError := false.B
+    }
+
+    when(uncacheState === UncacheState.waitResp) {
+      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.denied
+    }.elsewhen(cboState === CboState.waitResp){
+      hasAccessFault := io.toDCache.resp.fire && io.toDCache.resp.bits.denied
+    }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
+      hasAccessFault := false.B
+    }
+
+    val writeBack = Wire(new NewExuOutput(staParams.head))
+    writeBack.toRob.valid                        := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
+    writeBack.toRob.bits.robIdx := dataEntries.head.uop.robIdx
+    writeBack.toRob.bits.exceptionVec.foreach{ case x =>
+      x := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
+      x(hardwareError) := hasHardwareError
+      x(storeAccessFault) := hasAccessFault} // override
+    writeBack.toRob.bits.trigger.foreach(_ := DontCare)
+    writeBack.toRob.bits.isRVC.foreach(_ := DontCare)
+    writeBack.toRob.bits.sqIdx.foreach(_ := io.rdataPtrExt.head)
+    writeBack.pdest := DontCare
     // for difftest, ref will skip mmio store
+    writeBack.debug := DontCare
     if(debugEn) {
-      io.writeBack.bits.debug.vaddr   := dataEntries.head.debugVaddr.get
-      io.writeBack.bits.debug.paddr   := dataEntries.head.debugPaddr.get
-      io.writeBack.bits.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
-      io.writeBack.bits.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
+      writeBack.debug.vaddr   := dataEntries.head.debugVaddr.get
+      writeBack.debug.paddr   := dataEntries.head.debugPaddr.get
+      writeBack.debug.isPerfCnt := DontCare
+      writeBack.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
+      writeBack.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
     }
     if(basicDebugEn) {
-      io.writeBack.bits.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
-      io.writeBack.bits.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
+      writeBack.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
+      writeBack.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
     }
+    connectMemDecoupledNewExuOutput(io.writeBack, writeBack)
 
     io.exceptionInfo.valid             := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
     io.exceptionInfo.bits.robIdx       := dataEntries.head.uop.robIdx
-    io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(io.writeBack.bits.exceptionVec.get, StaCfg)
+    io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(writeBack.toRob.bits.exceptionVec.get, StaCfg)
     // TODO: why not fullVaddr and why don't have gpaddr ?
     io.exceptionInfo.bits.vaddr        := dataEntries.head.vaddr
     io.exceptionInfo.bits.gpaddr       := 0.U.asTypeOf(io.exceptionInfo.bits.gpaddr)

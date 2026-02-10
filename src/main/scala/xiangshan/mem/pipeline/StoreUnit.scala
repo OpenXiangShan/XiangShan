@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, connectSamePort, StoreUnitToLFST, UopIdx}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, NewExuOutput, StoreUnitToLFST, UopIdx, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
@@ -62,7 +62,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryReq)
-    val stout           = DecoupledIO(new ExuOutput(param)) // writeback store
+    val stout           = new NewExuOutput(param) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
@@ -698,14 +698,14 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
       sx_in_vls(i).isWhole := VlduType.isWhole(s3_in.uop.fuOpType)
       sx_in_vls(i).isVecLoad := VlduType.isVecLd(s3_in.uop.fuOpType)
       sx_in_vls(i).isVlm := VlduType.isMasked(s3_in.uop.fuOpType) && VlduType.isVecLd(s3_in.uop.fuOpType)
-      sx_ready(i) := !s3_valid(i) || sx_in(i).output.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := !s3_valid(i) || sx_in(i).output.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) true.B else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.robIdx.needFlush(io.redirect)
-      val cur_can_go = (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
+      val cur_can_go = (if (i == RAWTotalDelayCycles) true.B else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
       val prev_fire  = sx_valid(i-1) && !sx_in(i-1).output.robIdx.needFlush(io.redirect) && sx_ready(i)
 
-      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == RAWTotalDelayCycles) true.B else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
@@ -718,12 +718,20 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val sx_last_in    = sx_in.takeRight(1).head
   val sx_last_in_vec = sx_in_vec.takeRight(1).head
   val sx_last_in_vls = sx_in_vls.takeRight(1).head
-  sx_last_ready := !sx_last_valid || sx_last_in.output.robIdx.needFlush(io.redirect) || io.stout.ready
+  sx_last_ready := true.B
 
   // write back: normal store, nc store
-  io.stout.valid := sx_last_valid && !sx_last_in_vec
-  io.stout.bits := sx_last_in.output
-  io.stout.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg))
+  io.stout.toRob.valid := sx_last_valid && !sx_last_in_vec
+  io.stout.toRob.bits.robIdx := sx_last_in.output.robIdx
+  io.stout.toRob.bits.isRVC.foreach(_ := sx_last_in.output.isRVC.get)
+  io.stout.toRob.bits.trigger.foreach(_ := sx_last_in.output.trigger.get)
+  io.stout.toRob.bits.sqIdx.foreach(_ := sx_last_in.output.sqIdx.get)
+  io.stout.toRob.bits.lqIdx.foreach(_  := sx_last_in.output.lqIdx.get)
+  io.stout.pdest := DontCare
+  io.stout.debug := sx_last_in.output.debug
+  io.stout.debug_seqNum.foreach(_  := sx_last_in.output.debug_seqNum.get)
+  io.stout.perfDebugInfo.foreach(_  := sx_last_in.output.perfDebugInfo.get)
+  io.stout.toRob.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sx_last_in.output.exceptionVec.get, StaCfg))
 
   // exceptionInfo Gen
   io.exceptionInfo.valid             := sx_last_valid && !sx_last_in_vec // normal writeback, not vector writeback

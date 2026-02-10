@@ -23,7 +23,7 @@ import top.{ArgParser, Generator}
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, NewExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
@@ -1227,7 +1227,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     val unalignConcat = Flipped(ValidIO(new LoadStageIO))
 
     // Writeback to Backend / LQ / VLMergeBuffer
-    val ldout = DecoupledIO(new ExuOutput(param))
+    val ldout = new NewExuOutput(param)
     val lqWrite = DecoupledIO(new LqWriteBundle)
     val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
 
@@ -1283,7 +1283,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get
 
   assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
-  assert(!io.ldout.valid || io.ldout.ready, "Writeback to Backend should always be ready")
   assert(!io.vecldout.valid || io.vecldout.ready, "Writeback to VLMergeBuffer should always be ready")
 
   /**
@@ -1409,16 +1408,22 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   // Writeback to Backend
   val ldoutValid = pipeIn.valid && shouldWriteback && !isVector && endPipe
-  val ldout = Wire(new ExuOutput(param))
-  ldout.data := DontCare // assign data from LoadUnitDataPath
+  val ldout = Wire(new NewExuOutput(param))
+  ldout.toIntRf.foreach { case port =>
+    port.valid := uop.rfWen && pipeIn.valid && endPipe && shouldWakeup
+    port.bits := DontCare // assign data from LoadUnitDataPath
+  }
+  ldout.toFpRf.foreach { case port =>
+    port.valid := uop.fpWen && pipeIn.valid && endPipe && shouldWakeup
+    port.bits := DontCare
+  }
   ldout.pdest := uop.pdest
-  ldout.robIdx := uop.robIdx
-  ldout.intWen.get := uop.rfWen
-  ldout.fpWen.get := uop.fpWen
-  ldout.exceptionVec.get := exceptionVec
-  ldout.lqIdx.get := uop.lqIdx
-  ldout.trigger.get := uop.trigger
-  ldout.isRVC.get := uop.isRVC
+  ldout.toRob.valid := ldoutValid
+  ldout.toRob.bits.robIdx := uop.robIdx
+  ldout.toRob.bits.exceptionVec.get := exceptionVec
+  ldout.toRob.bits.lqIdx.get := uop.lqIdx
+  ldout.toRob.bits.trigger.get := uop.trigger
+  ldout.toRob.bits.isRVC.get := uop.isRVC
   ldout.isFromLoadUnit.get := true.B
   ldout.debug.isMMIO := in.isMMIOReplay()
   ldout.debug.isNCIO := in.isNCReplay() && in.pmp.get.mmio
@@ -1584,8 +1589,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io_pipeOut.get.bits := pipeOutBits
   io_pipeIn.get.ready := !pipeOutValid || kill || endPipe || pipeOut.ready
 
-  io.ldout.valid := ldoutValid
-  io.ldout.bits := ldout
+  io.ldout := ldout
   io.lqWrite.valid := lqWriteValid
   io.lqWrite.bits := lqWrite
   io.vecldout.valid := vecldoutValid
@@ -1626,8 +1630,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   XSPerfAccumulate("rollback_total", rollbackValid)
   XSPerfAccumulate("rollback_rar_violation", rollbackValid && rarViolation)
   XSPerfAccumulate("rollback_match_invalid", rollbackValid && matchInvalid)
-  XSPerfAccumulate("nc_writeback", io.ldout.fire && (in.isNCReplay() || in.nc.get))
-  XSPerfAccumulate("nc_exception", io.ldout.fire && (in.isNCReplay() || in.nc.get) && exception)
+  XSPerfAccumulate("nc_writeback", io.ldout.toRob.fire && (in.isNCReplay() || in.nc.get))
+  XSPerfAccumulate("nc_exception", io.ldout.toRob.fire && (in.isNCReplay() || in.nc.get) && exception)
   XSPerfAccumulate("nc_rar_violation", pipeIn.valid && in.isNCReplay() && rarViolation)
 
   // source occupy others but fail perf counter
@@ -1673,7 +1677,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     lqWriteCause(C_DR) -> PerfCCT.ReplayReason.DcacheStall.id.U,
     true.B -> PerfCCT.ReplayReason.OtherReplay.id.U
   ))
-  val perfCCTRecordAddrEn = io.ldout.fire && !kill
+  val perfCCTRecordAddrEn = io.ldout.toRob.fire && !kill
   val timer = GTimer()
   PerfCCT.updateInstMeta(
     uop.debug_seqNum, PerfCCT.InstDetail.ReplayStr.id.U, perfCCTReplayCause, perfCCTReplayEn, clock, reset
@@ -1818,7 +1822,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val replay = Flipped(DecoupledIO(new LoadReplayIO))
   val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
   // Writeback to Backend / LQ / VLMergeBuffer
-  val ldout = DecoupledIO(new ExuOutput(param))
+  val ldout = new NewExuOutput(param)
   val lqWrite = DecoupledIO(new LqWriteBundle)
   val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
   // TLB / PMA / PMP
@@ -1975,7 +1979,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2UncacheBypassResp := io.uncacheBypass.s2Resp
   dataPath.io.s2DCacheResp.valid := io.dcache.resp.valid
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits
-  io.ldout.bits.data := VecInit(Seq.fill(param.wbPathNum)(dataPath.io.s3ShiftAndExtData))
+  io.ldout.toFpRf.foreach(_.bits := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.getWidth - 1, 0))
+  io.ldout.toIntRf.foreach(_.bits := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.getWidth - 1, 0))
   io.vecldout.bits.vecdata.get := dataPath.io.s3ShiftData
 
   // Debug info

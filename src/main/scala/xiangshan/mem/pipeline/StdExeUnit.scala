@@ -29,7 +29,7 @@ class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSB
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
   val vstdIn = Flipped(ValidIO(new StoreQueueDataWrite))
-  val out = DecoupledIO(new ExuOutput(param)) // std -> wb
+  val out = new NewExuOutput(param) // std -> wb
   val atomicData = Valid(new ExuInput(param)) // std -> atomicsUnit
   val sqData = Valid(new StoreQueueDataWrite) // std -> sq
 }
@@ -38,23 +38,23 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   val io = IO(new StdExeUnitIO(param))
 
   // Arbitrate between scalar std and vector std
-  io.in.ready := io.out.ready && !io.vstdIn.valid
+  io.in.ready := !io.vstdIn.valid
 
   // writeback of scalar stds but not vector stds
-  io.out.valid := io.in.valid && !io.vstdIn.valid && !FuType.storeIsAMO(io.in.bits.fuType)
-  io.out.bits := 0.U.asTypeOf(io.out.bits)
-  io.out.bits.data := VecInit(Seq.fill(param.wbPathNum)(io.in.bits.src(0)))
-  io.out.bits.robIdx := io.in.bits.robIdx
-  io.out.bits.pdest := io.in.bits.pdest
-  io.out.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
-  io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
-  io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.out.toRob.valid := io.in.valid && !io.vstdIn.valid && !FuType.storeIsAMO(io.in.bits.fuType)
+  io.out.toRob.bits.robIdx := io.in.bits.robIdx
+  io.out.toRob.bits.isRVC.foreach(_ := DontCare)
+  io.out.toRob.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
+  io.out.pdest := io.in.bits.pdest
+  io.out.debug := DontCare
+  io.out.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
+  io.out.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
 
   io.atomicData.valid := io.in.fire && FuType.storeIsAMO(io.in.bits.fuType)
   io.atomicData.bits := io.in.bits
 
   // sq writeback of both scalar and vector stds
-  io.sqData.valid := io.out.fire || io.vstdIn.valid
+  io.sqData.valid := io.out.toRob.fire || io.vstdIn.valid
   io.sqData.bits.fuType := Mux(io.vstdIn.valid, io.vstdIn.bits.fuType, io.in.bits.fuType)
   io.sqData.bits.fuOpType := Mux(io.vstdIn.valid, io.vstdIn.bits.fuOpType, io.in.bits.fuOpType)
   io.sqData.bits.data := Mux(io.vstdIn.valid, io.vstdIn.bits.data, io.in.bits.src(0))
