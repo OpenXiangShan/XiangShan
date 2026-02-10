@@ -881,10 +881,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
 
-  when(wbUpdateVxsat && !oldestWbUpdateVxsat.robIdx.needFlush(io.redirect)){
-    updateVxsat := true.B
-  }.elsewhen(oldestRobidxUpdateVxsat.needFlush(io.redirect)) {
-    updateVxsat := false.B
+  val pendingNeedFlush = oldestRobidxUpdateVxsat.needFlush(io.redirect)
+  val wbNeedFlush      = oldestWbUpdateVxsat.robIdx.needFlush(io.redirect)
+
+  when(io.redirect.valid){
+    when(updateVxsat && wbUpdateVxsat){
+      updateVxsat := !(pendingNeedFlush && wbNeedFlush)
+    }.elsewhen(updateVxsat && !wbUpdateVxsat){
+      updateVxsat := !pendingNeedFlush
+    }.elsewhen(!updateVxsat && wbUpdateVxsat){
+      updateVxsat := !wbNeedFlush
+    }
   }.elsewhen(!updateVxsat || vxsat.valid) {
     updateVxsat := wbUpdateVxsat
   }
@@ -931,10 +938,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     }
 
-    when(wbUpdateFflags && !oldestWbUpdateFflags.robIdx.needFlush(io.redirect)){
-      updateFflags(i) := true.B
-    }.elsewhen(oldestRobidxUpdateFflags(i).needFlush(io.redirect)) {
-      updateFflags(i) := false.B
+    val pendingNeedFlush = oldestRobidxUpdateFflags(i).needFlush(io.redirect)
+    val wbNeedFlush      = oldestWbUpdateFflags.robIdx.needFlush(io.redirect)
+
+    when(io.redirect.valid){
+      when(updateFflags(i) && wbUpdateFflags){
+        updateFflags(i) := !(pendingNeedFlush && wbNeedFlush)
+      }.elsewhen(updateFflags(i) && !wbUpdateFflags){
+         updateFflags(i) := !pendingNeedFlush
+      }.elsewhen(!updateFflags(i) && wbUpdateFflags){
+        updateFflags(i) := !wbNeedFlush
+      }
     }.elsewhen(!updateFflags(i) || fflags(i).valid) {
       updateFflags(i) := wbUpdateFflags
     }
