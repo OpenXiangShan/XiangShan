@@ -234,7 +234,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val pc     = Input(UInt(VAddrBits.W))
   })
 
-  val intWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = intSchdParams.genExuOutputDecoupledBundleMemBlock
+  val intWriteback: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = intSchdParams.genNewExuOutputDecoupledBundleMemBlock
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = vecSchdParams.genExuOutputDecoupledBundleMemBlock
 
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
@@ -448,7 +448,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
   val issueVldu = vecIssue.filter(_.bits.params.hasVLoadFu)
 
-  val intWriteback: Seq[DecoupledIO[ExuOutput]] = io.mem_to_ooo.intWriteback.flatten
+  val intWriteback: Seq[DecoupledIO[NewExuOutput]] = io.mem_to_ooo.intWriteback.flatten
   val vecWriteback: Seq[DecoupledIO[ExuOutput]] = io.mem_to_ooo.vecWriteback.flatten
   val writeback = intWriteback ++ vecWriteback
   val writebackLda = intWriteback.filter(_.bits.params.hasLoadFu)
@@ -456,7 +456,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val writebackStd = intWriteback.filter(_.bits.params.hasStdFu)
   val writebackVldu = vecWriteback.filter(_.bits.params.hasVLoadFu)
 
-  writeback.zipWithIndex.foreach{ case (wb, i) =>
+  intWriteback.zipWithIndex.foreach{ case (wb, i) =>
+    wb.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset))
+  }
+  vecWriteback.zipWithIndex.foreach{ case (wb, i) =>
     wb.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset))
   }
 
@@ -512,18 +515,24 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   newLoadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
+
   writebackLda.zipWithIndex.foreach { case (wb, i) =>
     if (i == AtomicWBPort) {
       // atomicsUnit writeback
-      oneHotArbiter(Seq(atomicsUnit.io.out, newLoadUnits(i).io.ldout), wb, Some("writebackLdaAtomic"))
+      val lduDecoupledOut = Wire(DecoupledIO(new NewExuOutput(ldaParams(i))))
+      val atomicDecoupledOut = Wire(DecoupledIO(new NewExuOutput(ldaParams(i))))
+      connectMemDecoupledNewExuOutput(lduDecoupledOut, newLoadUnits(i).io.ldout)
+      connectMemDecoupledNewExuOutput(atomicDecoupledOut, atomicsUnit.io.out)
+
+      oneHotArbiter(Seq(atomicDecoupledOut, lduDecoupledOut), wb, Some("writebackLdaAtomic"))
     } else {
       // normal load writeback
-      wb <> newLoadUnits(i).io.ldout
+      connectMemDecoupledNewExuOutput(wb, newLoadUnits(i).io.ldout)
     }
   }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>
-    wb <> stdExeUnits(i).io.out
+    connectMemDecoupledNewExuOutput(wb, stdExeUnits(i).io.out)
   }
 
   val lsq     = Module(new LsqWrapper)
@@ -1019,8 +1028,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST
 
-    stu.io.stout.ready := true.B
-
     // vector
     if (i < VstuCnt) {
       stu.io.vecstin <> vsSplit(i).io.out
@@ -1033,21 +1040,20 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vec_isFirstIssue := true.B // TODO
   }
 
-  val sqStout, sqStoutLatch = Wire(DecoupledIO(new ExuOutput(staParams.head)))
-  oneHotArbiter(Seq(lsq.io.mmioStout, lsq.io.cboZeroStout), sqStout, Some("sqStout"))
-  NewPipelineConnect(sqStout, sqStoutLatch, sqStoutLatch.fire, false.B, Some("sqStout"))
+  val sqStoutLatch = Wire(DecoupledIO(new NewExuOutput(staParams.head)))
+  NewPipelineConnect(lsq.io.mmioStout, sqStoutLatch, sqStoutLatch.fire, false.B, Some("sqStout"))
   writebackSta.zipWithIndex.foreach { case (wb, i) =>
     if (i == 0) {
+      val staDecoupledOut = Wire(DecoupledIO(new NewExuOutput(staParams(i))))
+      connectMemDecoupledNewExuOutput(staDecoupledOut, storeUnits(i).io.stout)
       arbiter(
-        Seq(storeUnits(i).io.stout, sqStoutLatch, storeMisalignBuffer.io.writeBack),
+        Seq(staDecoupledOut, sqStoutLatch, storeMisalignBuffer.io.writeBack),
         wb, Some(s"writebackSta_$i")
       )
     } else {
-      wb <> storeUnits(i).io.stout
+      connectMemDecoupledNewExuOutput(wb, storeUnits(i).io.stout)
     }
   }
-
-  lsq.io.vecmmioStout.ready := false.B
 
   // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
@@ -1395,7 +1401,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     state := s_atomics(i)
   }
-  when (atomicsUnit.io.out.valid) {
+  when (atomicsUnit.io.out.toRob.valid) {
     state := s_normal
   }
 
@@ -1421,8 +1427,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
 
   when (state =/= s_normal) {
-    // use store wb port instead of load
-    newLoadUnits(0).io.ldout.ready := false.B
     // use load_0's TLB
     atomicsUnit.io.dtlb <> amoTlb
 
@@ -1430,7 +1434,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     newLoadUnits.foreach(_.io.prefetchReq.valid := false.B)
 
     // make sure there's no in-flight uops in load unit
-    assert(!newLoadUnits(0).io.ldout.valid)
+    assert(!newLoadUnits(0).io.ldout.toRob.valid)
   }
 
   lsq.io.flushSbuffer.empty := sbuffer.io.sbempty

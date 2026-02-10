@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, NewExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
@@ -103,9 +103,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
-    val mmioStout = DecoupledIO(new ExuOutput(staParams.head)) // writeback uncached store
-    val cboZeroStout = DecoupledIO(new ExuOutput(staParams.head))
-    val vecmmioStout = DecoupledIO(new ExuOutput(vstuParams.head)) // vec writeback uncached store
+    val mmioStout = DecoupledIO(new NewExuOutput(staParams.head)) // writeback uncached store
     val sqEmpty = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())
@@ -148,10 +146,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
   // TODO: Don't use for now, will be remove in the feature
-  io.vecmmioStout := DontCare
   io.maControl := DontCare
   io.maControl.toStoreMisalignBuffer.doDeq := true.B // always true, cross page unalign handled by store queue.
-  io.cboZeroStout := DontCare
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
