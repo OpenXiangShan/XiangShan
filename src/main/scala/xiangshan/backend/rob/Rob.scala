@@ -699,6 +699,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqPtrEntry.commitType, exceptionHappen) // TODO: delete it after rebase newest fix!
   val exceptionIsFormer = deqPtrEntry.needFlush(0)
+  io.exception.bits.isFormer := RegEnable(exceptionIsFormer, exceptionHappen)
   io.exception.bits.isStore := RegEnable(FuType.isStore(debug_microOp(deqPtr.value)(!exceptionIsFormer).fuType), exceptionHappen) // TODO: Dity Fix!
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   // fetch trigger fire or execute ebreak

@@ -1197,6 +1197,7 @@ object Bundles {
     val vls = Bool()
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
+    val isFormer = Bool() // TODO: it is only used for difftest 
   }
 
   object UopIdx {
