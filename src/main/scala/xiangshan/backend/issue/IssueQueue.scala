@@ -862,6 +862,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
+    deq.bits.rfRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isXp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
+    deq.bits.fpRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isFp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
+    deq.bits.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isVp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
+    deq.bits.v0Ren .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isV0(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
+    deq.bits.vlRen .foreach(x => x := deqEntryVec(i).bits.status.srcStatusVl.get.dataSource.readReg)
     deq.bits.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
     deq.bits.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
     deq.bits.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
