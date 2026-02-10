@@ -1410,15 +1410,13 @@ class LoadUnitS3(param: ExeUnitParams)(
   val ldoutValid = pipeIn.valid && shouldWriteback && !isVector && endPipe
   val ldout = Wire(new NewExuOutput(param))
   ldout.toIntRf.foreach { case port =>
-    port.valid := uop.rfWen
+    port.valid := uop.rfWen && pipeIn.valid && endPipe && shouldWakeup
     port.bits := DontCare // assign data from LoadUnitDataPath
   }
   ldout.toFpRf.foreach { case port =>
-    port.valid := uop.fpWen
+    port.valid := uop.fpWen && pipeIn.valid && endPipe && shouldWakeup
     port.bits := DontCare
   }
-  ldout.toIntRf.get.bits := DontCare // assign data from LoadUnitDataPath
-  ldout.toFpRf.get.bits := DontCare // assign data from LoadUnitDataPath
   ldout.pdest := uop.pdest
   ldout.toRob.valid := ldoutValid
   ldout.toRob.bits.robIdx := uop.robIdx
