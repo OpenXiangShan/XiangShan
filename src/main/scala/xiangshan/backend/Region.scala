@@ -553,9 +553,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     val intLoadWB = bypassNetwork.io.fromExus.int.flatten.filter(_.bits.params.hasLoadExu)
     intLoadWB.zip(io.lduWriteback.get.flatten).foreach { case (sink, source) =>
       sink.valid := source.valid
-      sink.bits.intWen := source.bits.intWen.getOrElse(false.B) && source.bits.isFromLoadUnit.getOrElse(true.B)
+      sink.bits.intWen := source.bits.toIntRf.get.valid && source.bits.isFromLoadUnit.getOrElse(true.B)
       sink.bits.pdest := source.bits.pdest
-      sink.bits.data := source.bits.data(source.bits.params.getForwardIndex)
+      sink.bits.data := source.bits.toIntRf.get.bits(source.bits.params.getForwardIndex)
     }
     bypassNetwork.io.fromExus.connectExuOutput(_.fp)(exuBlock.io.out)
     for (i <- 0 until exuBlock.io.in.length) {
@@ -807,8 +807,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
     val delayedOldestExuRedirect = Option.when(params.isIntSchd)(ValidIO(new Redirect))
   }
   val memWriteback: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.genNewExuOutputDecoupledBundleMemBlock)
-  val lduWriteback: Option[MixedVec[MixedVec[DecoupledIO[ExuOutput]]]] = Option.when(params.isFpSchd)(
-    Flipped(MixedVec(intSchdParam.issueBlockParams.filter(_.isLdAddrIQ).map(_.genExuOutputDecoupledBundle)))
+  val lduWriteback: Option[MixedVec[MixedVec[DecoupledIO[NewExuOutput]]]] = Option.when(params.isFpSchd)(
+    Flipped(MixedVec(intSchdParam.issueBlockParams.filter(_.isLdAddrIQ).map(_.genNewExuOutputDecoupledBundle)))
   )
   val lqDeqPtr = Option.when(params.isVecSchd)(Input(new LqPtr))
   val sqDeqPtr = Option.when(params.isVecSchd)(Input(new SqPtr))
