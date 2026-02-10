@@ -318,14 +318,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
 
-  io.toBpu.redirect.valid          := redirect.valid
-  io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
-  io.toBpu.redirect.bits.target    := redirect.bits.target
-  io.toBpu.redirect.bits.taken     := redirect.bits.taken
-  io.toBpu.redirect.bits.attribute := redirect.bits.attribute
-  io.toBpu.redirect.bits.meta      := metaQueueRedirect(redirect.bits.ftqIdx.value)
-  io.toBpu.redirectFromIFU         := ifuRedirect.valid
-
+  io.toBpu.redirect.valid            := redirect.valid
+  io.toBpu.redirect.bits.cfiPc       := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
+  io.toBpu.redirect.bits.target      := redirect.bits.target
+  io.toBpu.redirect.bits.taken       := redirect.bits.taken
+  io.toBpu.redirect.bits.attribute   := redirect.bits.attribute
+  io.toBpu.redirect.bits.meta        := metaQueueRedirect(redirect.bits.ftqIdx.value)
+  io.toBpu.redirectFromIFU           := ifuRedirect.valid
+  io.toBpu.redirectPrefetchBtbMeta   := metaQueueResolve(redirect.bits.ftqIdx.value).prefetchBtb
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
 

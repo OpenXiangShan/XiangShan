@@ -29,6 +29,7 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
     val readResp:      BankReadResp           = Output(new BankReadResp)
     val writeReq:      ValidIO[BankWriteReq]  = Flipped(Valid(new BankWriteReq))
     val TrainWriteReq: ValidIO[TrainWriteReq] = Flipped(Valid(new TrainWriteReq))
+    val IfuWriteReq:   ValidIO[TrainWriteReq] = Flipped(Valid(new TrainWriteReq))
     val resetDone:     Bool                   = Output(Bool())
   }
   val io: BankIO = IO(new BankIO)
@@ -107,8 +108,9 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
   for (i <- 0 until NumWay) {
-    val needWrite   = writeValid && writeWayMask(i).asBool
-    val needInvalid = io.TrainWriteReq.valid && io.TrainWriteReq.bits.needInvalid(i)
+    val needWrite = writeValid && writeWayMask(i).asBool
+    val needInvalid = io.TrainWriteReq.valid && io.TrainWriteReq.bits.needInvalid(i) ||
+      io.IfuWriteReq.valid && io.IfuWriteReq.bits.needInvalid(i)
     when(needInvalid) {
       valid(invalidSetIdx)(i) := false.B
     }

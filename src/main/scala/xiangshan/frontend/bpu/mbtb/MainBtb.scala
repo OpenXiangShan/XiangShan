@@ -24,6 +24,7 @@ import utility.XSPerfHistogram
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtb
 import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbMeta
@@ -40,7 +41,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
     // prefecth io
-    val flush: Bool = Input(Bool())
+    val redirect:                ValidIO[BpuRedirect] = Flipped(Valid(new BpuRedirect))
+    val redirectFromIfu:         Bool                 = Input(Bool())
+    val redirectPrefetchBtbMeta: PrefetchBtbMeta      = Input(new PrefetchBtbMeta)
     // prefetch data
     val prefetchData: Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
     // get pc from ftq
@@ -66,7 +69,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   prefetchBtb.io.prefetchData <> io.prefetchData
   prefetchBtb.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
   prefetchBtb.io.ftqEntry <> io.ftqEntry
-  prefetchBtb.io.flush := io.flush
+  prefetchBtb.io.redirect                := io.redirect
+  prefetchBtb.io.redirectFromIfu         := io.redirectFromIfu
+  prefetchBtb.io.redirectPrefetchBtbMeta := io.redirectPrefetchBtbMeta
 //  prefetchBtb.io.ifuPtr    := io.ifuPtr
   prefetchBtb.io.startPc   := io.startPc
   prefetchBtb.io.stageCtrl := io.stageCtrl

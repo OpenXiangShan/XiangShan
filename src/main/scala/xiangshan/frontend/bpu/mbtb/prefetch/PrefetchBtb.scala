@@ -7,6 +7,7 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.mbtb.TakenCounter
@@ -17,9 +18,11 @@ import xiangshan.frontend.icache.BtbPrefetchBundle
 
 class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   class PrefetchBtbIO(implicit p: Parameters) extends BasePredictorIO {
-    val flush:  Bool                   = Input(Bool())
-    val result: Vec[Valid[Prediction]] = Output(Vec(NumWay, Valid(new Prediction)))
-    val meta:   PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
+    val redirect:                ValidIO[BpuRedirect]   = Flipped(Valid(new BpuRedirect))
+    val redirectFromIfu:         Bool                   = Input(Bool())
+    val redirectPrefetchBtbMeta: PrefetchBtbMeta        = Input(new PrefetchBtbMeta)
+    val result:                  Vec[Valid[Prediction]] = Output(Vec(NumWay, Valid(new Prediction)))
+    val meta:                    PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
     // prefetch data
     val prefetchData: Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
     // get pc from ftq
@@ -92,7 +95,23 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacer.io.predictTouch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
   replacer.io.predictTouch.bits.setIdx  := s3_replacerSetIdx
   replacer.io.predictTouch.bits.wayMask := s3_takenMask.asUInt
-  // Train pipe
+
+  // Invalid pipe: invalid illegal branch inst
+
+  private val i0_fire     = io.redirect.valid && io.redirectFromIfu && io.enable
+  private val i0_setIdx   = getSetIndex(io.redirect.bits.cfiPc)
+  private val i0_bankMask = UIntToOH(getBankIndex(io.redirect.bits.cfiPc))
+  private val i0_position = getPosition(io.redirect.bits.cfiPc)
+  private val i0_needValid = io.redirectPrefetchBtbMeta.entries.map { entry =>
+    entry.rawHit && entry.position === i0_position
+  }
+  banks.zipWithIndex.foreach { case (bank, idx) =>
+    bank.io.IfuWriteReq.valid            := i0_fire && i0_bankMask(idx).asBool
+    bank.io.IfuWriteReq.bits.setIdx      := i0_setIdx
+    bank.io.IfuWriteReq.bits.needInvalid := i0_needValid
+  }
+
+  // Train pipe :aim to avoid multi hit TODO: invalid earlier
   private val t0_fire  = io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
 
@@ -105,7 +124,6 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val isHit = t1_train.meta.mbtb.entries.flatten.map { mbtb =>
       mbtb.rawHit && pbtb.rawHit && mbtb.position === pbtb.position
     }.reduce(_ || _)
-
     isHit
   }
   // train write to invalid entry
@@ -114,9 +132,8 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     bank.io.TrainWriteReq.bits.setIdx      := t1_setIdx
     bank.io.TrainWriteReq.bits.needInvalid := needInvalid
   }
-
   // Prefetch pipe
-  prefetchPipe.io.flush := io.flush
+  prefetchPipe.io.flush := io.redirect.valid
   prefetchPipe.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
   prefetchPipe.io.prefetchData <> io.prefetchData
   prefetchPipe.io.ftqEntry <> io.ftqEntry

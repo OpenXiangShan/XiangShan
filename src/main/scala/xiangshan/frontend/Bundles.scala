@@ -38,6 +38,7 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbMeta
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.BtbPrefetchBundle
 import xiangshan.frontend.icache.ICacheCacheLineHelper
@@ -69,8 +70,10 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
 
   val ftqEntry: FtqEntry = Output(new FtqEntry())
 //  val ifuPtr:          FtqPtr   = Output(new FtqPtr)
-  val bpuPtr:          FtqPtr = Output(new FtqPtr)
-  val redirectFromIFU: Bool   = Output(Bool())
+  val bpuPtr: FtqPtr = Output(new FtqPtr)
+  // only for prefetchBtb
+  val redirectPrefetchBtbMeta: PrefetchBtbMeta = Output(new PrefetchBtbMeta)
+  val redirectFromIFU:         Bool            = Output(Bool())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
