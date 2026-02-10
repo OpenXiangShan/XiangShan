@@ -56,7 +56,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
 
   val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
-  val deqOg1Payload: MixedVec[Og1Payload] = params.genIssueDeqOg1PayloadBundle
+  val deqOg1Payload: MixedVec[EntryOg1Payload] = params.genIssueDeqOg1PayloadBundle
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 

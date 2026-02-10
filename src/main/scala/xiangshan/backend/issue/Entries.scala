@@ -575,7 +575,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
-  val deqOg1Payload       = Vec(params.numDeq, new Og1Payload(params))
+  val deqOg1Payload       = Vec(params.numDeq, new EntryOg1Payload(params))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
   val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
 

@@ -439,7 +439,7 @@ object Bundles {
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
-  class Og1Payload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
+  class EntryOg1Payload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
 
     // from frontend
@@ -471,7 +471,7 @@ object Bundles {
 
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
-    val og1Payload = new Og1Payload(params)
+    val og1Payload = new EntryOg1Payload(params)
     // from frontend
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
@@ -1131,7 +1131,7 @@ object Bundles {
       this.vialuCtrl     .foreach(_ := 0.U.asTypeOf(new VIAluCtrlSignals))
     }
 
-    def fromIssueOg1PayloadBundle(source: Og1Payload): Unit = {
+    def fromIssueOg1PayloadBundle(source: EntryOg1Payload): Unit = {
       this.isRVC         .foreach(_ := source.isRVC.get)
       this.predictInfo.foreach(_.fixedTaken := source.fixedTaken.get)
       this.predictInfo.foreach(_.predTaken  := source.predTaken.get)
