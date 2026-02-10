@@ -803,7 +803,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val fromIntIQ: MixedVec[MixedVec[DecoupledIO[Og0InUop]]] =
     Flipped(MixedVec(intSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
-  val fromIQDeqOg1Payload: MixedVec[MixedVec[Og1Payload]] =
+  val fromIQDeqOg1Payload: MixedVec[MixedVec[EntryOg1Payload]] =
     Flipped(MixedVec(param.issueBlockParams.map(_.genIssueDeqOg1PayloadBundle)))
 
   val fromFpIQ: MixedVec[MixedVec[DecoupledIO[Og0InUop]]] =
