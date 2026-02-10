@@ -44,7 +44,6 @@ package object xiangshan {
 
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isReg(srcType: UInt) = srcType(0)
     def isXp(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
     def isVp(srcType: UInt) = srcType(2)
