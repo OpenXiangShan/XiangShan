@@ -339,6 +339,10 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       val difftest = DifftestModule(new DiffPhyIntRegState(intSchdParams.numPregs), delay = 2)
       difftest.coreid := io.hartId
       difftest.value := intDiffReadData.get
+
+      regCache.io.diffRcIdx.get.zip(io.diffRcIdx.get).foreach { case (sink, source) =>
+        sink <> source
+      }
     }
   }
   else if (param.isFpSchd) {
@@ -847,7 +851,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
-  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
+  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getExuRCWriteSize,
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
   )
 
@@ -857,12 +861,12 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
     )).flatten
   )
 
-  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
-    Output(UInt(RegCacheIdxWidth.W))
-  )
+  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getExuRCWriteSize, Output(UInt(RegCacheIdxWidth.W)))
 
   val diffVlRat = Option.when(params.basicDebugEn && param.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
   val diffVl = Option.when(params.basicDebugEn && param.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
+
+  val diffRcIdx = Option.when(params.basicDebugEn && param.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
 
   val uopTopDown = new UopTopDown
 }

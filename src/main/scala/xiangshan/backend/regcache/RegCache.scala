@@ -23,6 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.BackendParams
+import xiangshan.backend.Bundles._
 
 class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule {
 
@@ -33,12 +34,12 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
 
   println(s"[RegCache] dataWidth: ${params.intSchdParams.get.rfDataWidth}, addrWidth: ${RegCacheIdxWidth}, tagWidth: ${params.intSchdParams.get.pregIdxWidth}")
 
-  require(RegCacheIdxWidth == (log2Up(IntRegCacheSize) + 1), "IntRegCache should be half of the whole RegCache")
-  require(RegCacheIdxWidth == (log2Up(MemRegCacheSize) + 1), "MemRegCache should be half of the whole RegCache")
+  val regCacheRepSize = Math.max(log2Up(IntRegCacheSize + 1), log2Up(MemRegCacheSize + 1))
+  require(RegCacheIdxWidth == (regCacheRepSize + 1), "IntRegCache or MemRegCache should be half of the whole RegCache")
 
-  private val IntRegCacheReadSize = params.getIntExuRCReadSize + params.getMemExuRCReadSize
+  private val IntRegCacheReadSize = params.getExuRCReadSize
   private val IntRegCacheWriteSize = params.getIntExuRCWriteSize
-  private val MemRegCacheReadSize = params.getIntExuRCReadSize + params.getMemExuRCReadSize
+  private val MemRegCacheReadSize = params.getExuRCReadSize
   private val MemRegCacheWriteSize = params.getMemExuRCWriteSize
 
   val IntRegCache = Module(new RegCacheDataModule("IntRegCache", IntRegCacheSize, IntRegCacheReadSize, IntRegCacheWriteSize, 
@@ -51,8 +52,10 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
 
   val MemRegCacheAgeTimer = Module(new RegCacheAgeTimer(MemRegCacheSize, MemRegCacheReadSize, MemRegCacheWriteSize, RegCacheIdxWidth - 1))
 
-  val IntRegCacheRepRCIdx = RegCacheAgeDetector(IntRegCacheSize, IntRegCacheWriteSize, IntRegCacheAgeTimer.io.ageInfo)
-  val MemRegCacheRepRCIdx = RegCacheAgeDetector(MemRegCacheSize, MemRegCacheWriteSize, MemRegCacheAgeTimer.io.ageInfo)
+  val IntRegCacheRepRCIdx = Wire(Vec(IntRegCacheWriteSize, UInt(regCacheRepSize.W)))
+  IntRegCacheRepRCIdx := RegCacheAgeDetector(IntRegCacheSize, IntRegCacheWriteSize, IntRegCacheAgeTimer.io.ageInfo)
+  val MemRegCacheRepRCIdx = Wire(Vec(MemRegCacheWriteSize, UInt(regCacheRepSize.W)))
+  MemRegCacheRepRCIdx := RegCacheAgeDetector(MemRegCacheSize, MemRegCacheWriteSize, MemRegCacheAgeTimer.io.ageInfo)
 
   IntRegCacheAgeTimer.io.validInfo := IntRegCache.io.validInfo
   MemRegCacheAgeTimer.io.validInfo := MemRegCache.io.validInfo
@@ -115,16 +118,25 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
   writePorts.zip(delayToWakeupQueueRCIdx).foreach{ case (w, rcIdx) => 
     w.addr := rcIdx
   }
+
+  if (params.basicDebugEn) {
+    io.diffRcIdx.get.zipWithIndex.foreach { case (x, i) =>
+      when(x.wen) {
+        assert(x.rcIdx === delayToWakeupQueueRCIdx(i), "When rfWen is raised, the RcIdx to the wakeupQueue three clock cycles ago must match the RcIdx written back to the RegCache in the current clock cycle.")
+      }
+    }
+  }
 }
 
 class RegCacheIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
 
-  val readPorts = Vec(params.getIntExuRCReadSize + params.getMemExuRCReadSize, 
+  val readPorts = Vec(params.getExuRCReadSize,
     new RCReadPort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth))
 
-  val writePorts = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val writePorts = Vec(params.getExuRCWriteSize, 
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn))
 
-  val toWakeupQueueRCIdx = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
-     Output(UInt(RegCacheIdxWidth.W)))
+  val toWakeupQueueRCIdx = Vec(params.getExuRCWriteSize, Output(UInt(RegCacheIdxWidth.W)))
+
+  val diffRcIdx = Option.when(params.basicDebugEn && params.intSchdParams.get.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
 }

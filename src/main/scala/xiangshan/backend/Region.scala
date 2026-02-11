@@ -298,6 +298,19 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     iqReplaceRCIdxVec.zip(dataPath.io.toWakeupQueueRCIdx).foreach { case (iq, in) =>
       iq := in
     }
+
+    if (backendParams.basicDebugEn && params.isIntSchd) {
+      val delayedWakeupQueueRcIdx = issueQueues.flatMap(_.io.wakeupToIQ).map { case x =>
+        val delayed = Wire(new DiffRCIdx)
+        delayed.wen   := RegNextN(x.bits.rfWen, 3)
+        delayed.rcIdx := RegNextN(x.bits.rcDest.get, 3)
+        delayed
+      }.toSeq
+      dataPath.io.diffRcIdx.get.zipWithIndex.foreach { case (x, i) =>
+        x.wen   := delayedWakeupQueueRcIdx(i).wen
+        x.rcIdx := delayedWakeupQueueRcIdx(i).rcIdx
+      }
+    }
     println(s"[Region] numWriteRegCache: ${params.numWriteRegCache}")
     println(s"[Region] iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
   }

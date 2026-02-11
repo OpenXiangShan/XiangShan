@@ -385,6 +385,8 @@ case class BackendParams(
     this.allExuParams.filter(x => x.isMemExeUnit && x.readIntRf).map(_.numIntSrc).reduce(_ + _)
   }
 
+  def getExuRCReadSize = getIntExuRCReadSize + getMemExuRCReadSize
+
   /**
     * Get size of write ports of int regcache
     */
@@ -395,6 +397,8 @@ case class BackendParams(
   def getMemExuRCWriteSize = {
     this.allExuParams.filter(x => x.hasLoadExu && x.isIQWakeUpSource && x.readIntRf).size
   }
+
+  def getExuRCWriteSize = getIntExuRCWriteSize + getMemExuRCWriteSize
 
   def getExuIdx(name: String): Int = {
     val exuParams = allRealExuParams
