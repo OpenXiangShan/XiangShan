@@ -325,11 +325,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
     }
   )))
-  for (i <- 0 until EnsbufferWidth) {
-    when(readyReadGoVec.take(i + 1).reduce(_ && _)) {
-      sqReadCnt := (i + 1).U // increase one by one
-    }
-  }
+  sqReadCnt := PopCount(readyReadGoVec)  
   rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -1243,7 +1239,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
           dataBuffer.io.enq(i).bits.vecValid  := toSbufferVecValid
         }
         else {
@@ -1254,7 +1250,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
           dataBuffer.io.enq(i).bits.vecValid  := dataBuffer.io.enq(0).bits.vecValid
         }
       } .otherwise {
@@ -1266,7 +1262,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq  := true.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
           dataBuffer.io.enq(i).bits.vecValid  := toSbufferVecValid
         }
         else {
@@ -1277,7 +1273,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq  := false.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
           dataBuffer.io.enq(i).bits.vecValid  := dataBuffer.io.enq(0).bits.vecValid
         }
       }
