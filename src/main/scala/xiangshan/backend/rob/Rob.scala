@@ -876,7 +876,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateVxsat)
   }.reduce(_ | _)
 
-  val wbUpdateVxsat = vxsatWBs.map(wb => wb.valid && wb.bits.vxsat.get).reduce(_ | _)
+  val wbUpdateVxsat = vxsatWBs.map(wb => 
+    {
+      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtr) && isBefore(wb.bits.robIdx, enqPtr)
+      wb.valid && wbEntryValid && wb.bits.vxsat.get
+    }
+  ).reduce(_ | _)
 
   class WbSel extends Bundle{
     val validvxsat = Bool()
@@ -937,7 +942,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateFflags(i))
     }.reduce(_ | _)
 
-    val wbUpdateFflags = fflagsWBs.map(wb => wb.valid && wb.bits.wflags.get && wb.bits.fflags.get(i)).reduce(_ | _)
+    val wbUpdateFflags = fflagsWBs.map(wb => 
+      { 
+        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtr) && isBefore(wb.bits.robIdx, enqPtr)
+        wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
+      }
+    ).reduce(_ | _)
 
     val wbUpdateFflagsSeq = fflagsWBs.map(wb =>
       {
