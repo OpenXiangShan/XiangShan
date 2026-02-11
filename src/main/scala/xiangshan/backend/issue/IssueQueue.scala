@@ -304,6 +304,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.valid                                                 := s0_doEnqSelValidVec(enqIdx)
       enq.bits.status.robIdx                                    := s0_enqBits(enqIdx).robIdx
       enq.bits.status.fuType                                    := IQFuType.readFuType(VecInit(s0_enqBits(enqIdx).fuType.asBools), params.getFuCfgs.map(_.fuType))
+      enq.bits.status.isVecPartReplay.foreach(_                 := false.B)
+      enq.bits.status.vecReplayMask.foreach(_                   := 0.U)
+      enq.bits.status.vecReplayMbIdx.foreach(_                  := 0.U)
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
@@ -588,6 +591,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqResp.bits.lqIdx.foreach(_ := DontCare)
     deqResp.bits.fuType := deqBeforeDly(i).bits.common.fuType
     deqResp.bits.uopIdx.foreach(_ := DontCare)
+    deqResp.bits.isVecPartReplay.foreach(_:= false.B)
+    deqResp.bits.vecReplayMask  .foreach(_:= 0.U)
+    deqResp.bits.vecReplayMbIdx .foreach(_:= 0.U)
   }
 
   //fuBusyTable
@@ -1107,6 +1113,9 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     slowResp.bits.lqIdx.foreach( _ := memIO.feedbackIO(i).feedbackSlow.bits.lqIdx)
     slowResp.bits.resp   := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType := DontCare
+    slowResp.bits.isVecPartReplay.foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.isVecPartReplay.get)
+    slowResp.bits.vecReplayMask  .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMask  .get)
+    slowResp.bits.vecReplayMbIdx .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMbIdx .get)
   }
 
   entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
@@ -1116,6 +1125,9 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     fastResp.bits.lqIdx.foreach( _ := memIO.feedbackIO(i).feedbackFast.bits.lqIdx)
     fastResp.bits.resp   := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType := DontCare
+    fastResp.bits.isVecPartReplay.foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.isVecPartReplay.get)
+    fastResp.bits.vecReplayMask  .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMask  .get)
+    fastResp.bits.vecReplayMbIdx .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMbIdx .get)
   }
 
   // load wakeup
@@ -1195,6 +1207,9 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     slowResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType           := DontCare
     slowResp.bits.uopIdx.get       := DontCare
+    slowResp.bits.isVecPartReplay.foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.isVecPartReplay.get)
+    slowResp.bits.vecReplayMask  .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMask  .get)
+    slowResp.bits.vecReplayMbIdx .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMbIdx .get)
   }
 
   entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
@@ -1205,6 +1220,9 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     fastResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType           := DontCare
     fastResp.bits.uopIdx.get       := DontCare
+    fastResp.bits.isVecPartReplay.foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.isVecPartReplay.get)
+    fastResp.bits.vecReplayMask  .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMask  .get)
+    fastResp.bits.vecReplayMbIdx .foreach(_ := memIO.feedbackIO(i).feedbackSlow.bits.vecReplayMbIdx .get)
   }
 
   entries.io.vecMemIn.get.sqDeqPtr := memIO.sqDeqPtr.get
@@ -1214,6 +1232,9 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.sqIdx)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
     deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
+    deq.bits.common.isVecPartReplay.foreach(_ := deqEntryVec(i).bits.status.isVecPartReplay.get)
+    deq.bits.common.vecReplayMask  .foreach(_ := deqEntryVec(i).bits.status.vecReplayMask  .get)
+    deq.bits.common.vecReplayMbIdx .foreach(_ := deqEntryVec(i).bits.status.vecReplayMbIdx .get)
     if (params.isVecLduIQ) {
       deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
       deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset

@@ -303,6 +303,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
   val vecTriggerMask = UInt((VLEN/8).W)
+  val splitIndx = UInt(flowIdxBits.W)
 }
 
 object MulNum {

@@ -54,8 +54,11 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val isForVSnonLeafPTE= Bool()
   val fof              = Bool()
   val vlmax            = UInt(elemIdxBits.W)
+  val isPartReplay     = OptionWrapper(backendParams.debugEn, Bool())
+  val replayFlowNum    = UInt(flowIdxBits.W)
+  val replayFlowMask   = UInt(16.W)
 
-  def allReady(): Bool = (flowNum === 0.U)
+  def allReady(): Bool = flowNum === 0.U
 }
 
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
@@ -88,6 +91,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.originVl     := source.uop.vpu.vl
     sink.vaddr        := source.vaddr
     sink.vstart       := 0.U
+    sink.isPartReplay.foreach(_ := false.B)
+    sink.replayFlowNum := 0.U
+    sink.replayFlowMask := 0.U
   }
   def DeqConnect(source: MBufferBundle): MemExuOutput = {
     val sink               = WireInit(0.U.asTypeOf(new MemExuOutput(isVector = true)))
@@ -180,15 +186,20 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // handle the situation where multiple ports are going to write the same uop queue entry
   // select the oldest exception and count the flownum of the pipeline writeback.
   val mergePortMatrix        = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
+  val mergePortMatrixMiss    = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
   val mergePortMatrixHasExcp = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
   val mergedByPrevPortVec    = Wire(Vec(pipeWidth, Bool()))
   (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
-    val mergePortValid = (j == i).B ||
-      (j > i).B &&
-      io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
-      io.fromPipeline(j).valid
+    val mergePortValid =
+      ((j == i).B ||
+      (j > i).B && io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex && io.fromPipeline(j).valid)
+    val mergePortMiss =
+      !io.fromPipeline(j).bits.hit &&
+      ((j == i).B ||
+      (j > i).B && io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex && io.fromPipeline(j).valid)
 
     mergePortMatrix(i)(j)        := mergePortValid
+    mergePortMatrixMiss(i)(j)    := mergePortMiss
     mergePortMatrixHasExcp(i)(j) := mergePortValid && (io.fromPipeline(j).bits.hasException || TriggerAction.isDmode(io.fromPipeline(j).bits.trigger))
   }}
   (0 until pipeWidth).map{case i =>
@@ -202,6 +213,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val mergedByPrevPortVecWrap    = if(isVStore) mergedByPrevPortVec else RegNext(mergedByPrevPortVec)
   if (backendParams.debugEn){
     dontTouch(mergePortMatrix)
+    dontTouch(mergePortMatrixMiss)
     dontTouch(mergePortMatrixHasExcp)
     dontTouch(mergedByPrevPortVec)
   }
@@ -308,6 +320,19 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val latchMergeByPre  = if(isVStore) mergedByPrevPortVec(i) else RegEnable(mergedByPrevPortVec(i), pipewb.valid)
     when(latchWbValid && !latchMergeByPre){
       entries(latchWbIndex).flowNum := entries(latchWbIndex).flowNum - latchFlowNum
+
+      if (isVStore) {
+        val isUnitStride = LSUOpType.isAllUS(entries(wbIndex).uop.fuOpType)
+        when(!io.fromPipeline(i).bits.hit && !isUnitStride) {
+          val replayFlowNumOffset = PopCount(mergePortMatrixMiss(i))
+          val replayFlowMask = (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
+            UIntToOH(io.fromPipeline(i).bits.splitIndx, VLENB) & Fill(VLENB, mergePortMatrix(i)(j))
+          }.reduce(_ | _)}
+
+          entries(latchWbIndex).replayFlowNum := entries(latchWbIndex).replayFlowNum + replayFlowNumOffset
+          entries(latchWbIndex).replayFlowMask := entries(latchWbIndex).replayFlowMask | replayFlowMask(i)
+        }
+      }
     }
 
     when(pipewb.valid){
@@ -316,6 +341,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
     when(pipewb.valid && !pipewb.bits.hit){
       needRSReplay(wbIndex) := true.B
+      entries(wbIndex).isPartReplay.foreach(_ := true.B)
     }
     pipewb.ready := true.B
     XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, s"entry: $latchWbIndex, FlowWriteback overflow!!\n")
@@ -329,38 +355,52 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
   }
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
-   private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
+   val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
    for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
     val entryIdx = OHToUInt(selOHVec)
     val selEntry = entries(entryIdx)
     val selAllocated = allocated(entryIdx)
+    val selNeedRSReplay = needRSReplay(entryIdx)
+    val selIsUnitStride = LSUOpType.isAllUS(selEntry.uop.fuOpType)
     val selFire  = selValid && canGo
-    when(selFire){
-      freeMaskVec(entryIdx) := selAllocated
-      allocated(entryIdx)   := false.B
-      uopFinish(entryIdx)   := false.B
+    val canDeq = selFire && !selNeedRSReplay
+    when(selFire) {
       needRSReplay(entryIdx):= false.B
+      selEntry.replayFlowNum := 0.U
+      selEntry.replayFlowMask := 0.U
+      uopFinish(entryIdx)   := false.B
+
+      when (!selNeedRSReplay || selIsUnitStride) {
+        freeMaskVec(entryIdx) := selAllocated
+        allocated(entryIdx)   := false.B
+      } .otherwise {
+        selEntry.flowNum := selEntry.replayFlowNum
+      }
     }
+
     //writeback connect
-    port.valid   := selFire && selAllocated && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
+    port.valid   := canDeq && selAllocated && !selEntry.uop.robIdx.needFlush(io.redirect)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
-    lsqport.valid:= selFire && selAllocated && !needRSReplay(entryIdx)
+    lsqport.valid:= canDeq && selAllocated
     //to RS
     val feedbackOut                       = WireInit(0.U.asTypeOf(io.feedback(i).bits)).suggestName(s"feedbackOut_${i}")
     val feedbackValid                     = selFire && selAllocated
-    feedbackOut.hit                      := !needRSReplay(entryIdx)
+    feedbackOut.hit                      := !selNeedRSReplay
     feedbackOut.robIdx                   := selEntry.uop.robIdx
     feedbackOut.sourceType               := selEntry.sourceType
     feedbackOut.flushState               := selEntry.flushState
     feedbackOut.dataInvalidSqIdx         := DontCare
     feedbackOut.sqIdx                    := selEntry.uop.sqIdx
     feedbackOut.lqIdx                    := selEntry.uop.lqIdx
+    feedbackOut.isVecPartReplay.foreach(_:= selNeedRSReplay && !selIsUnitStride)
+    feedbackOut.vecReplayMask.foreach(_  := selEntry.replayFlowMask)
+    feedbackOut.vecReplayMbIdx.foreach(_ := entryIdx)
 
     io.feedback(i).valid                 := RegNext(feedbackValid)
     io.feedback(i).bits                  := RegEnable(feedbackOut, feedbackValid)
@@ -479,5 +519,8 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.uop.vpu.vstart   := source.vstart
     sink.vecDebug.get     := DontCare
     sink
+  }
+  if (backendParams.debugEn) {
+    entries.map(x => dontTouch(x.isPartReplay.get))
   }
 }
