@@ -20,8 +20,6 @@ import chisel3.util._
 import difftest.DiffRefillEvent
 import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
-import utility.BoolStopWatch
-import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.ValidHold
 import utility.XSPerfAccumulate
@@ -446,44 +444,30 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("stallCycles_fetch_icacheMain_dataArray", s0_valid && !toData.ready)
   XSPerfAccumulate("stallCycles_fetch_icacheMain_missUnit", s1_valid && !s1_fetchFinish)
 
-  private class AccessTrace extends Bundle {
-    val vAddr:      UInt      = UInt(VAddrBits.W)
-    val pAddr:      UInt      = UInt(PAddrBits.W)
-    val wayMask:    Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-    val crossLine:  Bool      = Bool()
-    val waitRefill: UInt      = UInt(XLEN.W)
-    val rawHits:    Vec[Bool] = Vec(PortNumber, Bool())
+  // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
+  //   val blkPAddr  = UInt((PAddrBits - blockOffBits).W)
+  //   val vSetIdx   = UInt(idxBits.W)
+  //   val waymask   = UInt(wayBits.W)
+  // }
 
-    val exception: ExceptionType = new ExceptionType
-    val pmpMmio:   Bool          = Bool()
-    val itlbPbmt:  UInt          = UInt(Pbmt.width.W)
-  }
+  // private val isWriteICacheTouchTable =
+  //   WireInit(Constantin.createRecord("isWriteICacheTouchTable" + p(XSCoreParamsKey).HartId.toString))
+  // private val ICacheTouchTable =
+  //   ChiselDB.createTable("ICacheTouchTable" + p(XSCoreParamsKey).HartId.toString, new ICacheTouchDB)
 
-  private val perf_waitRefill = RegInit(0.U(XLEN.W))
-  when(s1_valid && !s1_fetchFinish) {
-    perf_waitRefill := perf_waitRefill + 1.U
-  }.elsewhen(s1_fetchFinish || s1_flush) {
-    perf_waitRefill := 0.U
-  }
-
-  private val accessTrace = Wire(new AccessTrace)
-  accessTrace.vAddr      := s1_vAddr.head.toUInt
-  accessTrace.pAddr      := getPAddrFromPTag(s1_vAddr.head, s1_pTag).toUInt
-  accessTrace.wayMask    := s1_waymasks
-  accessTrace.crossLine  := s1_doubleline
-  accessTrace.waitRefill := perf_waitRefill
-  accessTrace.exception  := s1_exceptionOut
-  accessTrace.pmpMmio    := s1_pmpMmio
-  accessTrace.itlbPbmt   := s1_itlbPbmt
-  accessTrace.rawHits    := s1_rawHits
-
-  private val accessTable = ChiselDB.createTable("ICacheAccessTable", new AccessTrace, EnableTrace)
-  accessTable.log(
-    data = accessTrace,
-    en = s1_fire,
-    clock = clock,
-    reset = reset
-  )
+  // val ICacheTouchDumpData = Wire(Vec(PortNumber, new ICacheTouchDB))
+  // (0 until PortNumber).foreach{ i =>
+  //   ICacheTouchDumpData(i).blkPAddr  := getBlkAddr(s1_pAddr(i))
+  //   ICacheTouchDumpData(i).vSetIdx   := s1_vSetIdx(i)
+  //   ICacheTouchDumpData(i).waymask   := OHToUInt(s1_tag_match_vec(i))
+  //   ICacheTouchTable.log(
+  //     data  = ICacheTouchDumpData(i),
+  //     en    = io.replacerTouch.req(i).valid,
+  //     site  = "req_" + i.toString,
+  //     clock = clock,
+  //     reset = reset
+  //   )
+  // }
 
   /* *** difftest refill check *** */
   if (env.EnableDifftest) {
