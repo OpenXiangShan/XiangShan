@@ -689,8 +689,32 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.isRVC := deqPtrEntry.RVC(!deqPtrEntry.needFlush(0))
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
   io.flushOut.bits.robIdx.isFormer := Mux(needModifyFtqIdxOffset, true.B, deqPtrEntry.needFlush(0))
-  io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqPtrEntry.ftqIdx)
-  io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqPtrEntry.ftqOffset + Mux(deqPtrEntry.needFlush(0), 0.U, Mux(deqPtrEntry.RVC(1), 1.U, 2.U)))
+  io.flushOut.bits.ftqIdx := 
+    Mux(needModifyFtqIdxOffset, 
+      firstVInstrFtqPtr,
+      Mux(deqPtrEntry.needFlush(0),
+        deqPtrEntry.ftqIdx,
+        Mux(deqPtrEntry.predTaken,
+          deqPtrEntry.ftqIdx + 1.U,
+          deqPtrEntry.ftqIdx
+        )
+      )
+    )
+  io.flushOut.bits.ftqOffset :=
+    Mux(needModifyFtqIdxOffset,
+      firstVInstrFtqOffset,
+      Mux(deqPtrEntry.needFlush(0),
+        deqPtrEntry.ftqOffset,
+        Mux(deqPtrEntry.predTaken,
+          0.U.asTypeOf(deqPtrEntry.ftqOffset),
+          Mux(deqPtrEntry.RVC(1),
+          deqPtrEntry.ftqOffset + 1.U,
+          deqPtrEntry.ftqOffset + 2.U
+          )
+        )
+      )
+    )
+
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
   XSPerfAccumulate("flush_num", io.flushOut.valid)
@@ -701,14 +725,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit)) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
-  io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
+  io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen) // useless
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
-  io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqPtrEntry.commitType, exceptionHappen) // TODO: delete it after rebase newest fix!
   val exceptionIsFormer = deqPtrEntry.needFlush(0)
   io.exception.bits.isFormer := RegEnable(exceptionIsFormer, exceptionHappen)
   io.exception.bits.isStore := RegEnable(FuType.isStore(debug_microOp(deqPtr.value)(!exceptionIsFormer).fuType), exceptionHappen) // TODO: Dity Fix!
+  io.exception.bits.instr := RegEnable(debug_microOp(deqPtr.value)(!exceptionIsFormer).instr, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   // fetch trigger fire or execute ebreak
   io.exception.bits.isPcBkpt := RegEnable(
