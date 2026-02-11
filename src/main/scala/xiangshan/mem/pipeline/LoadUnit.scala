@@ -1840,6 +1840,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.vstart := s3_vecout.vstart
   io.vecldout.bits.vecTriggerMask := s3_vecout.vecTriggerMask
   io.vecldout.bits.nc := DontCare
+  io.vecldout.bits.splitIndx := DontCare
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf //||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
