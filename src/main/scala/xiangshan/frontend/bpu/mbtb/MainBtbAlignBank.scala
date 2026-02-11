@@ -46,6 +46,8 @@ class MainBtbAlignBank(
       val req: Req = Input(new Req)
 
       val resp: Resp = Output(new Resp)
+
+      val s1_positions: Vec[UInt] = Output(Vec(NumWay, UInt(CfiPositionWidth.W)))
     }
 
     class Write extends Bundle {
@@ -134,6 +136,8 @@ class MainBtbAlignBank(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.counters)
   )
+
+  io.read.s1_positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
 
   /* *** s2 ***
    * check entries hit

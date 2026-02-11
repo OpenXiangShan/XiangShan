@@ -220,6 +220,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
   tage.io.fromMainBtb.result             := mbtb.io.result
+  tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
@@ -262,7 +263,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
-  // * *** s1 prediction selection *** */
+  /* *** s1 prediction selection *** */
   private val s1_btbPrediction = VecInit(ubtb.io.prediction) ++ abtb.io.prediction
   private val s1_utageHitMask = VecInit(s1_btbPrediction.map { pred =>
     pred.valid && utage.io.prediction.valid && utage.io.prediction.bits.cfiPosition === pred.bits.cfiPosition
@@ -316,41 +317,35 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_utageMeta := utage.io.meta.bits
   s1_utageMeta.debug_useMicroTage.foreach(_ := s1_utageHitMask.reduce(_ || _))
 
-  private val s2_mbtbResult  = mbtb.io.result
-  private val s2_condHitMask = VecInit(s2_mbtbResult.map(e => e.valid && e.bits.attribute.isConditional))
-  private val s2_scUsed      = sc.io.scUsed
-  private val s2_scTakenMask = sc.io.scTakenMask
-  private val s2_scFlipTage = VecInit((tage.io.prediction zip s2_scUsed zip s2_scTakenMask).map {
-    case ((p, useSc), scTaken) =>
-      useSc && (p.providerPred =/= scTaken)
-  }) // for bpSource counter
-  private val s2_condTakenMask = VecInit((s2_mbtbResult zip tage.io.prediction zip s2_scUsed zip s2_scTakenMask).map {
-    case (((e, p), useSc), scTaken) =>
-      e.valid && e.bits.attribute.isConditional &&
-      MuxCase(
-        e.bits.taken,
-        Seq(
-          useSc         -> scTaken,
-          p.useProvider -> p.providerPred,
-          p.hasAlt      -> p.altPred
-        )
-      )
-  })
-
-  private val s2_jumpMask = VecInit(s2_mbtbResult.map { e =>
-    e.valid && (e.bits.attribute.isDirect || e.bits.attribute.isIndirect)
-  })
-  private val s2_takenMask = VecInit(s2_condTakenMask.zip(s2_jumpMask).map { case (a, b) => a || b })
-  private val s2_taken     = s2_takenMask.reduce(_ || _)
-
-  private val s2_compareMatrix      = CompareMatrix(VecInit(s2_mbtbResult.map(_.bits.cfiPosition)))
-  private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
-
   /* *** s3 prediction selection *** */
-  private val s3_taken              = RegEnable(s2_taken, s2_fire)
-  private val s3_condHitMask        = RegEnable(s2_condHitMask, s2_fire)
-  private val s3_mbtbResult         = RegEnable(s2_mbtbResult, s2_fire)
-  private val s3_firstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
+  private val s3_mbtbResult     = RegEnable(mbtb.io.result, s2_fire)
+  private val s3_tagePrediction = RegEnable(tage.io.prediction, s2_fire)
+  private val s3_scUsed         = RegEnable(sc.io.scUsed, s2_fire)
+  private val s3_scTakenMask    = RegEnable(sc.io.scTakenMask, s2_fire)
+
+  private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+    val tagePred = s3_tagePrediction(i)
+    val useSc    = s3_scUsed(i)
+    val scTaken  = s3_scTakenMask(i)
+
+    entry.valid && (
+      entry.bits.attribute.isDirect ||
+        entry.bits.attribute.isIndirect ||
+        entry.bits.attribute.isConditional &&
+        MuxCase(
+          entry.bits.taken, // default: base table
+          Seq(
+            useSc                -> scTaken,
+            tagePred.useProvider -> tagePred.providerPred,
+            tagePred.hasAlt      -> tagePred.altPred
+          )
+        )
+    )
+  })
+  private val s3_taken = s3_takenMask.reduce(_ || _)
+
+  private val s3_compareMatrix      = CompareMatrix(VecInit(s3_mbtbResult.map(_.bits.cfiPosition)))
+  private val s3_firstTakenBranchOH = s3_compareMatrix.getLeastElementOH(s3_takenMask)
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
   private val s3_useRas             = s3_firstTakenBranch.bits.attribute.isReturn
   private val s3_useIttage          = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
@@ -358,12 +353,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
-  private val s3_takenMask = RegEnable(s2_takenMask, s2_fire)
+  // used for mainBTB replacer
   mbtb.io.s3_takenMask := s3_takenMask
 
-  s3_prediction.taken       := s3_taken
-  s3_prediction.cfiPosition := Mux(s3_taken, s3_firstTakenBranch.bits.cfiPosition, s3_fallThroughPrediction.cfiPosition)
-  s3_prediction.attribute   := Mux(s3_taken, s3_firstTakenBranch.bits.attribute, s3_fallThroughPrediction.attribute)
+  // used for ghr
+  private val s3_condHitMask = VecInit(s3_mbtbResult.map(e => e.valid && e.bits.attribute.isConditional))
+
+  s3_prediction       := Mux(s3_taken, s3_firstTakenBranch.bits, s3_fallThroughPrediction)
+  s3_prediction.taken := s3_taken
   s3_prediction.target :=
     MuxCase(
       s3_fallThroughPrediction.target,
@@ -505,8 +502,25 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** Debug Meta *** */
   // used for performance counters
-  private val s3_condTakenMask      = RegEnable(s2_condTakenMask, s2_fire)
-  private val s3_scFlipTage         = RegEnable(s2_scFlipTage, s2_fire)
+  private val s3_scFlipTage = VecInit((s3_tagePrediction zip s3_scUsed zip s3_scTakenMask).map {
+    case ((tagePred, useSc), scTaken) =>
+      useSc && (tagePred.providerPred =/= scTaken)
+  }) // for bpSource counter
+  private val s3_condTakenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+    val tagePred = s3_tagePrediction(i)
+    val useSc    = s3_scUsed(i)
+    val scTaken  = s3_scTakenMask(i)
+
+    entry.valid && entry.bits.attribute.isConditional &&
+    MuxCase(
+      entry.bits.taken, // default: base table
+      Seq(
+        useSc                -> scTaken,
+        tagePred.useProvider -> tagePred.providerPred,
+        tagePred.hasAlt      -> tagePred.altPred
+      )
+    )
+  })
   private val s3_firstTakenPosition = Mux1H(s3_firstTakenBranchOH, VecInit(s3_mbtbResult.map(_.bits.cfiPosition)))
   private val s3_firstTakenBlameSc  = Mux1H(s3_firstTakenBranchOH, s3_scFlipTage)
   // if the branch before the first take has a flipped and !s3_taken && flipped, then blamed on sc

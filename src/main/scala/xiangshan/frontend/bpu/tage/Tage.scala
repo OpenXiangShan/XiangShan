@@ -26,8 +26,6 @@ import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
 
 /**
@@ -86,17 +84,19 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 1
-     - get read data from tables
-     - compute temp tag
+     - get read resp from tables
+     - compute tag
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s1_fire       = io.stageCtrl.s1_fire
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
 
-  // A tag without branch position, position will be hashed into after BTB result
-  private val s1_rawTag = VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
-    table.getRawTag(s1_startPc, hist.forTag)
+  // Vec[NumBtbResultEntries][NumTables]
+  private val s1_tag = VecInit(io.fromMainBtb.s1_positions.map { position =>
+    VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
+      table.getTag(s1_startPc, hist.forTag, position)
+    })
   })
 
   private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.predictReadResp)), RegNext(s0_fire))
@@ -109,7 +109,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val s2_fire     = io.stageCtrl.s2_fire
   private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
-  private val s2_rawTag   = RegEnable(s1_rawTag, s1_fire)
+  private val s2_tag      = RegEnable(s1_tag, s1_fire)
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
 
   private val s2_branches = io.fromMainBtb.result
@@ -122,7 +122,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     // compare tags of each branch with all tables
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val tag          = s2_rawTag(tableIdx) ^ position
+      val tag          = s2_tag(i)(tableIdx)
       val hitWayMask   = tableReadResp.entries.map(entry => entry.valid && entry.tag === tag)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
