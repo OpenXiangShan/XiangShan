@@ -133,6 +133,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_alignedType  = s0_vecstin.alignedType
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
+  val s0_vecSplitIdx = s0_vecstin.splitIndx
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
 
   // generate addr
@@ -266,6 +267,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   }
   s0_out.isFrmMisAlignBuf := s0_use_flow_ma
   s0_out.isFinalSplit := s0_isFinalSplit
+  s0_out.splitIndx := s0_vecSplitIdx
 //  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B) && !s0_misalignWith16Byte
 
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
@@ -622,6 +624,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
+      sx_in(i).splitIndx := s3_in.splitIndx
       sx_in(i).hasException := s3_exception
       sx_in_vec(i)         := s3_in.isvec
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
@@ -672,6 +675,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
   io.vecstout.bits.vstart      := sx_last_in.output.uop.vpu.vstart
   io.vecstout.bits.vecTriggerMask := sx_last_in.vecTriggerMask
+  io.vecstout.bits.splitIndx := sx_last_in.splitIndx
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

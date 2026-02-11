@@ -79,6 +79,12 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
   val usAligned128        = Bool()
   val usMask              = UInt((VLENB*2).W) // for unit-stride split
+
+  // Vec Store Replay
+  val isVecPartReplay     = Bool()
+  val vecReplayMbIdx      = UInt(vsmBindexBits.W)
+  val vecReplayFlowMask   = UInt(16.W)
+
 }
 
 object VSFQFeedbackType {
@@ -137,6 +143,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
   val elemIdxInsideVd      = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index in scope of vd
   val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
+  val splitIndx            = UInt(flowIdxBits.W)
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
@@ -157,6 +164,7 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
   val elemIdxInsideVd     = UInt(elemIdxBits.W) // only use in unit-stride
+  val splitIndx           = UInt(flowIdxBits.W)
 }
 
 object VecFeedbacks {
@@ -236,7 +244,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
-  val threshold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
+  val threshold           = if(isVStore) Flipped(ValidIO(new SqPtr)) else Flipped(ValidIO(new LqPtr))
 }
 
 class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -244,6 +252,7 @@ class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends 
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true)))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
+  val threshold           = if(isVStore) Flipped(ValidIO(new SqPtr)) else Flipped(ValidIO(new LqPtr))
 }
 
 class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -256,10 +265,10 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val fromPipeline        = if(isVStore) Vec(StorePipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(LoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
+  val fromPipeline        = if(isVStore) Vec(VSUopWritebackWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(LoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
   val fromSplit           = if(isVStore) Vec(VecStorePipelineWidth, new FromSplitIO) else Vec(VecLoadPipelineWidth, new FromSplitIO) // req mergebuffer entry, inactive elem issue
   val uopWriteback        = if(isVStore) Vec(VSUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true))) else Vec(VLUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
-  val toSplit             = OptionWrapper(!isVStore, new FeedbackToSplitIO())
+  val toSplit             = new FeedbackToSplitIO()
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 

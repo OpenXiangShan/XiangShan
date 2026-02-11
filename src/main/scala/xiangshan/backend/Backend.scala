@@ -751,6 +751,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.isVecPartReplay.foreach(_:= false.B)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMask  .foreach(_:= 0.U)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMbIdx .foreach(_:= 0.U)
       }
 
       NewPipelineConnect(
@@ -773,6 +776,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
             resp.bits.sqIdx.get := toMem(i)(j).bits.sqIdx.get
             resp.bits.lqIdx.get := toMem(i)(j).bits.lqIdx.get
             resp.bits.resp := RespType.success
+            resp.bits.isVecPartReplay.foreach(_:= false.B)
+            resp.bits.vecReplayMask  .foreach(_:= 0.U)
+            resp.bits.vecReplayMbIdx .foreach(_:= 0.U)
         }
         if (backendParams.debugEn){
           dontTouch(memScheduler.io.vecLoadIssueResp(i)(j))
@@ -788,6 +794,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     source.ready := sink.ready
     sink.bits.iqIdx              := source.bits.iqIdx
     sink.bits.isFirstIssue       := source.bits.isFirstIssue
+    sink.bits.isVecPartReplay.foreach(_ := source.bits.isVecPartReplay.get)
+    sink.bits.vecReplayMask.  foreach(_ := source.bits.vecReplayMask.get)
+    sink.bits.vecReplayMbIdx. foreach(_ := source.bits.vecReplayMbIdx.get)
     sink.bits.uop                := 0.U.asTypeOf(sink.bits.uop)
     sink.bits.src                := 0.U.asTypeOf(sink.bits.src)
     sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
