@@ -1309,7 +1309,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
-    val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    val canWbSeq = io.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
     val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer).reduce(_ || _)
@@ -1393,7 +1393,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
-    val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    val canWbSeq = io.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
     val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer).reduce(_ || _)
