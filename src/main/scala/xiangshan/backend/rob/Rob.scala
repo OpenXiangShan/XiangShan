@@ -768,15 +768,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val oldestRobidxEnqUpdateDirtyFs = PriorityMuxDefault(enqUpdateDirtyFsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
 
-  when(oldestRobidxupdateDirtyFs.needFlush(io.redirect)) {
-    updateDirtyFs := false.B
+  val pendingDirtyFsNeedFlush = oldestRobidxupdateDirtyFs.needFlush(io.redirect)
+  val enqDirtyFsNeedFlush     = oldestRobidxEnqUpdateDirtyFs.needFlush(io.redirect)
+
+  when(io.redirect.valid){
+    when(updateDirtyFs && enqUpdateDirtyFs){
+      updateDirtyFs := !(pendingDirtyFsNeedFlush && enqDirtyFsNeedFlush)
+    }.elsewhen(updateDirtyFs && !enqUpdateDirtyFs){
+      updateDirtyFs := !pendingDirtyFsNeedFlush
+    }.elsewhen(!updateDirtyFs && enqUpdateDirtyFs){
+      updateDirtyFs := !enqDirtyFsNeedFlush
+    }
   }.elsewhen(!updateDirtyFs || dirtyFs.valid) {
     updateDirtyFs := enqUpdateDirtyFs
   }
 
   when((!updateDirtyFs || dirtyFs.valid) && enqUpdateDirtyFs) {
-    oldestRobidxupdateDirtyFs := oldestRobidxEnqUpdateDirtyFs
-  }.elsewhen(updateDirtyFs && enqUpdateDirtyFs && isBefore(oldestRobidxEnqUpdateDirtyFs, oldestRobidxupdateDirtyFs)) {
     oldestRobidxupdateDirtyFs := oldestRobidxEnqUpdateDirtyFs
   }
 
@@ -821,15 +828,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //    )
 //  }
 
-  when(oldestRobidxupdateDirtyVs.needFlush(io.redirect)) {
-    updateDirtyVs := false.B
+  val pendingDirtyVsNeedFlush = oldestRobidxupdateDirtyVs.needFlush(io.redirect)
+  val enqDirtyVsNeedFlush     = oldestRobidxEnqUpdateDirtyVs.needFlush(io.redirect)
+
+  when(io.redirect.valid){
+    when(updateDirtyVs && enqUpdateDirtyVs){
+      updateDirtyVs := !(pendingDirtyVsNeedFlush && enqDirtyVsNeedFlush)
+    }.elsewhen(updateDirtyVs && !enqUpdateDirtyVs){
+      updateDirtyVs := !pendingDirtyVsNeedFlush
+    }.elsewhen(!updateDirtyVs && enqUpdateDirtyVs){
+      updateDirtyVs := !enqDirtyVsNeedFlush
+    }
   }.elsewhen(!updateDirtyVs || dirtyVs.valid) {
     updateDirtyVs := enqUpdateDirtyVs
   }
 
   when((!updateDirtyVs || dirtyVs.valid) && enqUpdateDirtyVs) {
-    oldestRobidxupdateDirtyVs := oldestRobidxEnqUpdateDirtyVs
-  }.elsewhen(updateDirtyVs && enqUpdateDirtyVs && isBefore(oldestRobidxEnqUpdateDirtyVs, oldestRobidxupdateDirtyVs)) {
     oldestRobidxupdateDirtyVs := oldestRobidxEnqUpdateDirtyVs
   }
 
