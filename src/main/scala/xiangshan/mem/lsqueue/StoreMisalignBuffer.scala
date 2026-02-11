@@ -636,6 +636,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.vstart            := req.uop.vpu.vstart
       wb.bits.vecTriggerMask    := 0.U
       wb.bits.nc                := globalNC
+      wb.bits.splitIndx         := req.splitIndx
     }
   }
 
