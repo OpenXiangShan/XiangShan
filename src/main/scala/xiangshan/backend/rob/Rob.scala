@@ -706,14 +706,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       Mux(deqPtrEntry.needFlush(0),
         deqPtrEntry.ftqOffset,
         Mux(deqPtrEntry.predTaken,
-          0.U.asTypeOf(deqPtrEntry.ftqOffset),
           Mux(deqPtrEntry.RVC(1),
-          deqPtrEntry.ftqOffset + 1.U,
-          deqPtrEntry.ftqOffset + 2.U
+            0.U.asTypeOf(deqPtrEntry.ftqOffset),
+            1.U.asTypeOf(deqPtrEntry.ftqOffset)
+          ),
+          Mux(deqPtrEntry.RVC(1),
+            deqPtrEntry.ftqOffset + 1.U,
+            deqPtrEntry.ftqOffset + 2.U
           )
         )
       )
     )
+  // TODO: it could use the former instr's ftqIdx and ftqOffset to calculate the latter instr's PC
+  // rather than calculate the latter instr's ftqIdx and ftqOffset which could be wrong!!!
 
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
