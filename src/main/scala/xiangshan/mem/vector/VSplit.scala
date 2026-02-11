@@ -106,6 +106,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
+//  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayMask.get), io.in.bits.flowNum.get)
   val flowNum = io.in.bits.flowNum.get
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
@@ -127,10 +128,10 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
-  val flowMask = ((srcMask &
-    UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
-    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
-  ) >> srcMaskShiftBits)(VLENB - 1, 0)
+  val flowMask = Mux(io.in.bits.isVecPartReplay.get,
+    io.in.bits.vecReplayMask.get,
+    ((srcMask & UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
+    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt) >> srcMaskShiftBits)(VLENB - 1, 0))
   val indexedSrcMask = (srcMask >> flowsPrevThisVd).asUInt //only for index instructions
 
   // Used to calculate the element index.
@@ -172,6 +173,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
     x.indexVlMaxInVd := indexVlMaxInVd
+    x.isVecPartReplay := io.in.bits.isVecPartReplay.get
+    x.vecReplayMbIdx := io.in.bits.vecReplayMbIdx.get
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------
@@ -238,7 +241,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
   // query mergeBuffer
-  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid// only can_go will get MergeBuffer entry
+  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid && !s1_in.isVecPartReplay// only can_go will get MergeBuffer entry
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
@@ -263,7 +266,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.uopOffset := uopOffset
   io.out.bits.uopAddr   := s1_in.baseAddr + uopOffset
   io.out.bits.stride    := stride
-  io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
+  io.out.bits.mBIndex   := Mux(s1_in.isVecPartReplay, s1_in.vecReplayMbIdx, io.toMergeBuffer.resp.bits.mBIndex)
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
   io.out.bits.usMask        := usMask
@@ -397,6 +400,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex
+    x.splitIndx             := splitIdx
   }
 
   // redirect
