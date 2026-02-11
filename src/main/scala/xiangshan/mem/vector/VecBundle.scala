@@ -79,6 +79,12 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
   val usAligned128        = Bool()
   val usMask              = UInt((VLENB*2).W) // for unit-stride split
+
+  // Vec Store Replay
+  val isVecPartReplay     = Bool()
+  val vecReplayMbIdx      = UInt(vsmBindexBits.W)
+  val vecReplayFlowMask   = UInt(16.W)
+
 }
 
 object VSFQFeedbackType {
@@ -137,6 +143,8 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
   val elemIdxInsideVd      = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index in scope of vd
   val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
+
+  val VecNeedReplayMask    = UInt(VLENB.W)
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {

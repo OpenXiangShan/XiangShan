@@ -27,14 +27,13 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
-import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.{LqPtr, SqPtr, VLSUBundle}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr, FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RASPtr}
 import xiangshan.cache.HasDCacheParameters
 import utility._
-
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
@@ -456,7 +455,7 @@ class SnapshotPort(implicit p: Parameters) extends XSBundle {
   val flushVec = Vec(RenameSnapshotNum, Bool())
 }
 
-class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
+class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle {
   val robIdx = new RobPtr
   val hit = Bool()
   val flushState = Bool()
@@ -464,6 +463,9 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val dataInvalidSqIdx = new SqPtr
   val sqIdx = new SqPtr
   val lqIdx = new LqPtr
+  val isVecPartReplay = Bool()
+  val vecReplayMask = UInt(VLENB.W)
+  val vecReplayMbIdx = UInt(vsmBindexBits.W)
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {

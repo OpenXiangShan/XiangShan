@@ -20,8 +20,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
-import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.{VecMissalignedDebugBundle}
+import xiangshan.mem.{LqPtr, SqPtr, VLSUBundle, VecMissalignedDebugBundle}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
 import utility._
@@ -946,12 +945,15 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
   }
 
-  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
+  class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle {
     val uop = new DynInst
     val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
     val flowNum      = OptionWrapper(isVector, NumLsElem())
+    val isVecPartReplay = Bool()
+    val vecReplayMbIdx = UInt(vsmBindexBits.W)
+    val vecReplayFlowMask = UInt(VLENB.W)
 
     def src_rs1 = src(0)
     def src_rs2 = src(1)

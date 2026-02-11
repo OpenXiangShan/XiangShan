@@ -42,6 +42,9 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   // val vdOffset         = UInt(vOffsetBits.W)
   val sourceType       = VSFQFeedbackType()
   val flushState       = Bool()
+  val isPartReplay     = Bool()
+  val replayFlowNum    = UInt(flowIdxBits.W)
+  val replayFlowMask   = UInt(16.W)
   val vdIdx            = UInt(3.W)
   val elemIdx          = UInt(elemIdxBits.W) // element index
   // for exception
@@ -55,7 +58,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val fof              = Bool()
   val vlmax            = UInt(elemIdxBits.W)
 
-  def allReady(): Bool = (flowNum === 0.U)
+  def allReady(): Bool = (flowNum === 0.U || flowNum === replayFlowNum
 }
 
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
@@ -88,6 +91,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.originVl     := source.uop.vpu.vl
     sink.vaddr        := source.vaddr
     sink.vstart       := 0.U
+    sink.isPartReplay := false.B
+    sink.replayFlowNum := 0.U
+    sink.replayFlowMask := 0.U
   }
   def DeqConnect(source: MBufferBundle): MemExuOutput = {
     val sink               = WireInit(0.U.asTypeOf(new MemExuOutput(isVector = true)))
@@ -180,15 +186,21 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // handle the situation where multiple ports are going to write the same uop queue entry
   // select the oldest exception and count the flownum of the pipeline writeback.
   val mergePortMatrix        = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
+  val mergePortMatrixMiss    = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
   val mergePortMatrixHasExcp = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
   val mergedByPrevPortVec    = Wire(Vec(pipeWidth, Bool()))
   (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
     val mergePortValid = (j == i).B ||
       (j > i).B &&
       io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
-      io.fromPipeline(j).valid
+      io.fromPipeline(j).valid && io.fromPipeline(j).bits.hit
+    val mergePortMiss = (j == i).B ||
+      (j > i).B &&
+        io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
+        io.fromPipeline(j).valid && !io.fromPipeline(j).bits.hit
 
     mergePortMatrix(i)(j)        := mergePortValid
+    mergePortMatrixMiss(i)(j)    := mergePortMiss
     mergePortMatrixHasExcp(i)(j) := mergePortValid && (io.fromPipeline(j).bits.hasException || TriggerAction.isDmode(io.fromPipeline(j).bits.trigger))
   }}
   (0 until pipeWidth).map{case i =>
@@ -202,6 +214,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val mergedByPrevPortVecWrap    = if(isVStore) mergedByPrevPortVec else RegNext(mergedByPrevPortVec)
   if (backendParams.debugEn){
     dontTouch(mergePortMatrix)
+    dontTouch(mergePortMatrixMiss)
     dontTouch(mergePortMatrixHasExcp)
     dontTouch(mergedByPrevPortVec)
   }
@@ -298,6 +311,10 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex          = pipewb.bits.mBIndex
     val flowNumOffset    = PopCount(mergePortMatrix(i))
+    val replayFlowNumOffset = PopCount(mergePortMatrixMiss(i))
+    val replayFlowMask = (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
+      io.fromPipeline(i).bits.VecNeedReplayMask & Fill(pipeWidth, mergePortMatrix(i)(j))
+    }.reduce(_ | _)
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
     val hasExp           = ExceptionNO.selectByFu(pipewb.bits.exceptionVec, fuCfg).asUInt.orR
 
@@ -305,9 +322,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val latchWbValid     = if(isVStore) pipewb.valid else RegNext(pipewb.valid)
     val latchWbIndex     = if(isVStore) wbIndex      else RegEnable(wbIndex, pipewb.valid)
     val latchFlowNum     = if(isVStore) flowNumOffset else RegEnable(flowNumOffset, pipewb.valid)
+    val latchReplayFlowNum = if(isVStore) replayFlowNumOffset else RegEnable(replayFlowNumOffset, pipewb.valid)
     val latchMergeByPre  = if(isVStore) mergedByPrevPortVec(i) else RegEnable(mergedByPrevPortVec(i), pipewb.valid)
     when(latchWbValid && !latchMergeByPre){
       entries(latchWbIndex).flowNum := entries(latchWbIndex).flowNum - latchFlowNum
+      entries(latchWbIndex).replayFlowNum := entries(latchWbIndex).replayFlowNum + latchReplayFlowNum
+      entries(latchWbIndex).replayFlowMask := entries(latchWbIndex).replayFlowMask | replayFlowMask
     }
 
     when(pipewb.valid){
@@ -316,6 +336,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
     when(pipewb.valid && !pipewb.bits.hit){
       needRSReplay(wbIndex) := true.B
+      entries(wbIndex).isPartReplay := true.B
     }
     pipewb.ready := true.B
     XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, s"entry: $latchWbIndex, FlowWriteback overflow!!\n")
@@ -344,6 +365,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       allocated(entryIdx)   := false.B
       uopFinish(entryIdx)   := false.B
       needRSReplay(entryIdx):= false.B
+      selEntry.replayFlowNum := 0.U
+      selEntry.replayFlowMask := 0.U
     }
     //writeback connect
     port.valid   := selFire && selAllocated && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
@@ -361,6 +384,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     feedbackOut.dataInvalidSqIdx         := DontCare
     feedbackOut.sqIdx                    := selEntry.uop.sqIdx
     feedbackOut.lqIdx                    := selEntry.uop.lqIdx
+    feedbackOut.isVecPartReplay          := selEntry.isPartReplay
+    feedbackOut.vecReplayMask            := selEntry.replayFlowMask
 
     io.feedback(i).valid                 := RegNext(feedbackValid)
     io.feedback(i).bits                  := RegEnable(feedbackOut, feedbackValid)
