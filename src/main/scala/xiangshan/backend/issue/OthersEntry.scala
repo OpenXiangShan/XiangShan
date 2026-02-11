@@ -37,7 +37,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   val entryReg = RegNext(entryRegNext)
 
   //Wire
-  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.status, io.commonIn, false)
+  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.payload.og1Payload, entryReg.status, io.commonIn, false)
 
   if (params.hasIQWakeUp) {
     ShiftLoadDependency(hasWakeupIQ.get)

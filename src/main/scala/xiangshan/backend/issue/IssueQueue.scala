@@ -339,7 +339,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.s0Resp.foreach(_                                  := io.s0Resp.get)
     entriesIO.s2Resp.foreach(_                                  := io.s2Resp.get)
     entriesIO.snResp.foreach(_                                  := io.snResp.get)
-    entriesIO.snResp.foreach(x => dontTouch(x.head.sqIdx.get))
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
       entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)

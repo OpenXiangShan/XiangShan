@@ -70,7 +70,7 @@ case class IssueBlockParams(
   def needFeedBackSqIdx: Boolean = isVecStuIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
-  def needFeedBackLqIdx: Boolean = false
+  def needFeedBackLqIdx: Boolean = isLdAddrIQ
 
   def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
@@ -240,13 +240,13 @@ case class IssueBlockParams(
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
-  def needS0Resp = this.isLdAddrIQ || this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ
+  def needS0Resp = this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ
 
   def needFakeS1Resp = this.isStAddrIQ
 
   def needS2Resp = this.isStAddrIQ
 
-  def needSnResp = this.isVecStuIQ
+  def needSnResp = this.isVecStuIQ || this.isLdAddrIQ
 
   // TODO needOg0Resp needOg1Resp
   def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, needFakeS1Resp, needS2Resp, needSnResp).count(_ == true)
