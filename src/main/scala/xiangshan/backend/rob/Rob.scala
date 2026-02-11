@@ -631,7 +631,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
-  val deqNeedFlush = (deqPtrEntry.needFlush(0) || deqPtrEntry.needFlush(1) && CompressType.isNotNORMAL(deqPtrEntry.compressType)) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
+  val deqPtrFormer = Wire(new RobPtr)
+  val deqPtrLatter = Wire(new RobPtr)
+  deqPtrFormer := deqPtr
+  deqPtrLatter := deqPtr
+  deqPtrFormer.isFormer := true.B
+  deqPtrLatter.isFormer := false.B
+  val formerNotFlush = !deqPtrFormer.needFlush(io.redirect)
+  val latterNotFlush = !deqPtrLatter.needFlush(io.redirect)
+  val deqNeedFlush = (deqPtrEntry.needFlush(0) && formerNotFlush || deqPtrEntry.needFlush(1) && CompressType.isNotNORMAL(deqPtrEntry.compressType) && latterNotFlush) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx.isSameEntry(deqPtr)
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
