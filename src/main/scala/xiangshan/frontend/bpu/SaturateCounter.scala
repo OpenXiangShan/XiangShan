@@ -55,8 +55,18 @@ class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.o
   def isWeak: Bool = isWeakPositive || isWeakNegative
   // medium
   def isMid: Bool = {
-    require(width >= 3, "SaturateCounter width must be at least 3 to have mid states")
-    !isSaturate && !isWeak
+    require(width == 3, "SaturateCounter width must be 3 to have mid states")
+    val isMidLut = VecInit(
+      false.B,
+      true.B,
+      true.B,
+      false.B,
+      false.B,
+      true.B,
+      true.B,
+      false.B
+    )
+    WireInit(isMidLut(value))
   }
 
   /* *** private update methods *** */

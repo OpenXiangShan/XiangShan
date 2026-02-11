@@ -316,22 +316,25 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
   for (i <- 0 until NumWays) {
-    val hit          = s2_hitMask(i)
-    val valid        = s2_providerValid(i)
-    val sum          = s2_totalPercsum(i)
-    val thres        = s2_thresholds(s2_wayIdx(i))
-    val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
-    val tageConfMid  = s2_providerCtr(i).isMid
-    val tageConfLow  = s2_providerCtr(i).isWeak
-    val conf         = WireInit(false.B)
+    val hit                     = s2_hitMask(i)
+    val valid                   = s2_providerValid(i)
+    val sum                     = s2_totalPercsum(i)
+    val thres                   = s2_thresholds(s2_wayIdx(i))
+    val tageConfHigh            = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
+    val tageConfMid             = s2_providerCtr(i).isMid
+    val tageConfLow             = s2_providerCtr(i).isWeak
+    val sumAboveThresholdShift1 = aboveThreshold(sum, thres >> 1)
+    val sumAboveThresholdShift2 = aboveThreshold(sum, thres >> 2)
+    val sumAboveThresholdShift3 = aboveThreshold(sum, thres >> 3)
+    val conf                    = WireInit(false.B)
     when(hit && valid && tageConfHigh) {
-      conf            := aboveThreshold(sum, thres >> 1)
+      conf            := sumAboveThresholdShift1
       s2_useScPred(i) := Mux(conf, true.B, false.B)
     }.elsewhen(hit && valid && tageConfMid) {
-      conf            := aboveThreshold(sum, thres >> 2)
+      conf            := sumAboveThresholdShift2
       s2_useScPred(i) := Mux(conf, true.B, false.B)
     }.elsewhen(hit && valid && tageConfLow) {
-      conf            := aboveThreshold(sum, thres >> 3)
+      conf            := sumAboveThresholdShift3
       s2_useScPred(i) := Mux(conf, true.B, false.B)
     }.otherwise {
       conf            := false.B
