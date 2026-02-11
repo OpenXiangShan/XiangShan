@@ -325,11 +325,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
     }
   )))
-  for (i <- 0 until EnsbufferWidth) {
-    when(readyReadGoVec.take(i + 1).reduce(_ && _)) {
-      sqReadCnt := (i + 1).U // increase one by one
-    }
-  }
+  sqReadCnt := PopCount(readyReadGoVec)  
   rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -1243,7 +1239,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
           dataBuffer.io.enq(i).bits.vecValid  := toSbufferVecValid
         }
         else {
@@ -1254,7 +1250,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
           dataBuffer.io.enq(i).bits.vecValid  := dataBuffer.io.enq(0).bits.vecValid
         }
       } .otherwise {
@@ -1266,7 +1262,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq  := true.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
           dataBuffer.io.enq(i).bits.vecValid  := toSbufferVecValid
         }
         else {
@@ -1277,7 +1273,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq  := false.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
           dataBuffer.io.enq(i).bits.vecValid  := dataBuffer.io.enq(0).bits.vecValid
         }
       }
@@ -1338,7 +1334,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Flags are used to record whether there are any exceptions when the queue is displayed.
   // This is determined each time a write is made to the 'databuffer', prevent subsequent uop of the same instruction from writing to the 'dataBuffer'.
   val vecCommitHasException = (0 until EnsbufferWidth).map{ i =>
-    val ptr = rdataPtrExt(i).value
+    val ptr = dataBuffer.io.enq(i).bits.sqPtr.value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val ncStall = if(i == 0) nc(rdataPtrExt(0).value) else (nc(rdataPtrExt(i).value) || nc(rdataPtrExt(i-1).value))
     val exceptionVliad      = isVec(ptr) && hasException(ptr) && dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq
@@ -1355,9 +1351,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // compare robidx to select the last flow
   require(EnsbufferWidth == 2, "The vector store exception handle process only support EnsbufferWidth == 2 yet.")
   val robidxEQ = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire &&
-    uop(rdataPtrExt(0).value).robIdx === uop(rdataPtrExt(1).value).robIdx
+    uop(dataBuffer.io.enq(0).bits.sqPtr.value).robIdx === uop(dataBuffer.io.enq(1).bits.sqPtr.value).robIdx
   val robidxNE = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire && (
-    uop(rdataPtrExt(0).value).robIdx =/= uop(rdataPtrExt(1).value).robIdx
+    uop(dataBuffer.io.enq(0).bits.sqPtr.value).robIdx =/= uop(dataBuffer.io.enq(1).bits.sqPtr.value).robIdx
   )
   val onlyCommit0 = dataBuffer.io.enq(0).fire && !dataBuffer.io.enq(1).fire
 
@@ -1370,7 +1366,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
 
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
-    val ptr = rdataPtrExt(i).value
+    val ptr = dataBuffer.io.enq(i).bits.sqPtr.value
     val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
                             dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq
     vecLastFlowCommit
