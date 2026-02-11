@@ -1243,7 +1243,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
           dataBuffer.io.enq(i).bits.vecValid  := toSbufferVecValid
         }
         else {
@@ -1254,7 +1254,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           dataBuffer.io.enq(i).bits.wline     := false.B
           dataBuffer.io.enq(i).bits.sqPtr     := rdataPtrExt(0)
           dataBuffer.io.enq(i).bits.prefetch  := false.B
-          dataBuffer.io.enq(i).bits.sqNeedDeq := false.B
+          dataBuffer.io.enq(i).bits.sqNeedDeq := true.B
           dataBuffer.io.enq(i).bits.vecValid  := dataBuffer.io.enq(0).bits.vecValid
         }
       } .otherwise {
