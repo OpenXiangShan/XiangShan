@@ -736,7 +736,7 @@ class CtrlBlockImp(
   enqRob.resp := rob.io.enq.resp
   enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
-    sink.valid := RegNext(source.valid && !rob.io.redirect.valid)
+    sink.valid := RegNext(source.valid && !rob.io.redirect.valid) && !s1_s3_redirect.valid
     sink.bits := RegEnable(source.bits, source.valid)
   }
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
