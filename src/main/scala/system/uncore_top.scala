@@ -122,15 +122,54 @@ case class Pbus2Params(
 /**
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
+class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
+  // cpu master: cpus--> cpu_xbarNto1-->cpu2imsic_s/cpu2dm_s
+//  val cpus_l0 = Seq.fill(params.NumHarts / 1)(AXI4Xbar())
+  val cpus_l0 = (0 until params.NumHarts / 1).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"cpus_l0_$i")
+    xbarNode.node
+  }
+  val cpus_l1 = (0 until params.NumHarts / 2).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"cpus_l1_$i")
+    xbarNode.node
+  }
+  val cpus_l2 = (0 until params.NumHarts / 4).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"cpus_l2_$i")
+    xbarNode.node
+  }
+  val cpus_l3 = (0 until params.NumHarts / 8).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"cpus_l3_$i")
+    xbarNode.node
+  }
+  val cpus_l4LM = LazyModule(new AXI4Xbar())
+  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4")
 
+//  val cpus_l1 = Seq.fill(params.NumHarts / 2)(AXI4Xbar())
+//  val cpus_l2 = Seq.fill(params.NumHarts / 4)(AXI4Xbar())
+//  val cpus_l3 = Seq.fill(params.NumHarts / 8)(AXI4Xbar())
+//  val cpus_l4 = AXI4Xbar()
+  // one xbar2to1 every two cpu modes
+  for (i <- 0 until params.NumHarts) {
+    cpus_l1(i / 2) :=* cpus_l0(i)
+  }
+  for (i <- 0 until params.NumHarts / 2) {
+    cpus_l2(i / 2) := AXI4Buffer() :=* cpus_l1(i)
+  }
+  for (i <- 0 until params.NumHarts / 4) {
+    cpus_l3(i / 2) :=* cpus_l2(i)
+  }
+  for (i <- 0 until params.NumHarts / 8) {
+    cpus_l4 := AXI4Buffer() :=* cpus_l3(i)
+  }
+  lazy val module = new Imp
+  class Imp extends LazyModuleImp(this)
+}
 class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
-//  with HasSoCParameter{
-//  val IMSICPbus = LazyModule(new IMSICPbus(params))
-  val cpus_l0xbars = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
-  val cpus_l1xbars = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
-  val cpus_l2xbars = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
-  val cpus_l3xbars = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
-  val cpus_l4xbars = AXI4Xbar()
+  val Cbus = LazyModule(new Cbus(params))
   val hni_s_xbar = AXI4Xbar()
   val pcie_xbar1to2 = AXI4Xbar()
   val pbus_xbar = AXI4Xbar()
@@ -160,44 +199,33 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       beatBytes = 4)))
   })
   println("IMSICXbar: end sNodes define")
-   // one xbar2to1 every two cpu modes
-  for (i <- 0 until params.NumHarts) {
-    cpus_l1xbars(i/2) :=* cpus_l0xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/2) {
-    cpus_l2xbars(i/2) := AXI4Buffer() :=* cpus_l1xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/4) {
-    cpus_l3xbars(i/2) :=* cpus_l2xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/8) {
-    cpus_l4xbars := AXI4Buffer() :=* cpus_l3xbars(i)
-  }
+
+
 
   pcie_xbar1to2 := aplic_mNode
   pcie_xbar1to2 := AXI4Buffer() := hni_s_xbar
-  pbus_xbar := cpus_l4xbars
+  pbus_xbar := Cbus.cpus_l4
   pbus_xbar := pcie_xbar1to2
   // start to decoder for imsic below
-  val imsic_l1xbars = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
-  val imsic_l2xbars = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
-  val imsic_l3xbars = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
-  val imsic_l4xbars = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
+  val imsic_l1 = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
+  val imsic_l2 = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
+  val imsic_l3 = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
+  val imsic_l4 = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
   // one xbar1to2 every two cpu xbar
   for (i <- 0 until params.NumHarts/8) {
-    imsic_l1xbars(i) :*= AXI4Buffer() := pbus_xbar
+    imsic_l1(i) :*= AXI4Buffer() := pbus_xbar
   }
   for (i <- 0 until params.NumHarts/4) {
-    imsic_l2xbars(i) :*= imsic_l1xbars(i/2)
+    imsic_l2(i) :*= imsic_l1(i/2)
   }
   for (i <- 0 until params.NumHarts/2) {
-    imsic_l3xbars(i) :*= AXI4Buffer() :=  imsic_l2xbars(i/2)
+    imsic_l3(i) :*= AXI4Buffer() :=  imsic_l2(i/2)
   }
   for (i <- 0 until params.NumHarts/1) {
-    imsic_l4xbars(i) :*= imsic_l3xbars(i/2)
+    imsic_l4(i) :*= imsic_l3(i/2)
   }
   for (i <- 0 until params.NumHarts) {
-    sNodes(i) := AXI4Buffer() := imsic_l4xbars(i)
+    sNodes(i) := AXI4Buffer() := imsic_l4(i)
   }
 
   // --- Module Implementation ---
@@ -225,6 +253,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       m(i).viewAs[AXI4Bundle].ar.bits.qos := 0.U
       m(i).viewAs[AXI4Bundle].ar.valid := false.B
       m(i).viewAs[AXI4Bundle].r.ready := true.B
+
     }
   }
 }
@@ -239,24 +268,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     hartNum = params.NumHarts
   ))
   // dm master: cpus--> cpu_xbarNto1-->cpu2dm_s
-  val cpus_l0xbars = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
-  val cpus_l1xbars = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
-  val cpus_l2xbars = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
-  val cpus_l3xbars = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
-  val cpus_l4xbars = AXI4Xbar()
-  // one xbar2to1 every two cpu modes
-  for (i <- 0 until params.NumHarts) {
-    cpus_l1xbars(i/2) :=* cpus_l0xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/2) {
-    cpus_l2xbars(i/2) := AXI4Buffer() :=* cpus_l1xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/4) {
-    cpus_l3xbars(i/2) :=* cpus_l2xbars(i)
-  }
-  for (i <- 0 until params.NumHarts/8) {
-    cpus_l4xbars := AXI4Buffer() :=* cpus_l3xbars(i)
-  }
+  val Cbus = LazyModule(new Cbus(params))
   val cpu2dm_s =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
@@ -266,7 +278,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )),
       beatBytes = params.cpuAddrWidth / 8
     )))
-  cpu2dm_s := cpus_l4xbars
+  cpu2dm_s := Cbus.cpus_l4
   // define dm_s_self
   val dm_sNode =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
@@ -381,8 +393,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   println("====uncoreTop: after syscnt instance ..==")
   for (i <- 0 until params.NumHarts) {
     cpu_xbar1to2(i) := AXI4Buffer() := cpu_mNodes(i)
-    imsicTop.cpus_l0xbars(i) := cpu_xbar1to2(i)
-    dmTop.cpus_l0xbars(i) := cpu_xbar1to2(i)
+    imsicTop.Cbus.cpus_l0(i) := cpu_xbar1to2(i)
+    dmTop.Cbus.cpus_l0(i) := cpu_xbar1to2(i)
   }
   val peri_xbar = AXI4Xbar()
   val peri_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
