@@ -58,7 +58,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val fof              = Bool()
   val vlmax            = UInt(elemIdxBits.W)
 
-  def allReady(): Bool = (flowNum === 0.U || flowNum === replayFlowNum
+  def allReady(): Bool = (flowNum === 0.U || flowNum === replayFlowNum)
 }
 
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
@@ -314,7 +314,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val replayFlowNumOffset = PopCount(mergePortMatrixMiss(i))
     val replayFlowMask = (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
       io.fromPipeline(i).bits.VecNeedReplayMask & Fill(pipeWidth, mergePortMatrix(i)(j))
-    }.reduce(_ | _)
+    }.reduce(_ | _)}
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
     val hasExp           = ExceptionNO.selectByFu(pipewb.bits.exceptionVec, fuCfg).asUInt.orR
 
@@ -327,7 +327,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     when(latchWbValid && !latchMergeByPre){
       entries(latchWbIndex).flowNum := entries(latchWbIndex).flowNum - latchFlowNum
       entries(latchWbIndex).replayFlowNum := entries(latchWbIndex).replayFlowNum + latchReplayFlowNum
-      entries(latchWbIndex).replayFlowMask := entries(latchWbIndex).replayFlowMask | replayFlowMask
+      entries(latchWbIndex).replayFlowMask := entries(latchWbIndex).replayFlowMask | replayFlowMask(i)
     }
 
     when(pipewb.valid){
@@ -350,9 +350,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
   }
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
-   private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
-   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
+   val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   val writeBackOutExceptionVec = writeBackOut.map(_.bits.uop.exceptionVec)
    for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
