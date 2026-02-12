@@ -106,7 +106,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
-  val flowNum = Mux(io.in.bits.isVecPartReplay, PopCount(io.in.bits.vecReplayFlowMask), io.in.bits.flowNum.get)
+  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayFlowMask.get), io.in.bits.flowNum.get)
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
   val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
@@ -127,7 +127,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
-  val flowMask = Mux(io.in.bits.isVecPartReplay, io.in.bits.vecReplayFlowMask, ((srcMask &
+  val flowMask = Mux(io.in.bits.isVecPartReplay.get, io.in.bits.vecReplayFlowMask.get, ((srcMask &
     UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
     (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
   ) >> srcMaskShiftBits)(VLENB - 1, 0))
@@ -172,8 +172,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
     x.indexVlMaxInVd := indexVlMaxInVd
-    x.isVecPartReplay := io.in.bits.isVecPartReplay
-    x.vecReplayMbIdx := io.in.bits.vecReplayMbIdx
+    x.isVecPartReplay := io.in.bits.isVecPartReplay.get
+    x.vecReplayMbIdx := io.in.bits.vecReplayMbIdx.get
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------

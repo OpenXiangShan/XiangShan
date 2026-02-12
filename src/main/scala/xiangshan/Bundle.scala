@@ -463,9 +463,9 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends VLSU
   val dataInvalidSqIdx = new SqPtr
   val sqIdx = new SqPtr
   val lqIdx = new LqPtr
-  val isVecPartReplay = Bool()
-  val vecReplayMask = UInt(VLENB.W)
-  val vecReplayMbIdx = UInt(vsmBindexBits.W)
+  val isVecPartReplay = Option.when(isVector)(Bool())
+  val vecReplayMask   = Option.when(isVector)(UInt(VLENB.W))
+  val vecReplayMbIdx  = Option.when(isVector)(UInt(vsmBindexBits.W))
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {

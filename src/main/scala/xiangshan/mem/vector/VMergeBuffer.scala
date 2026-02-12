@@ -384,8 +384,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     feedbackOut.dataInvalidSqIdx         := DontCare
     feedbackOut.sqIdx                    := selEntry.uop.sqIdx
     feedbackOut.lqIdx                    := selEntry.uop.lqIdx
-    feedbackOut.isVecPartReplay          := selEntry.isPartReplay
-    feedbackOut.vecReplayMask            := selEntry.replayFlowMask
+    feedbackOut.isVecPartReplay.foreach(_:= selEntry.isPartReplay)
+    feedbackOut.vecReplayMask.foreach(_  := selEntry.replayFlowMask)
 
     io.feedback(i).valid                 := RegNext(feedbackValid)
     io.feedback(i).bits                  := RegEnable(feedbackOut, feedbackValid)
