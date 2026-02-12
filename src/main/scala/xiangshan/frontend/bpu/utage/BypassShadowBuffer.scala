@@ -30,6 +30,21 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import yunsuan.vector.alu.VIntFixpTable.table
 
+/**
+ * Bypass Shadow Buffer - Write buffer and bypass cache
+ *
+ * Design goals:
+ * 1. Cache recent TAGE table updates to avoid frequent SRAM write-backs (write coalescing)
+ * 2. Provide RAW bypass (Read-After-Write) to ensure predictions see the latest updates
+ * 3. Reduce write port pressure on TAGE tables, saving area and power
+ *
+ * Operation principles:
+ * - Circular queue structure: new writes are enqueued, forced write-back to SRAM when nearly full
+ * - When buffer is not full, attempt to write-back the oldest entry every cycle
+ * - Entries already written back are not cleared, but marked as allocatable
+ * - Priority mask ensures the newest copy is read when multiple copies of the same address exist
+ * - Banked useful registers reduce fanout during reset
+ */
 class BypassShadowBuffer(
     val numSets:  Int,
     val numWay:   Int,
@@ -139,6 +154,8 @@ class BypassShadowBuffer(
   // ==========================================================================
   // Bypass Logic: entries with the same readIndex are not allowed
   // ==========================================================================
+  // Buffer write logic is pipelined across two cycles,
+  // creating potential for writes to the same index in consecutive cycles.
   private val needBypass        = WireDefault(false.B)
   private val bypasscleanId     = WireDefault(0.U(log2Ceil(numEntry).W))
   private val bypassHasHit      = Wire(Bool())
@@ -238,7 +255,8 @@ class BypassShadowBuffer(
   bypassHitVec      := newBufferEntry.entryData.map(e => e.valid)
   bypassReadEntries := newBufferEntry.entryData.map(e => e.bits)
 
-  when(io.writeSuccess || !statusEntries(deqPtr.value).dirty) {
+  private val isEmpty = deqPtr === enqPtr
+  when(io.writeSuccess || (!statusEntries(deqPtr.value).dirty && !isEmpty)) {
     deqPtr := deqPtr + 1.U
   }
 
@@ -255,7 +273,10 @@ class BypassShadowBuffer(
     statusEntries(t1_cleanId).dirty := false.B
   }
 
-  private val forceWrite = distanceBetween(enqPtr, deqPtr) > (numEntry - 2).U
+  private val forceWrite = RegInit(false.B)
+  // Early writeback to distribute SRAM write operations and avoid write pressure concentration
+  // that exacerbates read/write conflicts on individual entries.
+  forceWrite                  := distanceBetween(enqPtr, deqPtr) > (numEntry - 4).U
   io.tryWrite.valid           := statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
   io.tryWrite.bits.writeIndex := entries(deqPtr.value).index
   io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.map(_.bits)
@@ -272,6 +293,5 @@ class BypassShadowBuffer(
   // 2. Bypass and error statistics
   XSPerfAccumulate("need_bypass", needBypass)
   private val multihit = (PopCount(t0_entryHit) > 1.U) && t0_fire
-  dontTouch(multihit)
   XSPerfAccumulate("error_multihit", multihit)
 }
