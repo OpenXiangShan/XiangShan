@@ -298,7 +298,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   dmxbar2to1 := AXI4Buffer() := dm_mNode_crs
   dm_sNode := dmxbar2to1
   println("=== exit dmPbusTop class last ====")
-  class Imp(outer: dmPbusTop) extends LazyRawModuleImp(outer) {
+  class Imp(outer: dmPbusTop) extends LazyModuleImp(outer) {
     println("==== enter uncoreTop Imp ... ==")
     val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
       addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
@@ -482,6 +482,10 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     msi_m <> imsicTop.module.m
     dm_crs_s <> dmTop.module.dm_crs_s
     dm_crs_m <> dmTop.module.dm_crs_m
+    imsicTop.module.clock := clock
+    imsicTop.module.reset := reset
+    dmTop.module.clock := clock
+    dmTop.module.reset := reset
     dmTop.module.dm_m.foreach(_ <> dm_m.get)
     dmio <> dmTop.module.dmio
     dmint <> dmTop.module.dmint
