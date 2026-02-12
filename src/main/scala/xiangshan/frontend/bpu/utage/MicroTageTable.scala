@@ -48,6 +48,7 @@ class MicroTageTable(
     val resps:       MicroTageResp       = Output(new MicroTageResp)
     val train:       MicroTageTrain      = new MicroTageTrain(numWay, numSets)
     val usefulReset: Bool                = Input(Bool())
+    val resetDone:   Bool                = Output(Bool())
   }
   val io = IO(new MicroTageTableIO)
   // Write buffer to handle write conflicts
@@ -87,7 +88,8 @@ class MicroTageTable(
   // }
 
   // Calculate bank selection for read access
-  private val bankOH             = UIntToOH(getBankId(io.req.bits.readIndex, NumBanks))
+  private val bankId             = getBankId(io.req.bits.readIndex, NumBanks)
+  private val bankOH             = UIntToOH(bankId)
   private val bankReadInnerIndex = getBankInnerIndex(io.req.bits.readIndex, NumBanks, numSets)
 
   // Read from all SRAM banks
@@ -96,8 +98,10 @@ class MicroTageTable(
     bank.io.r.req.bits.setIdx := bankReadInnerIndex
   }
 
+  io.resetDone := entrySram.map(_.io.r.req.ready).reduce(_ && _)
+
   // Pipeline stage: capture bank selection from previous cycle
-  private val a1_bankOH = RegNext(bankOH)
+  private val a1_bankOH = RegNext(bankOH, 0.U(NumBanks.W))
   // Collect read responses from all banks
   private val bankReadRespVec = VecInit(entrySram.map(_.io.r.resp.data))
   // Select the appropriate bank's response based on a1_bankOH
@@ -108,11 +112,13 @@ class MicroTageTable(
   private val bufferHit         = wbuffer.io.resp.hit
   private val bufferReadEntries = wbuffer.io.resp.readEntries
   // Convert SRAM response to proper type
-  private val sramReadEntries = bankReadEntries.asTypeOf(Vec(numWay, new MicroTageEntry))
+  private val sramRealReadEntries = WireDefault(0.U.asTypeOf(Vec(numWay, new MicroTageEntry)))
+  private val sramReadEntries     = bankReadEntries.asTypeOf(Vec(numWay, new MicroTageEntry))
+  sramRealReadEntries := sramReadEntries
 
   // Select data from buffer (if hit) or SRAM (if miss)
   private val readEntries = VecInit(
-    (bufferHit, bufferReadEntries, sramReadEntries).zipped.map {
+    (bufferHit, bufferReadEntries, sramRealReadEntries).zipped.map {
       case (hit, bufferEntry, sramEntry) => Mux(hit, bufferEntry, sramEntry)
     }
   )
@@ -141,5 +147,12 @@ class MicroTageTable(
     val writeValid = (!bank.io.r.req.valid || forceWrite) && tryWrite && (writeBankId === bankIdx.U)
     bank.io.w(writeValid, writeEntry, bankWriteIndex, writeMask)
   // bank.io.w.apply(writeValid, writeEntry, bankWriteIndex, true.B, writeMaskBits)
+  }
+
+  private val needCheckConflict = RegNext(forceWrite && tryWrite, false.B)
+  private val writeOHNext       = RegNext(UIntToOH(writeBankId))
+  // Handle read-write conflicts in SRAM.
+  for (i <- 0 until numWay) {
+    sramRealReadEntries(i).valid := !((writeOHNext === a1_bankOH) && needCheckConflict) && sramReadEntries(i).valid
   }
 }

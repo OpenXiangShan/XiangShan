@@ -30,7 +30,6 @@ case class MicroTageParameters(
       new MicroTageInfo(512, 24, 12, 16)
     ),
     TakenCtrWidth:       Int = 3,
-    NumTables:           Int = 4,
     LowTickWidth:        Int = 7,
     HighTickWidth:       Int = 8,
     UsefulWidth:         Int = 2,
@@ -44,7 +43,7 @@ trait HasMicroTageParameters extends HasBpuParameters {
   val utageParameters: MicroTageParameters = bpuParameters.utageParameters
   def TableInfos:      Seq[MicroTageInfo]  = utageParameters.TableInfos
   def TakenCtrWidth:   Int                 = utageParameters.TakenCtrWidth
-  def NumTables:       Int                 = utageParameters.NumTables
+  def NumTables:       Int                 = TableInfos.length
   def LowTickWidth:    Int                 = utageParameters.LowTickWidth
   def HighTickWidth:   Int                 = utageParameters.HighTickWidth
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
@@ -67,12 +66,15 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def PCTagHashBitsForLongHistory:   Seq[Int] = Seq(18, 16, 14, 12, 10, 6, 5, 4, 2, 1)
   def PCTagHashBitsDefault:          Seq[Int] = Seq(31, 19, 12, 7, 4, 2, 1, 0)
 
+  // The PHR’s history generation incorporates the target address; during a branch,
+  // this target address matches the starting address of the next predicted basic block.
+  // Fine-grained adjustments may be beneficial during folding.
   def PCTagConcatBitsForShortHistory:    Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 4, 3, 2, 1)
-  def PCTagConcatBitsForMediumHistory:   Seq[Int] = Seq(11, 10, 9, 8, 5, 3, 1)
+  def PCTagConcatBitsForMediumHistory:   Seq[Int] = Seq(17, 15, 13, 11, 10, 9, 8, 5, 3, 1)
   def PCTagConcatBitsForLongHistory:     Seq[Int] = Seq(11, 10, 9, 7, 5, 3)
   def PCTagConcatBitsForVeryLongHistory: Seq[Int] = Seq(11, 7, 5, 3)
 
-  def PCTagXorBitsForShortHistory:    Seq[Int] = Seq(10, 8, 6, 4, 2)
+  def PCTagXorBitsForShortHistory:    Seq[Int] = Seq(12, 10, 8, 6, 4, 2)
   def PCTagXorBitsForMediumHistory:   Seq[Int] = Seq(16, 14, 12, 10, 8, 6, 4, 2, 0)
   def PCTagXorBitsForLongHistory:     Seq[Int] = Seq(18, 16, 14, 12, 10, 8, 6, 4, 2, 0)
   def PCTagXorBitsForVeryLongHistory: Seq[Int] = Seq(20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 1, 0)
