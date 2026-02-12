@@ -106,7 +106,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
-  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayFlowMask.get), io.in.bits.flowNum.get)
+  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayMask.get), io.in.bits.flowNum.get)
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
   val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
@@ -127,7 +127,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
-  val flowMask = Mux(io.in.bits.isVecPartReplay.get, io.in.bits.vecReplayFlowMask.get, ((srcMask &
+  val flowMask = Mux(io.in.bits.isVecPartReplay.get, io.in.bits.vecReplayMask.get, ((srcMask &
     UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
     (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
   ) >> srcMaskShiftBits)(VLENB - 1, 0))

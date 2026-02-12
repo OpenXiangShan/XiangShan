@@ -952,8 +952,8 @@ object Bundles {
     val isFirstIssue = Bool()
     val flowNum      = OptionWrapper(isVector, NumLsElem())
     val isVecPartReplay   = Option.when(isVector)(Bool())
+    val vecReplayMask     = Option.when(isVector)(UInt(VLENB.W))
     val vecReplayMbIdx    = Option.when(isVector)(UInt(vsmBindexBits.W))
-    val vecReplayFlowMask = Option.when(isVector)(UInt(VLENB.W))
 
     def src_rs1 = src(0)
     def src_rs2 = src(1)
