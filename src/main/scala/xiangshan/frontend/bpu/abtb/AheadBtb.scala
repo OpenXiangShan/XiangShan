@@ -34,6 +34,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val overrideValid: Bool                       = Input(Bool())
     val prediction:    Vec[Valid[Prediction]]     = Output(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
     val abtbResult:    Vec[Valid[AheadBtbResult]] = Output(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
+    val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
     val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
   }
@@ -146,11 +147,12 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s3_entries  = RegInit(0.U.asTypeOf(s1_entries))
   private val s3_startPc  = RegInit(0.U.asTypeOf(s1_startPc))
 
-  private val s2_setIdx   = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
-  private val s2_bankIdx  = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
-  private val s2_bankMask = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
-  private val s2_entries  = RegEnable(Mux(overrideValid, s3_entries, s1_entries), s1_fire)
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
+  private val s1_realEntries = Mux(overrideValid, s3_entries, s1_entries)
+  private val s2_setIdx      = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
+  private val s2_bankIdx     = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
+  private val s2_bankMask    = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
+  private val s2_entries     = RegEnable(s1_realEntries, s1_fire)
+  private val s2_startPc     = RegEnable(s1_startPc, s1_fire)
 
   when(s2_fire) {
     s3_setIdx   := s2_setIdx
@@ -184,6 +186,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     pred.bits.cfiPosition  := s2_entries(i).position
     pred.bits.attribute    := s2_entries(i).attribute
     pred.bits.isStrongBias := s2_strongBias(i)
+  }
+  io.abtbPos.zipWithIndex.map { case (pos, i) =>
+    pos := s1_realEntries(i).position
   }
 
   io.meta.valid    := s2_valid
