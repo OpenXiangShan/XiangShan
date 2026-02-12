@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -28,14 +28,28 @@ import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
-import yunsuan.vector.alu.VIntFixpTable.table
 
+/**
+ * Bypass Shadow Buffer - Write buffer and bypass cache
+ *
+ * Design goals:
+ * 1. Cache recent TAGE table updates to avoid frequent SRAM write-backs (write coalescing)
+ * 2. Provide RAW bypass (Read-After-Write) to ensure predictions see the latest updates
+ * 3. Reduce write port pressure on TAGE tables, saving area and power
+ *
+ * Operation principles:
+ * - Circular queue structure: new writes are enqueued, forced write-back to SRAM when nearly full
+ * - When buffer is not full, attempt to write-back the oldest entry every cycle
+ * - Entries already written back are not cleared, but marked as allocatable
+ * - Priority mask ensures the newest copy is read when multiple copies of the same address exist
+ * - Banked useful registers reduce fanout during reset
+ */
 class BypassShadowBuffer(
     val numSets:  Int,
     val numWay:   Int,
-    val numEntry: Int = 16,
     val tableId:  Int,
-    val NumBanks: Int = 4
+    val numBanks: Int = 4,
+    val numEntry: Int = 16
 )(implicit p: Parameters) extends MicroTageModule with HasCircularQueuePtrHelper with Helpers {
   class BypassBufferIO extends MicroTageBundle {
     class Req extends MicroTageBundle {
@@ -78,8 +92,8 @@ class BypassShadowBuffer(
   private val priorityMask  = RegInit(0.U(numEntry.W))
 
   // Banked useful registers
-  private val usefulEntries = RegInit(VecInit.tabulate(NumBanks) { bankIdx =>
-    VecInit(Seq.fill(numSets / NumBanks)(
+  private val usefulEntries = RegInit(VecInit.tabulate(numBanks) { bankIdx =>
+    VecInit(Seq.fill(numSets / numBanks)(
       VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
     ))
   })
@@ -121,8 +135,8 @@ class BypassShadowBuffer(
   private val t0_microTageHitVec   = VecInit(t0_bufferEntry.map(e => e.valid && t0_hasHit))
   private val t0_microTageEntryVec = VecInit(t0_bufferEntry.map(e => e.bits))
   // Access useful registers for t0 stage
-  private val t0_bankIdx         = getBankId(t0_trainIndex, NumBanks)
-  private val t0_bankOffset      = getBankInnerIndex(t0_trainIndex, NumBanks, numSets)
+  private val t0_bankIdx         = getBankId(t0_trainIndex, numBanks)
+  private val t0_bankOffset      = getBankInnerIndex(t0_trainIndex, numBanks, numSets)
   private val t0_trainReadUseful = usefulEntries(t0_bankIdx)(t0_bankOffset)
   private val t0_cleanId =
     Mux(t0_chosenFirst, ~PriorityEncoder(t0_firstHit.reverse), ~PriorityEncoder(t0_entryHit.reverse))
@@ -139,6 +153,8 @@ class BypassShadowBuffer(
   // ==========================================================================
   // Bypass Logic: entries with the same readIndex are not allowed
   // ==========================================================================
+  // Buffer write logic is pipelined across two cycles,
+  // creating potential for writes to the same index in consecutive cycles.
   private val needBypass        = WireDefault(false.B)
   private val bypasscleanId     = WireDefault(0.U(log2Ceil(numEntry).W))
   private val bypassHasHit      = Wire(Bool())
@@ -152,8 +168,8 @@ class BypassShadowBuffer(
   private val t1_trainReadEntries = RegNext(Mux(needBypass, bypassReadEntries, t0_trainReadEntries))
   private val t1_cleanId          = RegNext(Mux(needBypass, bypasscleanId, t0_cleanId))
   // Access useful registers for t1 stage
-  private val t1_bankIdx         = getBankId(t1_trainIndex, NumBanks)
-  private val t1_bankOffset      = getBankInnerIndex(t1_trainIndex, NumBanks, numSets)
+  private val t1_bankIdx         = getBankId(t1_trainIndex, numBanks)
+  private val t1_bankOffset      = getBankInnerIndex(t1_trainIndex, numBanks, numSets)
   private val t1_trainReadUseful = usefulEntries(t1_bankIdx)(t1_bankOffset)
 
   private val writeBufferValid     = WireDefault(VecInit(Seq.fill(numWay)(false.B)))
@@ -201,8 +217,8 @@ class BypassShadowBuffer(
 
   // Useful counter reset logic
   when(io.usefulReset) {
-    for (bankIdx <- 0 until NumBanks) {
-      for (setIdx <- 0 until numSets / NumBanks) {
+    for (bankIdx <- 0 until numBanks) {
+      for (setIdx <- 0 until numSets / numBanks) {
         for (wayIdx <- 0 until numWay) {
           val entry = usefulEntries(bankIdx)(setIdx)(wayIdx)
           if (tableId < NumTables / 2) {
@@ -238,7 +254,8 @@ class BypassShadowBuffer(
   bypassHitVec      := newBufferEntry.entryData.map(e => e.valid)
   bypassReadEntries := newBufferEntry.entryData.map(e => e.bits)
 
-  when(io.writeSuccess || !statusEntries(deqPtr.value).dirty) {
+  private val isEmpty = deqPtr === enqPtr
+  when(io.writeSuccess || (!statusEntries(deqPtr.value).dirty && !isEmpty)) {
     deqPtr := deqPtr + 1.U
   }
 
@@ -255,7 +272,10 @@ class BypassShadowBuffer(
     statusEntries(t1_cleanId).dirty := false.B
   }
 
-  private val forceWrite = distanceBetween(enqPtr, deqPtr) > (numEntry - 2).U
+  private val forceWrite = RegInit(false.B)
+  // Early writeback to distribute SRAM write operations and avoid write pressure concentration
+  // that exacerbates read/write conflicts on individual entries.
+  forceWrite                  := distanceBetween(enqPtr, deqPtr) > (numEntry - 2).U
   io.tryWrite.valid           := statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
   io.tryWrite.bits.writeIndex := entries(deqPtr.value).index
   io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.map(_.bits)
@@ -272,6 +292,5 @@ class BypassShadowBuffer(
   // 2. Bypass and error statistics
   XSPerfAccumulate("need_bypass", needBypass)
   private val multihit = (PopCount(t0_entryHit) > 1.U) && t0_fire
-  dontTouch(multihit)
   XSPerfAccumulate("error_multihit", multihit)
 }
