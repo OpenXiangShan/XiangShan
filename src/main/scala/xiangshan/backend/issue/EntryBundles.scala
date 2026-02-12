@@ -14,10 +14,11 @@ import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
+import xiangshan.mem.HasVLSUParameters
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
-  class Status(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+  class Status(implicit p: Parameters, params: IssueBlockParams) extends XSBundle with HasVLSUParameters {
     //basic status
     val robIdx                = new RobPtr
     val fuType                = IQFuType()
@@ -31,6 +32,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqPortIdx            = UInt(1.W)
     //vector mem status
     val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
+    val isVecPartReplay       = Option.when(params.isVecMemIQ)(Bool())
+    val vecReplayMask         = Option.when(params.isVecMemIQ)(UInt(VLENB.W))
+    val vecReplayMbIdx        = Option.when(params.isVecMemIQ)(UInt(vsmBindexBits.W))
 
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
@@ -65,13 +69,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val numLsElem             = NumLsElem()
   }
 
-  class EntryDeqRespBundle(implicit p: Parameters, val params: IssueBlockParams) extends XSBundle {
+  class EntryDeqRespBundle(implicit p: Parameters, val params: IssueBlockParams) extends XSBundle with HasVLSUParameters {
     val robIdx                = new RobPtr
     val resp                  = RespType()
     val fuType                = FuType()
     val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
     val sqIdx                 = Option.when(params.needFeedBackSqIdx)(new SqPtr())
     val lqIdx                 = Option.when(params.needFeedBackLqIdx)(new LqPtr())
+    val isVecPartReplay       = Option.when(params.isVecMemIQ)(Bool())
+    val vecReplayMask         = Option.when(params.isVecMemIQ)(UInt(VLENB.W))
+    val vecReplayMbIdx        = Option.when(params.isVecMemIQ)(UInt(vsmBindexBits.W))
   }
 
   object RespType {
@@ -282,6 +289,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val respIssueFail                                  = commonIn.issueResp.valid && RespType.isBlocked(commonIn.issueResp.bits.resp)
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
+    entryUpdate.status.isVecPartReplay.foreach(_      := commonIn.issueResp.bits.isVecPartReplay.get)
+    entryUpdate.status.vecReplayMask  .foreach(_      := Mux(commonIn.issueResp.bits.isVecPartReplay.get, commonIn.issueResp.bits.vecReplayMask .get, entryUpdate.status.vecReplayMask .get))
+    entryUpdate.status.vecReplayMbIdx .foreach(_      := Mux(commonIn.issueResp.bits.isVecPartReplay.get, commonIn.issueResp.bits.vecReplayMbIdx.get, entryUpdate.status.vecReplayMbIdx.get))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
       val srcLoadCancel = common.srcLoadCancelVec(srcIdx)
       val loadTransCancel = common.srcLoadTransCancelVec(srcIdx)

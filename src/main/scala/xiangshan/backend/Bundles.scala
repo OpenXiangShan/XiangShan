@@ -20,7 +20,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
-import xiangshan.mem.{LqPtr, SqPtr, VLSUBundle, VecMissalignedDebugBundle}
+import xiangshan.mem.{HasVLSUParameters, LqPtr, SqPtr, VLSUBundle, VecMissalignedDebugBundle}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
 import utility._
@@ -602,7 +602,7 @@ object Bundles {
   }
 
   // DataPath --[ExuInput]--> Exu
-  class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
+  class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
@@ -652,6 +652,10 @@ object Bundles {
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    // for vector mem
+    val isVecPartReplay = Option.when(params.hasVStoreFu)(Bool())
+    val vecReplayMask   = Option.when(params.hasVStoreFu)(UInt(VLENB.W))
+    val vecReplayMbIdx  = Option.when(params.hasVStoreFu)(UInt(vsmBindexBits.W))
 
     val perfDebugInfo = new PerfDebugInfo()
     val debug_seqNum = InstSeqNum()
@@ -951,9 +955,9 @@ object Bundles {
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
     val flowNum      = OptionWrapper(isVector, NumLsElem())
-    val isVecPartReplay   = Option.when(isVector)(Bool())
-    val vecReplayMask     = Option.when(isVector)(UInt(VLENB.W))
-    val vecReplayMbIdx    = Option.when(isVector)(UInt(vsmBindexBits.W))
+    val isVecPartReplay = Option.when(isVector)(Bool())
+    val vecReplayMask   = Option.when(isVector)(UInt(VLENB.W))
+    val vecReplayMbIdx  = Option.when(isVector)(UInt(vsmBindexBits.W))
 
     def src_rs1 = src(0)
     def src_rs2 = src(1)
