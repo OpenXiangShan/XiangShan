@@ -21,7 +21,7 @@ import difftest.common.DifftestMem
 import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
 import utility._
-import xiangshan.ExceptionNO.hardwareError
+import xiangshan.ExceptionNO.{hardwareError, storeAccessFault}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, NewExuOutput, UopIdx, connectMemDecoupledNewExuOutput, connectSamePort}
 import xiangshan.backend.exu.ExeUnitParams
@@ -806,6 +806,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     }
 
+    // exception check
+    private val hasHardwareError = RegInit(false.B)
+    private val hasAccessFault   = RegInit(false.B)
     /*================================================================================================================*/
     /*================================================= CBO.FSM ======================================================*/
     /*                                           zero
@@ -881,15 +884,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     uncacheState := uncacheStateNext
 
     private val isNC             = isPbmtNC(headDataEntry.memoryType)
-    private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) &&
+    private val isPBMTIO         = isPbmtIO(headDataEntry.memoryType)
+    private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) && !headCtrlEntry.isCbo &&
       headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated && headCtrlEntry.committed
-    private val hasHardwareError = RegInit(false.B)
-
-    when(uncacheState === UncacheState.waitResp) {
-      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.nderr
-    }.elsewhen(uncacheState === UncacheState.writeback) {
-      hasHardwareError := false.B
-    }
 
     switch(uncacheState) {
       is(UncacheState.idle) {
@@ -929,7 +926,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.req.bits.data          := Mux(headDataEntry.vaddr(3), outData.head(VLEN - 1, 64), outData.head(63,0))
     io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLENB - 1 , 8), outMask.head(7,0))
     io.toUncacheBuffer.req.bits.robIdx        := headDataEntry.uop.robIdx
-    io.toUncacheBuffer.req.bits.memBackTypeMM := isNC
+    io.toUncacheBuffer.req.bits.memBackTypeMM := isNC || isPBMTIO
     io.toUncacheBuffer.req.bits.nc            := isNC //TODO: remove it, why not use memBackTypeMM ?!
     io.toUncacheBuffer.req.bits.id            := brodenId
 
@@ -937,12 +934,29 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.resp.ready             := true.B
 
     //stout
+    when(uncacheState === UncacheState.waitResp) {
+      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.corrupt
+    }.elsewhen(cboState === CboState.waitResp){
+      hasHardwareError := io.toDCache.resp.fire && io.toDCache.resp.bits.corrupt
+    }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
+      hasHardwareError := false.B
+    }
+
+    when(uncacheState === UncacheState.waitResp) {
+      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.denied
+    }.elsewhen(cboState === CboState.waitResp){
+      hasAccessFault := io.toDCache.resp.fire && io.toDCache.resp.bits.denied
+    }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
+      hasAccessFault := false.B
+    }
+
     val writeBack = Wire(new NewExuOutput(staParams.head))
     writeBack.toRob.valid                        := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
     writeBack.toRob.bits.robIdx := dataEntries.head.uop.robIdx
     writeBack.toRob.bits.exceptionVec.foreach{ case x =>
       x := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
-      x(hardwareError) := hasHardwareError} // override
+      x(hardwareError) := hasHardwareError
+      x(storeAccessFault) := hasAccessFault} // override
     writeBack.toRob.bits.trigger.foreach(_ := DontCare)
     writeBack.toRob.bits.isRVC.foreach(_ := DontCare)
     writeBack.toRob.bits.sqIdx.foreach(_ := io.rdataPtrExt.head)
