@@ -270,11 +270,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_abtbPrediction = abtb.io.prediction
   private val s1_utageHitMask   = utage.io.prediction.hitVec
   private val s1_utageTakenMask = utage.io.prediction.takenVec
+  private val s1_useAbtbUtage = s1_abtbPrediction.zip(s1_utageHitMask).map {
+    case (prediction, hit) => hit && prediction.valid
+  }.reduce(_ || _)
   private val s1_abtbTakenMask = VecInit(s1_abtbPrediction.zipWithIndex.map { case (pred, i) =>
     pred.valid && (
       pred.bits.attribute.isDirect ||
         pred.bits.attribute.isIndirect ||
-        pred.bits.attribute.isConditional && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken)
+        pred.bits.attribute.isConditional && Mux(s1_useAbtbUtage, s1_utageTakenMask(i), pred.bits.taken)
     )
   })
 

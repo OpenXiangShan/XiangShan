@@ -132,67 +132,73 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a2_readIndex = RegEnable(Mux(overrideValid, a3_readIndex, a1_readIndex), a1_fire)
   private val a2_predRead =
     RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
-  private val a2_fromAbtbPos     = RegEnable(io.abtbPosVec, a1_fire)
-  private val a2_abtbHitVec      = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  private val a2_abtbTakenVec    = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  private val a2_abtbUseTableId  = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumTables).W)))
-  private val a2_abtbUseWayId    = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumWays).W)))
-  private val a2_tableIdVec      = VecInit.tabulate(NumTables)(i => i.U)
-  private val a2_abtbTakenCtrVec = Wire(Vec(NumAheadBtbPredictionEntries, TakenCounter()))
+  private val a2_fromAbtbPos = RegEnable(io.abtbPosVec, a1_fire)
 
-  for (i <- 0 until NumAheadBtbPredictionEntries) {
-    val tableHitVec         = Wire(Vec(NumTables, Bool()))
-    val tableCfiPositionVec = Wire(Vec(NumTables, UInt(CfiPositionWidth.W)))
-    val tableTakenVec       = Wire(Vec(NumTables, Bool()))
-    val tableTakenCtrVec    = Wire(Vec(NumTables, TakenCounter()))
-    val tableWayIdVec       = Wire(Vec(NumTables, UInt(log2Ceil(NumWays).W)))
-    for (j <- 0 until NumTables) {
-      val wayHitVec = Wire(Vec(NumWays, Bool()))
-      for (k <- 0 until NumWays) {
-        wayHitVec(k) := (a2_predRead(j)(k).valid && a2_predRead(j)(k).tagHit) &&
-          a2_predRead(j)(k).cfiPosition === a2_fromAbtbPos(i) // io.abtbPrediction(i).bits.cfiPosition
-      }
-      tableHitVec(j) := wayHitVec.asUInt.orR
-      val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
-      tableCfiPositionVec(j) := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.cfiPosition))
-      tableTakenVec(j)       := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.taken))
-      tableTakenCtrVec(j)    := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.takenCtr))
-      tableWayIdVec(j)       := PriorityEncoder(wayHitVec)
+  // Find the hit result from the highest-priority table
+  private val tableHitVec         = Wire(Vec(NumTables, Bool()))
+  private val tableCfiPositionVec = Wire(Vec(NumTables, UInt(CfiPositionWidth.W)))
+  private val tableTakenVec       = Wire(Vec(NumTables, Bool()))
+  private val tableTakenCtrVec    = Wire(Vec(NumTables, TakenCounter()))
+  private val tableIdVec          = VecInit.tabulate(NumTables)(i => i.U)
+  private val tableWayIdVec       = Wire(Vec(NumTables, UInt(log2Ceil(NumWays).W)))
+  private val tablePosHitVec      = Wire(Vec(NumTables, Vec(NumAheadBtbPredictionEntries, Bool())))
+  for (j <- 0 until NumTables) {
+    val wayHitVec = Wire(Vec(NumWays, Bool()))
+    for (k <- 0 until NumWays) {
+      wayHitVec(k) := (a2_predRead(j)(k).valid && a2_predRead(j)(k).tagHit)
     }
-    a2_abtbHitVec(i) := tableHitVec.asUInt.orR
-    // Find the hit result from the highest-priority table
-    val priorityTableHitVec = PriorityEncoderOH(tableHitVec.reverse)
-    a2_abtbTakenVec(i)    := Mux1H(priorityTableHitVec, tableTakenVec.reverse)
-    a2_abtbTakenCtrVec(i) := Mux1H(priorityTableHitVec, tableTakenCtrVec.reverse)
-    a2_abtbUseTableId(i)  := Mux1H(priorityTableHitVec, a2_tableIdVec.reverse)
-    a2_abtbUseWayId(i)    := Mux1H(priorityTableHitVec, tableWayIdVec.reverse)
+    tableHitVec(j) := wayHitVec.asUInt.orR
+    val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
+    tableCfiPositionVec(j) := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.cfiPosition))
+    tableTakenVec(j)       := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.taken))
+    tableTakenCtrVec(j)    := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.takenCtr))
+    tableWayIdVec(j)       := PriorityEncoder(wayHitVec)
+    for (l <- 0 until NumAheadBtbPredictionEntries) {
+      // tablePosHitVec(j)(l) := tableCfiPositionVec(j) === io.abtbPrediction(l).bits.cfiPosition
+      // Indicates whether the entry l in ABTB is hit by uTAGE.
+      tablePosHitVec(j)(l) := (tableCfiPositionVec(j) === a2_fromAbtbPos(l))
+    }
   }
 
+  private val priorityTableId        = ~PriorityEncoder(tableHitVec.reverse)
+  private val chosenTableId          = tableIdVec(priorityTableId)
+  private val chosenTableTaken       = tableTakenVec(priorityTableId)
+  private val chosenTableTakenCtr    = tableTakenCtrVec(priorityTableId)
+  private val chosenTableWayId       = tableWayIdVec(priorityTableId)
+  private val chosenTableCfiPosition = tableCfiPositionVec(priorityTableId)
+  private val chosenPosHitVec        = tablePosHitVec(priorityTableId)
+  private val a2_abtbHitVec          = chosenPosHitVec.map(posHit => posHit && tableHitVec.reduce(_ || _))
+  // Predictions are made per fetch block. Only one ABTB entry corresponds to uTAGE.
+  // If multiple entries match, their contents are assumed to be consistent.
+  // The top-level BPU selection logic inherently handles this case.
+  private val a2_abtbTakenVec = chosenPosHitVec.map(posHit => posHit && chosenTableTaken)
+
   private val s1_predMeta = Wire(Valid(new MicroTageMeta))
-  s1_predMeta.valid := a2_abtbHitVec.asUInt.orR
+  s1_predMeta.valid := tableHitVec.reduce(_ || _)
   s1_predMeta.bits.abtbResult := 0.U.asTypeOf(Vec(
     NumAheadBtbPredictionEntries,
     new AbtbResult
   )) // no use, only for placeholder.
   s1_predMeta.bits.readIndex := a2_readIndex
   for (i <- 0 until NumAheadBtbPredictionEntries) {
+    // Since only one ABTB entry is hit, some storage here is redundant.
+    // We keep it for now to allow future modifications without immediate optimization.
     s1_predMeta.bits.abtbResult(i).valid :=
       io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional
     s1_predMeta.bits.abtbResult(i).baseTaken        := io.abtbPrediction(i).bits.taken
     s1_predMeta.bits.abtbResult(i).hit              := a2_abtbHitVec(i) && io.abtbPrediction(i).valid
     s1_predMeta.bits.abtbResult(i).predTaken        := a2_abtbTakenVec(i)
-    s1_predMeta.bits.abtbResult(i).tableId          := a2_abtbUseTableId(i)
-    s1_predMeta.bits.abtbResult(i).wayId            := a2_abtbUseWayId(i)
-    s1_predMeta.bits.abtbResult(i).cfiPosition      := a2_fromAbtbPos(i) // io.abtbPrediction(i).bits.cfiPosition
+    s1_predMeta.bits.abtbResult(i).tableId          := priorityTableId
+    s1_predMeta.bits.abtbResult(i).wayId            := chosenTableWayId
+    s1_predMeta.bits.abtbResult(i).cfiPosition      := a2_fromAbtbPos(i)
     s1_predMeta.bits.abtbResult(i).baseIsStrongBias := io.abtbPrediction(i).bits.isStrongBias
-    s1_predMeta.bits.abtbResult(i).takenCtr         := a2_abtbTakenCtrVec(i)
+    s1_predMeta.bits.abtbResult(i).takenCtr         := chosenTableTakenCtr
   }
 
+  // prediction.valid := io.enable && tableHitVec.reduce(_||_)
   io.prediction.takenVec := a2_abtbTakenVec
-  // May be a false hit; needs to be combined with abtbEntry's valid signal for correctness.
-  // Done here for timing/layout reasons.
-  io.prediction.hitVec := a2_abtbHitVec
-  io.meta              := s1_predMeta
+  io.prediction.hitVec   := a2_abtbHitVec
+  io.meta                := s1_predMeta
 
   when(a2_fire) {
     a3_predRead  := a2_predRead
