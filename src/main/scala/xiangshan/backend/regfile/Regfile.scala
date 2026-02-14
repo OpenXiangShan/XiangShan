@@ -41,8 +41,7 @@ class RfWritePort(dataWidth: Int, addrWidth: Int) extends Bundle {
 }
 
 class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int)(implicit p: Parameters) extends Bundle {
-  val addr    = Input(UInt(addrWidth.W))
-  val srcType = Input(UInt(3.W))
+  val addr    = UInt(addrWidth.W)
   val robIdx  = new RobPtr
   val issueValid = Bool()
 

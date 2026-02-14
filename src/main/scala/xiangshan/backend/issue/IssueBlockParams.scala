@@ -67,6 +67,10 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
+  def needLqIdx: Boolean = isLdAddrIQ || isVecMemIQ
+
+  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ
+
   def needFeedBackSqIdx: Boolean = isVecStuIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
@@ -132,7 +136,7 @@ case class IssueBlockParams(
 
   def needRasAction: Boolean = exuBlockParams.map(_.hasRasAction).reduce(_ || _)
 
-  def needIsRVC: Boolean = exuBlockParams.map(_.hasIsRVC).reduce(_ || _)
+  def needIsRVC: Boolean = exuBlockParams.map(_.needIsRVC).reduce(_ || _)
 
   def needTaken: Boolean = JmpCnt + BrhCnt > 0
 
@@ -434,8 +438,8 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new Og0InUop(this, x))))
   }
 
-  def genIssueDeqOg1PayloadBundle(implicit p: Parameters): MixedVec[EntryOg1Payload] = {
-    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => new EntryOg1Payload(x.issueBlockParam)))
+  def genIssueDeqOg1PayloadBundle(implicit p: Parameters): MixedVec[IssueQueueDeqOg1Payload] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => new IssueQueueDeqOg1Payload(x)))
   }
 
   def genExuWakeUpOutValidBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]] = {

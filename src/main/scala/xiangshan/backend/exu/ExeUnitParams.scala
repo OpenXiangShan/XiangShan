@@ -74,12 +74,15 @@ case class ExeUnitParams(
   val needTaken: Boolean = fuConfigs.map(x => x.isJmp || x.isBrh).reduce(_ || _)
   val needRasAction: Boolean = fuConfigs.map(x => x.isJmp).reduce(_ || _)
   val needImm: Boolean = fuConfigs.map(x => x.immType.nonEmpty).reduce(_ || _)
+  def deqImmTypes: Seq[Imm] = fuConfigs.flatMap(_.immType).distinct
+  // set load imm to 32-bit for fused_lui_load
+  def deqImmTypesMaxLen: Int = if (hasLoadFu || hasHyldaFu) 32 else deqImmTypes.map(x => x).maxBy(_.len).len
   val writeVfRf: Boolean = writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val writeVxsat: Boolean = fuConfigs.map(_.writeVxsat).reduce(_ || _)
   val hasNoDataWB: Boolean = fuConfigs.map(_.hasNoDataWB).reduce(_ && _)
   val hasRedirect: Boolean = fuConfigs.map(_.hasRedirect).reduce(_ || _)
-  val hasIsRVC: Boolean = fuConfigs.map(_.hasIsRVC).reduce(_ || _)
+  val needIsRVC: Boolean = fuConfigs.map(_.hasIsRVC).reduce(_ || _)
   val hasRasAction: Boolean = fuConfigs.map(_.hasRasAction).reduce(_ || _)
   val exceptionOut: Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
   val hasLoadError: Boolean = fuConfigs.map(_.hasLoadError).reduce(_ || _)
