@@ -128,6 +128,7 @@ class PrintControl extends firrtl.options.Phase {
 
     def onModule(m: firrtl.ir.DefModule): firrtl.ir.DefModule = m match {
       case _: firrtl.ir.ExtModule => m
+      case _: firrtl.ir.IntModule => m
       case _: firrtl.ir.Module =>
         def inRange(seq: Seq[String]): Boolean = {
           seq.nonEmpty && (seq.contains(m.name) || seq.map(elm => {
