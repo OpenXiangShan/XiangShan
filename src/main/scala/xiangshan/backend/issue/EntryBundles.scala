@@ -98,6 +98,25 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val payload               = new IssueQueuePayload(params)
+    def toDeqOg1Payload(deqIdx: Int): IssueQueueDeqOg1Payload = {
+      val deqOg1Payload = Wire(new IssueQueueDeqOg1Payload(params.exuBlockParams(deqIdx)))
+      connectSamePort(deqOg1Payload, payload.og1Payload)
+      // imm's width may be diffrent
+      deqOg1Payload.imm.foreach(_ := payload.og1Payload.imm.get)
+      deqOg1Payload.rf.zip(status.srcStatus.map(_.psrc)).zip(status.srcStatus.map(_.srcType)).foreach { case ((rf, psrc), srcType) =>
+        // psrc in status array can be pregIdx of IntRegFile or VfRegFile
+        rf.foreach(_.addr := psrc)
+        rf.foreach(_.robIdx := status.robIdx)
+        rf.foreach(_.issueValid := status.issued)
+      }
+      deqOg1Payload.rfVl lazyZip status.srcStatusVl.map(_.psrc) foreach {
+        case (rf, psrc) =>
+          rf.addr := psrc
+          rf.robIdx := status.robIdx
+          rf.issueValid := status.issued
+      }
+      deqOg1Payload
+    }
   }
 
   class CommonInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
